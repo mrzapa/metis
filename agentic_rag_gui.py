@@ -1,0 +1,1025 @@
+import tkinter as tk
+from tkinter import ttk, filedialog, scrolledtext, messagebox
+import threading
+import os
+import sys
+import time
+import json
+import subprocess
+from datetime import datetime
+
+# --- Libraries check is done inside the class to prevent instant crash ---
+# Required: pip install langchain langchain-community langchain-openai langchain-anthropic langchain-google-genai langchain-cohere chromadb beautifulsoup4 tiktoken
+
+
+class AgenticRAGApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Agentic RAG: LangChain + Chroma/Weaviate + Cohere")
+        self.root.geometry("1200x900")
+        self.main_thread = threading.current_thread()
+        self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
+        self.default_system_instructions = (
+            "You are an expert analyst assistant. Use the provided context to answer the "
+            "user's question. If the answer is not in the context, say you don't know. "
+            "Cite specific sections if possible."
+        )
+
+        # --- State Variables ---
+        self.api_keys = {
+            "openai": tk.StringVar(),
+            "anthropic": tk.StringVar(),
+            "google": tk.StringVar(),
+            "cohere": tk.StringVar(),
+            "weaviate_url": tk.StringVar(value="http://localhost:8080"),
+            "weaviate_key": tk.StringVar(),
+            "mistral": tk.StringVar(),
+            "groq": tk.StringVar(),
+            "azure_openai": tk.StringVar(),
+            "together": tk.StringVar(),
+            "voyage": tk.StringVar(),
+            "huggingface": tk.StringVar(),
+            "fireworks": tk.StringVar(),
+            "perplexity": tk.StringVar(),
+        }
+
+        self.llm_provider = tk.StringVar(value="anthropic")
+        self.embedding_provider = tk.StringVar(value="voyage")
+        self.vector_db_type = tk.StringVar(value="chroma")
+        self.local_llm_url = tk.StringVar(value="http://localhost:1234/v1")
+        self.chunk_size = tk.IntVar(value=1000)
+        self.chunk_overlap = tk.IntVar(value=200)
+
+        self.llm_model = tk.StringVar(value="claude-opus-4-6")
+        self.llm_model_custom = tk.StringVar()
+        self.embedding_model = tk.StringVar(value="voyage-4-large")
+        self.embedding_model_custom = tk.StringVar()
+        self.llm_temperature = tk.DoubleVar(value=0.0)
+        self.llm_max_tokens = tk.IntVar(value=1024)
+        self.force_embedding_compat = tk.BooleanVar(value=False)
+        self.system_instructions = tk.StringVar(
+            value=self.default_system_instructions
+        )
+
+        self.vector_store = None
+        self.index_embedding_signature = ""
+        self.chat_history = []
+
+        self.setup_ui()
+        self.load_config()
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self._sync_model_options()
+
+        # Defer dependency check slightly to allow UI to render first
+        self.root.after(100, self.check_dependencies)
+
+    def setup_ui(self):
+        # Styles
+        style = ttk.Style()
+        style.configure("Bold.TLabel", font=("Segoe UI", 10, "bold"))
+        style.configure("Header.TLabel", font=("Segoe UI", 12, "bold"))
+
+        # Tabs
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # 1. Configuration Tab
+        self.tab_config = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_config, text="1. Configuration")
+        self.build_config_tab()
+
+        # 2. Ingestion Tab
+        self.tab_ingest = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_ingest, text="2. Data Ingestion")
+        self.build_ingest_tab()
+
+        # 3. Chat Tab
+        self.tab_chat = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_chat, text="3. Agentic Chat")
+        self.build_chat_tab()
+
+        # Logs
+        log_frame = ttk.LabelFrame(self.root, text="System Logs")
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.log_area = scrolledtext.ScrolledText(
+            log_frame, height=8, state="disabled", font=("Consolas", 9)
+        )
+        self.log_area.pack(fill=tk.BOTH, expand=True)
+
+    def _run_on_ui(self, func, *args, **kwargs):
+        if threading.current_thread() == self.main_thread:
+            func(*args, **kwargs)
+        else:
+            self.root.after(0, lambda: func(*args, **kwargs))
+
+    def _get_llm_model_options(self, provider):
+        options = {
+            "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "custom"],
+            "anthropic": [
+                "claude-opus-4-6",
+                "claude-3-5-sonnet-20240620",
+                "claude-3-5-haiku-20241022",
+                "custom",
+            ],
+            "google": ["gemini-1.5-flash", "gemini-1.5-pro", "custom"],
+            "local_lm_studio": ["custom"],
+        }
+        return options.get(provider, ["custom"])
+
+    def _get_embedding_model_options(self, provider):
+        options = {
+            "openai": ["text-embedding-3-small", "text-embedding-3-large", "custom"],
+            "google": ["models/embedding-001", "custom"],
+            "local_huggingface": ["all-MiniLM-L6-v2", "custom"],
+            "voyage": [
+                "voyage-4-large",
+                "voyage-4-lite",
+                "voyage-4-nano",
+                "voyage-4",
+                "custom",
+            ],
+        }
+        return options.get(provider, ["custom"])
+
+    def _sync_model_options(self):
+        llm_provider = self.llm_provider.get()
+        emb_provider = self.embedding_provider.get()
+
+        llm_options = self._get_llm_model_options(llm_provider)
+        emb_options = self._get_embedding_model_options(emb_provider)
+
+        self.cb_llm_model["values"] = llm_options
+        self.cb_emb_model["values"] = emb_options
+
+        if self.llm_model.get() not in llm_options:
+            self.llm_model.set(llm_options[0])
+        if self.embedding_model.get() not in emb_options:
+            self.embedding_model.set(emb_options[0])
+
+        self._toggle_custom_entries()
+
+    def _toggle_custom_entries(self):
+        llm_custom_enabled = self.llm_model.get() == "custom"
+        emb_custom_enabled = self.embedding_model.get() == "custom"
+        hf_enabled = self.embedding_provider.get() == "local_huggingface"
+
+        self.llm_model_custom_entry.config(
+            state="normal" if llm_custom_enabled else "disabled"
+        )
+        self.embedding_model_custom_entry.config(
+            state="normal" if emb_custom_enabled else "disabled"
+        )
+        self.btn_browse_hf_model.config(state="normal" if hf_enabled else "disabled")
+
+    def _on_llm_provider_change(self, event=None):
+        self._sync_model_options()
+
+    def _on_embedding_provider_change(self, event=None):
+        self._sync_model_options()
+        self._refresh_compatibility_warning()
+
+    def _on_llm_model_change(self, event=None):
+        self._toggle_custom_entries()
+
+    def _on_embedding_model_change(self, event=None):
+        self._toggle_custom_entries()
+        self._refresh_compatibility_warning()
+
+    def _on_instructions_change(self, event=None):
+        self.system_instructions.set(self.instructions_box.get("1.0", tk.END).strip())
+
+    def _current_embedding_signature(self):
+        provider = self.embedding_provider.get()
+        try:
+            model = self._resolve_embedding_model()
+        except ValueError:
+            model = ""
+        return f"{provider}:{model}".strip(":")
+
+    def _refresh_compatibility_warning(self):
+        if not self.index_embedding_signature:
+            self.compat_warning.config(text="")
+            return
+        current_signature = self._current_embedding_signature()
+        if not current_signature or current_signature == self.index_embedding_signature:
+            self.compat_warning.config(text="")
+            return
+        message = (
+            "Embedding mismatch: this index was built with "
+            f"{self.index_embedding_signature}. Re-embed or use a dual-index "
+            "migration. Force to bypass warning."
+        )
+        self.compat_warning.config(text=message)
+
+    def browse_hf_model(self):
+        path = filedialog.askdirectory()
+        if path:
+            self.embedding_model.set("custom")
+            self.embedding_model_custom.set(path)
+            self._toggle_custom_entries()
+            self._refresh_compatibility_warning()
+
+    def load_config(self):
+        if not os.path.exists(self.config_path):
+            return
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return
+
+        for key, var in self.api_keys.items():
+            if key in data.get("api_keys", {}):
+                var.set(data["api_keys"][key])
+
+        self.llm_provider.set(data.get("llm_provider", self.llm_provider.get()))
+        self.embedding_provider.set(
+            data.get("embedding_provider", self.embedding_provider.get())
+        )
+        self.vector_db_type.set(data.get("vector_db_type", self.vector_db_type.get()))
+        self.local_llm_url.set(data.get("local_llm_url", self.local_llm_url.get()))
+        self.chunk_size.set(data.get("chunk_size", self.chunk_size.get()))
+        self.chunk_overlap.set(data.get("chunk_overlap", self.chunk_overlap.get()))
+        self.llm_model.set(data.get("llm_model", self.llm_model.get()))
+        self.llm_model_custom.set(data.get("llm_model_custom", self.llm_model_custom.get()))
+        self.embedding_model.set(data.get("embedding_model", self.embedding_model.get()))
+        self.embedding_model_custom.set(
+            data.get("embedding_model_custom", self.embedding_model_custom.get())
+        )
+        self.llm_temperature.set(data.get("llm_temperature", self.llm_temperature.get()))
+        self.llm_max_tokens.set(data.get("llm_max_tokens", self.llm_max_tokens.get()))
+        self.force_embedding_compat.set(
+            data.get("force_embedding_compat", self.force_embedding_compat.get())
+        )
+        self.index_embedding_signature = data.get(
+            "index_embedding_signature", self.index_embedding_signature
+        )
+
+        instructions = data.get("system_instructions", self.system_instructions.get())
+        self.system_instructions.set(instructions or self.default_system_instructions)
+        self.instructions_box.delete("1.0", tk.END)
+        self.instructions_box.insert(tk.END, self.system_instructions.get())
+
+        self._sync_model_options()
+        self._refresh_compatibility_warning()
+
+    def save_config(self):
+        data = {
+            "api_keys": {key: var.get() for key, var in self.api_keys.items()},
+            "llm_provider": self.llm_provider.get(),
+            "embedding_provider": self.embedding_provider.get(),
+            "vector_db_type": self.vector_db_type.get(),
+            "local_llm_url": self.local_llm_url.get(),
+            "chunk_size": self.chunk_size.get(),
+            "chunk_overlap": self.chunk_overlap.get(),
+            "llm_model": self.llm_model.get(),
+            "llm_model_custom": self.llm_model_custom.get(),
+            "embedding_model": self.embedding_model.get(),
+            "embedding_model_custom": self.embedding_model_custom.get(),
+            "llm_temperature": self.llm_temperature.get(),
+            "llm_max_tokens": self.llm_max_tokens.get(),
+            "system_instructions": self.system_instructions.get(),
+            "force_embedding_compat": self.force_embedding_compat.get(),
+            "index_embedding_signature": self.index_embedding_signature,
+        }
+        try:
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except OSError:
+            pass
+
+    def on_close(self):
+        self.save_config()
+        self.root.destroy()
+
+    def build_config_tab(self):
+        frame = ttk.Frame(self.tab_config, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # --- LLM Provider Settings ---
+        llm_frame = ttk.LabelFrame(frame, text="LLM & Embedding Provider", padding=15)
+        llm_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
+        ttk.Label(llm_frame, text="Generation Provider:").grid(
+            row=0, column=0, sticky="w"
+        )
+        cb_llm = ttk.Combobox(
+            llm_frame,
+            textvariable=self.llm_provider,
+            values=["openai", "anthropic", "google", "local_lm_studio"],
+            state="readonly",
+        )
+        cb_llm.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+        cb_llm.bind("<<ComboboxSelected>>", self._on_llm_provider_change)
+
+        ttk.Label(llm_frame, text="Generation Model:").grid(
+            row=1, column=0, sticky="w"
+        )
+        self.cb_llm_model = ttk.Combobox(
+            llm_frame,
+            textvariable=self.llm_model,
+        )
+        self.cb_llm_model.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+        self.cb_llm_model.bind("<<ComboboxSelected>>", self._on_llm_model_change)
+
+        ttk.Label(llm_frame, text="Custom Generation Model (optional):").grid(
+            row=2, column=0, sticky="w"
+        )
+        self.llm_model_custom_entry = ttk.Entry(
+            llm_frame, textvariable=self.llm_model_custom
+        )
+        self.llm_model_custom_entry.grid(
+            row=2, column=1, sticky="ew", padx=5, pady=5
+        )
+
+        ttk.Label(llm_frame, text="Embedding Provider:").grid(
+            row=3, column=0, sticky="w"
+        )
+        cb_emb = ttk.Combobox(
+            llm_frame,
+            textvariable=self.embedding_provider,
+            values=["voyage", "openai", "google", "local_huggingface"],
+            state="readonly",
+        )
+        cb_emb.grid(row=3, column=1, sticky="ew", padx=5, pady=5)
+        cb_emb.bind("<<ComboboxSelected>>", self._on_embedding_provider_change)
+
+        ttk.Label(llm_frame, text="Embedding Model:").grid(
+            row=4, column=0, sticky="w"
+        )
+        self.cb_emb_model = ttk.Combobox(
+            llm_frame,
+            textvariable=self.embedding_model,
+        )
+        self.cb_emb_model.grid(row=4, column=1, sticky="ew", padx=5, pady=5)
+        self.cb_emb_model.bind("<<ComboboxSelected>>", self._on_embedding_model_change)
+
+        ttk.Label(llm_frame, text="Custom Embedding Model (optional):").grid(
+            row=5, column=0, sticky="w"
+        )
+        self.embedding_model_custom_entry = ttk.Entry(
+            llm_frame, textvariable=self.embedding_model_custom
+        )
+        self.embedding_model_custom_entry.grid(
+            row=5, column=1, sticky="ew", padx=5, pady=5
+        )
+        self.btn_browse_hf_model = ttk.Button(
+            llm_frame, text="Browse Local HF Model...", command=self.browse_hf_model
+        )
+        self.btn_browse_hf_model.grid(row=6, column=1, sticky="w", padx=5, pady=(0, 5))
+
+        self.compat_warning = ttk.Label(
+            llm_frame,
+            text="",
+            foreground="#a33",
+            wraplength=360,
+            justify="left",
+        )
+        self.compat_warning.grid(row=7, column=1, sticky="w", padx=5, pady=(0, 5))
+        self.force_compat_check = ttk.Checkbutton(
+            llm_frame,
+            text="Force embedding compatibility (skip warning)",
+            variable=self.force_embedding_compat,
+        )
+        self.force_compat_check.grid(row=8, column=1, sticky="w", padx=5, pady=(0, 5))
+
+        ttk.Label(llm_frame, text="Local LLM URL (if using LM Studio):").grid(
+            row=9, column=0, sticky="w"
+        )
+        ttk.Entry(llm_frame, textvariable=self.local_llm_url).grid(
+            row=9, column=1, sticky="ew", padx=5, pady=5
+        )
+
+        ttk.Label(llm_frame, text="Temperature:").grid(row=10, column=0, sticky="w")
+        ttk.Entry(llm_frame, textvariable=self.llm_temperature).grid(
+            row=10, column=1, sticky="ew", padx=5, pady=5
+        )
+
+        ttk.Label(llm_frame, text="Max Tokens:").grid(row=11, column=0, sticky="w")
+        ttk.Entry(llm_frame, textvariable=self.llm_max_tokens).grid(
+            row=11, column=1, sticky="ew", padx=5, pady=5
+        )
+
+        ttk.Label(llm_frame, text="System Instructions:").grid(
+            row=12, column=0, sticky="nw"
+        )
+        self.instructions_box = scrolledtext.ScrolledText(
+            llm_frame, height=6, font=("Segoe UI", 9)
+        )
+        self.instructions_box.grid(row=12, column=1, sticky="ew", padx=5, pady=5)
+        self.instructions_box.insert(tk.END, self.system_instructions.get())
+        self.instructions_box.bind("<KeyRelease>", self._on_instructions_change)
+
+        # --- Vector DB Settings ---
+        db_frame = ttk.LabelFrame(frame, text="Vector Database Strategy", padding=15)
+        db_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+
+        ttk.Radiobutton(
+            db_frame,
+            text="ChromaDB (Local File - Recommended)",
+            variable=self.vector_db_type,
+            value="chroma",
+        ).pack(anchor="w", pady=2)
+        ttk.Radiobutton(
+            db_frame,
+            text="Weaviate (Server)",
+            variable=self.vector_db_type,
+            value="weaviate",
+        ).pack(anchor="w", pady=2)
+
+        ttk.Label(db_frame, text="Weaviate URL:").pack(anchor="w", pady=(10, 0))
+        ttk.Entry(db_frame, textvariable=self.api_keys["weaviate_url"]).pack(
+            fill="x", pady=2
+        )
+
+        # --- API Keys ---
+        key_frame = ttk.LabelFrame(
+            frame, text="API Keys (Required for selected services)", padding=15
+        )
+        key_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
+
+        keys = [
+            ("OpenAI API Key:", "openai"),
+            ("Anthropic API Key:", "anthropic"),
+            ("Google Gemini Key:", "google"),
+            ("Cohere API Key (For Reranking):", "cohere"),
+            ("Weaviate API Key (Optional):", "weaviate_key"),
+            ("Voyage API Key:", "voyage"),
+            ("Mistral API Key:", "mistral"),
+            ("Groq API Key:", "groq"),
+            ("Azure OpenAI API Key:", "azure_openai"),
+            ("Together API Key:", "together"),
+            ("Hugging Face Token (Optional):", "huggingface"),
+            ("Fireworks API Key:", "fireworks"),
+            ("Perplexity API Key:", "perplexity"),
+        ]
+
+        for i, (label, key_name) in enumerate(keys):
+            ttk.Label(key_frame, text=label).grid(row=i, column=0, sticky="w", pady=2)
+            ttk.Entry(
+                key_frame, textvariable=self.api_keys[key_name], show="*", width=50
+            ).grid(row=i, column=1, sticky="w", padx=10, pady=2)
+
+    def build_ingest_tab(self):
+        frame = ttk.Frame(self.tab_ingest, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # File Selection
+        sel_frame = ttk.Frame(frame)
+        sel_frame.pack(fill="x", pady=10)
+
+        ttk.Label(
+            sel_frame,
+            text="Select HTML/Text File (2M+ tokens supported):",
+            style="Header.TLabel",
+        ).pack(anchor="w")
+        self.lbl_file = ttk.Label(sel_frame, text="No file selected", foreground="gray")
+        self.lbl_file.pack(anchor="w", pady=5)
+
+        btn_browse = ttk.Button(sel_frame, text="Browse File...", command=self.browse_file)
+        btn_browse.pack(anchor="w")
+
+        # Chunking Config
+        chunk_frame = ttk.LabelFrame(frame, text="Chunking Strategy", padding=10)
+        chunk_frame.pack(fill="x", pady=10)
+
+        ttk.Label(chunk_frame, text="Chunk Size (Tokens):").pack(side="left")
+        ttk.Entry(chunk_frame, textvariable=self.chunk_size, width=10).pack(
+            side="left", padx=5
+        )
+
+        ttk.Label(chunk_frame, text="Overlap:").pack(side="left", padx=(20, 0))
+        ttk.Entry(chunk_frame, textvariable=self.chunk_overlap, width=10).pack(
+            side="left", padx=5
+        )
+
+        # Action
+        self.btn_ingest = ttk.Button(
+            frame,
+            text="Start Ingestion (Process -> Chunk -> Embed -> Store)",
+            command=self.start_ingestion,
+        )
+        self.btn_ingest.pack(fill="x", pady=20)
+
+        self.progress = ttk.Progressbar(frame, orient="horizontal", mode="determinate")
+        self.progress.pack(fill="x")
+
+    def build_chat_tab(self):
+        frame = ttk.Frame(self.tab_chat, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Chat Display
+        self.chat_display = scrolledtext.ScrolledText(
+            frame, state="disabled", font=("Segoe UI", 10)
+        )
+        self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        # Tag configuration for coloring
+        self.chat_display.tag_config(
+            "user", foreground="blue", font=("Segoe UI", 10, "bold")
+        )
+        self.chat_display.tag_config("agent", foreground="green")
+        self.chat_display.tag_config(
+            "system", foreground="gray", font=("Segoe UI", 8, "italic")
+        )
+        self.chat_display.tag_config("source", foreground="#888888", font=("Consolas", 8))
+
+        # Input
+        input_frame = ttk.Frame(frame)
+        input_frame.pack(fill="x")
+
+        self.txt_input = ttk.Entry(input_frame, font=("Segoe UI", 11))
+        self.txt_input.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        self.txt_input.bind("<Return>", lambda e: self.send_message())
+
+        btn_send = ttk.Button(input_frame, text="Send", command=self.send_message)
+        btn_send.pack(side="right")
+
+        # Options
+        opt_frame = ttk.Frame(frame)
+        opt_frame.pack(fill="x", pady=5)
+        self.use_reranker = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            opt_frame,
+            text="Use Cohere Reranker (Higher Precision)",
+            variable=self.use_reranker,
+        ).pack(side="left")
+
+    # --- Logic ---
+
+    def log(self, msg):
+        def _append():
+            self.log_area.config(state="normal")
+            self.log_area.insert(
+                tk.END, f"[{datetime.now().strftime('%H:%M:%S')}] {msg}\n"
+            )
+            self.log_area.see(tk.END)
+            self.log_area.config(state="disabled")
+            self.root.update_idletasks()
+
+        self._run_on_ui(_append)
+
+    def check_dependencies(self):
+        required_packages = [
+            "langchain",
+            "langchain-community",
+            "langchain-openai",
+            "langchain-anthropic",
+            "langchain-google-genai",
+            "langchain-cohere",
+            "langchain-voyageai",
+            "chromadb",
+            "beautifulsoup4",
+            "tiktoken",
+            "weaviate-client",
+        ]
+
+        try:
+            import langchain
+            import chromadb
+            import bs4
+            import tiktoken
+
+            self.log("All core dependencies found.")
+        except ImportError:
+            self.prompt_install(required_packages)
+
+    def prompt_install(self, packages):
+        if messagebox.askyesno(
+            "Missing Dependencies", "Required libraries are missing. Install them automatically now?"
+        ):
+            threading.Thread(target=self.install_packages, args=(packages,), daemon=True).start()
+        else:
+            self.log("Dependencies missing. App may crash.")
+
+    def install_packages(self, packages):
+        self.log("Starting automatic installation...")
+        cmd = [sys.executable, "-m", "pip", "install"] + packages
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True,
+            )
+
+            for line in process.stdout:
+                self.log(line.strip())
+
+            process.wait()
+
+            if process.returncode == 0:
+                self.log("Installation Complete! Please restart the application.")
+                messagebox.showinfo(
+                    "Restart Required",
+                    "Dependencies installed successfully.\n\nPlease close and restart the application.",
+                )
+            else:
+                stderr = process.stderr.read()
+                self.log(f"Installation Failed: {stderr}")
+                messagebox.showerror(
+                    "Installation Failed", "Could not install dependencies. Check logs."
+                )
+
+        except Exception as e:
+            self.log(f"Installation Error: {e}")
+
+    def browse_file(self):
+        f = filedialog.askopenfilename(filetypes=[("HTML/Text", "*.html *.htm *.txt")])
+        if f:
+            self.selected_file = f
+            self.lbl_file.config(text=f, foreground="black")
+
+    def _validate_model_settings(self):
+        try:
+            temperature = float(self.llm_temperature.get())
+        except (TypeError, ValueError):
+            self._run_on_ui(
+                messagebox.showerror, "Invalid Temperature", "Temperature must be a number."
+            )
+            return None
+
+        if not 0 <= temperature <= 2:
+            self._run_on_ui(
+                messagebox.showerror,
+                "Invalid Temperature",
+                "Temperature must be between 0 and 2.",
+            )
+            return None
+
+        try:
+            max_tokens = int(self.llm_max_tokens.get())
+        except (TypeError, ValueError):
+            self._run_on_ui(
+                messagebox.showerror, "Invalid Max Tokens", "Max tokens must be an integer."
+            )
+            return None
+
+        if max_tokens <= 0:
+            self._run_on_ui(
+                messagebox.showerror,
+                "Invalid Max Tokens",
+                "Max tokens must be a positive integer.",
+            )
+            return None
+
+        return temperature, max_tokens
+
+    def _get_system_instructions(self):
+        instructions = self.system_instructions.get().strip()
+        if not instructions:
+            instructions = self.default_system_instructions
+            self.system_instructions.set(instructions)
+            self._run_on_ui(self._refresh_instructions_box)
+        return instructions
+
+    def _refresh_instructions_box(self):
+        self.instructions_box.delete("1.0", tk.END)
+        self.instructions_box.insert(tk.END, self.system_instructions.get())
+
+    def _resolve_llm_model(self):
+        selected = self.llm_model.get().strip()
+        custom = self.llm_model_custom.get().strip()
+        if selected == "custom":
+            if not custom:
+                raise ValueError("Custom generation model is selected but empty")
+            return custom
+        return selected or custom
+
+    def _resolve_embedding_model(self):
+        selected = self.embedding_model.get().strip()
+        custom = self.embedding_model_custom.get().strip()
+        if selected == "custom":
+            if not custom:
+                raise ValueError("Custom embedding model is selected but empty")
+            return custom
+        return selected or custom
+
+    def get_embeddings(self):
+        """Factory for embedding model"""
+        provider = self.embedding_provider.get()
+        api_key = self.api_keys[provider].get() if provider in self.api_keys else ""
+        model_name = self._resolve_embedding_model()
+
+        if provider == "openai":
+            from langchain_openai import OpenAIEmbeddings
+
+            if not api_key:
+                raise ValueError("OpenAI API Key missing")
+            return OpenAIEmbeddings(openai_api_key=api_key, model=model_name)
+
+        if provider == "google":
+            from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+            if not api_key:
+                raise ValueError("Google API Key missing")
+            return GoogleGenerativeAIEmbeddings(google_api_key=api_key, model=model_name)
+
+        if provider == "voyage":
+            from langchain_voyageai import VoyageEmbeddings
+
+            if not api_key:
+                raise ValueError("Voyage API Key missing")
+            return VoyageEmbeddings(voyage_api_key=api_key, model=model_name)
+
+        if provider == "local_huggingface":
+            # Uses local CPU/GPU via HuggingFace
+            from langchain_community.embeddings import HuggingFaceEmbeddings
+
+            resolved_model = model_name or "all-MiniLM-L6-v2"
+            self.log(f"Loading local HuggingFace embeddings ({resolved_model})...")
+            return HuggingFaceEmbeddings(model_name=resolved_model)
+
+        raise ValueError(f"Unknown embedding provider: {provider}")
+
+    def get_llm(self):
+        """Factory for LLM"""
+        validated = self._validate_model_settings()
+        if not validated:
+            raise ValueError("Invalid model settings")
+        temperature, max_tokens = validated
+        provider = self.llm_provider.get()
+        model_name = self._resolve_llm_model()
+
+        if provider == "openai":
+            from langchain_openai import ChatOpenAI
+
+            key = self.api_keys["openai"].get()
+            return ChatOpenAI(
+                api_key=key, model=model_name, temperature=temperature, max_tokens=max_tokens
+            )
+
+        if provider == "anthropic":
+            from langchain_anthropic import ChatAnthropic
+
+            key = self.api_keys["anthropic"].get()
+            return ChatAnthropic(
+                api_key=key, model=model_name, temperature=temperature, max_tokens=max_tokens
+            )
+
+        if provider == "google":
+            from langchain_google_genai import ChatGoogleGenerativeAI
+
+            key = self.api_keys["google"].get()
+            return ChatGoogleGenerativeAI(
+                google_api_key=key,
+                model=model_name,
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+            )
+
+        if provider == "local_lm_studio":
+            from langchain_openai import ChatOpenAI
+
+            url = self.local_llm_url.get()
+            self.log(f"Connecting to Local LLM at {url}...")
+            # LM Studio uses OpenAI compatible endpoint
+            return ChatOpenAI(
+                base_url=url,
+                api_key="lm-studio",
+                model=model_name,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+
+        raise ValueError(f"Unknown LLM provider: {provider}")
+
+    def start_ingestion(self):
+        if not hasattr(self, "selected_file"):
+            messagebox.showerror("Error", "Please select a file first.")
+            return
+
+        threading.Thread(target=self._ingest_process, daemon=True).start()
+
+    def _ingest_process(self):
+        try:
+            self._run_on_ui(self.btn_ingest.config, state="disabled")
+            self.log("Starting ingestion pipeline...")
+
+            # 1. Load & Clean
+            self.log("Step 1/4: Parsing File...")
+            text_content = ""
+
+            if self.selected_file.lower().endswith(".html"):
+                from bs4 import BeautifulSoup
+
+                with open(self.selected_file, "r", encoding="utf-8", errors="ignore") as f:
+                    soup = BeautifulSoup(f, "html.parser")
+                    # Aggressive cleaning for RAG
+                    for tag in soup(["script", "style", "svg", "path", "nav", "footer"]):
+                        tag.extract()
+                    text_content = soup.get_text(separator="\n")
+            else:
+                with open(self.selected_file, "r", encoding="utf-8") as f:
+                    text_content = f.read()
+
+            self.log(f"File loaded. Raw text length: {len(text_content)} characters.")
+
+            # 2. Split
+            self.log("Step 2/4: Splitting Text...")
+            from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.chunk_size.get(),
+                chunk_overlap=self.chunk_overlap.get(),
+                separators=["\n\n", "\n", ".", " ", ""],
+            )
+            docs = splitter.create_documents([text_content])
+            self.log(f"Created {len(docs)} text chunks.")
+
+            # 3. Initialize Vector DB & Embeddings
+            self.log("Step 3/4: Initializing Vector Store...")
+            embeddings = self.get_embeddings()
+
+            db_type = self.vector_db_type.get()
+
+            if db_type == "chroma":
+                persist_dir = os.path.join(os.getcwd(), "chroma_db")
+                from langchain_chroma import Chroma
+
+                # Using a new client per ingestion to ensure clean slate or append
+                self.vector_store = Chroma(
+                    collection_name="rag_collection",
+                    embedding_function=embeddings,
+                    persist_directory=persist_dir,
+                )
+            elif db_type == "weaviate":
+                import weaviate
+                from langchain_weaviate import WeaviateVectorStore
+
+                url = self.api_keys["weaviate_url"].get()
+                key = self.api_keys["weaviate_key"].get()
+                auth = weaviate.auth.AuthApiKey(api_key=key) if key else None
+
+                client = weaviate.Client(url=url, auth_client_secret=auth)
+                self.vector_store = WeaviateVectorStore(
+                    client=client, index_name="RagDocument", text_key="text", embedding=embeddings
+                )
+            else:
+                raise ValueError(f"Unknown vector DB type: {db_type}")
+
+            self.index_embedding_signature = self._current_embedding_signature()
+            self.save_config()
+            self._run_on_ui(self._refresh_compatibility_warning)
+
+            # 4. Batch Embed & Upsert
+            self.log("Step 4/4: Embedding & Storing (This takes time)...")
+            batch_size = 100  # Adjust based on API limits
+            total_docs = len(docs)
+
+            self._run_on_ui(self.progress.config, maximum=total_docs, value=0)
+
+            for i in range(0, total_docs, batch_size):
+                batch = docs[i : i + batch_size]
+                self.vector_store.add_documents(batch)
+                self._run_on_ui(self.progress.config, value=i + len(batch))
+                self.log(f"Indexed {min(i + batch_size, total_docs)}/{total_docs} chunks...")
+
+            self.log("Ingestion Complete! You can now chat.")
+            self._run_on_ui(
+                messagebox.showinfo,
+                "Success",
+                "File successfully ingested into Vector Database.",
+            )
+
+        except Exception as e:
+            self.log(f"INGESTION ERROR: {str(e)}")
+            self._run_on_ui(messagebox.showerror, "Error", f"Ingestion failed:\n{str(e)}")
+        finally:
+            self._run_on_ui(self.btn_ingest.config, state="normal")
+
+    def send_message(self):
+        query = self.txt_input.get()
+        if not query:
+            return
+
+        self.txt_input.delete(0, tk.END)
+        self.append_chat("user", f"You: {query}")
+
+        if self.index_embedding_signature:
+            current_signature = self._current_embedding_signature()
+            if (
+                current_signature
+                and current_signature != self.index_embedding_signature
+                and not self.force_embedding_compat.get()
+            ):
+                self.append_chat(
+                    "system",
+                    "Embedding mismatch detected. Re-embed documents or enable force "
+                    "compatibility to proceed.",
+                )
+                return
+
+        if not self.vector_store:
+            # Try to load existing DB if available
+            try:
+                self.log("Attempting to load existing Vector DB...")
+                embeddings = self.get_embeddings()
+                if self.vector_db_type.get() == "chroma":
+                    persist_dir = os.path.join(os.getcwd(), "chroma_db")
+                    from langchain_chroma import Chroma
+
+                    self.vector_store = Chroma(
+                        collection_name="rag_collection",
+                        embedding_function=embeddings,
+                        persist_directory=persist_dir,
+                    )
+                else:
+                    self.append_chat(
+                        "system", "Error: No Weaviate connection. Please Ingest first."
+                    )
+                    return
+            except Exception as e:
+                self.append_chat("system", f"Error: Please ingest a file first. ({e})")
+                return
+
+        threading.Thread(target=self._rag_pipeline, args=(query,), daemon=True).start()
+
+    def _rag_pipeline(self, query):
+        try:
+            self.log("Starting Retrieval...")
+
+            # 1. Retrieval
+            # Fetch more candidates first (e.g., 25) to rerank down to 5
+            retriever = self.vector_store.as_retriever(search_kwargs={"k": 25})
+            docs = retriever.invoke(query)
+
+            self.log(f"Retrieved {len(docs)} initial candidates.")
+
+            # 2. Reranking (Cohere)
+            final_docs = docs
+            if self.use_reranker.get() and self.api_keys["cohere"].get():
+                try:
+                    self.log("Reranking with Cohere...")
+                    from langchain_cohere import CohereRerank
+                    compressor = CohereRerank(
+                        cohere_api_key=self.api_keys["cohere"].get(),
+                        top_n=5,
+                        model="rerank-english-v3.0",
+                    )
+                    # We manually compress because we already have docs
+                    compressed_docs = compressor.compress_documents(docs, query)
+                    final_docs = compressed_docs
+                    self.log(
+                        f"Reranked down to {len(final_docs)} high-relevance chunks."
+                    )
+                except Exception as e:
+                    self.log(f"Rerank Error (Using raw retrieval instead): {e}")
+                    final_docs = docs[:5]  # Fallback to top 5 raw
+            else:
+                final_docs = docs[:5]  # No reranker, just take top 5
+
+            # 3. Context Construction
+            context_text = "\n\n---\n\n".join([d.page_content for d in final_docs])
+
+            # 4. Generation
+            self.log("Generating Answer...")
+            llm = self.get_llm()
+
+            # Prompt
+            system_prompt = (
+                f"{self._get_system_instructions()}\n\n"
+                f"CONTEXT:\n{context_text}"
+            )
+
+            from langchain_core.messages import HumanMessage, SystemMessage
+
+            messages = [SystemMessage(content=system_prompt), HumanMessage(content=query)]
+
+            response = llm.invoke(messages)
+
+            self.append_chat("agent", f"AI: {response.content}")
+
+            # Show sources
+            sources_text = "\n".join(
+                [
+                    f"- Chunk (Confidence: {getattr(d, 'metadata', {}).get('relevance_score', 'N/A')})"
+                    for d in final_docs
+                ]
+            )
+            self.append_chat("source", f"\nSources used:\n{sources_text}")
+
+        except Exception as e:
+            self.log(f"RAG Error: {e}")
+            self.append_chat("system", f"Error: {e}")
+
+    def append_chat(self, tag, message):
+        def _append():
+            self.chat_display.config(state="normal")
+            self.chat_display.insert(tk.END, message + "\n\n", tag)
+            self.chat_display.see(tk.END)
+            self.chat_display.config(state="disabled")
+
+        self._run_on_ui(_append)
+
+
+if __name__ == "__main__":
+    try:
+        root = tk.Tk()
+        app = AgenticRAGApp(root)
+        root.mainloop()
+    except Exception as e:
+        print(f"Startup Error: {e}")
