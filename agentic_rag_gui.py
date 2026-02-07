@@ -15,6 +15,15 @@ from datetime import datetime
 
 class AgenticRAGApp:
     def __init__(self, root):
+        import langchain
+
+        if not hasattr(langchain, "debug"):
+            langchain.debug = False
+            if hasattr(langchain, "globals") and hasattr(
+                langchain.globals, "set_debug"
+            ):
+                langchain.globals.set_debug(False)
+
         self.root = root
         self.root.title("Agentic RAG: LangChain + Chroma/Weaviate + Cohere")
         self.root.geometry("1200x900")
