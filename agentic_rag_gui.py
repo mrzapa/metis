@@ -653,11 +653,28 @@ class AgenticRAGApp:
         missing_modules = []
         missing_packages = set()
 
-        def check(module_name, packages, context=None):
-            if has_module(module_name):
-                return
-            missing_modules.append(module_name if context is None else f"{module_name} ({context})")
+        def record_missing(module_name, packages, context=None):
+            label = module_name if context is None else f"{module_name} ({context})"
+            missing_modules.append(label)
             missing_packages.update(packages)
+
+        def check_module(module_name, packages, context=None):
+            if has_module(module_name):
+                return True
+            record_missing(module_name, packages, context=context)
+            return False
+
+        def check_symbol(module_name, symbol_name, packages, context=None):
+            try:
+                module = __import__(module_name, fromlist=[symbol_name])
+                getattr(module, symbol_name)
+                return True
+            except (ImportError, AttributeError) as err:
+                detail = f"{module_name}.{symbol_name}"
+                detail_context = context or "import"
+                record_missing(detail, packages, context=detail_context)
+                self.log(f"Dependency import failed for {detail}: {err}")
+                return False
 
         core_checks = {
             "langchain": ["langchain"],
@@ -666,48 +683,80 @@ class AgenticRAGApp:
             "tiktoken": ["tiktoken"],
         }
         for module_name, packages in core_checks.items():
-            check(module_name, packages)
+            check_module(module_name, packages)
 
         llm_provider = self.llm_provider.get()
         embedding_provider = self.embedding_provider.get()
         vector_db_type = self.vector_db_type.get()
 
         llm_checks = {
-            "openai": ("langchain_openai", ["langchain-openai"]),
-            "anthropic": ("langchain_anthropic", ["langchain-anthropic"]),
-            "google": ("langchain_google_genai", ["langchain-google-genai"]),
-            "local_lm_studio": ("langchain_openai", ["langchain-openai"]),
+            "openai": ("langchain_openai", "ChatOpenAI", ["langchain-openai"]),
+            "anthropic": ("langchain_anthropic", "ChatAnthropic", ["langchain-anthropic"]),
+            "google": (
+                "langchain_google_genai",
+                "ChatGoogleGenerativeAI",
+                ["langchain-google-genai"],
+            ),
+            "local_lm_studio": ("langchain_openai", "ChatOpenAI", ["langchain-openai"]),
         }
         if llm_provider in llm_checks:
-            module_name, packages = llm_checks[llm_provider]
-            check(module_name, packages, context=f"LLM provider {llm_provider}")
+            module_name, symbol_name, packages = llm_checks[llm_provider]
+            check_symbol(
+                module_name,
+                symbol_name,
+                packages,
+                context=f"LLM provider {llm_provider}",
+            )
 
         embedding_checks = {
-            "openai": ("langchain_openai", ["langchain-openai"]),
-            "google": ("langchain_google_genai", ["langchain-google-genai"]),
-            "voyage": ("langchain_voyageai", ["langchain-voyageai"]),
-            "local_huggingface": ("langchain_community", ["langchain-community"]),
+            "openai": ("langchain_openai", "OpenAIEmbeddings", ["langchain-openai"]),
+            "google": (
+                "langchain_google_genai",
+                "GoogleGenerativeAIEmbeddings",
+                ["langchain-google-genai"],
+            ),
+            "voyage": ("langchain_voyageai", "VoyageEmbeddings", ["langchain-voyageai"]),
+            "local_huggingface": (
+                "langchain_community.embeddings",
+                "HuggingFaceEmbeddings",
+                ["langchain-community"],
+            ),
         }
         if embedding_provider in embedding_checks:
-            module_name, packages = embedding_checks[embedding_provider]
-            check(
+            module_name, symbol_name, packages = embedding_checks[embedding_provider]
+            check_symbol(
                 module_name,
+                symbol_name,
                 packages,
                 context=f"embedding provider {embedding_provider}",
             )
 
         vector_checks = {
-            "chroma": ("langchain_chroma", ["langchain-chroma", "chromadb"]),
-            "weaviate": ("langchain_weaviate", ["langchain-weaviate", "weaviate-client"]),
+            "chroma": ("langchain_chroma", "Chroma", ["langchain-chroma", "chromadb"]),
+            "weaviate": (
+                "langchain_weaviate",
+                "WeaviateVectorStore",
+                ["langchain-weaviate", "weaviate-client"],
+            ),
         }
         if vector_db_type in vector_checks:
-            module_name, packages = vector_checks[vector_db_type]
-            check(module_name, packages, context=f"vector DB {vector_db_type}")
+            module_name, symbol_name, packages = vector_checks[vector_db_type]
+            check_symbol(
+                module_name,
+                symbol_name,
+                packages,
+                context=f"vector DB {vector_db_type}",
+            )
             if vector_db_type == "weaviate":
-                check("weaviate", ["weaviate-client"], context="weaviate client")
+                check_module("weaviate", ["weaviate-client"], context="weaviate client")
 
         if self.use_reranker.get() and self.api_keys["cohere"].get():
-            check("langchain_cohere", ["langchain-cohere"], context="Cohere reranker")
+            check_symbol(
+                "langchain_cohere",
+                "CohereRerank",
+                ["langchain-cohere"],
+                context="Cohere reranker",
+            )
 
         if missing_packages:
             if missing_modules:
