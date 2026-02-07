@@ -72,7 +72,6 @@ class AgenticRAGApp:
         self.load_config()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self._sync_model_options()
-        self.dependency_prompted = False
 
         # Defer dependency check slightly to allow UI to render first
         self.root.after(100, self.check_dependencies)
@@ -665,6 +664,18 @@ class AgenticRAGApp:
             record_missing(module_name, packages, context=context)
             return False
 
+        def check_symbol(module_name, symbol_name, packages, context=None):
+            try:
+                module = __import__(module_name, fromlist=[symbol_name])
+                getattr(module, symbol_name)
+                return True
+            except (ImportError, AttributeError) as err:
+                detail = f"{module_name}.{symbol_name}"
+                detail_context = context or "import"
+                record_missing(detail, packages, context=detail_context)
+                self.log(f"Dependency import failed for {detail}: {err}")
+                return False
+
         core_checks = {
             "langchain": ["langchain"],
             "chromadb": ["chromadb"],
@@ -674,15 +685,86 @@ class AgenticRAGApp:
         for module_name, packages in core_checks.items():
             check_module(module_name, packages)
 
+        llm_provider = self.llm_provider.get()
+        embedding_provider = self.embedding_provider.get()
+        vector_db_type = self.vector_db_type.get()
+
+        llm_checks = {
+            "openai": ("langchain_openai", "ChatOpenAI", ["langchain-openai"]),
+            "anthropic": ("langchain_anthropic", "ChatAnthropic", ["langchain-anthropic"]),
+            "google": (
+                "langchain_google_genai",
+                "ChatGoogleGenerativeAI",
+                ["langchain-google-genai"],
+            ),
+            "local_lm_studio": ("langchain_openai", "ChatOpenAI", ["langchain-openai"]),
+        }
+        if llm_provider in llm_checks:
+            module_name, symbol_name, packages = llm_checks[llm_provider]
+            check_symbol(
+                module_name,
+                symbol_name,
+                packages,
+                context=f"LLM provider {llm_provider}",
+            )
+
+        embedding_checks = {
+            "openai": ("langchain_openai", "OpenAIEmbeddings", ["langchain-openai"]),
+            "google": (
+                "langchain_google_genai",
+                "GoogleGenerativeAIEmbeddings",
+                ["langchain-google-genai"],
+            ),
+            "voyage": ("langchain_voyageai", "VoyageEmbeddings", ["langchain-voyageai"]),
+            "local_huggingface": (
+                "langchain_community.embeddings",
+                "HuggingFaceEmbeddings",
+                ["langchain-community"],
+            ),
+        }
+        if embedding_provider in embedding_checks:
+            module_name, symbol_name, packages = embedding_checks[embedding_provider]
+            check_symbol(
+                module_name,
+                symbol_name,
+                packages,
+                context=f"embedding provider {embedding_provider}",
+            )
+
+        vector_checks = {
+            "chroma": ("langchain_chroma", "Chroma", ["langchain-chroma", "chromadb"]),
+            "weaviate": (
+                "langchain_weaviate",
+                "WeaviateVectorStore",
+                ["langchain-weaviate", "weaviate-client"],
+            ),
+        }
+        if vector_db_type in vector_checks:
+            module_name, symbol_name, packages = vector_checks[vector_db_type]
+            check_symbol(
+                module_name,
+                symbol_name,
+                packages,
+                context=f"vector DB {vector_db_type}",
+            )
+            if vector_db_type == "weaviate":
+                check_module("weaviate", ["weaviate-client"], context="weaviate client")
+
+        if self.use_reranker.get() and self.api_keys["cohere"].get():
+            check_symbol(
+                "langchain_cohere",
+                "CohereRerank",
+                ["langchain-cohere"],
+                context="Cohere reranker",
+            )
+
         if missing_packages:
             if missing_modules:
                 self.log(
                     "Missing dependencies detected: "
                     + ", ".join(sorted(missing_modules))
                 )
-            if not getattr(self, "dependency_prompted", False):
-                self.dependency_prompted = True
-                self.prompt_install(sorted(missing_packages))
+            self.prompt_install(sorted(missing_packages))
             return
 
         self.log("All required dependencies found.")
@@ -714,6 +796,12 @@ class AgenticRAGApp:
     def _prompt_dependency_install(self, packages, label, err):
         self.log(f"{label} dependency issue: {err}")
         if not getattr(self, "dependency_prompted", False):
+            self.dependency_prompted = True
+            self.prompt_install(packages)
+
+    def _prompt_dependency_install(self, packages, label, err):
+        self.log(f"{label} dependency issue: {err}")
+        if not self.dependency_prompted:
             self.dependency_prompted = True
             self.prompt_install(packages)
 
