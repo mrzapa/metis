@@ -661,6 +661,7 @@ class AgenticRAGApp:
 
         missing_modules = []
         missing_packages = set()
+        mismatched_symbols = []
 
         def record_missing(module_name, packages, context=None):
             label = module_name if context is None else f"{module_name} ({context})"
@@ -678,11 +679,22 @@ class AgenticRAGApp:
                 module = __import__(module_name, fromlist=[symbol_name])
                 getattr(module, symbol_name)
                 return True
-            except (ImportError, AttributeError) as err:
+            except ImportError as err:
                 detail = f"{module_name}.{symbol_name}"
                 detail_context = context or "import"
                 record_missing(detail, packages, context=detail_context)
                 self.log(f"Dependency import failed for {detail}: {err}")
+                return False
+            except AttributeError as err:
+                detail = f"{module_name}.{symbol_name}"
+                detail_context = context or "import"
+                mismatched_symbols.append(f"{detail} ({detail_context})")
+                self.log(
+                    "Dependency symbol missing but package is installed for "
+                    f"{detail} ({detail_context}). "
+                    "Please upgrade/downgrade to a compatible version. "
+                    f"Details: {err}"
+                )
                 return False
 
         core_checks = {
@@ -774,6 +786,13 @@ class AgenticRAGApp:
                     + ", ".join(sorted(missing_modules))
                 )
             self.prompt_install(sorted(missing_packages))
+            return
+
+        if mismatched_symbols:
+            self.log(
+                "Installed packages found, but expected symbols are missing: "
+                + ", ".join(sorted(mismatched_symbols))
+            )
             return
 
         self.log("All required dependencies found.")
