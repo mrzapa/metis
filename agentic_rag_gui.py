@@ -67,6 +67,7 @@ class AgenticRAGApp:
         self.chat_history = []
         self.selected_file = None
         self.last_answer = ""
+        self.dependency_prompted = False
 
         self.setup_ui()
         self.load_config()
@@ -792,12 +793,6 @@ class AgenticRAGApp:
             ).start()
         else:
             self.log("Dependencies missing. App may crash.")
-
-    def _prompt_dependency_install(self, packages, label, err):
-        self.log(f"{label} dependency issue: {err}")
-        if not getattr(self, "dependency_prompted", False):
-            self.dependency_prompted = True
-            self.prompt_install(packages)
 
     def _prompt_dependency_install(self, packages, label, err):
         self.log(f"{label} dependency issue: {err}")
