@@ -795,6 +795,12 @@ class AgenticRAGApp:
 
     def _prompt_dependency_install(self, packages, label, err):
         self.log(f"{label} dependency issue: {err}")
+        if not getattr(self, "dependency_prompted", False):
+            self.dependency_prompted = True
+            self.prompt_install(packages)
+
+    def _prompt_dependency_install(self, packages, label, err):
+        self.log(f"{label} dependency issue: {err}")
         if not self.dependency_prompted:
             self.dependency_prompted = True
             self.prompt_install(packages)
