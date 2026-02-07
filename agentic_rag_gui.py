@@ -618,6 +618,7 @@ class AgenticRAGApp:
             "langchain-google-genai",
             "langchain-cohere",
             "langchain-voyageai",
+            "langchain-text-splitters",
             "chromadb",
             "beautifulsoup4",
             "tiktoken",
@@ -887,7 +888,10 @@ class AgenticRAGApp:
 
             # 2. Split
             self.log("Step 2/4: Splitting Text...")
-            from langchain.text_splitter import RecursiveCharacterTextSplitter
+            try:
+                from langchain.text_splitter import RecursiveCharacterTextSplitter
+            except ImportError:
+                from langchain_text_splitters import RecursiveCharacterTextSplitter
 
             splitter = RecursiveCharacterTextSplitter(
                 chunk_size=self.chunk_size.get(),
