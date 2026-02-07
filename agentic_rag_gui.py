@@ -64,6 +64,8 @@ class AgenticRAGApp:
         self.vector_store = None
         self.index_embedding_signature = ""
         self.chat_history = []
+        self.selected_file = None
+        self.last_answer = ""
 
         self.setup_ui()
         self.load_config()
@@ -76,8 +78,11 @@ class AgenticRAGApp:
     def setup_ui(self):
         # Styles
         style = ttk.Style()
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
         style.configure("Bold.TLabel", font=("Segoe UI", 10, "bold"))
         style.configure("Header.TLabel", font=("Segoe UI", 12, "bold"))
+        style.configure("Status.TLabel", font=("Segoe UI", 9))
 
         # Tabs
         self.notebook = ttk.Notebook(self.root)
@@ -105,6 +110,13 @@ class AgenticRAGApp:
             log_frame, height=8, state="disabled", font=("Consolas", 9)
         )
         self.log_area.pack(fill=tk.BOTH, expand=True)
+
+        # Status Bar
+        self.status_var = tk.StringVar(value="Ready")
+        status_bar = ttk.Label(
+            self.root, textvariable=self.status_var, style="Status.TLabel", anchor="w"
+        )
+        status_bar.pack(fill="x", padx=10, pady=(0, 8))
 
     def _run_on_ui(self, func, *args, **kwargs):
         if threading.current_thread() == self.main_thread:
@@ -295,10 +307,13 @@ class AgenticRAGApp:
     def build_config_tab(self):
         frame = ttk.Frame(self.tab_config, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
 
         # --- LLM Provider Settings ---
         llm_frame = ttk.LabelFrame(frame, text="LLM & Embedding Provider", padding=15)
         llm_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        llm_frame.columnconfigure(1, weight=1)
 
         ttk.Label(llm_frame, text="Generation Provider:").grid(
             row=0, column=0, sticky="w"
@@ -437,6 +452,7 @@ class AgenticRAGApp:
             frame, text="API Keys (Required for selected services)", padding=15
         )
         key_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
+        key_frame.columnconfigure(1, weight=1)
 
         keys = [
             ("OpenAI API Key:", "openai"),
@@ -475,9 +491,18 @@ class AgenticRAGApp:
         ).pack(anchor="w")
         self.lbl_file = ttk.Label(sel_frame, text="No file selected", foreground="gray")
         self.lbl_file.pack(anchor="w", pady=5)
+        self.lbl_file_info = ttk.Label(sel_frame, text="", foreground="#666666")
+        self.lbl_file_info.pack(anchor="w")
 
-        btn_browse = ttk.Button(sel_frame, text="Browse File...", command=self.browse_file)
-        btn_browse.pack(anchor="w")
+        file_btn_frame = ttk.Frame(sel_frame)
+        file_btn_frame.pack(anchor="w")
+        btn_browse = ttk.Button(
+            file_btn_frame, text="Browse File...", command=self.browse_file
+        )
+        btn_browse.pack(side="left")
+        ttk.Button(
+            file_btn_frame, text="Clear Selection", command=self.clear_selected_file
+        ).pack(side="left", padx=8)
 
         # Chunking Config
         chunk_frame = ttk.LabelFrame(frame, text="Chunking Strategy", padding=10)
@@ -510,7 +535,7 @@ class AgenticRAGApp:
 
         # Chat Display
         self.chat_display = scrolledtext.ScrolledText(
-            frame, state="disabled", font=("Segoe UI", 10)
+            frame, state="disabled", font=("Segoe UI", 10), wrap=tk.WORD
         )
         self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
@@ -535,6 +560,19 @@ class AgenticRAGApp:
         btn_send = ttk.Button(input_frame, text="Send", command=self.send_message)
         btn_send.pack(side="right")
 
+        # Quick Actions
+        action_frame = ttk.Frame(frame)
+        action_frame.pack(fill="x", pady=(8, 4))
+        ttk.Button(action_frame, text="Clear Chat", command=self.clear_chat).pack(
+            side="left"
+        )
+        ttk.Button(
+            action_frame, text="Save Chat Transcript", command=self.save_chat
+        ).pack(side="left", padx=8)
+        ttk.Button(
+            action_frame, text="Copy Last Answer", command=self.copy_last_answer
+        ).pack(side="left")
+
         # Options
         opt_frame = ttk.Frame(frame)
         opt_frame.pack(fill="x", pady=5)
@@ -547,6 +585,16 @@ class AgenticRAGApp:
 
     # --- Logic ---
 
+    @staticmethod
+    def _humanize_bytes(num_bytes):
+        if num_bytes < 1024:
+            return f"{num_bytes} B"
+        for unit in ["KB", "MB", "GB", "TB"]:
+            num_bytes /= 1024
+            if num_bytes < 1024:
+                return f"{num_bytes:.1f} {unit}"
+        return f"{num_bytes:.1f} PB"
+
     def log(self, msg):
         def _append():
             self.log_area.config(state="normal")
@@ -556,6 +604,8 @@ class AgenticRAGApp:
             self.log_area.see(tk.END)
             self.log_area.config(state="disabled")
             self.root.update_idletasks()
+            if hasattr(self, "status_var"):
+                self.status_var.set(msg)
 
         self._run_on_ui(_append)
 
@@ -632,6 +682,23 @@ class AgenticRAGApp:
         if f:
             self.selected_file = f
             self.lbl_file.config(text=f, foreground="black")
+            self._update_file_info()
+
+    def clear_selected_file(self):
+        self.selected_file = None
+        self.lbl_file.config(text="No file selected", foreground="gray")
+        if hasattr(self, "lbl_file_info"):
+            self.lbl_file_info.config(text="")
+
+    def _update_file_info(self):
+        if not self.selected_file:
+            return
+        try:
+            size_bytes = os.path.getsize(self.selected_file)
+            size_label = self._humanize_bytes(size_bytes)
+            self.lbl_file_info.config(text=f"File size: {size_label}")
+        except OSError:
+            self.lbl_file_info.config(text="")
 
     def _validate_model_settings(self):
         try:
@@ -788,7 +855,7 @@ class AgenticRAGApp:
         raise ValueError(f"Unknown LLM provider: {provider}")
 
     def start_ingestion(self):
-        if not hasattr(self, "selected_file"):
+        if not self.selected_file:
             messagebox.showerror("Error", "Please select a file first.")
             return
 
@@ -991,6 +1058,7 @@ class AgenticRAGApp:
 
             response = llm.invoke(messages)
 
+            self.last_answer = response.content
             self.append_chat("agent", f"AI: {response.content}")
 
             # Show sources
@@ -1014,6 +1082,40 @@ class AgenticRAGApp:
             self.chat_display.config(state="disabled")
 
         self._run_on_ui(_append)
+
+    def clear_chat(self):
+        self.chat_display.config(state="normal")
+        self.chat_display.delete("1.0", tk.END)
+        self.chat_display.config(state="disabled")
+        self.last_answer = ""
+
+    def save_chat(self):
+        transcript = self.chat_display.get("1.0", tk.END).strip()
+        if not transcript:
+            messagebox.showinfo("No Chat History", "There is no chat transcript to save.")
+            return
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text Files", "*.txt")],
+            title="Save Chat Transcript",
+        )
+        if not save_path:
+            return
+        try:
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write(transcript + "\n")
+            self.log(f"Chat transcript saved to {save_path}")
+        except OSError as exc:
+            messagebox.showerror("Save Failed", f"Could not save transcript: {exc}")
+
+    def copy_last_answer(self):
+        if not self.last_answer:
+            messagebox.showinfo("No Answer", "There is no AI answer to copy yet.")
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.last_answer)
+        self.root.update()
+        self.log("Last answer copied to clipboard.")
 
 
 if __name__ == "__main__":
