@@ -661,6 +661,7 @@ class AgenticRAGApp:
 
         missing_modules = []
         missing_packages = set()
+        mismatched_symbols = []
 
         def record_missing(module_name, packages, context=None):
             label = module_name if context is None else f"{module_name} ({context})"
@@ -801,6 +802,13 @@ class AgenticRAGApp:
                     + ", ".join(sorted(missing_modules))
                 )
             self.prompt_install(sorted(missing_packages))
+            return
+
+        if mismatched_symbols:
+            self.log(
+                "Installed packages found, but expected symbols are missing: "
+                + ", ".join(sorted(mismatched_symbols))
+            )
             return
 
         self.log("All required dependencies found.")
