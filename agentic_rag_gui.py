@@ -645,6 +645,14 @@ class AgenticRAGApp:
                 self.status_var.set(msg)
 
         self._run_on_ui(_append)
+        self._emit_log_to_console(msg)
+
+    @staticmethod
+    def _emit_log_to_console(msg):
+        stream = sys.stderr if ("ERROR" in msg or "Failed" in msg) else sys.stdout
+        if not stream or not stream.isatty():
+            return
+        print(msg, file=stream)
 
     def check_dependencies(self):
         def has_module(module_name):
