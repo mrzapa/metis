@@ -77,11 +77,14 @@ class AgenticRAGApp:
         self.selected_file = None
         self.last_answer = ""
         self.dependency_prompted = False
+        self.existing_index_var = tk.StringVar(value="(default)")
+        self.existing_index_paths = {}
 
         self.setup_ui()
         self.load_config()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self._sync_model_options()
+        self.vector_db_type.trace_add("write", self._on_vector_db_type_change)
 
         # Defer dependency check slightly to allow UI to render first
         self.root.after(100, self.check_dependencies)
@@ -580,6 +583,28 @@ class AgenticRAGApp:
         frame = ttk.Frame(self.tab_chat, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
 
+        # Existing Index Selection
+        index_frame = ttk.LabelFrame(frame, text="Vector Store Selection", padding=10)
+        index_frame.pack(fill="x", pady=(0, 10))
+        index_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(index_frame, text="Existing Index (optional):").grid(
+            row=0, column=0, sticky="w"
+        )
+        self.cb_existing_index = ttk.Combobox(
+            index_frame,
+            textvariable=self.existing_index_var,
+            state="readonly",
+        )
+        self.cb_existing_index.grid(row=0, column=1, sticky="ew", padx=5)
+        self.cb_existing_index.bind(
+            "<<ComboboxSelected>>", self._on_existing_index_change
+        )
+        ttk.Button(
+            index_frame, text="Refresh", command=self._refresh_existing_indexes
+        ).grid(row=0, column=2, padx=(5, 0))
+        self._refresh_existing_indexes()
+
         # Chat Display
         self.chat_display = scrolledtext.ScrolledText(
             frame, state="disabled", font=("Segoe UI", 10), wrap=tk.WORD
@@ -663,6 +688,101 @@ class AgenticRAGApp:
         if not stream or not stream.isatty():
             return
         print(msg, file=stream)
+
+    def _on_vector_db_type_change(self, *_args):
+        self._refresh_existing_indexes()
+
+    def _get_chroma_persist_root(self):
+        return os.path.join(os.getcwd(), "chroma_db")
+
+    @staticmethod
+    def _is_chroma_persist_dir(path):
+        if not os.path.isdir(path):
+            return False
+        return os.path.exists(os.path.join(path, "chroma.sqlite3")) or os.path.exists(
+            os.path.join(path, "index")
+        )
+
+    @staticmethod
+    def _format_index_label(path):
+        try:
+            return os.path.relpath(path, os.getcwd())
+        except ValueError:
+            return path
+
+    def _list_existing_indexes(self):
+        db_type = self.vector_db_type.get()
+        indexes = []
+        if db_type == "chroma":
+            base_dir = self._get_chroma_persist_root()
+            if os.path.isdir(base_dir):
+                if self._is_chroma_persist_dir(base_dir):
+                    indexes.append(base_dir)
+                for entry in sorted(os.listdir(base_dir)):
+                    path = os.path.join(base_dir, entry)
+                    if self._is_chroma_persist_dir(path):
+                        indexes.append(path)
+        return indexes
+
+    def _refresh_existing_indexes(self):
+        indexes = self._list_existing_indexes()
+        display_values = ["(default)"] + [
+            self._format_index_label(path) for path in indexes
+        ]
+        self.existing_index_paths = {
+            self._format_index_label(path): path for path in indexes
+        }
+        if hasattr(self, "cb_existing_index"):
+            self.cb_existing_index["values"] = display_values
+        if self.existing_index_var.get() not in display_values:
+            self.existing_index_var.set("(default)")
+
+    def _get_selected_index_path(self):
+        selection = self.existing_index_var.get()
+        if not selection or selection == "(default)":
+            return None
+        return self.existing_index_paths.get(selection, selection)
+
+    def _on_existing_index_change(self, _event=None):
+        selected_path = self._get_selected_index_path()
+        if not selected_path:
+            return
+        threading.Thread(
+            target=self._load_existing_index, args=(selected_path,), daemon=True
+        ).start()
+
+    def _load_existing_index(self, selected_path):
+        try:
+            self.log(f"Loading existing index from {self._format_index_label(selected_path)}...")
+            db_type = self.vector_db_type.get()
+            embeddings = self.get_embeddings()
+            if db_type == "chroma":
+                try:
+                    from langchain_chroma import Chroma
+                except ImportError as err:
+                    self._prompt_dependency_install(
+                        ["langchain-chroma", "chromadb"], "Chroma vector store", err
+                    )
+                    return
+                self.vector_store = Chroma(
+                    collection_name="rag_collection",
+                    embedding_function=embeddings,
+                    persist_directory=selected_path,
+                )
+                self.index_embedding_signature = self._current_embedding_signature()
+                self.save_config()
+                self.log(
+                    f"Active index set to {self._format_index_label(selected_path)}."
+                )
+            elif db_type == "weaviate":
+                self.log(
+                    "Weaviate indexes must be loaded via server connection. "
+                    "Please ingest or connect first."
+                )
+            else:
+                self.log(f"Unknown vector DB type: {db_type}")
+        except Exception as exc:
+            self.log(f"Failed to load existing index: {exc}")
 
     def check_dependencies(self):
         def has_module(module_name):
@@ -1182,7 +1302,7 @@ class AgenticRAGApp:
             db_type = self.vector_db_type.get()
 
             if db_type == "chroma":
-                persist_dir = os.path.join(os.getcwd(), "chroma_db")
+                persist_dir = self._get_chroma_persist_root()
                 try:
                     from langchain_chroma import Chroma
                 except ImportError as err:
@@ -1238,6 +1358,7 @@ class AgenticRAGApp:
                 self.log(f"Indexed {min(i + batch_size, total_docs)}/{total_docs} chunks...")
 
             self.log("Ingestion Complete! You can now chat.")
+            self._run_on_ui(self._refresh_existing_indexes)
             self._run_on_ui(
                 messagebox.showinfo,
                 "Success",
@@ -1278,7 +1399,8 @@ class AgenticRAGApp:
                 self.log("Attempting to load existing Vector DB...")
                 embeddings = self.get_embeddings()
                 if self.vector_db_type.get() == "chroma":
-                    persist_dir = os.path.join(os.getcwd(), "chroma_db")
+                    selected_path = self._get_selected_index_path()
+                    persist_dir = selected_path or self._get_chroma_persist_root()
                     from langchain_chroma import Chroma
 
                     self.vector_store = Chroma(
@@ -1286,6 +1408,11 @@ class AgenticRAGApp:
                         embedding_function=embeddings,
                         persist_directory=persist_dir,
                     )
+                    if selected_path:
+                        self.log(
+                            "Active index set to "
+                            f"{self._format_index_label(persist_dir)}."
+                        )
                 else:
                     self.append_chat(
                         "system", "Error: No Weaviate connection. Please Ingest first."
