@@ -685,6 +685,27 @@ class AgenticRAGApp:
                 self.log(f"Dependency import failed for {detail}: {err}")
                 return False
 
+        def check_any_symbol(module_name, symbol_names, packages, context=None):
+            try:
+                module = __import__(module_name, fromlist=symbol_names)
+            except ImportError as err:
+                detail_context = context or "import"
+                record_missing(module_name, packages, context=detail_context)
+                self.log(f"Dependency import failed for {module_name}: {err}")
+                return False
+            for symbol_name in symbol_names:
+                if hasattr(module, symbol_name):
+                    return True
+            detail = f"{module_name}.[{', '.join(symbol_names)}]"
+            detail_context = context or "API mismatch"
+            record_missing(detail, packages, context=detail_context)
+            self.log(
+                f"{module_name} is installed but missing expected symbols "
+                f"{', '.join(symbol_names)}. This is likely an API mismatch; "
+                "please upgrade or downgrade langchain-voyageai."
+            )
+            return False
+
         core_checks = {
             "langchain": ["langchain"],
             "chromadb": ["chromadb"],
@@ -724,7 +745,6 @@ class AgenticRAGApp:
                 "GoogleGenerativeAIEmbeddings",
                 ["langchain-google-genai"],
             ),
-            "voyage": ("langchain_voyageai", "VoyageEmbeddings", ["langchain-voyageai"]),
             "local_huggingface": (
                 "langchain_community.embeddings",
                 "HuggingFaceEmbeddings",
@@ -738,6 +758,13 @@ class AgenticRAGApp:
                 symbol_name,
                 packages,
                 context=f"embedding provider {embedding_provider}",
+            )
+        if embedding_provider == "voyage":
+            check_any_symbol(
+                "langchain_voyageai",
+                ["VoyageAIEmbeddings", "VoyageEmbeddings"],
+                ["langchain-voyageai"],
+                context="embedding provider voyage",
             )
 
         vector_checks = {
@@ -968,16 +995,32 @@ class AgenticRAGApp:
 
         if provider == "voyage":
             try:
-                from langchain_voyageai import VoyageEmbeddings
-            except (ImportError, AttributeError) as err:
-                self._prompt_dependency_install(
-                    ["langchain-voyageai"], "Voyage embeddings", err
-                )
-                raise
+                from langchain_voyageai import VoyageAIEmbeddings
+                embedding_cls = VoyageAIEmbeddings
+            except ImportError as err:
+                try:
+                    module = __import__("langchain_voyageai", fromlist=["VoyageEmbeddings"])
+                except ImportError as module_err:
+                    self._prompt_dependency_install(
+                        ["langchain-voyageai"], "Voyage embeddings", module_err
+                    )
+                    raise
+                if hasattr(module, "VoyageEmbeddings"):
+                    embedding_cls = module.VoyageEmbeddings
+                else:
+                    mismatch_msg = (
+                        "langchain-voyageai is installed but does not export "
+                        "VoyageAIEmbeddings or VoyageEmbeddings. This is likely an "
+                        "API mismatch; please upgrade or downgrade langchain-voyageai."
+                    )
+                    self._prompt_dependency_install(
+                        ["langchain-voyageai"], "Voyage embeddings (API mismatch)", mismatch_msg
+                    )
+                    raise ImportError(mismatch_msg) from err
 
             if not api_key:
                 raise ValueError("Voyage API Key missing")
-            return VoyageEmbeddings(voyage_api_key=api_key, model=model_name)
+            return embedding_cls(voyage_api_key=api_key, model=model_name)
 
         if provider == "local_huggingface":
             # Uses local CPU/GPU via HuggingFace
