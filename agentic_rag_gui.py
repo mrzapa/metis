@@ -3081,9 +3081,14 @@ class AgenticRAGApp:
                         planner_prompt = (
                             "You are an evidence-pack retrieval planner. Given the user query and "
                             "output_style, return strict JSON with keys: checklist_items (array of "
-                            "strings), retrieval_queries (array of 4-10 strings), section_plan "
-                            "(optional array). Ensure checklist and queries cover chronology/timeline, "
-                            "impacts, grievances, and concrete examples. Do not include any extra text."
+                            "strings), retrieval_queries (array of 8-15 strings), section_plan "
+                            "(optional array). Checklist must include: 6–12 strongest dated incidents, "
+                            "2–4 supporting examples, timeline fields, impacts. Retrieval queries must be "
+                            "generic coverage sweeps (not user-specified examples), including date sweeps "
+                            "(months/years), channel terms (Teams/email/call/meeting/WhatsApp), and role "
+                            "queries (formal grievance examples, key incidents, what happened impact "
+                            "evidence). Ensure checklist and queries cover chronology/timeline, impacts, "
+                            "grievances, and concrete examples. Do not include any extra text."
                         )
                     else:
                         planner_prompt = (
