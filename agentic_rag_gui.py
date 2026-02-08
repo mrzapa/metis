@@ -46,14 +46,17 @@ class AgenticRAGApp:
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
         self.default_system_instructions = (
             "You are an expert analyst assistant. Use the provided context to answer the "
-            "user's question. If the answer is not in the context, say you don't know. "
-            "Cite specific sections if possible, and be clear about any assumptions."
+            "user's question. If the answer is not in the context, respond with exactly "
+            "\"NOT FOUND IN CONTEXT\" and provide no citations. For every other response, "
+            "include per-section citations like [Chunk 3] that reference the context "
+            "headers. Cite specific sections, and be clear about any assumptions."
         )
         self.verbose_system_instructions = (
             "You are an expert analyst assistant. Use the provided context to answer the "
-            "user's question. If the answer is not in the context, say you don't know. "
-            "Provide a concise summary, cite evidence from the context, list key points, "
-            "and explicitly note uncertainties or gaps."
+            "user's question. If the answer is not in the context, respond with exactly "
+            "\"NOT FOUND IN CONTEXT\" and provide no citations. Provide a concise summary, "
+            "cite evidence from the context with per-section citations like [Chunk 3], "
+            "list key points, and explicitly note uncertainties or gaps."
         )
 
         # --- State Variables ---
@@ -1408,6 +1411,12 @@ class AgenticRAGApp:
                 separators=["\n\n", "\n", ".", " ", ""],
             )
             docs = splitter.create_documents([text_content])
+            source_label = os.path.basename(self.selected_file)
+            for idx, doc in enumerate(docs, start=1):
+                metadata = getattr(doc, "metadata", {}) or {}
+                metadata.setdefault("source", self.selected_file)
+                metadata.setdefault("chunk_id", f"{source_label}-chunk-{idx}")
+                doc.metadata = metadata
             self.log(f"Created {len(docs)} text chunks.")
 
             # 3. Initialize Vector DB & Embeddings
@@ -1600,7 +1609,11 @@ class AgenticRAGApp:
                     or metadata.get("filename")
                     or "unknown"
                 )
-                header = f"[Chunk {idx} | score: {score} | source: {source}]"
+                chunk_id = metadata.get("chunk_id", "N/A")
+                header = (
+                    f"[Chunk {idx} | chunk_id: {chunk_id} | "
+                    f"score: {score} | source: {source}]"
+                )
                 content = doc.page_content.strip()
                 chunk_text = f"{header}\n{content}"
 
@@ -1644,7 +1657,8 @@ class AgenticRAGApp:
             sources_text = "\n".join(
                 [
                     (
-                        f"- [Chunk {idx} | score: "
+                        f"- [Chunk {idx} | chunk_id: "
+                        f"{getattr(d, 'metadata', {}).get('chunk_id', 'N/A')} | score: "
                         f"{getattr(d, 'metadata', {}).get('relevance_score', 'N/A')} | "
                         f"source: "
                         f"{(getattr(d, 'metadata', {}) or {}).get('source') or (getattr(d, 'metadata', {}) or {}).get('file_path') or (getattr(d, 'metadata', {}) or {}).get('filename') or 'unknown'}]"
