@@ -7,6 +7,7 @@ import time
 import json
 import subprocess
 import importlib.util
+import re
 from datetime import datetime
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -45,9 +46,10 @@ class AgenticRAGApp:
         self.main_thread = threading.current_thread()
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
         self.default_system_instructions = (
-            "You are an expert analyst assistant. Use the provided context to answer the "
-            "user's question. If the answer is not in the context, say you don't know. "
-            "Cite specific sections if possible, and be clear about any assumptions."
+            "You are an expert analyst assistant. Use only retrieved context for factual claims. "
+            "Do not ask for details already present in the context. Never emit placeholders like "
+            "\"[insert …]\". If a required field is missing, output exactly NOT FOUND IN CONTEXT. "
+            "Coverage rule: if N items are requested, output N items or NOT FOUND IN CONTEXT for each."
         )
         self.verbose_system_instructions = (
             "You are an expert analyst assistant. Use the provided context to answer the "
@@ -97,8 +99,6 @@ class AgenticRAGApp:
         self.fallback_final_k = tk.IntVar(value=self.final_k.get())
         self.search_type = tk.StringVar(value="similarity")
         self.mmr_lambda = tk.DoubleVar(value=0.5)
-        self.use_sub_queries = tk.BooleanVar(value=False)
-        self.subquery_max_docs = tk.IntVar(value=40)
 
         self.vector_store = None
         self.index_embedding_signature = ""
@@ -109,6 +109,7 @@ class AgenticRAGApp:
         self.dependency_prompted = False
         self.existing_index_var = tk.StringVar(value="(default)")
         self.existing_index_paths = {}
+        self.selected_index_path = None
 
         self.setup_ui()
         self.load_config()
@@ -342,6 +343,9 @@ class AgenticRAGApp:
         self.index_embedding_signature = data.get(
             "index_embedding_signature", self.index_embedding_signature
         )
+        self.selected_index_path = data.get(
+            "selected_index_path", self.selected_index_path
+        )
 
         instructions = data.get("system_instructions", self.system_instructions.get())
         self.system_instructions.set(instructions or self.default_system_instructions)
@@ -350,6 +354,11 @@ class AgenticRAGApp:
 
         self._sync_model_options()
         self._refresh_compatibility_warning()
+        if self.selected_index_path:
+            self.existing_index_var.set(
+                self._format_index_label(self.selected_index_path)
+            )
+            self._refresh_existing_indexes()
 
     def save_config(self):
         data = {
@@ -373,6 +382,7 @@ class AgenticRAGApp:
             "search_type": self.search_type.get(),
             "mmr_lambda": self.mmr_lambda.get(),
             "index_embedding_signature": self.index_embedding_signature,
+            "selected_index_path": self.selected_index_path,
         }
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
@@ -892,6 +902,13 @@ class AgenticRAGApp:
         return os.path.join(os.getcwd(), "chroma_db")
 
     @staticmethod
+    def _safe_file_stem(file_path):
+        base_name = os.path.basename(file_path or "")
+        stem = os.path.splitext(base_name)[0]
+        safe_stem = re.sub(r"[^A-Za-z0-9_-]+", "_", stem).strip("_")
+        return safe_stem or "ingest"
+
+    @staticmethod
     def _is_chroma_persist_dir(path):
         if not os.path.isdir(path):
             return False
@@ -931,18 +948,27 @@ class AgenticRAGApp:
         if hasattr(self, "cb_existing_index"):
             self.cb_existing_index["values"] = display_values
         if self.existing_index_var.get() not in display_values:
-            self.existing_index_var.set("(default)")
+            if self.selected_index_path:
+                candidate = self._format_index_label(self.selected_index_path)
+                if candidate in display_values:
+                    self.existing_index_var.set(candidate)
+                else:
+                    self.existing_index_var.set("(default)")
+            else:
+                self.existing_index_var.set("(default)")
 
     def _get_selected_index_path(self):
         selection = self.existing_index_var.get()
         if not selection or selection == "(default)":
-            return None
+            return self.selected_index_path
         return self.existing_index_paths.get(selection, selection)
 
     def _on_existing_index_change(self, _event=None):
         selected_path = self._get_selected_index_path()
         if not selected_path:
             return
+        self.selected_index_path = selected_path
+        self.save_config()
         threading.Thread(
             target=self._load_existing_index, args=(selected_path,), daemon=True
         ).start()
@@ -1466,6 +1492,9 @@ class AgenticRAGApp:
 
                 with open(self.selected_file, "r", encoding="utf-8", errors="ignore") as f:
                     soup = BeautifulSoup(f, "html.parser")
+                    doc_title = None
+                    if soup.title and soup.title.string:
+                        doc_title = soup.title.string.strip() or None
                     # Aggressive cleaning for RAG
                     for tag in soup(["script", "style", "svg", "path", "nav", "footer"]):
                         tag.extract()
@@ -1473,6 +1502,7 @@ class AgenticRAGApp:
             else:
                 with open(self.selected_file, "r", encoding="utf-8") as f:
                     text_content = f.read()
+                doc_title = None
 
             self.log(f"File loaded. Raw text length: {len(text_content)} characters.")
 
@@ -1489,6 +1519,20 @@ class AgenticRAGApp:
                 separators=["\n\n", "\n", ".", " ", ""],
             )
             docs = splitter.create_documents([text_content])
+            ingest_id = datetime.utcnow().isoformat()
+            source_basename = os.path.basename(self.selected_file)
+            for chunk_id, doc in enumerate(docs, start=1):
+                metadata = (doc.metadata or {}).copy()
+                metadata.update(
+                    {
+                        "source": source_basename,
+                        "chunk_id": chunk_id,
+                        "ingest_id": ingest_id,
+                    }
+                )
+                if doc_title:
+                    metadata["doc_title"] = doc_title
+                doc.metadata = metadata
             self.log(f"Created {len(docs)} text chunks.")
 
             # 3. Initialize Vector DB & Embeddings
@@ -1496,9 +1540,17 @@ class AgenticRAGApp:
             embeddings = self.get_embeddings()
 
             db_type = self.vector_db_type.get()
+            new_index_path = None
 
             if db_type == "chroma":
-                persist_dir = self._get_chroma_persist_root()
+                persist_root = self._get_chroma_persist_root()
+                ingest_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                safe_stem = self._safe_file_stem(self.selected_file)
+                persist_dir = os.path.join(
+                    persist_root, f"{safe_stem}__{ingest_id}"
+                )
+                os.makedirs(persist_root, exist_ok=True)
+                new_index_path = persist_dir
                 try:
                     from langchain_chroma import Chroma
                 except ImportError as err:
@@ -1554,7 +1606,16 @@ class AgenticRAGApp:
                 self.log(f"Indexed {min(i + batch_size, total_docs)}/{total_docs} chunks...")
 
             self.log("Ingestion Complete! You can now chat.")
-            self._run_on_ui(self._refresh_existing_indexes)
+            if new_index_path:
+                def _select_new_index():
+                    self._refresh_existing_indexes()
+                    selection_label = self._format_index_label(new_index_path)
+                    self.existing_index_var.set(selection_label)
+                    self.selected_index_path = new_index_path
+                    self.save_config()
+                self._run_on_ui(_select_new_index)
+            else:
+                self._run_on_ui(self._refresh_existing_indexes)
             self._run_on_ui(
                 messagebox.showinfo,
                 "Success",
@@ -1597,6 +1658,9 @@ class AgenticRAGApp:
                 embeddings = self.get_embeddings()
                 if self.vector_db_type.get() == "chroma":
                     selected_path = self._get_selected_index_path()
+                    if not selected_path and self.selected_index_path:
+                        if os.path.isdir(self.selected_index_path):
+                            selected_path = self.selected_index_path
                     persist_dir = selected_path or self._get_chroma_persist_root()
                     from langchain_chroma import Chroma
 
@@ -1629,6 +1693,24 @@ class AgenticRAGApp:
             retrieve_k = max(1, int(self.retrieval_k.get()))
             final_k = max(1, int(self.final_k.get()))
             candidate_k = max(retrieve_k, final_k)
+            long_form_keywords = (
+                "evidence",
+                "evidence pack",
+                "full report",
+                "timeline",
+                "all details",
+                "complete",
+                "extract all",
+                "every",
+                "required details",
+            )
+            normalized_query = query.lower()
+            if any(keyword in normalized_query for keyword in long_form_keywords):
+                boosted_final_k = min(candidate_k, max(final_k, 12))
+                if boosted_final_k > 20:
+                    boosted_final_k = min(candidate_k, 20)
+                final_k = boosted_final_k
+                self.log(f"Long-form intent detected; adjusted final_k to {final_k}.")
             search_type = self.search_type.get() or "similarity"
             mmr_lambda = float(self.mmr_lambda.get())
             search_kwargs = {"k": candidate_k}
@@ -1691,10 +1773,15 @@ class AgenticRAGApp:
                 final_docs = docs[:final_k]  # No reranker, just take top K
 
             # 3. Context Construction
-            context_budget_chars = max(2000, int(self.llm_max_tokens.get() * 4))
-            context_budget_tokens = context_budget_chars // 4
+            def _clamp(value, min_value, max_value):
+                return max(min_value, min(max_value, value))
+
+            context_budget_chars = _clamp(
+                int(self.llm_max_tokens.get()) * 12, min_value=12000, max_value=80000
+            )
             context_blocks = []
             used_chars = 0
+            was_truncated = False
 
             for idx, doc in enumerate(final_docs, start=1):
                 metadata = getattr(doc, "metadata", {}) or {}
@@ -1705,14 +1792,20 @@ class AgenticRAGApp:
                     or metadata.get("filename")
                     or "unknown"
                 )
-                header = f"[Chunk {idx} | score: {score} | source: {source}]"
+                chunk_id = metadata.get("chunk_id", "N/A")
+                header = (
+                    f"[Chunk {idx} | chunk_id: {chunk_id} | "
+                    f"score: {score} | source: {source}]"
+                )
                 content = doc.page_content.strip()
                 chunk_text = f"{header}\n{content}"
 
                 remaining = context_budget_chars - used_chars
                 if remaining <= 0:
+                    was_truncated = True
                     break
                 if len(chunk_text) > remaining:
+                    was_truncated = True
                     if remaining > len(header) + 20:
                         truncated_content = content[: remaining - len(header) - 20].rstrip()
                         chunk_text = f"{header}\n{truncated_content}\n...[truncated]"
@@ -1722,6 +1815,12 @@ class AgenticRAGApp:
                 used_chars += len(chunk_text) + 2
 
             context_text = "\n\n".join(context_blocks)
+            self.log(
+                "Context stats - "
+                f"candidate_k={candidate_k}, final_k={final_k}, "
+                f"context_budget_chars={context_budget_chars}, "
+                f"context_chars={len(context_text)}, truncated={was_truncated}"
+            )
 
             # 4. Generation
             self.log("Generating Answer...")
@@ -1749,7 +1848,8 @@ class AgenticRAGApp:
             sources_text = "\n".join(
                 [
                     (
-                        f"- [Chunk {idx} | score: "
+                        f"- [Chunk {idx} | chunk_id: "
+                        f"{getattr(d, 'metadata', {}).get('chunk_id', 'N/A')} | score: "
                         f"{getattr(d, 'metadata', {}).get('relevance_score', 'N/A')} | "
                         f"source: "
                         f"{(getattr(d, 'metadata', {}) or {}).get('source') or (getattr(d, 'metadata', {}) or {}).get('file_path') or (getattr(d, 'metadata', {}) or {}).get('filename') or 'unknown'}]"
