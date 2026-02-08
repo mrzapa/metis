@@ -1580,7 +1580,37 @@ class AgenticRAGApp:
                 final_docs = docs[:final_k]  # No reranker, just take top K
 
             # 3. Context Construction
-            context_text = "\n\n---\n\n".join([d.page_content for d in final_docs])
+            context_budget_chars = max(2000, int(self.llm_max_tokens.get() * 4))
+            context_budget_tokens = context_budget_chars // 4
+            context_blocks = []
+            used_chars = 0
+
+            for idx, doc in enumerate(final_docs, start=1):
+                metadata = getattr(doc, "metadata", {}) or {}
+                score = metadata.get("relevance_score", "N/A")
+                source = (
+                    metadata.get("source")
+                    or metadata.get("file_path")
+                    or metadata.get("filename")
+                    or "unknown"
+                )
+                header = f"[Chunk {idx} | score: {score} | source: {source}]"
+                content = doc.page_content.strip()
+                chunk_text = f"{header}\n{content}"
+
+                remaining = context_budget_chars - used_chars
+                if remaining <= 0:
+                    break
+                if len(chunk_text) > remaining:
+                    if remaining > len(header) + 20:
+                        truncated_content = content[: remaining - len(header) - 20].rstrip()
+                        chunk_text = f"{header}\n{truncated_content}\n...[truncated]"
+                    else:
+                        break
+                context_blocks.append(chunk_text)
+                used_chars += len(chunk_text) + 2
+
+            context_text = "\n\n".join(context_blocks)
 
             # 4. Generation
             self.log("Generating Answer...")
@@ -1607,8 +1637,13 @@ class AgenticRAGApp:
             # Show sources
             sources_text = "\n".join(
                 [
-                    f"- Chunk (Confidence: {getattr(d, 'metadata', {}).get('relevance_score', 'N/A')})"
-                    for d in final_docs
+                    (
+                        f"- [Chunk {idx} | score: "
+                        f"{getattr(d, 'metadata', {}).get('relevance_score', 'N/A')} | "
+                        f"source: "
+                        f"{(getattr(d, 'metadata', {}) or {}).get('source') or (getattr(d, 'metadata', {}) or {}).get('file_path') or (getattr(d, 'metadata', {}) or {}).get('filename') or 'unknown'}]"
+                    )
+                    for idx, d in enumerate(final_docs, start=1)
                 ]
             )
             self.append_chat("source", f"\nSources used:\n{sources_text}")
