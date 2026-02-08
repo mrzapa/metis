@@ -47,13 +47,16 @@ class AgenticRAGApp:
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
         self.default_system_instructions = (
             "You are an expert analyst assistant. Use only retrieved context for factual claims. "
-            "Do not ask for details already present in the context. Never emit placeholders like "
-            "\"[insert …]\". If a required field is missing, output exactly NOT FOUND IN CONTEXT. "
+            "Never ask for details already present in the retrieved context. Do not use placeholders. "
+            "If any requested item is missing from the context, output exactly: NOT FOUND IN CONTEXT "
+            "(no citation). Every factual paragraph must include at least one [Chunk N] citation. "
             "Coverage rule: if N items are requested, output N items or NOT FOUND IN CONTEXT for each."
         )
         self.verbose_system_instructions = (
-            "You are an expert analyst assistant. Use the provided context to answer the "
-            "user's question. If the answer is not in the context, say you don't know. "
+            "You are an expert analyst assistant. Use only retrieved context for factual claims. "
+            "Never ask for details already present in the retrieved context. Do not use placeholders. "
+            "If any requested item is missing from the context, output exactly: NOT FOUND IN CONTEXT "
+            "(no citation). Every factual paragraph must include at least one [Chunk N] citation. "
             "Provide a concise summary, cite evidence from the context, list key points, "
             "and explicitly note uncertainties or gaps."
         )
@@ -1686,6 +1689,7 @@ class AgenticRAGApp:
         threading.Thread(target=self._rag_pipeline, args=(query,), daemon=True).start()
 
     def _rag_pipeline(self, query):
+        stage = "retrieval"
         try:
             self.log("Starting Retrieval...")
 
@@ -1719,6 +1723,7 @@ class AgenticRAGApp:
                     {"fetch_k": candidate_k, "lambda_mult": mmr_lambda}
                 )
             queries = [query]
+            retrieval_counts = []
             if self.use_sub_queries.get():
                 sub_queries = self._generate_sub_queries(query)
                 if sub_queries:
@@ -1729,6 +1734,7 @@ class AgenticRAGApp:
                     search_type=search_type, search_kwargs=search_kwargs
                 )
                 docs = retriever.invoke(query)
+                retrieval_counts.append((query, len(docs)))
             else:
                 per_query_k = max(1, min(candidate_k, max_total_docs // len(queries)))
                 per_query_kwargs = dict(search_kwargs)
@@ -1740,13 +1746,27 @@ class AgenticRAGApp:
                 )
                 docs = []
                 for sub_query in queries:
-                    docs.extend(retriever.invoke(sub_query))
+                    results = retriever.invoke(sub_query)
+                    retrieval_counts.append((sub_query, len(results)))
+                    docs.extend(results)
                 docs = self._merge_dedupe_docs(docs)
                 if len(docs) > max_total_docs:
                     docs = docs[:max_total_docs]
 
+            total_unique_docs = len(docs)
+            per_query_counts = ", ".join(
+                [f"{item[0]!r}:{item[1]}" for item in retrieval_counts]
+            )
+            sub_queries_used = queries[1:] if len(queries) > 1 else []
             self.log(
-                f"Retrieved {len(docs)} initial candidates from {len(queries)} query(s)."
+                f"Retrieved {total_unique_docs} initial candidates from {len(queries)} "
+                f"query(s)."
+            )
+            self.log(
+                "Telemetry (retrieval) - "
+                f"sub_queries={sub_queries_used}, "
+                f"per_query_counts={{ {per_query_counts} }}, "
+                f"total_unique_docs={total_unique_docs}"
             )
 
             # 2. Reranking (Cohere)
@@ -1773,6 +1793,7 @@ class AgenticRAGApp:
                 final_docs = docs[:final_k]  # No reranker, just take top K
 
             # 3. Context Construction
+            stage = "packing"
             def _clamp(value, min_value, max_value):
                 return max(min_value, min(max_value, value))
 
@@ -1821,9 +1842,14 @@ class AgenticRAGApp:
                 f"context_budget_chars={context_budget_chars}, "
                 f"context_chars={len(context_text)}, truncated={was_truncated}"
             )
+            self.log(
+                "Telemetry (packing) - "
+                f"final_packed={len(context_blocks)}, truncated={was_truncated}"
+            )
 
             # 4. Generation
             self.log("Generating Answer...")
+            stage = "prompting"
             llm = self.get_llm()
 
             # Prompt
@@ -1860,8 +1886,8 @@ class AgenticRAGApp:
             self.append_chat("source", f"\nSources used:\n{sources_text}")
 
         except Exception as e:
-            self.log(f"RAG Error: {e}")
-            self.append_chat("system", f"Error: {e}")
+            self.log(f"RAG Error ({stage} failure): {e}")
+            self.append_chat("system", f"Error ({stage} failure): {e}")
 
     def append_chat(self, tag, message):
         def _append():
