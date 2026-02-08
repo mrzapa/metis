@@ -48,13 +48,16 @@ class AgenticRAGApp:
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
         self.default_system_instructions = (
             "You are an expert analyst assistant. Use only retrieved context for factual claims. "
-            "Do not ask for details already present in the context. Never emit placeholders like "
-            "\"[insert …]\". If a required field is missing, output exactly NOT FOUND IN CONTEXT. "
+            "Never ask for details already present in the retrieved context. Do not use placeholders. "
+            "If any requested item is missing from the context, output exactly: NOT FOUND IN CONTEXT "
+            "(no citation). Every factual paragraph must include at least one [Chunk N] citation. "
             "Coverage rule: if N items are requested, output N items or NOT FOUND IN CONTEXT for each."
         )
         self.verbose_system_instructions = (
-            "You are an expert analyst assistant. Use the provided context to answer the "
-            "user's question. If the answer is not in the context, say you don't know. "
+            "You are an expert analyst assistant. Use only retrieved context for factual claims. "
+            "Never ask for details already present in the retrieved context. Do not use placeholders. "
+            "If any requested item is missing from the context, output exactly: NOT FOUND IN CONTEXT "
+            "(no citation). Every factual paragraph must include at least one [Chunk N] citation. "
             "Provide a concise summary, cite evidence from the context, list key points, "
             "and explicitly note uncertainties or gaps."
         )
@@ -1894,6 +1897,7 @@ class AgenticRAGApp:
         threading.Thread(target=self._rag_pipeline, args=(query,), daemon=True).start()
 
     def _rag_pipeline(self, query):
+        stage = "retrieval"
         try:
             self.log("Starting Retrieval...")
 
@@ -2292,8 +2296,8 @@ class AgenticRAGApp:
             self.append_chat("source", f"\nSources used:\n{sources_text}")
 
         except Exception as e:
-            self.log(f"RAG Error: {e}")
-            self.append_chat("system", f"Error: {e}")
+            self.log(f"RAG Error ({stage} failure): {e}")
+            self.append_chat("system", f"Error ({stage} failure): {e}")
 
     def append_chat(self, tag, message):
         def _append():
