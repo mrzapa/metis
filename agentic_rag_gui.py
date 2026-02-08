@@ -1586,10 +1586,15 @@ class AgenticRAGApp:
                 final_docs = docs[:final_k]  # No reranker, just take top K
 
             # 3. Context Construction
-            context_budget_chars = max(2000, int(self.llm_max_tokens.get() * 4))
-            context_budget_tokens = context_budget_chars // 4
+            def _clamp(value, min_value, max_value):
+                return max(min_value, min(max_value, value))
+
+            context_budget_chars = _clamp(
+                int(self.llm_max_tokens.get()) * 12, min_value=12000, max_value=80000
+            )
             context_blocks = []
             used_chars = 0
+            was_truncated = False
 
             for idx, doc in enumerate(final_docs, start=1):
                 metadata = getattr(doc, "metadata", {}) or {}
@@ -1606,8 +1611,10 @@ class AgenticRAGApp:
 
                 remaining = context_budget_chars - used_chars
                 if remaining <= 0:
+                    was_truncated = True
                     break
                 if len(chunk_text) > remaining:
+                    was_truncated = True
                     if remaining > len(header) + 20:
                         truncated_content = content[: remaining - len(header) - 20].rstrip()
                         chunk_text = f"{header}\n{truncated_content}\n...[truncated]"
@@ -1617,6 +1624,12 @@ class AgenticRAGApp:
                 used_chars += len(chunk_text) + 2
 
             context_text = "\n\n".join(context_blocks)
+            self.log(
+                "Context stats - "
+                f"candidate_k={candidate_k}, final_k={final_k}, "
+                f"context_budget_chars={context_budget_chars}, "
+                f"context_chars={len(context_text)}, truncated={was_truncated}"
+            )
 
             # 4. Generation
             self.log("Generating Answer...")
