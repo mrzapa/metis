@@ -2158,6 +2158,200 @@ class AgenticRAGApp:
             "Do not ask the user for missing info."
         )
 
+    def _format_month_label(self, year, month):
+        month_label = MONTH_INDEX_TO_LABEL.get(month)
+        if not month_label:
+            return None
+        return f"{month_label} {year}"
+
+    def _month_sort_key(self, month_label):
+        if not month_label:
+            return (9999, 99)
+        parts = month_label.split()
+        if len(parts) != 2:
+            return (9999, 99)
+        month_part, year_part = parts
+        month_index = MONTH_NAME_TO_INDEX.get(month_part.lower(), 99)
+        try:
+            year_value = int(year_part)
+        except ValueError:
+            year_value = 9999
+        return (year_value, month_index)
+
+    def _extract_month_years(self, text):
+        if not text:
+            return set()
+        months = set()
+        month_name_re = re.compile(
+            r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+            r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|"
+            r"Dec(?:ember)?)\s+(\d{4})\b",
+            re.IGNORECASE,
+        )
+        for match in month_name_re.finditer(text):
+            month_index = MONTH_NAME_TO_INDEX.get(match.group(1).lower())
+            if not month_index:
+                continue
+            try:
+                year_value = int(match.group(2))
+            except ValueError:
+                continue
+            label = self._format_month_label(year_value, month_index)
+            if label:
+                months.add(label)
+        iso_date_re = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+        for match in iso_date_re.finditer(text):
+            try:
+                year_value = int(match.group(1))
+                month_index = int(match.group(2))
+            except ValueError:
+                continue
+            if 1 <= month_index <= 12:
+                label = self._format_month_label(year_value, month_index)
+                if label:
+                    months.add(label)
+        year_month_re = re.compile(r"\b(\d{4})-(\d{2})\b")
+        for match in year_month_re.finditer(text):
+            try:
+                year_value = int(match.group(1))
+                month_index = int(match.group(2))
+            except ValueError:
+                continue
+            if 1 <= month_index <= 12:
+                label = self._format_month_label(year_value, month_index)
+                if label:
+                    months.add(label)
+        slash_full_re = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
+        for match in slash_full_re.finditer(text):
+            try:
+                month_index = int(match.group(1))
+                year_value = int(match.group(3))
+            except ValueError:
+                continue
+            if 1 <= month_index <= 12:
+                label = self._format_month_label(year_value, month_index)
+                if label:
+                    months.add(label)
+        slash_re = re.compile(r"\b(\d{1,2})/(\d{4})\b")
+        for match in slash_re.finditer(text):
+            try:
+                month_index = int(match.group(1))
+                year_value = int(match.group(2))
+            except ValueError:
+                continue
+            if 1 <= month_index <= 12:
+                label = self._format_month_label(year_value, month_index)
+                if label:
+                    months.add(label)
+        return months
+
+    def _extract_date_tokens(self, text):
+        if not text:
+            return set()
+        tokens = set()
+        patterns = [
+            r"\b\d{4}-\d{2}-\d{2}\b",
+            r"\b\d{4}-\d{2}\b",
+            r"\b\d{1,2}/\d{1,2}/\d{4}\b",
+            r"\b\d{1,2}/\d{4}\b",
+            r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+            r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|"
+            r"Dec(?:ember)?)\s+\d{4}\b",
+        ]
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                tokens.add(match.group(0))
+        return tokens
+
+    def _extract_channels(self, docs):
+        channels = set()
+        for doc in docs:
+            metadata = getattr(doc, "metadata", {}) or {}
+            source = (
+                metadata.get("source")
+                or metadata.get("file_path")
+                or metadata.get("filename")
+                or ""
+            )
+            if not source:
+                continue
+            basename = os.path.basename(source)
+            channel = os.path.splitext(basename)[0] or basename
+            if channel:
+                channels.add(channel)
+        return channels
+
+    def _compute_unique_incidents(self, docs):
+        incidents = set()
+        for doc in docs:
+            metadata = getattr(doc, "metadata", {}) or {}
+            source = (
+                metadata.get("source")
+                or metadata.get("file_path")
+                or metadata.get("filename")
+                or "unknown"
+            )
+            content = (doc.page_content or "").strip()
+            months = sorted(self._extract_month_years(content), key=self._month_sort_key)
+            date_tokens = sorted(self._extract_date_tokens(content))
+            if months:
+                key_basis = months[0]
+            elif date_tokens:
+                key_basis = date_tokens[0]
+            else:
+                key_basis = re.sub(r"\s+", " ", content)[:80]
+            if not key_basis:
+                key_basis = "unknown"
+            incidents.add(f"{source}|{key_basis}".lower())
+        return len(incidents)
+
+    def _extract_months_and_tokens(self, docs):
+        months = set()
+        tokens = set()
+        for doc in docs:
+            content = doc.page_content or ""
+            months.update(self._extract_month_years(content))
+            tokens.update(self._extract_date_tokens(content))
+        return months, tokens
+
+    def _review_evidence_pack_coverage(self, candidate_docs, selected_docs):
+        candidate_months, candidate_tokens = self._extract_months_and_tokens(
+            candidate_docs
+        )
+        selected_months, _ = self._extract_months_and_tokens(selected_docs)
+        missing_months = sorted(
+            candidate_months - selected_months, key=self._month_sort_key
+        )
+        unique_incidents = self._compute_unique_incidents(selected_docs)
+        channels = self._extract_channels(candidate_docs)
+        return unique_incidents, missing_months, channels, candidate_tokens
+
+    def _generate_follow_up_queries(
+        self, base_query, missing_months, channels, date_tokens, max_queries=8
+    ):
+        queries = []
+        channel_list = sorted(channels)
+        for month in missing_months:
+            if channel_list:
+                for channel in channel_list[:3]:
+                    queries.append(
+                        f"{base_query} {month} {channel} incident timeline"
+                    )
+            else:
+                queries.append(f"{base_query} {month} incident timeline")
+        for token in sorted(date_tokens)[:4]:
+            queries.append(f"{base_query} {token} incident details")
+        deduped = []
+        seen = set()
+        for candidate in queries:
+            key = candidate.lower().strip()
+            if key and key not in seen:
+                seen.add(key)
+                deduped.append(candidate)
+            if len(deduped) >= max_queries:
+                break
+        return deduped
+
     def _extract_chunks(self, context_text):
         chunks = {}
         matches = list(re.finditer(r"^\[Chunk (\d+)[^\]]*\]\n", context_text, re.M))
@@ -3205,11 +3399,87 @@ class AgenticRAGApp:
                         "Mini-digest routing selected "
                         f"{len(routed_docs)} candidate chunks."
                     )
+                    candidate_docs = routed_docs
                     final_docs = _select_evidence_pack(
                         routed_docs, query, is_evidence_pack
                     )
                 else:
+                    candidate_docs = docs
                     final_docs = _select_evidence_pack(docs, query, is_evidence_pack)
+                if is_evidence_pack:
+                    (
+                        unique_incidents,
+                        missing_months,
+                        channels,
+                        date_tokens,
+                    ) = self._review_evidence_pack_coverage(
+                        candidate_docs, final_docs
+                    )
+                    coverage_floor = max(3, min(final_k, len(final_docs)))
+                    coverage_low = unique_incidents < coverage_floor or bool(
+                        missing_months
+                    )
+                    missing_months_text = (
+                        ", ".join(missing_months) if missing_months else "none"
+                    )
+                    self.log(
+                        "Evidence-pack coverage check: unique_incidents="
+                        f"{unique_incidents}, missing_months={missing_months_text}."
+                    )
+                    if coverage_low:
+                        follow_up_queries = self._generate_follow_up_queries(
+                            query, missing_months, channels, date_tokens
+                        )
+                        if follow_up_queries:
+                            remaining_cap = max(0, total_docs_cap - len(docs))
+                            if remaining_cap == 0:
+                                self.log(
+                                    "Evidence-pack follow-up skipped; total docs cap reached."
+                                )
+                            else:
+                                (
+                                    follow_docs,
+                                    follow_retrieved_count,
+                                    follow_cap_reached,
+                                    _follow_digest_docs,
+                                    follow_raw_expanded_count,
+                                    follow_digest_retrieved_count,
+                                    follow_digest_selected_count,
+                                ) = _retrieve_with_digest(
+                                    follow_up_queries,
+                                    remaining_cap,
+                                    routing_candidate_k,
+                                )
+                                retrieved_count += follow_retrieved_count
+                                raw_expanded_count += follow_raw_expanded_count
+                                digest_retrieved_count += follow_digest_retrieved_count
+                                digest_selected_count += follow_digest_selected_count
+                                cap_reached = cap_reached or follow_cap_reached
+                                if follow_docs:
+                                    docs = self._merge_dedupe_docs(docs + follow_docs)
+                                    if use_mini_digest:
+                                        routed_docs = self._route_with_mini_digest(
+                                            docs, query, final_k
+                                        )
+                                        candidate_docs = routed_docs
+                                        self.log(
+                                            "Evidence-pack follow-up routing selected "
+                                            f"{len(routed_docs)} candidate chunks."
+                                        )
+                                    else:
+                                        candidate_docs = docs
+                                    final_docs = _select_evidence_pack(
+                                        candidate_docs, query, is_evidence_pack
+                                    )
+                                    self.log(
+                                        "Evidence-pack follow-up retrieval added "
+                                        f"{len(follow_docs)} chunks; "
+                                        f"reselected {len(final_docs)} chunks."
+                                    )
+                        else:
+                            self.log(
+                                "Evidence-pack follow-up skipped; no follow-up queries."
+                            )
                 (
                     context_text,
                     was_truncated,
@@ -3415,13 +3685,92 @@ class AgenticRAGApp:
                         "Mini-digest routing selected "
                         f"{len(routed_docs)} candidate chunks."
                     )
+                    candidate_docs = routed_docs
                     final_docs = _select_evidence_pack(
                         routed_docs, query, is_evidence_pack
                     )
                 else:
+                    candidate_docs = all_docs
                     final_docs = _select_evidence_pack(
                         all_docs, query, is_evidence_pack
                     )
+                if is_evidence_pack:
+                    (
+                        unique_incidents,
+                        missing_months,
+                        channels,
+                        date_tokens,
+                    ) = self._review_evidence_pack_coverage(
+                        candidate_docs, final_docs
+                    )
+                    coverage_floor = max(3, min(final_k, len(final_docs)))
+                    coverage_low = unique_incidents < coverage_floor or bool(
+                        missing_months
+                    )
+                    missing_months_text = (
+                        ", ".join(missing_months) if missing_months else "none"
+                    )
+                    self.log(
+                        "Evidence-pack coverage check: unique_incidents="
+                        f"{unique_incidents}, missing_months={missing_months_text}."
+                    )
+                    if coverage_low:
+                        follow_up_queries = self._generate_follow_up_queries(
+                            query, missing_months, channels, date_tokens
+                        )
+                        if follow_up_queries:
+                            remaining_cap = max(0, total_docs_cap - total_retrieved)
+                            if remaining_cap == 0:
+                                self.log(
+                                    "Evidence-pack follow-up skipped; total docs cap reached."
+                                )
+                            else:
+                                (
+                                    follow_docs,
+                                    follow_retrieved_count,
+                                    follow_cap_reached,
+                                    _follow_digest_docs,
+                                    follow_raw_expanded_count,
+                                    follow_digest_retrieved_count,
+                                    follow_digest_selected_count,
+                                ) = _retrieve_with_digest(
+                                    follow_up_queries,
+                                    remaining_cap,
+                                    routing_candidate_k,
+                                )
+                                retrieved_count += follow_retrieved_count
+                                raw_expanded_count += follow_raw_expanded_count
+                                digest_retrieved_count += follow_digest_retrieved_count
+                                digest_selected_count += follow_digest_selected_count
+                                cap_reached = cap_reached or follow_cap_reached
+                                if follow_docs:
+                                    total_retrieved += len(follow_docs)
+                                    all_docs = self._merge_dedupe_docs(
+                                        all_docs + follow_docs
+                                    )
+                                    if use_mini_digest:
+                                        routed_docs = self._route_with_mini_digest(
+                                            all_docs, query, final_k
+                                        )
+                                        candidate_docs = routed_docs
+                                        self.log(
+                                            "Evidence-pack follow-up routing selected "
+                                            f"{len(routed_docs)} candidate chunks."
+                                        )
+                                    else:
+                                        candidate_docs = all_docs
+                                    final_docs = _select_evidence_pack(
+                                        candidate_docs, query, is_evidence_pack
+                                    )
+                                    self.log(
+                                        "Evidence-pack follow-up retrieval added "
+                                        f"{len(follow_docs)} chunks; "
+                                        f"reselected {len(final_docs)} chunks."
+                                    )
+                        else:
+                            self.log(
+                                "Evidence-pack follow-up skipped; no follow-up queries."
+                            )
                 (
                     context_text,
                     was_truncated,
