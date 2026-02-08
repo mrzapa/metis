@@ -106,6 +106,9 @@ class AgenticRAGApp:
         self.agentic_mode = tk.BooleanVar(value=False)
         self.agentic_max_iterations = tk.IntVar(value=2)
         self.show_retrieved_context = tk.BooleanVar(value=False)
+        self.use_reranker = tk.BooleanVar(value=True)
+        self.use_sub_queries = tk.BooleanVar(value=True)
+        self.subquery_max_docs = tk.IntVar(value=200)
 
         self.vector_store = None
         self.index_embedding_signature = ""
@@ -774,7 +777,6 @@ class AgenticRAGApp:
         # Options
         opt_frame = ttk.Frame(frame)
         opt_frame.pack(fill="x", pady=5)
-        self.use_reranker = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             opt_frame,
             text="Use Cohere Reranker (Higher Precision)",
