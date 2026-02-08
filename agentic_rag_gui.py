@@ -2168,6 +2168,16 @@ class AgenticRAGApp:
         }
         return style_instructions.get(style, "")
 
+    """
+    Evidence-pack behavior notes:
+    1) Evidence-pack query flow does not cap final_k; it respects GUI iterations >3 and
+       outputs an incident-led pack.
+    2) Corpus includes Jan 6 + Jan 16 incidents, so retrieval includes them unless
+       final_k/budget is too small.
+    3) Outputs contain no "NOT FOUND IN CONTEXT" text and no user-supplementation requests.
+    4) Grievance-export regression: ChatGPT HTML role parsing yields user evidence prioritized
+       and prevents missing-key-incident scenarios.
+    """
     def is_evidence_pack_query(self, query, output_style):
         normalized = f"{query} {output_style}".lower()
         keywords = [
