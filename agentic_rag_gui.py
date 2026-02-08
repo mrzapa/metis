@@ -2562,10 +2562,14 @@ class AgenticRAGApp:
             )
             if is_long_form:
                 boosted_final_k = min(candidate_k, max(final_k, 12))
-                if boosted_final_k > 20:
-                    boosted_final_k = min(candidate_k, 20)
-                final_k = boosted_final_k
-                self.log(f"Long-form intent detected; adjusted final_k to {final_k}.")
+                if boosted_final_k > final_k:
+                    original_final_k = final_k
+                    final_k = boosted_final_k
+                    self.log(
+                        "Long-form intent detected; raised final_k from "
+                        f"{original_final_k} to {final_k} "
+                        "(no hard cap; bounded by context budget)."
+                    )
             search_type = self.search_type.get() or "similarity"
             mmr_lambda = float(self.mmr_lambda.get())
             total_docs_cap = max(10, min(500, int(self.subquery_max_docs.get())))
