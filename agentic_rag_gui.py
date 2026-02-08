@@ -2023,17 +2023,24 @@ class AgenticRAGApp:
         repaired = repair_llm.invoke(repair_messages)
         return repaired.content
 
-    def _validate_and_repair(self, answer_text, context_text):
+    def _validate_and_repair(self, answer_text, context_text, iteration_id=None):
         output_style = self.output_style.get().strip()
         is_valid, failures = self._validate_answer(
             answer_text, context_text, output_style
         )
         if is_valid:
+            if iteration_id is not None:
+                self.log(f"Iter {iteration_id} repair=0")
             return answer_text
         self.log(
             "Validation failed; triggering repair pass. Reasons: "
             + "; ".join(failures)
         )
+        if iteration_id is not None:
+            self.log(
+                f"Iter {iteration_id} repair=1 failures="
+                + "; ".join(failures)
+            )
         repaired = self._repair_answer(answer_text, context_text, failures, output_style)
         return repaired
 
@@ -2725,26 +2732,42 @@ class AgenticRAGApp:
                 return raw_docs, cap_reached
 
             def _retrieve_with_digest(query_list, remaining_cap, k_value):
+                digest_retrieved = 0
+                digest_selected = 0
+                raw_expanded_count = 0
                 if digest_store:
                     digest_docs, digest_retrieved, digest_cap_reached = (
                         _retrieve_digest_nodes(
                             query_list, remaining_cap, k_value, digest_store
                         )
                     )
+                    digest_selected = len(digest_docs)
                     raw_docs, raw_cap_reached = _expand_digest_nodes(
                         digest_docs, remaining_cap
                     )
+                    raw_expanded_count = len(raw_docs)
                     if raw_docs:
                         return (
                             raw_docs,
-                            digest_retrieved,
+                            0,
                             digest_cap_reached or raw_cap_reached,
                             digest_docs,
+                            raw_expanded_count,
+                            digest_retrieved,
+                            digest_selected,
                         )
                 raw_docs, retrieved_count, cap_reached = _retrieve_for_queries(
                     query_list, remaining_cap, k_value
                 )
-                return raw_docs, retrieved_count, cap_reached, []
+                return (
+                    raw_docs,
+                    retrieved_count,
+                    cap_reached,
+                    [],
+                    0,
+                    digest_retrieved,
+                    digest_selected,
+                )
 
             def _retrieve_for_queries(query_list, remaining_cap, k_value):
                 if remaining_cap <= 0:
@@ -2853,7 +2876,12 @@ class AgenticRAGApp:
                     context_blocks.append(chunk_text)
                     used_chars += len(chunk_text) + 2
 
-                return "\n\n".join(context_blocks), was_truncated
+                return (
+                    "\n\n".join(context_blocks),
+                    was_truncated,
+                    used_chars,
+                    context_budget_chars,
+                )
 
             def _append_context_if_enabled(iteration_label, context_text, truncated_flag):
                 if not self.show_retrieved_context.get():
@@ -2866,19 +2894,33 @@ class AgenticRAGApp:
 
             def _log_iteration_telemetry(
                 iteration_id,
-                iteration_queries,
-                retrieved_count,
-                unique_docs,
+                output_style,
+                agentic_mode,
+                planner_subquery_count,
+                query_count,
+                digest_retrieved_count,
+                digest_selected_count,
+                raw_expanded_count,
+                raw_unique_count,
                 packed_docs,
                 truncated_flag,
+                trunc_used_chars,
+                trunc_budget_chars,
                 cap_reached_flag,
+                retrieved_count,
             ):
-                self.log(f"Iteration {iteration_id} queries: {iteration_queries}")
+                truncation_note = (
+                    f"{int(truncated_flag)} {trunc_used_chars}/{trunc_budget_chars}"
+                )
                 self.log(
-                    "Iteration "
-                    f"{iteration_id} telemetry - retrieved={retrieved_count}, "
-                    f"unique_docs={unique_docs}, packed_docs={packed_docs}, "
-                    f"truncated={truncated_flag}, cap_reached={cap_reached_flag}"
+                    "Iter "
+                    f"{iteration_id} telemetry | style={output_style}, "
+                    f"agentic={int(agentic_mode)}, planner_subqueries={planner_subquery_count}, "
+                    f"queries={query_count}, digest={digest_retrieved_count}/"
+                    f"{digest_selected_count}, raw_expanded={raw_expanded_count}, "
+                    f"raw_unique={raw_unique_count}, packed={packed_docs}, "
+                    f"trunc={truncation_note}, cap_reached={int(cap_reached_flag)}, "
+                    f"retrieved={retrieved_count}"
                 )
 
             if not self.agentic_mode.get():
@@ -2888,7 +2930,15 @@ class AgenticRAGApp:
                     if sub_queries:
                         queries = [query, *sub_queries]
                 max_total_docs = max(1, int(self.subquery_max_docs.get()))
-                docs, retrieved_count, cap_reached, _digest_docs = _retrieve_with_digest(
+                (
+                    docs,
+                    retrieved_count,
+                    cap_reached,
+                    _digest_docs,
+                    raw_expanded_count,
+                    digest_retrieved_count,
+                    digest_selected_count,
+                ) = _retrieve_with_digest(
                     queries, min(total_docs_cap, max_total_docs), routing_candidate_k
                 )
                 self.log(
@@ -2903,15 +2953,31 @@ class AgenticRAGApp:
                     final_docs = _select_evidence_pack(routed_docs, query)
                 else:
                     final_docs = _select_evidence_pack(docs, query)
-                context_text, was_truncated = _build_context(final_docs)
+                (
+                    context_text,
+                    was_truncated,
+                    trunc_used_chars,
+                    trunc_budget_chars,
+                ) = _build_context(final_docs)
+                planner_subquery_count = 0
+                if self.use_sub_queries.get():
+                    planner_subquery_count = max(0, len(queries) - 1)
                 _log_iteration_telemetry(
                     1,
-                    queries,
-                    retrieved_count,
+                    self.output_style.get(),
+                    self.agentic_mode.get(),
+                    planner_subquery_count,
+                    len(queries),
+                    digest_retrieved_count,
+                    digest_selected_count,
+                    raw_expanded_count,
                     len(docs),
                     len(final_docs),
                     was_truncated,
+                    trunc_used_chars,
+                    trunc_budget_chars,
                     cap_reached,
+                    retrieved_count,
                 )
                 _append_context_if_enabled("(single pass)", context_text, was_truncated)
 
@@ -2931,7 +2997,7 @@ class AgenticRAGApp:
                 ]
                 response = llm.invoke(messages)
                 validated_answer = self._validate_and_repair(
-                    response.content, context_text
+                    response.content, context_text, iteration_id=1
                 )
 
                 self.last_answer = validated_answer
@@ -2967,6 +3033,8 @@ class AgenticRAGApp:
             final_docs = []
             critic_queries = []
 
+            last_iteration_id = 1
+            planner_subquery_count = 0
             for iteration in range(1, max_iterations + 1):
                 if iteration == 1:
                     planner_llm = self._get_llm_with_temperature(0.2)
@@ -2999,6 +3067,7 @@ class AgenticRAGApp:
                         for item in plan_payload.get("retrieval_queries", [])
                         if str(item).strip()
                     ]
+                    planner_subquery_count = len(sub_queries)
                     section_plan = [
                         str(item).strip()
                         for item in plan_payload.get("section_plan", [])
@@ -3035,7 +3104,15 @@ class AgenticRAGApp:
                 if remaining_cap == 0:
                     self.log("Total retrieved document cap reached; stopping iterations.")
                     break
-                docs, retrieved_count, cap_reached, _digest_docs = _retrieve_with_digest(
+                (
+                    docs,
+                    retrieved_count,
+                    cap_reached,
+                    _digest_docs,
+                    raw_expanded_count,
+                    digest_retrieved_count,
+                    digest_selected_count,
+                ) = _retrieve_with_digest(
                     iteration_queries, remaining_cap, routing_candidate_k
                 )
                 total_retrieved += len(docs)
@@ -3049,15 +3126,28 @@ class AgenticRAGApp:
                     final_docs = _select_evidence_pack(routed_docs, query)
                 else:
                     final_docs = _select_evidence_pack(all_docs, query)
-                context_text, was_truncated = _build_context(final_docs)
+                (
+                    context_text,
+                    was_truncated,
+                    trunc_used_chars,
+                    trunc_budget_chars,
+                ) = _build_context(final_docs)
                 _log_iteration_telemetry(
                     iteration,
-                    iteration_queries,
-                    retrieved_count,
+                    self.output_style.get(),
+                    self.agentic_mode.get(),
+                    planner_subquery_count,
+                    len(iteration_queries),
+                    digest_retrieved_count,
+                    digest_selected_count,
+                    raw_expanded_count,
                     len(all_docs),
                     len(final_docs),
                     was_truncated,
+                    trunc_used_chars,
+                    trunc_budget_chars,
                     cap_reached,
+                    retrieved_count,
                 )
                 _append_context_if_enabled(
                     f"(iteration {iteration})", context_text, was_truncated
@@ -3096,6 +3186,7 @@ class AgenticRAGApp:
                 response = llm.invoke(messages)
                 latest_answer = response.content
                 latest_context_text = context_text
+                last_iteration_id = iteration
 
                 if iteration < max_iterations:
                     critic_llm = self._get_llm_with_temperature(0.2)
@@ -3135,7 +3226,7 @@ class AgenticRAGApp:
 
             if latest_answer:
                 validated_answer = self._validate_and_repair(
-                    latest_answer, latest_context_text
+                    latest_answer, latest_context_text, iteration_id=last_iteration_id
                 )
                 self.last_answer = validated_answer
                 self.append_chat("agent", f"AI: {validated_answer}")
