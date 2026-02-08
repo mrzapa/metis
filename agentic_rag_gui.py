@@ -29,6 +29,46 @@ MAX_PACKED_CONTEXT_CHARS = 60000
 MAX_GROUP_DOCS = 2
 MIN_UNIQUE_INCIDENTS = 8
 MAX_UNIQUE_INCIDENTS = 12
+MONTH_INDEX_TO_LABEL = {
+    1: "Jan",
+    2: "Feb",
+    3: "Mar",
+    4: "Apr",
+    5: "May",
+    6: "Jun",
+    7: "Jul",
+    8: "Aug",
+    9: "Sep",
+    10: "Oct",
+    11: "Nov",
+    12: "Dec",
+}
+MONTH_NAME_TO_INDEX = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
 
 class AgenticRAGApp:
     def __init__(self, root):
