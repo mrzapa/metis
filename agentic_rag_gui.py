@@ -387,7 +387,7 @@ class AgenticRAGApp:
             )
         except (TypeError, ValueError):
             max_iterations = self.agentic_max_iterations.get()
-        self.agentic_max_iterations.set(max(1, min(3, max_iterations)))
+        self.agentic_max_iterations.set(max(1, min(20, max_iterations)))
         self.show_retrieved_context.set(
             data.get("show_retrieved_context", self.show_retrieved_context.get())
         )
@@ -3020,7 +3020,11 @@ class AgenticRAGApp:
                 max_iterations_value = int(self.agentic_max_iterations.get())
             except (TypeError, ValueError):
                 max_iterations_value = 2
-            max_iterations = max(1, min(3, max_iterations_value))
+            max_iterations = max(1, min(20, max_iterations_value))
+            self.log(
+                "Agentic run starting with resolved max_iterations="
+                f"{max_iterations} (requested {max_iterations_value})."
+            )
             total_retrieved = 0
             all_docs = []
             checklist = []
@@ -3032,6 +3036,9 @@ class AgenticRAGApp:
 
             last_iteration_id = 1
             planner_subquery_count = 0
+            convergence_patience = 2
+            stagnant_iterations = 0
+            last_unique_incident_count = 0
             for iteration in range(1, max_iterations + 1):
                 if iteration == 1:
                     planner_llm = self._get_llm_with_temperature(0.2)
@@ -3114,6 +3121,13 @@ class AgenticRAGApp:
                 )
                 total_retrieved += len(docs)
                 all_docs = self._merge_dedupe_docs(all_docs + docs)
+                unique_incident_count = len(all_docs)
+                if unique_incident_count <= last_unique_incident_count:
+                    stagnant_iterations += 1
+                else:
+                    stagnant_iterations = 0
+                    last_unique_incident_count = unique_incident_count
+                stop_due_to_convergence = stagnant_iterations >= convergence_patience
                 if use_mini_digest:
                     routed_docs = self._route_with_mini_digest(all_docs, query, final_k)
                     self.log(
@@ -3185,6 +3199,13 @@ class AgenticRAGApp:
                 latest_context_text = context_text
                 last_iteration_id = iteration
 
+                if stop_due_to_convergence:
+                    self.log(
+                        "Unique incident count stalled at "
+                        f"{unique_incident_count} for {stagnant_iterations} "
+                        "iteration(s); stopping early."
+                    )
+                    break
                 if iteration < max_iterations:
                     critic_llm = self._get_llm_with_temperature(0.2)
                     critic_prompt = (
