@@ -7,6 +7,7 @@ import time
 import json
 import subprocess
 import importlib.util
+import re
 from datetime import datetime
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -107,6 +108,7 @@ class AgenticRAGApp:
         self.dependency_prompted = False
         self.existing_index_var = tk.StringVar(value="(default)")
         self.existing_index_paths = {}
+        self.selected_index_path = None
 
         self.setup_ui()
         self.load_config()
@@ -340,6 +342,9 @@ class AgenticRAGApp:
         self.index_embedding_signature = data.get(
             "index_embedding_signature", self.index_embedding_signature
         )
+        self.selected_index_path = data.get(
+            "selected_index_path", self.selected_index_path
+        )
 
         instructions = data.get("system_instructions", self.system_instructions.get())
         self.system_instructions.set(instructions or self.default_system_instructions)
@@ -348,6 +353,11 @@ class AgenticRAGApp:
 
         self._sync_model_options()
         self._refresh_compatibility_warning()
+        if self.selected_index_path:
+            self.existing_index_var.set(
+                self._format_index_label(self.selected_index_path)
+            )
+            self._refresh_existing_indexes()
 
     def save_config(self):
         data = {
@@ -371,6 +381,7 @@ class AgenticRAGApp:
             "search_type": self.search_type.get(),
             "mmr_lambda": self.mmr_lambda.get(),
             "index_embedding_signature": self.index_embedding_signature,
+            "selected_index_path": self.selected_index_path,
         }
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
@@ -811,6 +822,13 @@ class AgenticRAGApp:
         return os.path.join(os.getcwd(), "chroma_db")
 
     @staticmethod
+    def _safe_file_stem(file_path):
+        base_name = os.path.basename(file_path or "")
+        stem = os.path.splitext(base_name)[0]
+        safe_stem = re.sub(r"[^A-Za-z0-9_-]+", "_", stem).strip("_")
+        return safe_stem or "ingest"
+
+    @staticmethod
     def _is_chroma_persist_dir(path):
         if not os.path.isdir(path):
             return False
@@ -850,18 +868,27 @@ class AgenticRAGApp:
         if hasattr(self, "cb_existing_index"):
             self.cb_existing_index["values"] = display_values
         if self.existing_index_var.get() not in display_values:
-            self.existing_index_var.set("(default)")
+            if self.selected_index_path:
+                candidate = self._format_index_label(self.selected_index_path)
+                if candidate in display_values:
+                    self.existing_index_var.set(candidate)
+                else:
+                    self.existing_index_var.set("(default)")
+            else:
+                self.existing_index_var.set("(default)")
 
     def _get_selected_index_path(self):
         selection = self.existing_index_var.get()
         if not selection or selection == "(default)":
-            return None
+            return self.selected_index_path
         return self.existing_index_paths.get(selection, selection)
 
     def _on_existing_index_change(self, _event=None):
         selected_path = self._get_selected_index_path()
         if not selected_path:
             return
+        self.selected_index_path = selected_path
+        self.save_config()
         threading.Thread(
             target=self._load_existing_index, args=(selected_path,), daemon=True
         ).start()
@@ -1415,9 +1442,17 @@ class AgenticRAGApp:
             embeddings = self.get_embeddings()
 
             db_type = self.vector_db_type.get()
+            new_index_path = None
 
             if db_type == "chroma":
-                persist_dir = self._get_chroma_persist_root()
+                persist_root = self._get_chroma_persist_root()
+                ingest_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                safe_stem = self._safe_file_stem(self.selected_file)
+                persist_dir = os.path.join(
+                    persist_root, f"{safe_stem}__{ingest_id}"
+                )
+                os.makedirs(persist_root, exist_ok=True)
+                new_index_path = persist_dir
                 try:
                     from langchain_chroma import Chroma
                 except ImportError as err:
@@ -1473,7 +1508,16 @@ class AgenticRAGApp:
                 self.log(f"Indexed {min(i + batch_size, total_docs)}/{total_docs} chunks...")
 
             self.log("Ingestion Complete! You can now chat.")
-            self._run_on_ui(self._refresh_existing_indexes)
+            if new_index_path:
+                def _select_new_index():
+                    self._refresh_existing_indexes()
+                    selection_label = self._format_index_label(new_index_path)
+                    self.existing_index_var.set(selection_label)
+                    self.selected_index_path = new_index_path
+                    self.save_config()
+                self._run_on_ui(_select_new_index)
+            else:
+                self._run_on_ui(self._refresh_existing_indexes)
             self._run_on_ui(
                 messagebox.showinfo,
                 "Success",
@@ -1516,6 +1560,9 @@ class AgenticRAGApp:
                 embeddings = self.get_embeddings()
                 if self.vector_db_type.get() == "chroma":
                     selected_path = self._get_selected_index_path()
+                    if not selected_path and self.selected_index_path:
+                        if os.path.isdir(self.selected_index_path):
+                            selected_path = self.selected_index_path
                     persist_dir = selected_path or self._get_chroma_persist_root()
                     from langchain_chroma import Chroma
 
