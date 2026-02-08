@@ -45,9 +45,10 @@ class AgenticRAGApp:
         self.main_thread = threading.current_thread()
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
         self.default_system_instructions = (
-            "You are an expert analyst assistant. Use the provided context to answer the "
-            "user's question. If the answer is not in the context, say you don't know. "
-            "Cite specific sections if possible, and be clear about any assumptions."
+            "You are an expert analyst assistant. Use only retrieved context for factual claims. "
+            "Do not ask for details already present in the context. Never emit placeholders like "
+            "\"[insert …]\". If a required field is missing, output exactly NOT FOUND IN CONTEXT. "
+            "Coverage rule: if N items are requested, output N items or NOT FOUND IN CONTEXT for each."
         )
         self.verbose_system_instructions = (
             "You are an expert analyst assistant. Use the provided context to answer the "
