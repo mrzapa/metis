@@ -2547,8 +2547,11 @@ class AgenticRAGApp:
             def _build_search_kwargs(k_value):
                 search_kwargs_local = {"k": k_value}
                 if search_type == "mmr":
+                    fetch_k = min(max(4 * k_value, 50), 200)
+                    if fetch_k <= k_value:
+                        fetch_k = k_value + 1
                     search_kwargs_local.update(
-                        {"fetch_k": k_value, "lambda_mult": mmr_lambda}
+                        {"fetch_k": fetch_k, "lambda_mult": mmr_lambda}
                     )
                 return search_kwargs_local
 
@@ -2559,7 +2562,11 @@ class AgenticRAGApp:
                 if not filtered_queries:
                     return [], 0, False
                 digest_cap = min(MAX_DIGEST_NODES, remaining_cap)
-                per_query_k = max(1, min(k_value, digest_cap // len(filtered_queries)))
+                min_per_query_k = min(2, k_value)
+                per_query_k = max(
+                    min_per_query_k,
+                    min(k_value, max(1, digest_cap // len(filtered_queries))),
+                )
                 cap_reached = False
                 retrieved_count_local = 0
                 docs_local = []
@@ -2675,8 +2682,10 @@ class AgenticRAGApp:
                     )
                     docs_local = retriever.invoke(filtered_queries[0])
                 else:
+                    min_per_query_k = min(2, k_value)
                     per_query_k = max(
-                        1, min(k_value, max(1, remaining_cap) // len(filtered_queries))
+                        min_per_query_k,
+                        min(k_value, max(1, remaining_cap) // len(filtered_queries)),
                     )
                     retriever = self.vector_store.as_retriever(
                         search_type=search_type,
