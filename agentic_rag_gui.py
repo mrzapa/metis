@@ -23,6 +23,10 @@ DIGEST_WINDOW_MAX = 20
 DIGEST_WINDOW_TARGET = 15
 MINI_DIGEST_BOOST_MULTIPLIER = 3
 MINI_DIGEST_MIN_POOL = 40
+MAX_DIGEST_NODES = 60
+MAX_RAW_CHUNKS = 200
+MAX_PACKED_CONTEXT_CHARS = 60000
+MAX_GROUP_DOCS = 2
 
 class AgenticRAGApp:
     def __init__(self, root):
@@ -987,12 +991,9 @@ class AgenticRAGApp:
             metadata = getattr(doc, "metadata", {}) or {}
             content = (getattr(doc, "page_content", "") or "").strip()
             chunk_id = metadata.get("chunk_id")
-            source = metadata.get("source") or metadata.get("file_path") or metadata.get(
-                "filename"
-            )
             ingest_id = metadata.get("ingest_id")
-            if chunk_id and source and ingest_id:
-                key = (chunk_id, source, ingest_id)
+            if chunk_id is not None and ingest_id:
+                key = (ingest_id, chunk_id)
             else:
                 content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
                 key = content_hash
@@ -1016,6 +1017,9 @@ class AgenticRAGApp:
             value = metadata.get(field)
             if value:
                 return f"{field}:{value}"
+        digest_window = metadata.get("digest_window") or metadata.get("digest_id")
+        if digest_window:
+            return f"digest_window:{digest_window}"
         source = metadata.get("source") or metadata.get("file_path") or metadata.get(
             "filename"
         )
@@ -2356,6 +2360,20 @@ class AgenticRAGApp:
                     and not self._has_digest_collection(persist_dir)
                 )
             )
+            digest_store = None
+            if not digest_missing and self.vector_db_type.get() == "chroma":
+                try:
+                    embeddings = self.get_embeddings()
+                    from langchain_chroma import Chroma
+
+                    digest_store = Chroma(
+                        collection_name=DIGEST_COLLECTION_NAME,
+                        embedding_function=embeddings,
+                        persist_directory=persist_dir,
+                    )
+                except Exception as exc:
+                    self.log(f"Digest store unavailable; skipping digest tier. ({exc})")
+                    digest_store = None
             use_mini_digest = (
                 digest_missing and self.selected_collection_name == RAW_COLLECTION_NAME
             )
@@ -2395,6 +2413,115 @@ class AgenticRAGApp:
                     )
                 return search_kwargs_local
 
+            def _retrieve_digest_nodes(query_list, remaining_cap, k_value, digest_store):
+                if remaining_cap <= 0 or not digest_store:
+                    return [], 0, True
+                filtered_queries = [q for q in query_list if q]
+                if not filtered_queries:
+                    return [], 0, False
+                digest_cap = min(MAX_DIGEST_NODES, remaining_cap)
+                per_query_k = max(1, min(k_value, digest_cap // len(filtered_queries)))
+                cap_reached = False
+                retrieved_count_local = 0
+                docs_local = []
+                for sub_query in filtered_queries:
+                    if len(docs_local) >= digest_cap:
+                        cap_reached = True
+                        break
+                    query_k = min(per_query_k, digest_cap - len(docs_local))
+                    retriever = digest_store.as_retriever(
+                        search_type=search_type,
+                        search_kwargs=_build_search_kwargs(query_k),
+                    )
+                    batch = retriever.invoke(sub_query)
+                    retrieved_count_local += len(batch)
+                    docs_local.extend(batch)
+                docs_local = self._merge_dedupe_docs(docs_local)
+                if len(docs_local) > digest_cap:
+                    docs_local = docs_local[:digest_cap]
+                    cap_reached = True
+                return docs_local, retrieved_count_local, cap_reached
+
+            def _expand_digest_nodes(digest_docs, remaining_cap):
+                if not digest_docs or remaining_cap <= 0:
+                    return [], False
+                if not hasattr(self.vector_store, "_collection"):
+                    self.log("Digest expansion unavailable; missing raw collection handle.")
+                    return [], False
+                max_expand = min(MAX_RAW_CHUNKS, remaining_cap)
+                chunk_requests = {}
+                chunk_digest_map = {}
+                for digest_doc in digest_docs:
+                    metadata = getattr(digest_doc, "metadata", {}) or {}
+                    ingest_id = metadata.get("ingest_id")
+                    if not ingest_id:
+                        continue
+                    digest_id = metadata.get("digest_id") or metadata.get("section_title")
+                    chunk_ids = self._expand_compact_chunk_ids(
+                        metadata.get("child_chunk_ids", "")
+                    )
+                    if not chunk_ids:
+                        continue
+                    chunk_requests.setdefault(ingest_id, set()).update(chunk_ids)
+                    for chunk_id in chunk_ids:
+                        chunk_digest_map[(ingest_id, chunk_id)] = digest_id
+                raw_docs = []
+                cap_reached = False
+                collection = self.vector_store._collection
+                for ingest_id, chunk_ids in chunk_requests.items():
+                    if len(raw_docs) >= max_expand:
+                        cap_reached = True
+                        break
+                    remaining = max_expand - len(raw_docs)
+                    batch_ids = list(chunk_ids)[:remaining]
+                    if not batch_ids:
+                        continue
+                    try:
+                        result = collection.get(
+                            where={
+                                "ingest_id": ingest_id,
+                                "chunk_id": {"$in": batch_ids},
+                            },
+                            include=["documents", "metadatas"],
+                        )
+                    except Exception as exc:
+                        self.log(f"Digest expansion failed; falling back to raw search. ({exc})")
+                        return [], False
+                    docs = result.get("documents") or []
+                    metadatas = result.get("metadatas") or []
+                    for content, metadata in zip(docs, metadatas):
+                        if content is None:
+                            continue
+                        meta = metadata or {}
+                        chunk_id = meta.get("chunk_id")
+                        digest_window = chunk_digest_map.get((ingest_id, chunk_id))
+                        if digest_window:
+                            meta["digest_window"] = digest_window
+                        raw_docs.append(Document(page_content=content, metadata=meta))
+                return raw_docs, cap_reached
+
+            def _retrieve_with_digest(query_list, remaining_cap, k_value):
+                if digest_store:
+                    digest_docs, digest_retrieved, digest_cap_reached = (
+                        _retrieve_digest_nodes(
+                            query_list, remaining_cap, k_value, digest_store
+                        )
+                    )
+                    raw_docs, raw_cap_reached = _expand_digest_nodes(
+                        digest_docs, remaining_cap
+                    )
+                    if raw_docs:
+                        return (
+                            raw_docs,
+                            digest_retrieved,
+                            digest_cap_reached or raw_cap_reached,
+                            digest_docs,
+                        )
+                raw_docs, retrieved_count, cap_reached = _retrieve_for_queries(
+                    query_list, remaining_cap, k_value
+                )
+                return raw_docs, retrieved_count, cap_reached, []
+
             def _retrieve_for_queries(query_list, remaining_cap, k_value):
                 if remaining_cap <= 0:
                     return [], 0, True
@@ -2427,6 +2554,7 @@ class AgenticRAGApp:
                 return docs_local, retrieved_count_local, cap_reached
 
             def _select_evidence_pack(doc_list, rerank_query):
+                candidates = doc_list
                 if self.use_reranker.get() and self.api_keys["cohere"].get():
                     try:
                         self.log("Reranking with Cohere...")
@@ -2443,10 +2571,14 @@ class AgenticRAGApp:
                         self.log(
                             f"Reranked down to {len(compressed_docs)} high-relevance chunks."
                         )
-                        return compressed_docs
+                        candidates = compressed_docs
                     except Exception as exc:
                         self.log(f"Rerank Error (Using raw retrieval instead): {exc}")
-                return doc_list[:final_k]
+                        candidates = doc_list
+                candidates = self._apply_coverage_selection(
+                    candidates, final_k, group_limit=MAX_GROUP_DOCS
+                )
+                return candidates[:final_k]
 
             def _build_context(doc_list):
                 def _clamp(value, min_value, max_value):
@@ -2455,7 +2587,7 @@ class AgenticRAGApp:
                 context_budget_chars = _clamp(
                     int(self.llm_max_tokens.get()) * 12,
                     min_value=12000,
-                    max_value=80000,
+                    max_value=MAX_PACKED_CONTEXT_CHARS,
                 )
                 context_blocks = []
                 used_chars = 0
@@ -2531,7 +2663,7 @@ class AgenticRAGApp:
                     if sub_queries:
                         queries = [query, *sub_queries]
                 max_total_docs = max(1, int(self.subquery_max_docs.get()))
-                docs, retrieved_count, cap_reached = _retrieve_for_queries(
+                docs, retrieved_count, cap_reached, _digest_docs = _retrieve_with_digest(
                     queries, min(total_docs_cap, max_total_docs), routing_candidate_k
                 )
                 self.log(
@@ -2601,6 +2733,7 @@ class AgenticRAGApp:
             total_retrieved = 0
             all_docs = []
             checklist = []
+            section_plan = []
             latest_answer = ""
             final_docs = []
             critic_queries = []
@@ -2609,47 +2742,60 @@ class AgenticRAGApp:
                 if iteration == 1:
                     planner_llm = self._get_llm_with_temperature(0.2)
                     planner_prompt = (
-                        "You are a retrieval planner. Generate a checklist of key items "
-                        "the answer must cover and 3-6 focused search queries. "
-                        "Return JSON with keys: checklist (array of strings), queries "
-                        "(array of strings). Do not include extra text."
+                        "You are a retrieval planner. Given the user query and output_style, "
+                        "return strict JSON with keys: checklist_items (array of strings), "
+                        "retrieval_queries (array of 4-10 strings), section_plan (optional array). "
+                        "Do not include any extra text."
                     )
                     planner_messages = [
                         SystemMessage(content=planner_prompt),
-                        HumanMessage(content=query),
+                        HumanMessage(
+                            content=json.dumps(
+                                {
+                                    "query": query,
+                                    "output_style": self.output_style.get(),
+                                }
+                            )
+                        ),
                     ]
                     planner_response = planner_llm.invoke(planner_messages)
                     plan_payload = _extract_json_payload(planner_response.content) or {}
                     checklist = [
                         str(item).strip()
-                        for item in plan_payload.get("checklist", [])
+                        for item in plan_payload.get("checklist_items", [])
                         if str(item).strip()
                     ]
                     sub_queries = [
                         str(item).strip()
-                        for item in plan_payload.get("queries", [])
+                        for item in plan_payload.get("retrieval_queries", [])
+                        if str(item).strip()
+                    ]
+                    section_plan = [
+                        str(item).strip()
+                        for item in plan_payload.get("section_plan", [])
                         if str(item).strip()
                     ]
                     if not checklist:
                         checklist = [query.strip()]
-                    seen_queries = {query.lower().strip()}
+                    seen_queries = set()
                     normalized_sub_queries = []
-                    for sub_query in sub_queries:
-                        key = sub_query.lower()
+                    for candidate in [query, *sub_queries]:
+                        key = candidate.lower().strip()
                         if key and key not in seen_queries:
                             seen_queries.add(key)
-                            normalized_sub_queries.append(sub_query)
-                    if len(normalized_sub_queries) < 3:
+                            normalized_sub_queries.append(candidate)
+                    if len(normalized_sub_queries) < 4:
                         fallback_queries = self._generate_sub_queries(query)
                         for candidate in fallback_queries:
                             key = candidate.lower().strip()
                             if key and key not in seen_queries:
                                 seen_queries.add(key)
                                 normalized_sub_queries.append(candidate)
-                            if len(normalized_sub_queries) >= 3:
+                            if len(normalized_sub_queries) >= 4:
                                 break
-                    normalized_sub_queries = normalized_sub_queries[:6]
-                    iteration_queries = [query, *normalized_sub_queries]
+                    if len(normalized_sub_queries) < 4:
+                        normalized_sub_queries.append(query)
+                    iteration_queries = normalized_sub_queries[:10]
                 else:
                     if not critic_queries:
                         self.log("No critic follow-up queries; stopping iterations.")
@@ -2660,10 +2806,10 @@ class AgenticRAGApp:
                 if remaining_cap == 0:
                     self.log("Total retrieved document cap reached; stopping iterations.")
                     break
-                docs, retrieved_count, cap_reached = _retrieve_for_queries(
+                docs, retrieved_count, cap_reached, _digest_docs = _retrieve_with_digest(
                     iteration_queries, remaining_cap, routing_candidate_k
                 )
-                total_retrieved += retrieved_count
+                total_retrieved += len(docs)
                 all_docs = self._merge_dedupe_docs(all_docs + docs)
                 if use_mini_digest:
                     routed_docs = self._route_with_mini_digest(all_docs, query, final_k)
@@ -2701,6 +2847,10 @@ class AgenticRAGApp:
                 prompt_parts = [self._get_system_instructions()]
                 if style_instruction:
                     prompt_parts.append(style_instruction)
+                if section_plan:
+                    prompt_parts.append(
+                        "SECTION PLAN:\n" + "\n".join(f"- {item}" for item in section_plan)
+                    )
                 prompt_parts.append(
                     "Strict rules: Use ONLY the context. If an item is missing, output "
                     "exactly NOT FOUND IN CONTEXT for that item."
@@ -2720,10 +2870,12 @@ class AgenticRAGApp:
                 if iteration < max_iterations:
                     critic_llm = self._get_llm_with_temperature(0.2)
                     critic_prompt = (
-                        "You are a critic. Review the answer against the checklist and "
-                        "identify missing items. Propose 1-3 new search queries to fill gaps. "
-                        "Return JSON with keys: missing_items (array of strings), queries "
-                        "(array of strings). Do not include extra text."
+                        "You are a critic. Review the answer against the checklist. "
+                        "For each checklist item, mark it as FOUND with citations or "
+                        "NOT FOUND IN CONTEXT. If any items are NOT FOUND IN CONTEXT, "
+                        "propose new retrieval_queries. Return strict JSON with keys: "
+                        "checklist_review (array of {item, status, citations}), "
+                        "retrieval_queries (array). Do not include extra text."
                     )
                     critic_messages = [
                         SystemMessage(content=critic_prompt),
@@ -2736,11 +2888,20 @@ class AgenticRAGApp:
                     ]
                     critic_response = critic_llm.invoke(critic_messages)
                     critic_payload = _extract_json_payload(critic_response.content) or {}
+                    review_items = critic_payload.get("checklist_review", [])
+                    missing_items = []
+                    for review in review_items:
+                        status = str(review.get("status", "")).strip().upper()
+                        item = str(review.get("item", "")).strip()
+                        if status == "NOT FOUND IN CONTEXT" and item:
+                            missing_items.append(item)
                     critic_queries = [
                         str(item).strip()
-                        for item in critic_payload.get("queries", [])
+                        for item in critic_payload.get("retrieval_queries", [])
                         if str(item).strip()
                     ][:3]
+                    if not missing_items:
+                        critic_queries = []
 
             if latest_answer:
                 self.last_answer = latest_answer
