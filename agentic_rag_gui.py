@@ -2685,9 +2685,40 @@ class AgenticRAGApp:
             self.log("Step 1/4: Parsing File...")
             text_content = ""
 
+            chatgpt_messages = None
             if self.selected_file.lower().endswith(".html"):
                 from bs4 import BeautifulSoup
                 from bs4 import NavigableString
+
+                def _extract_chatgpt_messages(soup):
+                    message_nodes = soup.select(
+                        "div.message.user-message, div.message.assistant-message"
+                    )
+                    if not message_nodes:
+                        return None
+                    extracted = []
+                    for node in message_nodes:
+                        classes = node.get("class", [])
+                        if "user-message" in classes:
+                            role = "user"
+                        elif "assistant-message" in classes:
+                            role = "assistant"
+                        else:
+                            continue
+                        timestamp = None
+                        timestamp_node = node.find(class_="timestamp")
+                        if timestamp_node:
+                            timestamp = timestamp_node.get_text(" ", strip=True) or None
+                            timestamp_node.extract()
+                        content = node.get_text(" ", strip=True)
+                        extracted.append(
+                            {
+                                "role": role,
+                                "timestamp": timestamp,
+                                "content": content,
+                            }
+                        )
+                    return extracted
 
                 def _append_text_line(lines, text):
                     clean = text.strip()
@@ -2746,10 +2777,16 @@ class AgenticRAGApp:
                     # Aggressive cleaning for RAG
                     for tag in soup(["script", "style", "svg", "path", "nav", "footer"]):
                         tag.extract()
-                    lines = []
-                    root = soup.body or soup
-                    _process_children(root, lines)
-                    text_content = "\n".join(lines)
+                    chatgpt_messages = _extract_chatgpt_messages(soup)
+                    if chatgpt_messages:
+                        text_content = "\n".join(
+                            msg["content"] for msg in chatgpt_messages if msg["content"]
+                        )
+                    else:
+                        lines = []
+                        root = soup.body or soup
+                        _process_children(root, lines)
+                        text_content = "\n".join(lines)
             else:
                 with open(self.selected_file, "r", encoding="utf-8") as f:
                     text_content = f.read()
@@ -2764,14 +2801,41 @@ class AgenticRAGApp:
             except ImportError:
                 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-            splitter = RecursiveCharacterTextSplitter(
-                chunk_size=self.chunk_size.get(),
-                chunk_overlap=self.chunk_overlap.get(),
-                separators=["\n\n", "\n", ".", " ", ""],
-            )
-            docs = splitter.create_documents([text_content])
             chunk_ingest_id = datetime.utcnow().isoformat()
             source_basename = os.path.basename(self.selected_file)
+            chatgpt_docs = None
+            if chatgpt_messages:
+                chatgpt_docs = []
+                for index, message in enumerate(chatgpt_messages, start=1):
+                    role = message["role"]
+                    content = message["content"]
+                    prefixed_content = f"[ROLE={role}] {content}".strip()
+                    metadata = {
+                        "speaker_role": role,
+                        "message_index": index,
+                        "evidence_kind": "primary" if role == "user" else "secondary",
+                        "source": source_basename,
+                        "chunk_id": index,
+                        "ingest_id": chunk_ingest_id,
+                    }
+                    if message.get("timestamp"):
+                        metadata["timestamp"] = message["timestamp"]
+                    if doc_title:
+                        metadata["doc_title"] = doc_title
+                    chatgpt_docs.append(
+                        Document(page_content=prefixed_content, metadata=metadata)
+                    )
+
+            if chatgpt_docs is not None:
+                docs = chatgpt_docs
+            else:
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=self.chunk_size.get(),
+                    chunk_overlap=self.chunk_overlap.get(),
+                    separators=["\n\n", "\n", ".", " ", ""],
+                )
+                docs = splitter.create_documents([text_content])
+
             def _last_section_title(text):
                 last_heading = None
                 for line in text.splitlines():
@@ -2782,24 +2846,25 @@ class AgenticRAGApp:
                             last_heading = candidate
                 return last_heading
 
-            last_section_title = None
-            for chunk_id, doc in enumerate(docs, start=1):
-                section_title = _last_section_title(doc.page_content)
-                if section_title:
-                    last_section_title = section_title
-                metadata = (doc.metadata or {}).copy()
-                metadata.update(
-                    {
-                        "source": source_basename,
-                        "chunk_id": chunk_id,
-                        "ingest_id": chunk_ingest_id,
-                    }
-                )
-                if doc_title:
-                    metadata["doc_title"] = doc_title
-                if last_section_title:
-                    metadata["section_title"] = last_section_title
-                doc.metadata = metadata
+            if chatgpt_docs is None:
+                last_section_title = None
+                for chunk_id, doc in enumerate(docs, start=1):
+                    section_title = _last_section_title(doc.page_content)
+                    if section_title:
+                        last_section_title = section_title
+                    metadata = (doc.metadata or {}).copy()
+                    metadata.update(
+                        {
+                            "source": source_basename,
+                            "chunk_id": chunk_id,
+                            "ingest_id": chunk_ingest_id,
+                        }
+                    )
+                    if doc_title:
+                        metadata["doc_title"] = doc_title
+                    if last_section_title:
+                        metadata["section_title"] = last_section_title
+                    doc.metadata = metadata
             self.log(f"Created {len(docs)} text chunks.")
 
             # 3. Initialize Vector DB & Embeddings
