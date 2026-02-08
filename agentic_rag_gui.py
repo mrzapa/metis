@@ -670,6 +670,10 @@ class AgenticRAGApp:
         self.progress.pack(fill="x")
 
     def build_chat_tab(self):
+        if not hasattr(self, "use_sub_queries"):
+            self.use_sub_queries = tk.BooleanVar(value=True)
+        if not hasattr(self, "subquery_max_docs"):
+            self.subquery_max_docs = tk.IntVar(value=200)
         frame = ttk.Frame(self.tab_chat, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
 
