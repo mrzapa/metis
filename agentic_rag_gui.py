@@ -21,6 +21,8 @@ DIGEST_COLLECTION_NAME = "rag_digest_collection"
 DIGEST_WINDOW_MIN = 10
 DIGEST_WINDOW_MAX = 20
 DIGEST_WINDOW_TARGET = 15
+MINI_DIGEST_BOOST_MULTIPLIER = 3
+MINI_DIGEST_MIN_POOL = 40
 
 class AgenticRAGApp:
     def __init__(self, root):
@@ -1117,6 +1119,23 @@ class AgenticRAGApp:
             for start, end in ranges
         )
 
+    @staticmethod
+    def _expand_compact_chunk_ids(compact_ids):
+        if not compact_ids:
+            return set()
+        ids = set()
+        for part in str(compact_ids).split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "-" in part:
+                start, end = part.split("-", 1)
+                if start.strip().isdigit() and end.strip().isdigit():
+                    ids.update(range(int(start), int(end) + 1))
+            elif part.isdigit():
+                ids.add(int(part))
+        return ids
+
     def _split_into_digest_windows(self, docs):
         windows = []
         total = len(docs)
@@ -1221,6 +1240,98 @@ class AgenticRAGApp:
             )
         return digest_docs
 
+    def _build_mini_digest_documents(self, docs, query):
+        groups = self._group_chunks_for_digest(docs)
+        if not groups:
+            return []
+        llm = self._get_llm_with_temperature(0.2)
+        digest_docs = []
+        system_prompt = (
+            "Summarize the provided content into concise bullet points for routing. "
+            "Focus on entities, dates, decisions, and key statements that are useful "
+            "for answering the user's query. Use bullets only with no introductory text."
+        )
+        for digest_index, (group_docs, section_title) in enumerate(groups, start=1):
+            chunk_ids = [
+                (doc.metadata or {}).get("chunk_id")
+                for doc in group_docs
+                if (doc.metadata or {}).get("chunk_id") is not None
+            ]
+            compact_ids = self._compact_chunk_ids(chunk_ids)
+            group_text = "\n\n".join(doc.page_content for doc in group_docs)
+            if section_title:
+                human_content = (
+                    f"User query: {query}\n"
+                    f"Section title: {section_title}\n\nContent:\n{group_text}"
+                )
+            else:
+                human_content = f"User query: {query}\n\nContent:\n{group_text}"
+            response = llm.invoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=human_content),
+                ]
+            )
+            metadata = {
+                "doc_type": "mini_digest",
+                "digest_id": f"mini-{digest_index}",
+                "child_chunk_ids": compact_ids,
+            }
+            if section_title:
+                metadata["section_title"] = section_title
+            digest_docs.append(
+                Document(page_content=response.content.strip(), metadata=metadata)
+            )
+        return digest_docs
+
+    def _route_with_mini_digest(self, docs, query, final_k):
+        if not docs:
+            return []
+        docs_sorted = sorted(
+            docs,
+            key=lambda doc: (
+                (doc.metadata or {}).get("chunk_id", 0),
+                (doc.metadata or {}).get("source", ""),
+            ),
+        )
+        digest_docs = self._build_mini_digest_documents(docs_sorted, query)
+        if not digest_docs:
+            return docs_sorted
+        embeddings = self.get_embeddings()
+        digest_texts = [doc.page_content for doc in digest_docs]
+        digest_vectors = embeddings.embed_documents(digest_texts)
+        query_vector = embeddings.embed_query(query)
+
+        def _cosine_similarity(a, b):
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = sum(x * x for x in a) ** 0.5
+            norm_b = sum(y * y for y in b) ** 0.5
+            if norm_a == 0 or norm_b == 0:
+                return 0.0
+            return dot / (norm_a * norm_b)
+
+        scored = [
+            (idx, _cosine_similarity(vec, query_vector))
+            for idx, vec in enumerate(digest_vectors)
+        ]
+        scored.sort(key=lambda item: item[1], reverse=True)
+        target_digest_k = min(max(3, final_k), len(scored))
+        selected_digest_ids = {idx for idx, _score in scored[:target_digest_k]}
+        selected_chunk_ids = set()
+        for idx in selected_digest_ids:
+            metadata = digest_docs[idx].metadata or {}
+            selected_chunk_ids.update(
+                self._expand_compact_chunk_ids(metadata.get("child_chunk_ids", ""))
+            )
+        if not selected_chunk_ids:
+            return docs_sorted
+        routed_docs = [
+            doc
+            for doc in docs_sorted
+            if (doc.metadata or {}).get("chunk_id") in selected_chunk_ids
+        ]
+        return routed_docs or docs_sorted
+
     @staticmethod
     def _is_chroma_persist_dir(path):
         if not os.path.isdir(path):
@@ -1228,6 +1339,34 @@ class AgenticRAGApp:
         return os.path.exists(os.path.join(path, "chroma.sqlite3")) or os.path.exists(
             os.path.join(path, "index")
         )
+
+    def _has_digest_collection(self, persist_dir):
+        if not persist_dir or not os.path.isdir(persist_dir):
+            return False
+        try:
+            from langchain_chroma import Chroma
+        except ImportError:
+            return False
+        try:
+            digest_store = Chroma(
+                collection_name=DIGEST_COLLECTION_NAME,
+                embedding_function=self.get_embeddings(),
+                persist_directory=persist_dir,
+            )
+        except Exception:
+            return False
+        count = None
+        if hasattr(digest_store, "_collection"):
+            try:
+                count = digest_store._collection.count()
+            except Exception:
+                count = None
+        if count is None and hasattr(digest_store, "count"):
+            try:
+                count = digest_store.count()
+            except Exception:
+                count = None
+        return bool(count)
 
     @staticmethod
     def _format_index_label(path, collection_name=RAW_COLLECTION_NAME):
@@ -2154,6 +2293,35 @@ class AgenticRAGApp:
             search_type = self.search_type.get() or "similarity"
             mmr_lambda = float(self.mmr_lambda.get())
             total_docs_cap = max(10, min(500, int(self.subquery_max_docs.get())))
+            persist_dir = self.selected_index_path
+            if not persist_dir:
+                persist_dir = getattr(self.vector_store, "_persist_directory", None)
+            if not persist_dir and self.vector_db_type.get() == "chroma":
+                persist_dir = self._get_chroma_persist_root()
+            digest_missing = (
+                not self.build_digest_index.get()
+                or (
+                    self.vector_db_type.get() == "chroma"
+                    and not self._has_digest_collection(persist_dir)
+                )
+            )
+            use_mini_digest = (
+                digest_missing and self.selected_collection_name == RAW_COLLECTION_NAME
+            )
+            if use_mini_digest:
+                self.log(
+                    "Digest layer missing; using temporary mini-digest routing for this request."
+                )
+            routing_candidate_k = candidate_k
+            if use_mini_digest:
+                routing_candidate_k = min(
+                    max(candidate_k * MINI_DIGEST_BOOST_MULTIPLIER, MINI_DIGEST_MIN_POOL),
+                    total_docs_cap,
+                )
+                if routing_candidate_k > candidate_k:
+                    self.log(
+                        f"Mini-digest routing enabled; boosted retrieval pool to {routing_candidate_k}."
+                    )
 
             def _extract_json_payload(text):
                 cleaned = text.strip()
@@ -2176,7 +2344,7 @@ class AgenticRAGApp:
                     )
                 return search_kwargs_local
 
-            def _retrieve_for_queries(query_list, remaining_cap):
+            def _retrieve_for_queries(query_list, remaining_cap, k_value):
                 if remaining_cap <= 0:
                     return [], 0, True
                 filtered_queries = [q for q in query_list if q]
@@ -2186,12 +2354,12 @@ class AgenticRAGApp:
                 if len(filtered_queries) == 1:
                     retriever = self.vector_store.as_retriever(
                         search_type=search_type,
-                        search_kwargs=_build_search_kwargs(candidate_k),
+                        search_kwargs=_build_search_kwargs(k_value),
                     )
                     docs_local = retriever.invoke(filtered_queries[0])
                 else:
                     per_query_k = max(
-                        1, min(candidate_k, max(1, remaining_cap) // len(filtered_queries))
+                        1, min(k_value, max(1, remaining_cap) // len(filtered_queries))
                     )
                     retriever = self.vector_store.as_retriever(
                         search_type=search_type,
@@ -2313,12 +2481,20 @@ class AgenticRAGApp:
                         queries = [query, *sub_queries]
                 max_total_docs = max(1, int(self.subquery_max_docs.get()))
                 docs, retrieved_count, cap_reached = _retrieve_for_queries(
-                    queries, min(total_docs_cap, max_total_docs)
+                    queries, min(total_docs_cap, max_total_docs), routing_candidate_k
                 )
                 self.log(
                     f"Retrieved {len(docs)} initial candidates from {len(queries)} query(s)."
                 )
-                final_docs = _select_evidence_pack(docs, query)
+                if use_mini_digest:
+                    routed_docs = self._route_with_mini_digest(docs, query, final_k)
+                    self.log(
+                        "Mini-digest routing selected "
+                        f"{len(routed_docs)} candidate chunks."
+                    )
+                    final_docs = _select_evidence_pack(routed_docs, query)
+                else:
+                    final_docs = _select_evidence_pack(docs, query)
                 context_text, was_truncated = _build_context(final_docs)
                 _log_iteration_telemetry(
                     1,
@@ -2432,11 +2608,19 @@ class AgenticRAGApp:
                     self.log("Total retrieved document cap reached; stopping iterations.")
                     break
                 docs, retrieved_count, cap_reached = _retrieve_for_queries(
-                    iteration_queries, remaining_cap
+                    iteration_queries, remaining_cap, routing_candidate_k
                 )
                 total_retrieved += retrieved_count
                 all_docs = self._merge_dedupe_docs(all_docs + docs)
-                final_docs = _select_evidence_pack(all_docs, query)
+                if use_mini_digest:
+                    routed_docs = self._route_with_mini_digest(all_docs, query, final_k)
+                    self.log(
+                        "Mini-digest routing selected "
+                        f"{len(routed_docs)} candidate chunks."
+                    )
+                    final_docs = _select_evidence_pack(routed_docs, query)
+                else:
+                    final_docs = _select_evidence_pack(all_docs, query)
                 context_text, was_truncated = _build_context(final_docs)
                 _log_iteration_telemetry(
                     iteration,
