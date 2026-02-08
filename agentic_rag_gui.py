@@ -84,6 +84,10 @@ class AgenticRAGApp:
         self.system_instructions = tk.StringVar(
             value=self.default_system_instructions
         )
+        self.retrieval_k = tk.IntVar(value=25)
+        self.final_k = tk.IntVar(value=5)
+        self.search_type = tk.StringVar(value="similarity")
+        self.mmr_lambda = tk.DoubleVar(value=0.5)
 
         self.vector_store = None
         self.index_embedding_signature = ""
@@ -309,6 +313,10 @@ class AgenticRAGApp:
         self.force_embedding_compat.set(
             data.get("force_embedding_compat", self.force_embedding_compat.get())
         )
+        self.retrieval_k.set(data.get("retrieval_k", self.retrieval_k.get()))
+        self.final_k.set(data.get("final_k", self.final_k.get()))
+        self.search_type.set(data.get("search_type", self.search_type.get()))
+        self.mmr_lambda.set(data.get("mmr_lambda", self.mmr_lambda.get()))
         self.index_embedding_signature = data.get(
             "index_embedding_signature", self.index_embedding_signature
         )
@@ -338,6 +346,10 @@ class AgenticRAGApp:
             "llm_max_tokens": self.llm_max_tokens.get(),
             "system_instructions": self.system_instructions.get(),
             "force_embedding_compat": self.force_embedding_compat.get(),
+            "retrieval_k": self.retrieval_k.get(),
+            "final_k": self.final_k.get(),
+            "search_type": self.search_type.get(),
+            "mmr_lambda": self.mmr_lambda.get(),
             "index_embedding_signature": self.index_embedding_signature,
         }
         try:
@@ -618,6 +630,45 @@ class AgenticRAGApp:
             index_frame, text="Refresh", command=self._refresh_existing_indexes
         ).grid(row=0, column=2, padx=(5, 0))
         self._refresh_existing_indexes()
+
+        retrieval_frame = ttk.LabelFrame(
+            frame, text="Retrieval Settings", padding=10
+        )
+        retrieval_frame.pack(fill="x", pady=(0, 10))
+        retrieval_frame.columnconfigure(1, weight=1)
+        retrieval_frame.columnconfigure(3, weight=1)
+
+        ttk.Label(retrieval_frame, text="Retrieve K:").grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Entry(retrieval_frame, textvariable=self.retrieval_k, width=8).grid(
+            row=0, column=1, sticky="w", padx=(5, 15)
+        )
+
+        ttk.Label(retrieval_frame, text="Final K:").grid(
+            row=0, column=2, sticky="w"
+        )
+        ttk.Entry(retrieval_frame, textvariable=self.final_k, width=8).grid(
+            row=0, column=3, sticky="w", padx=(5, 0)
+        )
+
+        ttk.Label(retrieval_frame, text="Search Type:").grid(
+            row=1, column=0, sticky="w", pady=(6, 0)
+        )
+        ttk.Combobox(
+            retrieval_frame,
+            textvariable=self.search_type,
+            values=["similarity", "mmr"],
+            state="readonly",
+            width=12,
+        ).grid(row=1, column=1, sticky="w", padx=(5, 15), pady=(6, 0))
+
+        ttk.Label(retrieval_frame, text="MMR lambda:").grid(
+            row=1, column=2, sticky="w", pady=(6, 0)
+        )
+        ttk.Entry(retrieval_frame, textvariable=self.mmr_lambda, width=8).grid(
+            row=1, column=3, sticky="w", padx=(5, 0), pady=(6, 0)
+        )
 
         # Chat Display
         self.chat_display = scrolledtext.ScrolledText(
@@ -1443,8 +1494,19 @@ class AgenticRAGApp:
             self.log("Starting Retrieval...")
 
             # 1. Retrieval
-            # Fetch more candidates first (e.g., 25) to rerank down to 5
-            retriever = self.vector_store.as_retriever(search_kwargs={"k": 25})
+            retrieve_k = max(1, int(self.retrieval_k.get()))
+            final_k = max(1, int(self.final_k.get()))
+            candidate_k = max(retrieve_k, final_k)
+            search_type = self.search_type.get() or "similarity"
+            mmr_lambda = float(self.mmr_lambda.get())
+            search_kwargs = {"k": candidate_k}
+            if search_type == "mmr":
+                search_kwargs.update(
+                    {"fetch_k": candidate_k, "lambda_mult": mmr_lambda}
+                )
+            retriever = self.vector_store.as_retriever(
+                search_type=search_type, search_kwargs=search_kwargs
+            )
             docs = retriever.invoke(query)
 
             self.log(f"Retrieved {len(docs)} initial candidates.")
@@ -1457,7 +1519,7 @@ class AgenticRAGApp:
                     from langchain_cohere import CohereRerank
                     compressor = CohereRerank(
                         cohere_api_key=self.api_keys["cohere"].get(),
-                        top_n=5,
+                        top_n=final_k,
                         model="rerank-english-v3.0",
                     )
                     # We manually compress because we already have docs
@@ -1468,9 +1530,9 @@ class AgenticRAGApp:
                     )
                 except Exception as e:
                     self.log(f"Rerank Error (Using raw retrieval instead): {e}")
-                    final_docs = docs[:5]  # Fallback to top 5 raw
+                    final_docs = docs[:final_k]  # Fallback to top K raw
             else:
-                final_docs = docs[:5]  # No reranker, just take top 5
+                final_docs = docs[:final_k]  # No reranker, just take top K
 
             # 3. Context Construction
             context_text = "\n\n---\n\n".join([d.page_content for d in final_docs])
