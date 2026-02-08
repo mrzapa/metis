@@ -1905,6 +1905,27 @@ class AgenticRAGApp:
         }
         return style_instructions.get(style, "")
 
+    def is_evidence_pack_query(self, query, output_style):
+        normalized = f"{query} {output_style}".lower()
+        keywords = [
+            "evidence pack",
+            "chronology",
+            "timeline",
+            "grievance",
+            "when did it happen",
+            "impact",
+            "examples",
+        ]
+        return any(keyword in normalized for keyword in keywords)
+
+    def _get_evidence_pack_instruction(self):
+        return (
+            "Evidence pack mode: Build a structured evidence pack with a clear chronology/timeline "
+            "of events, explicit impacts, grievances, and concrete examples. Emphasize dates, actors, "
+            "actions, outcomes, and supporting quotes. Note gaps or uncertainties explicitly. "
+            "Do not ask the user for missing info."
+        )
+
     def _extract_chunks(self, context_text):
         chunks = {}
         matches = list(re.finditer(r"^\[Chunk (\d+)[^\]]*\]\n", context_text, re.M))
@@ -2803,7 +2824,7 @@ class AgenticRAGApp:
                     cap_reached = True
                 return docs_local, retrieved_count_local, cap_reached
 
-            def _select_evidence_pack(doc_list, rerank_query):
+            def _select_evidence_pack(doc_list, rerank_query, evidence_pack_mode):
                 candidates = self._promote_lexical_overlap(doc_list, rerank_query)
                 if self.use_reranker.get() and self.api_keys["cohere"].get():
                     try:
@@ -2824,8 +2845,9 @@ class AgenticRAGApp:
                         candidates = compressed_docs
                     except Exception as exc:
                         self.log(f"Rerank Error (Using raw retrieval instead): {exc}")
+                group_limit = 1 if evidence_pack_mode else MAX_GROUP_DOCS
                 candidates = self._apply_coverage_selection(
-                    candidates, final_k, group_limit=MAX_GROUP_DOCS
+                    candidates, final_k, group_limit=group_limit
                 )
                 return candidates[:final_k]
 
@@ -2951,9 +2973,11 @@ class AgenticRAGApp:
                         "Mini-digest routing selected "
                         f"{len(routed_docs)} candidate chunks."
                     )
-                    final_docs = _select_evidence_pack(routed_docs, query)
+                    final_docs = _select_evidence_pack(
+                        routed_docs, query, is_evidence_pack
+                    )
                 else:
-                    final_docs = _select_evidence_pack(docs, query)
+                    final_docs = _select_evidence_pack(docs, query, is_evidence_pack)
                 (
                     context_text,
                     was_truncated,
@@ -2985,9 +3009,16 @@ class AgenticRAGApp:
                 self.log("Generating Answer...")
                 llm = self.get_llm()
                 style_instruction = self._get_output_style_instruction()
+                evidence_instruction = (
+                    self._get_evidence_pack_instruction()
+                    if is_evidence_pack
+                    else ""
+                )
                 prompt_parts = [self._get_system_instructions()]
                 if style_instruction:
                     prompt_parts.append(style_instruction)
+                if evidence_instruction:
+                    prompt_parts.append(evidence_instruction)
                 prompt_parts.append(f"CONTEXT:\n{context_text}")
                 system_prompt = "\n\n".join(prompt_parts)
                 history_window = self._get_history_window(current_query=query)
@@ -3046,19 +3077,28 @@ class AgenticRAGApp:
             for iteration in range(1, max_iterations + 1):
                 if iteration == 1:
                     planner_llm = self._get_llm_with_temperature(0.2)
-                    planner_prompt = (
-                        "You are a retrieval planner. Given the user query and output_style, "
-                        "return strict JSON with keys: checklist_items (array of strings), "
-                        "retrieval_queries (array of 4-10 strings), section_plan (optional array). "
-                        "Do not include any extra text."
-                    )
+                    if is_evidence_pack:
+                        planner_prompt = (
+                            "You are an evidence-pack retrieval planner. Given the user query and "
+                            "output_style, return strict JSON with keys: checklist_items (array of "
+                            "strings), retrieval_queries (array of 4-10 strings), section_plan "
+                            "(optional array). Ensure checklist and queries cover chronology/timeline, "
+                            "impacts, grievances, and concrete examples. Do not include any extra text."
+                        )
+                    else:
+                        planner_prompt = (
+                            "You are a retrieval planner. Given the user query and output_style, "
+                            "return strict JSON with keys: checklist_items (array of strings), "
+                            "retrieval_queries (array of 4-10 strings), section_plan (optional array). "
+                            "Do not include any extra text."
+                        )
                     planner_messages = [
                         SystemMessage(content=planner_prompt),
                         HumanMessage(
                             content=json.dumps(
                                 {
                                     "query": query,
-                                    "output_style": self.output_style.get(),
+                                    "output_style": output_style,
                                 }
                             )
                         ),
@@ -3138,9 +3178,13 @@ class AgenticRAGApp:
                         "Mini-digest routing selected "
                         f"{len(routed_docs)} candidate chunks."
                     )
-                    final_docs = _select_evidence_pack(routed_docs, query)
+                    final_docs = _select_evidence_pack(
+                        routed_docs, query, is_evidence_pack
+                    )
                 else:
-                    final_docs = _select_evidence_pack(all_docs, query)
+                    final_docs = _select_evidence_pack(
+                        all_docs, query, is_evidence_pack
+                    )
                 (
                     context_text,
                     was_truncated,
@@ -3178,9 +3222,16 @@ class AgenticRAGApp:
                         "items to evidence or omitted due to missing support."
                     )
                 style_instruction = self._get_output_style_instruction()
+                evidence_instruction = (
+                    self._get_evidence_pack_instruction()
+                    if is_evidence_pack
+                    else ""
+                )
                 prompt_parts = [self._get_system_instructions()]
                 if style_instruction:
                     prompt_parts.append(style_instruction)
+                if evidence_instruction:
+                    prompt_parts.append(evidence_instruction)
                 if section_plan:
                     prompt_parts.append(
                         "SECTION PLAN:\n" + "\n".join(f"- {item}" for item in section_plan)
