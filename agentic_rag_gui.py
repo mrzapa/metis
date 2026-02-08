@@ -59,17 +59,23 @@ class AgenticRAGApp:
         self.main_thread = threading.current_thread()
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
         self.default_system_instructions = (
-            "You are an expert analyst assistant. Use only retrieved context for factual claims. "
+            "You are an expert analyst assistant. Use ONLY the provided context for factual claims. "
             "Never ask for details already present in the retrieved context. Do not use placeholders. "
             "If any requested item is missing from the context, output exactly: NOT FOUND IN CONTEXT "
             "(no citation). Every factual paragraph must include at least one [Chunk N] citation. "
+            "Do not include citations on NOT FOUND IN CONTEXT lines. "
+            "For Script / talk track and Structured report styles, include at least one short verbatim "
+            "quote (<=25 words) per major section with a [Chunk N] citation. "
             "Coverage rule: if N items are requested, output N items or NOT FOUND IN CONTEXT for each."
         )
         self.verbose_system_instructions = (
-            "You are an expert analyst assistant. Use only retrieved context for factual claims. "
+            "You are an expert analyst assistant. Use ONLY the provided context for factual claims. "
             "Never ask for details already present in the retrieved context. Do not use placeholders. "
             "If any requested item is missing from the context, output exactly: NOT FOUND IN CONTEXT "
             "(no citation). Every factual paragraph must include at least one [Chunk N] citation. "
+            "Do not include citations on NOT FOUND IN CONTEXT lines. "
+            "For Script / talk track and Structured report styles, include at least one short verbatim "
+            "quote (<=25 words) per major section with a [Chunk N] citation. "
             "Provide a concise summary, cite evidence from the context, list key points, "
             "and explicitly note uncertainties or gaps."
         )
@@ -1810,15 +1816,148 @@ class AgenticRAGApp:
             ),
             "Script / talk track": (
                 "Output style: Script / talk track. Provide a short talk track or script "
-                "with speaker-ready phrasing, organized as numbered beats or bullet points."
+                "with speaker-ready phrasing, organized as numbered beats or bullet points. "
+                "Include at least one short verbatim quote (<=25 words) per major section "
+                "with a [Chunk N] citation."
             ),
             "Structured report": (
                 "Output style: Structured report. Use clear section headings such as "
                 "Summary, Findings, Evidence, and Gaps/Unknowns. Use bullets within sections "
-                "where helpful."
+                "where helpful. Include at least one short verbatim quote (<=25 words) per "
+                "major section with a [Chunk N] citation."
             ),
         }
         return style_instructions.get(style, "")
+
+    def _extract_chunks(self, context_text):
+        chunks = {}
+        matches = list(re.finditer(r"^\[Chunk (\d+)[^\]]*\]\n", context_text, re.M))
+        for idx, match in enumerate(matches):
+            chunk_num = int(match.group(1))
+            start = match.end()
+            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(context_text)
+            chunks[chunk_num] = context_text[start:end].strip()
+        return chunks
+
+    def _split_major_sections(self, answer_text):
+        lines = answer_text.splitlines()
+        sections = []
+        current = []
+
+        def _flush():
+            if current:
+                section_text = "\n".join(current).strip()
+                if section_text:
+                    sections.append(section_text)
+
+        for line in lines:
+            if re.match(r"^\s*#{1,6}\s+\S", line) or re.match(
+                r"^[A-Za-z][A-Za-z /&-]{0,50}:$", line.strip()
+            ):
+                _flush()
+                current = [line]
+            else:
+                current.append(line)
+        _flush()
+        return sections or [answer_text.strip()]
+
+    def _find_quotes(self, text):
+        quotes = []
+        paragraphs = [p for p in re.split(r"\n\s*\n", text) if p.strip()]
+        for paragraph in paragraphs:
+            for match in re.finditer(r"\"([^\"]+)\"", paragraph):
+                quote_text = match.group(1).strip()
+                if quote_text:
+                    quotes.append((quote_text, paragraph))
+        return quotes
+
+    def _validate_answer(self, answer_text, context_text, output_style):
+        failures = []
+        citation_re = re.compile(r"\[Chunk (\d+)\]")
+
+        for line in answer_text.splitlines():
+            if line.strip() == "NOT FOUND IN CONTEXT" and citation_re.search(line):
+                failures.append(
+                    "NOT FOUND IN CONTEXT line includes a citation, which is not allowed."
+                )
+
+        paragraphs = [p for p in re.split(r"\n\s*\n", answer_text) if p.strip()]
+        for paragraph in paragraphs:
+            if paragraph.strip() == "NOT FOUND IN CONTEXT":
+                continue
+            if re.search(r"[A-Za-z0-9]", paragraph) and not citation_re.search(paragraph):
+                failures.append(
+                    "Factual paragraph missing at least one [Chunk N] citation."
+                )
+
+        if output_style in {"Script / talk track", "Structured report"}:
+            chunks = self._extract_chunks(context_text)
+            sections = self._split_major_sections(answer_text)
+            for index, section in enumerate(sections, start=1):
+                quotes = self._find_quotes(section)
+                section_has_quote = False
+                for quote_text, paragraph in quotes:
+                    word_count = len(quote_text.split())
+                    if word_count > 25:
+                        continue
+                    citations = citation_re.findall(paragraph)
+                    for citation in citations:
+                        chunk_num = int(citation)
+                        chunk_text = chunks.get(chunk_num, "")
+                        if quote_text in chunk_text:
+                            section_has_quote = True
+                            break
+                    if section_has_quote:
+                        break
+                if not section_has_quote:
+                    failures.append(
+                        "Missing short verbatim quote (<=25 words) with valid citation "
+                        f"in section {index}."
+                    )
+
+        return len(failures) == 0, failures
+
+    def _repair_answer(self, draft_text, context_text, failures, output_style):
+        repair_llm = self._get_llm_with_temperature(0.0)
+        failure_text = "\n".join(f"- {item}" for item in failures)
+        repair_prompt = (
+            "You are a repair assistant. Fix the draft using ONLY the provided context. "
+            "Rules: remove unsupported content, add correct [Chunk N] citations to every "
+            "factual paragraph, include no placeholders, and replace any unsupported "
+            "content with exactly: NOT FOUND IN CONTEXT (no citation). "
+            "NOT FOUND IN CONTEXT lines must contain no citations. "
+            "For Script / talk track and Structured report styles, ensure at least one short "
+            "verbatim quote (<=25 words) per major section with a [Chunk N] citation, and "
+            "the quote must appear in the cited chunk text. "
+            "Output ONLY the repaired answer."
+        )
+        repair_messages = [
+            SystemMessage(content=repair_prompt),
+            HumanMessage(
+                content=(
+                    f"OUTPUT_STYLE: {output_style}\n\n"
+                    f"FAILURES:\n{failure_text}\n\n"
+                    f"CONTEXT:\n{context_text}\n\n"
+                    f"DRAFT:\n{draft_text}"
+                )
+            ),
+        ]
+        repaired = repair_llm.invoke(repair_messages)
+        return repaired.content
+
+    def _validate_and_repair(self, answer_text, context_text):
+        output_style = self.output_style.get().strip()
+        is_valid, failures = self._validate_answer(
+            answer_text, context_text, output_style
+        )
+        if is_valid:
+            return answer_text
+        self.log(
+            "Validation failed; triggering repair pass. Reasons: "
+            + "; ".join(failures)
+        )
+        repaired = self._repair_answer(answer_text, context_text, failures, output_style)
+        return repaired
 
     def _refresh_instructions_box(self):
         self.instructions_box.delete("1.0", tk.END)
@@ -2705,10 +2844,13 @@ class AgenticRAGApp:
                     HumanMessage(content=query),
                 ]
                 response = llm.invoke(messages)
+                validated_answer = self._validate_and_repair(
+                    response.content, context_text
+                )
 
-                self.last_answer = response.content
-                self.append_chat("agent", f"AI: {response.content}")
-                self._append_history(AIMessage(content=response.content))
+                self.last_answer = validated_answer
+                self.append_chat("agent", f"AI: {validated_answer}")
+                self._append_history(AIMessage(content=validated_answer))
 
                 sources_text = "\n".join(
                     [
@@ -2735,6 +2877,7 @@ class AgenticRAGApp:
             checklist = []
             section_plan = []
             latest_answer = ""
+            latest_context_text = ""
             final_docs = []
             critic_queries = []
 
@@ -2866,6 +3009,7 @@ class AgenticRAGApp:
                 ]
                 response = llm.invoke(messages)
                 latest_answer = response.content
+                latest_context_text = context_text
 
                 if iteration < max_iterations:
                     critic_llm = self._get_llm_with_temperature(0.2)
@@ -2904,9 +3048,12 @@ class AgenticRAGApp:
                         critic_queries = []
 
             if latest_answer:
-                self.last_answer = latest_answer
-                self.append_chat("agent", f"AI: {latest_answer}")
-                self._append_history(AIMessage(content=latest_answer))
+                validated_answer = self._validate_and_repair(
+                    latest_answer, latest_context_text
+                )
+                self.last_answer = validated_answer
+                self.append_chat("agent", f"AI: {validated_answer}")
+                self._append_history(AIMessage(content=validated_answer))
 
             sources_text = "\n".join(
                 [
