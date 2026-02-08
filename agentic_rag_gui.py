@@ -362,6 +362,7 @@ class AgenticRAGApp:
         self.show_retrieved_context.set(
             data.get("show_retrieved_context", self.show_retrieved_context.get())
         )
+        self.use_reranker.set(data.get("use_reranker", self.use_reranker.get()))
         self.use_sub_queries.set(
             bool(data.get("use_sub_queries", self.use_sub_queries.get()))
         )
@@ -372,6 +373,13 @@ class AgenticRAGApp:
         except (TypeError, ValueError):
             subquery_max_docs = self.subquery_max_docs.get()
         self.subquery_max_docs.set(max(10, min(500, subquery_max_docs)))
+        try:
+            fallback_final_k = int(
+                data.get("fallback_final_k", self.fallback_final_k.get())
+            )
+        except (TypeError, ValueError):
+            fallback_final_k = self.fallback_final_k.get()
+        self.fallback_final_k.set(max(1, fallback_final_k))
         self.index_embedding_signature = data.get(
             "index_embedding_signature", self.index_embedding_signature
         )
@@ -421,8 +429,10 @@ class AgenticRAGApp:
             "agentic_mode": self.agentic_mode.get(),
             "agentic_max_iterations": self.agentic_max_iterations.get(),
             "show_retrieved_context": self.show_retrieved_context.get(),
+            "use_reranker": self.use_reranker.get(),
             "use_sub_queries": bool(self.use_sub_queries.get()),
             "subquery_max_docs": subquery_max_docs,
+            "fallback_final_k": self.fallback_final_k.get(),
             "index_embedding_signature": self.index_embedding_signature,
             "selected_index_path": self.selected_index_path,
         }
