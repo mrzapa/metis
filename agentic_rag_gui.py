@@ -2480,10 +2480,70 @@ class AgenticRAGApp:
     def _validate_answer(self, answer_text, context_text, output_style):
         failures = []
         citation_re = re.compile(r"\[Chunk (\d+)\]")
+        heading_re = re.compile(r"^\s{0,3}#{1,6}\s+\S+")
+        setext_re = re.compile(r"^[=-]{3,}\s*$")
+        verb_re = re.compile(
+            r"\b("
+            r"is|are|was|were|be|been|being|"
+            r"has|have|had|"
+            r"does|do|did|"
+            r"shows?|indicates?|suggests?|states?|notes?|reports?|"
+            r"causes?|led|leads?|resulted|results?|"
+            r"increases?|decreases?|"
+            r"includes?|including|"
+            r"found|finds?|observed|estimated|expected|"
+            r"according"
+            r")\b",
+            re.IGNORECASE,
+        )
+        structural_labels = {
+            "executive summary",
+            "summary",
+            "overview",
+            "timeline",
+            "background",
+            "context",
+            "approach",
+            "methodology",
+            "analysis",
+            "findings",
+            "discussion",
+            "recommendations",
+            "next steps",
+            "conclusion",
+            "appendix",
+        }
+        min_citation_chars = 40
+
+        def is_structural_paragraph(paragraph_text: str) -> bool:
+            lines = [line.strip() for line in paragraph_text.splitlines() if line.strip()]
+            if not lines:
+                return True
+            if len(lines) == 1:
+                line = lines[0]
+                if heading_re.match(line):
+                    return True
+                if line.rstrip(":").strip().lower() in structural_labels:
+                    return True
+                if line.endswith(":") and len(line.split()) <= 5:
+                    return True
+            if len(lines) == 2 and setext_re.match(lines[1]):
+                return True
+            return False
+
+        def needs_citation(paragraph_text: str) -> bool:
+            if is_structural_paragraph(paragraph_text):
+                return False
+            alnum_match = re.search(r"[A-Za-z0-9]", paragraph_text)
+            if not alnum_match:
+                return False
+            if verb_re.search(paragraph_text):
+                return True
+            return len(paragraph_text.strip()) >= min_citation_chars
 
         paragraphs = [p for p in re.split(r"\n\s*\n", answer_text) if p.strip()]
         for paragraph in paragraphs:
-            if re.search(r"[A-Za-z0-9]", paragraph) and not citation_re.search(paragraph):
+            if needs_citation(paragraph) and not citation_re.search(paragraph):
                 failures.append(
                     "Factual paragraph missing at least one [Chunk N] citation."
                 )
