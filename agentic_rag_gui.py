@@ -107,6 +107,14 @@ class AgenticRAGApp:
         self.system_instructions = tk.StringVar(
             value=self.default_system_instructions
         )
+        self.output_style_options = [
+            "Default answer",
+            "Detailed answer",
+            "Brief / exec summary",
+            "Script / talk track",
+            "Structured report",
+        ]
+        self.output_style = tk.StringVar(value="Default answer")
         self.retrieval_k = tk.IntVar(value=25)
         self.final_k = tk.IntVar(value=5)
         self.fallback_final_k = tk.IntVar(value=self.final_k.get())
@@ -402,6 +410,10 @@ class AgenticRAGApp:
         self.selected_collection_name = data.get(
             "selected_collection_name", self.selected_collection_name
         )
+        output_style = data.get("output_style", self.output_style.get())
+        if output_style not in self.output_style_options:
+            output_style = "Default answer"
+        self.output_style.set(output_style)
 
         instructions = data.get("system_instructions", self.system_instructions.get())
         self.system_instructions.set(instructions or self.default_system_instructions)
@@ -455,6 +467,7 @@ class AgenticRAGApp:
             "index_embedding_signature": self.index_embedding_signature,
             "selected_index_path": self.selected_index_path,
             "selected_collection_name": self.selected_collection_name,
+            "output_style": self.output_style.get(),
         }
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
@@ -851,6 +864,17 @@ class AgenticRAGApp:
         ttk.Entry(opt_frame, textvariable=self.fallback_final_k, width=6).pack(
             side="left"
         )
+
+        output_frame = ttk.Frame(frame)
+        output_frame.pack(fill="x", pady=(2, 4))
+        ttk.Label(output_frame, text="Output style:").pack(side="left")
+        ttk.Combobox(
+            output_frame,
+            textvariable=self.output_style,
+            values=self.output_style_options,
+            state="readonly",
+            width=22,
+        ).pack(side="left", padx=(6, 0))
 
         agentic_frame = ttk.LabelFrame(frame, text="Agentic Options", padding=8)
         agentic_frame.pack(fill="x", pady=(5, 0))
@@ -1765,6 +1789,33 @@ class AgenticRAGApp:
             self._run_on_ui(self._refresh_instructions_box)
         return instructions
 
+    def _get_output_style_instruction(self):
+        style = self.output_style.get().strip()
+        if not style or style == "Default answer":
+            return ""
+        style_instructions = {
+            "Detailed answer": (
+                "Output style: Detailed answer. Provide a thorough, well-structured "
+                "response with clear sections, concrete details, and explicit coverage "
+                "of requested items. Keep formatting readable with headings and bullets "
+                "as needed."
+            ),
+            "Brief / exec summary": (
+                "Output style: Brief / exec summary. Provide a concise executive summary "
+                "in 3-6 bullets or short paragraphs, focusing on key outcomes only."
+            ),
+            "Script / talk track": (
+                "Output style: Script / talk track. Provide a short talk track or script "
+                "with speaker-ready phrasing, organized as numbered beats or bullet points."
+            ),
+            "Structured report": (
+                "Output style: Structured report. Use clear section headings such as "
+                "Summary, Findings, Evidence, and Gaps/Unknowns. Use bullets within sections "
+                "where helpful."
+            ),
+        }
+        return style_instructions.get(style, "")
+
     def _refresh_instructions_box(self):
         self.instructions_box.delete("1.0", tk.END)
         self.instructions_box.insert(tk.END, self.system_instructions.get())
@@ -2509,10 +2560,12 @@ class AgenticRAGApp:
 
                 self.log("Generating Answer...")
                 llm = self.get_llm()
-                system_prompt = (
-                    f"{self._get_system_instructions()}\n\n"
-                    f"CONTEXT:\n{context_text}"
-                )
+                style_instruction = self._get_output_style_instruction()
+                prompt_parts = [self._get_system_instructions()]
+                if style_instruction:
+                    prompt_parts.append(style_instruction)
+                prompt_parts.append(f"CONTEXT:\n{context_text}")
+                system_prompt = "\n\n".join(prompt_parts)
                 history_window = self._get_history_window(current_query=query)
                 messages = [
                     SystemMessage(content=system_prompt),
@@ -2644,13 +2697,17 @@ class AgenticRAGApp:
                         "\nIf helpful, include a compact coverage table mapping checklist "
                         "items to evidence or NOT FOUND IN CONTEXT."
                     )
-                system_prompt = (
-                    f"{self._get_system_instructions()}\n\n"
+                style_instruction = self._get_output_style_instruction()
+                prompt_parts = [self._get_system_instructions()]
+                if style_instruction:
+                    prompt_parts.append(style_instruction)
+                prompt_parts.append(
                     "Strict rules: Use ONLY the context. If an item is missing, output "
-                    "exactly NOT FOUND IN CONTEXT for that item.\n"
-                    f"CHECKLIST:\n{checklist_text}\n\n"
-                    f"CONTEXT:\n{context_text}{coverage_note}"
+                    "exactly NOT FOUND IN CONTEXT for that item."
                 )
+                prompt_parts.append(f"CHECKLIST:\n{checklist_text}")
+                prompt_parts.append(f"CONTEXT:\n{context_text}{coverage_note}")
+                system_prompt = "\n\n".join(prompt_parts)
                 history_window = self._get_history_window(current_query=query)
                 messages = [
                     SystemMessage(content=system_prompt),
