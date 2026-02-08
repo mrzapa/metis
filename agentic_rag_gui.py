@@ -27,46 +27,8 @@ MAX_DIGEST_NODES = 60
 MAX_RAW_CHUNKS = 200
 MAX_PACKED_CONTEXT_CHARS = 60000
 MAX_GROUP_DOCS = 2
-MONTH_NAME_TO_INDEX = {
-    "jan": 1,
-    "january": 1,
-    "feb": 2,
-    "february": 2,
-    "mar": 3,
-    "march": 3,
-    "apr": 4,
-    "april": 4,
-    "may": 5,
-    "jun": 6,
-    "june": 6,
-    "jul": 7,
-    "july": 7,
-    "aug": 8,
-    "august": 8,
-    "sep": 9,
-    "sept": 9,
-    "september": 9,
-    "oct": 10,
-    "october": 10,
-    "nov": 11,
-    "november": 11,
-    "dec": 12,
-    "december": 12,
-}
-MONTH_INDEX_TO_LABEL = {
-    1: "Jan",
-    2: "Feb",
-    3: "Mar",
-    4: "Apr",
-    5: "May",
-    6: "Jun",
-    7: "Jul",
-    8: "Aug",
-    9: "Sep",
-    10: "Oct",
-    11: "Nov",
-    12: "Dec",
-}
+MIN_UNIQUE_INCIDENTS = 8
+MAX_UNIQUE_INCIDENTS = 12
 
 class AgenticRAGApp:
     def __init__(self, root):
@@ -1094,6 +1056,195 @@ class AgenticRAGApp:
             or metadata.get("required_context")
         )
 
+    @staticmethod
+    def _detect_channel_hint(text, metadata):
+        source = (
+            str(metadata.get("source") or metadata.get("file_path") or metadata.get("filename") or "")
+        )
+        combined = f"{source}\n{text}".lower()
+        if "teams" in combined:
+            return "teams"
+        if "whatsapp" in combined:
+            return "whatsapp"
+        if "email" in combined or "e-mail" in combined:
+            return "email"
+        if "call" in combined or "phone" in combined or "dial" in combined:
+            return "call"
+        return "unknown"
+
+    @staticmethod
+    def _month_to_number(month_name):
+        months = {
+            "jan": 1,
+            "january": 1,
+            "feb": 2,
+            "february": 2,
+            "mar": 3,
+            "march": 3,
+            "apr": 4,
+            "april": 4,
+            "may": 5,
+            "jun": 6,
+            "june": 6,
+            "jul": 7,
+            "july": 7,
+            "aug": 8,
+            "august": 8,
+            "sep": 9,
+            "sept": 9,
+            "september": 9,
+            "oct": 10,
+            "october": 10,
+            "nov": 11,
+            "november": 11,
+            "dec": 12,
+            "december": 12,
+        }
+        return months.get(month_name.lower())
+
+    def _extract_date_mentions(self, text):
+        mentions = []
+        if not text:
+            return mentions
+        patterns = []
+        patterns.append(
+            (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"), "ymd")
+        )
+        patterns.append(
+            (re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b"), "numeric")
+        )
+        patterns.append(
+            (
+                re.compile(
+                    r"\b(\d{1,2})\s+"
+                    r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
+                    r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|"
+                    r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+"
+                    r"(\d{4})\b",
+                    flags=re.I,
+                ),
+                "day_month_year",
+            )
+        )
+        patterns.append(
+            (
+                re.compile(
+                    r"\b(?:early|mid|late)\s+"
+                    r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
+                    r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|"
+                    r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+"
+                    r"(\d{4})\b",
+                    flags=re.I,
+                ),
+                "month_year",
+            )
+        )
+        patterns.append(
+            (
+                re.compile(
+                    r"\b"
+                    r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
+                    r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|"
+                    r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+"
+                    r"(\d{4})\b",
+                    flags=re.I,
+                ),
+                "month_year",
+            )
+        )
+        for pattern, kind in patterns:
+            for match in pattern.finditer(text):
+                if kind == "ymd":
+                    year, month, day = match.groups()
+                elif kind == "numeric":
+                    month, day, year = match.groups()
+                elif kind == "day_month_year":
+                    day, month_name, year = match.groups()
+                    month = self._month_to_number(month_name) or 0
+                    day = int(day)
+                    year = int(year)
+                    if month:
+                        mentions.append((match.start(), f"{year:04d}-{month:02d}-{day:02d}"))
+                    continue
+                elif kind == "month_year":
+                    month_name, year = match.groups()
+                    month = self._month_to_number(month_name) or 0
+                    year = int(year)
+                    if month:
+                        mentions.append((match.start(), f"{year:04d}-{month:02d}"))
+                    continue
+                if kind in {"ymd", "numeric"}:
+                    if len(year) == 2:
+                        year = int(f"20{year}")
+                    else:
+                        year = int(year)
+                    month = int(month)
+                    day = int(day)
+                    mentions.append((match.start(), f"{year:04d}-{month:02d}-{day:02d}"))
+        mentions.sort(key=lambda item: item[0])
+        return [value for _idx, value in mentions]
+
+    def _build_incident_key(self, doc):
+        content = (getattr(doc, "page_content", "") or "").strip()
+        metadata = getattr(doc, "metadata", {}) or {}
+        date_mentions = self._extract_date_mentions(content)
+        if date_mentions:
+            date_key = date_mentions[0]
+        else:
+            content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:10]
+            date_key = f"undated:{content_hash}"
+        channel_hint = self._detect_channel_hint(content, metadata)
+        return f"{date_key}:{channel_hint}"
+
+    def _score_doc_for_selection(self, doc):
+        content = (getattr(doc, "page_content", "") or "").strip()
+        metadata = getattr(doc, "metadata", {}) or {}
+        base_score = metadata.get("relevance_score")
+        try:
+            base_score = float(base_score)
+        except (TypeError, ValueError):
+            base_score = 0.0
+
+        date_mentions = self._extract_date_mentions(content)
+        quote_match = re.search(r"(\"[^\"]+\"|“[^”]+”)", content)
+        participant_match = re.search(
+            r"\b[A-Z][a-z]+ [A-Z][a-z]+\b", content
+        ) or re.search(
+            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", content
+        )
+        what_happened_match = re.search(
+            r"\b(incident|issue|complaint|reported|alleged|occurred|happened|"
+            r"breach|violation|harassment|grievance|escalated|confirmed|said|"
+            r"stated|told|raised)\b",
+            content,
+            flags=re.I,
+        )
+        advice_match = re.search(
+            r"\b(you should|we should|i recommend|recommend|suggest|consider|"
+            r"best practice|steps to|how to|guidance|advice|tips|as an ai)\b",
+            content,
+            flags=re.I,
+        )
+
+        score = base_score
+        if date_mentions:
+            score += 0.3
+        if quote_match:
+            score += 0.2
+        if participant_match:
+            score += 0.2
+        if what_happened_match:
+            score += 0.2
+        if advice_match:
+            score -= 0.3
+
+        incident_key = self._build_incident_key(doc)
+        metadata["incident_key"] = incident_key
+        metadata["selection_score"] = round(score, 4)
+        metadata["date_mentions"] = date_mentions
+        doc.metadata = metadata
+        return score, incident_key
+
     def _apply_coverage_selection(self, docs, final_k, group_limit=2):
         must_include = []
         remaining = []
@@ -1104,29 +1255,70 @@ class AgenticRAGApp:
                 remaining.append(doc)
 
         selected = list(must_include)
+        selected_ids = {id(doc) for doc in selected}
         group_counts = {}
+        incident_counts = {}
         for doc in selected:
             group_key = self._doc_group_key(doc)
             group_counts[group_key] = group_counts.get(group_key, 0) + 1
+            _score, incident_key = self._score_doc_for_selection(doc)
+            incident_counts[incident_key] = incident_counts.get(incident_key, 0) + 1
 
         priority_docs = [doc for doc in remaining if self._is_priority_doc(doc)]
         other_docs = [doc for doc in remaining if doc not in priority_docs]
 
+        scored_priority = []
+        scored_other = []
+        for doc in priority_docs:
+            score, incident_key = self._score_doc_for_selection(doc)
+            scored_priority.append((score, incident_key, doc))
+        for doc in other_docs:
+            score, incident_key = self._score_doc_for_selection(doc)
+            scored_other.append((score, incident_key, doc))
+        scored_priority.sort(key=lambda item: item[0], reverse=True)
+        scored_other.sort(key=lambda item: item[0], reverse=True)
+        scored_all = scored_priority + scored_other
+
+        if final_k < MIN_UNIQUE_INCIDENTS:
+            target_unique = final_k
+        else:
+            target_unique = min(final_k, MAX_UNIQUE_INCIDENTS)
+
         def _add_docs(candidates):
             nonlocal selected
-            for doc in candidates:
+            for _score, incident_key, doc in candidates:
                 if len(selected) >= final_k and not self._is_must_include(doc):
                     break
+                if id(doc) in selected_ids:
+                    continue
                 group_key = self._doc_group_key(doc)
                 count = group_counts.get(group_key, 0)
                 if count >= group_limit and not self._is_must_include(doc):
                     continue
                 selected.append(doc)
+                selected_ids.add(id(doc))
                 group_counts[group_key] = count + 1
+                incident_counts[incident_key] = incident_counts.get(incident_key, 0) + 1
 
-        _add_docs(priority_docs)
-        if len(selected) < final_k:
-            _add_docs(other_docs)
+        for _score, incident_key, doc in scored_all:
+            if len(selected) >= final_k:
+                break
+            if id(doc) in selected_ids:
+                continue
+            if incident_counts.get(incident_key):
+                continue
+            if len(incident_counts) >= target_unique:
+                break
+            group_key = self._doc_group_key(doc)
+            count = group_counts.get(group_key, 0)
+            if count >= group_limit and not self._is_must_include(doc):
+                continue
+            selected.append(doc)
+            selected_ids.add(id(doc))
+            group_counts[group_key] = count + 1
+            incident_counts[incident_key] = 1
+
+        _add_docs(scored_all)
 
         if len(selected) > final_k and len(must_include) <= final_k:
             selected = selected[:final_k]
@@ -3391,9 +3583,14 @@ class AgenticRAGApp:
                         planner_prompt = (
                             "You are an evidence-pack retrieval planner. Given the user query and "
                             "output_style, return strict JSON with keys: checklist_items (array of "
-                            "strings), retrieval_queries (array of 4-10 strings), section_plan "
-                            "(optional array). Ensure checklist and queries cover chronology/timeline, "
-                            "impacts, grievances, and concrete examples. Do not include any extra text."
+                            "strings), retrieval_queries (array of 8-15 strings), section_plan "
+                            "(optional array). Checklist must include: 6–12 strongest dated incidents, "
+                            "2–4 supporting examples, timeline fields, impacts. Retrieval queries must be "
+                            "generic coverage sweeps (not user-specified examples), including date sweeps "
+                            "(months/years), channel terms (Teams/email/call/meeting/WhatsApp), and role "
+                            "queries (formal grievance examples, key incidents, what happened impact "
+                            "evidence). Ensure checklist and queries cover chronology/timeline, impacts, "
+                            "grievances, and concrete examples. Do not include any extra text."
                         )
                     else:
                         planner_prompt = (
