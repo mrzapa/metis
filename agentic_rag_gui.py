@@ -1429,6 +1429,37 @@ class AgenticRAGApp:
             return
         print(msg, file=stream)
 
+    def _format_role_distribution(self, docs):
+        role_counts = {}
+        for doc in docs or []:
+            metadata = getattr(doc, "metadata", {}) or {}
+            role = metadata.get("speaker_role") or "unknown"
+            role_counts[role] = role_counts.get(role, 0) + 1
+        if not role_counts:
+            return "none"
+        parts = [f"{role}={count}" for role, count in sorted(role_counts.items())]
+        return ", ".join(parts)
+
+    def _log_final_docs_selection(
+        self,
+        retrieve_k,
+        candidate_k,
+        final_k,
+        trunc_used_chars,
+        trunc_budget_chars,
+        unique_incidents,
+        role_distribution,
+        rerank_top_n,
+        new_incidents_added,
+    ):
+        self.log(
+            "Final-docs selection telemetry | "
+            f"retrieve_k={retrieve_k}, candidate_k={candidate_k}, final_k={final_k}, "
+            f"packed_context_chars={trunc_used_chars}/{trunc_budget_chars}, "
+            f"unique_incidents={unique_incidents}, role_distribution={role_distribution}, "
+            f"rerank_top_n={rerank_top_n}, new_incidents_added={new_incidents_added}"
+        )
+
     def _on_vector_db_type_change(self, *_args):
         self._refresh_existing_indexes()
 
@@ -3480,6 +3511,7 @@ class AgenticRAGApp:
                     ) = self._review_evidence_pack_coverage(
                         candidate_docs, final_docs
                     )
+                    unique_incidents_value = unique_incidents
                     coverage_floor = max(3, min(final_k, len(final_docs)))
                     coverage_low = unique_incidents < coverage_floor or bool(
                         missing_months
@@ -3545,12 +3577,26 @@ class AgenticRAGApp:
                             self.log(
                                 "Evidence-pack follow-up skipped; no follow-up queries."
                             )
+                else:
+                    unique_incidents_value = len(final_docs)
                 (
                     context_text,
                     was_truncated,
                     trunc_used_chars,
                     trunc_budget_chars,
                 ) = _build_context(final_docs)
+                role_distribution = self._format_role_distribution(final_docs)
+                self._log_final_docs_selection(
+                    retrieve_k,
+                    candidate_k,
+                    final_k,
+                    trunc_used_chars,
+                    trunc_budget_chars,
+                    unique_incidents_value,
+                    role_distribution,
+                    final_k,
+                    unique_incidents_value,
+                )
                 planner_subquery_count = 0
                 if self.use_sub_queries.get():
                     planner_subquery_count = max(0, len(queries) - 1)
@@ -3720,6 +3766,7 @@ class AgenticRAGApp:
                         break
                     iteration_queries = critic_queries
 
+                prev_all_docs_count = len(all_docs)
                 remaining_cap = max(0, total_docs_cap - total_retrieved)
                 if remaining_cap == 0:
                     self.log("Total retrieved document cap reached; stopping iterations.")
@@ -3737,6 +3784,7 @@ class AgenticRAGApp:
                 )
                 total_retrieved += len(docs)
                 all_docs = self._merge_dedupe_docs(all_docs + docs)
+                new_incidents_added = len(all_docs) - prev_all_docs_count
                 unique_incident_count = len(all_docs)
                 if unique_incident_count <= last_unique_incident_count:
                     stagnant_iterations += 1
@@ -3768,6 +3816,7 @@ class AgenticRAGApp:
                     ) = self._review_evidence_pack_coverage(
                         candidate_docs, final_docs
                     )
+                    unique_incidents_value = unique_incidents
                     coverage_floor = max(3, min(final_k, len(final_docs)))
                     coverage_low = unique_incidents < coverage_floor or bool(
                         missing_months
@@ -3836,12 +3885,26 @@ class AgenticRAGApp:
                             self.log(
                                 "Evidence-pack follow-up skipped; no follow-up queries."
                             )
+                else:
+                    unique_incidents_value = len(final_docs)
                 (
                     context_text,
                     was_truncated,
                     trunc_used_chars,
                     trunc_budget_chars,
                 ) = _build_context(final_docs)
+                role_distribution = self._format_role_distribution(final_docs)
+                self._log_final_docs_selection(
+                    retrieve_k,
+                    candidate_k,
+                    final_k,
+                    trunc_used_chars,
+                    trunc_budget_chars,
+                    unique_incidents_value,
+                    role_distribution,
+                    final_k,
+                    new_incidents_added,
+                )
                 _log_iteration_telemetry(
                     iteration,
                     self.output_style.get(),
