@@ -8,6 +8,7 @@ import json
 import subprocess
 import importlib.util
 import re
+import hashlib
 from datetime import datetime
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -102,6 +103,9 @@ class AgenticRAGApp:
         self.fallback_final_k = tk.IntVar(value=self.final_k.get())
         self.search_type = tk.StringVar(value="similarity")
         self.mmr_lambda = tk.DoubleVar(value=0.5)
+        self.agentic_mode = tk.BooleanVar(value=False)
+        self.agentic_max_iterations = tk.IntVar(value=2)
+        self.show_retrieved_context = tk.BooleanVar(value=False)
 
         self.vector_store = None
         self.index_embedding_signature = ""
@@ -343,6 +347,18 @@ class AgenticRAGApp:
         self.final_k.set(data.get("final_k", self.final_k.get()))
         self.search_type.set(data.get("search_type", self.search_type.get()))
         self.mmr_lambda.set(data.get("mmr_lambda", self.mmr_lambda.get()))
+        # New config fields: agentic_mode, agentic_max_iterations, show_retrieved_context
+        self.agentic_mode.set(data.get("agentic_mode", self.agentic_mode.get()))
+        try:
+            max_iterations = int(
+                data.get("agentic_max_iterations", self.agentic_max_iterations.get())
+            )
+        except (TypeError, ValueError):
+            max_iterations = self.agentic_max_iterations.get()
+        self.agentic_max_iterations.set(max(1, min(3, max_iterations)))
+        self.show_retrieved_context.set(
+            data.get("show_retrieved_context", self.show_retrieved_context.get())
+        )
         self.index_embedding_signature = data.get(
             "index_embedding_signature", self.index_embedding_signature
         )
@@ -384,6 +400,10 @@ class AgenticRAGApp:
             "final_k": self.final_k.get(),
             "search_type": self.search_type.get(),
             "mmr_lambda": self.mmr_lambda.get(),
+            # New config fields: agentic_mode, agentic_max_iterations, show_retrieved_context
+            "agentic_mode": self.agentic_mode.get(),
+            "agentic_max_iterations": self.agentic_max_iterations.get(),
+            "show_retrieved_context": self.show_retrieved_context.get(),
             "index_embedding_signature": self.index_embedding_signature,
             "selected_index_path": self.selected_index_path,
         }
@@ -774,6 +794,27 @@ class AgenticRAGApp:
             side="left"
         )
 
+        agentic_frame = ttk.LabelFrame(frame, text="Agentic Options", padding=8)
+        agentic_frame.pack(fill="x", pady=(5, 0))
+        ttk.Checkbutton(
+            agentic_frame,
+            text="Agentic mode (iterate)",
+            variable=self.agentic_mode,
+        ).pack(side="left")
+        ttk.Label(agentic_frame, text="Max iterations:").pack(side="left", padx=(12, 4))
+        ttk.Spinbox(
+            agentic_frame,
+            from_=1,
+            to=3,
+            textvariable=self.agentic_max_iterations,
+            width=4,
+        ).pack(side="left")
+        ttk.Checkbutton(
+            agentic_frame,
+            text="Show retrieved context in chat",
+            variable=self.show_retrieved_context,
+        ).pack(side="left", padx=(12, 0))
+
     # --- Logic ---
 
     @staticmethod
@@ -862,19 +903,109 @@ class AgenticRAGApp:
         merged = []
         for doc in docs:
             metadata = getattr(doc, "metadata", {}) or {}
-            source = (
-                metadata.get("source")
-                or metadata.get("file_path")
-                or metadata.get("filename")
-                or ""
-            )
             content = (getattr(doc, "page_content", "") or "").strip()
-            key = (source, content)
+            chunk_id = metadata.get("chunk_id")
+            source = metadata.get("source") or metadata.get("file_path") or metadata.get(
+                "filename"
+            )
+            ingest_id = metadata.get("ingest_id")
+            if chunk_id and source and ingest_id:
+                key = (chunk_id, source, ingest_id)
+            else:
+                content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                key = content_hash
             if key in seen:
                 continue
             seen.add(key)
             merged.append(doc)
         return merged
+
+    @staticmethod
+    def _doc_group_key(doc):
+        metadata = getattr(doc, "metadata", {}) or {}
+        for field in (
+            "section",
+            "section_title",
+            "heading",
+            "header",
+            "title",
+            "doc_title",
+        ):
+            value = metadata.get(field)
+            if value:
+                return f"{field}:{value}"
+        source = metadata.get("source") or metadata.get("file_path") or metadata.get(
+            "filename"
+        )
+        content = (getattr(doc, "page_content", "") or "").strip()
+        prefix = content[:80]
+        return f"{source}:{prefix}"
+
+    @staticmethod
+    def _is_priority_doc(doc):
+        metadata = getattr(doc, "metadata", {}) or {}
+        if metadata.get("lexical_boost") or metadata.get("lexical_boosted"):
+            return True
+        if metadata.get("critic_missing") or metadata.get("critic_missing_items"):
+            return True
+        missing_items = metadata.get("missing_items") or metadata.get(
+            "missing_coverage"
+        )
+        if isinstance(missing_items, (list, tuple, set)):
+            return len(missing_items) > 0
+        return bool(missing_items)
+
+    @staticmethod
+    def _is_must_include(doc):
+        metadata = getattr(doc, "metadata", {}) or {}
+        return bool(
+            metadata.get("must_include")
+            or metadata.get("force_include")
+            or metadata.get("required_context")
+        )
+
+    def _apply_coverage_selection(self, docs, final_k, group_limit=2):
+        must_include = []
+        remaining = []
+        for doc in docs:
+            if self._is_must_include(doc):
+                must_include.append(doc)
+            else:
+                remaining.append(doc)
+
+        selected = list(must_include)
+        group_counts = {}
+        for doc in selected:
+            group_key = self._doc_group_key(doc)
+            group_counts[group_key] = group_counts.get(group_key, 0) + 1
+
+        priority_docs = [doc for doc in remaining if self._is_priority_doc(doc)]
+        other_docs = [doc for doc in remaining if doc not in priority_docs]
+
+        def _add_docs(candidates):
+            nonlocal selected
+            for doc in candidates:
+                if len(selected) >= final_k and not self._is_must_include(doc):
+                    break
+                group_key = self._doc_group_key(doc)
+                count = group_counts.get(group_key, 0)
+                if count >= group_limit and not self._is_must_include(doc):
+                    continue
+                selected.append(doc)
+                group_counts[group_key] = count + 1
+
+        _add_docs(priority_docs)
+        if len(selected) < final_k:
+            _add_docs(other_docs)
+
+        if len(selected) > final_k and len(must_include) <= final_k:
+            selected = selected[:final_k]
+        return selected
+
+    def _prioritize_must_include(self, docs):
+        must_include = [doc for doc in docs if self._is_must_include(doc)]
+        remainder = [doc for doc in docs if doc not in must_include]
+        return [*must_include, *remainder]
 
     def log(self, msg):
         def _append():
@@ -1474,6 +1605,14 @@ class AgenticRAGApp:
 
         raise ValueError(f"Unknown LLM provider: {provider}")
 
+    def _get_llm_with_temperature(self, temperature):
+        original_temperature = self.llm_temperature.get()
+        self.llm_temperature.set(temperature)
+        try:
+            return self.get_llm()
+        finally:
+            self.llm_temperature.set(original_temperature)
+
     def start_ingestion(self):
         if not self.selected_file:
             messagebox.showerror("Error", "Please select a file first.")
@@ -1492,6 +1631,56 @@ class AgenticRAGApp:
 
             if self.selected_file.lower().endswith(".html"):
                 from bs4 import BeautifulSoup
+                from bs4 import NavigableString
+
+                def _append_text_line(lines, text):
+                    clean = text.strip()
+                    if clean:
+                        lines.append(clean)
+
+                def _process_table(table_tag, lines):
+                    for row in table_tag.find_all("tr"):
+                        cells = [
+                            cell.get_text(" ", strip=True)
+                            for cell in row.find_all(["th", "td"])
+                        ]
+                        if any(cells):
+                            lines.append(" | ".join(cells))
+
+                def _process_list(list_tag, lines):
+                    for item in list_tag.find_all("li", recursive=False):
+                        nested_lists = item.find_all(["ul", "ol"], recursive=False)
+                        for nested in nested_lists:
+                            nested.extract()
+                        item_text = " ".join(item.stripped_strings)
+                        if item_text:
+                            lines.append(f"- {item_text}")
+                        for nested in nested_lists:
+                            _process_list(nested, lines)
+
+                def _process_children(parent, lines):
+                    for child in parent.children:
+                        if isinstance(child, NavigableString):
+                            _append_text_line(lines, str(child))
+                            continue
+                        if not hasattr(child, "name"):
+                            continue
+                        if child.name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+                            heading_text = child.get_text(" ", strip=True)
+                            if heading_text:
+                                lines.append(f"### {heading_text}")
+                            continue
+                        if child.name in {"ul", "ol"}:
+                            _process_list(child, lines)
+                            continue
+                        if child.name == "table":
+                            _process_table(child, lines)
+                            continue
+                        if child.name in {"p", "pre", "blockquote"}:
+                            paragraph_text = child.get_text(" ", strip=True)
+                            _append_text_line(lines, paragraph_text)
+                            continue
+                        _process_children(child, lines)
 
                 with open(self.selected_file, "r", encoding="utf-8", errors="ignore") as f:
                     soup = BeautifulSoup(f, "html.parser")
@@ -1501,7 +1690,10 @@ class AgenticRAGApp:
                     # Aggressive cleaning for RAG
                     for tag in soup(["script", "style", "svg", "path", "nav", "footer"]):
                         tag.extract()
-                    text_content = soup.get_text(separator="\n")
+                    lines = []
+                    root = soup.body or soup
+                    _process_children(root, lines)
+                    text_content = "\n".join(lines)
             else:
                 with open(self.selected_file, "r", encoding="utf-8") as f:
                     text_content = f.read()
@@ -1524,7 +1716,21 @@ class AgenticRAGApp:
             docs = splitter.create_documents([text_content])
             ingest_id = datetime.utcnow().isoformat()
             source_basename = os.path.basename(self.selected_file)
+            def _last_section_title(text):
+                last_heading = None
+                for line in text.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("### "):
+                        candidate = stripped[4:].strip()
+                        if candidate:
+                            last_heading = candidate
+                return last_heading
+
+            last_section_title = None
             for chunk_id, doc in enumerate(docs, start=1):
+                section_title = _last_section_title(doc.page_content)
+                if section_title:
+                    last_section_title = section_title
                 metadata = (doc.metadata or {}).copy()
                 metadata.update(
                     {
@@ -1535,6 +1741,8 @@ class AgenticRAGApp:
                 )
                 if doc_title:
                     metadata["doc_title"] = doc_title
+                if last_section_title:
+                    metadata["section_title"] = last_section_title
                 doc.metadata = metadata
             self.log(f"Created {len(docs)} text chunks.")
 
@@ -1709,7 +1917,10 @@ class AgenticRAGApp:
                 "required details",
             )
             normalized_query = query.lower()
-            if any(keyword in normalized_query for keyword in long_form_keywords):
+            is_long_form = any(
+                keyword in normalized_query for keyword in long_form_keywords
+            )
+            if is_long_form:
                 boosted_final_k = min(candidate_k, max(final_k, 12))
                 if boosted_final_k > 20:
                     boosted_final_k = min(candidate_k, 20)
@@ -1717,160 +1928,359 @@ class AgenticRAGApp:
                 self.log(f"Long-form intent detected; adjusted final_k to {final_k}.")
             search_type = self.search_type.get() or "similarity"
             mmr_lambda = float(self.mmr_lambda.get())
-            search_kwargs = {"k": candidate_k}
-            if search_type == "mmr":
-                search_kwargs.update(
-                    {"fetch_k": candidate_k, "lambda_mult": mmr_lambda}
-                )
-            queries = [query]
-            retrieval_counts = []
-            if self.use_sub_queries.get():
-                sub_queries = self._generate_sub_queries(query)
-                if sub_queries:
-                    queries = [query, *sub_queries]
-            max_total_docs = max(1, int(self.subquery_max_docs.get()))
-            if len(queries) == 1:
-                retriever = self.vector_store.as_retriever(
-                    search_type=search_type, search_kwargs=search_kwargs
-                )
-                docs = retriever.invoke(query)
-                retrieval_counts.append((query, len(docs)))
-            else:
-                per_query_k = max(1, min(candidate_k, max_total_docs // len(queries)))
-                per_query_kwargs = dict(search_kwargs)
-                per_query_kwargs["k"] = per_query_k
-                if search_type == "mmr":
-                    per_query_kwargs["fetch_k"] = per_query_k
-                retriever = self.vector_store.as_retriever(
-                    search_type=search_type, search_kwargs=per_query_kwargs
-                )
-                docs = []
-                for sub_query in queries:
-                    results = retriever.invoke(sub_query)
-                    retrieval_counts.append((sub_query, len(results)))
-                    docs.extend(results)
-                docs = self._merge_dedupe_docs(docs)
-                if len(docs) > max_total_docs:
-                    docs = docs[:max_total_docs]
+            total_docs_cap = 200
 
-            total_unique_docs = len(docs)
-            per_query_counts = ", ".join(
-                [f"{item[0]!r}:{item[1]}" for item in retrieval_counts]
-            )
-            sub_queries_used = queries[1:] if len(queries) > 1 else []
-            self.log(
-                f"Retrieved {total_unique_docs} initial candidates from {len(queries)} "
-                f"query(s)."
-            )
-            self.log(
-                "Telemetry (retrieval) - "
-                f"sub_queries={sub_queries_used}, "
-                f"per_query_counts={{ {per_query_counts} }}, "
-                f"total_unique_docs={total_unique_docs}"
-            )
-
-            # 2. Reranking (Cohere)
-            final_docs = docs
-            if self.use_reranker.get() and self.api_keys["cohere"].get():
+            def _extract_json_payload(text):
+                cleaned = text.strip()
+                if "```" in cleaned:
+                    parts = cleaned.split("```")
+                    if len(parts) >= 2:
+                        cleaned = parts[1].strip()
+                        if cleaned.lower().startswith("json"):
+                            cleaned = cleaned.split("\n", 1)[-1].strip()
                 try:
-                    self.log("Reranking with Cohere...")
-                    from langchain_cohere import CohereRerank
-                    compressor = CohereRerank(
-                        cohere_api_key=self.api_keys["cohere"].get(),
-                        top_n=final_k,
-                        model="rerank-english-v3.0",
+                    return json.loads(cleaned)
+                except json.JSONDecodeError:
+                    return None
+
+            def _build_search_kwargs(k_value):
+                search_kwargs_local = {"k": k_value}
+                if search_type == "mmr":
+                    search_kwargs_local.update(
+                        {"fetch_k": k_value, "lambda_mult": mmr_lambda}
                     )
-                    # We manually compress because we already have docs
-                    compressed_docs = compressor.compress_documents(docs, query)
-                    final_docs = compressed_docs
-                    self.log(
-                        f"Reranked down to {len(final_docs)} high-relevance chunks."
+                return search_kwargs_local
+
+            def _retrieve_for_queries(query_list, remaining_cap):
+                if remaining_cap <= 0:
+                    return [], 0, True
+                filtered_queries = [q for q in query_list if q]
+                if not filtered_queries:
+                    return [], 0, False
+                cap_reached = False
+                if len(filtered_queries) == 1:
+                    retriever = self.vector_store.as_retriever(
+                        search_type=search_type,
+                        search_kwargs=_build_search_kwargs(candidate_k),
                     )
-                except Exception as e:
-                    self.log(f"Rerank Error (Using raw retrieval instead): {e}")
-                    final_docs = docs[:final_k]  # Fallback to top K raw
-            else:
-                final_docs = docs[:final_k]  # No reranker, just take top K
+                    docs_local = retriever.invoke(filtered_queries[0])
+                else:
+                    per_query_k = max(
+                        1, min(candidate_k, max(1, remaining_cap) // len(filtered_queries))
+                    )
+                    retriever = self.vector_store.as_retriever(
+                        search_type=search_type,
+                        search_kwargs=_build_search_kwargs(per_query_k),
+                    )
+                    docs_local = []
+                    for sub_query in filtered_queries:
+                        docs_local.extend(retriever.invoke(sub_query))
+                retrieved_count_local = len(docs_local)
+                docs_local = self._merge_dedupe_docs(docs_local)
+                if len(docs_local) > remaining_cap:
+                    docs_local = docs_local[:remaining_cap]
+                    cap_reached = True
+                return docs_local, retrieved_count_local, cap_reached
 
-            # 3. Context Construction
-            stage = "packing"
-            def _clamp(value, min_value, max_value):
-                return max(min_value, min(max_value, value))
+            def _select_evidence_pack(doc_list, rerank_query):
+                if self.use_reranker.get() and self.api_keys["cohere"].get():
+                    try:
+                        self.log("Reranking with Cohere...")
+                        from langchain_cohere import CohereRerank
 
-            context_budget_chars = _clamp(
-                int(self.llm_max_tokens.get()) * 12, min_value=12000, max_value=80000
-            )
-            context_blocks = []
-            used_chars = 0
-            was_truncated = False
+                        compressor = CohereRerank(
+                            cohere_api_key=self.api_keys["cohere"].get(),
+                            top_n=final_k,
+                            model="rerank-english-v3.0",
+                        )
+                        compressed_docs = compressor.compress_documents(
+                            doc_list, rerank_query
+                        )
+                        self.log(
+                            f"Reranked down to {len(compressed_docs)} high-relevance chunks."
+                        )
+                        return compressed_docs
+                    except Exception as exc:
+                        self.log(f"Rerank Error (Using raw retrieval instead): {exc}")
+                return doc_list[:final_k]
 
-            for idx, doc in enumerate(final_docs, start=1):
-                metadata = getattr(doc, "metadata", {}) or {}
-                score = metadata.get("relevance_score", "N/A")
-                source = (
-                    metadata.get("source")
-                    or metadata.get("file_path")
-                    or metadata.get("filename")
-                    or "unknown"
+            def _build_context(doc_list):
+                def _clamp(value, min_value, max_value):
+                    return max(min_value, min(max_value, value))
+
+                context_budget_chars = _clamp(
+                    int(self.llm_max_tokens.get()) * 12,
+                    min_value=12000,
+                    max_value=80000,
                 )
-                chunk_id = metadata.get("chunk_id", "N/A")
-                header = (
-                    f"[Chunk {idx} | chunk_id: {chunk_id} | "
-                    f"score: {score} | source: {source}]"
-                )
-                content = doc.page_content.strip()
-                chunk_text = f"{header}\n{content}"
+                context_blocks = []
+                used_chars = 0
+                was_truncated = False
 
-                remaining = context_budget_chars - used_chars
-                if remaining <= 0:
-                    was_truncated = True
-                    break
-                if len(chunk_text) > remaining:
-                    was_truncated = True
-                    if remaining > len(header) + 20:
-                        truncated_content = content[: remaining - len(header) - 20].rstrip()
-                        chunk_text = f"{header}\n{truncated_content}\n...[truncated]"
-                    else:
+                for idx, doc in enumerate(doc_list, start=1):
+                    metadata = getattr(doc, "metadata", {}) or {}
+                    score = metadata.get("relevance_score", "N/A")
+                    source = (
+                        metadata.get("source")
+                        or metadata.get("file_path")
+                        or metadata.get("filename")
+                        or "unknown"
+                    )
+                    chunk_id = metadata.get("chunk_id", "N/A")
+                    header = (
+                        f"[Chunk {idx} | chunk_id: {chunk_id} | "
+                        f"score: {score} | source: {source}]"
+                    )
+                    content = doc.page_content.strip()
+                    chunk_text = f"{header}\n{content}"
+
+                    remaining = context_budget_chars - used_chars
+                    if remaining <= 0:
+                        was_truncated = True
                         break
-                context_blocks.append(chunk_text)
-                used_chars += len(chunk_text) + 2
+                    if len(chunk_text) > remaining:
+                        was_truncated = True
+                        if remaining > len(header) + 20:
+                            truncated_content = content[
+                                : remaining - len(header) - 20
+                            ].rstrip()
+                            chunk_text = (
+                                f"{header}\n{truncated_content}\n...[truncated]"
+                            )
+                        else:
+                            break
+                    context_blocks.append(chunk_text)
+                    used_chars += len(chunk_text) + 2
 
-            context_text = "\n\n".join(context_blocks)
-            self.log(
-                "Context stats - "
-                f"candidate_k={candidate_k}, final_k={final_k}, "
-                f"context_budget_chars={context_budget_chars}, "
-                f"context_chars={len(context_text)}, truncated={was_truncated}"
-            )
-            self.log(
-                "Telemetry (packing) - "
-                f"final_packed={len(context_blocks)}, truncated={was_truncated}"
-            )
+                return "\n\n".join(context_blocks), was_truncated
 
-            # 4. Generation
-            self.log("Generating Answer...")
-            stage = "prompting"
-            llm = self.get_llm()
+            def _append_context_if_enabled(iteration_label, context_text, truncated_flag):
+                if not self.show_retrieved_context.get():
+                    return
+                status = " (truncated)" if truncated_flag else ""
+                self.append_chat(
+                    "source",
+                    f"Retrieved context {iteration_label}{status}:\n{context_text}",
+                )
 
-            # Prompt
-            system_prompt = (
-                f"{self._get_system_instructions()}\n\n"
-                f"CONTEXT:\n{context_text}"
-            )
-            history_window = self._get_history_window(current_query=query)
-            messages = [
-                SystemMessage(content=system_prompt),
-                *history_window,
-                HumanMessage(content=query),
-            ]
+            def _log_iteration_telemetry(
+                iteration_id,
+                iteration_queries,
+                retrieved_count,
+                unique_docs,
+                packed_docs,
+                truncated_flag,
+                cap_reached_flag,
+            ):
+                self.log(f"Iteration {iteration_id} queries: {iteration_queries}")
+                self.log(
+                    "Iteration "
+                    f"{iteration_id} telemetry - retrieved={retrieved_count}, "
+                    f"unique_docs={unique_docs}, packed_docs={packed_docs}, "
+                    f"truncated={truncated_flag}, cap_reached={cap_reached_flag}"
+                )
 
-            response = llm.invoke(messages)
+            if not self.agentic_mode.get():
+                queries = [query]
+                if self.use_sub_queries.get():
+                    sub_queries = self._generate_sub_queries(query)
+                    if sub_queries:
+                        queries = [query, *sub_queries]
+                max_total_docs = max(1, int(self.subquery_max_docs.get()))
+                docs, retrieved_count, cap_reached = _retrieve_for_queries(
+                    queries, min(total_docs_cap, max_total_docs)
+                )
+                self.log(
+                    f"Retrieved {len(docs)} initial candidates from {len(queries)} query(s)."
+                )
+                final_docs = _select_evidence_pack(docs, query)
+                context_text, was_truncated = _build_context(final_docs)
+                _log_iteration_telemetry(
+                    1,
+                    queries,
+                    retrieved_count,
+                    len(docs),
+                    len(final_docs),
+                    was_truncated,
+                    cap_reached,
+                )
+                _append_context_if_enabled("(single pass)", context_text, was_truncated)
 
-            self.last_answer = response.content
-            self.append_chat("agent", f"AI: {response.content}")
-            self._append_history(AIMessage(content=response.content))
+                self.log("Generating Answer...")
+                llm = self.get_llm()
+                system_prompt = (
+                    f"{self._get_system_instructions()}\n\n"
+                    f"CONTEXT:\n{context_text}"
+                )
+                history_window = self._get_history_window(current_query=query)
+                messages = [
+                    SystemMessage(content=system_prompt),
+                    *history_window,
+                    HumanMessage(content=query),
+                ]
+                response = llm.invoke(messages)
 
-            # Show sources
+                self.last_answer = response.content
+                self.append_chat("agent", f"AI: {response.content}")
+                self._append_history(AIMessage(content=response.content))
+
+                sources_text = "\n".join(
+                    [
+                        (
+                            f"- [Chunk {idx} | chunk_id: "
+                            f"{getattr(d, 'metadata', {}).get('chunk_id', 'N/A')} | score: "
+                            f"{getattr(d, 'metadata', {}).get('relevance_score', 'N/A')} | "
+                            f"source: "
+                            f"{(getattr(d, 'metadata', {}) or {}).get('source') or (getattr(d, 'metadata', {}) or {}).get('file_path') or (getattr(d, 'metadata', {}) or {}).get('filename') or 'unknown'}]"
+                        )
+                        for idx, d in enumerate(final_docs, start=1)
+                    ]
+                )
+                self.append_chat("source", f"\nSources used:\n{sources_text}")
+                return
+
+            try:
+                max_iterations_value = int(self.agentic_max_iterations.get())
+            except (TypeError, ValueError):
+                max_iterations_value = 2
+            max_iterations = max(1, min(3, max_iterations_value))
+            total_retrieved = 0
+            all_docs = []
+            checklist = []
+            latest_answer = ""
+            final_docs = []
+            critic_queries = []
+
+            for iteration in range(1, max_iterations + 1):
+                if iteration == 1:
+                    planner_llm = self._get_llm_with_temperature(0.2)
+                    planner_prompt = (
+                        "You are a retrieval planner. Generate a checklist of key items "
+                        "the answer must cover and 3-6 focused search queries. "
+                        "Return JSON with keys: checklist (array of strings), queries "
+                        "(array of strings). Do not include extra text."
+                    )
+                    planner_messages = [
+                        SystemMessage(content=planner_prompt),
+                        HumanMessage(content=query),
+                    ]
+                    planner_response = planner_llm.invoke(planner_messages)
+                    plan_payload = _extract_json_payload(planner_response.content) or {}
+                    checklist = [
+                        str(item).strip()
+                        for item in plan_payload.get("checklist", [])
+                        if str(item).strip()
+                    ]
+                    sub_queries = [
+                        str(item).strip()
+                        for item in plan_payload.get("queries", [])
+                        if str(item).strip()
+                    ]
+                    if not checklist:
+                        checklist = [query.strip()]
+                    seen_queries = {query.lower().strip()}
+                    normalized_sub_queries = []
+                    for sub_query in sub_queries:
+                        key = sub_query.lower()
+                        if key and key not in seen_queries:
+                            seen_queries.add(key)
+                            normalized_sub_queries.append(sub_query)
+                    if len(normalized_sub_queries) < 3:
+                        fallback_queries = self._generate_sub_queries(query)
+                        for candidate in fallback_queries:
+                            key = candidate.lower().strip()
+                            if key and key not in seen_queries:
+                                seen_queries.add(key)
+                                normalized_sub_queries.append(candidate)
+                            if len(normalized_sub_queries) >= 3:
+                                break
+                    normalized_sub_queries = normalized_sub_queries[:6]
+                    iteration_queries = [query, *normalized_sub_queries]
+                else:
+                    if not critic_queries:
+                        self.log("No critic follow-up queries; stopping iterations.")
+                        break
+                    iteration_queries = critic_queries
+
+                remaining_cap = max(0, total_docs_cap - total_retrieved)
+                if remaining_cap == 0:
+                    self.log("Total retrieved document cap reached; stopping iterations.")
+                    break
+                docs, retrieved_count, cap_reached = _retrieve_for_queries(
+                    iteration_queries, remaining_cap
+                )
+                total_retrieved += retrieved_count
+                all_docs = self._merge_dedupe_docs(all_docs + docs)
+                final_docs = _select_evidence_pack(all_docs, query)
+                context_text, was_truncated = _build_context(final_docs)
+                _log_iteration_telemetry(
+                    iteration,
+                    iteration_queries,
+                    retrieved_count,
+                    len(all_docs),
+                    len(final_docs),
+                    was_truncated,
+                    cap_reached,
+                )
+                _append_context_if_enabled(
+                    f"(iteration {iteration})", context_text, was_truncated
+                )
+
+                self.log("Generating Answer...")
+                llm = self.get_llm()
+                checklist_text = "\n".join(f"- {item}" for item in checklist)
+                coverage_note = ""
+                if iteration > 1:
+                    coverage_note = (
+                        "\nIf helpful, include a compact coverage table mapping checklist "
+                        "items to evidence or NOT FOUND IN CONTEXT."
+                    )
+                system_prompt = (
+                    f"{self._get_system_instructions()}\n\n"
+                    "Strict rules: Use ONLY the context. If an item is missing, output "
+                    "exactly NOT FOUND IN CONTEXT for that item.\n"
+                    f"CHECKLIST:\n{checklist_text}\n\n"
+                    f"CONTEXT:\n{context_text}{coverage_note}"
+                )
+                history_window = self._get_history_window(current_query=query)
+                messages = [
+                    SystemMessage(content=system_prompt),
+                    *history_window,
+                    HumanMessage(content=query),
+                ]
+                response = llm.invoke(messages)
+                latest_answer = response.content
+
+                if iteration < max_iterations:
+                    critic_llm = self._get_llm_with_temperature(0.2)
+                    critic_prompt = (
+                        "You are a critic. Review the answer against the checklist and "
+                        "identify missing items. Propose 1-3 new search queries to fill gaps. "
+                        "Return JSON with keys: missing_items (array of strings), queries "
+                        "(array of strings). Do not include extra text."
+                    )
+                    critic_messages = [
+                        SystemMessage(content=critic_prompt),
+                        HumanMessage(
+                            content=(
+                                f"Checklist:\n{checklist_text}\n\n"
+                                f"Answer:\n{latest_answer}"
+                            )
+                        ),
+                    ]
+                    critic_response = critic_llm.invoke(critic_messages)
+                    critic_payload = _extract_json_payload(critic_response.content) or {}
+                    critic_queries = [
+                        str(item).strip()
+                        for item in critic_payload.get("queries", [])
+                        if str(item).strip()
+                    ][:3]
+
+            if latest_answer:
+                self.last_answer = latest_answer
+                self.append_chat("agent", f"AI: {latest_answer}")
+                self._append_history(AIMessage(content=latest_answer))
+
             sources_text = "\n".join(
                 [
                     (
