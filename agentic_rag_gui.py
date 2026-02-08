@@ -8,6 +8,7 @@ import json
 import subprocess
 import importlib.util
 from datetime import datetime
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 # --- Libraries check is done inside the class to prevent instant crash ---
 # Required: pip install langchain langchain-community langchain-openai langchain-anthropic langchain-google-genai langchain-cohere langchain-text-splitters chromadb beautifulsoup4 tiktoken
@@ -46,7 +47,13 @@ class AgenticRAGApp:
         self.default_system_instructions = (
             "You are an expert analyst assistant. Use the provided context to answer the "
             "user's question. If the answer is not in the context, say you don't know. "
-            "Cite specific sections if possible."
+            "Cite specific sections if possible, and be clear about any assumptions."
+        )
+        self.verbose_system_instructions = (
+            "You are an expert analyst assistant. Use the provided context to answer the "
+            "user's question. If the answer is not in the context, say you don't know. "
+            "Provide a concise summary, cite evidence from the context, list key points, "
+            "and explicitly note uncertainties or gaps."
         )
 
         # --- State Variables ---
@@ -92,6 +99,7 @@ class AgenticRAGApp:
         self.vector_store = None
         self.index_embedding_signature = ""
         self.chat_history = []
+        self.chat_history_max_turns = 6
         self.selected_file = None
         self.last_answer = ""
         self.dependency_prompted = False
@@ -249,6 +257,16 @@ class AgenticRAGApp:
 
     def _on_instructions_change(self, event=None):
         self.system_instructions.set(self.instructions_box.get("1.0", tk.END).strip())
+
+    def _on_verbose_mode_toggle(self):
+        if self.verbose_mode.get():
+            self._apply_instruction_template(self.verbose_system_instructions)
+        else:
+            self._apply_instruction_template(self.default_system_instructions)
+
+    def _apply_instruction_template(self, template):
+        self.system_instructions.set(template)
+        self._run_on_ui(self._refresh_instructions_box)
 
     def _current_embedding_signature(self):
         provider = self.embedding_provider.get()
@@ -482,6 +500,12 @@ class AgenticRAGApp:
         self.instructions_box.grid(row=12, column=1, sticky="ew", padx=5, pady=5)
         self.instructions_box.insert(tk.END, self.system_instructions.get())
         self.instructions_box.bind("<KeyRelease>", self._on_instructions_change)
+        ttk.Checkbutton(
+            llm_frame,
+            text="Verbose/Analytical mode",
+            variable=self.verbose_mode,
+            command=self._on_verbose_mode_toggle,
+        ).grid(row=13, column=1, sticky="w", padx=5, pady=(0, 5))
 
         # --- Vector DB Settings ---
         db_frame = ttk.LabelFrame(frame, text="Vector Database Strategy", padding=15)
@@ -731,6 +755,26 @@ class AgenticRAGApp:
             if num_bytes < 1024:
                 return f"{num_bytes:.1f} {unit}"
         return f"{num_bytes:.1f} PB"
+
+    def _append_history(self, message):
+        self.chat_history.append(message)
+        max_messages = self.chat_history_max_turns * 2
+        if len(self.chat_history) > max_messages:
+            self.chat_history = self.chat_history[-max_messages:]
+
+    def _get_history_window(self, current_query=None):
+        history = list(self.chat_history)
+        if (
+            current_query
+            and history
+            and isinstance(history[-1], HumanMessage)
+            and history[-1].content == current_query
+        ):
+            history = history[:-1]
+        max_messages = self.chat_history_max_turns * 2
+        if len(history) > max_messages:
+            history = history[-max_messages:]
+        return history
 
     def log(self, msg):
         def _append():
@@ -1443,6 +1487,7 @@ class AgenticRAGApp:
 
         self.txt_input.delete(0, tk.END)
         self.append_chat("user", f"You: {query}")
+        self._append_history(HumanMessage(content=query))
 
         if self.index_embedding_signature:
             current_signature = self._current_embedding_signature()
@@ -1546,15 +1591,18 @@ class AgenticRAGApp:
                 f"{self._get_system_instructions()}\n\n"
                 f"CONTEXT:\n{context_text}"
             )
-
-            from langchain_core.messages import HumanMessage, SystemMessage
-
-            messages = [SystemMessage(content=system_prompt), HumanMessage(content=query)]
+            history_window = self._get_history_window(current_query=query)
+            messages = [
+                SystemMessage(content=system_prompt),
+                *history_window,
+                HumanMessage(content=query),
+            ]
 
             response = llm.invoke(messages)
 
             self.last_answer = response.content
             self.append_chat("agent", f"AI: {response.content}")
+            self._append_history(AIMessage(content=response.content))
 
             # Show sources
             sources_text = "\n".join(
@@ -1583,6 +1631,7 @@ class AgenticRAGApp:
         self.chat_display.delete("1.0", tk.END)
         self.chat_display.config(state="disabled")
         self.last_answer = ""
+        self.chat_history = []
 
     def save_chat(self):
         transcript = self.chat_display.get("1.0", tk.END).strip()
