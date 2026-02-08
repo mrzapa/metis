@@ -106,6 +106,8 @@ class AgenticRAGApp:
         self.agentic_mode = tk.BooleanVar(value=False)
         self.agentic_max_iterations = tk.IntVar(value=2)
         self.show_retrieved_context = tk.BooleanVar(value=False)
+        self.use_sub_queries = tk.BooleanVar(value=False)
+        self.subquery_max_docs = tk.IntVar(value=25)
 
         self.vector_store = None
         self.index_embedding_signature = ""
@@ -359,6 +361,16 @@ class AgenticRAGApp:
         self.show_retrieved_context.set(
             data.get("show_retrieved_context", self.show_retrieved_context.get())
         )
+        self.use_sub_queries.set(
+            data.get("use_sub_queries", self.use_sub_queries.get())
+        )
+        try:
+            subquery_max_docs = int(
+                data.get("subquery_max_docs", self.subquery_max_docs.get())
+            )
+        except (TypeError, ValueError):
+            subquery_max_docs = self.subquery_max_docs.get()
+        self.subquery_max_docs.set(max(1, subquery_max_docs))
         self.index_embedding_signature = data.get(
             "index_embedding_signature", self.index_embedding_signature
         )
@@ -404,6 +416,8 @@ class AgenticRAGApp:
             "agentic_mode": self.agentic_mode.get(),
             "agentic_max_iterations": self.agentic_max_iterations.get(),
             "show_retrieved_context": self.show_retrieved_context.get(),
+            "use_sub_queries": self.use_sub_queries.get(),
+            "subquery_max_docs": self.subquery_max_docs.get(),
             "index_embedding_signature": self.index_embedding_signature,
             "selected_index_path": self.selected_index_path,
         }
