@@ -99,6 +99,9 @@ class AgenticRAGApp:
         self.fallback_final_k = tk.IntVar(value=self.final_k.get())
         self.search_type = tk.StringVar(value="similarity")
         self.mmr_lambda = tk.DoubleVar(value=0.5)
+        self.agentic_mode = tk.BooleanVar(value=False)
+        self.agentic_max_iterations = tk.IntVar(value=2)
+        self.show_retrieved_context = tk.BooleanVar(value=False)
 
         self.vector_store = None
         self.index_embedding_signature = ""
@@ -340,6 +343,18 @@ class AgenticRAGApp:
         self.final_k.set(data.get("final_k", self.final_k.get()))
         self.search_type.set(data.get("search_type", self.search_type.get()))
         self.mmr_lambda.set(data.get("mmr_lambda", self.mmr_lambda.get()))
+        # New config fields: agentic_mode, agentic_max_iterations, show_retrieved_context
+        self.agentic_mode.set(data.get("agentic_mode", self.agentic_mode.get()))
+        try:
+            max_iterations = int(
+                data.get("agentic_max_iterations", self.agentic_max_iterations.get())
+            )
+        except (TypeError, ValueError):
+            max_iterations = self.agentic_max_iterations.get()
+        self.agentic_max_iterations.set(max(1, min(3, max_iterations)))
+        self.show_retrieved_context.set(
+            data.get("show_retrieved_context", self.show_retrieved_context.get())
+        )
         self.index_embedding_signature = data.get(
             "index_embedding_signature", self.index_embedding_signature
         )
@@ -381,6 +396,10 @@ class AgenticRAGApp:
             "final_k": self.final_k.get(),
             "search_type": self.search_type.get(),
             "mmr_lambda": self.mmr_lambda.get(),
+            # New config fields: agentic_mode, agentic_max_iterations, show_retrieved_context
+            "agentic_mode": self.agentic_mode.get(),
+            "agentic_max_iterations": self.agentic_max_iterations.get(),
+            "show_retrieved_context": self.show_retrieved_context.get(),
             "index_embedding_signature": self.index_embedding_signature,
             "selected_index_path": self.selected_index_path,
         }
@@ -770,6 +789,27 @@ class AgenticRAGApp:
         ttk.Entry(opt_frame, textvariable=self.fallback_final_k, width=6).pack(
             side="left"
         )
+
+        agentic_frame = ttk.LabelFrame(frame, text="Agentic Options", padding=8)
+        agentic_frame.pack(fill="x", pady=(5, 0))
+        ttk.Checkbutton(
+            agentic_frame,
+            text="Agentic mode (iterate)",
+            variable=self.agentic_mode,
+        ).pack(side="left")
+        ttk.Label(agentic_frame, text="Max iterations:").pack(side="left", padx=(12, 4))
+        ttk.Spinbox(
+            agentic_frame,
+            from_=1,
+            to=3,
+            textvariable=self.agentic_max_iterations,
+            width=4,
+        ).pack(side="left")
+        ttk.Checkbutton(
+            agentic_frame,
+            text="Show retrieved context in chat",
+            variable=self.show_retrieved_context,
+        ).pack(side="left", padx=(12, 0))
 
     # --- Logic ---
 
@@ -1471,6 +1511,14 @@ class AgenticRAGApp:
 
         raise ValueError(f"Unknown LLM provider: {provider}")
 
+    def _get_llm_with_temperature(self, temperature):
+        original_temperature = self.llm_temperature.get()
+        self.llm_temperature.set(temperature)
+        try:
+            return self.get_llm()
+        finally:
+            self.llm_temperature.set(original_temperature)
+
     def start_ingestion(self):
         if not self.selected_file:
             messagebox.showerror("Error", "Please select a file first.")
@@ -1713,138 +1761,359 @@ class AgenticRAGApp:
                 self.log(f"Long-form intent detected; adjusted final_k to {final_k}.")
             search_type = self.search_type.get() or "similarity"
             mmr_lambda = float(self.mmr_lambda.get())
-            search_kwargs = {"k": candidate_k}
-            if search_type == "mmr":
-                search_kwargs.update(
-                    {"fetch_k": candidate_k, "lambda_mult": mmr_lambda}
-                )
-            queries = [query]
-            if self.use_sub_queries.get():
-                sub_queries = self._generate_sub_queries(query)
-                if sub_queries:
-                    queries = [query, *sub_queries]
-            max_total_docs = max(1, int(self.subquery_max_docs.get()))
-            if len(queries) == 1:
-                retriever = self.vector_store.as_retriever(
-                    search_type=search_type, search_kwargs=search_kwargs
-                )
-                docs = retriever.invoke(query)
-            else:
-                per_query_k = max(1, min(candidate_k, max_total_docs // len(queries)))
-                per_query_kwargs = dict(search_kwargs)
-                per_query_kwargs["k"] = per_query_k
-                if search_type == "mmr":
-                    per_query_kwargs["fetch_k"] = per_query_k
-                retriever = self.vector_store.as_retriever(
-                    search_type=search_type, search_kwargs=per_query_kwargs
-                )
-                docs = []
-                for sub_query in queries:
-                    docs.extend(retriever.invoke(sub_query))
-                docs = self._merge_dedupe_docs(docs)
-                if len(docs) > max_total_docs:
-                    docs = docs[:max_total_docs]
+            total_docs_cap = 200
 
-            self.log(
-                f"Retrieved {len(docs)} initial candidates from {len(queries)} query(s)."
-            )
-
-            # 2. Reranking (Cohere)
-            final_docs = docs
-            if self.use_reranker.get() and self.api_keys["cohere"].get():
+            def _extract_json_payload(text):
+                cleaned = text.strip()
+                if "```" in cleaned:
+                    parts = cleaned.split("```")
+                    if len(parts) >= 2:
+                        cleaned = parts[1].strip()
+                        if cleaned.lower().startswith("json"):
+                            cleaned = cleaned.split("\n", 1)[-1].strip()
                 try:
-                    self.log("Reranking with Cohere...")
-                    from langchain_cohere import CohereRerank
-                    compressor = CohereRerank(
-                        cohere_api_key=self.api_keys["cohere"].get(),
-                        top_n=final_k,
-                        model="rerank-english-v3.0",
+                    return json.loads(cleaned)
+                except json.JSONDecodeError:
+                    return None
+
+            def _build_search_kwargs(k_value):
+                search_kwargs_local = {"k": k_value}
+                if search_type == "mmr":
+                    search_kwargs_local.update(
+                        {"fetch_k": k_value, "lambda_mult": mmr_lambda}
                     )
-                    # We manually compress because we already have docs
-                    compressed_docs = compressor.compress_documents(docs, query)
-                    final_docs = compressed_docs
-                    self.log(
-                        f"Reranked down to {len(final_docs)} high-relevance chunks."
+                return search_kwargs_local
+
+            def _retrieve_for_queries(query_list, remaining_cap):
+                if remaining_cap <= 0:
+                    return [], 0, True
+                filtered_queries = [q for q in query_list if q]
+                if not filtered_queries:
+                    return [], 0, False
+                cap_reached = False
+                if len(filtered_queries) == 1:
+                    retriever = self.vector_store.as_retriever(
+                        search_type=search_type,
+                        search_kwargs=_build_search_kwargs(candidate_k),
                     )
-                except Exception as e:
-                    self.log(f"Rerank Error (Using raw retrieval instead): {e}")
-                    final_docs = docs[:final_k]  # Fallback to top K raw
-            else:
-                final_docs = docs[:final_k]  # No reranker, just take top K
+                    docs_local = retriever.invoke(filtered_queries[0])
+                else:
+                    per_query_k = max(
+                        1, min(candidate_k, max(1, remaining_cap) // len(filtered_queries))
+                    )
+                    retriever = self.vector_store.as_retriever(
+                        search_type=search_type,
+                        search_kwargs=_build_search_kwargs(per_query_k),
+                    )
+                    docs_local = []
+                    for sub_query in filtered_queries:
+                        docs_local.extend(retriever.invoke(sub_query))
+                retrieved_count_local = len(docs_local)
+                docs_local = self._merge_dedupe_docs(docs_local)
+                if len(docs_local) > remaining_cap:
+                    docs_local = docs_local[:remaining_cap]
+                    cap_reached = True
+                return docs_local, retrieved_count_local, cap_reached
 
-            # 3. Context Construction
-            def _clamp(value, min_value, max_value):
-                return max(min_value, min(max_value, value))
+            def _select_evidence_pack(doc_list, rerank_query):
+                if self.use_reranker.get() and self.api_keys["cohere"].get():
+                    try:
+                        self.log("Reranking with Cohere...")
+                        from langchain_cohere import CohereRerank
 
-            context_budget_chars = _clamp(
-                int(self.llm_max_tokens.get()) * 12, min_value=12000, max_value=80000
-            )
-            context_blocks = []
-            used_chars = 0
-            was_truncated = False
+                        compressor = CohereRerank(
+                            cohere_api_key=self.api_keys["cohere"].get(),
+                            top_n=final_k,
+                            model="rerank-english-v3.0",
+                        )
+                        compressed_docs = compressor.compress_documents(
+                            doc_list, rerank_query
+                        )
+                        self.log(
+                            f"Reranked down to {len(compressed_docs)} high-relevance chunks."
+                        )
+                        return compressed_docs
+                    except Exception as exc:
+                        self.log(f"Rerank Error (Using raw retrieval instead): {exc}")
+                return doc_list[:final_k]
 
-            for idx, doc in enumerate(final_docs, start=1):
-                metadata = getattr(doc, "metadata", {}) or {}
-                score = metadata.get("relevance_score", "N/A")
-                source = (
-                    metadata.get("source")
-                    or metadata.get("file_path")
-                    or metadata.get("filename")
-                    or "unknown"
+            def _build_context(doc_list):
+                def _clamp(value, min_value, max_value):
+                    return max(min_value, min(max_value, value))
+
+                context_budget_chars = _clamp(
+                    int(self.llm_max_tokens.get()) * 12,
+                    min_value=12000,
+                    max_value=80000,
                 )
-                chunk_id = metadata.get("chunk_id", "N/A")
-                header = (
-                    f"[Chunk {idx} | chunk_id: {chunk_id} | "
-                    f"score: {score} | source: {source}]"
-                )
-                content = doc.page_content.strip()
-                chunk_text = f"{header}\n{content}"
+                context_blocks = []
+                used_chars = 0
+                was_truncated = False
 
-                remaining = context_budget_chars - used_chars
-                if remaining <= 0:
-                    was_truncated = True
-                    break
-                if len(chunk_text) > remaining:
-                    was_truncated = True
-                    if remaining > len(header) + 20:
-                        truncated_content = content[: remaining - len(header) - 20].rstrip()
-                        chunk_text = f"{header}\n{truncated_content}\n...[truncated]"
-                    else:
+                for idx, doc in enumerate(doc_list, start=1):
+                    metadata = getattr(doc, "metadata", {}) or {}
+                    score = metadata.get("relevance_score", "N/A")
+                    source = (
+                        metadata.get("source")
+                        or metadata.get("file_path")
+                        or metadata.get("filename")
+                        or "unknown"
+                    )
+                    chunk_id = metadata.get("chunk_id", "N/A")
+                    header = (
+                        f"[Chunk {idx} | chunk_id: {chunk_id} | "
+                        f"score: {score} | source: {source}]"
+                    )
+                    content = doc.page_content.strip()
+                    chunk_text = f"{header}\n{content}"
+
+                    remaining = context_budget_chars - used_chars
+                    if remaining <= 0:
+                        was_truncated = True
                         break
-                context_blocks.append(chunk_text)
-                used_chars += len(chunk_text) + 2
+                    if len(chunk_text) > remaining:
+                        was_truncated = True
+                        if remaining > len(header) + 20:
+                            truncated_content = content[
+                                : remaining - len(header) - 20
+                            ].rstrip()
+                            chunk_text = (
+                                f"{header}\n{truncated_content}\n...[truncated]"
+                            )
+                        else:
+                            break
+                    context_blocks.append(chunk_text)
+                    used_chars += len(chunk_text) + 2
 
-            context_text = "\n\n".join(context_blocks)
-            self.log(
-                "Context stats - "
-                f"candidate_k={candidate_k}, final_k={final_k}, "
-                f"context_budget_chars={context_budget_chars}, "
-                f"context_chars={len(context_text)}, truncated={was_truncated}"
-            )
+                return "\n\n".join(context_blocks), was_truncated
 
-            # 4. Generation
-            self.log("Generating Answer...")
-            llm = self.get_llm()
+            def _append_context_if_enabled(iteration_label, context_text, truncated_flag):
+                if not self.show_retrieved_context.get():
+                    return
+                status = " (truncated)" if truncated_flag else ""
+                self.append_chat(
+                    "source",
+                    f"Retrieved context {iteration_label}{status}:\n{context_text}",
+                )
 
-            # Prompt
-            system_prompt = (
-                f"{self._get_system_instructions()}\n\n"
-                f"CONTEXT:\n{context_text}"
-            )
-            history_window = self._get_history_window(current_query=query)
-            messages = [
-                SystemMessage(content=system_prompt),
-                *history_window,
-                HumanMessage(content=query),
-            ]
+            def _log_iteration_telemetry(
+                iteration_id,
+                iteration_queries,
+                retrieved_count,
+                unique_docs,
+                packed_docs,
+                truncated_flag,
+                cap_reached_flag,
+            ):
+                self.log(f"Iteration {iteration_id} queries: {iteration_queries}")
+                self.log(
+                    "Iteration "
+                    f"{iteration_id} telemetry - retrieved={retrieved_count}, "
+                    f"unique_docs={unique_docs}, packed_docs={packed_docs}, "
+                    f"truncated={truncated_flag}, cap_reached={cap_reached_flag}"
+                )
 
-            response = llm.invoke(messages)
+            if not self.agentic_mode.get():
+                queries = [query]
+                if self.use_sub_queries.get():
+                    sub_queries = self._generate_sub_queries(query)
+                    if sub_queries:
+                        queries = [query, *sub_queries]
+                max_total_docs = max(1, int(self.subquery_max_docs.get()))
+                docs, retrieved_count, cap_reached = _retrieve_for_queries(
+                    queries, min(total_docs_cap, max_total_docs)
+                )
+                self.log(
+                    f"Retrieved {len(docs)} initial candidates from {len(queries)} query(s)."
+                )
+                final_docs = _select_evidence_pack(docs, query)
+                context_text, was_truncated = _build_context(final_docs)
+                _log_iteration_telemetry(
+                    1,
+                    queries,
+                    retrieved_count,
+                    len(docs),
+                    len(final_docs),
+                    was_truncated,
+                    cap_reached,
+                )
+                _append_context_if_enabled("(single pass)", context_text, was_truncated)
 
-            self.last_answer = response.content
-            self.append_chat("agent", f"AI: {response.content}")
-            self._append_history(AIMessage(content=response.content))
+                self.log("Generating Answer...")
+                llm = self.get_llm()
+                system_prompt = (
+                    f"{self._get_system_instructions()}\n\n"
+                    f"CONTEXT:\n{context_text}"
+                )
+                history_window = self._get_history_window(current_query=query)
+                messages = [
+                    SystemMessage(content=system_prompt),
+                    *history_window,
+                    HumanMessage(content=query),
+                ]
+                response = llm.invoke(messages)
 
-            # Show sources
+                self.last_answer = response.content
+                self.append_chat("agent", f"AI: {response.content}")
+                self._append_history(AIMessage(content=response.content))
+
+                sources_text = "\n".join(
+                    [
+                        (
+                            f"- [Chunk {idx} | chunk_id: "
+                            f"{getattr(d, 'metadata', {}).get('chunk_id', 'N/A')} | score: "
+                            f"{getattr(d, 'metadata', {}).get('relevance_score', 'N/A')} | "
+                            f"source: "
+                            f"{(getattr(d, 'metadata', {}) or {}).get('source') or (getattr(d, 'metadata', {}) or {}).get('file_path') or (getattr(d, 'metadata', {}) or {}).get('filename') or 'unknown'}]"
+                        )
+                        for idx, d in enumerate(final_docs, start=1)
+                    ]
+                )
+                self.append_chat("source", f"\nSources used:\n{sources_text}")
+                return
+
+            try:
+                max_iterations_value = int(self.agentic_max_iterations.get())
+            except (TypeError, ValueError):
+                max_iterations_value = 2
+            max_iterations = max(1, min(3, max_iterations_value))
+            total_retrieved = 0
+            all_docs = []
+            checklist = []
+            latest_answer = ""
+            final_docs = []
+            critic_queries = []
+
+            for iteration in range(1, max_iterations + 1):
+                if iteration == 1:
+                    planner_llm = self._get_llm_with_temperature(0.2)
+                    planner_prompt = (
+                        "You are a retrieval planner. Generate a checklist of key items "
+                        "the answer must cover and 3-6 focused search queries. "
+                        "Return JSON with keys: checklist (array of strings), queries "
+                        "(array of strings). Do not include extra text."
+                    )
+                    planner_messages = [
+                        SystemMessage(content=planner_prompt),
+                        HumanMessage(content=query),
+                    ]
+                    planner_response = planner_llm.invoke(planner_messages)
+                    plan_payload = _extract_json_payload(planner_response.content) or {}
+                    checklist = [
+                        str(item).strip()
+                        for item in plan_payload.get("checklist", [])
+                        if str(item).strip()
+                    ]
+                    sub_queries = [
+                        str(item).strip()
+                        for item in plan_payload.get("queries", [])
+                        if str(item).strip()
+                    ]
+                    if not checklist:
+                        checklist = [query.strip()]
+                    seen_queries = {query.lower().strip()}
+                    normalized_sub_queries = []
+                    for sub_query in sub_queries:
+                        key = sub_query.lower()
+                        if key and key not in seen_queries:
+                            seen_queries.add(key)
+                            normalized_sub_queries.append(sub_query)
+                    if len(normalized_sub_queries) < 3:
+                        fallback_queries = self._generate_sub_queries(query)
+                        for candidate in fallback_queries:
+                            key = candidate.lower().strip()
+                            if key and key not in seen_queries:
+                                seen_queries.add(key)
+                                normalized_sub_queries.append(candidate)
+                            if len(normalized_sub_queries) >= 3:
+                                break
+                    normalized_sub_queries = normalized_sub_queries[:6]
+                    iteration_queries = [query, *normalized_sub_queries]
+                else:
+                    if not critic_queries:
+                        self.log("No critic follow-up queries; stopping iterations.")
+                        break
+                    iteration_queries = critic_queries
+
+                remaining_cap = max(0, total_docs_cap - total_retrieved)
+                if remaining_cap == 0:
+                    self.log("Total retrieved document cap reached; stopping iterations.")
+                    break
+                docs, retrieved_count, cap_reached = _retrieve_for_queries(
+                    iteration_queries, remaining_cap
+                )
+                total_retrieved += retrieved_count
+                all_docs = self._merge_dedupe_docs(all_docs + docs)
+                final_docs = _select_evidence_pack(all_docs, query)
+                context_text, was_truncated = _build_context(final_docs)
+                _log_iteration_telemetry(
+                    iteration,
+                    iteration_queries,
+                    retrieved_count,
+                    len(all_docs),
+                    len(final_docs),
+                    was_truncated,
+                    cap_reached,
+                )
+                _append_context_if_enabled(
+                    f"(iteration {iteration})", context_text, was_truncated
+                )
+
+                self.log("Generating Answer...")
+                llm = self.get_llm()
+                checklist_text = "\n".join(f"- {item}" for item in checklist)
+                coverage_note = ""
+                if iteration > 1:
+                    coverage_note = (
+                        "\nIf helpful, include a compact coverage table mapping checklist "
+                        "items to evidence or NOT FOUND IN CONTEXT."
+                    )
+                system_prompt = (
+                    f"{self._get_system_instructions()}\n\n"
+                    "Strict rules: Use ONLY the context. If an item is missing, output "
+                    "exactly NOT FOUND IN CONTEXT for that item.\n"
+                    f"CHECKLIST:\n{checklist_text}\n\n"
+                    f"CONTEXT:\n{context_text}{coverage_note}"
+                )
+                history_window = self._get_history_window(current_query=query)
+                messages = [
+                    SystemMessage(content=system_prompt),
+                    *history_window,
+                    HumanMessage(content=query),
+                ]
+                response = llm.invoke(messages)
+                latest_answer = response.content
+
+                if iteration < max_iterations:
+                    critic_llm = self._get_llm_with_temperature(0.2)
+                    critic_prompt = (
+                        "You are a critic. Review the answer against the checklist and "
+                        "identify missing items. Propose 1-3 new search queries to fill gaps. "
+                        "Return JSON with keys: missing_items (array of strings), queries "
+                        "(array of strings). Do not include extra text."
+                    )
+                    critic_messages = [
+                        SystemMessage(content=critic_prompt),
+                        HumanMessage(
+                            content=(
+                                f"Checklist:\n{checklist_text}\n\n"
+                                f"Answer:\n{latest_answer}"
+                            )
+                        ),
+                    ]
+                    critic_response = critic_llm.invoke(critic_messages)
+                    critic_payload = _extract_json_payload(critic_response.content) or {}
+                    critic_queries = [
+                        str(item).strip()
+                        for item in critic_payload.get("queries", [])
+                        if str(item).strip()
+                    ][:3]
+
+            if latest_answer:
+                self.last_answer = latest_answer
+                self.append_chat("agent", f"AI: {latest_answer}")
+                self._append_history(AIMessage(content=latest_answer))
+
             sources_text = "\n".join(
                 [
                     (
