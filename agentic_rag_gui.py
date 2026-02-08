@@ -10,11 +10,17 @@ import importlib.util
 import re
 import hashlib
 from datetime import datetime
+from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 # --- Libraries check is done inside the class to prevent instant crash ---
 # Required: pip install langchain langchain-community langchain-openai langchain-anthropic langchain-google-genai langchain-cohere langchain-text-splitters chromadb beautifulsoup4 tiktoken
 
+RAW_COLLECTION_NAME = "rag_collection"
+DIGEST_COLLECTION_NAME = "rag_digest_collection"
+DIGEST_WINDOW_MIN = 10
+DIGEST_WINDOW_MAX = 20
+DIGEST_WINDOW_TARGET = 15
 
 class AgenticRAGApp:
     def __init__(self, root):
@@ -86,6 +92,7 @@ class AgenticRAGApp:
         self.local_llm_url = tk.StringVar(value="http://localhost:1234/v1")
         self.chunk_size = tk.IntVar(value=1000)
         self.chunk_overlap = tk.IntVar(value=200)
+        self.build_digest_index = tk.BooleanVar(value=True)
 
         self.llm_model = tk.StringVar(value="claude-opus-4-6")
         self.llm_model_custom = tk.StringVar()
@@ -120,6 +127,7 @@ class AgenticRAGApp:
         self.existing_index_var = tk.StringVar(value="(default)")
         self.existing_index_paths = {}
         self.selected_index_path = None
+        self.selected_collection_name = RAW_COLLECTION_NAME
 
         self.setup_ui()
         self.load_config()
@@ -335,6 +343,9 @@ class AgenticRAGApp:
         self.local_llm_url.set(data.get("local_llm_url", self.local_llm_url.get()))
         self.chunk_size.set(data.get("chunk_size", self.chunk_size.get()))
         self.chunk_overlap.set(data.get("chunk_overlap", self.chunk_overlap.get()))
+        self.build_digest_index.set(
+            bool(data.get("build_digest_index", self.build_digest_index.get()))
+        )
         self.llm_model.set(data.get("llm_model", self.llm_model.get()))
         self.llm_model_custom.set(data.get("llm_model_custom", self.llm_model_custom.get()))
         self.embedding_model.set(data.get("embedding_model", self.embedding_model.get()))
@@ -386,6 +397,9 @@ class AgenticRAGApp:
         self.selected_index_path = data.get(
             "selected_index_path", self.selected_index_path
         )
+        self.selected_collection_name = data.get(
+            "selected_collection_name", self.selected_collection_name
+        )
 
         instructions = data.get("system_instructions", self.system_instructions.get())
         self.system_instructions.set(instructions or self.default_system_instructions)
@@ -394,11 +408,13 @@ class AgenticRAGApp:
 
         self._sync_model_options()
         self._refresh_compatibility_warning()
+        self._refresh_existing_indexes()
         if self.selected_index_path:
-            self.existing_index_var.set(
-                self._format_index_label(self.selected_index_path)
+            selection_label = self._format_index_label(
+                self.selected_index_path, self.selected_collection_name
             )
-            self._refresh_existing_indexes()
+            if selection_label in self.existing_index_paths:
+                self.existing_index_var.set(selection_label)
 
     def save_config(self):
         try:
@@ -413,6 +429,7 @@ class AgenticRAGApp:
             "local_llm_url": self.local_llm_url.get(),
             "chunk_size": self.chunk_size.get(),
             "chunk_overlap": self.chunk_overlap.get(),
+            "build_digest_index": self.build_digest_index.get(),
             "llm_model": self.llm_model.get(),
             "llm_model_custom": self.llm_model_custom.get(),
             "embedding_model": self.embedding_model.get(),
@@ -435,6 +452,7 @@ class AgenticRAGApp:
             "fallback_final_k": self.fallback_final_k.get(),
             "index_embedding_signature": self.index_embedding_signature,
             "selected_index_path": self.selected_index_path,
+            "selected_collection_name": self.selected_collection_name,
         }
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
@@ -683,6 +701,12 @@ class AgenticRAGApp:
         ttk.Entry(chunk_frame, textvariable=self.chunk_overlap, width=10).pack(
             side="left", padx=5
         )
+
+        ttk.Checkbutton(
+            chunk_frame,
+            text="Build digest index",
+            variable=self.build_digest_index,
+        ).pack(side="left", padx=(20, 0))
 
         # Action
         self.btn_ingest = ttk.Button(
@@ -1075,6 +1099,129 @@ class AgenticRAGApp:
         return safe_stem or "ingest"
 
     @staticmethod
+    def _compact_chunk_ids(chunk_ids):
+        filtered = sorted({int(cid) for cid in chunk_ids if str(cid).isdigit()})
+        if not filtered:
+            return ""
+        ranges = []
+        start = prev = filtered[0]
+        for cid in filtered[1:]:
+            if cid == prev + 1:
+                prev = cid
+                continue
+            ranges.append((start, prev))
+            start = prev = cid
+        ranges.append((start, prev))
+        return ",".join(
+            str(start) if start == end else f"{start}-{end}"
+            for start, end in ranges
+        )
+
+    def _split_into_digest_windows(self, docs):
+        windows = []
+        total = len(docs)
+        if total <= DIGEST_WINDOW_MAX:
+            return [docs]
+        idx = 0
+        while idx < total:
+            remaining = total - idx
+            if remaining <= DIGEST_WINDOW_MAX:
+                windows.append(docs[idx:])
+                break
+            take = min(DIGEST_WINDOW_TARGET, DIGEST_WINDOW_MAX)
+            if remaining - take < DIGEST_WINDOW_MIN:
+                take = remaining - DIGEST_WINDOW_MIN
+            take = max(DIGEST_WINDOW_MIN, min(DIGEST_WINDOW_MAX, take))
+            windows.append(docs[idx : idx + take])
+            idx += take
+        return windows
+
+    def _group_chunks_for_digest(self, docs):
+        groups = []
+        buffer = []
+        buffer_title = None
+
+        def _flush():
+            nonlocal buffer, buffer_title
+            if not buffer:
+                return
+            if buffer_title and len(buffer) > DIGEST_WINDOW_MAX:
+                windows = self._split_into_digest_windows(buffer)
+            elif buffer_title:
+                windows = [buffer]
+            else:
+                windows = self._split_into_digest_windows(buffer)
+            for window in windows:
+                groups.append((window, buffer_title))
+            buffer = []
+            buffer_title = None
+
+        for doc in docs:
+            section_title = (doc.metadata or {}).get("section_title")
+            if section_title:
+                if buffer and buffer_title != section_title:
+                    _flush()
+                buffer_title = section_title
+                buffer.append(doc)
+            else:
+                if buffer and buffer_title:
+                    _flush()
+                buffer_title = None
+                buffer.append(doc)
+                if len(buffer) >= DIGEST_WINDOW_MAX:
+                    _flush()
+
+        _flush()
+        return groups
+
+    def _build_digest_documents(self, docs, ingest_id, source_basename, doc_title):
+        groups = self._group_chunks_for_digest(docs)
+        if not groups:
+            return []
+        llm = self._get_llm_with_temperature(0.2)
+        digest_docs = []
+        system_prompt = (
+            "Summarize the provided content into concise bullet points. "
+            "Focus on entities, dates, decisions, and key statements. "
+            "Use bullets only with no introductory text."
+        )
+        for digest_index, (group_docs, section_title) in enumerate(groups, start=1):
+            chunk_ids = [
+                (doc.metadata or {}).get("chunk_id")
+                for doc in group_docs
+                if (doc.metadata or {}).get("chunk_id") is not None
+            ]
+            compact_ids = self._compact_chunk_ids(chunk_ids)
+            group_text = "\n\n".join(doc.page_content for doc in group_docs)
+            if section_title:
+                human_content = (
+                    f"Section title: {section_title}\n\nContent:\n{group_text}"
+                )
+            else:
+                human_content = f"Content:\n{group_text}"
+            response = llm.invoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=human_content),
+                ]
+            )
+            metadata = {
+                "doc_type": "digest",
+                "ingest_id": ingest_id,
+                "source": source_basename,
+                "digest_id": f"{ingest_id}-{digest_index}",
+                "child_chunk_ids": compact_ids,
+            }
+            if section_title:
+                metadata["section_title"] = section_title
+            if doc_title:
+                metadata["doc_title"] = doc_title
+            digest_docs.append(
+                Document(page_content=response.content.strip(), metadata=metadata)
+            )
+        return digest_docs
+
+    @staticmethod
     def _is_chroma_persist_dir(path):
         if not os.path.isdir(path):
             return False
@@ -1083,11 +1230,14 @@ class AgenticRAGApp:
         )
 
     @staticmethod
-    def _format_index_label(path):
+    def _format_index_label(path, collection_name=RAW_COLLECTION_NAME):
         try:
-            return os.path.relpath(path, os.getcwd())
+            label = os.path.relpath(path, os.getcwd())
         except ValueError:
-            return path
+            label = path
+        if collection_name and collection_name != RAW_COLLECTION_NAME:
+            return f"{label} (digest)"
+        return label
 
     def _list_existing_indexes(self):
         db_type = self.vector_db_type.get()
@@ -1105,17 +1255,22 @@ class AgenticRAGApp:
 
     def _refresh_existing_indexes(self):
         indexes = self._list_existing_indexes()
-        display_values = ["(default)"] + [
-            self._format_index_label(path) for path in indexes
-        ]
-        self.existing_index_paths = {
-            self._format_index_label(path): path for path in indexes
-        }
+        display_values = ["(default)"]
+        self.existing_index_paths = {}
+        for path in indexes:
+            raw_label = self._format_index_label(path, RAW_COLLECTION_NAME)
+            display_values.append(raw_label)
+            self.existing_index_paths[raw_label] = (path, RAW_COLLECTION_NAME)
+            digest_label = self._format_index_label(path, DIGEST_COLLECTION_NAME)
+            display_values.append(digest_label)
+            self.existing_index_paths[digest_label] = (path, DIGEST_COLLECTION_NAME)
         if hasattr(self, "cb_existing_index"):
             self.cb_existing_index["values"] = display_values
         if self.existing_index_var.get() not in display_values:
             if self.selected_index_path:
-                candidate = self._format_index_label(self.selected_index_path)
+                candidate = self._format_index_label(
+                    self.selected_index_path, self.selected_collection_name
+                )
                 if candidate in display_values:
                     self.existing_index_var.set(candidate)
                 else:
@@ -1126,22 +1281,28 @@ class AgenticRAGApp:
     def _get_selected_index_path(self):
         selection = self.existing_index_var.get()
         if not selection or selection == "(default)":
-            return self.selected_index_path
-        return self.existing_index_paths.get(selection, selection)
+            return self.selected_index_path, self.selected_collection_name
+        return self.existing_index_paths.get(selection, (selection, RAW_COLLECTION_NAME))
 
     def _on_existing_index_change(self, _event=None):
-        selected_path = self._get_selected_index_path()
+        selected_path, selected_collection = self._get_selected_index_path()
         if not selected_path:
             return
         self.selected_index_path = selected_path
+        self.selected_collection_name = selected_collection
         self.save_config()
         threading.Thread(
-            target=self._load_existing_index, args=(selected_path,), daemon=True
+            target=self._load_existing_index,
+            args=(selected_path, selected_collection),
+            daemon=True,
         ).start()
 
-    def _load_existing_index(self, selected_path):
+    def _load_existing_index(self, selected_path, selected_collection):
         try:
-            self.log(f"Loading existing index from {self._format_index_label(selected_path)}...")
+            self.log(
+                "Loading existing index from "
+                f"{self._format_index_label(selected_path, selected_collection)}..."
+            )
             db_type = self.vector_db_type.get()
             embeddings = self.get_embeddings()
             if db_type == "chroma":
@@ -1153,14 +1314,15 @@ class AgenticRAGApp:
                     )
                     return
                 self.vector_store = Chroma(
-                    collection_name="rag_collection",
+                    collection_name=selected_collection,
                     embedding_function=embeddings,
                     persist_directory=selected_path,
                 )
                 self.index_embedding_signature = self._current_embedding_signature()
                 self.save_config()
                 self.log(
-                    f"Active index set to {self._format_index_label(selected_path)}."
+                    "Active index set to "
+                    f"{self._format_index_label(selected_path, selected_collection)}."
                 )
             elif db_type == "weaviate":
                 self.log(
@@ -1746,7 +1908,7 @@ class AgenticRAGApp:
                 separators=["\n\n", "\n", ".", " ", ""],
             )
             docs = splitter.create_documents([text_content])
-            ingest_id = datetime.utcnow().isoformat()
+            chunk_ingest_id = datetime.utcnow().isoformat()
             source_basename = os.path.basename(self.selected_file)
             def _last_section_title(text):
                 last_heading = None
@@ -1768,7 +1930,7 @@ class AgenticRAGApp:
                     {
                         "source": source_basename,
                         "chunk_id": chunk_id,
-                        "ingest_id": ingest_id,
+                        "ingest_id": chunk_ingest_id,
                     }
                 )
                 if doc_title:
@@ -1784,13 +1946,24 @@ class AgenticRAGApp:
 
             db_type = self.vector_db_type.get()
             new_index_path = None
+            digest_docs = []
+
+            if self.build_digest_index.get():
+                if db_type == "chroma":
+                    self.log("Building digest summaries...")
+                    digest_docs = self._build_digest_documents(
+                        docs, chunk_ingest_id, source_basename, doc_title
+                    )
+                    self.log(f"Prepared {len(digest_docs)} digest summaries.")
+                else:
+                    self.log("Digest indexing is only supported for Chroma. Skipping.")
 
             if db_type == "chroma":
                 persist_root = self._get_chroma_persist_root()
-                ingest_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                index_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                 safe_stem = self._safe_file_stem(self.selected_file)
                 persist_dir = os.path.join(
-                    persist_root, f"{safe_stem}__{ingest_id}"
+                    persist_root, f"{safe_stem}__{index_id}"
                 )
                 os.makedirs(persist_root, exist_ok=True)
                 new_index_path = persist_dir
@@ -1804,7 +1977,7 @@ class AgenticRAGApp:
 
                 # Using a new client per ingestion to ensure clean slate or append
                 self.vector_store = Chroma(
-                    collection_name="rag_collection",
+                    collection_name=RAW_COLLECTION_NAME,
                     embedding_function=embeddings,
                     persist_directory=persist_dir,
                 )
@@ -1848,6 +2021,19 @@ class AgenticRAGApp:
                 self._run_on_ui(self.progress.config, value=i + len(batch))
                 self.log(f"Indexed {min(i + batch_size, total_docs)}/{total_docs} chunks...")
 
+            if digest_docs:
+                self.log("Storing digest summaries...")
+                digest_store = Chroma(
+                    collection_name=DIGEST_COLLECTION_NAME,
+                    embedding_function=embeddings,
+                    persist_directory=persist_dir,
+                )
+                total_digests = len(digest_docs)
+                for i in range(0, total_digests, batch_size):
+                    batch = digest_docs[i : i + batch_size]
+                    digest_store.add_documents(batch)
+                self.log(f"Indexed {total_digests} digest summaries.")
+
             self.log("Ingestion Complete! You can now chat.")
             if new_index_path:
                 def _select_new_index():
@@ -1855,6 +2041,7 @@ class AgenticRAGApp:
                     selection_label = self._format_index_label(new_index_path)
                     self.existing_index_var.set(selection_label)
                     self.selected_index_path = new_index_path
+                    self.selected_collection_name = RAW_COLLECTION_NAME
                     self.save_config()
                 self._run_on_ui(_select_new_index)
             else:
@@ -1900,22 +2087,28 @@ class AgenticRAGApp:
                 self.log("Attempting to load existing Vector DB...")
                 embeddings = self.get_embeddings()
                 if self.vector_db_type.get() == "chroma":
-                    selected_path = self._get_selected_index_path()
+                    selected_path, selected_collection = self._get_selected_index_path()
                     if not selected_path and self.selected_index_path:
                         if os.path.isdir(self.selected_index_path):
                             selected_path = self.selected_index_path
                     persist_dir = selected_path or self._get_chroma_persist_root()
+                    collection_name = (
+                        selected_collection or self.selected_collection_name or RAW_COLLECTION_NAME
+                    )
                     from langchain_chroma import Chroma
 
                     self.vector_store = Chroma(
-                        collection_name="rag_collection",
+                        collection_name=collection_name,
                         embedding_function=embeddings,
                         persist_directory=persist_dir,
                     )
                     if selected_path:
+                        self.selected_index_path = selected_path
+                        self.selected_collection_name = collection_name
+                        self.save_config()
                         self.log(
                             "Active index set to "
-                            f"{self._format_index_label(persist_dir)}."
+                            f"{self._format_index_label(persist_dir, collection_name)}."
                         )
                 else:
                     self.append_chat(
