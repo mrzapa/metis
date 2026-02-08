@@ -3115,6 +3115,9 @@ class AgenticRAGApp:
             is_long_form = any(
                 keyword in normalized_query for keyword in long_form_keywords
             )
+            is_evidence_pack = self.is_evidence_pack_query(
+                query, self.output_style.get()
+            )
             if is_long_form:
                 boosted_final_k = min(candidate_k, max(final_k, 12))
                 if boosted_final_k > final_k:
