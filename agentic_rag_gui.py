@@ -2025,12 +2025,17 @@ class AgenticRAGApp:
 
     def _validate_and_repair(self, answer_text, context_text, iteration_id=None):
         output_style = self.output_style.get().strip()
+        agentic_mode = self.agentic_mode.get()
         is_valid, failures = self._validate_answer(
             answer_text, context_text, output_style
         )
         if is_valid:
             if iteration_id is not None:
-                self.log(f"Iter {iteration_id} repair=0")
+                self.log(
+                    "Iter "
+                    f"{iteration_id} repair | style={output_style}, "
+                    f"agentic={int(agentic_mode)}, triggered=0, failures=none"
+                )
             return answer_text
         self.log(
             "Validation failed; triggering repair pass. Reasons: "
@@ -2038,7 +2043,9 @@ class AgenticRAGApp:
         )
         if iteration_id is not None:
             self.log(
-                f"Iter {iteration_id} repair=1 failures="
+                "Iter "
+                f"{iteration_id} repair | style={output_style}, "
+                f"agentic={int(agentic_mode)}, triggered=1, failures="
                 + "; ".join(failures)
             )
         repaired = self._repair_answer(answer_text, context_text, failures, output_style)
@@ -2917,8 +2924,8 @@ class AgenticRAGApp:
                     f"{iteration_id} telemetry | style={output_style}, "
                     f"agentic={int(agentic_mode)}, planner_subqueries={planner_subquery_count}, "
                     f"queries={query_count}, digest={digest_retrieved_count}/"
-                    f"{digest_selected_count}, raw_expanded={raw_expanded_count}, "
-                    f"raw_unique={raw_unique_count}, packed={packed_docs}, "
+                    f"{digest_selected_count}, raw={raw_expanded_count}/"
+                    f"{raw_unique_count}/{packed_docs}, "
                     f"trunc={truncation_note}, cap_reached={int(cap_reached_flag)}, "
                     f"retrieved={retrieved_count}"
                 )
