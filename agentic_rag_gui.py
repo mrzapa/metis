@@ -17,6 +17,13 @@ class AgenticRAGApp:
     def __init__(self, root):
         import langchain
 
+        if not hasattr(langchain, "llm_cache"):
+            langchain.llm_cache = None
+            if hasattr(langchain, "globals") and hasattr(
+                langchain.globals, "set_llm_cache"
+            ):
+                langchain.globals.set_llm_cache(None)
+
         if not hasattr(langchain, "verbose"):
             langchain.verbose = False
             if hasattr(langchain, "globals") and hasattr(
