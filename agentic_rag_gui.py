@@ -1548,6 +1548,24 @@ class AgenticRAGApp:
             retrieve_k = max(1, int(self.retrieval_k.get()))
             final_k = max(1, int(self.final_k.get()))
             candidate_k = max(retrieve_k, final_k)
+            long_form_keywords = (
+                "evidence",
+                "evidence pack",
+                "full report",
+                "timeline",
+                "all details",
+                "complete",
+                "extract all",
+                "every",
+                "required details",
+            )
+            normalized_query = query.lower()
+            if any(keyword in normalized_query for keyword in long_form_keywords):
+                boosted_final_k = min(candidate_k, max(final_k, 12))
+                if boosted_final_k > 20:
+                    boosted_final_k = min(candidate_k, 20)
+                final_k = boosted_final_k
+                self.log(f"Long-form intent detected; adjusted final_k to {final_k}.")
             search_type = self.search_type.get() or "similarity"
             mmr_lambda = float(self.mmr_lambda.get())
             search_kwargs = {"k": candidate_k}
