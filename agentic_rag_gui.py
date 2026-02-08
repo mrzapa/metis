@@ -8,6 +8,7 @@ import json
 import subprocess
 import importlib.util
 import re
+import hashlib
 from datetime import datetime
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -899,19 +900,109 @@ class AgenticRAGApp:
         merged = []
         for doc in docs:
             metadata = getattr(doc, "metadata", {}) or {}
-            source = (
-                metadata.get("source")
-                or metadata.get("file_path")
-                or metadata.get("filename")
-                or ""
-            )
             content = (getattr(doc, "page_content", "") or "").strip()
-            key = (source, content)
+            chunk_id = metadata.get("chunk_id")
+            source = metadata.get("source") or metadata.get("file_path") or metadata.get(
+                "filename"
+            )
+            ingest_id = metadata.get("ingest_id")
+            if chunk_id and source and ingest_id:
+                key = (chunk_id, source, ingest_id)
+            else:
+                content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                key = content_hash
             if key in seen:
                 continue
             seen.add(key)
             merged.append(doc)
         return merged
+
+    @staticmethod
+    def _doc_group_key(doc):
+        metadata = getattr(doc, "metadata", {}) or {}
+        for field in (
+            "section",
+            "section_title",
+            "heading",
+            "header",
+            "title",
+            "doc_title",
+        ):
+            value = metadata.get(field)
+            if value:
+                return f"{field}:{value}"
+        source = metadata.get("source") or metadata.get("file_path") or metadata.get(
+            "filename"
+        )
+        content = (getattr(doc, "page_content", "") or "").strip()
+        prefix = content[:80]
+        return f"{source}:{prefix}"
+
+    @staticmethod
+    def _is_priority_doc(doc):
+        metadata = getattr(doc, "metadata", {}) or {}
+        if metadata.get("lexical_boost") or metadata.get("lexical_boosted"):
+            return True
+        if metadata.get("critic_missing") or metadata.get("critic_missing_items"):
+            return True
+        missing_items = metadata.get("missing_items") or metadata.get(
+            "missing_coverage"
+        )
+        if isinstance(missing_items, (list, tuple, set)):
+            return len(missing_items) > 0
+        return bool(missing_items)
+
+    @staticmethod
+    def _is_must_include(doc):
+        metadata = getattr(doc, "metadata", {}) or {}
+        return bool(
+            metadata.get("must_include")
+            or metadata.get("force_include")
+            or metadata.get("required_context")
+        )
+
+    def _apply_coverage_selection(self, docs, final_k, group_limit=2):
+        must_include = []
+        remaining = []
+        for doc in docs:
+            if self._is_must_include(doc):
+                must_include.append(doc)
+            else:
+                remaining.append(doc)
+
+        selected = list(must_include)
+        group_counts = {}
+        for doc in selected:
+            group_key = self._doc_group_key(doc)
+            group_counts[group_key] = group_counts.get(group_key, 0) + 1
+
+        priority_docs = [doc for doc in remaining if self._is_priority_doc(doc)]
+        other_docs = [doc for doc in remaining if doc not in priority_docs]
+
+        def _add_docs(candidates):
+            nonlocal selected
+            for doc in candidates:
+                if len(selected) >= final_k and not self._is_must_include(doc):
+                    break
+                group_key = self._doc_group_key(doc)
+                count = group_counts.get(group_key, 0)
+                if count >= group_limit and not self._is_must_include(doc):
+                    continue
+                selected.append(doc)
+                group_counts[group_key] = count + 1
+
+        _add_docs(priority_docs)
+        if len(selected) < final_k:
+            _add_docs(other_docs)
+
+        if len(selected) > final_k and len(must_include) <= final_k:
+            selected = selected[:final_k]
+        return selected
+
+    def _prioritize_must_include(self, docs):
+        must_include = [doc for doc in docs if self._is_must_include(doc)]
+        remainder = [doc for doc in docs if doc not in must_include]
+        return [*must_include, *remainder]
 
     def log(self, msg):
         def _append():
@@ -1753,7 +1844,10 @@ class AgenticRAGApp:
                 "required details",
             )
             normalized_query = query.lower()
-            if any(keyword in normalized_query for keyword in long_form_keywords):
+            is_long_form = any(
+                keyword in normalized_query for keyword in long_form_keywords
+            )
+            if is_long_form:
                 boosted_final_k = min(candidate_k, max(final_k, 12))
                 if boosted_final_k > 20:
                     boosted_final_k = min(candidate_k, 20)
