@@ -1385,6 +1385,9 @@ class AgenticRAGApp:
 
                 with open(self.selected_file, "r", encoding="utf-8", errors="ignore") as f:
                     soup = BeautifulSoup(f, "html.parser")
+                    doc_title = None
+                    if soup.title and soup.title.string:
+                        doc_title = soup.title.string.strip() or None
                     # Aggressive cleaning for RAG
                     for tag in soup(["script", "style", "svg", "path", "nav", "footer"]):
                         tag.extract()
@@ -1392,6 +1395,7 @@ class AgenticRAGApp:
             else:
                 with open(self.selected_file, "r", encoding="utf-8") as f:
                     text_content = f.read()
+                doc_title = None
 
             self.log(f"File loaded. Raw text length: {len(text_content)} characters.")
 
@@ -1408,6 +1412,20 @@ class AgenticRAGApp:
                 separators=["\n\n", "\n", ".", " ", ""],
             )
             docs = splitter.create_documents([text_content])
+            ingest_id = datetime.utcnow().isoformat()
+            source_basename = os.path.basename(self.selected_file)
+            for chunk_id, doc in enumerate(docs, start=1):
+                metadata = (doc.metadata or {}).copy()
+                metadata.update(
+                    {
+                        "source": source_basename,
+                        "chunk_id": chunk_id,
+                        "ingest_id": ingest_id,
+                    }
+                )
+                if doc_title:
+                    metadata["doc_title"] = doc_title
+                doc.metadata = metadata
             self.log(f"Created {len(docs)} text chunks.")
 
             # 3. Initialize Vector DB & Embeddings
@@ -1593,14 +1611,17 @@ class AgenticRAGApp:
 
             for idx, doc in enumerate(final_docs, start=1):
                 metadata = getattr(doc, "metadata", {}) or {}
-                score = metadata.get("relevance_score", "N/A")
                 source = (
                     metadata.get("source")
                     or metadata.get("file_path")
                     or metadata.get("filename")
                     or "unknown"
                 )
-                header = f"[Chunk {idx} | score: {score} | source: {source}]"
+                chunk_id = metadata.get("chunk_id") or idx
+                doc_title = metadata.get("doc_title") or "unknown"
+                header = (
+                    f"[Chunk {chunk_id} | source: {source} | title: {doc_title}]"
+                )
                 content = doc.page_content.strip()
                 chunk_text = f"{header}\n{content}"
 
