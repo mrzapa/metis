@@ -8,6 +8,7 @@ import json
 import subprocess
 import importlib.util
 from datetime import datetime
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 # --- Libraries check is done inside the class to prevent instant crash ---
 # Required: pip install langchain langchain-community langchain-openai langchain-anthropic langchain-google-genai langchain-cohere langchain-text-splitters chromadb beautifulsoup4 tiktoken
@@ -46,7 +47,13 @@ class AgenticRAGApp:
         self.default_system_instructions = (
             "You are an expert analyst assistant. Use the provided context to answer the "
             "user's question. If the answer is not in the context, say you don't know. "
-            "Cite specific sections if possible."
+            "Cite specific sections if possible, and be clear about any assumptions."
+        )
+        self.verbose_system_instructions = (
+            "You are an expert analyst assistant. Use the provided context to answer the "
+            "user's question. If the answer is not in the context, say you don't know. "
+            "Provide a concise summary, cite evidence from the context, list key points, "
+            "and explicitly note uncertainties or gaps."
         )
 
         # --- State Variables ---
@@ -81,14 +88,18 @@ class AgenticRAGApp:
         self.llm_temperature = tk.DoubleVar(value=0.0)
         self.llm_max_tokens = tk.IntVar(value=1024)
         self.force_embedding_compat = tk.BooleanVar(value=False)
-        self.fallback_final_k = tk.IntVar(value=8)
         self.system_instructions = tk.StringVar(
             value=self.default_system_instructions
         )
+        self.retrieval_k = tk.IntVar(value=25)
+        self.final_k = tk.IntVar(value=5)
+        self.search_type = tk.StringVar(value="similarity")
+        self.mmr_lambda = tk.DoubleVar(value=0.5)
 
         self.vector_store = None
         self.index_embedding_signature = ""
         self.chat_history = []
+        self.chat_history_max_turns = 6
         self.selected_file = None
         self.last_answer = ""
         self.dependency_prompted = False
@@ -247,6 +258,16 @@ class AgenticRAGApp:
     def _on_instructions_change(self, event=None):
         self.system_instructions.set(self.instructions_box.get("1.0", tk.END).strip())
 
+    def _on_verbose_mode_toggle(self):
+        if self.verbose_mode.get():
+            self._apply_instruction_template(self.verbose_system_instructions)
+        else:
+            self._apply_instruction_template(self.default_system_instructions)
+
+    def _apply_instruction_template(self, template):
+        self.system_instructions.set(template)
+        self._run_on_ui(self._refresh_instructions_box)
+
     def _current_embedding_signature(self):
         provider = self.embedding_provider.get()
         try:
@@ -310,9 +331,10 @@ class AgenticRAGApp:
         self.force_embedding_compat.set(
             data.get("force_embedding_compat", self.force_embedding_compat.get())
         )
-        self.fallback_final_k.set(
-            data.get("fallback_final_k", self.fallback_final_k.get())
-        )
+        self.retrieval_k.set(data.get("retrieval_k", self.retrieval_k.get()))
+        self.final_k.set(data.get("final_k", self.final_k.get()))
+        self.search_type.set(data.get("search_type", self.search_type.get()))
+        self.mmr_lambda.set(data.get("mmr_lambda", self.mmr_lambda.get()))
         self.index_embedding_signature = data.get(
             "index_embedding_signature", self.index_embedding_signature
         )
@@ -342,7 +364,10 @@ class AgenticRAGApp:
             "llm_max_tokens": self.llm_max_tokens.get(),
             "system_instructions": self.system_instructions.get(),
             "force_embedding_compat": self.force_embedding_compat.get(),
-            "fallback_final_k": self.fallback_final_k.get(),
+            "retrieval_k": self.retrieval_k.get(),
+            "final_k": self.final_k.get(),
+            "search_type": self.search_type.get(),
+            "mmr_lambda": self.mmr_lambda.get(),
             "index_embedding_signature": self.index_embedding_signature,
         }
         try:
@@ -475,6 +500,12 @@ class AgenticRAGApp:
         self.instructions_box.grid(row=12, column=1, sticky="ew", padx=5, pady=5)
         self.instructions_box.insert(tk.END, self.system_instructions.get())
         self.instructions_box.bind("<KeyRelease>", self._on_instructions_change)
+        ttk.Checkbutton(
+            llm_frame,
+            text="Verbose/Analytical mode",
+            variable=self.verbose_mode,
+            command=self._on_verbose_mode_toggle,
+        ).grid(row=13, column=1, sticky="w", padx=5, pady=(0, 5))
 
         # --- Vector DB Settings ---
         db_frame = ttk.LabelFrame(frame, text="Vector Database Strategy", padding=15)
@@ -624,6 +655,45 @@ class AgenticRAGApp:
         ).grid(row=0, column=2, padx=(5, 0))
         self._refresh_existing_indexes()
 
+        retrieval_frame = ttk.LabelFrame(
+            frame, text="Retrieval Settings", padding=10
+        )
+        retrieval_frame.pack(fill="x", pady=(0, 10))
+        retrieval_frame.columnconfigure(1, weight=1)
+        retrieval_frame.columnconfigure(3, weight=1)
+
+        ttk.Label(retrieval_frame, text="Retrieve K:").grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Entry(retrieval_frame, textvariable=self.retrieval_k, width=8).grid(
+            row=0, column=1, sticky="w", padx=(5, 15)
+        )
+
+        ttk.Label(retrieval_frame, text="Final K:").grid(
+            row=0, column=2, sticky="w"
+        )
+        ttk.Entry(retrieval_frame, textvariable=self.final_k, width=8).grid(
+            row=0, column=3, sticky="w", padx=(5, 0)
+        )
+
+        ttk.Label(retrieval_frame, text="Search Type:").grid(
+            row=1, column=0, sticky="w", pady=(6, 0)
+        )
+        ttk.Combobox(
+            retrieval_frame,
+            textvariable=self.search_type,
+            values=["similarity", "mmr"],
+            state="readonly",
+            width=12,
+        ).grid(row=1, column=1, sticky="w", padx=(5, 15), pady=(6, 0))
+
+        ttk.Label(retrieval_frame, text="MMR lambda:").grid(
+            row=1, column=2, sticky="w", pady=(6, 0)
+        )
+        ttk.Entry(retrieval_frame, textvariable=self.mmr_lambda, width=8).grid(
+            row=1, column=3, sticky="w", padx=(5, 0), pady=(6, 0)
+        )
+
         # Chat Display
         self.chat_display = scrolledtext.ScrolledText(
             frame, state="disabled", font=("Segoe UI", 10), wrap=tk.WORD
@@ -690,6 +760,26 @@ class AgenticRAGApp:
                 return f"{num_bytes:.1f} {unit}"
         return f"{num_bytes:.1f} PB"
 
+    def _append_history(self, message):
+        self.chat_history.append(message)
+        max_messages = self.chat_history_max_turns * 2
+        if len(self.chat_history) > max_messages:
+            self.chat_history = self.chat_history[-max_messages:]
+
+    def _get_history_window(self, current_query=None):
+        history = list(self.chat_history)
+        if (
+            current_query
+            and history
+            and isinstance(history[-1], HumanMessage)
+            and history[-1].content == current_query
+        ):
+            history = history[:-1]
+        max_messages = self.chat_history_max_turns * 2
+        if len(history) > max_messages:
+            history = history[-max_messages:]
+        return history
+
     def log(self, msg):
         def _append():
             self.log_area.config(state="normal")
@@ -704,31 +794,6 @@ class AgenticRAGApp:
 
         self._run_on_ui(_append)
         self._emit_log_to_console(msg)
-
-    def _get_fallback_final_k(self):
-        try:
-            fallback_k = int(self.fallback_final_k.get())
-        except (TypeError, ValueError):
-            fallback_k = 8
-        if fallback_k <= 0:
-            fallback_k = 8
-        return fallback_k
-
-    def _run_fallback_retrieval(self, query, fallback_k):
-        try:
-            self.log(f"Fallback retrieval with MMR (k={fallback_k})...")
-            retriever = self.vector_store.as_retriever(
-                search_type="mmr", search_kwargs={"k": fallback_k}
-            )
-            docs = retriever.invoke(query)
-            self.log(f"MMR fallback returned {len(docs)} chunks.")
-            return docs
-        except Exception as e:
-            self.log(f"MMR fallback failed ({e}); using similarity top {fallback_k}.")
-            retriever = self.vector_store.as_retriever(
-                search_kwargs={"k": fallback_k}
-            )
-            return retriever.invoke(query)
 
     @staticmethod
     def _emit_log_to_console(msg):
@@ -1426,6 +1491,7 @@ class AgenticRAGApp:
 
         self.txt_input.delete(0, tk.END)
         self.append_chat("user", f"You: {query}")
+        self._append_history(HumanMessage(content=query))
 
         if self.index_embedding_signature:
             current_signature = self._current_embedding_signature()
@@ -1477,22 +1543,32 @@ class AgenticRAGApp:
             self.log("Starting Retrieval...")
 
             # 1. Retrieval
-            # Fetch more candidates first (e.g., 25) to rerank down to 5
-            retriever = self.vector_store.as_retriever(search_kwargs={"k": 25})
+            retrieve_k = max(1, int(self.retrieval_k.get()))
+            final_k = max(1, int(self.final_k.get()))
+            candidate_k = max(retrieve_k, final_k)
+            search_type = self.search_type.get() or "similarity"
+            mmr_lambda = float(self.mmr_lambda.get())
+            search_kwargs = {"k": candidate_k}
+            if search_type == "mmr":
+                search_kwargs.update(
+                    {"fetch_k": candidate_k, "lambda_mult": mmr_lambda}
+                )
+            retriever = self.vector_store.as_retriever(
+                search_type=search_type, search_kwargs=search_kwargs
+            )
             docs = retriever.invoke(query)
 
             self.log(f"Retrieved {len(docs)} initial candidates.")
 
             # 2. Reranking (Cohere)
             final_docs = docs
-            fallback_k = self._get_fallback_final_k()
             if self.use_reranker.get() and self.api_keys["cohere"].get():
                 try:
                     self.log("Reranking with Cohere...")
                     from langchain_cohere import CohereRerank
                     compressor = CohereRerank(
                         cohere_api_key=self.api_keys["cohere"].get(),
-                        top_n=5,
+                        top_n=final_k,
                         model="rerank-english-v3.0",
                     )
                     # We manually compress because we already have docs
@@ -1502,21 +1578,10 @@ class AgenticRAGApp:
                         f"Reranked down to {len(final_docs)} high-relevance chunks."
                     )
                 except Exception as e:
-                    self.log(f"Rerank Error (Using fallback retrieval instead): {e}")
-                    self.append_chat(
-                        "system",
-                        "System: Reranking failed. Using fallback retrieval for quality.",
-                    )
-                    final_docs = self._run_fallback_retrieval(query, fallback_k)
+                    self.log(f"Rerank Error (Using raw retrieval instead): {e}")
+                    final_docs = docs[:final_k]  # Fallback to top K raw
             else:
-                if self.use_reranker.get():
-                    self.append_chat(
-                        "system",
-                        "System: Reranking unavailable. Using fallback retrieval.",
-                    )
-                    final_docs = self._run_fallback_retrieval(query, fallback_k)
-                else:
-                    final_docs = docs[:fallback_k]
+                final_docs = docs[:final_k]  # No reranker, just take top K
 
             # 3. Context Construction
             context_text = "\n\n---\n\n".join([d.page_content for d in final_docs])
@@ -1530,15 +1595,18 @@ class AgenticRAGApp:
                 f"{self._get_system_instructions()}\n\n"
                 f"CONTEXT:\n{context_text}"
             )
-
-            from langchain_core.messages import HumanMessage, SystemMessage
-
-            messages = [SystemMessage(content=system_prompt), HumanMessage(content=query)]
+            history_window = self._get_history_window(current_query=query)
+            messages = [
+                SystemMessage(content=system_prompt),
+                *history_window,
+                HumanMessage(content=query),
+            ]
 
             response = llm.invoke(messages)
 
             self.last_answer = response.content
             self.append_chat("agent", f"AI: {response.content}")
+            self._append_history(AIMessage(content=response.content))
 
             # Show sources
             sources_text = "\n".join(
@@ -1567,6 +1635,7 @@ class AgenticRAGApp:
         self.chat_display.delete("1.0", tk.END)
         self.chat_display.config(state="disabled")
         self.last_answer = ""
+        self.chat_history = []
 
     def save_chat(self):
         transcript = self.chat_display.get("1.0", tk.END).strip()
