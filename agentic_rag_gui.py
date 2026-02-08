@@ -2569,7 +2569,43 @@ class AgenticRAGApp:
                 + "; ".join(failures)
             )
         repaired = self._repair_answer(answer_text, context_text, failures, output_style)
+        repaired = self._append_missing_citations(repaired, context_text)
         return repaired
+
+    def _append_missing_citations(self, answer_text, context_text):
+        citation_re = re.compile(r"\[Chunk (\d+)\]")
+        paragraphs = [p for p in re.split(r"\n\s*\n", answer_text) if p.strip()]
+        missing = [
+            idx
+            for idx, paragraph in enumerate(paragraphs)
+            if re.search(r"[A-Za-z0-9]", paragraph)
+            and not citation_re.search(paragraph)
+        ]
+        if not missing:
+            return answer_text
+
+        chunks = self._extract_chunks(context_text)
+        if not chunks:
+            return answer_text
+
+        def _tokens(text):
+            return set(re.findall(r"[A-Za-z0-9]{4,}", text.lower()))
+
+        chunk_tokens = {num: _tokens(text) for num, text in chunks.items()}
+        updated = list(paragraphs)
+        for idx in missing:
+            paragraph = paragraphs[idx]
+            paragraph_tokens = _tokens(paragraph)
+            best_chunk = None
+            best_score = 0
+            for chunk_num in sorted(chunk_tokens):
+                score = len(paragraph_tokens & chunk_tokens[chunk_num])
+                if score > best_score:
+                    best_score = score
+                    best_chunk = chunk_num
+            if best_chunk and best_score > 0:
+                updated[idx] = paragraph.rstrip() + f" [Chunk {best_chunk}]"
+        return "\n\n".join(updated)
 
     def _refresh_instructions_box(self):
         self.instructions_box.delete("1.0", tk.END)
