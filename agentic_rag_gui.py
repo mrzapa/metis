@@ -2154,8 +2154,10 @@ class AgenticRAGApp:
         return (
             "Evidence pack mode: Build a structured evidence pack with a clear chronology/timeline "
             "of events, explicit impacts, grievances, and concrete examples. Emphasize dates, actors, "
-            "actions, outcomes, and supporting quotes. Note gaps or uncertainties explicitly. "
-            "Do not ask the user for missing info."
+            "actions, outcomes, and supporting quotes. Only include claims supported by context; "
+            "omit details not present in context. Write incident entries using: When; What happened; "
+            "Impact; Evidence (chunk citations). Do not provide coaching or advice. Ensure the output "
+            "does not include the phrase \"NOT FOUND IN CONTEXT\". Do not ask the user for missing info."
         )
 
     def _format_month_label(self, year, month):
