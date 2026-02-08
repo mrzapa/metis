@@ -94,6 +94,7 @@ class AgenticRAGApp:
         )
         self.retrieval_k = tk.IntVar(value=25)
         self.final_k = tk.IntVar(value=5)
+        self.fallback_final_k = tk.IntVar(value=self.final_k.get())
         self.search_type = tk.StringVar(value="similarity")
         self.mmr_lambda = tk.DoubleVar(value=0.5)
 
