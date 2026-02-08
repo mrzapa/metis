@@ -3097,6 +3097,7 @@ class AgenticRAGApp:
             self.log("Starting Retrieval...")
 
             # 1. Retrieval
+            output_style = self.output_style.get().strip() or "Default answer"
             retrieve_k = max(1, int(self.retrieval_k.get()))
             final_k = max(1, int(self.final_k.get()))
             candidate_k = max(retrieve_k, final_k)
@@ -3115,9 +3116,7 @@ class AgenticRAGApp:
             is_long_form = any(
                 keyword in normalized_query for keyword in long_form_keywords
             )
-            is_evidence_pack = self.is_evidence_pack_query(
-                query, self.output_style.get()
-            )
+            is_evidence_pack = self.is_evidence_pack_query(query, output_style)
             if is_long_form:
                 boosted_final_k = min(candidate_k, max(final_k, 12))
                 if boosted_final_k > final_k:
