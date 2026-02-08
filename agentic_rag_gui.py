@@ -1099,6 +1099,84 @@ class AgenticRAGApp:
         remainder = [doc for doc in docs if doc not in must_include]
         return [*must_include, *remainder]
 
+    @staticmethod
+    def _detect_exact_detail_cues(query):
+        cues = {
+            "quotes": False,
+            "dates": False,
+            "ids": False,
+            "numeric_heavy": False,
+        }
+        if re.search(r"\"[^\"]+\"", query):
+            cues["quotes"] = True
+        if re.search(r"\b\d{4}-\d{2}-\d{2}\b", query) or re.search(
+            r"\b\d{1,2}/\d{1,2}/\d{2,4}\b", query
+        ):
+            cues["dates"] = True
+        if re.search(
+            r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}\b",
+            query,
+            flags=re.I,
+        ):
+            cues["dates"] = True
+        if re.search(r"\b[A-Z]{2,}-\d+\b", query) or re.search(
+            r"\b(?:id|ticket|case|ref)[\s:#-]*[A-Za-z0-9-]{3,}\b",
+            query,
+            flags=re.I,
+        ):
+            cues["ids"] = True
+        alnum_count = sum(ch.isalnum() for ch in query)
+        digit_count = sum(ch.isdigit() for ch in query)
+        if alnum_count:
+            ratio = digit_count / alnum_count
+            if digit_count >= 4 or ratio >= 0.2:
+                cues["numeric_heavy"] = True
+        return cues
+
+    @staticmethod
+    def _tokenize_for_overlap(text):
+        return set(re.findall(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*", text.lower()))
+
+    def _lexical_overlap_score(self, query, content, cues):
+        query_tokens = self._tokenize_for_overlap(query)
+        if not query_tokens:
+            return 0.0
+        content_tokens = self._tokenize_for_overlap(content)
+        shared = query_tokens & content_tokens
+        base = len(shared) / max(1, len(query_tokens))
+        bonus = 0.0
+        if cues.get("quotes"):
+            for quoted in re.findall(r"\"([^\"]+)\"", query):
+                if quoted and quoted.lower() in content.lower():
+                    bonus += 0.2
+                    break
+        if cues.get("dates") or cues.get("ids") or cues.get("numeric_heavy"):
+            numeric_shared = [token for token in shared if any(ch.isdigit() for ch in token)]
+            if numeric_shared:
+                bonus += 0.15
+        return min(1.0, base + bonus)
+
+    def _promote_lexical_overlap(self, docs, query):
+        cues = self._detect_exact_detail_cues(query)
+        scored = []
+        for idx, doc in enumerate(docs):
+            content = (getattr(doc, "page_content", "") or "").strip()
+            score = self._lexical_overlap_score(query, content, cues)
+            metadata = getattr(doc, "metadata", {}) or {}
+            metadata["lexical_overlap"] = round(score, 4)
+            if score >= 0.3 or (any(cues.values()) and score >= 0.15):
+                metadata["lexical_boost"] = True
+            doc.metadata = metadata
+            scored.append((idx, score, doc))
+        scored.sort(
+            key=lambda item: (
+                (item[2].metadata or {}).get("lexical_boost") is True,
+                item[1],
+            ),
+            reverse=True,
+        )
+        return [doc for _idx, _score, doc in scored]
+
     def log(self, msg):
         def _append():
             self.log_area.config(state="normal")
@@ -2702,7 +2780,7 @@ class AgenticRAGApp:
                 return docs_local, retrieved_count_local, cap_reached
 
             def _select_evidence_pack(doc_list, rerank_query):
-                candidates = doc_list
+                candidates = self._promote_lexical_overlap(doc_list, rerank_query)
                 if self.use_reranker.get() and self.api_keys["cohere"].get():
                     try:
                         self.log("Reranking with Cohere...")
@@ -2714,7 +2792,7 @@ class AgenticRAGApp:
                             model="rerank-english-v3.0",
                         )
                         compressed_docs = compressor.compress_documents(
-                            doc_list, rerank_query
+                            candidates, rerank_query
                         )
                         self.log(
                             f"Reranked down to {len(compressed_docs)} high-relevance chunks."
@@ -2722,7 +2800,6 @@ class AgenticRAGApp:
                         candidates = compressed_docs
                     except Exception as exc:
                         self.log(f"Rerank Error (Using raw retrieval instead): {exc}")
-                        candidates = doc_list
                 candidates = self._apply_coverage_selection(
                     candidates, final_k, group_limit=MAX_GROUP_DOCS
                 )
