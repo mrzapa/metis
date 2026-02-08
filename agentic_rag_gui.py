@@ -60,20 +60,18 @@ class AgenticRAGApp:
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
         self.default_system_instructions = (
             "You are an expert analyst assistant. Use ONLY the provided context for factual claims. "
-            "Never ask for details already present in the retrieved context. Do not use placeholders. "
-            "If any requested item is missing from the context, output exactly: NOT FOUND IN CONTEXT "
-            "(no citation). Every factual paragraph must include at least one [Chunk N] citation. "
-            "Do not include citations on NOT FOUND IN CONTEXT lines. "
+            "Never ask for details already present in the retrieved context. "
+            "Omit unsupported claims; deepen supported ones; do not ask the user for missing info; "
+            "do not use placeholders. Every factual paragraph must include at least one [Chunk N] citation. "
             "For Script / talk track and Structured report styles, include at least one short verbatim "
             "quote (<=25 words) per major section with a [Chunk N] citation. "
-            "Coverage rule: if N items are requested, output N items or NOT FOUND IN CONTEXT for each."
+            "Coverage rule: if N items are requested, output N items, omitting unsupported claims."
         )
         self.verbose_system_instructions = (
             "You are an expert analyst assistant. Use ONLY the provided context for factual claims. "
-            "Never ask for details already present in the retrieved context. Do not use placeholders. "
-            "If any requested item is missing from the context, output exactly: NOT FOUND IN CONTEXT "
-            "(no citation). Every factual paragraph must include at least one [Chunk N] citation. "
-            "Do not include citations on NOT FOUND IN CONTEXT lines. "
+            "Never ask for details already present in the retrieved context. "
+            "Omit unsupported claims; deepen supported ones; do not ask the user for missing info; "
+            "do not use placeholders. Every factual paragraph must include at least one [Chunk N] citation. "
             "For Script / talk track and Structured report styles, include at least one short verbatim "
             "quote (<=25 words) per major section with a [Chunk N] citation. "
             "Provide a concise summary, cite evidence from the context, list key points, "
@@ -1953,16 +1951,8 @@ class AgenticRAGApp:
         failures = []
         citation_re = re.compile(r"\[Chunk (\d+)\]")
 
-        for line in answer_text.splitlines():
-            if line.strip() == "NOT FOUND IN CONTEXT" and citation_re.search(line):
-                failures.append(
-                    "NOT FOUND IN CONTEXT line includes a citation, which is not allowed."
-                )
-
         paragraphs = [p for p in re.split(r"\n\s*\n", answer_text) if p.strip()]
         for paragraph in paragraphs:
-            if paragraph.strip() == "NOT FOUND IN CONTEXT":
-                continue
             if re.search(r"[A-Za-z0-9]", paragraph) and not citation_re.search(paragraph):
                 failures.append(
                     "Factual paragraph missing at least one [Chunk N] citation."
@@ -2001,9 +1991,9 @@ class AgenticRAGApp:
         repair_prompt = (
             "You are a repair assistant. Fix the draft using ONLY the provided context. "
             "Rules: remove unsupported content, add correct [Chunk N] citations to every "
-            "factual paragraph, include no placeholders, and replace any unsupported "
-            "content with exactly: NOT FOUND IN CONTEXT (no citation). "
-            "NOT FOUND IN CONTEXT lines must contain no citations. "
+            "factual paragraph, include no placeholders, and omit unsupported content. "
+            "Omit unsupported claims; deepen supported ones; do not ask the user for missing info; "
+            "do not use placeholders. "
             "For Script / talk track and Structured report styles, ensure at least one short "
             "verbatim quote (<=25 words) per major section with a [Chunk N] citation, and "
             "the quote must appear in the cited chunk text. "
@@ -3167,7 +3157,7 @@ class AgenticRAGApp:
                 if iteration > 1:
                     coverage_note = (
                         "\nIf helpful, include a compact coverage table mapping checklist "
-                        "items to evidence or NOT FOUND IN CONTEXT."
+                        "items to evidence or omitted due to missing support."
                     )
                 style_instruction = self._get_output_style_instruction()
                 prompt_parts = [self._get_system_instructions()]
@@ -3178,8 +3168,8 @@ class AgenticRAGApp:
                         "SECTION PLAN:\n" + "\n".join(f"- {item}" for item in section_plan)
                     )
                 prompt_parts.append(
-                    "Strict rules: Use ONLY the context. If an item is missing, output "
-                    "exactly NOT FOUND IN CONTEXT for that item."
+                    "Strict rules: Use ONLY the context. Omit unsupported claims; deepen supported ones; "
+                    "do not ask the user for missing info; do not use placeholders."
                 )
                 prompt_parts.append(f"CHECKLIST:\n{checklist_text}")
                 prompt_parts.append(f"CONTEXT:\n{context_text}{coverage_note}")
@@ -3200,8 +3190,8 @@ class AgenticRAGApp:
                     critic_prompt = (
                         "You are a critic. Review the answer against the checklist. "
                         "For each checklist item, mark it as FOUND with citations or "
-                        "NOT FOUND IN CONTEXT. If any items are NOT FOUND IN CONTEXT, "
-                        "propose new retrieval_queries. Return strict JSON with keys: "
+                        "UNSUPPORTED. If any items are UNSUPPORTED, propose new "
+                        "retrieval_queries. Return strict JSON with keys: "
                         "checklist_review (array of {item, status, citations}), "
                         "retrieval_queries (array). Do not include extra text."
                     )
@@ -3221,7 +3211,7 @@ class AgenticRAGApp:
                     for review in review_items:
                         status = str(review.get("status", "")).strip().upper()
                         item = str(review.get("item", "")).strip()
-                        if status == "NOT FOUND IN CONTEXT" and item:
+                        if status == "UNSUPPORTED" and item:
                             missing_items.append(item)
                     critic_queries = [
                         str(item).strip()
