@@ -106,8 +106,9 @@ class AgenticRAGApp:
         self.agentic_mode = tk.BooleanVar(value=False)
         self.agentic_max_iterations = tk.IntVar(value=2)
         self.show_retrieved_context = tk.BooleanVar(value=False)
-        self.use_sub_queries = tk.BooleanVar(value=False)
-        self.subquery_max_docs = tk.IntVar(value=100)
+        self.use_reranker = tk.BooleanVar(value=True)
+        self.use_sub_queries = tk.BooleanVar(value=True)
+        self.subquery_max_docs = tk.IntVar(value=200)
 
         self.vector_store = None
         self.index_embedding_signature = ""
@@ -685,6 +686,10 @@ class AgenticRAGApp:
         self.progress.pack(fill="x")
 
     def build_chat_tab(self):
+        if not hasattr(self, "use_sub_queries"):
+            self.use_sub_queries = tk.BooleanVar(value=True)
+        if not hasattr(self, "subquery_max_docs"):
+            self.subquery_max_docs = tk.IntVar(value=200)
         frame = ttk.Frame(self.tab_chat, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
 
@@ -792,7 +797,6 @@ class AgenticRAGApp:
         # Options
         opt_frame = ttk.Frame(frame)
         opt_frame.pack(fill="x", pady=5)
-        self.use_reranker = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             opt_frame,
             text="Use Cohere Reranker (Higher Precision)",
