@@ -31,6 +31,7 @@ CONTEXT_SAFETY_MARGIN_TOKENS = 512
 MAX_GROUP_DOCS = 2
 MIN_UNIQUE_INCIDENTS = 8
 MAX_UNIQUE_INCIDENTS = 12
+AGENTIC_MAX_ITERATIONS_HARD_CAP = 12
 MONTH_INDEX_TO_LABEL = {
     1: "Jan",
     2: "Feb",
@@ -435,7 +436,10 @@ class AgenticRAGApp:
             )
         except (TypeError, ValueError):
             max_iterations = self.agentic_max_iterations.get()
-        self.agentic_max_iterations.set(max(1, min(20, max_iterations)))
+        clamped_max_iterations = max(
+            1, min(AGENTIC_MAX_ITERATIONS_HARD_CAP, max_iterations)
+        )
+        self.agentic_max_iterations.set(clamped_max_iterations)
         self.show_retrieved_context.set(
             data.get("show_retrieved_context", self.show_retrieved_context.get())
         )
@@ -491,6 +495,12 @@ class AgenticRAGApp:
             subquery_max_docs = int(self.subquery_max_docs.get())
         except (TypeError, ValueError):
             subquery_max_docs = self.subquery_max_docs.get()
+        try:
+            max_iterations = int(self.agentic_max_iterations.get())
+        except (TypeError, ValueError):
+            max_iterations = self.agentic_max_iterations.get()
+        max_iterations = max(1, min(AGENTIC_MAX_ITERATIONS_HARD_CAP, max_iterations))
+        self.agentic_max_iterations.set(max_iterations)
         data = {
             "api_keys": {key: var.get() for key, var in self.api_keys.items()},
             "llm_provider": self.llm_provider.get(),
@@ -514,7 +524,7 @@ class AgenticRAGApp:
             "mmr_lambda": self.mmr_lambda.get(),
             # New config fields: agentic_mode, agentic_max_iterations, show_retrieved_context
             "agentic_mode": self.agentic_mode.get(),
-            "agentic_max_iterations": self.agentic_max_iterations.get(),
+            "agentic_max_iterations": max_iterations,
             "show_retrieved_context": self.show_retrieved_context.get(),
             "use_reranker": self.use_reranker.get(),
             "use_sub_queries": bool(self.use_sub_queries.get()),
@@ -943,7 +953,7 @@ class AgenticRAGApp:
         ttk.Spinbox(
             agentic_frame,
             from_=1,
-            to=3,
+            to=AGENTIC_MAX_ITERATIONS_HARD_CAP,
             textvariable=self.agentic_max_iterations,
             width=4,
         ).pack(side="left")
@@ -3910,7 +3920,8 @@ class AgenticRAGApp:
                 max_iterations_value = int(self.agentic_max_iterations.get())
             except (TypeError, ValueError):
                 max_iterations_value = 2
-            max_iterations = max(1, min(20, max_iterations_value))
+            HARD_CAP = AGENTIC_MAX_ITERATIONS_HARD_CAP
+            max_iterations = max(1, min(HARD_CAP, max_iterations_value))
             self.log(
                 "Agentic run starting with resolved max_iterations="
                 f"{max_iterations} (requested {max_iterations_value})."
