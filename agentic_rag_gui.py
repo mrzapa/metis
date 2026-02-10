@@ -230,6 +230,57 @@ class AgenticRAGApp:
             "weaviate-client",
         ]
 
+    def _build_evidence_pack_context(self, docs, budget_chars, per_doc_chars=600):
+        context_blocks = []
+        used_chars = 0
+        packed_count = 0
+        truncated_flag = False
+
+        for idx, doc in enumerate(docs, start=1):
+            metadata = getattr(doc, "metadata", {}) or {}
+            chunk_id = metadata.get("chunk_id", "N/A")
+            month_key = metadata.get("month_key")
+            channel_key = metadata.get("channel_key", "N/A")
+            role = metadata.get("role", "N/A")
+            evidence_kind = metadata.get("evidence_kind", "N/A")
+            source = (
+                metadata.get("source")
+                or metadata.get("file_path")
+                or metadata.get("filename")
+            )
+            header_parts = [
+                f"[Chunk {idx}",
+                f"chunk_id: {chunk_id}",
+                f"channel_key: {channel_key}",
+                f"role: {role}",
+                f"evidence_kind: {evidence_kind}",
+            ]
+            if month_key:
+                header_parts.append(f"month_key: {month_key}")
+            if source:
+                header_parts.append(f"source: {source}")
+            header = " | ".join(header_parts) + "]"
+
+            excerpt = (getattr(doc, "page_content", "") or "").strip()[:per_doc_chars]
+            chunk_text = f"{header}\n{excerpt}"
+            added_chars = len(chunk_text) + (2 if context_blocks else 0)
+
+            if used_chars + added_chars > budget_chars:
+                truncated_flag = True
+                break
+
+            context_blocks.append(chunk_text)
+            used_chars += added_chars
+            packed_count += 1
+
+        self.log(
+            "Evidence-pack context: "
+            f"packed_count={packed_count}, truncated={truncated_flag}, "
+            f"per_doc_chars={per_doc_chars}, used_chars={used_chars}/{budget_chars}"
+        )
+
+        return "\n\n".join(context_blocks), packed_count, truncated_flag
+
     def setup_ui(self):
         # Styles
         style = ttk.Style()
@@ -5126,13 +5177,32 @@ class AgenticRAGApp:
                     str((getattr(doc, "metadata", {}) or {}).get("chunk_id") or (getattr(doc, "metadata", {}) or {}).get("source_id") or self._doc_identity_key(doc))
                     for doc in final_docs
                 )
-                (
-                    context_text,
-                    was_truncated,
-                    trunc_used_chars,
-                    trunc_budget_chars,
-                    packed_count,
-                ) = _build_context(final_docs)
+                if is_evidence_pack:
+                    trunc_budget_chars = max(
+                        12000,
+                        min(
+                            MAX_PACKED_CONTEXT_CHARS,
+                            context_budget_tokens * TOKENS_TO_CHARS_RATIO,
+                        ),
+                    )
+                    (
+                        context_text,
+                        packed_count,
+                        was_truncated,
+                    ) = self._build_evidence_pack_context(
+                        final_docs,
+                        budget_chars=trunc_budget_chars,
+                        per_doc_chars=600,
+                    )
+                    trunc_used_chars = len(context_text)
+                else:
+                    (
+                        context_text,
+                        was_truncated,
+                        trunc_used_chars,
+                        trunc_budget_chars,
+                        packed_count,
+                    ) = _build_context(final_docs)
                 role_distribution = self._format_role_distribution(final_docs)
                 selected_distribution = self._format_selected_distribution(final_docs)
                 self._log_final_docs_selection(
@@ -5517,13 +5587,32 @@ class AgenticRAGApp:
                     str((getattr(doc, "metadata", {}) or {}).get("chunk_id") or (getattr(doc, "metadata", {}) or {}).get("source_id") or self._doc_identity_key(doc))
                     for doc in final_docs
                 )
-                (
-                    context_text,
-                    was_truncated,
-                    trunc_used_chars,
-                    trunc_budget_chars,
-                    packed_count,
-                ) = _build_context(final_docs)
+                if is_evidence_pack:
+                    trunc_budget_chars = max(
+                        12000,
+                        min(
+                            MAX_PACKED_CONTEXT_CHARS,
+                            context_budget_tokens * TOKENS_TO_CHARS_RATIO,
+                        ),
+                    )
+                    (
+                        context_text,
+                        packed_count,
+                        was_truncated,
+                    ) = self._build_evidence_pack_context(
+                        final_docs,
+                        budget_chars=trunc_budget_chars,
+                        per_doc_chars=600,
+                    )
+                    trunc_used_chars = len(context_text)
+                else:
+                    (
+                        context_text,
+                        was_truncated,
+                        trunc_used_chars,
+                        trunc_budget_chars,
+                        packed_count,
+                    ) = _build_context(final_docs)
                 role_distribution = self._format_role_distribution(final_docs)
                 selected_distribution = self._format_selected_distribution(final_docs)
                 self._log_final_docs_selection(
