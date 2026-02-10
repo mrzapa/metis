@@ -5202,6 +5202,8 @@ class AgenticRAGApp:
                     *history_window,
                     HumanMessage(content=query),
                 ]
+                generation_started_at = time.perf_counter()
+                generation_ms = 0
                 if is_evidence_pack:
                     response_content = _run_evidence_pack_two_stage(
                         llm,
@@ -5212,6 +5214,8 @@ class AgenticRAGApp:
                 else:
                     response = llm.invoke(messages)
                     response_content = response.content
+                generation_ms = int((time.perf_counter() - generation_started_at) * 1000)
+                validation_started_at = time.perf_counter()
                 validated_answer = self._validate_and_repair(
                     response_content, context_text, iteration_id=1
                 )
@@ -5606,6 +5610,8 @@ class AgenticRAGApp:
                     *history_window,
                     HumanMessage(content=query),
                 ]
+                generation_started_at = time.perf_counter()
+                generation_ms = 0
                 if is_evidence_pack:
                     latest_answer = _run_evidence_pack_two_stage(
                         llm,
@@ -5619,6 +5625,7 @@ class AgenticRAGApp:
                 else:
                     response = llm.invoke(messages)
                     latest_answer = response.content
+                generation_ms = int((time.perf_counter() - generation_started_at) * 1000)
                 latest_context_text = context_text
                 last_iteration_id = iteration
                 self._append_jsonl_telemetry(
