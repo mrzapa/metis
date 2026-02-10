@@ -1256,7 +1256,7 @@ class AgenticRAGApp:
         channel_hint = self._detect_channel_hint(content, metadata)
         return f"{date_key}:{channel_hint}"
 
-    def _score_doc_for_selection(self, doc):
+    def _score_doc_for_selection(self, doc, seen_chunk_ids=None):
         content = (getattr(doc, "page_content", "") or "").strip()
         metadata = getattr(doc, "metadata", {}) or {}
         base_score = metadata.get("relevance_score")
@@ -1298,14 +1298,22 @@ class AgenticRAGApp:
         if advice_match:
             score -= 0.3
 
+        doc_key = self._doc_identity_key(doc)
+        seen_before = bool(seen_chunk_ids and doc_key in seen_chunk_ids)
+        if seen_before and not self._is_must_include(doc):
+            score -= 0.15
+
         incident_key = self._build_incident_key(doc)
         metadata["incident_key"] = incident_key
         metadata["selection_score"] = round(score, 4)
         metadata["date_mentions"] = date_mentions
+        metadata["selection_seen_before"] = seen_before
         doc.metadata = metadata
         return score, incident_key
 
-    def _apply_coverage_selection(self, docs, final_k, group_limit=2):
+    def _apply_coverage_selection(
+        self, docs, final_k, group_limit=2, seen_chunk_ids=None
+    ):
         must_include = []
         remaining = []
         for doc in docs:
@@ -1321,7 +1329,9 @@ class AgenticRAGApp:
         for doc in selected:
             group_key = self._doc_group_key(doc)
             group_counts[group_key] = group_counts.get(group_key, 0) + 1
-            _score, incident_key = self._score_doc_for_selection(doc)
+            _score, incident_key = self._score_doc_for_selection(
+                doc, seen_chunk_ids=seen_chunk_ids
+            )
             incident_counts[incident_key] = incident_counts.get(incident_key, 0) + 1
 
         priority_docs = [doc for doc in remaining if self._is_priority_doc(doc)]
@@ -1330,10 +1340,14 @@ class AgenticRAGApp:
         scored_priority = []
         scored_other = []
         for doc in priority_docs:
-            score, incident_key = self._score_doc_for_selection(doc)
+            score, incident_key = self._score_doc_for_selection(
+                doc, seen_chunk_ids=seen_chunk_ids
+            )
             scored_priority.append((score, incident_key, doc))
         for doc in other_docs:
-            score, incident_key = self._score_doc_for_selection(doc)
+            score, incident_key = self._score_doc_for_selection(
+                doc, seen_chunk_ids=seen_chunk_ids
+            )
             scored_other.append((score, incident_key, doc))
         scored_priority.sort(key=lambda item: item[0], reverse=True)
         scored_other.sort(key=lambda item: item[0], reverse=True)
@@ -1570,6 +1584,17 @@ class AgenticRAGApp:
         if ingest_id is None or chunk_id is None:
             return None
         return f"{ingest_id}:{chunk_id}"
+
+    def _doc_identity_key(self, doc):
+        metadata = getattr(doc, "metadata", {}) or {}
+        chunk_pk = self._chunk_pk(metadata)
+        if chunk_pk:
+            return chunk_pk
+        chunk_db_id = metadata.get("chunk_db_id")
+        if chunk_db_id:
+            return str(chunk_db_id)
+        content = (getattr(doc, "page_content", "") or "").strip()
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     def _upsert_lexical_chunks(self, docs):
         if not self._ensure_lexical_db():
@@ -2607,33 +2632,77 @@ class AgenticRAGApp:
             tokens.update(self._extract_date_tokens(content))
         return months, tokens
 
-    def _review_evidence_pack_coverage(self, candidate_docs, selected_docs):
-        candidate_months, candidate_tokens = self._extract_months_and_tokens(
-            candidate_docs
-        )
-        selected_months, _ = self._extract_months_and_tokens(selected_docs)
-        missing_months = sorted(
-            candidate_months - selected_months, key=self._month_sort_key
-        )
-        unique_incidents = self._compute_unique_incidents(selected_docs)
-        channels = self._extract_channels(candidate_docs)
-        return unique_incidents, missing_months, channels, candidate_tokens
+    def coverage_audit(self, final_docs, candidate_pool):
+        available_months, candidate_tokens = self._extract_months_and_tokens(candidate_pool)
+        selected_months, _ = self._extract_months_and_tokens(final_docs)
+        available_channels = self._extract_channels(candidate_pool)
+        selected_channels = self._extract_channels(final_docs)
+        missing_months = sorted(available_months - selected_months, key=self._month_sort_key)
+        missing_channels = sorted(available_channels - selected_channels)
+        role_balance = {}
+        for doc in final_docs:
+            metadata = getattr(doc, "metadata", {}) or {}
+            role = metadata.get("speaker_role") or metadata.get("role") or "unknown"
+            role_balance[role] = role_balance.get(role, 0) + 1
+        return {
+            "selected_months": sorted(selected_months, key=self._month_sort_key),
+            "available_months": sorted(available_months, key=self._month_sort_key),
+            "selected_channels": sorted(selected_channels),
+            "available_channels": sorted(available_channels),
+            "incident_count": self._compute_unique_incidents(final_docs),
+            "role_balance": role_balance,
+            "missing_months": missing_months,
+            "missing_channels": missing_channels,
+            "candidate_date_tokens": sorted(candidate_tokens),
+            "missing_indicators": {
+                "months": bool(missing_months),
+                "channels": bool(missing_channels),
+            },
+        }
 
-    def _generate_follow_up_queries(
-        self, base_query, missing_months, channels, date_tokens, max_queries=8
-    ):
+    def _extract_candidate_keyphrases(self, candidate_pool, max_phrases=6):
+        stop_words = {
+            "the", "and", "that", "with", "from", "this", "have", "were", "been", "they",
+            "their", "about", "would", "could", "there", "which", "what", "when", "where",
+            "while", "into", "than", "then", "them", "also", "only", "other", "after",
+            "before", "under", "over", "between", "because", "during", "meeting", "incident",
+            "timeline", "details", "reported", "report", "issue", "complaint", "email", "teams",
+        }
+        counts = {}
+        for doc in candidate_pool:
+            content = (getattr(doc, "page_content", "") or "").lower()
+            for phrase in re.findall(r"\b[a-z][a-z0-9]{3,}(?:\s+[a-z][a-z0-9]{3,}){1,2}\b", content):
+                parts = phrase.split()
+                if any(part in stop_words for part in parts):
+                    continue
+                if phrase.isdigit():
+                    continue
+                counts[phrase] = counts.get(phrase, 0) + 1
+        ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+        return [phrase for phrase, _count in ranked[:max_phrases]]
+
+    def _generate_follow_up_queries(self, coverage, candidate_pool, max_queries=10):
         queries = []
-        channel_list = sorted(channels)
-        for month in missing_months:
-            if channel_list:
-                for channel in channel_list[:3]:
-                    queries.append(
-                        f"{base_query} {month} {channel} incident timeline"
-                    )
+        months = coverage.get("missing_months", [])
+        channels = coverage.get("missing_channels", [])
+        date_tokens = coverage.get("candidate_date_tokens", [])
+
+        for month in months[:4]:
+            if channels:
+                for channel in channels[:3]:
+                    queries.append(f"{month} {channel} incident timeline what happened impact")
             else:
-                queries.append(f"{base_query} {month} incident timeline")
-        for token in sorted(date_tokens)[:4]:
-            queries.append(f"{base_query} {token} incident details")
+                queries.append(f"{month} incident timeline what happened impact")
+
+        for channel in channels[:4]:
+            queries.append(f"{channel} incident grievance escalation timeline")
+
+        for token in date_tokens[:4]:
+            queries.append(f"{token} incident details what happened outcome")
+
+        for phrase in self._extract_candidate_keyphrases(candidate_pool):
+            queries.append(f"{phrase} incident evidence chronology")
+
         deduped = []
         seen = set()
         for candidate in queries:
@@ -3743,7 +3812,64 @@ class AgenticRAGApp:
                     cap_reached = True
                 return docs_local, retrieved_count_local, cap_reached
 
-            def _select_evidence_pack(doc_list, rerank_query, evidence_pack_mode):
+            def _retrieve_with_rrf(query_list, remaining_cap, k_value):
+                if remaining_cap <= 0:
+                    return [], 0, True
+                filtered_queries = [q for q in query_list if q]
+                if not filtered_queries:
+                    return [], 0, False
+                fused_scores = {}
+                fused_docs = {}
+                retrieved_count_local = 0
+                cap_reached = False
+                rrf_k = 60
+                if len(filtered_queries) == 1:
+                    per_query_k = min(k_value, remaining_cap)
+                else:
+                    per_query_k = max(2, min(k_value, max(1, remaining_cap) // len(filtered_queries)))
+                retriever = self.vector_store.as_retriever(
+                    search_type=search_type,
+                    search_kwargs=_build_search_kwargs(per_query_k),
+                )
+                for sub_query in filtered_queries:
+                    dense_docs = retriever.invoke(sub_query)
+                    retrieved_count_local += len(dense_docs)
+                    for rank, doc in enumerate(dense_docs, start=1):
+                        key = self._doc_identity_key(doc)
+                        fused_scores[key] = fused_scores.get(key, 0.0) + 1.0 / (rrf_k + rank)
+                        fused_docs.setdefault(key, doc)
+                    if self.lexical_db_available:
+                        lexical_docs = self.lexical_search(sub_query, per_query_k)
+                        retrieved_count_local += len(lexical_docs)
+                        for rank, doc in enumerate(lexical_docs, start=1):
+                            key = self._doc_identity_key(doc)
+                            fused_scores[key] = fused_scores.get(key, 0.0) + 1.0 / (rrf_k + rank)
+                            fused_docs.setdefault(key, doc)
+                ranked_keys = sorted(fused_scores, key=lambda key: fused_scores[key], reverse=True)
+                docs_local = []
+                for key in ranked_keys:
+                    doc = fused_docs[key]
+                    metadata = getattr(doc, "metadata", {}) or {}
+                    metadata["rrf_score"] = round(fused_scores[key], 6)
+                    if metadata.get("relevance_score") is None:
+                        metadata["relevance_score"] = round(fused_scores[key], 6)
+                    doc.metadata = metadata
+                    docs_local.append(doc)
+                    if len(docs_local) >= remaining_cap:
+                        cap_reached = True
+                        break
+                self.log(
+                    "RRF fusion retrieval combined dense+lexical results into "
+                    f"{len(docs_local)} unique candidates."
+                )
+                return docs_local, retrieved_count_local, cap_reached
+
+            def _select_evidence_pack(
+                doc_list,
+                rerank_query,
+                evidence_pack_mode,
+                seen_chunk_ids=None,
+            ):
                 candidates = self._promote_lexical_overlap(doc_list, rerank_query)
                 if self.use_reranker.get() and self.api_keys["cohere"].get():
                     try:
@@ -3766,7 +3892,10 @@ class AgenticRAGApp:
                         self.log(f"Rerank Error (Using raw retrieval instead): {exc}")
                 group_limit = 1 if evidence_pack_mode else MAX_GROUP_DOCS
                 candidates = self._apply_coverage_selection(
-                    candidates, final_k, group_limit=group_limit
+                    candidates,
+                    final_k,
+                    group_limit=group_limit,
+                    seen_chunk_ids=seen_chunk_ids,
                 )
                 return candidates[:final_k]
 
@@ -3874,6 +4003,8 @@ class AgenticRAGApp:
                     f"retrieved={retrieved_count}"
                 )
 
+            seen_chunk_ids = set()
+
             if not self.agentic_mode.get():
                 queries = [query]
                 if self.use_sub_queries.get():
@@ -3903,88 +4034,78 @@ class AgenticRAGApp:
                     )
                     candidate_docs = routed_docs
                     final_docs = _select_evidence_pack(
-                        routed_docs, query, is_evidence_pack
+                        routed_docs, query, is_evidence_pack, seen_chunk_ids=seen_chunk_ids
                     )
                 else:
                     candidate_docs = docs
-                    final_docs = _select_evidence_pack(docs, query, is_evidence_pack)
+                    final_docs = _select_evidence_pack(
+                        docs, query, is_evidence_pack, seen_chunk_ids=seen_chunk_ids
+                    )
                 if is_evidence_pack:
-                    (
-                        unique_incidents,
-                        missing_months,
-                        channels,
-                        date_tokens,
-                    ) = self._review_evidence_pack_coverage(
-                        candidate_docs, final_docs
-                    )
-                    unique_incidents_value = unique_incidents
-                    coverage_floor = max(3, min(final_k, len(final_docs)))
-                    coverage_low = unique_incidents < coverage_floor or bool(
-                        missing_months
-                    )
-                    missing_months_text = (
-                        ", ".join(missing_months) if missing_months else "none"
+                    coverage = self.coverage_audit(final_docs, candidate_docs)
+                    unique_incidents_value = coverage["incident_count"]
+                    incident_floor = max(8, final_k // 2)
+                    coverage_triggered = (
+                        coverage["incident_count"] < incident_floor
+                        or coverage["missing_indicators"]["months"]
+                        or coverage["missing_indicators"]["channels"]
                     )
                     self.log(
-                        "Evidence-pack coverage check: unique_incidents="
-                        f"{unique_incidents}, missing_months={missing_months_text}."
+                        "Coverage audit: incident_count="
+                        f"{coverage['incident_count']}, months={coverage['selected_months']}/"
+                        f"{coverage['available_months']}, channels={coverage['selected_channels']}/"
+                        f"{coverage['available_channels']}, role_balance={coverage['role_balance']}."
                     )
-                    if coverage_low:
+                    if coverage_triggered:
                         follow_up_queries = self._generate_follow_up_queries(
-                            query, missing_months, channels, date_tokens
+                            coverage, candidate_docs
                         )
-                        if follow_up_queries:
-                            remaining_cap = max(0, total_docs_cap - len(docs))
-                            if remaining_cap == 0:
-                                self.log(
-                                    "Evidence-pack follow-up skipped; total docs cap reached."
-                                )
-                            else:
-                                (
-                                    follow_docs,
-                                    follow_retrieved_count,
-                                    follow_cap_reached,
-                                    _follow_digest_docs,
-                                    follow_raw_expanded_count,
-                                    follow_digest_retrieved_count,
-                                    follow_digest_selected_count,
-                                ) = _retrieve_with_digest(
-                                    follow_up_queries,
-                                    remaining_cap,
-                                    routing_candidate_k,
-                                )
-                                retrieved_count += follow_retrieved_count
-                                raw_expanded_count += follow_raw_expanded_count
-                                digest_retrieved_count += follow_digest_retrieved_count
-                                digest_selected_count += follow_digest_selected_count
-                                cap_reached = cap_reached or follow_cap_reached
-                                if follow_docs:
-                                    docs = self._merge_dedupe_docs(docs + follow_docs)
-                                    if use_mini_digest:
-                                        routed_docs = self._route_with_mini_digest(
-                                            docs, query, final_k
-                                        )
-                                        candidate_docs = routed_docs
-                                        self.log(
-                                            "Evidence-pack follow-up routing selected "
-                                            f"{len(routed_docs)} candidate chunks."
-                                        )
-                                    else:
-                                        candidate_docs = docs
-                                    final_docs = _select_evidence_pack(
-                                        candidate_docs, query, is_evidence_pack
-                                    )
-                                    self.log(
-                                        "Evidence-pack follow-up retrieval added "
-                                        f"{len(follow_docs)} chunks; "
-                                        f"reselected {len(final_docs)} chunks."
-                                    )
-                        else:
-                            self.log(
-                                "Evidence-pack follow-up skipped; no follow-up queries."
+                        self.log(
+                            "Coverage gate triggered: "
+                            f"incident_floor={incident_floor}, queries={follow_up_queries}."
+                        )
+                        remaining_cap = max(0, total_docs_cap - len(docs))
+                        if follow_up_queries and remaining_cap > 0:
+                            follow_docs, follow_retrieved_count, follow_cap_reached = _retrieve_with_rrf(
+                                follow_up_queries,
+                                remaining_cap,
+                                routing_candidate_k,
                             )
+                            retrieved_count += follow_retrieved_count
+                            cap_reached = cap_reached or follow_cap_reached
+                            if follow_docs:
+                                docs = self._merge_dedupe_docs(docs + follow_docs)
+                                if use_mini_digest:
+                                    routed_docs = self._route_with_mini_digest(
+                                        docs, query, final_k
+                                    )
+                                    candidate_docs = routed_docs
+                                    self.log(
+                                        "Coverage follow-up routing selected "
+                                        f"{len(routed_docs)} candidate chunks."
+                                    )
+                                else:
+                                    candidate_docs = docs
+                                final_docs = _select_evidence_pack(
+                                    candidate_docs,
+                                    query,
+                                    is_evidence_pack,
+                                    seen_chunk_ids=seen_chunk_ids,
+                                )
+                                unique_incidents_value = self.coverage_audit(
+                                    final_docs, candidate_docs
+                                )["incident_count"]
+                                self.log(
+                                    "Coverage follow-up retrieval added "
+                                    f"{len(follow_docs)} chunks; reselected {len(final_docs)} chunks."
+                                )
+                        elif remaining_cap == 0:
+                            self.log("Coverage follow-up skipped; total docs cap reached.")
+                        else:
+                            self.log("Coverage follow-up skipped; no follow-up queries.")
                 else:
                     unique_incidents_value = len(final_docs)
+                seen_chunk_ids.update(self._doc_identity_key(doc) for doc in final_docs)
                 (
                     context_text,
                     was_truncated,
@@ -4207,93 +4328,79 @@ class AgenticRAGApp:
                     )
                     candidate_docs = routed_docs
                     final_docs = _select_evidence_pack(
-                        routed_docs, query, is_evidence_pack
+                        routed_docs, query, is_evidence_pack, seen_chunk_ids=seen_chunk_ids
                     )
                 else:
                     candidate_docs = all_docs
                     final_docs = _select_evidence_pack(
-                        all_docs, query, is_evidence_pack
+                        all_docs, query, is_evidence_pack, seen_chunk_ids=seen_chunk_ids
                     )
                 if is_evidence_pack:
-                    (
-                        unique_incidents,
-                        missing_months,
-                        channels,
-                        date_tokens,
-                    ) = self._review_evidence_pack_coverage(
-                        candidate_docs, final_docs
-                    )
-                    unique_incidents_value = unique_incidents
-                    coverage_floor = max(3, min(final_k, len(final_docs)))
-                    coverage_low = unique_incidents < coverage_floor or bool(
-                        missing_months
-                    )
-                    missing_months_text = (
-                        ", ".join(missing_months) if missing_months else "none"
+                    coverage = self.coverage_audit(final_docs, candidate_docs)
+                    unique_incidents_value = coverage["incident_count"]
+                    incident_floor = max(8, final_k // 2)
+                    coverage_triggered = (
+                        coverage["incident_count"] < incident_floor
+                        or coverage["missing_indicators"]["months"]
+                        or coverage["missing_indicators"]["channels"]
                     )
                     self.log(
-                        "Evidence-pack coverage check: unique_incidents="
-                        f"{unique_incidents}, missing_months={missing_months_text}."
+                        "Coverage audit: incident_count="
+                        f"{coverage['incident_count']}, months={coverage['selected_months']}/"
+                        f"{coverage['available_months']}, channels={coverage['selected_channels']}/"
+                        f"{coverage['available_channels']}, role_balance={coverage['role_balance']}."
                     )
-                    if coverage_low:
+                    if coverage_triggered:
                         follow_up_queries = self._generate_follow_up_queries(
-                            query, missing_months, channels, date_tokens
+                            coverage, candidate_docs
                         )
-                        if follow_up_queries:
-                            remaining_cap = max(0, total_docs_cap - total_retrieved)
-                            if remaining_cap == 0:
-                                self.log(
-                                    "Evidence-pack follow-up skipped; total docs cap reached."
-                                )
-                            else:
-                                (
-                                    follow_docs,
-                                    follow_retrieved_count,
-                                    follow_cap_reached,
-                                    _follow_digest_docs,
-                                    follow_raw_expanded_count,
-                                    follow_digest_retrieved_count,
-                                    follow_digest_selected_count,
-                                ) = _retrieve_with_digest(
-                                    follow_up_queries,
-                                    remaining_cap,
-                                    routing_candidate_k,
-                                )
-                                retrieved_count += follow_retrieved_count
-                                raw_expanded_count += follow_raw_expanded_count
-                                digest_retrieved_count += follow_digest_retrieved_count
-                                digest_selected_count += follow_digest_selected_count
-                                cap_reached = cap_reached or follow_cap_reached
-                                if follow_docs:
-                                    total_retrieved += len(follow_docs)
-                                    all_docs = self._merge_dedupe_docs(
-                                        all_docs + follow_docs
-                                    )
-                                    if use_mini_digest:
-                                        routed_docs = self._route_with_mini_digest(
-                                            all_docs, query, final_k
-                                        )
-                                        candidate_docs = routed_docs
-                                        self.log(
-                                            "Evidence-pack follow-up routing selected "
-                                            f"{len(routed_docs)} candidate chunks."
-                                        )
-                                    else:
-                                        candidate_docs = all_docs
-                                    final_docs = _select_evidence_pack(
-                                        candidate_docs, query, is_evidence_pack
-                                    )
-                                    self.log(
-                                        "Evidence-pack follow-up retrieval added "
-                                        f"{len(follow_docs)} chunks; "
-                                        f"reselected {len(final_docs)} chunks."
-                                    )
-                        else:
-                            self.log(
-                                "Evidence-pack follow-up skipped; no follow-up queries."
+                        self.log(
+                            "Coverage gate triggered: "
+                            f"incident_floor={incident_floor}, queries={follow_up_queries}."
+                        )
+                        remaining_cap = max(0, total_docs_cap - total_retrieved)
+                        if follow_up_queries and remaining_cap > 0:
+                            follow_docs, follow_retrieved_count, follow_cap_reached = _retrieve_with_rrf(
+                                follow_up_queries,
+                                remaining_cap,
+                                routing_candidate_k,
                             )
+                            retrieved_count += follow_retrieved_count
+                            cap_reached = cap_reached or follow_cap_reached
+                            if follow_docs:
+                                total_retrieved += len(follow_docs)
+                                all_docs = self._merge_dedupe_docs(all_docs + follow_docs)
+                                if use_mini_digest:
+                                    routed_docs = self._route_with_mini_digest(
+                                        all_docs, query, final_k
+                                    )
+                                    candidate_docs = routed_docs
+                                    self.log(
+                                        "Coverage follow-up routing selected "
+                                        f"{len(routed_docs)} candidate chunks."
+                                    )
+                                else:
+                                    candidate_docs = all_docs
+                                final_docs = _select_evidence_pack(
+                                    candidate_docs,
+                                    query,
+                                    is_evidence_pack,
+                                    seen_chunk_ids=seen_chunk_ids,
+                                )
+                                unique_incidents_value = self.coverage_audit(
+                                    final_docs, candidate_docs
+                                )["incident_count"]
+                                self.log(
+                                    "Coverage follow-up retrieval added "
+                                    f"{len(follow_docs)} chunks; reselected {len(final_docs)} chunks."
+                                )
+                        elif remaining_cap == 0:
+                            self.log("Coverage follow-up skipped; total docs cap reached.")
+                        else:
+                            self.log("Coverage follow-up skipped; no follow-up queries.")
                 else:
                     unique_incidents_value = len(final_docs)
+                seen_chunk_ids.update(self._doc_identity_key(doc) for doc in final_docs)
                 (
                     context_text,
                     was_truncated,
