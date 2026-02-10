@@ -4888,6 +4888,58 @@ class AgenticRAGApp:
                     "selected_incidents": len(selected_incidents),
                 }
 
+            def _trim_followup_swap_pool(existing_pool, follow_pool, cap_value, seen_ids=None):
+                seen_ids = seen_ids if isinstance(seen_ids, set) else set(seen_ids or [])
+                follow_keys = {
+                    self._doc_identity_key(doc)
+                    for doc in follow_pool
+                }
+                combined = self._merge_dedupe_docs(existing_pool + follow_pool)
+                signature_counts = {}
+                for doc in combined:
+                    metadata = getattr(doc, "metadata", {}) or {}
+                    signature = metadata.get("incident_signature") or metadata.get("incident_key") or self._build_incident_key(doc)
+                    signature_counts[signature] = signature_counts.get(signature, 0) + 1
+
+                scored = []
+                for doc in combined:
+                    metadata = getattr(doc, "metadata", {}) or {}
+                    relevance = metadata.get("relevance_score")
+                    try:
+                        relevance = float(relevance)
+                    except (TypeError, ValueError):
+                        relevance = 0.0
+                    doc_key = str(metadata.get("chunk_id") or metadata.get("source_id") or self._doc_identity_key(doc))
+                    role_kind = metadata.get("role_kind") or self._extract_role_kind(doc)
+                    content = (getattr(doc, "page_content", "") or "")
+                    advice_heavy = bool(
+                        re.search(
+                            r"\b(you should|we should|i recommend|recommend|suggest|consider|best practice|steps to|how to|guidance|advice|tips|as an ai)\b",
+                            content,
+                            flags=re.I,
+                        )
+                    )
+                    signature = metadata.get("incident_signature") or metadata.get("incident_key") or self._build_incident_key(doc)
+                    duplicate_penalty = max(0, signature_counts.get(signature, 0) - 1)
+                    keep_score = relevance
+                    if role_kind == "assistant":
+                        keep_score -= 0.9
+                    if advice_heavy:
+                        keep_score -= 0.7
+                    if doc_key in seen_ids and not self._is_must_include(doc):
+                        keep_score -= 0.35
+                    keep_score -= duplicate_penalty * 0.25
+                    if self._is_must_include(doc):
+                        keep_score += 3.0
+                    scored.append((keep_score, doc))
+
+                scored.sort(key=lambda item: item[0], reverse=True)
+                trimmed = [doc for _score, doc in scored[:cap_value]]
+                trimmed_keys = {self._doc_identity_key(doc) for doc in trimmed}
+                dropped_count = max(0, len(existing_pool) - len([doc for doc in existing_pool if self._doc_identity_key(doc) in trimmed_keys]))
+                added_count = len([doc for doc in trimmed if self._doc_identity_key(doc) in follow_keys])
+                return trimmed, dropped_count, added_count
+
             def _build_context(doc_list):
                 def _clamp(value, min_value, max_value):
                     return max(min_value, min(max_value, value))
@@ -5161,8 +5213,54 @@ class AgenticRAGApp:
                                     "Coverage follow-up retrieval added "
                                     f"{len(follow_docs)} chunks; reselected {len(final_docs)} chunks."
                                 )
-                        elif remaining_cap == 0:
-                            self.log("Coverage follow-up skipped; total docs cap reached.")
+                        elif follow_up_queries and remaining_cap <= 0:
+                            swap_k = 60
+                            follow_docs, follow_retrieved_count, follow_cap_reached = _retrieve_with_rrf(
+                                follow_up_queries,
+                                swap_k,
+                                min(routing_candidate_k, swap_k),
+                            )
+                            retrieved_count += follow_retrieved_count
+                            cap_reached = cap_reached or follow_cap_reached
+                            if follow_docs:
+                                seed_n = min(len(docs), max(final_k * 4, 80))
+                                existing_seed = self._apply_coverage_selection(
+                                    docs,
+                                    seed_n,
+                                    group_limit=1 if is_evidence_pack else MAX_GROUP_DOCS,
+                                    evidence_pack_mode=is_evidence_pack,
+                                    seen_chunk_ids=seen_chunk_ids,
+                                )
+                                docs, dropped_count, added_count = _trim_followup_swap_pool(
+                                    existing_seed,
+                                    follow_docs,
+                                    total_docs_cap,
+                                    seen_ids=seen_chunk_ids,
+                                )
+                                if use_mini_digest:
+                                    routed_docs = self._route_with_mini_digest(
+                                        docs, query, final_k
+                                    )
+                                    candidate_docs = routed_docs
+                                    self.log(
+                                        "Coverage follow-up routing selected "
+                                        f"{len(routed_docs)} candidate chunks."
+                                    )
+                                else:
+                                    candidate_docs = docs
+                                final_docs = _select_evidence_pack(
+                                    candidate_docs,
+                                    query,
+                                    is_evidence_pack,
+                                    seen_chunk_ids=seen_chunk_ids,
+                                )
+                                unique_incidents_value = self.coverage_audit(
+                                    final_docs, candidate_docs
+                                )["incident_count"]
+                                self.log(
+                                    f"Coverage follow-up swap: dropped={dropped_count}, "
+                                    f"added={added_count}, cap={total_docs_cap}"
+                                )
                         else:
                             self.log("Coverage follow-up skipped; no follow-up queries.")
                     coverage_stats = {
@@ -5571,8 +5669,55 @@ class AgenticRAGApp:
                                     "Coverage follow-up retrieval added "
                                     f"{len(follow_docs)} chunks; reselected {len(final_docs)} chunks."
                                 )
-                        elif remaining_cap == 0:
-                            self.log("Coverage follow-up skipped; total docs cap reached.")
+                        elif follow_up_queries and remaining_cap <= 0:
+                            swap_k = 60
+                            follow_docs, follow_retrieved_count, follow_cap_reached = _retrieve_with_rrf(
+                                follow_up_queries,
+                                swap_k,
+                                min(routing_candidate_k, swap_k),
+                            )
+                            retrieved_count += follow_retrieved_count
+                            cap_reached = cap_reached or follow_cap_reached
+                            if follow_docs:
+                                seed_n = min(len(all_docs), max(final_k * 4, 80))
+                                existing_seed = self._apply_coverage_selection(
+                                    all_docs,
+                                    seed_n,
+                                    group_limit=1 if is_evidence_pack else MAX_GROUP_DOCS,
+                                    evidence_pack_mode=is_evidence_pack,
+                                    seen_chunk_ids=seen_chunk_ids,
+                                )
+                                all_docs, dropped_count, added_count = _trim_followup_swap_pool(
+                                    existing_seed,
+                                    follow_docs,
+                                    total_docs_cap,
+                                    seen_ids=seen_chunk_ids,
+                                )
+                                total_retrieved = len(all_docs)
+                                if use_mini_digest:
+                                    routed_docs = self._route_with_mini_digest(
+                                        all_docs, query, final_k
+                                    )
+                                    candidate_docs = routed_docs
+                                    self.log(
+                                        "Coverage follow-up routing selected "
+                                        f"{len(routed_docs)} candidate chunks."
+                                    )
+                                else:
+                                    candidate_docs = all_docs
+                                final_docs = _select_evidence_pack(
+                                    candidate_docs,
+                                    query,
+                                    is_evidence_pack,
+                                    seen_chunk_ids=seen_chunk_ids,
+                                )
+                                unique_incidents_value = self.coverage_audit(
+                                    final_docs, candidate_docs
+                                )["incident_count"]
+                                self.log(
+                                    f"Coverage follow-up swap: dropped={dropped_count}, "
+                                    f"added={added_count}, cap={total_docs_cap}"
+                                )
                         else:
                             self.log("Coverage follow-up skipped; no follow-up queries.")
                     coverage_stats = {
