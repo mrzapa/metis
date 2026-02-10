@@ -4021,6 +4021,158 @@ class AgenticRAGApp:
                 except json.JSONDecodeError:
                     return None
 
+            def _build_chunk_reference_lookup(doc_list):
+                lookup = {}
+                for idx, doc in enumerate(doc_list, start=1):
+                    metadata = getattr(doc, "metadata", {}) or {}
+                    chunk_id = str(metadata.get("chunk_id", "")).strip()
+                    canonical = chunk_id if chunk_id and chunk_id != "N/A" else f"Chunk {idx}"
+                    keys = {
+                        canonical,
+                        canonical.lower(),
+                        f"Chunk {idx}",
+                        f"chunk {idx}",
+                        str(idx),
+                    }
+                    if chunk_id and chunk_id != "N/A":
+                        keys.update(
+                            {
+                                chunk_id,
+                                chunk_id.lower(),
+                                f"chunk_id:{chunk_id}",
+                                f"chunk_id: {chunk_id}",
+                                f"chunk id {chunk_id}",
+                            }
+                        )
+                    for key in keys:
+                        lookup[str(key).strip().lower()] = canonical
+                return lookup
+
+            def _normalize_incident_payload(payload, doc_list):
+                scope_note = ""
+                if isinstance(payload, list):
+                    incidents_raw = payload
+                elif isinstance(payload, dict):
+                    incidents_raw = payload.get("incidents", [])
+                    scope_note = str(payload.get("scope_note", "")).strip()
+                else:
+                    incidents_raw = []
+
+                lookup = _build_chunk_reference_lookup(doc_list)
+                incidents = []
+                for item in incidents_raw:
+                    if not isinstance(item, dict):
+                        continue
+                    supporting_raw = item.get("supporting_chunks", [])
+                    if isinstance(supporting_raw, str):
+                        supporting_raw = [supporting_raw]
+                    supporting_chunks = []
+                    seen = set()
+                    for ref in supporting_raw:
+                        normalized = lookup.get(str(ref).strip().lower())
+                        if normalized and normalized not in seen:
+                            supporting_chunks.append(normalized)
+                            seen.add(normalized)
+                    if not supporting_chunks:
+                        continue
+
+                    people_value = item.get("people", [])
+                    if isinstance(people_value, str):
+                        people_value = [p.strip() for p in people_value.split(",") if p.strip()]
+                    elif isinstance(people_value, list):
+                        people_value = [str(p).strip() for p in people_value if str(p).strip()]
+                    else:
+                        people_value = []
+
+                    quotes_value = item.get("quotes", [])
+                    if isinstance(quotes_value, str):
+                        quotes_value = [quotes_value.strip()] if quotes_value.strip() else []
+                    elif isinstance(quotes_value, list):
+                        quotes_value = [str(q).strip() for q in quotes_value if str(q).strip()]
+                    else:
+                        quotes_value = []
+
+                    incidents.append(
+                        {
+                            "date": str(item.get("date", "")).strip(),
+                            "title": str(item.get("title", "")).strip(),
+                            "channel": str(item.get("channel", "")).strip(),
+                            "people": people_value,
+                            "what_happened": str(item.get("what_happened", "")).strip(),
+                            "impact": str(item.get("impact", "")).strip(),
+                            "supporting_chunks": supporting_chunks,
+                            "quotes": quotes_value,
+                        }
+                    )
+                return incidents, scope_note
+
+            def _run_evidence_pack_two_stage(llm, query_text, context_text, doc_list, checklist_text="", section_plan_items=None, coverage_note=""):
+                section_plan_items = section_plan_items or []
+                stage_a_prompt = (
+                    "You are Stage A for evidence-pack mode. Use ONLY FINAL_DOCS context below. "
+                    "Extract incidents and return STRICT JSON only (no markdown, no commentary).\n\n"
+                    "Schema (array of objects):\n"
+                    "[{\n"
+                    '  "date": "",\n'
+                    '  "title": "",\n'
+                    '  "channel": "",\n'
+                    '  "people": [""],\n'
+                    '  "what_happened": "",\n'
+                    '  "impact": "",\n'
+                    '  "supporting_chunks": [""],\n'
+                    '  "quotes": [""]\n'
+                    "}]\n\n"
+                    "Rules: supporting_chunks must reference chunk_id values or Chunk numbers present in FINAL_DOCS. "
+                    "If no incidents are supported, return []"
+                )
+                stage_a_messages = [
+                    SystemMessage(content=stage_a_prompt),
+                    HumanMessage(
+                        content=(
+                            f"User request:\n{query_text}\n\n"
+                            f"FINAL_DOCS:\n{context_text}{coverage_note}"
+                        )
+                    ),
+                ]
+                stage_a_response = llm.invoke(stage_a_messages)
+                stage_a_payload = _extract_json_payload(stage_a_response.content)
+                incidents, scope_note = _normalize_incident_payload(stage_a_payload, doc_list)
+
+                if not incidents:
+                    if scope_note:
+                        return f"Scope: {scope_note}"
+                    return "No supported incidents were found in final_docs."
+
+                incident_json = json.dumps(incidents, ensure_ascii=False, indent=2)
+                section_text = (
+                    "\nSECTION PLAN:\n" + "\n".join(f"- {item}" for item in section_plan_items)
+                    if section_plan_items
+                    else ""
+                )
+                checklist_block = f"\nCHECKLIST:\n{checklist_text}" if checklist_text else ""
+                scope_rule = (
+                    "If needed, include at most one short Scope note at the very top. "
+                    if scope_note
+                    else "If needed, include at most one short Scope note at the very top."
+                )
+                stage_b_prompt = (
+                    "You are Stage B for evidence-pack mode. Write the final narrative using ONLY the INCIDENT JSON. "
+                    "Preserve incident order exactly as listed. Cite each incident to listed supporting_chunks. "
+                    "Do not cite chunks that are not in an incident's supporting_chunks. Omit requested sections that have no incidents. "
+                    f"{scope_rule}"
+                )
+                stage_b_messages = [
+                    SystemMessage(content=stage_b_prompt),
+                    HumanMessage(
+                        content=(
+                            f"User request:\n{query_text}{section_text}{checklist_block}\n\n"
+                            f"INCIDENT JSON:\n{incident_json}"
+                        )
+                    ),
+                ]
+                stage_b_response = llm.invoke(stage_b_messages)
+                return stage_b_response.content
+
             def _build_search_kwargs(k_value):
                 search_kwargs_local = {"k": k_value}
                 if search_type == "mmr":
@@ -4589,9 +4741,18 @@ class AgenticRAGApp:
                     *history_window,
                     HumanMessage(content=query),
                 ]
-                response = llm.invoke(messages)
+                if is_evidence_pack:
+                    response_content = _run_evidence_pack_two_stage(
+                        llm,
+                        query,
+                        context_text,
+                        final_docs,
+                    )
+                else:
+                    response = llm.invoke(messages)
+                    response_content = response.content
                 validated_answer = self._validate_and_repair(
-                    response.content, context_text, iteration_id=1
+                    response_content, context_text, iteration_id=1
                 )
 
                 self.last_answer = validated_answer
@@ -4902,8 +5063,19 @@ class AgenticRAGApp:
                     *history_window,
                     HumanMessage(content=query),
                 ]
-                response = llm.invoke(messages)
-                latest_answer = response.content
+                if is_evidence_pack:
+                    latest_answer = _run_evidence_pack_two_stage(
+                        llm,
+                        query,
+                        context_text,
+                        final_docs,
+                        checklist_text=checklist_text,
+                        section_plan_items=section_plan,
+                        coverage_note=coverage_note,
+                    )
+                else:
+                    response = llm.invoke(messages)
+                    latest_answer = response.content
                 latest_context_text = context_text
                 last_iteration_id = iteration
 
