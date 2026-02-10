@@ -1179,6 +1179,23 @@ class AgenticRAGApp:
         return "unknown"
 
     @staticmethod
+    def _extract_channel(text):
+        normalized = (text or "").lower()
+        if not normalized:
+            return "unknown"
+        if re.search(r"\b(teams|slack|discord|chat)\b", normalized):
+            return "chat"
+        if "whatsapp" in normalized:
+            return "whatsapp"
+        if re.search(r"\b(email|e-mail|mail)\b", normalized):
+            return "email"
+        if re.search(r"\b(call|phone|dial|voicemail|zoom|meet)\b", normalized):
+            return "call"
+        if re.search(r"\b(ticket|case|jira|zendesk|servicenow)\b", normalized):
+            return "ticket"
+        return "unknown"
+
+    @staticmethod
     def _month_to_number(month_name):
         months = {
             "jan": 1,
@@ -1208,7 +1225,7 @@ class AgenticRAGApp:
         }
         return months.get(month_name.lower())
 
-    def _extract_date_mentions(self, text):
+    def _extract_dates(self, text):
         mentions = []
         if not text:
             return mentions
@@ -1290,19 +1307,67 @@ class AgenticRAGApp:
         mentions.sort(key=lambda item: item[0])
         return [value for _idx, value in mentions]
 
+    def _extract_date_mentions(self, text):
+        return self._extract_dates(text)
+
+    def _extract_incident_signature(self, text):
+        date_mentions = self._extract_dates(text)
+        date_key = date_mentions[0] if date_mentions else "undated"
+        channel = self._extract_channel(text)
+        normalized = re.sub(r"\s+", " ", (text or "").strip().lower())
+        participant = ""
+        participant_match = re.search(
+            r"\b([A-Z][a-z]+ [A-Z][a-z]+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b",
+            text or "",
+        )
+        if participant_match:
+            participant = participant_match.group(1).lower()
+        digest = hashlib.sha256(normalized[:200].encode("utf-8")).hexdigest()[:12]
+        return f"{date_key}|{channel}|{participant or digest}"
+
+    @staticmethod
+    def _extract_role_kind(doc):
+        metadata = getattr(doc, "metadata", {}) or {}
+        role = str(
+            metadata.get("speaker_role") or metadata.get("role") or "unknown"
+        ).strip().lower()
+        if role in {"assistant", "system", "bot", "ai"}:
+            return "assistant"
+        if role in {"user", "human", "employee", "complainant", "reporter"}:
+            return "user"
+        if role in {"manager", "supervisor", "lead", "hr", "legal"}:
+            return "authority"
+        return "other"
+
+    def _evidence_kind(self, doc):
+        metadata = getattr(doc, "metadata", {}) or {}
+        kind = str(metadata.get("evidence_kind") or "").strip().lower()
+        if kind:
+            return kind
+        role_kind = self._extract_role_kind(doc)
+        if role_kind == "user":
+            return "primary"
+        if role_kind == "assistant":
+            return "secondary"
+        return "unknown"
+
     def _build_incident_key(self, doc):
         content = (getattr(doc, "page_content", "") or "").strip()
         metadata = getattr(doc, "metadata", {}) or {}
-        date_mentions = self._extract_date_mentions(content)
-        if date_mentions:
-            date_key = date_mentions[0]
-        else:
-            content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:10]
-            date_key = f"undated:{content_hash}"
-        channel_hint = self._detect_channel_hint(content, metadata)
-        return f"{date_key}:{channel_hint}"
+        signature_text = "\n".join(
+            [
+                str(
+                    metadata.get("source")
+                    or metadata.get("file_path")
+                    or metadata.get("filename")
+                    or ""
+                ),
+                content,
+            ]
+        )
+        return self._extract_incident_signature(signature_text)
 
-    def _score_doc_for_selection(self, doc):
+    def _score_doc_for_selection(self, doc, evidence_pack_mode=False, evidence_thin=False):
         content = (getattr(doc, "page_content", "") or "").strip()
         metadata = getattr(doc, "metadata", {}) or {}
         base_score = metadata.get("relevance_score")
@@ -1332,6 +1397,24 @@ class AgenticRAGApp:
             flags=re.I,
         )
 
+        channel = self._extract_channel(
+            "\n".join(
+                [
+                    str(
+                        metadata.get("source")
+                        or metadata.get("file_path")
+                        or metadata.get("filename")
+                        or ""
+                    ),
+                    content,
+                ]
+            )
+        )
+        month_bucket = date_mentions[0][:7] if date_mentions else "undated"
+        incident_signature = self._extract_incident_signature(content)
+        role_kind = self._extract_role_kind(doc)
+        evidence_kind = self._evidence_kind(doc)
+
         score = base_score
         if date_mentions:
             score += 0.3
@@ -1342,16 +1425,29 @@ class AgenticRAGApp:
         if what_happened_match:
             score += 0.2
         if advice_match:
-            score -= 0.3
+            score -= 0.2 if (evidence_pack_mode and evidence_thin) else (0.5 if evidence_pack_mode else 0.3)
+
+        if role_kind == "assistant" and evidence_pack_mode:
+            score -= 0.1 if evidence_thin else 0.25
+        elif role_kind == "user":
+            score += 0.15
+
+        if evidence_kind == "primary":
+            score += 0.1
 
         incident_key = self._build_incident_key(doc)
         metadata["incident_key"] = incident_key
+        metadata["incident_signature"] = incident_signature
+        metadata["month_bucket"] = month_bucket
+        metadata["channel_type"] = channel
+        metadata["role_kind"] = role_kind
+        metadata["evidence_kind"] = evidence_kind
         metadata["selection_score"] = round(score, 4)
         metadata["date_mentions"] = date_mentions
         doc.metadata = metadata
         return score, incident_key
 
-    def _apply_coverage_selection(self, docs, final_k, group_limit=2):
+    def _apply_coverage_selection(self, docs, final_k, group_limit=2, evidence_pack_mode=False):
         must_include = []
         remaining = []
         for doc in docs:
@@ -1364,11 +1460,31 @@ class AgenticRAGApp:
         selected_ids = {id(doc) for doc in selected}
         group_counts = {}
         incident_counts = {}
+        month_counts = {}
+        channel_counts = {}
+        signature_counts = {}
+        pool_non_assistant = 0
+        for doc in docs:
+            if self._extract_role_kind(doc) != "assistant":
+                pool_non_assistant += 1
+        evidence_thin = evidence_pack_mode and pool_non_assistant <= max(2, final_k // 3)
+
         for doc in selected:
             group_key = self._doc_group_key(doc)
             group_counts[group_key] = group_counts.get(group_key, 0) + 1
-            _score, incident_key = self._score_doc_for_selection(doc)
+            _score, incident_key = self._score_doc_for_selection(
+                doc,
+                evidence_pack_mode,
+                evidence_thin=evidence_thin,
+            )
             incident_counts[incident_key] = incident_counts.get(incident_key, 0) + 1
+            metadata = getattr(doc, "metadata", {}) or {}
+            month = metadata.get("month_bucket") or "undated"
+            channel = metadata.get("channel_type") or "unknown"
+            signature = metadata.get("incident_signature") or incident_key
+            month_counts[month] = month_counts.get(month, 0) + 1
+            channel_counts[channel] = channel_counts.get(channel, 0) + 1
+            signature_counts[signature] = signature_counts.get(signature, 0) + 1
 
         priority_docs = [doc for doc in remaining if self._is_priority_doc(doc)]
         other_docs = [doc for doc in remaining if doc not in priority_docs]
@@ -1376,13 +1492,45 @@ class AgenticRAGApp:
         scored_priority = []
         scored_other = []
         for doc in priority_docs:
-            score, incident_key = self._score_doc_for_selection(doc)
+            score, incident_key = self._score_doc_for_selection(
+                doc,
+                evidence_pack_mode,
+                evidence_thin=evidence_thin,
+            )
             scored_priority.append((score, incident_key, doc))
         for doc in other_docs:
-            score, incident_key = self._score_doc_for_selection(doc)
+            score, incident_key = self._score_doc_for_selection(
+                doc,
+                evidence_pack_mode,
+                evidence_thin=evidence_thin,
+            )
             scored_other.append((score, incident_key, doc))
-        scored_priority.sort(key=lambda item: item[0], reverse=True)
-        scored_other.sort(key=lambda item: item[0], reverse=True)
+        all_channels = {
+            (getattr(doc, "metadata", {}) or {}).get("channel_type") or "unknown"
+            for _score, _incident_key, doc in (scored_priority + scored_other)
+        }
+        all_channels.discard("unknown")
+        month_pool = {
+            (getattr(doc, "metadata", {}) or {}).get("month_bucket") or "undated"
+            for _score, _incident_key, doc in (scored_priority + scored_other)
+        }
+        month_pool.discard("undated")
+        min_month_buckets = min(3, len(month_pool))
+
+        def _diversity_boost(item):
+            score, incident_key, doc = item
+            metadata = getattr(doc, "metadata", {}) or {}
+            month = metadata.get("month_bucket") or "undated"
+            channel = metadata.get("channel_type") or "unknown"
+            signature = metadata.get("incident_signature") or incident_key
+            boost = 0.0
+            boost += 0.25 if month_counts.get(month, 0) == 0 else 0.0
+            boost += 0.2 if channel != "unknown" and channel_counts.get(channel, 0) == 0 else 0.0
+            boost += 0.25 if signature_counts.get(signature, 0) == 0 else 0.0
+            return score + boost
+
+        scored_priority.sort(key=_diversity_boost, reverse=True)
+        scored_other.sort(key=_diversity_boost, reverse=True)
         scored_all = scored_priority + scored_other
 
         if final_k < MIN_UNIQUE_INCIDENTS:
@@ -1405,6 +1553,44 @@ class AgenticRAGApp:
                 selected_ids.add(id(doc))
                 group_counts[group_key] = count + 1
                 incident_counts[incident_key] = incident_counts.get(incident_key, 0) + 1
+                metadata = getattr(doc, "metadata", {}) or {}
+                month = metadata.get("month_bucket") or "undated"
+                channel = metadata.get("channel_type") or "unknown"
+                signature = metadata.get("incident_signature") or incident_key
+                month_counts[month] = month_counts.get(month, 0) + 1
+                channel_counts[channel] = channel_counts.get(channel, 0) + 1
+                signature_counts[signature] = signature_counts.get(signature, 0) + 1
+
+        missing_channels = [
+            channel
+            for channel in sorted(all_channels)
+            if channel_counts.get(channel, 0) == 0
+        ]
+        for channel in missing_channels:
+            if len(selected) >= final_k:
+                break
+            for _score, incident_key, doc in scored_all:
+                metadata = getattr(doc, "metadata", {}) or {}
+                if (metadata.get("channel_type") or "unknown") != channel:
+                    continue
+                _add_docs([(_score, incident_key, doc)])
+                break
+
+        missing_months = [
+            month
+            for month in sorted(month_pool)
+            if month_counts.get(month, 0) == 0
+        ]
+        for month in missing_months:
+            represented_months = len([m for m, c in month_counts.items() if c > 0 and m != "undated"])
+            if represented_months >= min_month_buckets or len(selected) >= final_k:
+                break
+            for _score, incident_key, doc in scored_all:
+                metadata = getattr(doc, "metadata", {}) or {}
+                if (metadata.get("month_bucket") or "undated") != month:
+                    continue
+                _add_docs([(_score, incident_key, doc)])
+                break
 
         for _score, incident_key, doc in scored_all:
             if len(selected) >= final_k:
@@ -1419,10 +1605,7 @@ class AgenticRAGApp:
             count = group_counts.get(group_key, 0)
             if count >= group_limit and not self._is_must_include(doc):
                 continue
-            selected.append(doc)
-            selected_ids.add(id(doc))
-            group_counts[group_key] = count + 1
-            incident_counts[incident_key] = 1
+            _add_docs([(_score, incident_key, doc)])
 
         _add_docs(scored_all)
 
@@ -1546,6 +1729,50 @@ class AgenticRAGApp:
         parts = [f"{role}={count}" for role, count in sorted(role_counts.items())]
         return ", ".join(parts)
 
+    def _format_selected_distribution(self, docs):
+        def _fmt(counter):
+            if not counter:
+                return "none"
+            return ", ".join(
+                f"{key}={value}" for key, value in sorted(counter.items(), key=lambda kv: kv[0])
+            )
+
+        month_counts = {}
+        channel_counts = {}
+        role_counts = {}
+        evidence_counts = {}
+        for doc in docs or []:
+            metadata = getattr(doc, "metadata", {}) or {}
+            month = metadata.get("month_bucket")
+            if not month:
+                dates = self._extract_dates(getattr(doc, "page_content", "") or "")
+                month = dates[0][:7] if dates else "undated"
+            channel = metadata.get("channel_type") or self._extract_channel(
+                "\n".join(
+                    [
+                        str(
+                            metadata.get("source")
+                            or metadata.get("file_path")
+                            or metadata.get("filename")
+                            or ""
+                        ),
+                        getattr(doc, "page_content", "") or "",
+                    ]
+                )
+            )
+            role = metadata.get("role_kind") or self._extract_role_kind(doc)
+            evidence = metadata.get("evidence_kind") or self._evidence_kind(doc)
+            month_counts[month] = month_counts.get(month, 0) + 1
+            channel_counts[channel] = channel_counts.get(channel, 0) + 1
+            role_counts[role] = role_counts.get(role, 0) + 1
+            evidence_counts[evidence] = evidence_counts.get(evidence, 0) + 1
+        return {
+            "months": _fmt(month_counts),
+            "channels": _fmt(channel_counts),
+            "roles": _fmt(role_counts),
+            "evidence_kind": _fmt(evidence_counts),
+        }
+
     def _log_final_docs_selection(
         self,
         retrieve_k,
@@ -1557,13 +1784,18 @@ class AgenticRAGApp:
         role_distribution,
         rerank_top_n,
         new_incidents_added,
+        selected_distribution,
     ):
         self.log(
             "Final-docs selection telemetry | "
             f"retrieve_k={retrieve_k}, candidate_k={candidate_k}, final_k={final_k}, "
             f"packed_context_chars={trunc_used_chars}/{trunc_budget_chars}, "
             f"unique_incidents={unique_incidents}, role_distribution={role_distribution}, "
-            f"rerank_top_n={rerank_top_n}, new_incidents_added={new_incidents_added}"
+            f"rerank_top_n={rerank_top_n}, new_incidents_added={new_incidents_added}, "
+            f"months={selected_distribution.get('months')}, "
+            f"channels={selected_distribution.get('channels')}, "
+            f"roles={selected_distribution.get('roles')}, "
+            f"evidence_kind={selected_distribution.get('evidence_kind')}"
         )
 
     def _on_vector_db_type_change(self, *_args):
@@ -2606,16 +2838,16 @@ class AgenticRAGApp:
         channels = set()
         for doc in docs:
             metadata = getattr(doc, "metadata", {}) or {}
-            source = (
+            source = str(
                 metadata.get("source")
                 or metadata.get("file_path")
                 or metadata.get("filename")
                 or ""
             )
-            if not source:
-                continue
-            basename = os.path.basename(source)
-            channel = os.path.splitext(basename)[0] or basename
+            content = (getattr(doc, "page_content", "") or "").strip()
+            channel = metadata.get("channel_type") or self._extract_channel(
+                f"{source}\n{content}"
+            )
             if channel:
                 channels.add(channel)
         return channels
@@ -3836,7 +4068,10 @@ class AgenticRAGApp:
                         self.log(f"Rerank Error (Using raw retrieval instead): {exc}")
                 group_limit = 1 if evidence_pack_mode else MAX_GROUP_DOCS
                 candidates = self._apply_coverage_selection(
-                    candidates, final_k, group_limit=group_limit
+                    candidates,
+                    final_k,
+                    group_limit=group_limit,
+                    evidence_pack_mode=evidence_pack_mode,
                 )
                 if len(candidates) < final_k:
                     fallback = self._merge_dedupe_docs(candidates + doc_list)
@@ -4067,6 +4302,7 @@ class AgenticRAGApp:
                     trunc_budget_chars,
                 ) = _build_context(final_docs)
                 role_distribution = self._format_role_distribution(final_docs)
+                selected_distribution = self._format_selected_distribution(final_docs)
                 self._log_final_docs_selection(
                     retrieve_k,
                     candidate_k,
@@ -4077,6 +4313,7 @@ class AgenticRAGApp:
                     role_distribution,
                     final_k,
                     unique_incidents_value,
+                    selected_distribution,
                 )
                 planner_subquery_count = 0
                 if self.use_sub_queries.get():
@@ -4376,6 +4613,7 @@ class AgenticRAGApp:
                     trunc_budget_chars,
                 ) = _build_context(final_docs)
                 role_distribution = self._format_role_distribution(final_docs)
+                selected_distribution = self._format_selected_distribution(final_docs)
                 self._log_final_docs_selection(
                     retrieve_k,
                     candidate_k,
@@ -4386,6 +4624,7 @@ class AgenticRAGApp:
                     role_distribution,
                     final_k,
                     new_incidents_added,
+                    selected_distribution,
                 )
                 _log_iteration_telemetry(
                     iteration,
