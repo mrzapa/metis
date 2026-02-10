@@ -26,6 +26,8 @@ MINI_DIGEST_MIN_POOL = 40
 MAX_DIGEST_NODES = 60
 MAX_RAW_CHUNKS = 200
 MAX_PACKED_CONTEXT_CHARS = 60000
+TOKENS_TO_CHARS_RATIO = 4
+CONTEXT_SAFETY_MARGIN_TOKENS = 512
 MAX_GROUP_DOCS = 2
 MIN_UNIQUE_INCIDENTS = 8
 MAX_UNIQUE_INCIDENTS = 12
@@ -2174,6 +2176,54 @@ class AgenticRAGApp:
 
         return temperature, max_tokens
 
+    def get_model_caps(self, provider: str, model: str) -> dict:
+        provider_name = (provider or "").strip().lower()
+        model_name = (model or "").strip().lower()
+
+        caps = {
+            "max_context_tokens": 8192,
+            "max_output_tokens": 2048,
+        }
+
+        provider_defaults = {
+            "openai": {"max_context_tokens": 128000, "max_output_tokens": 4096},
+            "anthropic": {
+                "max_context_tokens": 200000,
+                "max_output_tokens": 4096,
+            },
+            "google": {"max_context_tokens": 32000, "max_output_tokens": 4096},
+            "local_lm_studio": {
+                "max_context_tokens": 8192,
+                "max_output_tokens": 2048,
+            },
+        }
+        caps.update(provider_defaults.get(provider_name, {}))
+
+        model_overrides = {
+            "openai": [
+                (r"gpt-4o|o4-mini", 128000, 16384),
+                (r"gpt-4\.1", 1000000, 16384),
+                (r"gpt-4-turbo", 128000, 4096),
+                (r"gpt-4", 8192, 2048),
+                (r"gpt-3\.5-turbo", 16384, 4096),
+            ],
+            "anthropic": [
+                (r"claude-(opus|sonnet|haiku)-4", 200000, 8192),
+                (r"claude-3\.7-sonnet", 200000, 8192),
+                (r"claude-3\.5-(sonnet|haiku)", 200000, 8192),
+                (r"claude-3-(opus|sonnet|haiku)", 200000, 4096),
+            ],
+        }
+        for pattern, max_context_tokens, max_output_tokens in model_overrides.get(
+            provider_name, []
+        ):
+            if re.search(pattern, model_name):
+                caps["max_context_tokens"] = max_context_tokens
+                caps["max_output_tokens"] = max_output_tokens
+                break
+
+        return caps
+
     def _get_system_instructions(self):
         instructions = self.system_instructions.get().strip()
         if not instructions:
@@ -2775,9 +2825,14 @@ class AgenticRAGApp:
         validated = self._validate_model_settings()
         if not validated:
             raise ValueError("Invalid model settings")
-        temperature, max_tokens = validated
+        temperature, gui_llm_max_tokens = validated
         provider = self.llm_provider.get()
         model_name = self._resolve_llm_model()
+        caps = self.get_model_caps(provider, model_name)
+        output_max_tokens = max(
+            1,
+            min(int(gui_llm_max_tokens), int(caps.get("max_output_tokens", gui_llm_max_tokens))),
+        )
 
         if provider == "openai":
             try:
@@ -2788,7 +2843,10 @@ class AgenticRAGApp:
 
             key = self.api_keys["openai"].get()
             return ChatOpenAI(
-                api_key=key, model=model_name, temperature=temperature, max_tokens=max_tokens
+                api_key=key,
+                model=model_name,
+                temperature=temperature,
+                max_tokens=output_max_tokens,
             )
 
         if provider == "anthropic":
@@ -2802,7 +2860,10 @@ class AgenticRAGApp:
 
             key = self.api_keys["anthropic"].get()
             return ChatAnthropic(
-                api_key=key, model=model_name, temperature=temperature, max_tokens=max_tokens
+                api_key=key,
+                model=model_name,
+                temperature=temperature,
+                max_tokens=output_max_tokens,
             )
 
         if provider == "google":
@@ -2819,7 +2880,7 @@ class AgenticRAGApp:
                 google_api_key=key,
                 model=model_name,
                 temperature=temperature,
-                max_output_tokens=max_tokens,
+                max_output_tokens=output_max_tokens,
             )
 
         if provider == "local_lm_studio":
@@ -2839,7 +2900,7 @@ class AgenticRAGApp:
                 api_key="lm-studio",
                 model=model_name,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_tokens=output_max_tokens,
             )
 
         raise ValueError(f"Unknown LLM provider: {provider}")
@@ -3240,6 +3301,23 @@ class AgenticRAGApp:
             output_style = self.output_style.get().strip() or "Default answer"
             retrieve_k = max(1, int(self.retrieval_k.get()))
             final_k = max(1, int(self.final_k.get()))
+            provider = self.llm_provider.get()
+            model_name = self._resolve_llm_model()
+            gui_llm_max_tokens = max(1, int(self.llm_max_tokens.get()))
+            caps = self.get_model_caps(provider, model_name)
+            output_max_tokens = max(
+                1,
+                min(
+                    gui_llm_max_tokens,
+                    int(caps.get("max_output_tokens", gui_llm_max_tokens)),
+                ),
+            )
+            context_budget_tokens = max(
+                1024,
+                int(caps.get("max_context_tokens", 8192))
+                - output_max_tokens
+                - CONTEXT_SAFETY_MARGIN_TOKENS,
+            )
             candidate_k = max(retrieve_k, final_k)
             long_form_keywords = (
                 "evidence",
@@ -3258,14 +3336,15 @@ class AgenticRAGApp:
             )
             is_evidence_pack = self.is_evidence_pack_query(query, output_style)
             if is_long_form:
-                boosted_final_k = min(candidate_k, max(final_k, 12))
+                boosted_final_k = max(final_k, 12)
                 if boosted_final_k > final_k:
                     original_final_k = final_k
                     final_k = boosted_final_k
+                    candidate_k = max(candidate_k, final_k)
                     self.log(
                         "Long-form intent detected; raised final_k from "
                         f"{original_final_k} to {final_k} "
-                        "(no hard cap; bounded by context budget)."
+                        "(GUI value remains authoritative with long-form floor only)."
                     )
             search_type = self.search_type.get() or "similarity"
             mmr_lambda = float(self.mmr_lambda.get())
@@ -3532,13 +3611,14 @@ class AgenticRAGApp:
                     return max(min_value, min(max_value, value))
 
                 context_budget_chars = _clamp(
-                    int(self.llm_max_tokens.get()) * 12,
+                    context_budget_tokens * TOKENS_TO_CHARS_RATIO,
                     min_value=12000,
                     max_value=MAX_PACKED_CONTEXT_CHARS,
                 )
                 context_blocks = []
                 used_chars = 0
                 was_truncated = False
+                packed_count = 0
 
                 for idx, doc in enumerate(doc_list, start=1):
                     metadata = getattr(doc, "metadata", {}) or {}
@@ -3574,6 +3654,14 @@ class AgenticRAGApp:
                             break
                     context_blocks.append(chunk_text)
                     used_chars += len(chunk_text) + 2
+                    packed_count += 1
+
+                if was_truncated:
+                    self.log(
+                        "Context truncated during packing: "
+                        f"packed_count={packed_count}, truncated={was_truncated}, "
+                        f"used_chars={used_chars}, budget_chars={context_budget_chars}."
+                    )
 
                 return (
                     "\n\n".join(context_blocks),
