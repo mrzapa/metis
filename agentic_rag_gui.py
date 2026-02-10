@@ -1054,6 +1054,8 @@ class AgenticRAGApp:
         seen = set()
         merged = []
         for doc in docs:
+            if doc is None:
+                continue
             metadata = getattr(doc, "metadata", {}) or {}
             content = (getattr(doc, "page_content", "") or "").strip()
             chunk_id = metadata.get("chunk_id")
@@ -1068,6 +1070,50 @@ class AgenticRAGApp:
             seen.add(key)
             merged.append(doc)
         return merged
+
+    @staticmethod
+    def _doc_identity_key(doc):
+        metadata = getattr(doc, "metadata", {}) or {}
+        content = (getattr(doc, "page_content", "") or "").strip()
+        chunk_id = metadata.get("chunk_id")
+        ingest_id = metadata.get("ingest_id")
+        if chunk_id is not None and ingest_id:
+            return f"{ingest_id}:{chunk_id}"
+        chunk_db_id = metadata.get("chunk_db_id")
+        if chunk_db_id:
+            return f"chunk_db:{chunk_db_id}"
+        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        return f"content:{content_hash}"
+
+    def _fuse_ranked_results(self, ranked_lists, k_rrf=60, fused_pool_size=600):
+        score_by_key = {}
+        doc_by_key = {}
+        systems_by_key = {}
+        for system_name, docs in ranked_lists:
+            for rank_idx, doc in enumerate(docs or [], start=1):
+                if doc is None:
+                    continue
+                key = self._doc_identity_key(doc)
+                score = 1.0 / (k_rrf + rank_idx)
+                score_by_key[key] = score_by_key.get(key, 0.0) + score
+                doc_by_key[key] = doc
+                systems_by_key.setdefault(key, set()).add(system_name)
+
+        ranked_items = sorted(score_by_key.items(), key=lambda item: item[1], reverse=True)
+        if fused_pool_size > 0:
+            ranked_items = ranked_items[:fused_pool_size]
+
+        fused_docs = []
+        for rank_idx, (key, score) in enumerate(ranked_items, start=1):
+            doc = doc_by_key[key]
+            metadata = (getattr(doc, "metadata", {}) or {}).copy()
+            metadata["rrf_score"] = round(score, 8)
+            metadata["relevance_score"] = round(score, 8)
+            metadata["rrf_rank"] = rank_idx
+            metadata["retrieval_systems"] = sorted(systems_by_key.get(key, set()))
+            doc.metadata = metadata
+            fused_docs.append(doc)
+        return fused_docs
 
     @staticmethod
     def _doc_group_key(doc):
@@ -3708,17 +3754,20 @@ class AgenticRAGApp:
                 if not filtered_queries:
                     return [], 0, False
                 cap_reached = False
+                rrf_base = max(200, final_k * 20)
+                dense_k = max(1, min(rrf_base, remaining_cap)) if is_evidence_pack else k_value
+                lexical_k = max(1, min(rrf_base, remaining_cap)) if is_evidence_pack else max(1, min(k_value, remaining_cap))
                 if len(filtered_queries) == 1:
                     retriever = self.vector_store.as_retriever(
                         search_type=search_type,
-                        search_kwargs=_build_search_kwargs(k_value),
+                        search_kwargs=_build_search_kwargs(dense_k),
                     )
                     docs_local = retriever.invoke(filtered_queries[0])
                 else:
-                    min_per_query_k = min(2, k_value)
+                    min_per_query_k = min(2, dense_k)
                     per_query_k = max(
                         min_per_query_k,
-                        min(k_value, max(1, remaining_cap) // len(filtered_queries)),
+                        min(dense_k, max(1, remaining_cap) // len(filtered_queries)),
                     )
                     retriever = self.vector_store.as_retriever(
                         search_type=search_type,
@@ -3728,16 +3777,36 @@ class AgenticRAGApp:
                     for sub_query in filtered_queries:
                         docs_local.extend(retriever.invoke(sub_query))
                 vector_retrieved_count = len(docs_local)
+                dense_docs = self._merge_dedupe_docs(docs_local)
                 lexical_docs = []
-                if self.lexical_db_available:
-                    lexical_limit = max(1, min(k_value, remaining_cap))
+                lexical_available = False
+                if is_evidence_pack:
+                    lexical_available = self.lexical_db_available or self._ensure_lexical_db()
+                elif self.lexical_db_available:
+                    lexical_available = True
+                if lexical_available:
                     for sub_query in filtered_queries:
-                        lexical_docs.extend(self.lexical_search(sub_query, lexical_limit))
+                        lexical_docs.extend(self.lexical_search(sub_query, lexical_k))
                     if lexical_docs:
                         self.log(f"Lexical search contributed {len(lexical_docs)} candidates.")
-                docs_local.extend(lexical_docs)
                 retrieved_count_local = vector_retrieved_count + len(lexical_docs)
-                docs_local = self._merge_dedupe_docs(docs_local)
+                if is_evidence_pack and lexical_docs:
+                    dense_ranked = self._merge_dedupe_docs(dense_docs)
+                    lexical_ranked = self._merge_dedupe_docs(lexical_docs)
+                    pool_cap = min(600, remaining_cap)
+                    docs_local = self._fuse_ranked_results(
+                        [("dense", dense_ranked), ("lexical", lexical_ranked)],
+                        k_rrf=60,
+                        fused_pool_size=pool_cap,
+                    )
+                    self.log(
+                        "Fused dense+lexical candidates via RRF "
+                        f"(dense={len(dense_ranked)}, lexical={len(lexical_ranked)}, fused={len(docs_local)})."
+                    )
+                else:
+                    docs_local = dense_docs
+                    if lexical_docs:
+                        docs_local = self._merge_dedupe_docs(docs_local + lexical_docs)
                 if len(docs_local) > remaining_cap:
                     docs_local = docs_local[:remaining_cap]
                     cap_reached = True
@@ -3745,6 +3814,7 @@ class AgenticRAGApp:
 
             def _select_evidence_pack(doc_list, rerank_query, evidence_pack_mode):
                 candidates = self._promote_lexical_overlap(doc_list, rerank_query)
+                rerank_top_n = min(len(candidates), max(final_k * 6, 80))
                 if self.use_reranker.get() and self.api_keys["cohere"].get():
                     try:
                         self.log("Reranking with Cohere...")
@@ -3752,7 +3822,7 @@ class AgenticRAGApp:
 
                         compressor = CohereRerank(
                             cohere_api_key=self.api_keys["cohere"].get(),
-                            top_n=final_k,
+                            top_n=rerank_top_n,
                             model="rerank-english-v3.0",
                         )
                         compressed_docs = compressor.compress_documents(
@@ -3768,7 +3838,12 @@ class AgenticRAGApp:
                 candidates = self._apply_coverage_selection(
                     candidates, final_k, group_limit=group_limit
                 )
-                return candidates[:final_k]
+                if len(candidates) < final_k:
+                    fallback = self._merge_dedupe_docs(candidates + doc_list)
+                    candidates = fallback[:final_k]
+                else:
+                    candidates = candidates[:final_k]
+                return candidates
 
             def _build_context(doc_list):
                 def _clamp(value, min_value, max_value):
