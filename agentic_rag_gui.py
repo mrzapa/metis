@@ -10,6 +10,7 @@ import importlib.util
 import re
 import hashlib
 import sqlite3
+import uuid
 from datetime import datetime
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -104,6 +105,8 @@ class AgenticRAGApp:
         self.root.geometry("1200x900")
         self.main_thread = threading.current_thread()
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
+        self.telemetry_log_filename = "agentic_rag_runs.jsonl"
+        self._active_run_id = None
         self.default_system_instructions = (
             "You are an expert analyst assistant. Use ONLY the provided context for factual claims. "
             "Never ask for details already present in the retrieved context. "
@@ -1814,6 +1817,28 @@ class AgenticRAGApp:
         persist_root = self._get_chroma_persist_root()
         parent_dir = os.path.dirname(os.path.abspath(persist_root))
         return os.path.join(parent_dir, "rag_lexical.db")
+
+    def _get_telemetry_log_path(self):
+        candidate_dir = self.selected_index_path
+        if candidate_dir and os.path.isdir(candidate_dir):
+            base_dir = os.path.dirname(os.path.abspath(candidate_dir))
+        else:
+            base_dir = os.path.dirname(os.path.abspath(self.config_path))
+        return os.path.join(base_dir, self.telemetry_log_filename)
+
+    def _append_jsonl_telemetry(self, payload):
+        if not isinstance(payload, dict):
+            return
+        record = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            **payload,
+        }
+        try:
+            log_path = self._get_telemetry_log_path()
+            with open(log_path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        except Exception:
+            return
 
     def _ensure_lexical_db(self):
         db_path = self._get_lexical_db_path()
@@ -4096,13 +4121,17 @@ class AgenticRAGApp:
 
     def _rag_pipeline(self, query):
         stage = "retrieval"
+        run_id = f"run-{uuid.uuid4().hex[:12]}"
+        run_started_at = time.perf_counter()
+        self._active_run_id = run_id
         try:
             self.log("Starting Retrieval...")
 
             # 1. Retrieval
             output_style = self.output_style.get().strip() or "Default answer"
             retrieve_k = max(1, int(self.retrieval_k.get()))
-            final_k = max(1, int(self.final_k.get()))
+            user_final_k = max(1, int(self.final_k.get()))
+            final_k = user_final_k
             provider = self.llm_provider.get()
             model_name = self._resolve_llm_model()
             gui_llm_max_tokens = max(1, int(self.llm_max_tokens.get()))
@@ -4144,6 +4173,18 @@ class AgenticRAGApp:
                         f"{original_final_k} to {final_k} "
                         "(GUI value remains authoritative with long-form floor only)."
                     )
+            self._append_jsonl_telemetry(
+                {
+                    "event": "run_start",
+                    "run_id": run_id,
+                    "iter": 0,
+                    "query": query,
+                    "user_final_k": user_final_k,
+                    "effective_final_k": final_k,
+                    "agentic": int(self.agentic_mode.get()),
+                    "output_style": output_style,
+                }
+            )
             search_type = self.search_type.get() or "similarity"
             mmr_lambda = float(self.mmr_lambda.get())
             total_docs_cap = max(10, min(500, int(self.subquery_max_docs.get())))
@@ -4716,6 +4757,7 @@ class AgenticRAGApp:
                     was_truncated,
                     used_chars,
                     context_budget_chars,
+                    packed_count,
                 )
 
             def _append_context_if_enabled(iteration_label, context_text, truncated_flag):
@@ -4743,6 +4785,10 @@ class AgenticRAGApp:
                 trunc_budget_chars,
                 cap_reached_flag,
                 retrieved_count,
+                stage_timings_ms,
+                selection_stats,
+                coverage_stats,
+                follow_up_queries,
             ):
                 truncation_note = (
                     f"{int(truncated_flag)} {trunc_used_chars}/{trunc_budget_chars}"
@@ -4757,10 +4803,46 @@ class AgenticRAGApp:
                     f"trunc={truncation_note}, cap_reached={int(cap_reached_flag)}, "
                     f"retrieved={retrieved_count}"
                 )
+                self._append_jsonl_telemetry(
+                    {
+                        "event": "iteration",
+                        "run_id": run_id,
+                        "iter": iteration_id,
+                        "timing_ms": stage_timings_ms,
+                        "agentic": int(agentic_mode),
+                        "output_style": output_style,
+                        "user_final_k": user_final_k,
+                        "effective_final_k": final_k,
+                        "packed_count": packed_docs,
+                        "truncation": {
+                            "was_truncated": bool(truncated_flag),
+                            "used_chars": trunc_used_chars,
+                            "budget_chars": trunc_budget_chars,
+                        },
+                        "retrieval_stats": {
+                            "queries": query_count,
+                            "planner_subqueries": planner_subquery_count,
+                            "digest_retrieved_count": digest_retrieved_count,
+                            "digest_selected_count": digest_selected_count,
+                            "raw_expanded_count": raw_expanded_count,
+                            "raw_unique_count": raw_unique_count,
+                            "retrieved_count": retrieved_count,
+                            "cap_reached": bool(cap_reached_flag),
+                        },
+                        "selection_stats": selection_stats,
+                        "coverage_gate": {
+                            **coverage_stats,
+                            "follow_up_queries": follow_up_queries or [],
+                        },
+                    }
+                )
 
             seen_chunk_ids = set()
 
             if not self.agentic_mode.get():
+                iteration_started_at = time.perf_counter()
+                follow_up_queries = []
+                coverage_stats = {"triggered": False}
                 queries = [query]
                 if self.use_sub_queries.get():
                     sub_queries = self._generate_sub_queries(query)
@@ -4858,14 +4940,21 @@ class AgenticRAGApp:
                             self.log("Coverage follow-up skipped; total docs cap reached.")
                         else:
                             self.log("Coverage follow-up skipped; no follow-up queries.")
+                    coverage_stats = {
+                        "triggered": bool(coverage_triggered),
+                        "incident_floor": incident_floor,
+                        "incident_count": coverage.get("incident_count", 0),
+                    }
                 else:
                     unique_incidents_value = len(final_docs)
+                retrieval_selection_ms = int((time.perf_counter() - iteration_started_at) * 1000)
                 seen_chunk_ids.update(self._doc_identity_key(doc) for doc in final_docs)
                 (
                     context_text,
                     was_truncated,
                     trunc_used_chars,
                     trunc_budget_chars,
+                    packed_count,
                 ) = _build_context(final_docs)
                 role_distribution = self._format_role_distribution(final_docs)
                 selected_distribution = self._format_selected_distribution(final_docs)
@@ -4884,6 +4973,12 @@ class AgenticRAGApp:
                 planner_subquery_count = 0
                 if self.use_sub_queries.get():
                     planner_subquery_count = max(0, len(queries) - 1)
+                selection_stats = {
+                    "candidate_k": candidate_k,
+                    "final_docs_count": len(final_docs),
+                    "unique_incidents": unique_incidents_value,
+                    "role_distribution": role_distribution,
+                }
                 _log_iteration_telemetry(
                     1,
                     self.output_style.get(),
@@ -4894,12 +4989,18 @@ class AgenticRAGApp:
                     digest_selected_count,
                     raw_expanded_count,
                     len(docs),
-                    len(final_docs),
+                    packed_count,
                     was_truncated,
                     trunc_used_chars,
                     trunc_budget_chars,
                     cap_reached,
                     retrieved_count,
+                    {
+                        "retrieval_selection": retrieval_selection_ms,
+                    },
+                    selection_stats,
+                    coverage_stats,
+                    follow_up_queries,
                 )
                 _append_context_if_enabled("(single pass)", context_text, was_truncated)
 
@@ -4937,6 +5038,19 @@ class AgenticRAGApp:
                 validated_answer = self._validate_and_repair(
                     response_content, context_text, iteration_id=1
                 )
+                validation_ms = int((time.perf_counter() - validation_started_at) * 1000)
+                self._append_jsonl_telemetry(
+                    {
+                        "event": "iteration_stage_timings",
+                        "run_id": run_id,
+                        "iter": 1,
+                        "timing_ms": {
+                            "retrieval_selection": retrieval_selection_ms,
+                            "generation": generation_ms,
+                            "validation": validation_ms,
+                        },
+                    }
+                )
 
                 self.last_answer = validated_answer
                 self.append_chat("agent", f"AI: {validated_answer}")
@@ -4955,6 +5069,16 @@ class AgenticRAGApp:
                     ]
                 )
                 self.append_chat("source", f"\nSources used:\n{sources_text}")
+                self._append_jsonl_telemetry(
+                    {
+                        "event": "run_end",
+                        "run_id": run_id,
+                        "iter": 0,
+                        "timing_ms": {
+                            "run_total": int((time.perf_counter() - run_started_at) * 1000),
+                        },
+                    }
+                )
                 return
 
             try:
@@ -4982,6 +5106,9 @@ class AgenticRAGApp:
             stagnant_iterations = 0
             last_unique_incident_count = 0
             for iteration in range(1, max_iterations + 1):
+                iteration_started_at = time.perf_counter()
+                follow_up_queries = []
+                coverage_stats = {"triggered": False}
                 if iteration == 1:
                     planner_llm = self._get_llm_with_temperature(0.2)
                     if is_evidence_pack:
@@ -5164,14 +5291,21 @@ class AgenticRAGApp:
                             self.log("Coverage follow-up skipped; total docs cap reached.")
                         else:
                             self.log("Coverage follow-up skipped; no follow-up queries.")
+                    coverage_stats = {
+                        "triggered": bool(coverage_triggered),
+                        "incident_floor": incident_floor,
+                        "incident_count": coverage.get("incident_count", 0),
+                    }
                 else:
                     unique_incidents_value = len(final_docs)
+                retrieval_selection_ms = int((time.perf_counter() - iteration_started_at) * 1000)
                 seen_chunk_ids.update(self._doc_identity_key(doc) for doc in final_docs)
                 (
                     context_text,
                     was_truncated,
                     trunc_used_chars,
                     trunc_budget_chars,
+                    packed_count,
                 ) = _build_context(final_docs)
                 role_distribution = self._format_role_distribution(final_docs)
                 selected_distribution = self._format_selected_distribution(final_docs)
@@ -5187,6 +5321,13 @@ class AgenticRAGApp:
                     new_incidents_added,
                     selected_distribution,
                 )
+                selection_stats = {
+                    "candidate_k": candidate_k,
+                    "final_docs_count": len(final_docs),
+                    "unique_incidents": unique_incidents_value,
+                    "new_incidents_added": new_incidents_added,
+                    "role_distribution": role_distribution,
+                }
                 _log_iteration_telemetry(
                     iteration,
                     self.output_style.get(),
@@ -5197,12 +5338,18 @@ class AgenticRAGApp:
                     digest_selected_count,
                     raw_expanded_count,
                     len(all_docs),
-                    len(final_docs),
+                    packed_count,
                     was_truncated,
                     trunc_used_chars,
                     trunc_budget_chars,
                     cap_reached,
                     retrieved_count,
+                    {
+                        "retrieval_selection": retrieval_selection_ms,
+                    },
+                    selection_stats,
+                    coverage_stats,
+                    follow_up_queries,
                 )
                 _append_context_if_enabled(
                     f"(iteration {iteration})", context_text, was_truncated
@@ -5261,6 +5408,17 @@ class AgenticRAGApp:
                     latest_answer = response.content
                 latest_context_text = context_text
                 last_iteration_id = iteration
+                self._append_jsonl_telemetry(
+                    {
+                        "event": "iteration_stage_timings",
+                        "run_id": run_id,
+                        "iter": iteration,
+                        "timing_ms": {
+                            "retrieval_selection": retrieval_selection_ms,
+                            "generation": generation_ms,
+                        },
+                    }
+                )
 
                 if stop_due_to_convergence:
                     self.log(
@@ -5308,8 +5466,20 @@ class AgenticRAGApp:
                         critic_queries = []
 
             if latest_answer:
+                validation_started_at = time.perf_counter()
                 validated_answer = self._validate_and_repair(
                     latest_answer, latest_context_text, iteration_id=last_iteration_id
+                )
+                validation_ms = int((time.perf_counter() - validation_started_at) * 1000)
+                self._append_jsonl_telemetry(
+                    {
+                        "event": "iteration_stage_timings",
+                        "run_id": run_id,
+                        "iter": last_iteration_id,
+                        "timing_ms": {
+                            "validation": validation_ms,
+                        },
+                    }
                 )
                 self.last_answer = validated_answer
                 self.append_chat("agent", f"AI: {validated_answer}")
@@ -5329,9 +5499,31 @@ class AgenticRAGApp:
             )
             self.append_chat("source", f"\nSources used:\n{sources_text}")
 
+            self._append_jsonl_telemetry(
+                {
+                    "event": "run_end",
+                    "run_id": run_id,
+                    "iter": 0,
+                    "timing_ms": {
+                        "run_total": int((time.perf_counter() - run_started_at) * 1000),
+                    },
+                }
+            )
         except Exception as e:
             self.log(f"RAG Error ({stage} failure): {e}")
             self.append_chat("system", f"Error ({stage} failure): {e}")
+            self._append_jsonl_telemetry(
+                {
+                    "event": "run_error",
+                    "run_id": run_id,
+                    "iter": 0,
+                    "stage": stage,
+                    "error": str(e),
+                }
+            )
+        finally:
+            if self._active_run_id == run_id:
+                self._active_run_id = None
 
     def append_chat(self, tag, message):
         def _append():
