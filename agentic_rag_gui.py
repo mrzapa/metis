@@ -2235,6 +2235,12 @@ class AgenticRAGApp:
 
         return caps
 
+    def _get_capped_output_tokens(self, provider: str, model_name: str, requested_max_tokens: int) -> int:
+        requested = max(1, int(requested_max_tokens))
+        caps = self.get_model_caps(provider, model_name)
+        capped = max(1, int(caps.get("max_output_tokens", requested)))
+        return min(requested, capped)
+
     def _get_system_instructions(self):
         instructions = self.system_instructions.get().strip()
         if not instructions:
@@ -2841,10 +2847,8 @@ class AgenticRAGApp:
         temperature, gui_llm_max_tokens = validated
         provider = self.llm_provider.get()
         model_name = self._resolve_llm_model()
-        caps = self.get_model_caps(provider, model_name)
-        output_max_tokens = max(
-            1,
-            min(int(gui_llm_max_tokens), int(caps.get("max_output_tokens", gui_llm_max_tokens))),
+        output_max_tokens = self._get_capped_output_tokens(
+            provider, model_name, gui_llm_max_tokens
         )
 
         if provider == "openai":
@@ -3318,12 +3322,8 @@ class AgenticRAGApp:
             model_name = self._resolve_llm_model()
             gui_llm_max_tokens = max(1, int(self.llm_max_tokens.get()))
             caps = self.get_model_caps(provider, model_name)
-            output_max_tokens = max(
-                1,
-                min(
-                    gui_llm_max_tokens,
-                    int(caps.get("max_output_tokens", gui_llm_max_tokens)),
-                ),
+            output_max_tokens = self._get_capped_output_tokens(
+                provider, model_name, gui_llm_max_tokens
             )
             context_budget_tokens = max(
                 1024,
