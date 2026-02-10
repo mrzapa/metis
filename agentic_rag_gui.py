@@ -11,7 +11,7 @@ import re
 import hashlib
 import sqlite3
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -1370,7 +1370,16 @@ class AgenticRAGApp:
         )
         return self._extract_incident_signature(signature_text)
 
-    def _score_doc_for_selection(self, doc, evidence_pack_mode=False, evidence_thin=False):
+    def _score_doc_for_selection(
+        self,
+        doc,
+        evidence_pack_mode=False,
+        evidence_thin=False,
+        incident_key=None,
+        month_key=None,
+        channel_key=None,
+        seen_chunk_ids=None,
+    ):
         content = (getattr(doc, "page_content", "") or "").strip()
         metadata = getattr(doc, "metadata", {}) or {}
         base_score = metadata.get("relevance_score")
@@ -1400,7 +1409,7 @@ class AgenticRAGApp:
             flags=re.I,
         )
 
-        channel = self._extract_channel(
+        channel = channel_key or self._extract_channel(
             "\n".join(
                 [
                     str(
@@ -1413,8 +1422,8 @@ class AgenticRAGApp:
                 ]
             )
         )
-        month_bucket = date_mentions[0][:7] if date_mentions else "undated"
-        incident_signature = self._extract_incident_signature(content)
+        month_bucket = month_key or (date_mentions[0][:7] if date_mentions else "undated")
+        incident_signature = incident_key or self._extract_incident_signature(content)
         role_kind = self._extract_role_kind(doc)
         evidence_kind = self._evidence_kind(doc)
 
@@ -1438,12 +1447,14 @@ class AgenticRAGApp:
         if evidence_kind == "primary":
             score += 0.1
 
-        doc_key = self._doc_identity_key(doc)
-        seen_before = bool(seen_chunk_ids and doc_key in seen_chunk_ids)
+        seen_ids = seen_chunk_ids if isinstance(seen_chunk_ids, set) else set(seen_chunk_ids or [])
+        doc_id = metadata.get("chunk_id") or metadata.get("source_id")
+        doc_key = str(doc_id) if doc_id is not None else self._doc_identity_key(doc)
+        seen_before = bool(doc_key in seen_ids)
         if seen_before and not self._is_must_include(doc):
             score -= 0.15
 
-        incident_key = self._build_incident_key(doc)
+        incident_key = incident_key or self._build_incident_key(doc)
         metadata["incident_key"] = incident_key
         metadata["incident_signature"] = incident_signature
         metadata["month_bucket"] = month_bucket
@@ -1456,7 +1467,14 @@ class AgenticRAGApp:
         doc.metadata = metadata
         return score, incident_key
 
-    def _apply_coverage_selection(self, docs, final_k, group_limit=2, evidence_pack_mode=False):
+    def _apply_coverage_selection(
+        self,
+        docs,
+        final_k,
+        group_limit=2,
+        evidence_pack_mode=False,
+        seen_chunk_ids=None,
+    ):
         must_include = []
         remaining = []
         for doc in docs:
@@ -1485,6 +1503,7 @@ class AgenticRAGApp:
                 doc,
                 evidence_pack_mode,
                 evidence_thin=evidence_thin,
+                seen_chunk_ids=seen_chunk_ids,
             )
             incident_counts[incident_key] = incident_counts.get(incident_key, 0) + 1
             metadata = getattr(doc, "metadata", {}) or {}
@@ -1505,6 +1524,7 @@ class AgenticRAGApp:
                 doc,
                 evidence_pack_mode,
                 evidence_thin=evidence_thin,
+                seen_chunk_ids=seen_chunk_ids,
             )
             scored_priority.append((score, incident_key, doc))
         for doc in other_docs:
@@ -1512,6 +1532,7 @@ class AgenticRAGApp:
                 doc,
                 evidence_pack_mode,
                 evidence_thin=evidence_thin,
+                seen_chunk_ids=seen_chunk_ids,
             )
             scored_other.append((score, incident_key, doc))
         all_channels = {
@@ -1928,6 +1949,16 @@ class AgenticRAGApp:
             self.log(f"Lexical chunk upsert skipped (SQLite/FTS5 issue). ({exc})")
             return False
 
+    @staticmethod
+    def _fts5_query_tokens(q: str) -> list[str]:
+        return re.findall(r"[a-z0-9]{2,}", (q or "").lower())[:16]
+
+    def _fts5_sanitize_query(self, q: str) -> str:
+        tokens = self._fts5_query_tokens(q)
+        if not tokens:
+            return ""
+        return " OR ".join(f'"{token}"*' for token in tokens)
+
     def lexical_search(self, query: str, k: int) -> list[Document]:
         if not query or k <= 0:
             return []
@@ -1935,10 +1966,12 @@ class AgenticRAGApp:
             self._ensure_lexical_db()
         if not self.lexical_db_available or not self.lexical_db_path:
             return []
-        try:
-            with sqlite3.connect(self.lexical_db_path) as conn:
-                rows = conn.execute(
-                    """
+        safe_q = self._fts5_sanitize_query(query)
+        if not safe_q:
+            self.log("lexical skipped (empty after sanitize)")
+            return []
+        tokens = self._fts5_query_tokens(query)
+        sql = """
                     SELECT
                         c.chunk_id,
                         c.source,
@@ -1952,12 +1985,61 @@ class AgenticRAGApp:
                     WHERE chunks_fts MATCH ?
                     ORDER BY lexical_score ASC
                     LIMIT ?
-                    """,
-                    (query, int(k)),
-                ).fetchall()
+                    """
+        try:
+            with sqlite3.connect(self.lexical_db_path) as conn:
+                rows = conn.execute(sql, (safe_q, int(k))).fetchall()
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            retryable = "fts5" in msg or "syntax" in msg
+            if retryable and tokens:
+                safe_q2 = " ".join(tokens)
+                self.log(f"Lexical MATCH retry with conservative query. ({exc})")
+                try:
+                    with sqlite3.connect(self.lexical_db_path) as conn:
+                        rows = conn.execute(sql, (safe_q2, int(k))).fetchall()
+                except Exception as retry_exc:
+                    retry_msg = str(retry_exc).lower()
+                    if any(
+                        marker in retry_msg
+                        for marker in (
+                            "no such table",
+                            "unable to open database",
+                            "not authorized",
+                            "no such module: fts5",
+                        )
+                    ):
+                        self.lexical_db_available = False
+                    self.log(
+                        f"Lexical search failed after retry; continuing without it. ({retry_exc})"
+                    )
+                    return []
+            else:
+                if any(
+                    marker in msg
+                    for marker in (
+                        "no such table",
+                        "unable to open database",
+                        "not authorized",
+                        "no such module: fts5",
+                    )
+                ):
+                    self.lexical_db_available = False
+                self.log(f"Lexical search failed; continuing without it. ({exc})")
+                return []
         except Exception as exc:
-            self.lexical_db_available = False
-            self.log(f"Lexical search unavailable; continuing without it. ({exc})")
+            msg = str(exc).lower()
+            if any(
+                marker in msg
+                for marker in (
+                    "no such table",
+                    "unable to open database",
+                    "not authorized",
+                    "no such module: fts5",
+                )
+            ):
+                self.lexical_db_available = False
+            self.log(f"Lexical search failed; continuing without it. ({exc})")
             return []
 
         docs = []
@@ -3857,7 +3939,7 @@ class AgenticRAGApp:
             except ImportError:
                 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-            chunk_ingest_id = datetime.utcnow().isoformat()
+            chunk_ingest_id = datetime.now(timezone.utc).isoformat()
             source_basename = os.path.basename(self.selected_file)
             chatgpt_docs = None
             if chatgpt_messages:
@@ -4473,23 +4555,39 @@ class AgenticRAGApp:
                     batch_ids = list(chunk_ids)[:remaining]
                     if not batch_ids:
                         continue
+                    filtered_in_python = False
                     try:
                         result = collection.get(
                             where={
-                                "ingest_id": ingest_id,
-                                "chunk_id": {"$in": batch_ids},
+                                "$and": [
+                                    {"ingest_id": ingest_id},
+                                    {"chunk_id": {"$in": batch_ids}},
+                                ]
                             },
                             include=["documents", "metadatas"],
                         )
+                        self.log("Digest expansion filter path: chroma $and")
                     except Exception as exc:
-                        self.log(f"Digest expansion failed; falling back to raw search. ({exc})")
-                        return [], False
+                        self.log(f"Digest expansion $and filter unsupported; retrying ingest_id-only path. ({exc})")
+                        try:
+                            result = collection.get(
+                                where={"ingest_id": ingest_id},
+                                include=["documents", "metadatas"],
+                            )
+                            filtered_in_python = True
+                            self.log("Digest expansion filter path: ingest_id-only + python chunk_id filter")
+                        except Exception as exc2:
+                            self.log(f"Digest expansion failed; falling back to raw search. ({exc2})")
+                            return [], False
                     docs = result.get("documents") or []
                     metadatas = result.get("metadatas") or []
+                    batch_id_set = {str(item) for item in batch_ids}
                     for content, metadata in zip(docs, metadatas):
                         if content is None:
                             continue
                         meta = metadata or {}
+                        if filtered_in_python and str(meta.get("chunk_id")) not in batch_id_set:
+                            continue
                         chunk_id = meta.get("chunk_id")
                         digest_window = chunk_digest_map.get((ingest_id, chunk_id))
                         if digest_window:
@@ -4567,34 +4665,35 @@ class AgenticRAGApp:
                 vector_retrieved_count = len(docs_local)
                 dense_docs = self._merge_dedupe_docs(docs_local)
                 lexical_docs = []
+                lexical_ran = False
                 lexical_available = False
                 if is_evidence_pack:
                     lexical_available = self.lexical_db_available or self._ensure_lexical_db()
                 elif self.lexical_db_available:
                     lexical_available = True
                 if lexical_available:
+                    lexical_ran = True
                     for sub_query in filtered_queries:
                         lexical_docs.extend(self.lexical_search(sub_query, lexical_k))
-                    if lexical_docs:
-                        self.log(f"Lexical search contributed {len(lexical_docs)} candidates.")
+                dense_ranked = self._merge_dedupe_docs(dense_docs)
+                lexical_ranked = self._merge_dedupe_docs(lexical_docs)
                 retrieved_count_local = vector_retrieved_count + len(lexical_docs)
                 if is_evidence_pack and lexical_docs:
-                    dense_ranked = self._merge_dedupe_docs(dense_docs)
-                    lexical_ranked = self._merge_dedupe_docs(lexical_docs)
                     pool_cap = min(600, remaining_cap)
                     docs_local = self._fuse_ranked_results(
                         [("dense", dense_ranked), ("lexical", lexical_ranked)],
                         k_rrf=60,
                         fused_pool_size=pool_cap,
                     )
-                    self.log(
-                        "Fused dense+lexical candidates via RRF "
-                        f"(dense={len(dense_ranked)}, lexical={len(lexical_ranked)}, fused={len(docs_local)})."
-                    )
                 else:
-                    docs_local = dense_docs
+                    docs_local = dense_ranked
                     if lexical_docs:
                         docs_local = self._merge_dedupe_docs(docs_local + lexical_docs)
+                self.log(
+                    "Retrieval candidates: "
+                    f"dense={len(dense_ranked)}, lexical={len(lexical_ranked)} "
+                    f"(ran={int(lexical_ran)}), fused={len(docs_local)}."
+                )
                 if len(docs_local) > remaining_cap:
                     docs_local = docs_local[:remaining_cap]
                     cap_reached = True
@@ -4685,6 +4784,7 @@ class AgenticRAGApp:
                     final_k,
                     group_limit=group_limit,
                     evidence_pack_mode=evidence_pack_mode,
+                    seen_chunk_ids=seen_chunk_ids,
                 )
                 if len(candidates) < final_k:
                     fallback = self._merge_dedupe_docs(candidates + doc_list)
@@ -4692,6 +4792,50 @@ class AgenticRAGApp:
                 else:
                     candidates = candidates[:final_k]
                 return candidates
+
+            def _coverage_followup_from_metadata(pool_docs, selected_docs, max_queries=2):
+                pool_months = {
+                    (getattr(doc, "metadata", {}) or {}).get("month_bucket")
+                    for doc in pool_docs
+                }
+                selected_months = {
+                    (getattr(doc, "metadata", {}) or {}).get("month_bucket")
+                    for doc in selected_docs
+                }
+                pool_months = {m for m in pool_months if m and m != "undated"}
+                selected_months = {m for m in selected_months if m and m != "undated"}
+
+                pool_incidents = {
+                    (getattr(doc, "metadata", {}) or {}).get("incident_key") or self._build_incident_key(doc)
+                    for doc in pool_docs
+                }
+                selected_incidents = {
+                    (getattr(doc, "metadata", {}) or {}).get("incident_key") or self._build_incident_key(doc)
+                    for doc in selected_docs
+                }
+                pool_incidents = {i for i in pool_incidents if i}
+                selected_incidents = {i for i in selected_incidents if i}
+
+                missing_months = sorted(pool_months - selected_months, key=self._month_sort_key)
+                lost_incident_diversity = len(pool_incidents) > len(selected_incidents)
+                triggered = bool(missing_months) or lost_incident_diversity
+                queries = []
+                for month in missing_months[:max_queries]:
+                    queries.append(f"on {month} what happened")
+                    if len(queries) < max_queries:
+                        queries.append(f"{month} Holly Garland Sam Weekes incident")
+                    if len(queries) >= max_queries:
+                        break
+                if lost_incident_diversity and not queries:
+                    month_hint = sorted(pool_months, key=self._month_sort_key)[0] if pool_months else "recent"
+                    queries.append(f"on {month_hint} what happened")
+                return queries[:max_queries], {
+                    "triggered": triggered,
+                    "pool_months": len(pool_months),
+                    "selected_months": len(selected_months),
+                    "pool_incidents": len(pool_incidents),
+                    "selected_incidents": len(selected_incidents),
+                }
 
             def _build_context(doc_list):
                 def _clamp(value, min_value, max_value):
@@ -4876,6 +5020,38 @@ class AgenticRAGApp:
                     final_docs = _select_evidence_pack(
                         docs, query, is_evidence_pack, seen_chunk_ids=seen_chunk_ids
                     )
+
+                generic_followups, generic_cov = _coverage_followup_from_metadata(candidate_docs, final_docs)
+                self.log(
+                    "Selection telemetry: "
+                    f"final_docs={len(final_docs)}, months={generic_cov['selected_months']}/{generic_cov['pool_months']}, "
+                    f"incidents={generic_cov['selected_incidents']}/{generic_cov['pool_incidents']}."
+                )
+                remaining_cap = max(0, total_docs_cap - len(docs))
+                if generic_followups and self.agentic_max_iterations.get() > 1 and remaining_cap > 0:
+                    self.log(f"Generic coverage gate triggered: follow-up queries={generic_followups}.")
+                    follow_docs, follow_retrieved_count, follow_cap_reached = _retrieve_with_rrf(
+                        generic_followups,
+                        remaining_cap,
+                        routing_candidate_k,
+                    )
+                    retrieved_count += follow_retrieved_count
+                    cap_reached = cap_reached or follow_cap_reached
+                    if follow_docs:
+                        docs = self._merge_dedupe_docs(docs + follow_docs)
+                        if use_mini_digest:
+                            routed_docs = self._route_with_mini_digest(docs, query, final_k)
+                            candidate_docs = routed_docs
+                        else:
+                            candidate_docs = docs
+                        final_docs = _select_evidence_pack(
+                            candidate_docs,
+                            query,
+                            is_evidence_pack,
+                            seen_chunk_ids=seen_chunk_ids,
+                        )
+                        follow_up_queries = list(dict.fromkeys(follow_up_queries + generic_followups))
+
                 if is_evidence_pack:
                     coverage = self.coverage_audit(final_docs, candidate_docs)
                     unique_incidents_value = coverage["incident_count"]
@@ -4946,7 +5122,10 @@ class AgenticRAGApp:
                 else:
                     unique_incidents_value = len(final_docs)
                 retrieval_selection_ms = int((time.perf_counter() - iteration_started_at) * 1000)
-                seen_chunk_ids.update(self._doc_identity_key(doc) for doc in final_docs)
+                seen_chunk_ids.update(
+                    str((getattr(doc, "metadata", {}) or {}).get("chunk_id") or (getattr(doc, "metadata", {}) or {}).get("source_id") or self._doc_identity_key(doc))
+                    for doc in final_docs
+                )
                 (
                     context_text,
                     was_truncated,
@@ -5226,6 +5405,39 @@ class AgenticRAGApp:
                     final_docs = _select_evidence_pack(
                         all_docs, query, is_evidence_pack, seen_chunk_ids=seen_chunk_ids
                     )
+
+                generic_followups, generic_cov = _coverage_followup_from_metadata(candidate_docs, final_docs)
+                self.log(
+                    "Selection telemetry: "
+                    f"final_docs={len(final_docs)}, months={generic_cov['selected_months']}/{generic_cov['pool_months']}, "
+                    f"incidents={generic_cov['selected_incidents']}/{generic_cov['pool_incidents']}."
+                )
+                remaining_cap = max(0, total_docs_cap - total_retrieved)
+                if generic_followups and iteration < max_iterations and remaining_cap > 0:
+                    self.log(f"Generic coverage gate triggered: follow-up queries={generic_followups}.")
+                    follow_docs, follow_retrieved_count, follow_cap_reached = _retrieve_with_rrf(
+                        generic_followups,
+                        remaining_cap,
+                        routing_candidate_k,
+                    )
+                    retrieved_count += follow_retrieved_count
+                    cap_reached = cap_reached or follow_cap_reached
+                    if follow_docs:
+                        total_retrieved += len(follow_docs)
+                        all_docs = self._merge_dedupe_docs(all_docs + follow_docs)
+                        if use_mini_digest:
+                            routed_docs = self._route_with_mini_digest(all_docs, query, final_k)
+                            candidate_docs = routed_docs
+                        else:
+                            candidate_docs = all_docs
+                        final_docs = _select_evidence_pack(
+                            candidate_docs,
+                            query,
+                            is_evidence_pack,
+                            seen_chunk_ids=seen_chunk_ids,
+                        )
+                        follow_up_queries = list(dict.fromkeys(follow_up_queries + generic_followups))
+
                 if is_evidence_pack:
                     coverage = self.coverage_audit(final_docs, candidate_docs)
                     unique_incidents_value = coverage["incident_count"]
@@ -5297,7 +5509,10 @@ class AgenticRAGApp:
                 else:
                     unique_incidents_value = len(final_docs)
                 retrieval_selection_ms = int((time.perf_counter() - iteration_started_at) * 1000)
-                seen_chunk_ids.update(self._doc_identity_key(doc) for doc in final_docs)
+                seen_chunk_ids.update(
+                    str((getattr(doc, "metadata", {}) or {}).get("chunk_id") or (getattr(doc, "metadata", {}) or {}).get("source_id") or self._doc_identity_key(doc))
+                    for doc in final_docs
+                )
                 (
                     context_text,
                     was_truncated,
@@ -5566,6 +5781,14 @@ class AgenticRAGApp:
         self.root.clipboard_append(self.last_answer)
         self.root.update()
         self.log("Last answer copied to clipboard.")
+
+
+# Acceptance tests (comments only; do not execute):
+# - Digest expansion: when filtering by ingest_id + chunk_id list, Chroma get should not throw "exactly one operator".
+# - Lexical search: query containing "Sam.Weekes@gbe.gov.uk" should not crash; should return [] or results; must not disable lexical_db_available.
+# - Agent loop: running with novelty tracking should not raise NameError; seen_chunk_ids should grow across iterations.
+# - Ingestion should not emit utcnow() deprecation warning.
+
 
 
 if __name__ == "__main__":
