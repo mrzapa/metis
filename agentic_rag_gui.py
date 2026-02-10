@@ -3051,6 +3051,173 @@ class AgenticRAGApp:
                     quotes.append((quote_text, paragraph))
         return quotes
 
+    @staticmethod
+    def _sentence_split(text):
+        sentence_re = re.compile(r"[^.!?\n]+(?:[.!?](?=\s|$))?", re.M)
+        return [match.group(0).strip() for match in sentence_re.finditer(text) if match.group(0).strip()]
+
+    @staticmethod
+    def _claim_tokens(text):
+        stop_words = {
+            "the", "and", "that", "with", "from", "this", "have", "were", "been", "they",
+            "their", "about", "would", "could", "there", "which", "what", "when", "where",
+            "while", "into", "than", "then", "them", "also", "only", "other", "after",
+            "before", "under", "over", "between", "because", "during", "across", "within",
+        }
+        tokens = re.findall(r"[A-Za-z0-9]{4,}", text.lower())
+        return {token for token in tokens if token not in stop_words}
+
+    def _get_claim_embedding_model(self):
+        if hasattr(self, "_claim_embedding_model"):
+            return self._claim_embedding_model
+        try:
+            self._claim_embedding_model = self.get_embeddings()
+        except Exception as exc:
+            self._claim_embedding_model = None
+            self.log(f"Claim-level embedding support unavailable; using lexical overlap. ({exc})")
+        return self._claim_embedding_model
+
+    @staticmethod
+    def _cosine_similarity(vec_a, vec_b):
+        if not vec_a or not vec_b or len(vec_a) != len(vec_b):
+            return 0.0
+        dot = sum(a * b for a, b in zip(vec_a, vec_b))
+        norm_a = sum(a * a for a in vec_a) ** 0.5
+        norm_b = sum(b * b for b in vec_b) ** 0.5
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+
+    def _claim_supported(self, claim_text, cited_chunks, chunks, chunk_tokens, chunk_embeddings, embedding_model):
+        claim_tokens = self._claim_tokens(claim_text)
+        if not claim_tokens:
+            return False
+        claim_embedding = None
+        for chunk_num in cited_chunks:
+            chunk_text = chunks.get(chunk_num, "")
+            if not chunk_text:
+                continue
+            overlap = claim_tokens & chunk_tokens.get(chunk_num, set())
+            if len(overlap) >= 2:
+                ratio = len(overlap) / max(1, len(claim_tokens))
+                if ratio >= 0.12:
+                    return True
+            if embedding_model is not None:
+                if claim_embedding is None:
+                    try:
+                        claim_embedding = embedding_model.embed_query(claim_text)
+                    except Exception:
+                        claim_embedding = []
+                chunk_embedding = chunk_embeddings.get(chunk_num)
+                if claim_embedding and chunk_embedding:
+                    if self._cosine_similarity(claim_embedding, chunk_embedding) >= 0.55:
+                        return True
+        return False
+
+    def _claim_level_sanitize(self, answer_text, context_text):
+        citation_re = re.compile(r"\[Chunk (\d+)\]")
+        bullet_re = re.compile(r"^(\s*(?:[-*+]\s+|\d+[.)]\s+))(.*)$")
+        chunks = self._extract_chunks(context_text)
+        chunk_tokens = {num: self._claim_tokens(text) for num, text in chunks.items()}
+        embedding_model = self._get_claim_embedding_model() if chunks else None
+        chunk_embeddings = {}
+        if embedding_model is not None:
+            try:
+                texts = [chunks[num] for num in sorted(chunks)]
+                vectors = embedding_model.embed_documents(texts)
+                for num, vector in zip(sorted(chunks), vectors):
+                    chunk_embeddings[num] = vector
+            except Exception as exc:
+                chunk_embeddings = {}
+                embedding_model = None
+                self.log(f"Claim-level chunk embeddings unavailable; using lexical overlap. ({exc})")
+
+        failures = []
+        cleaned_lines = []
+        factual_hint_re = re.compile(r"\b(is|are|was|were|has|have|had|shows?|indicates?|states?|reports?|found|observed|according|caused?|led|resulted)\b", re.I)
+
+        for raw_line in answer_text.splitlines():
+            if not raw_line.strip():
+                cleaned_lines.append(raw_line)
+                continue
+            if re.match(r"^\s{0,3}#{1,6}\s+\S", raw_line):
+                cleaned_lines.append(raw_line)
+                continue
+
+            bullet_match = bullet_re.match(raw_line)
+            bullet_prefix = ""
+            body = raw_line
+            if bullet_match:
+                bullet_prefix = bullet_match.group(1)
+                body = bullet_match.group(2)
+
+            bullet_citations = [int(num) for num in citation_re.findall(body)]
+            sentences = self._sentence_split(body)
+            if not sentences:
+                cleaned_lines.append(raw_line)
+                continue
+
+            kept_sentences = []
+            for sentence in sentences:
+                is_factual = bool(factual_hint_re.search(sentence)) or len(sentence) >= 40
+                if not is_factual:
+                    kept_sentences.append(sentence)
+                    continue
+
+                sentence_citations = [int(num) for num in citation_re.findall(sentence)]
+                cited_chunks = sentence_citations or bullet_citations
+                if not cited_chunks and chunks:
+                    best_chunk = None
+                    best_score = 0
+                    sentence_tokens = self._claim_tokens(sentence)
+                    for chunk_num, token_set in chunk_tokens.items():
+                        score = len(sentence_tokens & token_set)
+                        if score > best_score:
+                            best_score = score
+                            best_chunk = chunk_num
+                    if best_chunk is not None and best_score > 0:
+                        sentence = sentence.rstrip() + f" [Chunk {best_chunk}]"
+                        sentence_citations = [best_chunk]
+                        cited_chunks = [best_chunk]
+
+                if not cited_chunks:
+                    failures.append("Factual sentence missing [Chunk N] citation.")
+                    continue
+
+                if not self._claim_supported(
+                    sentence,
+                    cited_chunks,
+                    chunks,
+                    chunk_tokens,
+                    chunk_embeddings,
+                    embedding_model,
+                ):
+                    failures.append("Unsupported factual sentence for cited chunk(s).")
+                    continue
+                kept_sentences.append(sentence)
+
+            if not kept_sentences:
+                continue
+            rebuilt = " ".join(kept_sentences).strip()
+            cleaned_lines.append(f"{bullet_prefix}{rebuilt}" if bullet_prefix else rebuilt)
+
+        cleaned_text = "\n".join(cleaned_lines).strip()
+        return cleaned_text, failures
+
+    @staticmethod
+    def _summarize_failures(failures):
+        unique = []
+        seen = set()
+        for item in failures:
+            key = item.strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            unique.append(key)
+            if len(unique) >= 5:
+                break
+        return unique
+
     def _validate_answer(self, answer_text, context_text, output_style):
         failures = []
         citation_re = re.compile(r"\[Chunk (\d+)\]")
@@ -3181,49 +3348,46 @@ class AgenticRAGApp:
     def _validate_and_repair(self, answer_text, context_text, iteration_id=None):
         output_style = self.output_style.get().strip()
         agentic_mode = self.agentic_mode.get()
+        answer_text, claim_failures = self._claim_level_sanitize(answer_text, context_text)
         is_valid, failures = self._validate_answer(
             answer_text, context_text, output_style
         )
-        unsupported_claims_count = sum(
-            1 for failure in failures if "unsupported" in str(failure).lower()
-        )
-        unique_failures_count = len({str(failure).strip() for failure in failures if str(failure).strip()})
-        repair_triggered = int(not is_valid)
-        self._append_jsonl_telemetry(
-            {
-                "event": "validator",
-                "run_id": self._active_run_id,
-                "iter": iteration_id,
-                "agentic": int(agentic_mode),
-                "style": output_style,
-                "validator": {
-                    "unsupported_claims_count": unsupported_claims_count,
-                    "repair_triggered": repair_triggered,
-                    "unique_failures_count": unique_failures_count,
-                },
-            }
-        )
+        failures.extend(claim_failures)
         if is_valid:
+            unique_failures = self._summarize_failures(failures)
             if iteration_id is not None:
                 self.log(
                     "Iter "
                     f"{iteration_id} repair | style={output_style}, "
                     f"agentic={int(agentic_mode)}, triggered=0, failures=none"
                 )
+            if unique_failures:
+                self.log(
+                    "Claim-level pass removed/adjusted unsupported content. Top unique issues: "
+                    + "; ".join(unique_failures)
+                )
             return answer_text
+        unique_failures = self._summarize_failures(failures)
         self.log(
             "Validation failed; triggering repair pass. Reasons: "
-            + "; ".join(failures)
+            + "; ".join(unique_failures)
         )
         if iteration_id is not None:
             self.log(
                 "Iter "
                 f"{iteration_id} repair | style={output_style}, "
                 f"agentic={int(agentic_mode)}, triggered=1, failures="
-                + "; ".join(failures)
+                + "; ".join(unique_failures)
             )
-        repaired = self._repair_answer(answer_text, context_text, failures, output_style)
+        repaired = self._repair_answer(answer_text, context_text, unique_failures, output_style)
         repaired = self._append_missing_citations(repaired, context_text)
+        repaired, post_failures = self._claim_level_sanitize(repaired, context_text)
+        post_unique = self._summarize_failures(post_failures)
+        if post_unique:
+            self.log(
+                "Post-repair claim-level cleanup applied. Top unique issues: "
+                + "; ".join(post_unique)
+            )
         return repaired
 
     def _append_missing_citations(self, answer_text, context_text):
@@ -4081,6 +4245,158 @@ class AgenticRAGApp:
                 except json.JSONDecodeError:
                     return None
 
+            def _build_chunk_reference_lookup(doc_list):
+                lookup = {}
+                for idx, doc in enumerate(doc_list, start=1):
+                    metadata = getattr(doc, "metadata", {}) or {}
+                    chunk_id = str(metadata.get("chunk_id", "")).strip()
+                    canonical = chunk_id if chunk_id and chunk_id != "N/A" else f"Chunk {idx}"
+                    keys = {
+                        canonical,
+                        canonical.lower(),
+                        f"Chunk {idx}",
+                        f"chunk {idx}",
+                        str(idx),
+                    }
+                    if chunk_id and chunk_id != "N/A":
+                        keys.update(
+                            {
+                                chunk_id,
+                                chunk_id.lower(),
+                                f"chunk_id:{chunk_id}",
+                                f"chunk_id: {chunk_id}",
+                                f"chunk id {chunk_id}",
+                            }
+                        )
+                    for key in keys:
+                        lookup[str(key).strip().lower()] = canonical
+                return lookup
+
+            def _normalize_incident_payload(payload, doc_list):
+                scope_note = ""
+                if isinstance(payload, list):
+                    incidents_raw = payload
+                elif isinstance(payload, dict):
+                    incidents_raw = payload.get("incidents", [])
+                    scope_note = str(payload.get("scope_note", "")).strip()
+                else:
+                    incidents_raw = []
+
+                lookup = _build_chunk_reference_lookup(doc_list)
+                incidents = []
+                for item in incidents_raw:
+                    if not isinstance(item, dict):
+                        continue
+                    supporting_raw = item.get("supporting_chunks", [])
+                    if isinstance(supporting_raw, str):
+                        supporting_raw = [supporting_raw]
+                    supporting_chunks = []
+                    seen = set()
+                    for ref in supporting_raw:
+                        normalized = lookup.get(str(ref).strip().lower())
+                        if normalized and normalized not in seen:
+                            supporting_chunks.append(normalized)
+                            seen.add(normalized)
+                    if not supporting_chunks:
+                        continue
+
+                    people_value = item.get("people", [])
+                    if isinstance(people_value, str):
+                        people_value = [p.strip() for p in people_value.split(",") if p.strip()]
+                    elif isinstance(people_value, list):
+                        people_value = [str(p).strip() for p in people_value if str(p).strip()]
+                    else:
+                        people_value = []
+
+                    quotes_value = item.get("quotes", [])
+                    if isinstance(quotes_value, str):
+                        quotes_value = [quotes_value.strip()] if quotes_value.strip() else []
+                    elif isinstance(quotes_value, list):
+                        quotes_value = [str(q).strip() for q in quotes_value if str(q).strip()]
+                    else:
+                        quotes_value = []
+
+                    incidents.append(
+                        {
+                            "date": str(item.get("date", "")).strip(),
+                            "title": str(item.get("title", "")).strip(),
+                            "channel": str(item.get("channel", "")).strip(),
+                            "people": people_value,
+                            "what_happened": str(item.get("what_happened", "")).strip(),
+                            "impact": str(item.get("impact", "")).strip(),
+                            "supporting_chunks": supporting_chunks,
+                            "quotes": quotes_value,
+                        }
+                    )
+                return incidents, scope_note
+
+            def _run_evidence_pack_two_stage(llm, query_text, context_text, doc_list, checklist_text="", section_plan_items=None, coverage_note=""):
+                section_plan_items = section_plan_items or []
+                stage_a_prompt = (
+                    "You are Stage A for evidence-pack mode. Use ONLY FINAL_DOCS context below. "
+                    "Extract incidents and return STRICT JSON only (no markdown, no commentary).\n\n"
+                    "Schema (array of objects):\n"
+                    "[{\n"
+                    '  "date": "",\n'
+                    '  "title": "",\n'
+                    '  "channel": "",\n'
+                    '  "people": [""],\n'
+                    '  "what_happened": "",\n'
+                    '  "impact": "",\n'
+                    '  "supporting_chunks": [""],\n'
+                    '  "quotes": [""]\n'
+                    "}]\n\n"
+                    "Rules: supporting_chunks must reference chunk_id values or Chunk numbers present in FINAL_DOCS. "
+                    "If no incidents are supported, return []"
+                )
+                stage_a_messages = [
+                    SystemMessage(content=stage_a_prompt),
+                    HumanMessage(
+                        content=(
+                            f"User request:\n{query_text}\n\n"
+                            f"FINAL_DOCS:\n{context_text}{coverage_note}"
+                        )
+                    ),
+                ]
+                stage_a_response = llm.invoke(stage_a_messages)
+                stage_a_payload = _extract_json_payload(stage_a_response.content)
+                incidents, scope_note = _normalize_incident_payload(stage_a_payload, doc_list)
+
+                if not incidents:
+                    if scope_note:
+                        return f"Scope: {scope_note}"
+                    return "No supported incidents were found in final_docs."
+
+                incident_json = json.dumps(incidents, ensure_ascii=False, indent=2)
+                section_text = (
+                    "\nSECTION PLAN:\n" + "\n".join(f"- {item}" for item in section_plan_items)
+                    if section_plan_items
+                    else ""
+                )
+                checklist_block = f"\nCHECKLIST:\n{checklist_text}" if checklist_text else ""
+                scope_rule = (
+                    "If needed, include at most one short Scope note at the very top. "
+                    if scope_note
+                    else "If needed, include at most one short Scope note at the very top."
+                )
+                stage_b_prompt = (
+                    "You are Stage B for evidence-pack mode. Write the final narrative using ONLY the INCIDENT JSON. "
+                    "Preserve incident order exactly as listed. Cite each incident to listed supporting_chunks. "
+                    "Do not cite chunks that are not in an incident's supporting_chunks. Omit requested sections that have no incidents. "
+                    f"{scope_rule}"
+                )
+                stage_b_messages = [
+                    SystemMessage(content=stage_b_prompt),
+                    HumanMessage(
+                        content=(
+                            f"User request:\n{query_text}{section_text}{checklist_block}\n\n"
+                            f"INCIDENT JSON:\n{incident_json}"
+                        )
+                    ),
+                ]
+                stage_b_response = llm.invoke(stage_b_messages)
+                return stage_b_response.content
+
             def _build_search_kwargs(k_value):
                 search_kwargs_local = {"k": k_value}
                 if search_type == "mmr":
@@ -4709,12 +5025,18 @@ class AgenticRAGApp:
                     *history_window,
                     HumanMessage(content=query),
                 ]
-                generation_started_at = time.perf_counter()
-                response = llm.invoke(messages)
-                generation_ms = int((time.perf_counter() - generation_started_at) * 1000)
-                validation_started_at = time.perf_counter()
+                if is_evidence_pack:
+                    response_content = _run_evidence_pack_two_stage(
+                        llm,
+                        query,
+                        context_text,
+                        final_docs,
+                    )
+                else:
+                    response = llm.invoke(messages)
+                    response_content = response.content
                 validated_answer = self._validate_and_repair(
-                    response.content, context_text, iteration_id=1
+                    response_content, context_text, iteration_id=1
                 )
                 validation_ms = int((time.perf_counter() - validation_started_at) * 1000)
                 self._append_jsonl_telemetry(
@@ -5071,10 +5393,19 @@ class AgenticRAGApp:
                     *history_window,
                     HumanMessage(content=query),
                 ]
-                generation_started_at = time.perf_counter()
-                response = llm.invoke(messages)
-                generation_ms = int((time.perf_counter() - generation_started_at) * 1000)
-                latest_answer = response.content
+                if is_evidence_pack:
+                    latest_answer = _run_evidence_pack_two_stage(
+                        llm,
+                        query,
+                        context_text,
+                        final_docs,
+                        checklist_text=checklist_text,
+                        section_plan_items=section_plan,
+                        coverage_note=coverage_note,
+                    )
+                else:
+                    response = llm.invoke(messages)
+                    latest_answer = response.content
                 latest_context_text = context_text
                 last_iteration_id = iteration
                 self._append_jsonl_telemetry(
