@@ -1582,7 +1582,7 @@ class AgenticRAGApp:
                     if not chunk_pk:
                         continue
                     source = metadata.get("source") or ""
-                    role = metadata.get("speaker_role") or metadata.get("role") or ""
+                    role = metadata.get("role") or metadata.get("speaker_role") or ""
                     evidence_kind = metadata.get("evidence_kind") or ""
                     text = doc.page_content or ""
                     meta_json = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
@@ -3089,27 +3089,139 @@ class AgenticRAGApp:
                 from bs4 import BeautifulSoup
                 from bs4 import NavigableString
 
+                def _normalize_timestamp(raw_timestamp):
+                    if raw_timestamp is None:
+                        return None
+                    candidate = str(raw_timestamp).strip()
+                    if not candidate:
+                        return None
+                    compact = re.sub(r"\s+", " ", candidate)
+                    iso_candidate = compact.replace("Z", "+00:00")
+                    try:
+                        return datetime.fromisoformat(iso_candidate).isoformat()
+                    except ValueError:
+                        return compact
+
+                def _contains_quoted_primary_evidence(text):
+                    if not text:
+                        return False
+                    lowered = text.lower()
+                    quote_markers = [
+                        r'"[^"\n]{8,}"',
+                        r"'[^'\n]{8,}'",
+                        r"“[^”\n]{8,}”",
+                        r"‘[^’\n]{8,}’",
+                        r"(^|\n)>\s*.+",
+                    ]
+                    has_quote = any(
+                        re.search(pattern, text, flags=re.MULTILINE)
+                        for pattern in quote_markers
+                    )
+                    if not has_quote:
+                        return False
+                    evidence_signals = [
+                        "user",
+                        "customer",
+                        "client",
+                        "transcript",
+                        "email",
+                        "chat",
+                        "message",
+                        "said",
+                        "wrote",
+                    ]
+                    return any(signal in lowered for signal in evidence_signals)
+
+                def _detect_message_role(node):
+                    classes = [cls.lower() for cls in (node.get("class") or [])]
+                    class_blob = " ".join(classes)
+                    if "user-message" in classes or re.search(r"\buser\b", class_blob):
+                        return "user"
+                    if "assistant-message" in classes or re.search(
+                        r"\bassistant\b", class_blob
+                    ):
+                        return "assistant"
+
+                    attr_candidates = [
+                        node.get("data-message-author-role"),
+                        node.get("data-author-role"),
+                        node.get("data-role"),
+                        node.get("aria-label"),
+                        node.get("data-testid"),
+                    ]
+                    for value in attr_candidates:
+                        lowered = str(value or "").strip().lower()
+                        if not lowered:
+                            continue
+                        if "user" in lowered:
+                            return "user"
+                        if any(token in lowered for token in ["assistant", "chatgpt", "model"]):
+                            return "assistant"
+
+                    role_label_node = node.find(
+                        attrs={"data-message-author-role": True}
+                    )
+                    if role_label_node:
+                        nested_role = str(
+                            role_label_node.get("data-message-author-role") or ""
+                        ).strip().lower()
+                        if nested_role in {"user", "assistant"}:
+                            return nested_role
+
+                    return "unknown"
+
+                def _extract_timestamp(node):
+                    time_node = node.find("time")
+                    if time_node:
+                        raw = time_node.get("datetime") or time_node.get_text(
+                            " ", strip=True
+                        )
+                        parsed = _normalize_timestamp(raw)
+                        if parsed:
+                            return parsed, time_node
+
+                    timestamp_node = node.select_one(
+                        ".timestamp, [data-testid*='timestamp'], [class*='timestamp']"
+                    )
+                    if timestamp_node:
+                        raw = timestamp_node.get("datetime") or timestamp_node.get_text(
+                            " ", strip=True
+                        )
+                        parsed = _normalize_timestamp(raw)
+                        if parsed:
+                            return parsed, timestamp_node
+
+                    return None, None
+
                 def _extract_chatgpt_messages(soup):
                     message_nodes = soup.select(
-                        "div.message.user-message, div.message.assistant-message"
+                        "div.message.user-message, "
+                        "div.message.assistant-message, "
+                        "[data-message-author-role], "
+                        "article[data-testid*='conversation-turn'], "
+                        "div[data-testid*='conversation-turn']"
                     )
                     if not message_nodes:
                         return None
                     extracted = []
+                    seen_messages = set()
                     for node in message_nodes:
-                        classes = node.get("class", [])
-                        if "user-message" in classes:
-                            role = "user"
-                        elif "assistant-message" in classes:
-                            role = "assistant"
-                        else:
-                            continue
-                        timestamp = None
-                        timestamp_node = node.find(class_="timestamp")
+                        role = _detect_message_role(node)
+                        timestamp, timestamp_node = _extract_timestamp(node)
+                        node_copy = BeautifulSoup(str(node), "html.parser")
                         if timestamp_node:
-                            timestamp = timestamp_node.get_text(" ", strip=True) or None
-                            timestamp_node.extract()
-                        content = node.get_text(" ", strip=True)
+                            copy_time_node = node_copy.find("time") or node_copy.select_one(
+                                ".timestamp, [data-testid*='timestamp'], [class*='timestamp']"
+                            )
+                            if copy_time_node:
+                                copy_time_node.extract()
+                        content = node_copy.get_text(" ", strip=True)
+                        if not content:
+                            continue
+                        dedupe_key = (role, timestamp, content)
+                        if dedupe_key in seen_messages:
+                            continue
+                        seen_messages.add(dedupe_key)
                         extracted.append(
                             {
                                 "role": role,
@@ -3206,13 +3318,22 @@ class AgenticRAGApp:
             if chatgpt_messages:
                 chatgpt_docs = []
                 for index, message in enumerate(chatgpt_messages, start=1):
-                    role = message["role"]
+                    role = message.get("role") or "unknown"
                     content = message["content"]
                     prefixed_content = f"[ROLE={role}] {content}".strip()
+                    if role == "user":
+                        evidence_kind = "primary"
+                    elif role == "assistant":
+                        evidence_kind = (
+                            "primary" if _contains_quoted_primary_evidence(content) else "advice"
+                        )
+                    else:
+                        evidence_kind = "unknown"
                     metadata = {
+                        "role": role,
                         "speaker_role": role,
                         "message_index": index,
-                        "evidence_kind": "primary" if role == "user" else "secondary",
+                        "evidence_kind": evidence_kind,
                         "source": source_basename,
                         "chunk_id": index,
                         "ingest_id": chunk_ingest_id,
