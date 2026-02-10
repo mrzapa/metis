@@ -106,8 +106,9 @@ class AgenticRAGApp:
         self.default_system_instructions = (
             "You are an expert analyst assistant. Use ONLY the provided context for factual claims. "
             "Never ask for details already present in the retrieved context. "
-            "Omit unsupported claims; deepen supported ones; do not ask the user for missing info; "
-            "do not use placeholders. Every paragraph with factual content must end with one or more "
+            "Omit unsupported claims; deepen supported ones; do not ask for more docs or missing info; "
+            "do not use placeholders. If evidence is thin, you may add one short 'Scope:' note at the "
+            "top describing limitations. Every paragraph with factual content must end with one or more "
             "[Chunk N] citations. Use the exact [Chunk N] format only; do not use alternative formats "
             "(e.g., (1), [1], or inline URLs). Example: \"The policy was revised in 2023.\" [Chunk 4] "
             "For Script / talk track and Structured report styles, include at least one short verbatim "
@@ -2278,7 +2279,7 @@ class AgenticRAGApp:
        outputs an incident-led pack.
     2) Corpus includes Jan 6 + Jan 16 incidents, so retrieval includes them unless
        final_k/budget is too small.
-    3) Outputs contain no "NOT FOUND IN CONTEXT" text and no user-supplementation requests.
+    3) Outputs omit unsupported details, include no placeholders, and no user-supplementation requests.
     4) Grievance-export regression: ChatGPT HTML role parsing yields user evidence prioritized
        and prevents missing-key-incident scenarios.
     """
@@ -2302,7 +2303,8 @@ class AgenticRAGApp:
             "actions, outcomes, and supporting quotes. Only include claims supported by context; "
             "omit details not present in context. Write incident entries using: When; What happened; "
             "Impact; Evidence (chunk citations). Do not provide coaching or advice. Ensure the output "
-            "does not include the phrase \"NOT FOUND IN CONTEXT\". Do not ask the user for missing info."
+            "contains no placeholders and does not ask for more docs or missing info. If evidence is "
+            "thin, allow one short 'Scope:' note at the top."
         )
 
     def _format_month_label(self, year, month):
@@ -2646,8 +2648,9 @@ class AgenticRAGApp:
             "You are a repair assistant. Fix the draft using ONLY the provided context. "
             "Rules: remove unsupported content, add correct [Chunk N] citations to every "
             "factual paragraph, include no placeholders, and omit unsupported content. "
-            "Omit unsupported claims; deepen supported ones; do not ask the user for missing info; "
-            "do not use placeholders. "
+            "Omit unsupported claims; deepen supported ones; do not ask for more docs or missing info; "
+            "do not use placeholders. If evidence is thin, you may include one short 'Scope:' note "
+            "at the top. "
             "For Script / talk track and Structured report styles, ensure at least one short "
             "verbatim quote (<=25 words) per major section with a [Chunk N] citation, and "
             "the quote must appear in the cited chunk text. "
@@ -4205,7 +4208,8 @@ class AgenticRAGApp:
                     )
                 prompt_parts.append(
                     "Strict rules: Use ONLY the context. Omit unsupported claims; deepen supported ones; "
-                    "do not ask the user for missing info; do not use placeholders."
+                    "do not ask for more docs or missing info; do not use placeholders. If evidence "
+                    "is thin, you may add one short 'Scope:' note at the top."
                 )
                 prompt_parts.append(f"CHECKLIST:\n{checklist_text}")
                 prompt_parts.append(f"CONTEXT:\n{context_text}{coverage_note}")
@@ -4233,7 +4237,9 @@ class AgenticRAGApp:
                     critic_prompt = (
                         "You are a critic. Review the answer against the checklist. "
                         "For each checklist item, mark it as FOUND with citations or "
-                        "UNSUPPORTED. If any items are UNSUPPORTED, propose new "
+                        "UNSUPPORTED. Unsupported means the answer should omit those details "
+                        "(no placeholders) rather than request more docs, except one short "
+                        "'Scope:' note at top when evidence is thin. If any items are UNSUPPORTED, propose new "
                         "retrieval_queries. Return strict JSON with keys: "
                         "checklist_review (array of {item, status, citations}), "
                         "retrieval_queries (array). Do not include extra text."
