@@ -9,6 +9,7 @@ import subprocess
 import importlib.util
 import re
 import hashlib
+import sqlite3
 from datetime import datetime
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -196,6 +197,8 @@ class AgenticRAGApp:
         self.existing_index_paths = {}
         self.selected_index_path = None
         self.selected_collection_name = RAW_COLLECTION_NAME
+        self.lexical_db_path = None
+        self.lexical_db_available = False
 
         self.setup_ui()
         self.load_config()
@@ -1523,6 +1526,140 @@ class AgenticRAGApp:
     def _get_chroma_persist_root(self):
         return os.path.join(os.getcwd(), "chroma_db")
 
+    def _get_lexical_db_path(self):
+        persist_root = self._get_chroma_persist_root()
+        parent_dir = os.path.dirname(os.path.abspath(persist_root))
+        return os.path.join(parent_dir, "rag_lexical.db")
+
+    def _ensure_lexical_db(self):
+        db_path = self._get_lexical_db_path()
+        try:
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS chunks(
+                        chunk_id TEXT PRIMARY KEY,
+                        source TEXT,
+                        role TEXT,
+                        evidence_kind TEXT,
+                        text TEXT,
+                        meta_json TEXT
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
+                    USING fts5(text, content='chunks', content_rowid='rowid')
+                    """
+                )
+                conn.commit()
+            self.lexical_db_path = db_path
+            self.lexical_db_available = True
+            return True
+        except Exception as exc:
+            self.lexical_db_path = db_path
+            self.lexical_db_available = False
+            self.log(f"Lexical DB unavailable; skipping SQLite sidecar. ({exc})")
+            return False
+
+    @staticmethod
+    def _chunk_pk(metadata):
+        ingest_id = metadata.get("ingest_id")
+        chunk_id = metadata.get("chunk_id")
+        if ingest_id is None or chunk_id is None:
+            return None
+        return f"{ingest_id}:{chunk_id}"
+
+    def _upsert_lexical_chunks(self, docs):
+        if not self._ensure_lexical_db():
+            return False
+        try:
+            with sqlite3.connect(self.lexical_db_path) as conn:
+                for doc in docs:
+                    metadata = (doc.metadata or {}).copy()
+                    chunk_pk = self._chunk_pk(metadata)
+                    if not chunk_pk:
+                        continue
+                    source = metadata.get("source") or ""
+                    role = metadata.get("speaker_role") or metadata.get("role") or ""
+                    evidence_kind = metadata.get("evidence_kind") or ""
+                    text = doc.page_content or ""
+                    meta_json = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+                    conn.execute(
+                        """
+                        INSERT INTO chunks(chunk_id, source, role, evidence_kind, text, meta_json)
+                        VALUES(?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(chunk_id) DO UPDATE SET
+                            source=excluded.source,
+                            role=excluded.role,
+                            evidence_kind=excluded.evidence_kind,
+                            text=excluded.text,
+                            meta_json=excluded.meta_json
+                        """,
+                        (chunk_pk, source, role, evidence_kind, text, meta_json),
+                    )
+                conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
+                conn.commit()
+            self.lexical_db_available = True
+            return True
+        except Exception as exc:
+            self.lexical_db_available = False
+            self.log(f"Lexical chunk upsert skipped (SQLite/FTS5 issue). ({exc})")
+            return False
+
+    def lexical_search(self, query: str, k: int) -> list[Document]:
+        if not query or k <= 0:
+            return []
+        if not self.lexical_db_available:
+            self._ensure_lexical_db()
+        if not self.lexical_db_available or not self.lexical_db_path:
+            return []
+        try:
+            with sqlite3.connect(self.lexical_db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT
+                        c.chunk_id,
+                        c.source,
+                        c.role,
+                        c.evidence_kind,
+                        c.text,
+                        c.meta_json,
+                        bm25(chunks_fts) AS lexical_score
+                    FROM chunks_fts
+                    JOIN chunks c ON c.rowid = chunks_fts.rowid
+                    WHERE chunks_fts MATCH ?
+                    ORDER BY lexical_score ASC
+                    LIMIT ?
+                    """,
+                    (query, int(k)),
+                ).fetchall()
+        except Exception as exc:
+            self.lexical_db_available = False
+            self.log(f"Lexical search unavailable; continuing without it. ({exc})")
+            return []
+
+        docs = []
+        for chunk_id, source, role, evidence_kind, text, meta_json, score in rows:
+            metadata = {}
+            if meta_json:
+                try:
+                    metadata = json.loads(meta_json)
+                except json.JSONDecodeError:
+                    metadata = {}
+            if source and "source" not in metadata:
+                metadata["source"] = source
+            if role and "speaker_role" not in metadata:
+                metadata["speaker_role"] = role
+            if evidence_kind and "evidence_kind" not in metadata:
+                metadata["evidence_kind"] = evidence_kind
+            metadata["chunk_db_id"] = chunk_id
+            metadata["lexical_score"] = float(score)
+            metadata["lexical_match"] = True
+            docs.append(Document(page_content=text or "", metadata=metadata))
+        return docs
+
     @staticmethod
     def _safe_file_stem(file_path):
         base_name = os.path.basename(file_path or "")
@@ -1887,6 +2024,7 @@ class AgenticRAGApp:
                     embedding_function=embeddings,
                     persist_directory=selected_path,
                 )
+                self._ensure_lexical_db()
                 self.index_embedding_signature = self._current_embedding_signature()
                 self.save_config()
                 self.log(
@@ -3128,11 +3266,15 @@ class AgenticRAGApp:
                     doc.metadata = metadata
             self.log(f"Created {len(docs)} text chunks.")
 
+            db_type = self.vector_db_type.get()
+            if db_type == "chroma":
+                if self._upsert_lexical_chunks(docs):
+                    self.log(f"Lexical sidecar updated: {self.lexical_db_path}")
+
             # 3. Initialize Vector DB & Embeddings
             self.log("Step 3/4: Initializing Vector Store...")
             embeddings = self.get_embeddings()
 
-            db_type = self.vector_db_type.get()
             new_index_path = None
             digest_docs = []
 
@@ -3585,7 +3727,16 @@ class AgenticRAGApp:
                     docs_local = []
                     for sub_query in filtered_queries:
                         docs_local.extend(retriever.invoke(sub_query))
-                retrieved_count_local = len(docs_local)
+                vector_retrieved_count = len(docs_local)
+                lexical_docs = []
+                if self.lexical_db_available:
+                    lexical_limit = max(1, min(k_value, remaining_cap))
+                    for sub_query in filtered_queries:
+                        lexical_docs.extend(self.lexical_search(sub_query, lexical_limit))
+                    if lexical_docs:
+                        self.log(f"Lexical search contributed {len(lexical_docs)} candidates.")
+                docs_local.extend(lexical_docs)
+                retrieved_count_local = vector_retrieved_count + len(lexical_docs)
                 docs_local = self._merge_dedupe_docs(docs_local)
                 if len(docs_local) > remaining_cap:
                     docs_local = docs_local[:remaining_cap]
