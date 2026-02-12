@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox
 import threading
+import logging
 import os
 import sys
 import time
@@ -14,6 +15,20 @@ import uuid
 from datetime import datetime, timezone
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+logger = logging.getLogger(__name__)
+
+try:
+    import langextract
+except ImportError:
+    langextract = None
+    logger.info("optional dependency not installed: langextract")
+
+try:
+    import agent_lightning
+except ImportError:
+    agent_lightning = None
+    logger.info("optional dependency not installed: agent_lightning")
 
 # --- Libraries check is done inside the class to prevent instant crash ---
 # Required: pip install langchain langchain-community langchain-openai langchain-anthropic langchain-google-genai langchain-cohere langchain-text-splitters chromadb beautifulsoup4 tiktoken
@@ -188,6 +203,12 @@ class AgenticRAGApp:
         self.use_reranker = tk.BooleanVar(value=True)
         self.use_sub_queries = tk.BooleanVar(value=True)
         self.subquery_max_docs = tk.IntVar(value=200)
+        self.enable_langextract = tk.BooleanVar(value=False)
+        self.enable_structured_incidents = tk.BooleanVar(value=False)
+        self.enable_recursive_memory = tk.BooleanVar(value=False)
+        self.enable_citation_v2 = tk.BooleanVar(value=False)
+        self.enable_agent_lightning_telemetry = tk.BooleanVar(value=False)
+        self._frontier_evidence_pack_mode = False
 
         self.vector_store = None
         self.index_embedding_signature = ""
@@ -519,6 +540,33 @@ class AgenticRAGApp:
         except (TypeError, ValueError):
             fallback_final_k = self.fallback_final_k.get()
         self.fallback_final_k.set(max(1, fallback_final_k))
+        self.enable_langextract.set(
+            bool(data.get("enable_langextract", self.enable_langextract.get()))
+        )
+        self.enable_structured_incidents.set(
+            bool(
+                data.get(
+                    "enable_structured_incidents",
+                    self.enable_structured_incidents.get(),
+                )
+            )
+        )
+        self.enable_recursive_memory.set(
+            bool(
+                data.get("enable_recursive_memory", self.enable_recursive_memory.get())
+            )
+        )
+        self.enable_citation_v2.set(
+            bool(data.get("enable_citation_v2", self.enable_citation_v2.get()))
+        )
+        self.enable_agent_lightning_telemetry.set(
+            bool(
+                data.get(
+                    "enable_agent_lightning_telemetry",
+                    self.enable_agent_lightning_telemetry.get(),
+                )
+            )
+        )
         self.index_embedding_signature = data.get(
             "index_embedding_signature", self.index_embedding_signature
         )
@@ -588,6 +636,15 @@ class AgenticRAGApp:
             "use_sub_queries": bool(self.use_sub_queries.get()),
             "subquery_max_docs": subquery_max_docs,
             "fallback_final_k": self.fallback_final_k.get(),
+            "enable_langextract": bool(self.enable_langextract.get()),
+            "enable_structured_incidents": bool(
+                self.enable_structured_incidents.get()
+            ),
+            "enable_recursive_memory": bool(self.enable_recursive_memory.get()),
+            "enable_citation_v2": bool(self.enable_citation_v2.get()),
+            "enable_agent_lightning_telemetry": bool(
+                self.enable_agent_lightning_telemetry.get()
+            ),
             "index_embedding_signature": self.index_embedding_signature,
             "selected_index_path": self.selected_index_path,
             "selected_collection_name": self.selected_collection_name,
@@ -1021,6 +1078,55 @@ class AgenticRAGApp:
             variable=self.show_retrieved_context,
         ).pack(side="left", padx=(12, 0))
 
+        frontier_wrap = ttk.LabelFrame(frame, text="Advanced / Frontier", padding=8)
+        frontier_wrap.pack(fill="x", pady=(6, 0))
+        self.frontier_collapsed = tk.BooleanVar(value=True)
+
+        def _toggle_frontier_section():
+            if self.frontier_collapsed.get():
+                self.frontier_options_frame.pack(fill="x", pady=(6, 0))
+                self.frontier_toggle_btn.config(text="Hide")
+                self.frontier_collapsed.set(False)
+            else:
+                self.frontier_options_frame.pack_forget()
+                self.frontier_toggle_btn.config(text="Show")
+                self.frontier_collapsed.set(True)
+
+        header_row = ttk.Frame(frontier_wrap)
+        header_row.pack(fill="x")
+        ttk.Label(header_row, text="Optional frontier components").pack(side="left")
+        self.frontier_toggle_btn = ttk.Button(
+            header_row, text="Show", width=8, command=_toggle_frontier_section
+        )
+        self.frontier_toggle_btn.pack(side="right")
+
+        self.frontier_options_frame = ttk.Frame(frontier_wrap)
+        ttk.Checkbutton(
+            self.frontier_options_frame,
+            text="Enable langextract",
+            variable=self.enable_langextract,
+        ).pack(anchor="w")
+        ttk.Checkbutton(
+            self.frontier_options_frame,
+            text="Enable structured incidents",
+            variable=self.enable_structured_incidents,
+        ).pack(anchor="w")
+        ttk.Checkbutton(
+            self.frontier_options_frame,
+            text="Enable recursive memory",
+            variable=self.enable_recursive_memory,
+        ).pack(anchor="w")
+        ttk.Checkbutton(
+            self.frontier_options_frame,
+            text="Enable citation v2 (defaults ON in evidence-pack mode)",
+            variable=self.enable_citation_v2,
+        ).pack(anchor="w")
+        ttk.Checkbutton(
+            self.frontier_options_frame,
+            text="Enable Agent Lightning telemetry",
+            variable=self.enable_agent_lightning_telemetry,
+        ).pack(anchor="w")
+
     # --- Logic ---
 
     @staticmethod
@@ -1032,6 +1138,14 @@ class AgenticRAGApp:
             if num_bytes < 1024:
                 return f"{num_bytes:.1f} {unit}"
         return f"{num_bytes:.1f} PB"
+
+    def _frontier_enabled(self, name: str) -> bool:
+        var_name = f"enable_{name}"
+        var = getattr(self, var_name, None)
+        enabled = bool(var.get()) if hasattr(var, "get") else False
+        if name == "citation_v2":
+            return enabled or bool(getattr(self, "_frontier_evidence_pack_mode", False))
+        return enabled
 
     def _append_history(self, message):
         self.chat_history.append(message)
@@ -3756,7 +3870,16 @@ class AgenticRAGApp:
     def _ingest_process(self):
         try:
             self._run_on_ui(self.btn_ingest.config, state="disabled")
+            self._frontier_evidence_pack_mode = False
             self.log("Starting ingestion pipeline...")
+            self.log(
+                "Frontier flags (ingestion): "
+                f"langextract={self._frontier_enabled('langextract')}, "
+                f"structured_incidents={self._frontier_enabled('structured_incidents')}, "
+                f"recursive_memory={self._frontier_enabled('recursive_memory')}, "
+                f"citation_v2={self._frontier_enabled('citation_v2')}, "
+                f"agent_lightning_telemetry={self._frontier_enabled('agent_lightning_telemetry')}"
+            )
 
             # 1. Load & Clean
             self.log("Step 1/4: Parsing File...")
@@ -4293,6 +4416,16 @@ class AgenticRAGApp:
                 keyword in normalized_query for keyword in long_form_keywords
             )
             is_evidence_pack = self.is_evidence_pack_query(query, output_style)
+            self._frontier_evidence_pack_mode = bool(is_evidence_pack)
+            self.log(
+                "Frontier flags (chat): "
+                f"langextract={self._frontier_enabled('langextract')}, "
+                f"structured_incidents={self._frontier_enabled('structured_incidents')}, "
+                f"recursive_memory={self._frontier_enabled('recursive_memory')}, "
+                f"citation_v2={self._frontier_enabled('citation_v2')}, "
+                f"agent_lightning_telemetry={self._frontier_enabled('agent_lightning_telemetry')}, "
+                f"evidence_pack_mode={is_evidence_pack}"
+            )
             if is_long_form:
                 boosted_final_k = max(final_k, 12)
                 if boosted_final_k > final_k:
