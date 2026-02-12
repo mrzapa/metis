@@ -3444,6 +3444,54 @@ class AgenticRAGApp:
             "quotes": quotes[:3],
         }
 
+    @staticmethod
+    def _is_advice_request(query_text):
+        query = str(query_text or "").lower()
+        advice_terms = [
+            "advice", "recommend", "recommendation", "suggest", "suggestion",
+            "next steps", "what should", "how should", "what can i do",
+            "what do i do", "strategy", "coach", "guidance", "action plan",
+        ]
+        return any(term in query for term in advice_terms)
+
+    @staticmethod
+    def _incident_sort_key_for_pack(item):
+        date_value = str(item.get("date") or "").strip()
+        iso_value = AgenticRAGApp._extract_iso_date(date_value)
+        if iso_value:
+            return (0, iso_value, str(item.get("title") or "").lower())
+        return (1, "9999-12-31", str(item.get("title") or "").lower())
+
+    def _build_incident_synthesis_cards(self, incidents):
+        cards = []
+        for incident in sorted(incidents or [], key=self._incident_sort_key_for_pack):
+            supporting = []
+            for ref in incident.get("supporting_chunks") or []:
+                label = str(ref).strip()
+                if re.match(r"^S\d+$", label) and label not in supporting:
+                    supporting.append(label)
+            if not supporting:
+                continue
+
+            when_text = str(incident.get("date") or "").strip() or "Undated"
+            what_text = str(incident.get("what_happened") or "").strip()
+            impact_text = str(incident.get("impact") or "").strip()
+
+            # Omission rule: drop unsupported claims entirely.
+            if not what_text and not impact_text:
+                continue
+
+            cards.append(
+                {
+                    "when": when_text,
+                    "what_happened": what_text,
+                    "impact": impact_text,
+                    "evidence": supporting[:3],
+                }
+            )
+        return cards
+
+
     def _incident_cache_path(self):
         persist_dir = self.selected_index_path
         if not persist_dir:
@@ -5152,25 +5200,46 @@ class AgenticRAGApp:
                         return f"Scope: {scope_note}"
                     return "No supported incidents were found in final_docs."
 
+                synthesis_cards = self._build_incident_synthesis_cards(incidents)
+                if not synthesis_cards:
+                    if scope_note:
+                        return f"Scope: {scope_note}"
+                    return "No supported incidents were found in final_docs."
+
                 incident_json = json.dumps(incidents, ensure_ascii=False, indent=2)
+                cards_json = json.dumps(synthesis_cards, ensure_ascii=False, indent=2)
                 section_text = (
                     "\nSECTION PLAN:\n" + "\n".join(f"- {item}" for item in section_plan_items)
                     if section_plan_items
                     else ""
                 )
                 checklist_block = f"\nCHECKLIST:\n{checklist_text}" if checklist_text else ""
+                advice_requested = self._is_advice_request(query_text)
+                tone_rule = (
+                    "Advice is allowed only because the user explicitly asked for advice. Keep it concise and separate from factual findings."
+                    if advice_requested
+                    else "Default to a factual evidence pack only. Do not give coaching, guidance, recommendations, or action plans."
+                )
                 stage_b_prompt = (
-                    "You are Stage B for evidence-pack mode. Write the final narrative using ONLY the INCIDENT JSON. "
-                    "Preserve incident order exactly as listed. Cite each incident to listed supporting_chunks. "
-                    "Do not cite chunks that are not in an incident's supporting_chunks. Omit requested sections that have no incidents. "
-                    "If needed, include at most one short Scope note at the very top."
+                    "You are Stage B for evidence-pack mode. Write the final narrative using ONLY INCIDENT_SYNTHESIS_CARDS, "
+                    "which were produced from Stage A Incident objects. Do NOT quote or infer directly from raw chunks. "
+                    "Preserve incident order exactly as listed (already date-ordered with undated incidents last). "
+                    "For each incident, keep fields in this structure: When / What happened / Impact / Evidence (S#). "
+                    "Omission rule: if a claim has no evidence_refs (no S# evidence), omit it entirely. "
+                    "Never output NOT FOUND or placeholders. Omit sections/subsections that have no supported incidents. "
+                    f"{tone_rule} "
+                    "Required output format:\n"
+                    "1) One-page overview: allegation themes and overall impacts.\n"
+                    "2) Timeline of key incidents: bulleted; each bullet must include 1-3 S# citations from the incident Evidence field.\n"
+                    "3) Appendix: Source Cards list."
                 )
                 stage_b_messages = [
                     SystemMessage(content=stage_b_prompt),
                     HumanMessage(
                         content=(
                             f"User request:\n{query_text}{section_text}{checklist_block}\n\n"
-                            f"INCIDENT JSON:\n{incident_json}"
+                            f"INCIDENT_SYNTHESIS_CARDS (from Stage A Incident objects):\n{cards_json}\n\n"
+                            f"INCIDENT JSON (reference only):\n{incident_json}"
                         )
                     ),
                 ]
