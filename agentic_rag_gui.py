@@ -12,7 +12,9 @@ import re
 import hashlib
 import sqlite3
 import uuid
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from typing import Optional
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -89,6 +91,28 @@ MONTH_NAME_TO_INDEX = {
     "dec": 12,
     "december": 12,
 }
+
+
+@dataclass
+class EvidenceRef:
+    source_id: str
+    quote: str = ""
+    span_start: Optional[int] = None
+    span_end: Optional[int] = None
+    chunk_id: str = ""
+
+
+@dataclass
+class Incident:
+    incident_id: str
+    date_start: Optional[str]
+    date_end: Optional[str]
+    month_bucket: str
+    people: list[str] = field(default_factory=list)
+    channel: str = "unknown"
+    what_happened: str = ""
+    impact: str = ""
+    evidence_refs: list[EvidenceRef] = field(default_factory=list)
 
 class AgenticRAGApp:
     def __init__(self, root):
@@ -3352,6 +3376,261 @@ class AgenticRAGApp:
         rewritten = bracket_re.sub(_replace, answer_text)
         return rewritten
 
+    @staticmethod
+    def _normalize_incident_channel(channel_value):
+        value = str(channel_value or "").strip().lower()
+        if value in {"email", "chat", "call", "ticket", "unknown"}:
+            return value
+        if "team" in value or "slack" in value or "chat" in value or "dm" in value:
+            return "chat"
+        if "mail" in value:
+            return "email"
+        if "phone" in value or "call" in value or "zoom" in value or "meeting" in value:
+            return "call"
+        if "ticket" in value or "case" in value or "jira" in value or "zendesk" in value:
+            return "ticket"
+        return "unknown"
+
+    def _derive_incident_month_bucket(self, date_start, date_end):
+        for candidate in [date_start, date_end]:
+            iso_value = self._extract_iso_date(candidate)
+            if iso_value and len(iso_value) >= 7:
+                return iso_value[:7]
+        return ""
+
+    @staticmethod
+    def _evidence_ref_from_dict(item):
+        return EvidenceRef(
+            source_id=str(item.get("source_id", "")).strip(),
+            quote=str(item.get("quote", "")).strip(),
+            span_start=item.get("span_start") if isinstance(item.get("span_start"), int) else None,
+            span_end=item.get("span_end") if isinstance(item.get("span_end"), int) else None,
+            chunk_id=str(item.get("chunk_id", "")).strip(),
+        )
+
+    def _build_incident_id(self, incident):
+        ref_basis = "|".join(
+            f"{ref.source_id}:{ref.span_start}:{ref.span_end}:{ref.quote[:40]}" for ref in incident.evidence_refs
+        )
+        raw = "|".join(
+            [
+                incident.date_start or "",
+                incident.date_end or "",
+                incident.month_bucket or "",
+                ",".join(sorted([p.lower() for p in incident.people])),
+                incident.channel,
+                incident.what_happened[:180],
+                incident.impact[:180],
+                ref_basis,
+            ]
+        )
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+    def _incident_to_stage_a_payload(self, incident, source_label_by_id):
+        supporting_chunks = []
+        for ref in incident.evidence_refs:
+            source_label = source_label_by_id.get(ref.source_id)
+            if source_label and source_label not in supporting_chunks:
+                supporting_chunks.append(source_label)
+        quotes = [ref.quote for ref in incident.evidence_refs if ref.quote]
+        return {
+            "date": incident.date_start or incident.date_end or "",
+            "title": incident.incident_id,
+            "channel": incident.channel,
+            "people": incident.people,
+            "what_happened": incident.what_happened,
+            "impact": incident.impact,
+            "supporting_chunks": supporting_chunks,
+            "quotes": quotes[:3],
+        }
+
+    def _incident_cache_path(self):
+        persist_dir = self.selected_index_path
+        if not persist_dir:
+            persist_dir = getattr(self.vector_store, "_persist_directory", None)
+        if not persist_dir:
+            return ""
+        return os.path.join(persist_dir, "incidents_cache.jsonl")
+
+    def _incident_cache_key(self, query_text, final_docs):
+        ingest_ids = sorted(
+            {
+                str((getattr(doc, "metadata", {}) or {}).get("ingest_id", "")).strip()
+                for doc in (final_docs or [])
+                if str((getattr(doc, "metadata", {}) or {}).get("ingest_id", "")).strip()
+            }
+        )
+        ingest_basis = "|".join(ingest_ids) if ingest_ids else "unknown"
+        query_hash = hashlib.sha1((query_text or "").strip().lower().encode("utf-8")).hexdigest()[:16]
+        return f"{ingest_basis}:{query_hash}"
+
+    def _load_incident_cache(self, query_text, final_docs):
+        cache_path = self._incident_cache_path()
+        if not cache_path or not os.path.isfile(cache_path):
+            return []
+        cache_key = self._incident_cache_key(query_text, final_docs)
+        try:
+            with open(cache_path, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    row = json.loads(line)
+                    if row.get("key") != cache_key:
+                        continue
+                    incidents = []
+                    for item in row.get("incidents", []):
+                        refs = [self._evidence_ref_from_dict(ref) for ref in item.get("evidence_refs", []) if isinstance(ref, dict)]
+                        incidents.append(
+                            Incident(
+                                incident_id=str(item.get("incident_id", "")).strip(),
+                                date_start=item.get("date_start"),
+                                date_end=item.get("date_end"),
+                                month_bucket=str(item.get("month_bucket", "")).strip(),
+                                people=[str(p).strip() for p in item.get("people", []) if str(p).strip()],
+                                channel=self._normalize_incident_channel(item.get("channel")),
+                                what_happened=str(item.get("what_happened", "")).strip(),
+                                impact=str(item.get("impact", "")).strip(),
+                                evidence_refs=refs,
+                            )
+                        )
+                    return incidents
+        except Exception as exc:
+            self.log(f"Incident cache read failed; recomputing incidents. ({exc})")
+        return []
+
+    def _save_incident_cache(self, query_text, final_docs, incidents):
+        cache_path = self._incident_cache_path()
+        if not cache_path:
+            return
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        record = {
+            "key": self._incident_cache_key(query_text, final_docs),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "incidents": [asdict(item) for item in incidents],
+        }
+        try:
+            with open(cache_path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            self.log(f"Incident cache write failed. ({exc})")
+
+    def _extract_incidents_langextract(self, final_docs, source_map) -> list[Incident]:
+        if not final_docs:
+            return []
+        ordered_source_ids = sorted(source_map.keys())
+        source_label_by_id = {source_id: f"S{idx}" for idx, source_id in enumerate(ordered_source_ids, start=1)}
+        docs_payload = []
+        chunk_lookup = {}
+        for doc in final_docs:
+            metadata = getattr(doc, "metadata", {}) or {}
+            content = getattr(doc, "page_content", "") or ""
+            enriched = self._ensure_source_metadata(
+                metadata,
+                metadata.get("source") or metadata.get("file_path") or metadata.get("filename") or "",
+                content,
+            )
+            title = enriched.get("source_title") or "unknown"
+            date = enriched.get("source_date") or "unknown"
+            locator = enriched.get("source_locator") or "unknown"
+            role_kind = str(enriched.get("role") or enriched.get("speaker_role") or "unknown").strip().lower() or "unknown"
+            channel_key = str(enriched.get("channel_type") or self._extract_channel(f"{title}\n{content}") or "unknown").strip().lower()
+            stable_input = f"{title}|{date}|{locator}|{role_kind}|{channel_key}".lower()
+            source_id = hashlib.sha1(stable_input.encode("utf-8")).hexdigest()[:12]
+            chunk_id = str(enriched.get("chunk_id", "")).strip()
+            chunk_lookup[chunk_id] = (source_id, content)
+            docs_payload.append(
+                {
+                    "id": chunk_id or hashlib.sha1(content.encode("utf-8")).hexdigest()[:12],
+                    "text": content,
+                    "metadata": {
+                        "source_id": source_id,
+                        "source_label": source_label_by_id.get(source_id, ""),
+                        "chunk_id": chunk_id,
+                        "date": date,
+                    },
+                }
+            )
+
+        incidents = []
+        if langextract is not None:
+            try:
+                prompt = (
+                    "Extract incident objects. Ground each incident to exact spans. "
+                    "Return JSON with incidents[] where each incident has date_start, date_end, month_bucket, "
+                    "people[], channel(email/chat/call/ticket/unknown), what_happened, impact, evidence_refs[]. "
+                    "Each evidence_ref includes source_id, quote, span_start, span_end, chunk_id."
+                )
+                result = langextract.extract(docs_payload, prompt=prompt)
+                payload = result if isinstance(result, dict) else {}
+                raw_incidents = payload.get("incidents", []) if isinstance(payload, dict) else []
+                for item in raw_incidents:
+                    if not isinstance(item, dict):
+                        continue
+                    refs = []
+                    for ref in item.get("evidence_refs", []):
+                        if not isinstance(ref, dict):
+                            continue
+                        refs.append(self._evidence_ref_from_dict(ref))
+                    incident = Incident(
+                        incident_id="",
+                        date_start=self._extract_iso_date(item.get("date_start")) or None,
+                        date_end=self._extract_iso_date(item.get("date_end")) or None,
+                        month_bucket=str(item.get("month_bucket") or "").strip(),
+                        people=[str(p).strip() for p in item.get("people", []) if str(p).strip()],
+                        channel=self._normalize_incident_channel(item.get("channel")),
+                        what_happened=str(item.get("what_happened", "")).strip(),
+                        impact=str(item.get("impact", "")).strip(),
+                        evidence_refs=refs,
+                    )
+                    incident.month_bucket = incident.month_bucket or self._derive_incident_month_bucket(incident.date_start, incident.date_end)
+                    incident.incident_id = self._build_incident_id(incident)
+                    if incident.evidence_refs:
+                        incidents.append(incident)
+            except Exception as exc:
+                self.log(f"LangExtract incident extraction failed; falling back to LLM JSON extraction. ({exc})")
+
+        if incidents:
+            return incidents
+
+        llm = self.get_llm()
+        fallback_prompt = (
+            "Extract incidents from FINAL_DOCS. Return STRICT JSON object with incidents array. "
+            "Each incident fields: date_start, date_end, month_bucket, people, channel, what_happened, impact, evidence_refs. "
+            "evidence_refs fields: source_id, quote, span_start, span_end, chunk_id. Use source_id values from metadata only."
+        )
+        response = llm.invoke(
+            [
+                SystemMessage(content=fallback_prompt),
+                HumanMessage(content=json.dumps(docs_payload, ensure_ascii=False)),
+            ]
+        )
+        payload = {}
+        try:
+            payload = json.loads(str(response.content).strip().strip("`").replace("json\n", "", 1))
+        except Exception:
+            payload = {}
+        for item in payload.get("incidents", []):
+            if not isinstance(item, dict):
+                continue
+            refs = [self._evidence_ref_from_dict(ref) for ref in item.get("evidence_refs", []) if isinstance(ref, dict)]
+            incident = Incident(
+                incident_id="",
+                date_start=self._extract_iso_date(item.get("date_start")) or None,
+                date_end=self._extract_iso_date(item.get("date_end")) or None,
+                month_bucket=str(item.get("month_bucket") or "").strip(),
+                people=[str(p).strip() for p in item.get("people", []) if str(p).strip()],
+                channel=self._normalize_incident_channel(item.get("channel")),
+                what_happened=str(item.get("what_happened", "")).strip(),
+                impact=str(item.get("impact", "")).strip(),
+                evidence_refs=refs,
+            )
+            incident.month_bucket = incident.month_bucket or self._derive_incident_month_bucket(incident.date_start, incident.date_end)
+            incident.incident_id = self._build_incident_id(incident)
+            if incident.evidence_refs:
+                incidents.append(incident)
+        return incidents
+
     def _compute_unique_incidents(self, docs):
         incidents = set()
         for doc in docs:
@@ -4815,35 +5094,58 @@ class AgenticRAGApp:
 
             def _run_evidence_pack_two_stage(llm, query_text, context_text, doc_list, checklist_text="", section_plan_items=None, coverage_note=""):
                 section_plan_items = section_plan_items or []
-                stage_a_prompt = (
-                    "You are Stage A for evidence-pack mode. Use ONLY FINAL_DOCS context below. "
-                    "Extract incidents and return STRICT JSON only (no markdown, no commentary).\n\n"
-                    "Schema (array of objects):\n"
-                    "[{\n"
-                    '  "date": "",\n'
-                    '  "title": "",\n'
-                    '  "channel": "",\n'
-                    '  "people": [""],\n'
-                    '  "what_happened": "",\n'
-                    '  "impact": "",\n'
-                    '  "supporting_chunks": [""],\n'
-                    '  "quotes": [""]\n'
-                    "}]\n\n"
-                    "Rules: supporting_chunks must reference chunk_id values or Chunk numbers present in FINAL_DOCS. "
-                    "If no incidents are supported, return []"
+                use_langextract_incidents = bool(
+                    self.enable_langextract.get() and self.enable_structured_incidents.get()
                 )
-                stage_a_messages = [
-                    SystemMessage(content=stage_a_prompt),
-                    HumanMessage(
-                        content=(
-                            f"User request:\n{query_text}\n\n"
-                            f"FINAL_DOCS:\n{context_text}{coverage_note}"
-                        )
-                    ),
-                ]
-                stage_a_response = llm.invoke(stage_a_messages)
-                stage_a_payload = _extract_json_payload(stage_a_response.content)
-                incidents, scope_note = _normalize_incident_payload(stage_a_payload, doc_list)
+                source_map, _source_cards_text = self._build_source_cards(doc_list)
+                scope_note = ""
+
+                if use_langextract_incidents:
+                    incidents_structured = self._load_incident_cache(query_text, doc_list)
+                    if incidents_structured:
+                        self.log("Loaded structured incidents from cache.")
+                    else:
+                        incidents_structured = self._extract_incidents_langextract(doc_list, source_map)
+                        if incidents_structured:
+                            self._save_incident_cache(query_text, doc_list, incidents_structured)
+                    ordered_source_ids = sorted(source_map.keys())
+                    source_label_by_id = {
+                        source_id: f"S{idx}" for idx, source_id in enumerate(ordered_source_ids, start=1)
+                    }
+                    incidents = [
+                        self._incident_to_stage_a_payload(item, source_label_by_id)
+                        for item in incidents_structured
+                    ]
+                else:
+                    stage_a_prompt = (
+                        "You are Stage A for evidence-pack mode. Use ONLY FINAL_DOCS context below. "
+                        "Extract incidents and return STRICT JSON only (no markdown, no commentary).\n\n"
+                        "Schema (array of objects):\n"
+                        "[{\n"
+                        '  "date": "",\n'
+                        '  "title": "",\n'
+                        '  "channel": "",\n'
+                        '  "people": [""],\n'
+                        '  "what_happened": "",\n'
+                        '  "impact": "",\n'
+                        '  "supporting_chunks": [""],\n'
+                        '  "quotes": [""]\n'
+                        "}]\n\n"
+                        "Rules: supporting_chunks must reference chunk_id values or Chunk numbers present in FINAL_DOCS. "
+                        "If no incidents are supported, return []"
+                    )
+                    stage_a_messages = [
+                        SystemMessage(content=stage_a_prompt),
+                        HumanMessage(
+                            content=(
+                                f"User request:\n{query_text}\n\n"
+                                f"FINAL_DOCS:\n{context_text}{coverage_note}"
+                            )
+                        ),
+                    ]
+                    stage_a_response = llm.invoke(stage_a_messages)
+                    stage_a_payload = _extract_json_payload(stage_a_response.content)
+                    incidents, scope_note = _normalize_incident_payload(stage_a_payload, doc_list)
 
                 if not incidents:
                     if scope_note:
@@ -4857,16 +5159,11 @@ class AgenticRAGApp:
                     else ""
                 )
                 checklist_block = f"\nCHECKLIST:\n{checklist_text}" if checklist_text else ""
-                scope_rule = (
-                    "If needed, include at most one short Scope note at the very top. "
-                    if scope_note
-                    else "If needed, include at most one short Scope note at the very top."
-                )
                 stage_b_prompt = (
                     "You are Stage B for evidence-pack mode. Write the final narrative using ONLY the INCIDENT JSON. "
                     "Preserve incident order exactly as listed. Cite each incident to listed supporting_chunks. "
                     "Do not cite chunks that are not in an incident's supporting_chunks. Omit requested sections that have no incidents. "
-                    f"{scope_rule}"
+                    "If needed, include at most one short Scope note at the very top."
                 )
                 stage_b_messages = [
                     SystemMessage(content=stage_b_prompt),
