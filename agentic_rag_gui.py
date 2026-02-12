@@ -3139,6 +3139,219 @@ class AgenticRAGApp:
                 channels.add(channel)
         return channels
 
+    @staticmethod
+    def _extract_iso_date(value):
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        candidate = re.sub(r"\s+", " ", raw)
+        iso_candidate = candidate.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(iso_candidate)
+            return parsed.date().isoformat()
+        except ValueError:
+            pass
+        patterns = [
+            (r"\b(\d{4}-\d{2}-\d{2})\b", "%Y-%m-%d"),
+            (r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", None),
+            (
+                r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+                r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|"
+                r"Dec(?:ember)?)\s+(\d{1,2}),?\s+(\d{4})\b",
+                None,
+            ),
+        ]
+        for pattern, _ in patterns:
+            match = re.search(pattern, candidate, re.IGNORECASE)
+            if not match:
+                continue
+            if len(match.groups()) == 1:
+                try:
+                    return datetime.strptime(match.group(1), "%Y-%m-%d").date().isoformat()
+                except ValueError:
+                    continue
+            if pattern.startswith(r"\b(\d{1,2})/(\d{1,2})"):
+                try:
+                    month, day, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+                    return datetime(year, month, day).date().isoformat()
+                except ValueError:
+                    continue
+            month_idx = MONTH_NAME_TO_INDEX.get(match.group(1).lower())
+            if not month_idx:
+                continue
+            try:
+                day = int(match.group(2))
+                year = int(match.group(3))
+                return datetime(year, month_idx, day).date().isoformat()
+            except ValueError:
+                continue
+        return ""
+
+    def _source_type_for_file(self, file_path, metadata=None):
+        metadata = metadata or {}
+        source = f"{file_path} {(metadata.get('source') or '')}".lower()
+        ext = os.path.splitext(file_path or "")[1].lower()
+        if ext == ".pdf":
+            return "pdf"
+        if ext in {".htm", ".html"}:
+            return "html"
+        if ext in {".txt", ".md", ".rtf", ".csv", ".json", ".log"}:
+            return "txt"
+        if "email" in source or ext in {".eml", ".msg"}:
+            return "email"
+        if metadata.get("message_index") is not None or "chat" in source:
+            return "chat"
+        return "unknown"
+
+    def _ensure_source_metadata(self, metadata, selected_file, content):
+        meta = (metadata or {}).copy()
+        source_title = (
+            str(meta.get("doc_title") or meta.get("title") or meta.get("source") or "").strip()
+        )
+        if not source_title:
+            source_title = os.path.basename(selected_file or "") or "unknown"
+        source_type = str(meta.get("source_type") or "").strip().lower() or self._source_type_for_file(
+            selected_file, meta
+        )
+        source_actor = str(
+            meta.get("source_actor")
+            or meta.get("speaker")
+            or meta.get("speaker_role")
+            or meta.get("author")
+            or meta.get("from")
+            or meta.get("role")
+            or ""
+        ).strip()
+        raw_date = (
+            meta.get("source_date")
+            or meta.get("timestamp")
+            or meta.get("date")
+            or meta.get("created_at")
+            or ""
+        )
+        source_date = self._extract_iso_date(raw_date) or self._extract_iso_date(content)
+        chunk_id = meta.get("chunk_id")
+        locator = str(meta.get("source_locator") or "").strip()
+        if not locator:
+            page_num = meta.get("page") or meta.get("page_number")
+            if page_num is not None and str(page_num).strip():
+                locator = f"p{page_num}"
+            elif meta.get("message_index") is not None:
+                locator = f"msg {meta.get('message_index')}"
+            elif chunk_id is not None:
+                locator = f"chunk {chunk_id}"
+            else:
+                locator = "chunk unknown"
+        meta["source_title"] = source_title
+        meta["source_type"] = source_type
+        meta["source_date"] = source_date
+        meta["source_actor"] = source_actor
+        meta["source_locator"] = locator
+        return meta
+
+    def _build_source_cards(self, final_docs) -> tuple[dict, str]:
+        source_map = {}
+        for doc in final_docs or []:
+            metadata = getattr(doc, "metadata", {}) or {}
+            content = getattr(doc, "page_content", "") or ""
+            enriched = self._ensure_source_metadata(metadata, metadata.get("source") or metadata.get("file_path") or metadata.get("filename") or "", content)
+            title = enriched.get("source_title") or "unknown"
+            date = enriched.get("source_date") or "unknown"
+            actor = enriched.get("source_actor") or "unknown"
+            source_type = enriched.get("source_type") or "unknown"
+            locator = enriched.get("source_locator") or "unknown"
+            role_kind = str(enriched.get("role") or enriched.get("speaker_role") or "unknown").strip().lower() or "unknown"
+            channel_key = str(
+                enriched.get("channel_type")
+                or self._extract_channel(f"{title}\n{content}")
+                or "unknown"
+            ).strip().lower() or "unknown"
+            stable_input = f"{title}|{date}|{locator}|{role_kind}|{channel_key}".lower()
+            stable_source_id = hashlib.sha1(stable_input.encode("utf-8")).hexdigest()[:12]
+            entry = source_map.setdefault(
+                stable_source_id,
+                {
+                    "title": title,
+                    "date": date,
+                    "actor": actor,
+                    "type": source_type,
+                    "locator": locator,
+                    "chunk_ids": [],
+                    "role_kind": role_kind,
+                    "channel_key": channel_key,
+                },
+            )
+            chunk_id = str(enriched.get("chunk_id", "")).strip()
+            if chunk_id and chunk_id not in entry["chunk_ids"]:
+                entry["chunk_ids"].append(chunk_id)
+
+        ordered_source_ids = sorted(source_map.keys())
+        lines = ["Sources:"]
+        for idx, source_id in enumerate(ordered_source_ids, start=1):
+            entry = source_map[source_id]
+            lines.append(
+                f"- S{idx} -> ({entry['title']} • {entry['date']} • {entry['actor']} • {entry['type']} • {entry['locator']})"
+            )
+        return source_map, "\n".join(lines)
+
+    def _rewrite_evidence_pack_citations(self, answer_text, final_docs, source_map):
+        if not answer_text:
+            return answer_text
+        ordered_source_ids = sorted(source_map.keys())
+        label_by_source = {source_id: f"S{idx}" for idx, source_id in enumerate(ordered_source_ids, start=1)}
+        chunk_to_source = {}
+        for idx, doc in enumerate(final_docs or [], start=1):
+            metadata = getattr(doc, "metadata", {}) or {}
+            content = getattr(doc, "page_content", "") or ""
+            enriched = self._ensure_source_metadata(metadata, metadata.get("source") or metadata.get("file_path") or metadata.get("filename") or "", content)
+            title = enriched.get("source_title") or "unknown"
+            date = enriched.get("source_date") or "unknown"
+            locator = enriched.get("source_locator") or "unknown"
+            role_kind = str(enriched.get("role") or enriched.get("speaker_role") or "unknown").strip().lower() or "unknown"
+            channel_key = str(
+                enriched.get("channel_type")
+                or self._extract_channel(f"{title}\n{content}")
+                or "unknown"
+            ).strip().lower() or "unknown"
+            stable_input = f"{title}|{date}|{locator}|{role_kind}|{channel_key}".lower()
+            source_id = hashlib.sha1(stable_input.encode("utf-8")).hexdigest()[:12]
+            label = label_by_source.get(source_id)
+            if not label:
+                continue
+            chunk_id = str(enriched.get("chunk_id", "")).strip()
+            if chunk_id:
+                chunk_to_source[chunk_id.lower()] = label
+                chunk_to_source[f"chunk {chunk_id}".lower()] = label
+                chunk_to_source[f"chunk_id:{chunk_id}".lower()] = label
+                chunk_to_source[f"chunk_id: {chunk_id}".lower()] = label
+            chunk_to_source[str(idx)] = label
+            chunk_to_source[f"chunk {idx}"] = label
+
+        bracket_re = re.compile(r"\[([^\[\]]+)\]")
+
+        def _replace(match):
+            inner = match.group(1)
+            candidates = [item.strip() for item in re.split(r"[,;]", inner) if item.strip()]
+            mapped = []
+            for candidate in candidates:
+                key = candidate.lower()
+                if key in chunk_to_source:
+                    mapped.append(chunk_to_source[key])
+                    continue
+                chunk_match = re.search(r"chunk\s*(\d+)", key)
+                if chunk_match and chunk_match.group(1) in chunk_to_source:
+                    mapped.append(chunk_to_source[chunk_match.group(1)])
+            if not mapped:
+                return match.group(0)
+            ordered = []
+            for label in mapped:
+                if label not in ordered:
+                    ordered.append(label)
+            return "[" + ", ".join(ordered) + "]"
+
+        rewritten = bracket_re.sub(_replace, answer_text)
+        return rewritten
+
     def _compute_unique_incidents(self, docs):
         incidents = set()
         for doc in docs:
@@ -4143,6 +4356,9 @@ class AgenticRAGApp:
                         metadata["timestamp"] = message["timestamp"]
                     if doc_title:
                         metadata["doc_title"] = doc_title
+                    metadata = self._ensure_source_metadata(
+                        metadata, self.selected_file, prefixed_content
+                    )
                     chatgpt_docs.append(
                         Document(page_content=prefixed_content, metadata=metadata)
                     )
@@ -4185,6 +4401,9 @@ class AgenticRAGApp:
                         metadata["doc_title"] = doc_title
                     if last_section_title:
                         metadata["section_title"] = last_section_title
+                    metadata = self._ensure_source_metadata(
+                        metadata, self.selected_file, doc.page_content
+                    )
                     doc.metadata = metadata
             self.log(f"Created {len(docs)} text chunks.")
 
@@ -5534,23 +5753,34 @@ class AgenticRAGApp:
                     }
                 )
 
+                if is_evidence_pack:
+                    source_map, source_cards_text = self._build_source_cards(final_docs)
+                    validated_answer = self._rewrite_evidence_pack_citations(
+                        validated_answer, final_docs, source_map
+                    )
+                    if source_cards_text.strip():
+                        validated_answer = f"{validated_answer.rstrip()}\n\n{source_cards_text}"
+
                 self.last_answer = validated_answer
                 self.append_chat("agent", f"AI: {validated_answer}")
                 self._append_history(AIMessage(content=validated_answer))
 
-                sources_text = "\n".join(
-                    [
-                        (
-                            f"- [Chunk {idx} | chunk_id: "
-                            f"{getattr(d, 'metadata', {}).get('chunk_id', 'N/A')} | score: "
-                            f"{getattr(d, 'metadata', {}).get('relevance_score', 'N/A')} | "
-                            f"source: "
-                            f"{(getattr(d, 'metadata', {}) or {}).get('source') or (getattr(d, 'metadata', {}) or {}).get('file_path') or (getattr(d, 'metadata', {}) or {}).get('filename') or 'unknown'}]"
-                        )
-                        for idx, d in enumerate(final_docs, start=1)
-                    ]
-                )
-                self.append_chat("source", f"\nSources used:\n{sources_text}")
+                if is_evidence_pack:
+                    self.append_chat("source", f"\n{source_cards_text}")
+                else:
+                    sources_text = "\n".join(
+                        [
+                            (
+                                f"- [Chunk {idx} | chunk_id: "
+                                f"{getattr(d, 'metadata', {}).get('chunk_id', 'N/A')} | score: "
+                                f"{getattr(d, 'metadata', {}).get('relevance_score', 'N/A')} | "
+                                f"source: "
+                                f"{(getattr(d, 'metadata', {}) or {}).get('source') or (getattr(d, 'metadata', {}) or {}).get('file_path') or (getattr(d, 'metadata', {}) or {}).get('filename') or 'unknown'}]"
+                            )
+                            for idx, d in enumerate(final_docs, start=1)
+                        ]
+                    )
+                    self.append_chat("source", f"\nSources used:\n{sources_text}")
                 self._append_jsonl_telemetry(
                     {
                         "event": "run_end",
@@ -6068,23 +6298,35 @@ class AgenticRAGApp:
                         },
                     }
                 )
+                if is_evidence_pack:
+                    source_map, source_cards_text = self._build_source_cards(final_docs)
+                    validated_answer = self._rewrite_evidence_pack_citations(
+                        validated_answer, final_docs, source_map
+                    )
+                    if source_cards_text.strip():
+                        validated_answer = f"{validated_answer.rstrip()}\n\n{source_cards_text}"
                 self.last_answer = validated_answer
                 self.append_chat("agent", f"AI: {validated_answer}")
                 self._append_history(AIMessage(content=validated_answer))
 
-            sources_text = "\n".join(
-                [
-                    (
-                        f"- [Chunk {idx} | chunk_id: "
-                        f"{getattr(d, 'metadata', {}).get('chunk_id', 'N/A')} | score: "
-                        f"{getattr(d, 'metadata', {}).get('relevance_score', 'N/A')} | "
-                        f"source: "
-                        f"{(getattr(d, 'metadata', {}) or {}).get('source') or (getattr(d, 'metadata', {}) or {}).get('file_path') or (getattr(d, 'metadata', {}) or {}).get('filename') or 'unknown'}]"
-                    )
-                    for idx, d in enumerate(final_docs, start=1)
-                ]
-            )
-            self.append_chat("source", f"\nSources used:\n{sources_text}")
+            if is_evidence_pack:
+                if not latest_answer:
+                    _, source_cards_text = self._build_source_cards(final_docs)
+                self.append_chat("source", f"\n{source_cards_text}")
+            else:
+                sources_text = "\n".join(
+                    [
+                        (
+                            f"- [Chunk {idx} | chunk_id: "
+                            f"{getattr(d, 'metadata', {}).get('chunk_id', 'N/A')} | score: "
+                            f"{getattr(d, 'metadata', {}).get('relevance_score', 'N/A')} | "
+                            f"source: "
+                            f"{(getattr(d, 'metadata', {}) or {}).get('source') or (getattr(d, 'metadata', {}) or {}).get('file_path') or (getattr(d, 'metadata', {}) or {}).get('filename') or 'unknown'}]"
+                        )
+                        for idx, d in enumerate(final_docs, start=1)
+                    ]
+                )
+                self.append_chat("source", f"\nSources used:\n{sources_text}")
 
             self._append_jsonl_telemetry(
                 {
