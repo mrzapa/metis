@@ -3309,7 +3309,7 @@ class AgenticRAGApp:
             if chunk_id and chunk_id not in entry["chunk_ids"]:
                 entry["chunk_ids"].append(chunk_id)
 
-        ordered_source_ids = sorted(source_map.keys())
+        ordered_source_ids = sorted(working_source_map.keys())
         lines = ["Sources:"]
         for idx, source_id in enumerate(ordered_source_ids, start=1):
             entry = source_map[source_id]
@@ -3321,7 +3321,7 @@ class AgenticRAGApp:
     def _rewrite_evidence_pack_citations(self, answer_text, final_docs, source_map):
         if not answer_text:
             return answer_text
-        ordered_source_ids = sorted(source_map.keys())
+        ordered_source_ids = sorted(working_source_map.keys())
         label_by_source = {source_id: f"S{idx}" for idx, source_id in enumerate(ordered_source_ids, start=1)}
         chunk_to_source = {}
         for idx, doc in enumerate(final_docs or [], start=1):
@@ -3491,6 +3491,142 @@ class AgenticRAGApp:
             )
         return cards
 
+    @staticmethod
+    def _infer_theme_from_incident(incident):
+        text = " ".join(
+            [
+                str(incident.get("channel", "")),
+                str(incident.get("what_happened", "")),
+                str(incident.get("impact", "")),
+            ]
+        ).lower()
+        theme_rules = [
+            ("escalation_grievance", ["grievance", "escalat", "formal complaint", "hr", "tribunal"]),
+            ("communication_breakdown", ["email", "chat", "teams", "dm", "message", "call", "meeting"]),
+            ("process_policy", ["policy", "process", "procedure", "compliance", "protocol"]),
+            ("workload_delivery", ["deadline", "deliver", "workload", "capacity", "timeline", "delay"]),
+            ("people_conduct", ["behavior", "conduct", "harass", "bully", "retaliat", "hostile"]),
+        ]
+        for label, needles in theme_rules:
+            if any(needle in text for needle in needles):
+                return label
+        return "other"
+
+    def _build_recursive_memories(self, incidents):
+        month_groups = {}
+        theme_groups = {}
+        for incident in incidents or []:
+            if not isinstance(incident, dict):
+                continue
+            month_bucket = str(incident.get("date") or "").strip()
+            iso_date = self._extract_iso_date(month_bucket)
+            if iso_date:
+                month_bucket = iso_date[:7]
+            elif re.match(r"^\d{4}-\d{2}$", month_bucket):
+                month_bucket = month_bucket
+            else:
+                month_bucket = "undated"
+            theme = self._infer_theme_from_incident(incident)
+            month_groups.setdefault(month_bucket, []).append(incident)
+            theme_groups.setdefault(theme, []).append(incident)
+
+        def _summarize_group(items, key_name):
+            sorted_items = sorted(items, key=self._incident_sort_key_for_pack)
+            fragments = []
+            for item in sorted_items[:4]:
+                what_text = re.sub(r"\s+", " ", str(item.get("what_happened", "")).strip())
+                impact_text = re.sub(r"\s+", " ", str(item.get("impact", "")).strip())
+                detail = what_text[:120]
+                if impact_text:
+                    detail = f"{detail}; impact: {impact_text[:80]}"
+                fragments.append(detail)
+            return {
+                "summary": f"{len(items)} incidents in {key_name}. " + " | ".join([f for f in fragments if f]),
+                "incident_count": len(items),
+                "sample_titles": [str(it.get("title", "")).strip() for it in sorted_items[:3] if str(it.get("title", "")).strip()],
+            }
+
+        month_memory = {
+            key: _summarize_group(value, key)
+            for key, value in sorted(month_groups.items(), key=lambda item: self._month_sort_key(item[0]))
+        }
+        theme_memory = {
+            key: _summarize_group(value, key)
+            for key, value in sorted(theme_groups.items(), key=lambda item: item[0])
+        }
+        return month_memory, theme_memory
+
+    def _build_recursive_coverage_queries(self, candidate_pool, incidents, max_queries=5):
+        pool_months = set()
+        for doc in candidate_pool or []:
+            metadata = getattr(doc, "metadata", {}) or {}
+            month_bucket = str(metadata.get("month_bucket", "")).strip()
+            if month_bucket and month_bucket != "undated":
+                pool_months.add(month_bucket)
+            content = getattr(doc, "page_content", "") or ""
+            for month in self._extract_month_years(content):
+                pool_months.add(month)
+
+        incident_months = set()
+        for item in incidents or []:
+            month_bucket = str(item.get("date") or "").strip()
+            iso_date = self._extract_iso_date(month_bucket)
+            if iso_date:
+                incident_months.add(iso_date[:7])
+            elif re.match(r"^\d{4}-\d{2}$", month_bucket):
+                incident_months.add(month_bucket)
+
+        missing_months = sorted(pool_months - incident_months, key=self._month_sort_key)
+        if not missing_months:
+            return [], {
+                "triggered": False,
+                "missing_months": [],
+                "pool_months": sorted(pool_months, key=self._month_sort_key),
+                "incident_months": sorted(incident_months, key=self._month_sort_key),
+            }
+
+        query_templates = [
+            "{month} incident timeline what happened impact evidence",
+            "{month} complaint escalation chronology primary facts",
+            "{month} formal report dates participants outcomes",
+        ]
+        queries = []
+        for month in missing_months:
+            for template in query_templates:
+                queries.append(template.format(month=month))
+                if len(queries) >= max_queries:
+                    break
+            if len(queries) >= max_queries:
+                break
+        if 0 < len(queries) < 2:
+            queries.append("undated incident chronology evidence summary")
+        return queries[:max_queries], {
+            "triggered": True,
+            "missing_months": missing_months,
+            "pool_months": sorted(pool_months, key=self._month_sort_key),
+            "incident_months": sorted(incident_months, key=self._month_sort_key),
+        }
+
+    def _save_recursive_memory_artifact(self, query_text, artifact_payload):
+        persist_dir = self.selected_index_path
+        if not persist_dir:
+            persist_dir = getattr(self.vector_store, "_persist_directory", None)
+        if not persist_dir:
+            return ""
+        artifact_path = os.path.join(persist_dir, "recursive_memory_artifacts.jsonl")
+        payload = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "query_hash": hashlib.sha1((query_text or "").strip().lower().encode("utf-8")).hexdigest()[:16],
+            **(artifact_payload or {}),
+        }
+        try:
+            with open(artifact_path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            self.log(f"Failed to write recursive memory artifact. ({exc})")
+            return ""
+        return artifact_path
+
 
     def _incident_cache_path(self):
         persist_dir = self.selected_index_path
@@ -3566,7 +3702,7 @@ class AgenticRAGApp:
     def _extract_incidents_langextract(self, final_docs, source_map) -> list[Incident]:
         if not final_docs:
             return []
-        ordered_source_ids = sorted(source_map.keys())
+        ordered_source_ids = sorted(working_source_map.keys())
         source_label_by_id = {source_id: f"S{idx}" for idx, source_id in enumerate(ordered_source_ids, start=1)}
         docs_payload = []
         chunk_lookup = {}
@@ -5142,58 +5278,112 @@ class AgenticRAGApp:
 
             def _run_evidence_pack_two_stage(llm, query_text, context_text, doc_list, checklist_text="", section_plan_items=None, coverage_note=""):
                 section_plan_items = section_plan_items or []
+                recursive_memory_enabled = bool(self.enable_recursive_memory.get())
                 use_langextract_incidents = bool(
                     self.enable_langextract.get() and self.enable_structured_incidents.get()
                 )
-                source_map, _source_cards_text = self._build_source_cards(doc_list)
+                _source_map_seed, _source_cards_text = self._build_source_cards(doc_list)
                 scope_note = ""
 
-                if use_langextract_incidents:
-                    incidents_structured = self._load_incident_cache(query_text, doc_list)
-                    if incidents_structured:
-                        self.log("Loaded structured incidents from cache.")
-                    else:
-                        incidents_structured = self._extract_incidents_langextract(doc_list, source_map)
+                def _extract_stage_a_incidents(working_docs, working_context):
+                    local_scope_note = ""
+                    working_source_map, _ = self._build_source_cards(working_docs)
+                    if use_langextract_incidents:
+                        incidents_structured = self._load_incident_cache(query_text, working_docs)
                         if incidents_structured:
-                            self._save_incident_cache(query_text, doc_list, incidents_structured)
-                    ordered_source_ids = sorted(source_map.keys())
-                    source_label_by_id = {
-                        source_id: f"S{idx}" for idx, source_id in enumerate(ordered_source_ids, start=1)
-                    }
-                    incidents = [
-                        self._incident_to_stage_a_payload(item, source_label_by_id)
-                        for item in incidents_structured
-                    ]
-                else:
-                    stage_a_prompt = (
-                        "You are Stage A for evidence-pack mode. Use ONLY FINAL_DOCS context below. "
-                        "Extract incidents and return STRICT JSON only (no markdown, no commentary).\n\n"
-                        "Schema (array of objects):\n"
-                        "[{\n"
-                        '  "date": "",\n'
-                        '  "title": "",\n'
-                        '  "channel": "",\n'
-                        '  "people": [""],\n'
-                        '  "what_happened": "",\n'
-                        '  "impact": "",\n'
-                        '  "supporting_chunks": [""],\n'
-                        '  "quotes": [""]\n'
-                        "}]\n\n"
-                        "Rules: supporting_chunks must reference chunk_id values or Chunk numbers present in FINAL_DOCS. "
-                        "If no incidents are supported, return []"
-                    )
-                    stage_a_messages = [
-                        SystemMessage(content=stage_a_prompt),
-                        HumanMessage(
-                            content=(
-                                f"User request:\n{query_text}\n\n"
-                                f"FINAL_DOCS:\n{context_text}{coverage_note}"
+                            self.log("Loaded structured incidents from cache.")
+                        else:
+                            incidents_structured = self._extract_incidents_langextract(working_docs, working_source_map)
+                            if incidents_structured:
+                                self._save_incident_cache(query_text, working_docs, incidents_structured)
+                        ordered_source_ids = sorted(working_source_map.keys())
+                        source_label_by_id = {
+                            source_id: f"S{idx}" for idx, source_id in enumerate(ordered_source_ids, start=1)
+                        }
+                        extracted_incidents = [
+                            self._incident_to_stage_a_payload(item, source_label_by_id)
+                            for item in incidents_structured
+                        ]
+                    else:
+                        stage_a_prompt = (
+                            "You are Stage A for evidence-pack mode. Use ONLY FINAL_DOCS context below. "
+                            "Extract incidents and return STRICT JSON only (no markdown, no commentary).\n\n"
+                            "Schema (array of objects):\n"
+                            "[{\n"
+                            '  "date": "",\n'
+                            '  "title": "",\n'
+                            '  "channel": "",\n'
+                            '  "people": [""],\n'
+                            '  "what_happened": "",\n'
+                            '  "impact": "",\n'
+                            '  "supporting_chunks": [""],\n'
+                            '  "quotes": [""]\n'
+                            "}]\n\n"
+                            "Rules: supporting_chunks must reference chunk_id values or Chunk numbers present in FINAL_DOCS. "
+                            "If no incidents are supported, return []"
+                        )
+                        stage_a_messages = [
+                            SystemMessage(content=stage_a_prompt),
+                            HumanMessage(
+                                content=(
+                                    f"User request:\n{query_text}\n\n"
+                                    f"FINAL_DOCS:\n{working_context}{coverage_note}"
+                                )
+                            ),
+                        ]
+                        stage_a_response = llm.invoke(stage_a_messages)
+                        stage_a_payload = _extract_json_payload(stage_a_response.content)
+                        extracted_incidents, local_scope_note = _normalize_incident_payload(stage_a_payload, working_docs)
+                    return extracted_incidents, local_scope_note
+
+                incidents, scope_note = _extract_stage_a_incidents(doc_list, context_text)
+
+                month_memory = {}
+                theme_memory = {}
+                memory_coverage = {
+                    "triggered": False,
+                    "missing_months": [],
+                }
+
+                if recursive_memory_enabled:
+                    follow_up_queries_rm, memory_coverage = self._build_recursive_coverage_queries(doc_list, incidents)
+                    if memory_coverage.get("triggered") and follow_up_queries_rm:
+                        self.log(
+                            "Recursive memory coverage gate triggered: "
+                            f"missing_months={memory_coverage.get('missing_months', [])}, queries={follow_up_queries_rm}."
+                        )
+                        follow_docs, _follow_count, _follow_cap = _retrieve_for_queries(
+                            follow_up_queries_rm,
+                            remaining_cap=min(total_docs_cap, max(120, final_k * 10)),
+                            k_value=max(retrieve_k, final_k * 4),
+                        )
+                        if follow_docs:
+                            routed_docs, _route_meta = self._route_followup_docs_by_query(
+                                follow_docs, follow_up_queries_rm
                             )
-                        ),
-                    ]
-                    stage_a_response = llm.invoke(stage_a_messages)
-                    stage_a_payload = _extract_json_payload(stage_a_response.content)
-                    incidents, scope_note = _normalize_incident_payload(stage_a_payload, doc_list)
+                            merged_docs = self._merge_dedupe_docs(doc_list + routed_docs)
+                            selected_docs = _select_evidence_pack(
+                                merged_docs,
+                                query_text,
+                                is_evidence_pack,
+                                seen_chunk_ids=seen_chunk_ids,
+                            )
+                            if selected_docs:
+                                doc_list = selected_docs
+                                refreshed_context, _was_trunc, _used, _budget, _packed = _build_context(doc_list)
+                                incidents, scope_note = _extract_stage_a_incidents(doc_list, refreshed_context)
+                    month_memory, theme_memory = self._build_recursive_memories(incidents)
+                    artifact_path = self._save_recursive_memory_artifact(
+                        query_text,
+                        {
+                            "month_memory": month_memory,
+                            "theme_memory": theme_memory,
+                            "coverage": memory_coverage,
+                            "incident_count": len(incidents or []),
+                        },
+                    )
+                    if artifact_path:
+                        self.log(f"Recursive memory artifacts saved to {artifact_path}.")
 
                 if not incidents:
                     if scope_note:
@@ -5223,6 +5413,7 @@ class AgenticRAGApp:
                 stage_b_prompt = (
                     "You are Stage B for evidence-pack mode. Write the final narrative using ONLY INCIDENT_SYNTHESIS_CARDS, "
                     "which were produced from Stage A Incident objects. Do NOT quote or infer directly from raw chunks. "
+                    "Use MONTH_MEMORY and THEME_MEMORY as compressed guidance to improve coverage across time periods and recurring themes. "
                     "Preserve incident order exactly as listed (already date-ordered with undated incidents last). "
                     "For each incident, keep fields in this structure: When / What happened / Impact / Evidence (S#). "
                     "Omission rule: if a claim has no evidence_refs (no S# evidence), omit it entirely. "
@@ -5239,6 +5430,8 @@ class AgenticRAGApp:
                         content=(
                             f"User request:\n{query_text}{section_text}{checklist_block}\n\n"
                             f"INCIDENT_SYNTHESIS_CARDS (from Stage A Incident objects):\n{cards_json}\n\n"
+                            f"MONTH_MEMORY:\n{json.dumps(month_memory, ensure_ascii=False, indent=2)}\n\n"
+                            f"THEME_MEMORY:\n{json.dumps(theme_memory, ensure_ascii=False, indent=2)}\n\n"
                             f"INCIDENT JSON (reference only):\n{incident_json}"
                         )
                     ),
@@ -5590,14 +5783,14 @@ class AgenticRAGApp:
                 triggered = bool(missing_months) or lost_incident_diversity
                 queries = []
                 for month in missing_months[:max_queries]:
-                    queries.append(f"on {month} what happened")
+                    queries.append(f"{month} incident timeline what happened impact")
                     if len(queries) < max_queries:
-                        queries.append(f"{month} Holly Garland Sam Weekes incident")
+                        queries.append(f"{month} complaint escalation chronology")
                     if len(queries) >= max_queries:
                         break
                 if lost_incident_diversity and not queries:
                     month_hint = sorted(pool_months, key=self._month_sort_key)[0] if pool_months else "recent"
-                    queries.append(f"on {month_hint} what happened")
+                    queries.append(f"{month_hint} incident chronology evidence")
                 return queries[:max_queries], {
                     "triggered": triggered,
                     "pool_months": len(pool_months),
