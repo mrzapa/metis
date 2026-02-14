@@ -266,7 +266,9 @@ class AgenticRAGApp:
         self.enable_recursive_memory = tk.BooleanVar(value=False)
         self.enable_recursive_retrieval = tk.BooleanVar(value=False)
         self.enable_citation_v2 = tk.BooleanVar(value=False)
-        self.enable_agent_lightning_telemetry = tk.BooleanVar(value=False)
+        self.agent_lightning_enabled = tk.BooleanVar(value=False)
+        # Backward-compatible alias used by existing config/frontier plumbing.
+        self.enable_agent_lightning_telemetry = self.agent_lightning_enabled
         self._frontier_evidence_pack_mode = False
         self._last_evidence_pack_synthesis_cards = []
         self._agent_lightning_runs_by_id = {}
@@ -639,14 +641,14 @@ class AgenticRAGApp:
         self.enable_citation_v2.set(
             bool(data.get("enable_citation_v2", self.enable_citation_v2.get()))
         )
-        self.enable_agent_lightning_telemetry.set(
-            bool(
-                data.get(
-                    "enable_agent_lightning_telemetry",
-                    self.enable_agent_lightning_telemetry.get(),
-                )
-            )
+        agent_lightning_enabled_value = data.get(
+            "agent_lightning_enabled",
+            data.get(
+                "enable_agent_lightning_telemetry",
+                self.agent_lightning_enabled.get(),
+            ),
         )
+        self.agent_lightning_enabled.set(bool(agent_lightning_enabled_value))
         self.index_embedding_signature = data.get(
             "index_embedding_signature", self.index_embedding_signature
         )
@@ -723,9 +725,8 @@ class AgenticRAGApp:
             "enable_recursive_memory": bool(self.enable_recursive_memory.get()),
             "enable_recursive_retrieval": bool(self.enable_recursive_retrieval.get()),
             "enable_citation_v2": bool(self.enable_citation_v2.get()),
-            "enable_agent_lightning_telemetry": bool(
-                self.enable_agent_lightning_telemetry.get()
-            ),
+            "agent_lightning_enabled": bool(self.agent_lightning_enabled.get()),
+            "enable_agent_lightning_telemetry": bool(self.agent_lightning_enabled.get()),
             "index_embedding_signature": self.index_embedding_signature,
             "selected_index_path": self.selected_index_path,
             "selected_collection_name": self.selected_collection_name,
@@ -1223,7 +1224,7 @@ class AgenticRAGApp:
         ttk.Checkbutton(
             self.frontier_options_frame,
             text="Enable Agent Lightning telemetry",
-            variable=self.enable_agent_lightning_telemetry,
+            variable=self.agent_lightning_enabled,
         ).pack(anchor="w")
 
         # Right evidence pane
@@ -2378,7 +2379,40 @@ class AgenticRAGApp:
             return
 
     def _agent_lightning_telemetry_enabled(self):
-        return bool(self._frontier_enabled("agent_lightning_telemetry"))
+        return bool(self.agent_lightning_enabled.get())
+
+    @staticmethod
+    def _payload_size_hint(payload):
+        if payload is None:
+            return 0
+        if isinstance(payload, (str, bytes, list, tuple, dict, set)):
+            try:
+                return len(payload)
+            except Exception:
+                pass
+        try:
+            return len(json.dumps(payload, ensure_ascii=False, default=str))
+        except Exception:
+            return len(str(payload))
+
+    def _record_agent_lightning_span(self, run_id, node, iteration, started_at, input_payload=None, output_payload=None, metrics=None):
+        if not self._agent_lightning_telemetry_enabled():
+            return
+        run_payload = self._agent_lightning_runs_by_id.get(run_id)
+        if not run_payload:
+            return
+        event = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "run_id": run_id,
+            "event": "node_span",
+            "node": str(node),
+            "iter": int(iteration or 0),
+            "latency_ms": int((time.perf_counter() - started_at) * 1000),
+            "input_size": int(self._payload_size_hint(input_payload)),
+            "output_size": int(self._payload_size_hint(output_payload)),
+            "metrics": metrics or {},
+        }
+        run_payload.setdefault("trajectory_events", []).append(event)
 
     def _start_agent_lightning_run(self, run_id, query):
         if not self._agent_lightning_telemetry_enabled():
@@ -2402,6 +2436,8 @@ class AgenticRAGApp:
                 "llm_model": str(self._resolve_llm_model()),
             },
             "events": [],
+            "trajectory_events": [],
+            "trajectory_path": "",
             "example": {
                 "query": query,
                 "incidents": [],
@@ -2477,6 +2513,33 @@ class AgenticRAGApp:
         incident_payload = self._build_incident_export_payload(final_docs)
         run_payload["example"]["incidents"] = incident_payload["incidents"]
         run_payload["example"]["final_output"] = final_output
+        run_payload["example"]["sources"] = [
+            {
+                "chunk_id": str((getattr(doc, "metadata", {}) or {}).get("chunk_id") or ""),
+                "source": str((getattr(doc, "metadata", {}) or {}).get("source") or (getattr(doc, "metadata", {}) or {}).get("file_path") or "unknown"),
+            }
+            for doc in (final_docs or [])
+        ]
+        trajectory_path = ""
+        try:
+            base_dir = os.path.dirname(os.path.abspath(self._get_telemetry_log_path()))
+            trajectory_path = os.path.join(base_dir, f"agent_lightning_trajectory_{run_id}.jsonl")
+            with open(trajectory_path, "w", encoding="utf-8") as handle:
+                for event in run_payload.get("trajectory_events", []):
+                    handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+                final_record = {
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "run_id": run_id,
+                    "event": "trajectory_final",
+                    "final_answer": final_output,
+                    "sources": run_payload["example"].get("sources", []),
+                    "incident_count": int(incident_payload.get("incident_count", 0)),
+                }
+                handle.write(json.dumps(final_record, ensure_ascii=False, sort_keys=True) + "\n")
+            run_payload["trajectory_path"] = trajectory_path
+            self.log(f"Agent Lightning trajectory saved: {trajectory_path}")
+        except Exception as exc:
+            self.log(f"Agent Lightning trajectory export skipped ({exc}).")
         self._agent_lightning_last_exportable_run = run_payload
 
     def export_run_as_agent_lightning_dataset(self):
@@ -6984,12 +7047,23 @@ class AgenticRAGApp:
                 iteration_started_at = time.perf_counter()
                 follow_up_queries = []
                 coverage_stats = {"triggered": False}
+                planner_started_at = time.perf_counter()
                 queries = [query]
                 if self.use_sub_queries.get():
                     sub_queries = self._generate_sub_queries(query)
                     if sub_queries:
                         queries = [query, *sub_queries]
+                self._record_agent_lightning_span(
+                    run_id,
+                    "Planner",
+                    1,
+                    planner_started_at,
+                    input_payload={"query": query, "output_style": output_style},
+                    output_payload={"queries": queries},
+                    metrics={"subquery_count": max(0, len(queries) - 1)},
+                )
                 max_total_docs = max(1, int(self.subquery_max_docs.get()))
+                retrieve_started_at = time.perf_counter()
                 (
                     docs,
                     retrieved_count,
@@ -7002,9 +7076,23 @@ class AgenticRAGApp:
                 ) = _retrieve_with_digest(
                     queries, min(total_docs_cap, max_total_docs), routing_candidate_k
                 )
+                self._record_agent_lightning_span(
+                    run_id,
+                    "Retrieve",
+                    1,
+                    retrieve_started_at,
+                    input_payload={"queries": queries, "k": routing_candidate_k},
+                    output_payload={"docs": len(docs), "levels": levels_used},
+                    metrics={
+                        "dense_count": int(raw_expanded_count),
+                        "lexical_count": int(digest_selected_count),
+                        "recursive_levels": levels_used or ["L0"],
+                    },
+                )
                 self.log(
                     f"Retrieved {len(docs)} initial candidates from {len(queries)} query(s)."
                 )
+                rerank_started_at = time.perf_counter()
                 if use_mini_digest:
                     routed_docs = self._route_with_mini_digest(docs, query, final_k)
                     self.log(
@@ -7012,14 +7100,30 @@ class AgenticRAGApp:
                         f"{len(routed_docs)} candidate chunks."
                     )
                     candidate_docs = routed_docs
-                    final_docs = _select_evidence_pack(
-                        routed_docs, query, is_evidence_pack, seen_chunk_ids=seen_chunk_ids
-                    )
                 else:
                     candidate_docs = docs
-                    final_docs = _select_evidence_pack(
-                        docs, query, is_evidence_pack, seen_chunk_ids=seen_chunk_ids
-                    )
+                self._record_agent_lightning_span(
+                    run_id,
+                    "Rerank",
+                    1,
+                    rerank_started_at,
+                    input_payload={"candidate_docs": len(docs), "query": query},
+                    output_payload={"candidate_docs": len(candidate_docs)},
+                    metrics={"novelty": len({(getattr(d, 'metadata', {}) or {}).get('chunk_id', '') for d in candidate_docs if (getattr(d, 'metadata', {}) or {}).get('chunk_id', '')})},
+                )
+                select_started_at = time.perf_counter()
+                final_docs = _select_evidence_pack(
+                    candidate_docs, query, is_evidence_pack, seen_chunk_ids=seen_chunk_ids
+                )
+                self._record_agent_lightning_span(
+                    run_id,
+                    "Select",
+                    1,
+                    select_started_at,
+                    input_payload={"candidate_docs": len(candidate_docs), "final_k": final_k},
+                    output_payload={"final_docs": len(final_docs)},
+                    metrics={"coverage": float(len(final_docs) / max(1, final_k))},
+                )
 
                 generic_followups, generic_cov = _coverage_followup_from_metadata(candidate_docs, final_docs)
                 self.log(
@@ -7232,7 +7336,17 @@ class AgenticRAGApp:
                         "role_balance": role_distribution,
                     },
                 )
+                extract_started_at = time.perf_counter()
                 extraction_payload = self._build_incident_export_payload(final_docs)
+                self._record_agent_lightning_span(
+                    run_id,
+                    "ExtractIncidents",
+                    1,
+                    extract_started_at,
+                    input_payload={"final_docs": len(final_docs)},
+                    output_payload=extraction_payload,
+                    metrics={"coverage": int(extraction_payload["incident_count"])},
+                )
                 self._record_agent_lightning_event(
                     run_id,
                     "extraction",
@@ -7304,6 +7418,15 @@ class AgenticRAGApp:
                     response = llm.invoke(messages)
                     response_content = response.content
                 generation_ms = int((time.perf_counter() - generation_started_at) * 1000)
+                self._record_agent_lightning_span(
+                    run_id,
+                    "Synthesize",
+                    1,
+                    generation_started_at,
+                    input_payload={"context_chars": len(context_text), "docs": len(final_docs)},
+                    output_payload=str(response_content or ""),
+                    metrics={"novelty": len(set(str(response_content or "").split()))},
+                )
                 validation_started_at = time.perf_counter()
                 validated_answer = self._validate_and_repair(
                     response_content,
@@ -7313,6 +7436,16 @@ class AgenticRAGApp:
                     synthesis_cards=self._last_evidence_pack_synthesis_cards,
                 )
                 validation_ms = int((time.perf_counter() - validation_started_at) * 1000)
+                citation_pass_rate = min(1.0, self._count_citations(validated_answer) / max(1, self._count_claim_like_sentences(validated_answer)))
+                self._record_agent_lightning_span(
+                    run_id,
+                    "VerifyCitations",
+                    1,
+                    validation_started_at,
+                    input_payload=str(response_content or ""),
+                    output_payload=str(validated_answer or ""),
+                    metrics={"citation_pass_rate": citation_pass_rate},
+                )
                 self._record_agent_lightning_event(
                     run_id,
                     "generation",
@@ -7473,6 +7606,7 @@ class AgenticRAGApp:
                             )
                         ),
                     ]
+                    planner_started_at = time.perf_counter()
                     planner_response = planner_llm.invoke(planner_messages)
                     plan_payload = _extract_json_payload(planner_response.content) or {}
                     checklist = [
@@ -7512,6 +7646,15 @@ class AgenticRAGApp:
                     if len(normalized_sub_queries) < 4:
                         normalized_sub_queries.append(query)
                     iteration_queries = normalized_sub_queries[:10]
+                    self._record_agent_lightning_span(
+                        run_id,
+                        "Planner",
+                        iteration,
+                        planner_started_at,
+                        input_payload={"query": query, "output_style": output_style},
+                        output_payload={"queries": iteration_queries, "checklist": checklist},
+                        metrics={"subquery_count": len(iteration_queries), "checklist_items": len(checklist)},
+                    )
                 else:
                     if not critic_queries:
                         self.log("No critic follow-up queries; stopping iterations.")
@@ -7523,6 +7666,7 @@ class AgenticRAGApp:
                 if remaining_cap == 0:
                     self.log("Total retrieved document cap reached; stopping iterations.")
                     break
+                retrieve_started_at = time.perf_counter()
                 (
                     docs,
                     retrieved_count,
@@ -7535,6 +7679,15 @@ class AgenticRAGApp:
                 ) = _retrieve_with_digest(
                     iteration_queries, remaining_cap, routing_candidate_k
                 )
+                self._record_agent_lightning_span(
+                    run_id,
+                    "Retrieve",
+                    iteration,
+                    retrieve_started_at,
+                    input_payload={"queries": iteration_queries, "remaining_cap": remaining_cap},
+                    output_payload={"docs": len(docs), "levels": levels_used},
+                    metrics={"dense_count": int(raw_expanded_count), "lexical_count": int(digest_selected_count), "recursive_levels": levels_used or ["L0"]},
+                )
                 total_retrieved += len(docs)
                 all_docs = self._merge_dedupe_docs(all_docs + docs)
                 new_incidents_added = len(all_docs) - prev_all_docs_count
@@ -7545,6 +7698,7 @@ class AgenticRAGApp:
                     stagnant_iterations = 0
                     last_unique_incident_count = unique_incident_count
                 stop_due_to_convergence = stagnant_iterations >= convergence_patience
+                rerank_started_at = time.perf_counter()
                 if use_mini_digest:
                     routed_docs = self._route_with_mini_digest(all_docs, query, final_k)
                     self.log(
@@ -7552,14 +7706,30 @@ class AgenticRAGApp:
                         f"{len(routed_docs)} candidate chunks."
                     )
                     candidate_docs = routed_docs
-                    final_docs = _select_evidence_pack(
-                        routed_docs, query, is_evidence_pack, seen_chunk_ids=seen_chunk_ids
-                    )
                 else:
                     candidate_docs = all_docs
-                    final_docs = _select_evidence_pack(
-                        all_docs, query, is_evidence_pack, seen_chunk_ids=seen_chunk_ids
-                    )
+                self._record_agent_lightning_span(
+                    run_id,
+                    "Rerank",
+                    iteration,
+                    rerank_started_at,
+                    input_payload={"candidate_docs": len(all_docs)},
+                    output_payload={"candidate_docs": len(candidate_docs)},
+                    metrics={"novelty": len({(getattr(d, 'metadata', {}) or {}).get('chunk_id', '') for d in candidate_docs if (getattr(d, 'metadata', {}) or {}).get('chunk_id', '')})},
+                )
+                select_started_at = time.perf_counter()
+                final_docs = _select_evidence_pack(
+                    candidate_docs, query, is_evidence_pack, seen_chunk_ids=seen_chunk_ids
+                )
+                self._record_agent_lightning_span(
+                    run_id,
+                    "Select",
+                    iteration,
+                    select_started_at,
+                    input_payload={"candidate_docs": len(candidate_docs), "final_k": final_k},
+                    output_payload={"final_docs": len(final_docs)},
+                    metrics={"coverage": float(len(final_docs) / max(1, final_k))},
+                )
 
                 generic_followups, generic_cov = _coverage_followup_from_metadata(candidate_docs, final_docs)
                 self.log(
@@ -7773,7 +7943,17 @@ class AgenticRAGApp:
                         "role_balance": role_distribution,
                     },
                 )
+                extract_started_at = time.perf_counter()
                 extraction_payload = self._build_incident_export_payload(final_docs)
+                self._record_agent_lightning_span(
+                    run_id,
+                    "ExtractIncidents",
+                    iteration,
+                    extract_started_at,
+                    input_payload={"final_docs": len(final_docs)},
+                    output_payload=extraction_payload,
+                    metrics={"coverage": int(extraction_payload["incident_count"])},
+                )
                 self._record_agent_lightning_event(
                     run_id,
                     "extraction",
@@ -7867,6 +8047,15 @@ class AgenticRAGApp:
                     response = llm.invoke(messages)
                     latest_answer = response.content
                 generation_ms = int((time.perf_counter() - generation_started_at) * 1000)
+                self._record_agent_lightning_span(
+                    run_id,
+                    "Synthesize",
+                    iteration,
+                    generation_started_at,
+                    input_payload={"context_chars": len(context_text), "docs": len(final_docs)},
+                    output_payload=str(latest_answer or ""),
+                    metrics={"novelty": len(set(str(latest_answer or "").split()))},
+                )
                 latest_context_text = context_text
                 last_iteration_id = iteration
                 self._append_jsonl_telemetry(
@@ -7936,6 +8125,16 @@ class AgenticRAGApp:
                     synthesis_cards=self._last_evidence_pack_synthesis_cards,
                 )
                 validation_ms = int((time.perf_counter() - validation_started_at) * 1000)
+                citation_pass_rate = min(1.0, self._count_citations(validated_answer) / max(1, self._count_claim_like_sentences(validated_answer)))
+                self._record_agent_lightning_span(
+                    run_id,
+                    "VerifyCitations",
+                    last_iteration_id,
+                    validation_started_at,
+                    input_payload=str(latest_answer or ""),
+                    output_payload=str(validated_answer or ""),
+                    metrics={"citation_pass_rate": citation_pass_rate},
+                )
                 self._record_agent_lightning_event(
                     run_id,
                     "generation",
