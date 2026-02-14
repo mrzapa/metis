@@ -114,6 +114,8 @@ class Incident:
     channel: str = "unknown"
     what_happened: str = ""
     impact: str = ""
+    operational_impact: str = ""
+    personal_impact: str = ""
     evidence_refs: list[EvidenceRef] = field(default_factory=list)
 
 class AgenticRAGApp:
@@ -3778,7 +3780,7 @@ class AgenticRAGApp:
     def _evidence_ref_from_dict(item):
         return EvidenceRef(
             source_id=str(item.get("source_id", "")).strip(),
-            quote=str(item.get("quote", "")).strip(),
+            quote=str(item.get("quote_anchor") or item.get("quote") or "").strip(),
             span_start=item.get("span_start") if isinstance(item.get("span_start"), int) else None,
             span_end=item.get("span_end") if isinstance(item.get("span_end"), int) else None,
             chunk_id=str(item.get("chunk_id", "")).strip(),
@@ -3802,6 +3804,15 @@ class AgenticRAGApp:
         )
         return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
+    def _incident_date_for_pack(self, incident):
+        iso_date = self._extract_iso_date(incident.date_start) or self._extract_iso_date(incident.date_end)
+        if iso_date:
+            return iso_date
+        month_key = str(incident.month_bucket or "").strip()
+        if re.match(r"^\d{4}-\d{2}$", month_key):
+            return f"{month_key}-unknown"
+        return "unknown"
+
     def _incident_to_stage_a_payload(self, incident, source_label_by_id):
         supporting_chunks = []
         evidence_refs = []
@@ -3812,19 +3823,28 @@ class AgenticRAGApp:
             evidence_refs.append(
                 {
                     "source_id": source_label or ref.source_id,
-                    "quote": ref.quote,
+                    "span_start": ref.span_start,
+                    "span_end": ref.span_end,
+                    "quote_anchor": ref.quote,
+                    "chunk_id": ref.chunk_id,
                 }
             )
-        quotes = [ref.quote for ref in incident.evidence_refs if ref.quote]
+        operational_impact = str(incident.operational_impact or "").strip()
+        personal_impact = str(incident.personal_impact or "").strip()
+        if not operational_impact and not personal_impact and incident.impact:
+            operational_impact = str(incident.impact).strip()
         return {
-            "date": incident.date_start or incident.date_end or "",
-            "title": incident.incident_id,
+            "incident_id": incident.incident_id,
+            "date": self._incident_date_for_pack(incident),
+            "month_key": incident.month_bucket or "",
             "channel": incident.channel,
             "people": incident.people,
             "what_happened": incident.what_happened,
-            "impact": incident.impact,
+            "impact": {
+                "operational": operational_impact,
+                "personal": personal_impact,
+            },
             "supporting_chunks": supporting_chunks,
-            "quotes": quotes[:3],
             "evidence_refs": evidence_refs,
         }
 
@@ -3846,8 +3866,17 @@ class AgenticRAGApp:
             return (0, iso_value, str(item.get("title") or "").lower())
         return (1, "9999-12-31", str(item.get("title") or "").lower())
 
+    def _write_incidents_json_artifact(self, incidents_payload):
+        artifact_path = os.path.join(os.getcwd(), "incidents.json")
+        try:
+            with open(artifact_path, "w", encoding="utf-8") as handle:
+                json.dump(incidents_payload, handle, ensure_ascii=False, indent=2)
+            self.log(f"Evidence pack Stage A saved: {artifact_path}")
+        except Exception as exc:
+            self.log(f"Failed to write incidents.json artifact. ({exc})")
+
     def _build_incident_synthesis_cards(self, incidents):
-        cards = []
+        ranked = []
         for incident in sorted(incidents or [], key=self._incident_sort_key_for_pack):
             supporting = []
             for ref in incident.get("supporting_chunks") or []:
@@ -3857,25 +3886,80 @@ class AgenticRAGApp:
             if not supporting:
                 continue
 
-            when_text = str(incident.get("date") or "").strip() or "Undated"
+            when_text = str(incident.get("date") or "").strip() or "unknown"
             what_text = str(incident.get("what_happened") or "").strip()
-            impact_text = str(incident.get("impact") or "").strip()
+            impact_raw = incident.get("impact") or {}
+            if isinstance(impact_raw, dict):
+                operational = str(impact_raw.get("operational") or "").strip()
+                personal = str(impact_raw.get("personal") or "").strip()
+                impact_text = "; ".join([f"operational: {operational}" if operational else "", f"personal: {personal}" if personal else ""]).strip("; ")
+            else:
+                impact_text = str(impact_raw).strip()
 
-            # Omission rule: drop unsupported claims entirely.
             if not what_text and not impact_text:
                 continue
 
-            cards.append(
+            month_key = str(incident.get("month_key") or "").strip() or "undated"
+            channel = str(incident.get("channel") or "unknown").strip() or "unknown"
+            evidence_refs = []
+            for ref in incident.get("evidence_refs") or []:
+                if not isinstance(ref, dict):
+                    continue
+                label = str(ref.get("source_id") or "").strip()
+                if re.match(r"^S\d+$", label) and label not in evidence_refs:
+                    evidence_refs.append(label)
+            if not evidence_refs:
+                evidence_refs = supporting[:]
+            ranked.append(
                 {
-                    "incident_id": str(incident.get("title") or incident.get("incident_id") or "").strip(),
+                    "incident_id": str(incident.get("incident_id") or incident.get("title") or "").strip(),
                     "when": when_text,
+                    "month_key": month_key,
+                    "channel": channel,
                     "what_happened": what_text,
                     "impact": impact_text,
-                    "evidence": supporting[:3],
-                    "evidence_refs": supporting[:3],
+                    "evidence": evidence_refs[:3],
+                    "evidence_refs": evidence_refs[:3],
+                    "strength": len(evidence_refs) * 10 + len(what_text) + len(impact_text),
                 }
             )
-        return cards
+
+        if not ranked:
+            return []
+
+        target_primary = min(12, max(6, len(ranked)))
+        selected = []
+        used_months = set()
+        used_channels = set()
+
+        for item in sorted(ranked, key=lambda x: (-x["strength"], x["when"])):
+            if len(selected) >= target_primary:
+                break
+            month = item.get("month_key") or "undated"
+            channel = item.get("channel") or "unknown"
+            if month not in used_months or channel not in used_channels or len(selected) < 6:
+                selected.append(item)
+                used_months.add(month)
+                used_channels.add(channel)
+
+        for item in sorted(ranked, key=lambda x: (-x["strength"], x["when"])):
+            if len(selected) >= target_primary:
+                break
+            if item not in selected:
+                selected.append(item)
+
+        supporting_count = min(4, max(2, len(ranked) - len(selected)))
+        for item in sorted(ranked, key=lambda x: x["strength"]):
+            if supporting_count <= 0:
+                break
+            if item in selected:
+                continue
+            selected.append(item)
+            supporting_count -= 1
+
+        for card in selected:
+            card.pop("strength", None)
+        return selected
 
     def _verify_evidence_pack_claims(self, answer_text, synthesis_cards):
         if not answer_text:
@@ -4172,7 +4256,9 @@ class AgenticRAGApp:
                                 people=[str(p).strip() for p in item.get("people", []) if str(p).strip()],
                                 channel=self._normalize_incident_channel(item.get("channel")),
                                 what_happened=str(item.get("what_happened", "")).strip(),
-                                impact=str(item.get("impact", "")).strip(),
+                                impact=(str(item.get("impact", "")).strip() if not isinstance(item.get("impact"), dict) else ""),
+                                operational_impact=str(item.get("operational_impact", "")).strip(),
+                                personal_impact=str(item.get("personal_impact", "")).strip(),
                                 evidence_refs=refs,
                             )
                         )
@@ -4239,9 +4325,9 @@ class AgenticRAGApp:
             try:
                 prompt = (
                     "Extract incident objects. Ground each incident to exact spans. "
-                    "Return JSON with incidents[] where each incident has date_start, date_end, month_bucket, "
-                    "people[], channel(email/chat/call/ticket/unknown), what_happened, impact, evidence_refs[]. "
-                    "Each evidence_ref includes source_id, quote, span_start, span_end, chunk_id."
+                    "Return JSON with incidents[] where each incident has incident_id, date_start/date_end or month_bucket, "
+                    "people[], channel(email/chat/call/ticket/unknown), what_happened, impact{operational,personal}, evidence_refs[]. "
+                    "Each evidence_ref includes source_id, quote_anchor (or quote), span_start, span_end, chunk_id."
                 )
                 result = langextract.extract(docs_payload, prompt=prompt)
                 payload = result if isinstance(result, dict) else {}
@@ -4265,7 +4351,9 @@ class AgenticRAGApp:
                         people=[str(p).strip() for p in item.get("people", []) if str(p).strip()],
                         channel=self._normalize_incident_channel(item.get("channel")),
                         what_happened=str(item.get("what_happened", "")).strip(),
-                        impact=str(item.get("impact", "")).strip(),
+                        impact=(str(item.get("impact", "")).strip() if not isinstance(item.get("impact"), dict) else ""),
+                        operational_impact=str((item.get("impact") or {}).get("operational", "")).strip() if isinstance(item.get("impact"), dict) else "",
+                        personal_impact=str((item.get("impact") or {}).get("personal", "")).strip() if isinstance(item.get("impact"), dict) else "",
                         evidence_refs=refs,
                     )
                     incident.month_bucket = incident.month_bucket or self._derive_incident_month_bucket(incident.date_start, incident.date_end)
@@ -4281,8 +4369,8 @@ class AgenticRAGApp:
         llm = self.get_llm()
         fallback_prompt = (
             "Extract incidents from FINAL_DOCS. Return STRICT JSON object with incidents array. "
-            "Each incident fields: date_start, date_end, month_bucket, people, channel, what_happened, impact, evidence_refs. "
-            "evidence_refs fields: source_id, quote, span_start, span_end, chunk_id. Use source_id values from metadata only."
+            "Each incident fields: incident_id, date_start/date_end or month_bucket, people, channel, what_happened, impact{operational,personal}, evidence_refs. "
+            "evidence_refs fields: source_id, quote_anchor (or quote), span_start, span_end, chunk_id. Use source_id values from metadata only."
         )
         response = llm.invoke(
             [
@@ -4307,7 +4395,9 @@ class AgenticRAGApp:
                 people=[str(p).strip() for p in item.get("people", []) if str(p).strip()],
                 channel=self._normalize_incident_channel(item.get("channel")),
                 what_happened=str(item.get("what_happened", "")).strip(),
-                impact=str(item.get("impact", "")).strip(),
+                impact=(str(item.get("impact", "")).strip() if not isinstance(item.get("impact"), dict) else ""),
+                operational_impact=str((item.get("impact") or {}).get("operational", "")).strip() if isinstance(item.get("impact"), dict) else "",
+                personal_impact=str((item.get("impact") or {}).get("personal", "")).strip() if isinstance(item.get("impact"), dict) else "",
                 evidence_refs=refs,
             )
             incident.month_bucket = incident.month_bucket or self._derive_incident_month_bucket(incident.date_start, incident.date_end)
@@ -5773,32 +5863,45 @@ class AgenticRAGApp:
                     else:
                         people_value = []
 
-                    quotes_value = item.get("quotes", [])
-                    if isinstance(quotes_value, str):
-                        quotes_value = [quotes_value.strip()] if quotes_value.strip() else []
-                    elif isinstance(quotes_value, list):
-                        quotes_value = [str(q).strip() for q in quotes_value if str(q).strip()]
+                    impact_value = item.get("impact", {})
+                    if isinstance(impact_value, dict):
+                        operational_impact = str(impact_value.get("operational", "")).strip()
+                        personal_impact = str(impact_value.get("personal", "")).strip()
                     else:
-                        quotes_value = []
+                        operational_impact = str(impact_value).strip()
+                        personal_impact = ""
+
+                    normalized_refs = []
+                    for ref in item.get("evidence_refs", []):
+                        if not isinstance(ref, dict):
+                            continue
+                        src = str(ref.get("source_id", "")).strip()
+                        if src and re.match(r"^S\d+$", src) and src not in supporting_chunks:
+                            supporting_chunks.append(src)
+                        normalized_refs.append(
+                            {
+                                "source_id": src,
+                                "span_start": ref.get("span_start") if isinstance(ref.get("span_start"), int) else None,
+                                "span_end": ref.get("span_end") if isinstance(ref.get("span_end"), int) else None,
+                                "quote_anchor": str(ref.get("quote_anchor") or ref.get("quote") or "").strip(),
+                                "chunk_id": str(ref.get("chunk_id", "")).strip(),
+                            }
+                        )
 
                     incidents.append(
                         {
+                            "incident_id": str(item.get("incident_id") or item.get("title") or "").strip(),
                             "date": str(item.get("date", "")).strip(),
-                            "title": str(item.get("title", "")).strip(),
+                            "month_key": str(item.get("month_key", "")).strip(),
                             "channel": str(item.get("channel", "")).strip(),
                             "people": people_value,
                             "what_happened": str(item.get("what_happened", "")).strip(),
-                            "impact": str(item.get("impact", "")).strip(),
+                            "impact": {
+                                "operational": operational_impact,
+                                "personal": personal_impact,
+                            },
                             "supporting_chunks": supporting_chunks,
-                            "quotes": quotes_value,
-                            "evidence_refs": [
-                                {
-                                    "source_id": str(ref.get("source_id", "")).strip(),
-                                    "quote": str(ref.get("quote", "")).strip(),
-                                }
-                                for ref in item.get("evidence_refs", [])
-                                if isinstance(ref, dict)
-                            ],
+                            "evidence_refs": normalized_refs,
                         }
                     )
                 return incidents, scope_note
@@ -5806,9 +5909,7 @@ class AgenticRAGApp:
             def _run_evidence_pack_two_stage(llm, query_text, context_text, doc_list, checklist_text="", section_plan_items=None, coverage_note=""):
                 section_plan_items = section_plan_items or []
                 recursive_memory_enabled = bool(self.enable_recursive_memory.get())
-                use_langextract_incidents = bool(
-                    self.enable_langextract.get() and self.enable_structured_incidents.get()
-                )
+                use_langextract_incidents = bool(langextract is not None and self.enable_langextract.get())
                 _source_map_seed, _source_cards_text = self._build_source_cards(doc_list)
                 scope_note = ""
 
@@ -5835,19 +5936,20 @@ class AgenticRAGApp:
                         stage_a_prompt = (
                             "You are Stage A for evidence-pack mode. Use ONLY FINAL_DOCS context below. "
                             "Extract incidents and return STRICT JSON only (no markdown, no commentary).\n\n"
-                            "Schema (array of objects):\n"
-                            "[{\n"
-                            '  "date": "",\n'
-                            '  "title": "",\n'
-                            '  "channel": "",\n'
-                            '  "people": [""],\n'
-                            '  "what_happened": "",\n'
-                            '  "impact": "",\n'
-                            '  "supporting_chunks": [""],\n'
-                            '  "quotes": [""]\n'
-                            "}]\n\n"
-                            "Rules: supporting_chunks must reference chunk_id values or Chunk numbers present in FINAL_DOCS. "
-                            "If no incidents are supported, return []"
+                            "Schema (object with incidents array):\n"
+                            "{\"incidents\": [{\n"
+                            '  "incident_id": "",\n'
+                            '  "date": "ISO date (YYYY-MM-DD) if known; else YYYY-MM-unknown",\n'
+                            '  "month_key": "YYYY-MM when day is unknown",\n'
+                            '  "channel": "email|chat|call|ticket|unknown",\n'
+                            '  "people": ["name/role"],\n'
+                            '  "what_happened": "verbatim-grounded summary with minimal paraphrase",\n'
+                            '  "impact": {"operational": "", "personal": ""},\n'
+                            '  "evidence_refs": [{"source_id": "S# or chunk reference", "span_start": 0, "span_end": 0, "quote_anchor": "", "chunk_id": ""}]\n'
+                            "}]}\n\n"
+                            "Rules: every incident must include evidence_refs; do not invent dates. "
+                            "If day is missing, keep month_key and set date to YYYY-MM-unknown. "
+                            "If no incidents are supported, return {\"incidents\": []}."
                         )
                         stage_a_messages = [
                             SystemMessage(content=stage_a_prompt),
@@ -5865,6 +5967,7 @@ class AgenticRAGApp:
 
                 incidents, scope_note = _extract_stage_a_incidents(doc_list, context_text)
                 self._latest_incidents = incidents
+                self._write_incidents_json_artifact({"incidents": incidents})
 
                 month_memory = {}
                 theme_memory = {}
@@ -5940,17 +6043,19 @@ class AgenticRAGApp:
                 )
                 stage_b_prompt = (
                     "You are Stage B for evidence-pack mode. Write the final narrative using ONLY INCIDENT_SYNTHESIS_CARDS, "
-                    "which were produced from Stage A Incident objects. Do NOT quote or infer directly from raw chunks. "
+                    "which were produced from Stage A incidents.json. Do NOT quote or infer directly from raw chunks. "
+                    "If the user asks for an incident not present in INCIDENT_SYNTHESIS_CARDS, use the closest matching extracted incidents "
+                    "and state what is supportable without asking the user for additional evidence. "
                     "Use MONTH_MEMORY and THEME_MEMORY as compressed guidance to improve coverage across time periods and recurring themes. "
-                    "Preserve incident order exactly as listed (already date-ordered with undated incidents last). "
-                    "For each incident, keep fields in this structure: When / What happened / Impact / Evidence (S#). "
-                    "Omission rule: if a claim has no evidence_refs (no S# evidence), omit it entirely. "
-                    "Never output NOT FOUND or placeholders. Omit sections/subsections that have no supported incidents. "
+                    "For each incident block: When / What happened / Impact / Evidence, and end the block with [S#] citations from evidence_refs. "
+                    "Never invent dates: if date is YYYY-MM-unknown or unknown, preserve it as-is. "
+                    "Never output NOT FOUND IN CONTEXT (or variants), placeholders, or requests for user-supplied evidence. "
                     f"{tone_rule} "
                     "Required output format:\n"
                     "1) One-page overview: allegation themes and overall impacts.\n"
-                    "2) Timeline of key incidents: bulleted; each bullet must include 1-3 S# citations from the incident Evidence field.\n"
-                    "3) Appendix: Source Cards list."
+                    "2) Timeline of key incidents: bulleted; each bullet ends with [S#] citations.\n"
+                    "3) Supporting incidents (2-4 concise bullets) to widen month/channel coverage.\n"
+                    "4) Appendix: Source Cards list."
                 )
                 stage_b_messages = [
                     SystemMessage(content=stage_b_prompt),
