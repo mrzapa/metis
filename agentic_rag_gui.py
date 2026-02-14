@@ -300,6 +300,7 @@ class AgenticRAGApp:
         self.enable_recursive_memory = tk.BooleanVar(value=False)
         self.enable_recursive_retrieval = tk.BooleanVar(value=False)
         self.enable_citation_v2 = tk.BooleanVar(value=False)
+        self.enable_claim_level_grounding_citefix_lite = tk.BooleanVar(value=False)
         self.agent_lightning_enabled = tk.BooleanVar(value=False)
         # Backward-compatible alias used by existing config/frontier plumbing.
         self.enable_agent_lightning_telemetry = self.agent_lightning_enabled
@@ -857,6 +858,14 @@ class AgenticRAGApp:
         self.enable_citation_v2.set(
             bool(data.get("enable_citation_v2", self.enable_citation_v2.get()))
         )
+        self.enable_claim_level_grounding_citefix_lite.set(
+            bool(
+                data.get(
+                    "enable_claim_level_grounding_citefix_lite",
+                    self.enable_claim_level_grounding_citefix_lite.get(),
+                )
+            )
+        )
         agent_lightning_enabled_value = data.get(
             "agent_lightning_enabled",
             data.get(
@@ -952,6 +961,9 @@ class AgenticRAGApp:
             "enable_recursive_memory": bool(self.enable_recursive_memory.get()),
             "enable_recursive_retrieval": bool(self.enable_recursive_retrieval.get()),
             "enable_citation_v2": bool(self.enable_citation_v2.get()),
+            "enable_claim_level_grounding_citefix_lite": bool(
+                self.enable_claim_level_grounding_citefix_lite.get()
+            ),
             "agent_lightning_enabled": bool(self.agent_lightning_enabled.get()),
             "enable_agent_lightning_telemetry": bool(self.agent_lightning_enabled.get()),
             "index_embedding_signature": self.index_embedding_signature,
@@ -1523,6 +1535,11 @@ class AgenticRAGApp:
             self.frontier_options_frame,
             text="Enable citation v2 (defaults ON in evidence-pack mode)",
             variable=self.enable_citation_v2,
+        ).pack(anchor="w")
+        ttk.Checkbutton(
+            self.frontier_options_frame,
+            text="Claim-level grounding (CiteFix-lite)",
+            variable=self.enable_claim_level_grounding_citefix_lite,
         ).pack(anchor="w")
         ttk.Checkbutton(
             self.frontier_options_frame,
@@ -5890,6 +5907,17 @@ class AgenticRAGApp:
             chunks[chunk_num] = context_text[start:end].strip()
         return chunks
 
+    def _extract_sources(self, context_text):
+        sources = {}
+        header_re = re.compile(r"^\[(Chunk\s+\d+|S\d+)[^\]]*\]\n", re.M)
+        matches = list(header_re.finditer(context_text or ""))
+        for idx, match in enumerate(matches):
+            label = match.group(1).strip()
+            start = match.end()
+            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(context_text)
+            sources[label] = (context_text[start:end] or "").strip()
+        return sources
+
     def _split_major_sections(self, answer_text):
         lines = answer_text.splitlines()
         sections = []
@@ -5926,6 +5954,29 @@ class AgenticRAGApp:
     def _sentence_split(text):
         sentence_re = re.compile(r"[^.!?\n]+(?:[.!?](?=\s|$))?", re.M)
         return [match.group(0).strip() for match in sentence_re.finditer(text) if match.group(0).strip()]
+
+    def _split_claims(self, text):
+        claims = []
+        for line in str(text or "").splitlines():
+            if not line.strip():
+                continue
+            bullet_match = re.match(r"^(\s*(?:[-*+]\s+|\d+[.)]\s+))(.*)$", line)
+            prefix = bullet_match.group(1) if bullet_match else ""
+            body = bullet_match.group(2) if bullet_match else line
+            for sentence in self._sentence_split(body):
+                claims.append((prefix, sentence.strip()))
+                prefix = ""
+        return claims
+
+    @staticmethod
+    def _extract_source_labels(text):
+        labels = set()
+        for value in re.findall(r"\[(Chunk\s+\d+|S\d+(?:\s*,\s*S\d+)*)\]", str(text or "")):
+            parts = [part.strip() for part in value.split(",")]
+            for part in parts:
+                if part:
+                    labels.add(part)
+        return sorted(labels)
 
     @staticmethod
     def _claim_tokens(text):
@@ -6015,6 +6066,127 @@ class AgenticRAGApp:
                 best_chunk = chunk_num
 
         return best_chunk, best_score
+
+    def _score_claim_support(self, claim_text, source_label, source_text, source_tokens, source_embeddings, embedding_model):
+        claim_tokens = self._claim_tokens(claim_text)
+        if not claim_tokens:
+            return 0.0
+        overlap = claim_tokens & source_tokens.get(source_label, set())
+        lexical_ratio = len(overlap) / max(1, len(claim_tokens))
+        lexical_score = min(1.0, lexical_ratio * 2.2)
+
+        embed_score = 0.0
+        if embedding_model is not None:
+            try:
+                claim_embedding = embedding_model.embed_query(claim_text)
+                source_embedding = source_embeddings.get(source_label)
+                if claim_embedding and source_embedding:
+                    embed_score = max(0.0, self._cosine_similarity(claim_embedding, source_embedding))
+            except Exception:
+                embed_score = 0.0
+
+        cross_encoder_score = 0.0
+        scorer = getattr(self, "_claim_cross_encoder", None)
+        if scorer is not None:
+            try:
+                cross_encoder_score = max(0.0, float(scorer(claim_text, source_text)))
+            except Exception:
+                cross_encoder_score = 0.0
+
+        return (0.55 * lexical_score) + (0.35 * embed_score) + (0.10 * cross_encoder_score)
+
+    def _rewrite_claim_to_supported_generalization(self, claim_text, best_label, source_text):
+        claim_core = re.sub(r"\[(?:Chunk\s+\d+|S\d+(?:\s*,\s*S\d+)*)\]", "", claim_text).strip()
+        source_sentences = self._sentence_split(source_text)
+        claim_tokens = self._claim_tokens(claim_core)
+        best_sentence = ""
+        best_overlap = 0
+        for sentence in source_sentences:
+            overlap = len(claim_tokens & self._claim_tokens(sentence))
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_sentence = sentence.strip()
+        if best_sentence and len(best_sentence) > 16:
+            generalized = best_sentence
+        else:
+            key_terms = sorted(claim_tokens)[:3]
+            if key_terms:
+                generalized = f"The evidence discusses {'; '.join(key_terms)}."
+            else:
+                return ""
+        generalized = generalized.rstrip(" .") + "."
+        generalized = re.sub(r"\s+", " ", generalized).strip()
+        return f"{generalized} [{best_label}]"
+
+    def _claim_level_grounding_validate(self, answer_text, context_text):
+        sources = self._extract_sources(context_text)
+        if not sources:
+            return answer_text, []
+
+        source_tokens = {label: self._claim_tokens(text) for label, text in sources.items()}
+        embedding_model = self._get_claim_embedding_model()
+        source_embeddings = {}
+        if embedding_model is not None:
+            try:
+                labels = sorted(sources)
+                vectors = embedding_model.embed_documents([sources[label] for label in labels])
+                for label, vector in zip(labels, vectors):
+                    source_embeddings[label] = vector
+            except Exception as exc:
+                embedding_model = None
+                self.log(f"Claim-level source embeddings unavailable; using lexical overlap. ({exc})")
+
+        kept = []
+        failures = []
+        support_threshold = 0.58 if embedding_model is not None else 0.32
+        rewrite_threshold = max(0.22, support_threshold - 0.18)
+        factual_hint_re = re.compile(r"\b(is|are|was|were|has|have|had|shows?|indicates?|states?|reports?|found|observed|according|caused?|led|resulted)\b", re.I)
+
+        for prefix, claim in self._split_claims(answer_text):
+            if not claim:
+                continue
+            if re.match(r"^\s{0,3}#{1,6}\s+\S", claim):
+                kept.append(f"{prefix}{claim}" if prefix else claim)
+                continue
+            is_factual = bool(factual_hint_re.search(claim)) or len(claim) >= 40
+            if not is_factual:
+                kept.append(f"{prefix}{claim}" if prefix else claim)
+                continue
+
+            cited_labels = self._extract_source_labels(claim)
+            candidate_labels = cited_labels or list(sources.keys())
+            scored = []
+            claim_wo_cites = re.sub(r"\[(?:Chunk\s+\d+|S\d+(?:\s*,\s*S\d+)*)\]", "", claim).strip()
+            for label in candidate_labels:
+                source_text = sources.get(label, "")
+                if not source_text:
+                    continue
+                score = self._score_claim_support(
+                    claim_wo_cites, label, source_text, source_tokens, source_embeddings, embedding_model
+                )
+                scored.append((score, label))
+            scored.sort(reverse=True)
+
+            if scored and scored[0][0] >= support_threshold:
+                best_label = scored[0][1]
+                kept_claim = f"{claim_wo_cites} [{best_label}]".strip()
+                kept.append(f"{prefix}{kept_claim}" if prefix else kept_claim)
+                continue
+
+            if scored and scored[0][0] >= rewrite_threshold:
+                best_label = scored[0][1]
+                rewritten = self._rewrite_claim_to_supported_generalization(
+                    claim_wo_cites, best_label, sources.get(best_label, "")
+                )
+                if rewritten:
+                    kept.append(f"{prefix}{rewritten}" if prefix else rewritten)
+                    failures.append("Generalized weakly supported claim to grounded statement.")
+                    continue
+
+            failures.append("Dropped unsupported factual claim during claim-level grounding.")
+
+        cleaned = "\n".join(line for line in kept if line.strip()).strip()
+        return cleaned, failures
 
     def _claim_level_sanitize(self, answer_text, context_text):
         bullet_re = re.compile(r"^(\s*(?:[-*+]\s+|\d+[.)]\s+))(.*)$")
@@ -6279,10 +6451,19 @@ class AgenticRAGApp:
                 )
             return answer_text
 
+        claim_level_enabled = self._frontier_enabled("claim_level_grounding_citefix_lite")
         chunks_available = bool(self._extract_chunks(context_text))
-        answer_text, claim_failures = self._claim_level_sanitize(answer_text, context_text)
-        failures = list(claim_failures)
-        if chunks_available:
+        if not chunks_available:
+            chunks_available = bool(self._extract_sources(context_text))
+
+        failures = []
+        if claim_level_enabled:
+            answer_text, claim_failures = self._claim_level_grounding_validate(answer_text, context_text)
+            failures.extend(claim_failures)
+            is_valid = len(claim_failures) == 0
+        elif chunks_available:
+            answer_text, claim_failures = self._claim_level_sanitize(answer_text, context_text)
+            failures.extend(claim_failures)
             is_valid = len(claim_failures) == 0
         else:
             is_valid, fallback_failures = self._validate_answer(
@@ -6317,7 +6498,10 @@ class AgenticRAGApp:
             )
         repaired = self._repair_answer(answer_text, context_text, unique_failures, output_style)
         repaired = self._append_missing_citations(repaired, context_text)
-        repaired, post_failures = self._claim_level_sanitize(repaired, context_text)
+        if claim_level_enabled:
+            repaired, post_failures = self._claim_level_grounding_validate(repaired, context_text)
+        else:
+            repaired, post_failures = self._claim_level_sanitize(repaired, context_text)
         post_unique = self._summarize_failures(post_failures)
         if post_unique:
             self.log(
@@ -9742,6 +9926,7 @@ class AgenticRAGApp:
 # - search_concepts("...") should return relevant concept_cards (title/kind/card_text/source refs) for topical queries.
 # - Concept cards should preserve grounded S#-style source locators via source_refs_json entries.
 # - Tutor mode produces flashcards and quiz for a query like "Teach me X from this book".
+# - Given deliberately weak retrieval, claim-level grounding (CiteFix-lite) outputs a smaller but fully supported answer with no placeholders.
 
 
 if __name__ == "__main__":
