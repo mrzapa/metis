@@ -47,6 +47,8 @@ MINI_DIGEST_BOOST_MULTIPLIER = 3
 MINI_DIGEST_MIN_POOL = 40
 MAX_DIGEST_NODES = 60
 MAX_RAW_CHUNKS = 200
+MAX_HIERARCHICAL_RECURSION_ITERATIONS = 3
+HIERARCHICAL_COVERAGE_MIN_SCORE = 0.55
 MAX_PACKED_CONTEXT_CHARS = 60000
 TOKENS_TO_CHARS_RATIO = 4
 CONTEXT_SAFETY_MARGIN_TOKENS = 512
@@ -280,6 +282,11 @@ class AgenticRAGApp:
         self.final_k = tk.IntVar(value=5)
         self.fallback_final_k = tk.IntVar(value=self.final_k.get())
         self.search_type = tk.StringVar(value="similarity")
+        self.retrieval_mode_options = [
+            "Flat (Chunks)",
+            "Hierarchical (Digest→Chunk)",
+        ]
+        self.retrieval_mode = tk.StringVar(value="Flat (Chunks)")
         self.mmr_lambda = tk.DoubleVar(value=0.5)
         self.agentic_mode = tk.BooleanVar(value=False)
         self.agentic_max_iterations = tk.IntVar(value=2)
@@ -784,6 +791,10 @@ class AgenticRAGApp:
         self.retrieval_k.set(data.get("retrieval_k", self.retrieval_k.get()))
         self.final_k.set(data.get("final_k", self.final_k.get()))
         self.search_type.set(data.get("search_type", self.search_type.get()))
+        retrieval_mode = data.get("retrieval_mode", self.retrieval_mode.get())
+        if retrieval_mode not in self.retrieval_mode_options:
+            retrieval_mode = "Flat (Chunks)"
+        self.retrieval_mode.set(retrieval_mode)
         self.mmr_lambda.set(data.get("mmr_lambda", self.mmr_lambda.get()))
         # New config fields: agentic_mode, agentic_max_iterations, show_retrieved_context
         self.agentic_mode.set(data.get("agentic_mode", self.agentic_mode.get()))
@@ -923,6 +934,7 @@ class AgenticRAGApp:
             "retrieval_k": self.retrieval_k.get(),
             "final_k": self.final_k.get(),
             "search_type": self.search_type.get(),
+            "retrieval_mode": self.retrieval_mode.get(),
             "mmr_lambda": self.mmr_lambda.get(),
             # New config fields: agentic_mode, agentic_max_iterations, show_retrieved_context
             "agentic_mode": self.agentic_mode.get(),
@@ -1296,6 +1308,17 @@ class AgenticRAGApp:
             state="readonly",
             width=12,
         ).grid(row=1, column=1, sticky="w", padx=(5, 15), pady=(6, 0))
+
+        ttk.Label(retrieval_frame, text="Retrieval mode:").grid(
+            row=2, column=0, sticky="w", pady=(6, 0)
+        )
+        ttk.Combobox(
+            retrieval_frame,
+            textvariable=self.retrieval_mode,
+            values=self.retrieval_mode_options,
+            state="readonly",
+            width=28,
+        ).grid(row=2, column=1, columnspan=3, sticky="w", padx=(5, 0), pady=(6, 0))
 
         ttk.Label(retrieval_frame, text="MMR lambda:").grid(
             row=1, column=2, sticky="w", pady=(6, 0)
@@ -3452,6 +3475,191 @@ class AgenticRAGApp:
         _flush()
         return groups
 
+    def _group_chunks_for_chapter_digest(self, docs):
+        chapter_groups = {}
+        for doc in docs:
+            metadata = (doc.metadata or {})
+            chapter_idx = metadata.get("chapter_idx")
+            chapter_title = metadata.get("chapter_title")
+            if chapter_idx is None and not chapter_title:
+                continue
+            key = (chapter_idx if chapter_idx is not None else "na", chapter_title or "Untitled chapter")
+            chapter_groups.setdefault(key, []).append(doc)
+        ordered_items = sorted(chapter_groups.items(), key=lambda item: item[0][0])
+        return [((chapter_idx, chapter_title), chunk_docs) for (chapter_idx, chapter_title), chunk_docs in ordered_items]
+
+    def _build_chapter_digest_documents(self, docs, ingest_id, source_basename, doc_title):
+        chapter_groups = self._group_chunks_for_chapter_digest(docs)
+        if not chapter_groups:
+            return []
+        llm = self._get_llm_with_temperature(0.2)
+        digest_docs = []
+        system_prompt = (
+            "Summarize this chapter into concise bullet points for routing. "
+            "Highlight topics, events, key actors, and chapter-specific decisions. "
+            "Use bullets only with no introductory text."
+        )
+        for chapter_ordinal, ((chapter_idx, chapter_title), chunk_docs) in enumerate(chapter_groups, start=1):
+            chunk_ids = [
+                (doc.metadata or {}).get("chunk_id")
+                for doc in chunk_docs
+                if (doc.metadata or {}).get("chunk_id") is not None
+            ]
+            compact_ids = self._compact_chunk_ids(chunk_ids)
+            digest_id = f"chapter-{ingest_id}-{chapter_ordinal}"
+            group_text = "\n\n".join(doc.page_content for doc in chunk_docs[:DIGEST_WINDOW_MAX])
+            response = llm.invoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=f"Chapter title: {chapter_title}\n\nContent:\n{group_text}"),
+                ]
+            )
+            metadata = {
+                "doc_type": "chapter_digest",
+                "digest_scope": "chapter",
+                "tree_level": 1,
+                "ingest_id": ingest_id,
+                "source": source_basename,
+                "digest_id": digest_id,
+                "node_id": f"l1:{digest_id}",
+                "parent_node_id": f"l2:{ingest_id}",
+                "child_chunk_ids": compact_ids,
+                "chapter_title": chapter_title,
+            }
+            if chapter_idx is not None and str(chapter_idx).isdigit():
+                metadata["chapter_idx"] = int(chapter_idx)
+            if doc_title:
+                metadata["doc_title"] = doc_title
+            digest_docs.append(Document(page_content=response.content.strip(), metadata=metadata))
+        return digest_docs
+
+    @staticmethod
+    def _is_short_factual_query(query):
+        text = (query or "").strip()
+        if not text:
+            return False
+        tokens = re.findall(r"\w+", text.lower())
+        if len(tokens) > 14:
+            return False
+        factual_patterns = (
+            r"^who\b",
+            r"^what\s+(is|are|was|were|did|does|do)\b",
+            r"^when\b",
+            r"^where\b",
+            r"^which\b",
+            r"^define\b",
+        )
+        return any(re.search(pattern, text.lower()) for pattern in factual_patterns)
+
+    def _resolve_retrieval_mode(self, query, resolved_settings, has_digest_store):
+        configured_mode = (self.retrieval_mode.get() or "Flat (Chunks)").strip()
+        mode_name = (resolved_settings or {}).get("mode", "")
+        should_default_hierarchical = mode_name in {"Book Tutor", "Blinkist-style Summary"}
+        is_short_factual = self._is_short_factual_query(query)
+        if configured_mode == "Hierarchical (Digest→Chunk)":
+            return "hierarchical"
+        if should_default_hierarchical and not is_short_factual and has_digest_store:
+            return "hierarchical"
+        return "flat"
+
+    def search_digests(self, query, k, digest_store, tree_level=None, digest_scope=None):
+        if not digest_store or not query:
+            return []
+        retriever = digest_store.as_retriever(
+            search_type=self.search_type.get(),
+            search_kwargs={"k": max(1, int(k))},
+        )
+        digest_docs = retriever.invoke(query)
+        filtered = []
+        for doc in digest_docs:
+            metadata = (getattr(doc, "metadata", {}) or {})
+            if tree_level is not None and int(metadata.get("tree_level", 1)) != int(tree_level):
+                continue
+            if digest_scope and metadata.get("digest_scope") != digest_scope:
+                continue
+            filtered.append(doc)
+        return filtered
+
+    def expand_digest_to_chunks(self, digest_id, k_within, digest_store):
+        if not digest_store or not digest_id:
+            return []
+        if not hasattr(self.vector_store, "_collection"):
+            return []
+        try:
+            fetch = digest_store._collection.get(
+                where={"digest_id": digest_id},
+                include=["metadatas"],
+                limit=1,
+            )
+        except Exception:
+            return []
+        metadatas = fetch.get("metadatas") or []
+        if not metadatas:
+            return []
+        metadata = metadatas[0] or {}
+        ingest_id = metadata.get("ingest_id")
+        chunk_ids = sorted(self._expand_compact_chunk_ids(metadata.get("child_chunk_ids", "")))
+        if not ingest_id or not chunk_ids:
+            return []
+        max_expand = max(1, int(k_within))
+        try:
+            result = self.vector_store._collection.get(
+                where={"ingest_id": ingest_id},
+                include=["documents", "metadatas"],
+            )
+        except Exception:
+            return []
+        docs = []
+        chunk_id_set = {str(item) for item in chunk_ids}
+        for content, chunk_meta in zip(result.get("documents") or [], result.get("metadatas") or []):
+            meta = chunk_meta or {}
+            if str(meta.get("chunk_id")) not in chunk_id_set:
+                continue
+            meta["digest_window"] = digest_id
+            docs.append(Document(page_content=content or "", metadata=meta))
+            if len(docs) >= max_expand:
+                break
+        return docs
+
+    @staticmethod
+    def _estimate_digest_coverage_score(digest_docs):
+        if not digest_docs:
+            return 0.0
+        chapter_keys = set()
+        section_keys = set()
+        for doc in digest_docs:
+            metadata = (getattr(doc, "metadata", {}) or {})
+            chapter_key = metadata.get("chapter_idx") or metadata.get("chapter_title")
+            section_key = metadata.get("section_idx") or metadata.get("section_title")
+            if chapter_key:
+                chapter_keys.add(str(chapter_key))
+            if section_key:
+                section_keys.add(str(section_key))
+        diversity = min(1.0, len(chapter_keys) / 3.0)
+        detail = min(1.0, len(section_keys) / 4.0)
+        return round((0.7 * diversity) + (0.3 * detail), 3)
+
+    @staticmethod
+    def _refine_digest_queries(query_list, digest_docs):
+        base_queries = [q for q in query_list if q]
+        anchors = []
+        for doc in digest_docs[:3]:
+            metadata = (getattr(doc, "metadata", {}) or {})
+            anchor = metadata.get("chapter_title") or metadata.get("section_title")
+            if anchor:
+                anchors.append(str(anchor))
+        refined = list(base_queries)
+        for anchor in anchors:
+            refined.append(f"{base_queries[0] if base_queries else ''} {anchor}".strip())
+        seen = set()
+        deduped = []
+        for item in refined:
+            key = item.lower().strip()
+            if key and key not in seen:
+                seen.add(key)
+                deduped.append(item)
+        return deduped[:8]
+
     def _build_digest_documents(self, docs, ingest_id, source_basename, doc_title):
         groups = self._group_chunks_for_digest(docs)
         if not groups:
@@ -3485,6 +3693,7 @@ class AgenticRAGApp:
             )
             metadata = {
                 "doc_type": "digest",
+                "digest_scope": "section",
                 "tree_level": 1,
                 "ingest_id": ingest_id,
                 "source": source_basename,
@@ -4155,6 +4364,7 @@ class AgenticRAGApp:
             "final_k": max(1, int(retrieval.get("final_k", self.final_k.get()))),
             "mmr_lambda": float(retrieval.get("mmr_lambda", self.mmr_lambda.get())),
             "search_type": retrieval.get("search_type", self.search_type.get()),
+            "retrieval_mode": retrieval.get("retrieval_mode", self.retrieval_mode.get()),
             "agentic_mode": bool(iteration.get("agentic_mode", self.agentic_mode.get())),
             "agentic_max_iterations": max(
                 1,
@@ -6657,9 +6867,13 @@ class AgenticRAGApp:
             if self.build_digest_index.get():
                 if db_type == "chroma":
                     self.log("Building summary tree (L1 sections, L2 document summary)...")
-                    digest_docs = self._build_digest_documents(
+                    section_digest_docs = self._build_digest_documents(
                         docs, chunk_ingest_id, source_basename, doc_title
                     )
+                    chapter_digest_docs = self._build_chapter_digest_documents(
+                        docs, chunk_ingest_id, source_basename, doc_title
+                    )
+                    digest_docs = [*chapter_digest_docs, *section_digest_docs]
                     summary_tree_docs = [*digest_docs]
                     summary_tree_docs.extend(
                         self._build_document_summary_node(
@@ -6667,7 +6881,9 @@ class AgenticRAGApp:
                         )
                     )
                     self.log(
-                        f"Prepared summary tree nodes: L1={len(digest_docs)}, "
+                        "Prepared summary tree nodes: "
+                        f"chapter_digests={len(chapter_digest_docs)}, "
+                        f"section_digests={len(section_digest_docs)}, "
                         f"L2={max(0, len(summary_tree_docs) - len(digest_docs))}."
                     )
                 else:
@@ -6994,6 +7210,13 @@ class AgenticRAGApp:
                 except Exception as exc:
                     self.log(f"Digest store unavailable; skipping digest tier. ({exc})")
                     digest_store = None
+            resolved_retrieval_mode = self._resolve_retrieval_mode(
+                query, resolved_settings, bool(digest_store)
+            )
+            use_hierarchical_retrieval = resolved_retrieval_mode == "hierarchical" and bool(digest_store)
+            if resolved_retrieval_mode == "hierarchical" and not digest_store:
+                self.log("Hierarchical retrieval requested, but digest index unavailable; falling back to flat retrieval.")
+            self.log(f"Retrieval mode resolved: {resolved_retrieval_mode}.")
             use_mini_digest = (
                 digest_missing and self.selected_collection_name == RAW_COLLECTION_NAME
             )
@@ -7312,8 +7535,7 @@ class AgenticRAGApp:
                         {"fetch_k": fetch_k, "lambda_mult": mmr_lambda}
                     )
                 return search_kwargs_local
-
-            def _retrieve_digest_nodes(query_list, remaining_cap, k_value, digest_store, tree_level=None):
+            def _retrieve_digest_nodes(query_list, remaining_cap, k_value, digest_store, tree_level=None, digest_scope=None):
                 if remaining_cap <= 0 or not digest_store:
                     return [], 0, True
                 filtered_queries = [q for q in query_list if q]
@@ -7333,18 +7555,16 @@ class AgenticRAGApp:
                         cap_reached = True
                         break
                     query_k = min(per_query_k, digest_cap - len(docs_local))
-                    retriever = digest_store.as_retriever(
-                        search_type=search_type,
-                        search_kwargs=_build_search_kwargs(query_k),
+                    batch = self.search_digests(
+                        sub_query,
+                        query_k,
+                        digest_store,
+                        tree_level=tree_level,
+                        digest_scope=digest_scope,
                     )
-                    batch = retriever.invoke(sub_query)
-                    if tree_level is not None:
-                        batch = [
-                            doc
-                            for doc in batch
-                            if int((getattr(doc, "metadata", {}) or {}).get("tree_level", 1))
-                            == int(tree_level)
-                        ]
+                    self.log(
+                        f"search_digests(query='{sub_query[:48]}', k={query_k}) -> {len(batch)} digest hits."
+                    )
                     retrieved_count_local += len(batch)
                     docs_local.extend(batch)
                 docs_local = self._merge_dedupe_docs(docs_local)
@@ -7356,72 +7576,30 @@ class AgenticRAGApp:
             def _expand_digest_nodes(digest_docs, remaining_cap):
                 if not digest_docs or remaining_cap <= 0:
                     return [], False
-                if not hasattr(self.vector_store, "_collection"):
-                    self.log("Digest expansion unavailable; missing raw collection handle.")
-                    return [], False
                 max_expand = min(MAX_RAW_CHUNKS, remaining_cap)
-                chunk_requests = {}
-                chunk_digest_map = {}
-                for digest_doc in digest_docs:
-                    metadata = getattr(digest_doc, "metadata", {}) or {}
-                    ingest_id = metadata.get("ingest_id")
-                    if not ingest_id:
-                        continue
-                    digest_id = metadata.get("digest_id") or metadata.get("section_title")
-                    chunk_ids = self._expand_compact_chunk_ids(
-                        metadata.get("child_chunk_ids", "")
-                    )
-                    if not chunk_ids:
-                        continue
-                    chunk_requests.setdefault(ingest_id, set()).update(chunk_ids)
-                    for chunk_id in chunk_ids:
-                        chunk_digest_map[(ingest_id, chunk_id)] = digest_id
                 raw_docs = []
                 cap_reached = False
-                collection = self.vector_store._collection
-                for ingest_id, chunk_ids in chunk_requests.items():
-                    if len(raw_docs) >= max_expand:
+                for digest_doc in digest_docs:
+                    digest_id = ((getattr(digest_doc, "metadata", {}) or {}).get("digest_id"))
+                    if not digest_id:
+                        continue
+                    remaining = max_expand - len(raw_docs)
+                    if remaining <= 0:
                         cap_reached = True
                         break
-                    remaining = max_expand - len(raw_docs)
-                    batch_ids = list(chunk_ids)[:remaining]
-                    if not batch_ids:
-                        continue
-                    filtered_in_python = False
-                    try:
-                        result = collection.get(
-                            where={
-                                "$and": [
-                                    {"ingest_id": ingest_id},
-                                    {"chunk_id": {"$in": batch_ids}},
-                                ]
-                            },
-                            include=["documents", "metadatas"],
-                        )
-                    except Exception:
-                        try:
-                            result = collection.get(
-                                where={"ingest_id": ingest_id},
-                                include=["documents", "metadatas"],
-                            )
-                            filtered_in_python = True
-                        except Exception as exc2:
-                            self.log(f"Digest expansion failed; falling back to raw search. ({exc2})")
-                            return [], False
-                    docs = result.get("documents") or []
-                    metadatas = result.get("metadatas") or []
-                    batch_id_set = {str(item) for item in batch_ids}
-                    for content, metadata in zip(docs, metadatas):
-                        if content is None:
-                            continue
-                        meta = metadata or {}
-                        if filtered_in_python and str(meta.get("chunk_id")) not in batch_id_set:
-                            continue
-                        chunk_id = meta.get("chunk_id")
-                        digest_window = chunk_digest_map.get((ingest_id, chunk_id))
-                        if digest_window:
-                            meta["digest_window"] = digest_window
-                        raw_docs.append(Document(page_content=content, metadata=meta))
+                    expanded_docs = self.expand_digest_to_chunks(
+                        digest_id=digest_id,
+                        k_within=remaining,
+                        digest_store=digest_store,
+                    )
+                    self.log(
+                        f"expand_digest_to_chunks(digest_id='{digest_id}', k_within={remaining}) -> {len(expanded_docs)} chunks."
+                    )
+                    raw_docs.extend(expanded_docs)
+                raw_docs = self._merge_dedupe_docs(raw_docs)
+                if len(raw_docs) > max_expand:
+                    raw_docs = raw_docs[:max_expand]
+                    cap_reached = True
                 return raw_docs, cap_reached
 
             def _retrieve_with_digest(query_list, remaining_cap, k_value):
@@ -7429,95 +7607,64 @@ class AgenticRAGApp:
                 digest_selected = 0
                 raw_expanded_count = 0
                 levels_used = []
-                if digest_store:
-                    if use_recursive_retrieval:
-                        top_docs, top_retrieved, l2_cap_reached = _retrieve_digest_nodes(
-                            query_list,
+                if use_hierarchical_retrieval and digest_store:
+                    working_queries = [q for q in query_list if q]
+                    digest_docs = []
+                    # Acceptance test (logs): book-scale queries should emit digest search
+                    # then focused chunk expansion within selected chapters/sections.
+                    # Acceptance test (context): final selected chunks should reflect chapter diversity,
+                    # not only nearest-neighbor chunk locality.
+                    for iteration in range(MAX_HIERARCHICAL_RECURSION_ITERATIONS):
+                        chapter_docs, chapter_retrieved, chapter_cap = _retrieve_digest_nodes(
+                            working_queries,
                             remaining_cap,
                             k_value,
                             digest_store,
-                            tree_level=2,
+                            tree_level=1,
+                            digest_scope="chapter",
                         )
-                        if top_docs:
-                            levels_used.append("L2")
-                            digest_retrieved += top_retrieved
-                            selected_ingest_ids = {
-                                (getattr(doc, "metadata", {}) or {}).get("ingest_id")
-                                for doc in top_docs
-                            }
-                            selected_ingest_ids = {item for item in selected_ingest_ids if item}
-                            expanded_sections = []
-                            for ingest_id in selected_ingest_ids:
-                                cache_key = (tuple(query_list), ingest_id, "l1")
-                                if cache_key not in recursive_expansion_cache:
-                                    section_docs, section_retrieved, _ = _retrieve_digest_nodes(
-                                        query_list,
-                                        remaining_cap,
-                                        k_value,
-                                        digest_store,
-                                        tree_level=1,
-                                    )
-                                    section_docs = [
-                                        doc
-                                        for doc in section_docs
-                                        if (getattr(doc, "metadata", {}) or {}).get("ingest_id") == ingest_id
-                                    ]
-                                    recursive_expansion_cache[cache_key] = (section_docs, section_retrieved)
-                                cached_sections, section_retrieved = recursive_expansion_cache[cache_key]
-                                digest_retrieved += section_retrieved
-                                expanded_sections.extend(cached_sections)
-                            digest_docs = self._merge_dedupe_docs(expanded_sections)
-                            digest_selected = len(digest_docs)
-                            if digest_docs:
-                                levels_used.append("L1")
-                                raw_cache_key = (tuple(query_list), tuple(sorted(selected_ingest_ids)), "l0")
-                                if raw_cache_key not in recursive_expansion_cache:
-                                    raw_docs, raw_cap_reached = _expand_digest_nodes(
-                                        digest_docs, remaining_cap
-                                    )
-                                    recursive_expansion_cache[raw_cache_key] = (
-                                        raw_docs,
-                                        raw_cap_reached,
-                                    )
-                                raw_docs, raw_cap_reached = recursive_expansion_cache[raw_cache_key]
-                                raw_expanded_count = len(raw_docs)
-                                if raw_docs:
-                                    levels_used.append("L0")
-                                    self.log(
-                                        "Recursive retrieval path: "
-                                        f"L2 docs={len(top_docs)} -> L1 sections={len(digest_docs)} -> L0 chunks={len(raw_docs)}"
-                                    )
-                                    return (
-                                        raw_docs,
-                                        0,
-                                        l2_cap_reached or raw_cap_reached,
-                                        digest_docs,
-                                        raw_expanded_count,
-                                        digest_retrieved,
-                                        digest_selected,
-                                        levels_used,
-                                    )
-                    digest_docs, digest_retrieved, digest_cap_reached = _retrieve_digest_nodes(
-                        query_list, remaining_cap, k_value, digest_store, tree_level=1
-                    )
-                    digest_selected = len(digest_docs)
+                        section_docs, section_retrieved, section_cap = _retrieve_digest_nodes(
+                            working_queries,
+                            remaining_cap,
+                            k_value,
+                            digest_store,
+                            tree_level=1,
+                            digest_scope="section",
+                        )
+                        digest_docs = self._merge_dedupe_docs(chapter_docs + section_docs)
+                        digest_retrieved = chapter_retrieved + section_retrieved
+                        digest_selected = len(digest_docs)
+                        coverage_score = self._estimate_digest_coverage_score(digest_docs)
+                        self.log(
+                            "Hierarchical retrieval iteration "
+                            f"{iteration + 1}: selected_digests={digest_selected}, coverage_score={coverage_score}."
+                        )
+                        if coverage_score >= HIERARCHICAL_COVERAGE_MIN_SCORE or iteration + 1 >= MAX_HIERARCHICAL_RECURSION_ITERATIONS:
+                            break
+                        refined_queries = self._refine_digest_queries(working_queries, digest_docs)
+                        if refined_queries == working_queries:
+                            break
+                        working_queries = refined_queries
+                        self.log(
+                            "Coverage score below threshold; refining digest queries for another pass: "
+                            f"{working_queries}."
+                        )
                     if digest_docs:
                         levels_used.extend(["L1", "L0"])
-                    raw_docs, raw_cap_reached = _expand_digest_nodes(
-                        digest_docs, remaining_cap
-                    )
+                    raw_docs, raw_cap_reached = _expand_digest_nodes(digest_docs, remaining_cap)
                     raw_expanded_count = len(raw_docs)
                     if raw_docs:
                         return (
                             raw_docs,
                             0,
-                            digest_cap_reached or raw_cap_reached,
+                            chapter_cap or section_cap or raw_cap_reached,
                             digest_docs,
                             raw_expanded_count,
                             digest_retrieved,
                             digest_selected,
                             levels_used,
                         )
+                    self.log("Hierarchical digest expansion returned no chunks; falling back to flat retrieval.")
                 raw_docs, retrieved_count, cap_reached = _retrieve_for_queries(
                     query_list, remaining_cap, k_value
                 )
