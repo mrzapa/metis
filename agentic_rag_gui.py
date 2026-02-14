@@ -1381,9 +1381,14 @@ class AgenticRAGApp:
         ).pack(side="left")
         ttk.Button(
             action_frame,
+            text="Export notes to Markdown",
+            command=self.export_notes_to_markdown,
+        ).pack(side="left", padx=8)
+        ttk.Button(
+            action_frame,
             text="Export run as AgentLightning dataset",
             command=self.export_run_as_agent_lightning_dataset,
-        ).pack(side="left", padx=8)
+        ).pack(side="left")
 
         # Options
         opt_frame = ttk.Frame(left_pane)
@@ -4335,8 +4340,11 @@ class AgenticRAGApp:
         packs = {
             "Standard RAG Q&A": "",
             "Book Tutor": (
-                "Mode: Book Tutor. Use a Socratic teaching style. Start with a compact lesson, "
-                "then include 2-4 comprehension questions, and optionally add flashcards if useful."
+                "Mode: Book Tutor. Teach in plain English using the book's framing. "
+                "Prefer concept cards + chapter digests; retrieve raw chunks only when needed for missing support. "
+                "Include 2-3 analogies/examples, ask exactly 3 Socratic questions unless user asks one-shot output, "
+                "generate exactly 10 flashcards (Q/A), and generate a short 5-question quiz with answer key. "
+                "Use minimal claim-level [S#] citations."
             ),
             "Blinkist-style Summary": (
                 "Mode: Blinkist-style Summary. Produce a concise summary: big idea, key takeaways, "
@@ -4352,6 +4360,54 @@ class AgenticRAGApp:
             ),
         }
         return packs.get(mode, "")
+
+    def _is_one_shot_learning_request(self, query):
+        text = (query or "").strip().lower()
+        if not text:
+            return False
+        one_shot_signals = [
+            "one-shot",
+            "one shot",
+            "no follow-up",
+            "no follow up",
+            "without questions",
+            "just teach me",
+            "single response",
+        ]
+        return any(signal in text for signal in one_shot_signals)
+
+    def _render_flashcards(self, flashcards):
+        rendered = ["### Flashcards (10)"]
+        for idx, card in enumerate(flashcards or [], start=1):
+            question = str(card.get("q") or "").strip()
+            answer = str(card.get("a") or "").strip()
+            sources = [str(s).strip() for s in (card.get("sources") or []) if str(s).strip()]
+            citation = f" [{' '.join(sources)}]" if sources else ""
+            if not question or not answer:
+                continue
+            rendered.append(f"{idx}. Q: {question}")
+            rendered.append(f"   A: {answer}{citation}")
+        return "\n".join(rendered)
+
+    def _render_quiz(self, quiz_items, answer_key):
+        rendered = ["### Quiz (5 questions)"]
+        for idx, item in enumerate(quiz_items or [], start=1):
+            q_text = str(item.get("question") or "").strip()
+            if q_text:
+                rendered.append(f"{idx}. {q_text}")
+        rendered.append("\n### Answer Key")
+        for idx, item in enumerate(answer_key or [], start=1):
+            answer = str(item.get("answer") or "").strip()
+            reason = str(item.get("why") or "").strip()
+            sources = [str(s).strip() for s in (item.get("sources") or []) if str(s).strip()]
+            citation = f" [{' '.join(sources)}]" if sources else ""
+            if answer:
+                line = f"{idx}. {answer}"
+                if reason:
+                    line += f" — {reason}"
+                line += citation
+                rendered.append(line)
+        return "\n".join(rendered)
 
     def _resolve_mode_profile_settings(self, query=None):
         mode = self.selected_mode.get().strip() or "Standard RAG Q&A"
@@ -7649,6 +7705,122 @@ class AgenticRAGApp:
                 stage_b_response = llm.invoke(stage_b_messages)
                 return str(stage_b_response.content or "")
 
+            def _run_book_tutor_two_stage(llm, query_text, doc_list, digest_docs=None):
+                digest_docs = digest_docs or []
+                source_map, source_cards_text = self._build_source_cards(doc_list)
+                if not source_map:
+                    return ""
+
+                concept_cards = self.search_concepts(query_text, k=20)
+                chapter_digests = []
+                for digest_doc in digest_docs:
+                    metadata = getattr(digest_doc, "metadata", {}) or {}
+                    digest_scope = str(metadata.get("digest_scope") or "").strip().lower()
+                    if digest_scope not in {"chapter", "section"}:
+                        continue
+                    chapter_digests.append(
+                        {
+                            "digest_scope": digest_scope,
+                            "chapter_idx": metadata.get("chapter_idx"),
+                            "chapter_title": str(metadata.get("chapter_title") or "").strip(),
+                            "section_idx": metadata.get("section_idx"),
+                            "section_title": str(metadata.get("section_title") or "").strip(),
+                            "summary": str(getattr(digest_doc, "page_content", "") or "").strip(),
+                        }
+                    )
+
+                compact_cards = []
+                for card in concept_cards[:20]:
+                    compact_cards.append(
+                        {
+                            "title": str(card.get("title") or "").strip(),
+                            "kind": str(card.get("kind") or "").strip(),
+                            "content": card.get("content") or {},
+                            "source_refs": card.get("source_refs") or [],
+                        }
+                    )
+
+                one_shot_mode = self._is_one_shot_learning_request(query_text)
+                socratic_rule = (
+                    "- socratic_questions: empty array because user asked for one-shot output with no interaction.\n"
+                    if one_shot_mode
+                    else "- socratic_questions: exactly 3 questions.\n"
+                )
+                stage_a_prompt = (
+                    "You are Stage A planner for Book Tutor mode. "
+                    "Build strict JSON for a lesson grounded in SOURCE_CARDS, CHAPTER_DIGESTS, and CONCEPT_CARDS. "
+                    "Prefer concept cards and chapter digests first; only rely on raw chunk detail when required to fill unsupported gaps. "
+                    "Use plain English and the book's framing. Keep citations minimal and claim-level with S# labels. "
+                    "Return only supported content; omit unsupported points entirely.\n\n"
+                    "Return ONLY valid JSON:\n"
+                    "{\n"
+                    "  \"lesson\": {\"concept\":\"\",\"explanation\":\"\",\"sources\":[\"S#\"]},\n"
+                    "  \"analogies\": [{\"example\":\"\",\"sources\":[\"S#\"]}],\n"
+                    "  \"socratic_questions\": [\"\"],\n"
+                    "  \"flashcards\": [{\"q\":\"\",\"a\":\"\",\"sources\":[\"S#\"]}],\n"
+                    "  \"quiz\": {\"questions\": [{\"question\":\"\"}], \"answer_key\": [{\"answer\":\"\",\"why\":\"\",\"sources\":[\"S#\"]}]}\n"
+                    "}\n\n"
+                    "Rules:\n"
+                    "- lesson.explanation: plain English using the book framing.\n"
+                    "- analogies: 2-3 entries.\n"
+                    f"{socratic_rule}"
+                    "- flashcards: exactly 10 Q/A cards.\n"
+                    "- quiz.questions: exactly 5 questions.\n"
+                    "- quiz.answer_key: exactly 5 entries matching quiz.questions order.\n"
+                    "- Omit placeholders or TODO markers.\n"
+                )
+                stage_a_messages = [
+                    SystemMessage(content=stage_a_prompt),
+                    HumanMessage(
+                        content=(
+                            f"User request:\n{query_text}\n\n"
+                            f"SOURCE_CARDS:\n{source_cards_text}\n\n"
+                            f"CHAPTER_DIGESTS:\n{json.dumps(chapter_digests, ensure_ascii=False, indent=2)}\n\n"
+                            f"CONCEPT_CARDS:\n{json.dumps(compact_cards, ensure_ascii=False, indent=2)}"
+                        )
+                    ),
+                ]
+                stage_a_response = llm.invoke(stage_a_messages)
+                plan_payload = _extract_json_payload(stage_a_response.content)
+                if not isinstance(plan_payload, dict):
+                    plan_payload = {}
+
+                lesson = plan_payload.get("lesson") or {}
+                analogies = plan_payload.get("analogies") or []
+                socratic_questions = plan_payload.get("socratic_questions") or []
+                flashcards = plan_payload.get("flashcards") or []
+                quiz_payload = plan_payload.get("quiz") or {}
+                quiz_questions = quiz_payload.get("questions") or []
+                answer_key = quiz_payload.get("answer_key") or []
+
+                lesson_title = str(lesson.get("concept") or "").strip() or "Concept"
+                lesson_body = str(lesson.get("explanation") or "").strip()
+                lesson_sources = [str(s).strip() for s in (lesson.get("sources") or []) if str(s).strip()]
+                lesson_citation = f" [{' '.join(lesson_sources)}]" if lesson_sources else ""
+
+                rendered = [f"## Book Tutor — {lesson_title}"]
+                if lesson_body:
+                    rendered.append(f"{lesson_body}{lesson_citation}")
+
+                rendered.append("\n### Analogies & Examples")
+                for idx, item in enumerate(analogies[:3], start=1):
+                    example = str(item.get("example") or "").strip()
+                    sources = [str(s).strip() for s in (item.get("sources") or []) if str(s).strip()]
+                    citation = f" [{' '.join(sources)}]" if sources else ""
+                    if example:
+                        rendered.append(f"{idx}. {example}{citation}")
+
+                if not one_shot_mode:
+                    rendered.append("\n### Socratic Questions")
+                    for idx, q in enumerate(socratic_questions[:3], start=1):
+                        question = str(q).strip()
+                        if question:
+                            rendered.append(f"{idx}. {question}")
+
+                rendered.append("\n" + self._render_flashcards(flashcards[:10]))
+                rendered.append("\n" + self._render_quiz(quiz_questions[:5], answer_key[:5]))
+                return "\n".join(rendered).strip()
+
             def _build_search_kwargs(k_value):
                 search_kwargs_local = {"k": k_value}
                 if search_type == "mmr":
@@ -8598,6 +8770,7 @@ class AgenticRAGApp:
                 generation_started_at = time.perf_counter()
                 generation_ms = 0
                 is_blinkist_summary_style = self.output_style.get().strip() == "Blinkist-style summary"
+                is_book_tutor_mode = resolved_settings.get("mode") == "Book Tutor"
                 if is_evidence_pack:
                     response_content = _run_evidence_pack_two_stage(
                         llm,
@@ -8607,6 +8780,13 @@ class AgenticRAGApp:
                     )
                 elif is_blinkist_summary_style:
                     response_content = _run_blinkist_summary_two_stage(
+                        llm,
+                        query,
+                        final_docs,
+                        digest_docs=digest_docs,
+                    )
+                elif is_book_tutor_mode:
+                    response_content = _run_book_tutor_two_stage(
                         llm,
                         query,
                         final_docs,
@@ -9236,6 +9416,7 @@ class AgenticRAGApp:
                 generation_started_at = time.perf_counter()
                 generation_ms = 0
                 is_blinkist_summary_style = self.output_style.get().strip() == "Blinkist-style summary"
+                is_book_tutor_mode = resolved_settings.get("mode") == "Book Tutor"
                 if is_evidence_pack:
                     latest_answer = _run_evidence_pack_two_stage(
                         llm,
@@ -9248,6 +9429,13 @@ class AgenticRAGApp:
                     )
                 elif is_blinkist_summary_style:
                     latest_answer = _run_blinkist_summary_two_stage(
+                        llm,
+                        query,
+                        final_docs,
+                        digest_docs=digest_docs,
+                    )
+                elif is_book_tutor_mode:
+                    latest_answer = _run_book_tutor_two_stage(
                         llm,
                         query,
                         final_docs,
@@ -9519,6 +9707,27 @@ class AgenticRAGApp:
         self.root.update()
         self.log("Last answer copied to clipboard.")
 
+    def export_notes_to_markdown(self):
+        notes = (self.last_answer or "").strip()
+        if not notes:
+            messagebox.showinfo("No Notes", "There are no tutor notes to export yet.")
+            return
+        default_name = f"book_tutor_notes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".md",
+            initialfile=default_name,
+            filetypes=[("Markdown Files", "*.md"), ("All Files", "*.*")],
+            title="Export Notes to Markdown",
+        )
+        if not save_path:
+            return
+        try:
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write(notes + "\n")
+            self.log(f"Notes exported to Markdown: {save_path}")
+        except OSError as exc:
+            messagebox.showerror("Export Failed", f"Could not export notes: {exc}")
+
 
 # Acceptance tests (comments only; do not execute):
 # - Digest expansion: when filtering by ingest_id + chunk_id list, Chroma get should not throw "exactly one operator".
@@ -9532,6 +9741,7 @@ class AgenticRAGApp:
 # - With "Build Comprehension Index" enabled, ingestion should create concept_cards rows in SQLite.
 # - search_concepts("...") should return relevant concept_cards (title/kind/card_text/source refs) for topical queries.
 # - Concept cards should preserve grounded S#-style source locators via source_refs_json entries.
+# - Tutor mode produces flashcards and quiz for a query like "Teach me X from this book".
 
 
 if __name__ == "__main__":
