@@ -233,6 +233,7 @@ class AgenticRAGApp:
         self.enable_citation_v2 = tk.BooleanVar(value=False)
         self.enable_agent_lightning_telemetry = tk.BooleanVar(value=False)
         self._frontier_evidence_pack_mode = False
+        self._last_evidence_pack_synthesis_cards = []
 
         self.vector_store = None
         self.index_embedding_signature = ""
@@ -3483,13 +3484,127 @@ class AgenticRAGApp:
 
             cards.append(
                 {
+                    "incident_id": str(incident.get("title") or incident.get("incident_id") or "").strip(),
                     "when": when_text,
                     "what_happened": what_text,
                     "impact": impact_text,
                     "evidence": supporting[:3],
+                    "evidence_refs": supporting[:3],
                 }
             )
         return cards
+
+    def _verify_evidence_pack_claims(self, answer_text, synthesis_cards):
+        if not answer_text:
+            return answer_text
+        citation_re = re.compile(r"\[(S\d+(?:\s*,\s*S\d+)*)\]")
+        bullet_re = re.compile(r"^(\s*(?:[-*+]\s+|\d+[.)]\s+))(.*)$")
+        factual_hint_re = re.compile(
+            r"\b(is|are|was|were|has|have|had|shows?|indicates?|states?|reports?|found|observed|according|caused?|led|resulted|occurred|happened)\b",
+            re.I,
+        )
+
+        indexed_cards = []
+        for card in synthesis_cards or []:
+            incident_id = str(card.get("incident_id") or "").strip()
+            evidence_refs = []
+            for ref in card.get("evidence_refs") or card.get("evidence") or []:
+                label = str(ref).strip()
+                if re.match(r"^S\d+$", label) and label not in evidence_refs:
+                    evidence_refs.append(label)
+            if not evidence_refs:
+                continue
+            text_blob = " ".join(
+                [
+                    str(card.get("when") or ""),
+                    str(card.get("what_happened") or ""),
+                    str(card.get("impact") or ""),
+                ]
+            )
+            indexed_cards.append(
+                {
+                    "incident_id": incident_id,
+                    "incident_id_l": incident_id.lower(),
+                    "evidence_refs": evidence_refs,
+                    "tokens": self._claim_tokens(text_blob),
+                }
+            )
+
+        cleaned_lines = []
+        for raw_line in answer_text.splitlines():
+            if not raw_line.strip():
+                cleaned_lines.append(raw_line)
+                continue
+            stripped = raw_line.strip()
+            if stripped == "Sources:" or re.match(r"^-\s*S\d+\s*->", stripped):
+                cleaned_lines.append(raw_line)
+                continue
+            if re.match(r"^\s{0,3}#{1,6}\s+\S", raw_line):
+                cleaned_lines.append(raw_line)
+                continue
+
+            bullet_match = bullet_re.match(raw_line)
+            bullet_prefix = ""
+            body = raw_line
+            if bullet_match:
+                bullet_prefix = bullet_match.group(1)
+                body = bullet_match.group(2)
+
+            existing_labels = []
+            for group in citation_re.findall(body):
+                for label in [part.strip() for part in group.split(",") if part.strip()]:
+                    if label not in existing_labels:
+                        existing_labels.append(label)
+
+            kept_sentences = []
+            for sentence in self._sentence_split(body):
+                sentence = sentence.strip()
+                if not sentence:
+                    continue
+                if sentence.lower().startswith("scope:"):
+                    kept_sentences.append(sentence)
+                    continue
+
+                is_factual = bool(factual_hint_re.search(sentence)) or bool(re.search(r"\d", sentence)) or len(sentence) >= 48
+                if not is_factual:
+                    kept_sentences.append(sentence)
+                    continue
+
+                sentence_labels = []
+                for group in citation_re.findall(sentence):
+                    for label in [part.strip() for part in group.split(",") if part.strip()]:
+                        if label not in sentence_labels:
+                            sentence_labels.append(label)
+                mapped_labels = list(sentence_labels or existing_labels)
+
+                lower_sentence = sentence.lower()
+                sentence_tokens = self._claim_tokens(sentence)
+                if not mapped_labels:
+                    best_labels = []
+                    best_score = 0
+                    for card in indexed_cards:
+                        score = len(sentence_tokens & card["tokens"])
+                        if card["incident_id_l"] and card["incident_id_l"] in lower_sentence:
+                            score += 3
+                        if score > best_score:
+                            best_score = score
+                            best_labels = card["evidence_refs"]
+                    if best_score >= 2 and best_labels:
+                        mapped_labels = best_labels[:2]
+
+                if not mapped_labels:
+                    continue
+
+                if not sentence_labels:
+                    sentence = sentence.rstrip() + " [" + ", ".join(mapped_labels[:2]) + "]"
+                kept_sentences.append(sentence)
+
+            if not kept_sentences:
+                continue
+            rebuilt = " ".join(kept_sentences).strip()
+            cleaned_lines.append(f"{bullet_prefix}{rebuilt}" if bullet_prefix else rebuilt)
+
+        return "\n".join(cleaned_lines).strip()
 
     @staticmethod
     def _infer_theme_from_incident(incident):
@@ -4266,9 +4381,21 @@ class AgenticRAGApp:
         repaired = repair_llm.invoke(repair_messages)
         return repaired.content
 
-    def _validate_and_repair(self, answer_text, context_text, iteration_id=None):
+    def _validate_and_repair(self, answer_text, context_text, iteration_id=None, evidence_pack_mode=False, synthesis_cards=None):
         output_style = self.output_style.get().strip()
         agentic_mode = self.agentic_mode.get()
+        if evidence_pack_mode:
+            answer_text = self._verify_evidence_pack_claims(
+                answer_text, synthesis_cards or self._last_evidence_pack_synthesis_cards
+            )
+            if iteration_id is not None:
+                self.log(
+                    "Iter "
+                    f"{iteration_id} repair | style={output_style}, "
+                    f"agentic={int(agentic_mode)}, triggered=0, failures=none"
+                )
+            return answer_text
+
         answer_text, claim_failures = self._claim_level_sanitize(answer_text, context_text)
         is_valid, failures = self._validate_answer(
             answer_text, context_text, output_style
@@ -5099,6 +5226,7 @@ class AgenticRAGApp:
             )
             is_evidence_pack = self.is_evidence_pack_query(query, output_style)
             self._frontier_evidence_pack_mode = bool(is_evidence_pack)
+            self._last_evidence_pack_synthesis_cards = []
             self.log(
                 "Frontier flags (chat): "
                 f"langextract={self._frontier_enabled('langextract')}, "
@@ -5437,6 +5565,7 @@ class AgenticRAGApp:
                     ),
                 ]
                 stage_b_response = llm.invoke(stage_b_messages)
+                self._last_evidence_pack_synthesis_cards = synthesis_cards
                 return stage_b_response.content
 
             def _build_search_kwargs(k_value):
@@ -6296,7 +6425,11 @@ class AgenticRAGApp:
                 generation_ms = int((time.perf_counter() - generation_started_at) * 1000)
                 validation_started_at = time.perf_counter()
                 validated_answer = self._validate_and_repair(
-                    response_content, context_text, iteration_id=1
+                    response_content,
+                    context_text,
+                    iteration_id=1,
+                    evidence_pack_mode=is_evidence_pack,
+                    synthesis_cards=self._last_evidence_pack_synthesis_cards,
                 )
                 validation_ms = int((time.perf_counter() - validation_started_at) * 1000)
                 self._append_jsonl_telemetry(
@@ -6844,7 +6977,11 @@ class AgenticRAGApp:
             if latest_answer:
                 validation_started_at = time.perf_counter()
                 validated_answer = self._validate_and_repair(
-                    latest_answer, latest_context_text, iteration_id=last_iteration_id
+                    latest_answer,
+                    latest_context_text,
+                    iteration_id=last_iteration_id,
+                    evidence_pack_mode=is_evidence_pack,
+                    synthesis_cards=self._last_evidence_pack_synthesis_cards,
                 )
                 validation_ms = int((time.perf_counter() - validation_started_at) * 1000)
                 self._append_jsonl_telemetry(
