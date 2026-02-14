@@ -1476,17 +1476,19 @@ class AgenticRAGApp:
         self.evidence_notebook.add(self.sources_tab, text="Sources")
         self.sources_tree = ttk.Treeview(
             self.sources_tab,
-            columns=("sid", "title", "date", "actor", "type"),
+            columns=("sid", "doc", "chapter", "section", "location", "speaker", "date"),
             show="headings",
             height=10,
             selectmode="extended",
         )
         for col, label, width in [
             ("sid", "S#", 50),
-            ("title", "Title", 150),
-            ("date", "Date", 90),
-            ("actor", "Actor", 100),
-            ("type", "Type", 80),
+            ("doc", "Doc", 140),
+            ("chapter", "Chapter", 140),
+            ("section", "Section", 140),
+            ("location", "Locator", 220),
+            ("speaker", "Speaker/Role", 120),
+            ("date", "Date/Month", 100),
         ]:
             self.sources_tree.heading(col, text=label)
             self.sources_tree.column(col, width=width, anchor="w")
@@ -1571,8 +1573,10 @@ class AgenticRAGApp:
             ranges = self.chat_display.tag_prevrange("citation", index)
             if not ranges:
                 return
-            label = self.chat_display.get(ranges[0], ranges[1]).strip("[] \n,;")
-            self._select_source_by_sid(label)
+            raw = self.chat_display.get(ranges[0], ranges[1]).strip()
+            match = re.search(r"S\d+", raw)
+            if match:
+                self._select_source_by_sid(match.group(0))
         except Exception:
             return
 
@@ -1583,8 +1587,10 @@ class AgenticRAGApp:
             ranges = self.answer_text.tag_prevrange("citation", index)
             if not ranges:
                 return
-            label = self.answer_text.get(ranges[0], ranges[1]).strip("[] \n,;")
-            self._select_source_by_sid(label)
+            raw = self.answer_text.get(ranges[0], ranges[1]).strip()
+            match = re.search(r"S\d+", raw)
+            if match:
+                self._select_source_by_sid(match.group(0))
         except Exception:
             return
 
@@ -1609,15 +1615,17 @@ class AgenticRAGApp:
         excerpt = str(entry.get("excerpt") or "").strip() or "(no excerpt captured)"
         detail_lines = [
             f"Citation: {entry.get('sid', '')}",
-            f"Label: {entry.get('label', 'unknown')}",
-            f"Title: {entry.get('title', 'unknown')}",
-            f"Date: {entry.get('date', 'undated')}",
-            f"Actor: {entry.get('actor', 'unknown')}",
+            f"Source Card: {entry.get('label', 'unknown')}",
+            f"Doc: {entry.get('title', 'unknown')}",
+            f"Chapter: {entry.get('chapter', '-')}",
+            f"Section: {entry.get('section', '-')}",
+            f"Date/Month: {entry.get('date', entry.get('month_bucket', 'undated'))}",
+            f"Speaker/Role: {entry.get('speaker', entry.get('actor', 'unknown'))}",
             f"Type: {entry.get('type', 'unknown')}",
             f"Locator: {entry.get('locator', 'unknown')}",
             f"Anchor: {entry.get('anchor', '') or '(none)'}",
             "",
-            "Excerpt window:",
+            "Evidence snippet:",
             excerpt,
             "",
             "Full metadata:",
@@ -1642,16 +1650,24 @@ class AgenticRAGApp:
         for source_id in ordered_source_ids:
             entry = (source_map or {}).get(source_id, {})
             sid = label_by_source[source_id]
+            chapter_label = entry.get("chapter") or "-"
+            if chapter_label != "-" and entry.get("chapter_idx"):
+                chapter_label = f"{entry.get('chapter_idx')}. {chapter_label}"
+            section_label = entry.get("section") or "-"
+            if section_label != "-" and entry.get("section_idx"):
+                section_label = f"{entry.get('section_idx')}. {section_label}"
             self.sources_tree.insert(
                 "",
                 tk.END,
                 iid=sid,
                 values=(
                     sid,
-                    entry.get("label", entry.get("title", "unknown")),
-                    entry.get("date", "unknown"),
-                    entry.get("actor", "unknown"),
-                    entry.get("type", "unknown"),
+                    entry.get("title", "unknown"),
+                    chapter_label,
+                    section_label,
+                    entry.get("locator", "unknown"),
+                    entry.get("speaker", entry.get("actor", "unknown")),
+                    entry.get("date", entry.get("month_bucket", "unknown")),
                 ),
             )
             self._source_id_by_tree_iid[sid] = source_id
@@ -4210,6 +4226,81 @@ class AgenticRAGApp:
             return ""
         return " ".join(words[:max_words]).strip(" ,;:-")
 
+    @staticmethod
+    def _detect_structure_markers(text):
+        chapter_markers = []
+        section_markers = []
+        chapter_idx = 0
+        section_idx = 0
+        cursor = 0
+        for raw_line in (text or "").splitlines(keepends=True):
+            line = raw_line.strip()
+            if not line:
+                cursor += len(raw_line)
+                continue
+
+            chapter_candidate = None
+            section_candidate = None
+            md_match = re.match(r"^(#{1,6})\s+(.+)$", line)
+            chapter_match = re.match(r"^(chapter|part)\s+([\w.-]+)?\s*[:\-–]?\s*(.*)$", line, re.IGNORECASE)
+            looks_all_caps = (
+                len(line) >= 6
+                and len(line) <= 90
+                and bool(re.search(r"[A-Z]", line))
+                and line.upper() == line
+                and len(re.findall(r"[A-Z]", line)) >= 4
+            )
+
+            if chapter_match:
+                suffix = (chapter_match.group(3) or "").strip()
+                chapter_candidate = suffix or line
+            elif md_match:
+                level = len(md_match.group(1))
+                title = md_match.group(2).strip()
+                if level <= 2:
+                    chapter_candidate = title
+                else:
+                    section_candidate = title
+            elif looks_all_caps:
+                chapter_candidate = line.title()
+
+            if chapter_candidate:
+                chapter_idx += 1
+                chapter_markers.append(
+                    {"char_start": cursor, "chapter_idx": chapter_idx, "chapter_title": chapter_candidate}
+                )
+                section_idx = 0
+            if section_candidate:
+                section_idx += 1
+                section_markers.append(
+                    {"char_start": cursor, "section_idx": section_idx, "section_title": section_candidate}
+                )
+
+            cursor += len(raw_line)
+        return chapter_markers, section_markers
+
+    @staticmethod
+    def _structure_at_offset(offset, markers):
+        active = None
+        for marker in markers:
+            if marker.get("char_start", -1) <= offset:
+                active = marker
+            else:
+                break
+        return active or {}
+
+    @staticmethod
+    def _format_char_bucket(value):
+        if value is None:
+            return "?"
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            return "?"
+        if n >= 1000:
+            return f"{round(n / 1000)}k"
+        return str(n)
+
     def _build_source_locator(self, metadata, content):
         enriched = self._ensure_source_metadata(
             metadata,
@@ -4229,6 +4320,25 @@ class AgenticRAGApp:
         role = str(enriched.get("role") or enriched.get("speaker_role") or "unknown role").strip().lower() or "unknown role"
         speaker = str(enriched.get("speaker") or enriched.get("source_actor") or role).strip() or role
         anchor = self._short_anchor(content)
+        chapter_idx = enriched.get("chapter_idx")
+        chapter_title = str(enriched.get("chapter_title") or "").strip()
+        section_title = str(enriched.get("section_title") or "").strip()
+        char_start = enriched.get("char_start")
+        char_end = enriched.get("char_end")
+        loc_parts = [title]
+        if chapter_title:
+            ch_label = f"Ch. {chapter_idx}" if chapter_idx else "Ch."
+            loc_parts.append(f"{ch_label} '{chapter_title}'")
+        if section_title:
+            loc_parts.append(f"§ '{section_title}'")
+        if enriched.get("page") or enriched.get("page_number"):
+            loc_parts.append(f"p. {enriched.get('page') or enriched.get('page_number')}")
+        elif char_start is not None or char_end is not None:
+            loc_parts.append(
+                f"chars {self._format_char_bucket(char_start)}–{self._format_char_bucket(char_end)}"
+            )
+        source_locator_text = " — ".join(loc_parts)
+        enriched["source_locator"] = source_locator_text
         stable_input = "|".join(
             [
                 title.lower(),
@@ -4238,10 +4348,17 @@ class AgenticRAGApp:
                 role.lower(),
                 speaker.lower(),
                 anchor.lower(),
+                str(chapter_idx or "").lower(),
+                chapter_title.lower(),
+                section_title.lower(),
+                str(char_start or "").lower(),
+                str(char_end or "").lower(),
             ]
         )
         source_id = hashlib.sha1(stable_input.encode("utf-8")).hexdigest()[:12]
         label = f"{title} • {month_key} • {channel_key} • {speaker}"
+        if chapter_title:
+            label += f" • {chapter_title}"
         if anchor:
             label += f' • "{anchor}"'
         return SourceLocator(source_id=source_id, label=label, anchor=anchor, metadata=enriched)
@@ -4272,6 +4389,12 @@ class AgenticRAGApp:
                     "actor": actor,
                     "type": source_type,
                     "locator": source_locator_text,
+                    "chapter": str(enriched.get("chapter_title") or "").strip(),
+                    "chapter_idx": enriched.get("chapter_idx"),
+                    "section": str(enriched.get("section_title") or "").strip(),
+                    "section_idx": enriched.get("section_idx"),
+                    "speaker": str(enriched.get("speaker") or enriched.get("source_actor") or "").strip() or "unknown",
+                    "month_bucket": str(enriched.get("month_key") or "undated"),
                     "chunk_ids": [],
                     "role_kind": role_kind,
                     "channel_key": channel_key,
@@ -4294,7 +4417,7 @@ class AgenticRAGApp:
         for source_id in ordered_source_ids:
             entry = source_map[source_id]
             lines.append(
-                f"- {entry['sid']} -> ({entry['label']})"
+                f"- {entry['sid']} {entry['locator']} | speaker={entry['speaker']} | month={entry['month_bucket']}"
             )
         return source_map, "\n".join(lines)
 
@@ -6135,6 +6258,8 @@ class AgenticRAGApp:
                 )
                 docs = splitter.create_documents([text_content])
 
+            chapter_markers, section_markers = self._detect_structure_markers(text_content)
+
             def _last_section_title(text):
                 last_heading = None
                 for line in text.splitlines():
@@ -6147,22 +6272,43 @@ class AgenticRAGApp:
 
             if chatgpt_docs is None:
                 last_section_title = None
+                search_cursor = 0
                 for chunk_id, doc in enumerate(docs, start=1):
                     section_title = _last_section_title(doc.page_content)
                     if section_title:
                         last_section_title = section_title
+                    chunk_body = str(doc.page_content or "")
+                    char_start = text_content.find(chunk_body, search_cursor)
+                    if char_start < 0:
+                        char_start = text_content.find(chunk_body)
+                    if char_start < 0:
+                        char_start = search_cursor
+                    char_end = char_start + len(chunk_body)
+                    search_cursor = max(search_cursor, max(char_end - self.chunk_overlap.get(), char_start))
+                    active_chapter = self._structure_at_offset(char_start, chapter_markers)
+                    active_section = self._structure_at_offset(char_start, section_markers)
                     metadata = (doc.metadata or {}).copy()
                     metadata.update(
                         {
                             "source": source_basename,
                             "chunk_id": chunk_id,
                             "ingest_id": chunk_ingest_id,
+                            "char_start": char_start,
+                            "char_end": char_end,
                         }
                     )
                     if doc_title:
                         metadata["doc_title"] = doc_title
                     if last_section_title:
                         metadata["section_title"] = last_section_title
+                    if active_chapter.get("chapter_title"):
+                        metadata["chapter_title"] = active_chapter.get("chapter_title")
+                    if active_chapter.get("chapter_idx"):
+                        metadata["chapter_idx"] = active_chapter.get("chapter_idx")
+                    if active_section.get("section_title") and not metadata.get("section_title"):
+                        metadata["section_title"] = active_section.get("section_title")
+                    if active_section.get("section_idx"):
+                        metadata["section_idx"] = active_section.get("section_idx")
                     metadata = self._ensure_source_metadata(
                         metadata, self.selected_file, doc.page_content
                     )
@@ -8739,7 +8885,8 @@ class AgenticRAGApp:
 # - Ingestion should not emit utcnow() deprecation warning.
 # - If citation_v2 enabled, answer uses [S#] and Sources shows readable labels (not chunk ids).
 # - If citation_v2 disabled, legacy [Chunk N] citations still work end-to-end.
-
+# - A generated answer includes [S#] citations and a Sources list with meaningful labels (not chunk-only labels).
+# - Source cards include chapter/section and char offset locator for book-like raw text ingestion.
 
 
 if __name__ == "__main__":
