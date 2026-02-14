@@ -12,6 +12,8 @@ import re
 import hashlib
 import sqlite3
 import uuid
+import html
+import webbrowser
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -236,6 +238,9 @@ class AgenticRAGApp:
         self._last_evidence_pack_synthesis_cards = []
         self._agent_lightning_runs_by_id = {}
         self._agent_lightning_last_exportable_run = None
+        self._latest_source_map = {}
+        self._latest_incidents = []
+        self._latest_grounding_html_path = ""
 
         self.vector_store = None
         self.index_embedding_signature = ""
@@ -1011,9 +1016,17 @@ class AgenticRAGApp:
             row=1, column=3, sticky="w", padx=(5, 0), pady=(6, 0)
         )
 
+        content_split = ttk.Panedwindow(frame, orient=tk.HORIZONTAL)
+        content_split.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        left_pane = ttk.Frame(content_split)
+        right_pane = ttk.Frame(content_split, width=380)
+        content_split.add(left_pane, weight=4)
+        content_split.add(right_pane, weight=2)
+
         # Chat Display
         self.chat_display = scrolledtext.ScrolledText(
-            frame, state="disabled", font=("Segoe UI", 10), wrap=tk.WORD
+            left_pane, state="disabled", font=("Segoe UI", 10), wrap=tk.WORD
         )
         self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
@@ -1028,7 +1041,7 @@ class AgenticRAGApp:
         self.chat_display.tag_config("source", foreground="#888888", font=("Consolas", 8))
 
         # Input
-        input_frame = ttk.Frame(frame)
+        input_frame = ttk.Frame(left_pane)
         input_frame.pack(fill="x")
 
         self.txt_input = ttk.Entry(input_frame, font=("Segoe UI", 11))
@@ -1039,7 +1052,7 @@ class AgenticRAGApp:
         btn_send.pack(side="right")
 
         # Quick Actions
-        action_frame = ttk.Frame(frame)
+        action_frame = ttk.Frame(left_pane)
         action_frame.pack(fill="x", pady=(8, 4))
         ttk.Button(action_frame, text="Clear Chat", command=self.clear_chat).pack(
             side="left"
@@ -1057,7 +1070,7 @@ class AgenticRAGApp:
         ).pack(side="left", padx=8)
 
         # Options
-        opt_frame = ttk.Frame(frame)
+        opt_frame = ttk.Frame(left_pane)
         opt_frame.pack(fill="x", pady=5)
         ttk.Checkbutton(
             opt_frame,
@@ -1078,7 +1091,7 @@ class AgenticRAGApp:
             side="left"
         )
 
-        output_frame = ttk.Frame(frame)
+        output_frame = ttk.Frame(left_pane)
         output_frame.pack(fill="x", pady=(2, 4))
         ttk.Label(output_frame, text="Output style:").pack(side="left")
         ttk.Combobox(
@@ -1089,7 +1102,7 @@ class AgenticRAGApp:
             width=22,
         ).pack(side="left", padx=(6, 0))
 
-        agentic_frame = ttk.LabelFrame(frame, text="Agentic Options", padding=8)
+        agentic_frame = ttk.LabelFrame(left_pane, text="Agentic Options", padding=8)
         agentic_frame.pack(fill="x", pady=(5, 0))
         ttk.Checkbutton(
             agentic_frame,
@@ -1110,7 +1123,7 @@ class AgenticRAGApp:
             variable=self.show_retrieved_context,
         ).pack(side="left", padx=(12, 0))
 
-        frontier_wrap = ttk.LabelFrame(frame, text="Advanced / Frontier", padding=8)
+        frontier_wrap = ttk.LabelFrame(left_pane, text="Advanced / Frontier", padding=8)
         frontier_wrap.pack(fill="x", pady=(6, 0))
         self.frontier_collapsed = tk.BooleanVar(value=True)
 
@@ -1158,6 +1171,210 @@ class AgenticRAGApp:
             text="Enable Agent Lightning telemetry",
             variable=self.enable_agent_lightning_telemetry,
         ).pack(anchor="w")
+
+        # Right evidence pane
+        evidence_wrap = ttk.LabelFrame(right_pane, text="Evidence Navigator", padding=8)
+        evidence_wrap.pack(fill=tk.BOTH, expand=True)
+        self.evidence_notebook = ttk.Notebook(evidence_wrap)
+        self.evidence_notebook.pack(fill=tk.BOTH, expand=True)
+
+        self.sources_tab = ttk.Frame(self.evidence_notebook)
+        self.evidence_notebook.add(self.sources_tab, text="Sources")
+        self.sources_tree = ttk.Treeview(
+            self.sources_tab,
+            columns=("sid", "title", "date", "actor", "type"),
+            show="headings",
+            height=10,
+            selectmode="extended",
+        )
+        for col, label, width in [
+            ("sid", "S#", 50),
+            ("title", "Title", 150),
+            ("date", "Date", 90),
+            ("actor", "Actor", 100),
+            ("type", "Type", 80),
+        ]:
+            self.sources_tree.heading(col, text=label)
+            self.sources_tree.column(col, width=width, anchor="w")
+        self.sources_tree.tag_configure("supporting", background="#fff4cc")
+        self.sources_tree.pack(fill=tk.BOTH, expand=True)
+
+        self.incidents_tab = ttk.Frame(self.evidence_notebook)
+        self.evidence_notebook.add(self.incidents_tab, text="Incidents")
+        self.incidents_tree = ttk.Treeview(
+            self.incidents_tab,
+            columns=("when", "channel", "what", "evidence"),
+            show="headings",
+            height=8,
+        )
+        for col, label, width in [
+            ("when", "When", 90),
+            ("channel", "Channel", 70),
+            ("what", "What happened", 170),
+            ("evidence", "Evidence", 90),
+        ]:
+            self.incidents_tree.heading(col, text=label)
+            self.incidents_tree.column(col, width=width, anchor="w")
+        self.incidents_tree.pack(fill=tk.BOTH, expand=True)
+        self.incidents_tree.bind("<<TreeviewSelect>>", self._on_incident_selected)
+
+        self.incident_evidence_text = scrolledtext.ScrolledText(
+            self.incidents_tab, height=8, wrap=tk.WORD, state="disabled", font=("Consolas", 9)
+        )
+        self.incident_evidence_text.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+
+        self.grounding_tab = ttk.Frame(self.evidence_notebook)
+        self.grounding_label_var = tk.StringVar(value="LangExtract grounding HTML is not available yet.")
+        ttk.Label(self.grounding_tab, textvariable=self.grounding_label_var, wraplength=300).pack(
+            fill="x", anchor="w", pady=(0, 8)
+        )
+        ttk.Button(
+            self.grounding_tab,
+            text="Open grounding HTML",
+            command=self._open_grounding_html,
+        ).pack(anchor="w")
+        self._grounding_tab_added = False
+        self.enable_langextract.trace_add("write", self._toggle_grounding_tab)
+        self._toggle_grounding_tab()
+
+    def _toggle_grounding_tab(self, *args):
+        should_show = bool(self.enable_langextract.get())
+        currently_added = bool(getattr(self, "_grounding_tab_added", False))
+        if should_show and not currently_added:
+            self.evidence_notebook.add(self.grounding_tab, text="Grounding")
+            self._grounding_tab_added = True
+        elif not should_show and currently_added:
+            self.evidence_notebook.forget(self.grounding_tab)
+            self._grounding_tab_added = False
+
+    def _open_grounding_html(self):
+        path = getattr(self, "_latest_grounding_html_path", "")
+        if not path or not os.path.isfile(path):
+            messagebox.showinfo("Grounding", "No LangExtract grounding HTML is available for this run.")
+            return
+        webbrowser.open_new_tab(f"file://{os.path.abspath(path)}")
+
+    def _render_incident_evidence(self, incident):
+        lines = []
+        evidence_refs = list(incident.get("evidence_refs") or [])
+        quotes = list(incident.get("quotes") or [])
+        labels = list(incident.get("supporting_chunks") or [])
+        if labels:
+            lines.append("Supporting sources: " + ", ".join(labels))
+        for ref in evidence_refs:
+            label = str(ref.get("source_id") or "").strip()
+            quote = str(ref.get("quote") or "").strip()
+            if quote:
+                lines.append(f"- {label}: \"{quote}\"")
+        for idx, quote in enumerate(quotes, start=1):
+            if quote:
+                lines.append(f"- Quote {idx}: \"{quote}\"")
+        if not lines:
+            lines.append("No quote-level evidence captured for this incident.")
+        self.incident_evidence_text.config(state="normal")
+        self.incident_evidence_text.delete("1.0", tk.END)
+        self.incident_evidence_text.insert(tk.END, "\n".join(lines))
+        self.incident_evidence_text.config(state="disabled")
+
+    def _on_incident_selected(self, event=None):
+        selection = self.incidents_tree.selection()
+        if not selection:
+            return
+        item_id = selection[0]
+        incident = self._incident_row_lookup.get(item_id)
+        if not incident:
+            return
+        evidence_labels = set(incident.get("supporting_chunks") or [])
+        for source_item in self.sources_tree.get_children():
+            values = self.sources_tree.item(source_item, "values")
+            sid = values[0] if values else ""
+            tags = ("supporting",) if sid in evidence_labels else ()
+            self.sources_tree.item(source_item, tags=tags)
+        supporting_ids = [
+            item
+            for item in self.sources_tree.get_children()
+            if (self.sources_tree.item(item, "values") or [""])[0] in evidence_labels
+        ]
+        self.sources_tree.selection_set(supporting_ids)
+        if supporting_ids:
+            self.sources_tree.see(supporting_ids[0])
+        self._render_incident_evidence(incident)
+
+    def _refresh_evidence_pane(self, source_map, incidents, grounding_html_path=""):
+        ordered_source_ids = sorted((source_map or {}).keys())
+        label_by_source = {
+            source_id: f"S{idx}" for idx, source_id in enumerate(ordered_source_ids, start=1)
+        }
+        self.sources_tree.delete(*self.sources_tree.get_children())
+        for source_id in ordered_source_ids:
+            entry = (source_map or {}).get(source_id, {})
+            sid = label_by_source[source_id]
+            self.sources_tree.insert(
+                "",
+                tk.END,
+                iid=sid,
+                values=(
+                    sid,
+                    entry.get("title", "unknown"),
+                    entry.get("date", "unknown"),
+                    entry.get("actor", "unknown"),
+                    entry.get("type", "unknown"),
+                ),
+            )
+
+        normalized_incidents = []
+        for incident in incidents or []:
+            raw_support = incident.get("supporting_chunks") or []
+            normalized_support = []
+            for ref in raw_support:
+                candidate = str(ref).strip()
+                if candidate in label_by_source.values():
+                    normalized_support.append(candidate)
+                elif candidate in label_by_source:
+                    normalized_support.append(label_by_source[candidate])
+            copied = dict(incident)
+            copied["supporting_chunks"] = sorted(set(normalized_support))
+            normalized_incidents.append(copied)
+
+        self.incidents_tree.delete(*self.incidents_tree.get_children())
+        self._incident_row_lookup = {}
+        for idx, incident in enumerate(sorted(normalized_incidents, key=self._incident_sort_key_for_pack), start=1):
+            iid = f"inc-{idx}"
+            when_text = str(incident.get("date") or "").strip() or "Undated"
+            evidence_labels = ", ".join(incident.get("supporting_chunks") or [])
+            what_text = re.sub(r"\s+", " ", str(incident.get("what_happened") or "").strip())
+            self.incidents_tree.insert(
+                "",
+                tk.END,
+                iid=iid,
+                values=(when_text, incident.get("channel", ""), what_text[:120], evidence_labels),
+            )
+            self._incident_row_lookup[iid] = incident
+
+        self._latest_grounding_html_path = grounding_html_path or ""
+        if self._latest_grounding_html_path and os.path.isfile(self._latest_grounding_html_path):
+            self.grounding_label_var.set(f"Saved grounding HTML: {self._latest_grounding_html_path}")
+        else:
+            self.grounding_label_var.set("LangExtract grounding HTML is not available yet.")
+        self._render_incident_evidence({})
+
+    def _save_langextract_grounding_html(self, payload):
+        if not payload:
+            return ""
+        persist_dir = self.selected_index_path or getattr(self.vector_store, "_persist_directory", None) or os.getcwd()
+        os.makedirs(persist_dir, exist_ok=True)
+        path = os.path.join(persist_dir, "langextract_grounding_latest.html")
+        html_body = payload.get("grounding_html") or payload.get("html") or ""
+        if not html_body:
+            incidents_blob = html.escape(json.dumps(payload.get("incidents", []), ensure_ascii=False, indent=2))
+            html_body = f"<html><body><h2>LangExtract grounding fallback</h2><pre>{incidents_blob}</pre></body></html>"
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(html_body)
+            return path
+        except Exception as exc:
+            self.log(f"Failed to write LangExtract grounding HTML. ({exc})")
+            return ""
 
     # --- Logic ---
 
@@ -3468,7 +3685,7 @@ class AgenticRAGApp:
             if chunk_id and chunk_id not in entry["chunk_ids"]:
                 entry["chunk_ids"].append(chunk_id)
 
-        ordered_source_ids = sorted(working_source_map.keys())
+        ordered_source_ids = sorted(source_map.keys())
         lines = ["Sources:"]
         for idx, source_id in enumerate(ordered_source_ids, start=1):
             entry = source_map[source_id]
@@ -3480,7 +3697,7 @@ class AgenticRAGApp:
     def _rewrite_evidence_pack_citations(self, answer_text, final_docs, source_map):
         if not answer_text:
             return answer_text
-        ordered_source_ids = sorted(working_source_map.keys())
+        ordered_source_ids = sorted(source_map.keys())
         label_by_source = {source_id: f"S{idx}" for idx, source_id in enumerate(ordered_source_ids, start=1)}
         chunk_to_source = {}
         for idx, doc in enumerate(final_docs or [], start=1):
@@ -3587,10 +3804,17 @@ class AgenticRAGApp:
 
     def _incident_to_stage_a_payload(self, incident, source_label_by_id):
         supporting_chunks = []
+        evidence_refs = []
         for ref in incident.evidence_refs:
             source_label = source_label_by_id.get(ref.source_id)
             if source_label and source_label not in supporting_chunks:
                 supporting_chunks.append(source_label)
+            evidence_refs.append(
+                {
+                    "source_id": source_label or ref.source_id,
+                    "quote": ref.quote,
+                }
+            )
         quotes = [ref.quote for ref in incident.evidence_refs if ref.quote]
         return {
             "date": incident.date_start or incident.date_end or "",
@@ -3601,6 +3825,7 @@ class AgenticRAGApp:
             "impact": incident.impact,
             "supporting_chunks": supporting_chunks,
             "quotes": quotes[:3],
+            "evidence_refs": evidence_refs,
         }
 
     @staticmethod
@@ -3975,7 +4200,7 @@ class AgenticRAGApp:
     def _extract_incidents_langextract(self, final_docs, source_map) -> list[Incident]:
         if not final_docs:
             return []
-        ordered_source_ids = sorted(working_source_map.keys())
+        ordered_source_ids = sorted(source_map.keys())
         source_label_by_id = {source_id: f"S{idx}" for idx, source_id in enumerate(ordered_source_ids, start=1)}
         docs_payload = []
         chunk_lookup = {}
@@ -4020,6 +4245,9 @@ class AgenticRAGApp:
                 )
                 result = langextract.extract(docs_payload, prompt=prompt)
                 payload = result if isinstance(result, dict) else {}
+                grounding_html_path = self._save_langextract_grounding_html(payload)
+                if grounding_html_path:
+                    self._latest_grounding_html_path = grounding_html_path
                 raw_incidents = payload.get("incidents", []) if isinstance(payload, dict) else []
                 for item in raw_incidents:
                     if not isinstance(item, dict):
@@ -5385,6 +5613,10 @@ class AgenticRAGApp:
             is_evidence_pack = self.is_evidence_pack_query(query, output_style)
             self._frontier_evidence_pack_mode = bool(is_evidence_pack)
             self._last_evidence_pack_synthesis_cards = []
+            self._latest_source_map = {}
+            self._latest_incidents = []
+            self._latest_grounding_html_path = ""
+            self._run_on_ui(self._refresh_evidence_pane, {}, [], "")
             self.log(
                 "Frontier flags (chat): "
                 f"langextract={self._frontier_enabled('langextract')}, "
@@ -5559,6 +5791,14 @@ class AgenticRAGApp:
                             "impact": str(item.get("impact", "")).strip(),
                             "supporting_chunks": supporting_chunks,
                             "quotes": quotes_value,
+                            "evidence_refs": [
+                                {
+                                    "source_id": str(ref.get("source_id", "")).strip(),
+                                    "quote": str(ref.get("quote", "")).strip(),
+                                }
+                                for ref in item.get("evidence_refs", [])
+                                if isinstance(ref, dict)
+                            ],
                         }
                     )
                 return incidents, scope_note
@@ -5624,6 +5864,7 @@ class AgenticRAGApp:
                     return extracted_incidents, local_scope_note
 
                 incidents, scope_note = _extract_stage_a_incidents(doc_list, context_text)
+                self._latest_incidents = incidents
 
                 month_memory = {}
                 theme_memory = {}
@@ -6668,6 +6909,13 @@ class AgenticRAGApp:
 
                 if is_evidence_pack:
                     source_map, source_cards_text = self._build_source_cards(final_docs)
+                    self._latest_source_map = source_map
+                    self._run_on_ui(
+                        self._refresh_evidence_pane,
+                        source_map,
+                        list(self._latest_incidents or []),
+                        self._latest_grounding_html_path,
+                    )
                     validated_answer = self._rewrite_evidence_pack_citations(
                         validated_answer, final_docs, source_map
                     )
@@ -6681,6 +6929,10 @@ class AgenticRAGApp:
                 if is_evidence_pack:
                     self.append_chat("source", f"\n{source_cards_text}")
                 else:
+                    source_map, _ = self._build_source_cards(final_docs)
+                    self._latest_source_map = source_map
+                    self._latest_incidents = []
+                    self._run_on_ui(self._refresh_evidence_pane, source_map, [], "")
                     sources_text = "\n".join(
                         [
                             (
@@ -7261,6 +7513,13 @@ class AgenticRAGApp:
                 )
                 if is_evidence_pack:
                     source_map, source_cards_text = self._build_source_cards(final_docs)
+                    self._latest_source_map = source_map
+                    self._run_on_ui(
+                        self._refresh_evidence_pane,
+                        source_map,
+                        list(self._latest_incidents or []),
+                        self._latest_grounding_html_path,
+                    )
                     validated_answer = self._rewrite_evidence_pack_citations(
                         validated_answer, final_docs, source_map
                     )
@@ -7275,6 +7534,10 @@ class AgenticRAGApp:
                     _, source_cards_text = self._build_source_cards(final_docs)
                 self.append_chat("source", f"\n{source_cards_text}")
             else:
+                source_map, _ = self._build_source_cards(final_docs)
+                self._latest_source_map = source_map
+                self._latest_incidents = []
+                self._run_on_ui(self._refresh_evidence_pane, source_map, [], "")
                 sources_text = "\n".join(
                     [
                         (
