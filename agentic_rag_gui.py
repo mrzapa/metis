@@ -4911,8 +4911,38 @@ class AgenticRAGApp:
                         return True
         return False
 
+    def _best_supporting_chunk(self, claim_text, chunks, chunk_tokens, chunk_embeddings, embedding_model):
+        claim_tokens = self._claim_tokens(claim_text)
+        if not claim_tokens:
+            return None, 0.0
+
+        best_chunk = None
+        best_score = 0.0
+        claim_embedding = None
+        for chunk_num, chunk_text in chunks.items():
+            if not chunk_text:
+                continue
+            overlap = claim_tokens & chunk_tokens.get(chunk_num, set())
+            overlap_ratio = len(overlap) / max(1, len(claim_tokens))
+            score = overlap_ratio
+
+            if embedding_model is not None:
+                if claim_embedding is None:
+                    try:
+                        claim_embedding = embedding_model.embed_query(claim_text)
+                    except Exception:
+                        claim_embedding = []
+                chunk_embedding = chunk_embeddings.get(chunk_num)
+                if claim_embedding and chunk_embedding:
+                    score = max(score, self._cosine_similarity(claim_embedding, chunk_embedding))
+
+            if score > best_score:
+                best_score = score
+                best_chunk = chunk_num
+
+        return best_chunk, best_score
+
     def _claim_level_sanitize(self, answer_text, context_text):
-        citation_re = self._citation_references_regex()
         bullet_re = re.compile(r"^(\s*(?:[-*+]\s+|\d+[.)]\s+))(.*)$")
         chunks = self._extract_chunks(context_text)
         chunk_tokens = {num: self._claim_tokens(text) for num, text in chunks.items()}
@@ -4963,35 +4993,43 @@ class AgenticRAGApp:
 
                 sentence_citations = self._extract_chunk_citation_numbers(sentence)
                 cited_chunks = sentence_citations or bullet_citations
-                if not cited_chunks and chunks:
-                    best_chunk = None
-                    best_score = 0
-                    sentence_tokens = self._claim_tokens(sentence)
-                    for chunk_num, token_set in chunk_tokens.items():
-                        score = len(sentence_tokens & token_set)
-                        if score > best_score:
-                            best_score = score
-                            best_chunk = chunk_num
-                    if best_chunk is not None and best_score > 0:
-                        sentence = sentence.rstrip() + f" [Chunk {best_chunk}]"
-                        sentence_citations = [best_chunk]
-                        cited_chunks = [best_chunk]
 
-                if not cited_chunks:
-                    failures.append("Factual sentence missing citation ([Chunk N] or [S#]).")
-                    continue
-
-                if not self._claim_supported(
+                has_supported_citation = bool(cited_chunks) and self._claim_supported(
                     sentence,
                     cited_chunks,
                     chunks,
                     chunk_tokens,
                     chunk_embeddings,
                     embedding_model,
-                ):
-                    failures.append("Unsupported factual sentence for cited chunk(s).")
+                )
+                if has_supported_citation:
+                    kept_sentences.append(sentence)
                     continue
-                kept_sentences.append(sentence)
+
+                best_chunk, best_score = self._best_supporting_chunk(
+                    sentence,
+                    chunks,
+                    chunk_tokens,
+                    chunk_embeddings,
+                    embedding_model,
+                )
+                support_threshold = 0.12 if embedding_model is None else 0.55
+                if best_chunk is not None and best_score >= support_threshold:
+                    sentence_wo_chunk_cites = re.sub(r"\[Chunk\s+\d+\]", "", sentence).rstrip()
+                    sentence_wo_chunk_cites = re.sub(r"\s{2,}", " ", sentence_wo_chunk_cites).strip()
+                    sentence = f"{sentence_wo_chunk_cites} [Chunk {best_chunk}]".strip()
+                    kept_sentences.append(sentence)
+                    if cited_chunks:
+                        failures.append("Repaired weakly grounded claim by reattaching best supporting citation.")
+                    else:
+                        failures.append("Added citation to previously uncited factual claim.")
+                    continue
+
+                if cited_chunks:
+                    failures.append("Removed factual claim with unsupported citation evidence.")
+                else:
+                    failures.append("Removed uncited factual claim with no supporting evidence.")
+                continue
 
             if not kept_sentences:
                 continue
@@ -5159,11 +5197,16 @@ class AgenticRAGApp:
                 )
             return answer_text
 
+        chunks_available = bool(self._extract_chunks(context_text))
         answer_text, claim_failures = self._claim_level_sanitize(answer_text, context_text)
-        is_valid, failures = self._validate_answer(
-            answer_text, context_text, output_style
-        )
-        failures.extend(claim_failures)
+        failures = list(claim_failures)
+        if chunks_available:
+            is_valid = len(claim_failures) == 0
+        else:
+            is_valid, fallback_failures = self._validate_answer(
+                answer_text, context_text, output_style
+            )
+            failures.extend(fallback_failures)
         if is_valid:
             unique_failures = self._summarize_failures(failures)
             if iteration_id is not None:
