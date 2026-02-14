@@ -264,6 +264,7 @@ class AgenticRAGApp:
             "Brief / exec summary",
             "Script / talk track",
             "Structured report",
+            "Blinkist-style summary",
         ]
         self.output_style = tk.StringVar(value="Default answer")
         self.mode_options = [
@@ -4446,6 +4447,12 @@ class AgenticRAGApp:
                 "where helpful. Include at least one short verbatim quote (<=25 words) per "
                 f"major section with a {'[S#]' if self._frontier_enabled('citation_v2') else '[Chunk N]'} citation."
             ),
+            "Blinkist-style summary": (
+                "Output style: Blinkist-style summary. Use a compact, practical structure with: "
+                "1-line premise, key ideas, actionable exercises, memorable quotes, and a final "
+                "'If you only remember 3 things' section. Ground factual lines with citations and "
+                "omit unsupported points instead of using placeholders."
+            ),
         }
         return style_instructions.get(style, "")
 
@@ -4458,6 +4465,8 @@ class AgenticRAGApp:
     5) SQLite FTS exact-phrase queries surface in candidate pool when available.
     6) Default mode produces identical output to before for the same prompt.
     7) Switching mode changes system prompt and output structure deterministically.
+    8) Blinkist-style summary output follows the exact template sections in order.
+    9) Blinkist-style summary sources should be chapter/section meaningful (S# mapped via source locator), not chunk-id-only references.
     """
     def is_evidence_pack_query(self, query, output_style):
         normalized = f"{query} {output_style}".lower()
@@ -6049,6 +6058,13 @@ class AgenticRAGApp:
         return cleaned_text, failures
 
     @staticmethod
+    def _strip_unsupported_placeholders(text):
+        cleaned = str(text or "")
+        cleaned = re.sub(r"(?im)^.*not\s+found(?:\s+in\s+context)?[^\n]*$", "", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
+    @staticmethod
     def _summarize_failures(failures):
         unique = []
         seen = set()
@@ -6192,6 +6208,7 @@ class AgenticRAGApp:
         return repaired.content
 
     def _validate_and_repair(self, answer_text, context_text, iteration_id=None, evidence_pack_mode=False, synthesis_cards=None):
+        answer_text = self._strip_unsupported_placeholders(answer_text)
         output_style = self.output_style.get().strip()
         agentic_mode = self.agentic_mode.get()
         if evidence_pack_mode:
@@ -6251,7 +6268,7 @@ class AgenticRAGApp:
                 "Post-repair claim-level cleanup applied. Top unique issues: "
                 + "; ".join(post_unique)
             )
-        return repaired
+        return self._strip_unsupported_placeholders(repaired)
 
     def _append_missing_citations(self, answer_text, context_text):
         citation_re = self._citation_references_regex()
@@ -7525,6 +7542,113 @@ class AgenticRAGApp:
                 self._last_evidence_pack_synthesis_cards = synthesis_cards
                 return stage_b_response.content
 
+            def _run_blinkist_summary_two_stage(llm, query_text, doc_list, digest_docs=None):
+                digest_docs = digest_docs or []
+                source_map, source_cards_text = self._build_source_cards(doc_list)
+                if not source_map:
+                    return ""
+
+                concept_cards = self.search_concepts(query_text, k=16)
+                chapter_digests = []
+                for digest_doc in digest_docs:
+                    metadata = getattr(digest_doc, "metadata", {}) or {}
+                    digest_scope = str(metadata.get("digest_scope") or "").strip().lower()
+                    if digest_scope not in {"chapter", "section"}:
+                        continue
+                    chapter_digests.append(
+                        {
+                            "digest_scope": digest_scope,
+                            "chapter_idx": metadata.get("chapter_idx"),
+                            "chapter_title": str(metadata.get("chapter_title") or "").strip(),
+                            "section_idx": metadata.get("section_idx"),
+                            "section_title": str(metadata.get("section_title") or "").strip(),
+                            "summary": str(getattr(digest_doc, "page_content", "") or "").strip(),
+                        }
+                    )
+
+                compact_cards = []
+                for card in concept_cards[:16]:
+                    compact_cards.append(
+                        {
+                            "title": str(card.get("title") or "").strip(),
+                            "kind": str(card.get("kind") or "").strip(),
+                            "content": card.get("content") or {},
+                            "source_refs": card.get("source_refs") or [],
+                        }
+                    )
+
+                stage_a_prompt = (
+                    "You are Stage A planner for Blinkist-style summary mode. "
+                    "Build a strict JSON plan using chapter digests + concept cards as the primary evidence, "
+                    "and SOURCE_CARDS for grounding labels. Prefer chapter/section level coverage over chunk-local detail. "
+                    "Do not ask for more information. Omit unsupported claims and fields entirely. "
+                    "Never emit placeholders like NOT FOUND.\n\n"
+                    "Return ONLY valid JSON with keys:\n"
+                    "{\n"
+                    "  \"premise\": \"single sentence\",\n"
+                    "  \"key_ideas\": [{\"title\":\"\",\"what\":\"\",\"why\":\"\",\"how\":\"\",\"sources\":[\"S#\"]}],\n"
+                    "  \"exercises\": [{\"title\":\"\",\"steps\":[\"\"],\"sources\":[\"S#\"]}],\n"
+                    "  \"memorable_quotes\": [{\"quote\":\"\",\"why_it_matters\":\"\",\"sources\":[\"S#\"]}],\n"
+                    "  \"remember_three\": [\"\"],\n"
+                    "  \"chapter_mini_summaries\": [{\"chapter\":\"\",\"summary\":\"\",\"sources\":[\"S#\"]}]\n"
+                    "}\n\n"
+                    "Rules:\n"
+                    "- premise: exactly 1 line.\n"
+                    "- key_ideas: 8-12 items, each must include what/why/how plus S# source labels.\n"
+                    "- exercises: up to 3 items grounded in supported ideas; omit any unsupported exercise.\n"
+                    "- memorable_quotes: up to 5 short grounded quotes; omit unsupported quotes.\n"
+                    "- remember_three: exactly 3 concise points.\n"
+                    "- chapter_mini_summaries is optional: include only when chapter-level support exists.\n"
+                    "- Omit-if-unsupported everywhere; do not include empty strings, null placeholders, or fallback text."
+                )
+                stage_a_messages = [
+                    SystemMessage(content=stage_a_prompt),
+                    HumanMessage(
+                        content=(
+                            f"User request:\n{query_text}\n\n"
+                            f"SOURCE_CARDS:\n{source_cards_text}\n\n"
+                            f"CHAPTER_DIGESTS:\n{json.dumps(chapter_digests, ensure_ascii=False, indent=2)}\n\n"
+                            f"CONCEPT_CARDS:\n{json.dumps(compact_cards, ensure_ascii=False, indent=2)}"
+                        )
+                    ),
+                ]
+                stage_a_response = llm.invoke(stage_a_messages)
+                stage_a_payload = _extract_json_payload(stage_a_response.content)
+                if not isinstance(stage_a_payload, dict):
+                    stage_a_payload = {}
+
+                stage_b_prompt = (
+                    "You are Stage B renderer for Blinkist-style summary mode. "
+                    "Render final output from PLAN_JSON only. Keep the exact template and headings below. "
+                    "Ground each factual line with [S#] citations from source labels present in PLAN_JSON/SOURCE_CARDS. "
+                    "Never output placeholders, NOT FOUND text, or requests for additional user info.\n\n"
+                    "Template (follow exactly):\n"
+                    "1) Premise (1 line)\n"
+                    "2) Key Ideas (8-12)\n"
+                    "   - For each idea use exactly:\n"
+                    "     Idea N — <title>\n"
+                    "     What it is: ... [S#]\n"
+                    "     Why it matters: ... [S#]\n"
+                    "     How to apply: ... [S#]\n"
+                    "3) 3 Actionable Exercises\n"
+                    "4) 5 Memorable Quotes (grounded)\n"
+                    "5) If you only remember 3 things...\n"
+                    "6) Optional: Chapter-by-chapter mini-summaries (append only if present in PLAN_JSON).\n\n"
+                    "If PLAN_JSON has fewer than requested supported items, output only supported items without explanatory filler."
+                )
+                stage_b_messages = [
+                    SystemMessage(content=stage_b_prompt),
+                    HumanMessage(
+                        content=(
+                            f"User request:\n{query_text}\n\n"
+                            f"PLAN_JSON:\n{json.dumps(stage_a_payload, ensure_ascii=False, indent=2)}\n\n"
+                            f"SOURCE_CARDS:\n{source_cards_text}"
+                        )
+                    ),
+                ]
+                stage_b_response = llm.invoke(stage_b_messages)
+                return str(stage_b_response.content or "")
+
             def _build_search_kwargs(k_value):
                 search_kwargs_local = {"k": k_value}
                 if search_type == "mmr":
@@ -8134,7 +8258,7 @@ class AgenticRAGApp:
                     docs,
                     retrieved_count,
                     cap_reached,
-                    _digest_docs,
+                    digest_docs,
                     raw_expanded_count,
                     digest_retrieved_count,
                     digest_selected_count,
@@ -8473,12 +8597,20 @@ class AgenticRAGApp:
                 ]
                 generation_started_at = time.perf_counter()
                 generation_ms = 0
+                is_blinkist_summary_style = self.output_style.get().strip() == "Blinkist-style summary"
                 if is_evidence_pack:
                     response_content = _run_evidence_pack_two_stage(
                         llm,
                         query,
                         context_text,
                         final_docs,
+                    )
+                elif is_blinkist_summary_style:
+                    response_content = _run_blinkist_summary_two_stage(
+                        llm,
+                        query,
+                        final_docs,
+                        digest_docs=digest_docs,
                     )
                 else:
                     response = llm.invoke(messages)
@@ -8741,7 +8873,7 @@ class AgenticRAGApp:
                     docs,
                     retrieved_count,
                     cap_reached,
-                    _digest_docs,
+                    digest_docs,
                     raw_expanded_count,
                     digest_retrieved_count,
                     digest_selected_count,
@@ -9103,6 +9235,7 @@ class AgenticRAGApp:
                 ]
                 generation_started_at = time.perf_counter()
                 generation_ms = 0
+                is_blinkist_summary_style = self.output_style.get().strip() == "Blinkist-style summary"
                 if is_evidence_pack:
                     latest_answer = _run_evidence_pack_two_stage(
                         llm,
@@ -9112,6 +9245,13 @@ class AgenticRAGApp:
                         checklist_text=checklist_text,
                         section_plan_items=section_plan,
                         coverage_note=coverage_note,
+                    )
+                elif is_blinkist_summary_style:
+                    latest_answer = _run_blinkist_summary_two_stage(
+                        llm,
+                        query,
+                        final_docs,
+                        digest_docs=digest_docs,
                     )
                 else:
                     response = llm.invoke(messages)
