@@ -116,6 +116,36 @@ class Incident:
     impact: str = ""
     evidence_refs: list[EvidenceRef] = field(default_factory=list)
 
+
+@dataclass
+class SourceLocator:
+    source_id: str
+    label: str
+    anchor: str
+    metadata: dict
+
+
+class CitationManager:
+    def __init__(self):
+        self._label_by_source = {}
+        self._source_by_label = {}
+
+    def register(self, source_id: str) -> str:
+        if source_id not in self._label_by_source:
+            label = f"S{len(self._label_by_source) + 1}"
+            self._label_by_source[source_id] = label
+            self._source_by_label[label] = source_id
+        return self._label_by_source[source_id]
+
+    def label_for(self, source_id: str) -> str:
+        return self._label_by_source.get(source_id, "")
+
+    def source_for(self, label: str) -> str:
+        return self._source_by_label.get(label, "")
+
+    def as_dict(self) -> dict:
+        return dict(self._label_by_source)
+
 class AgenticRAGApp:
     def __init__(self, root):
         import langchain
@@ -241,6 +271,7 @@ class AgenticRAGApp:
         self._latest_source_map = {}
         self._latest_incidents = []
         self._latest_grounding_html_path = ""
+        self._source_id_by_tree_iid = {}
 
         self.vector_store = None
         self.index_embedding_signature = ""
@@ -288,6 +319,8 @@ class AgenticRAGApp:
         used_chars = 0
         packed_count = 0
         truncated_flag = False
+        citation_v2_enabled = self._frontier_enabled("citation_v2")
+        citation_manager = CitationManager()
 
         for idx, doc in enumerate(docs, start=1):
             metadata = getattr(doc, "metadata", {}) or {}
@@ -301,8 +334,10 @@ class AgenticRAGApp:
                 or metadata.get("file_path")
                 or metadata.get("filename")
             )
+            locator = self._build_source_locator(metadata, getattr(doc, "page_content", "") or "")
+            citation_label = citation_manager.register(locator.source_id) if citation_v2_enabled else f"Chunk {idx}"
             header_parts = [
-                f"[Chunk {idx}",
+                f"[{citation_label}",
                 f"chunk_id: {chunk_id}",
                 f"channel_key: {channel_key}",
                 f"role: {role}",
@@ -312,6 +347,8 @@ class AgenticRAGApp:
                 header_parts.append(f"month_key: {month_key}")
             if source:
                 header_parts.append(f"source: {source}")
+            if citation_v2_enabled:
+                header_parts.append(f"source_label: {locator.label}")
             header = " | ".join(header_parts) + "]"
 
             excerpt = (getattr(doc, "page_content", "") or "").strip()[:per_doc_chars]
@@ -1198,6 +1235,12 @@ class AgenticRAGApp:
             self.sources_tree.column(col, width=width, anchor="w")
         self.sources_tree.tag_configure("supporting", background="#fff4cc")
         self.sources_tree.pack(fill=tk.BOTH, expand=True)
+        self.sources_tree.bind("<<TreeviewSelect>>", self._on_source_selected)
+
+        self.source_detail_text = scrolledtext.ScrolledText(
+            self.sources_tab, height=8, wrap=tk.WORD, state="disabled", font=("Consolas", 9)
+        )
+        self.source_detail_text.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
         self.incidents_tab = ttk.Frame(self.evidence_notebook)
         self.evidence_notebook.add(self.incidents_tab, text="Incidents")
@@ -1300,10 +1343,47 @@ class AgenticRAGApp:
             self.sources_tree.see(supporting_ids[0])
         self._render_incident_evidence(incident)
 
+    def _on_source_selected(self, event=None):
+        selection = self.sources_tree.selection()
+        if not selection:
+            return
+        item_id = selection[0]
+        source_id = self._source_id_by_tree_iid.get(item_id)
+        entry = (self._latest_source_map or {}).get(source_id or "", {})
+        if not entry:
+            return
+        metadata_blob = json.dumps(entry.get("metadata") or {}, ensure_ascii=False, indent=2, sort_keys=True)
+        excerpt = str(entry.get("excerpt") or "").strip() or "(no excerpt captured)"
+        detail_lines = [
+            f"Citation: {entry.get('sid', '')}",
+            f"Label: {entry.get('label', 'unknown')}",
+            f"Title: {entry.get('title', 'unknown')}",
+            f"Date: {entry.get('date', 'undated')}",
+            f"Actor: {entry.get('actor', 'unknown')}",
+            f"Type: {entry.get('type', 'unknown')}",
+            f"Locator: {entry.get('locator', 'unknown')}",
+            f"Anchor: {entry.get('anchor', '') or '(none)'}",
+            "",
+            "Excerpt window:",
+            excerpt,
+            "",
+            "Full metadata:",
+            metadata_blob,
+        ]
+        self.source_detail_text.config(state="normal")
+        self.source_detail_text.delete("1.0", tk.END)
+        self.source_detail_text.insert(tk.END, "\n".join(detail_lines))
+        self.source_detail_text.config(state="disabled")
+
     def _refresh_evidence_pane(self, source_map, incidents, grounding_html_path=""):
-        ordered_source_ids = sorted((source_map or {}).keys())
+        self._source_id_by_tree_iid = {}
+        ordered_source_ids = sorted(
+            (source_map or {}).keys(),
+            key=lambda source_id: int(str((source_map or {}).get(source_id, {}).get("sid", "S999")).lstrip("S") or "999"),
+        )
         label_by_source = {
-            source_id: f"S{idx}" for idx, source_id in enumerate(ordered_source_ids, start=1)
+            source_id: str((source_map or {}).get(source_id, {}).get("sid") or source_id)
+            for source_id in ordered_source_ids
         }
         self.sources_tree.delete(*self.sources_tree.get_children())
         for source_id in ordered_source_ids:
@@ -1315,12 +1395,13 @@ class AgenticRAGApp:
                 iid=sid,
                 values=(
                     sid,
-                    entry.get("title", "unknown"),
+                    entry.get("label", entry.get("title", "unknown")),
                     entry.get("date", "unknown"),
                     entry.get("actor", "unknown"),
                     entry.get("type", "unknown"),
                 ),
             )
+            self._source_id_by_tree_iid[sid] = source_id
 
         normalized_incidents = []
         for incident in incidents or []:
@@ -1357,6 +1438,10 @@ class AgenticRAGApp:
         else:
             self.grounding_label_var.set("LangExtract grounding HTML is not available yet.")
         self._render_incident_evidence({})
+        self.source_detail_text.config(state="normal")
+        self.source_detail_text.delete("1.0", tk.END)
+        self.source_detail_text.insert(tk.END, "Select a source to inspect label, metadata, and excerpt.")
+        self.source_detail_text.config(state="disabled")
 
     def _save_langextract_grounding_html(self, payload):
         if not payload:
@@ -3352,7 +3437,17 @@ class AgenticRAGApp:
             instructions = self.default_system_instructions
             self.system_instructions.set(instructions)
             self._run_on_ui(self._refresh_instructions_box)
+        if self._frontier_enabled("citation_v2"):
+            instructions = instructions.replace("[Chunk N]", "[S#]")
+            instructions = instructions.replace("Chunk 4", "S1")
         return instructions
+
+    def _citation_references_regex(self):
+        return re.compile(r"\[(?:Chunk\s+\d+|S\d+(?:\s*,\s*S\d+)*)\]")
+
+    @staticmethod
+    def _extract_chunk_citation_numbers(text):
+        return [int(num) for num in re.findall(r"\[Chunk\s+(\d+)\]", str(text or ""))]
 
     def _get_output_style_instruction(self):
         style = self.output_style.get().strip()
@@ -3373,13 +3468,13 @@ class AgenticRAGApp:
                 "Output style: Script / talk track. Provide a short talk track or script "
                 "with speaker-ready phrasing, organized as numbered beats or bullet points. "
                 "Include at least one short verbatim quote (<=25 words) per major section "
-                "with a [Chunk N] citation."
+                f"with a {'[S#]' if self._frontier_enabled('citation_v2') else '[Chunk N]'} citation."
             ),
             "Structured report": (
                 "Output style: Structured report. Use clear section headings such as "
                 "Summary, Findings, Evidence, and Gaps/Unknowns. Use bullets within sections "
                 "where helpful. Include at least one short verbatim quote (<=25 words) per "
-                "major section with a [Chunk N] citation."
+                f"major section with a {'[S#]' if self._frontier_enabled('citation_v2') else '[Chunk N]'} citation."
             ),
         }
         return style_instructions.get(style, "")
@@ -3411,7 +3506,7 @@ class AgenticRAGApp:
             "of events, explicit impacts, grievances, and concrete examples. Emphasize dates, actors, "
             "actions, outcomes, and supporting quotes. Only include claims supported by context; "
             "omit details not present in context. Write incident entries using: When; What happened; "
-            "Impact; Evidence (chunk citations). Do not provide coaching or advice. Ensure the output "
+            "Impact; Evidence ([S#] citations). Do not provide coaching or advice. Ensure the output "
             "contains no placeholders and does not ask for more docs or missing info. If evidence is "
             "thin, allow one short 'Scope:' note at the top."
         )
@@ -3647,78 +3742,141 @@ class AgenticRAGApp:
         meta["source_date"] = source_date
         meta["source_actor"] = source_actor
         meta["source_locator"] = locator
+        meta.setdefault("role", str(meta.get("speaker_role") or meta.get("role") or "unknown"))
+        meta.setdefault(
+            "speaker",
+            str(meta.get("speaker") or meta.get("source_actor") or meta.get("author") or "").strip(),
+        )
+        channel_key = str(meta.get("channel_key") or meta.get("channel_type") or "").strip().lower()
+        if not channel_key:
+            channel_key = self._extract_channel(f"{source_title}\n{content}") or "unknown"
+        meta["channel_key"] = channel_key
+        date_for_month = meta.get("month_key") or source_date or raw_date
+        month_key = ""
+        if date_for_month:
+            normalized = self._extract_iso_date(date_for_month)
+            if normalized and len(normalized) >= 7:
+                month_key = normalized[:7]
+        meta["month_key"] = month_key or "undated"
         return meta
+
+    @staticmethod
+    def _short_anchor(text, min_words=6, max_words=12):
+        content = re.sub(r"\s+", " ", str(text or "")).strip()
+        if not content:
+            return ""
+        sentence = re.split(r"(?<=[.!?])\s+", content, maxsplit=1)[0].strip()
+        words = sentence.split()
+        if len(words) < min_words:
+            words = content.split()
+        if len(words) < min_words:
+            return ""
+        return " ".join(words[:max_words]).strip(" ,;:-")
+
+    def _build_source_locator(self, metadata, content):
+        enriched = self._ensure_source_metadata(
+            metadata,
+            metadata.get("source") or metadata.get("file_path") or metadata.get("filename") or "",
+            content,
+        )
+        title = str(
+            enriched.get("source_title")
+            or enriched.get("doc_title")
+            or enriched.get("title")
+            or enriched.get("filename")
+            or "unknown"
+        ).strip()
+        date = str(enriched.get("source_date") or enriched.get("month_key") or "undated").strip() or "undated"
+        month_key = str(enriched.get("month_key") or "undated").strip() or "undated"
+        channel_key = str(enriched.get("channel_key") or "unknown channel").strip().lower() or "unknown channel"
+        role = str(enriched.get("role") or enriched.get("speaker_role") or "unknown role").strip().lower() or "unknown role"
+        speaker = str(enriched.get("speaker") or enriched.get("source_actor") or role).strip() or role
+        anchor = self._short_anchor(content)
+        stable_input = "|".join(
+            [
+                title.lower(),
+                date.lower(),
+                month_key.lower(),
+                channel_key.lower(),
+                role.lower(),
+                speaker.lower(),
+                anchor.lower(),
+            ]
+        )
+        source_id = hashlib.sha1(stable_input.encode("utf-8")).hexdigest()[:12]
+        label = f"{title} • {month_key} • {channel_key} • {speaker}"
+        if anchor:
+            label += f' • "{anchor}"'
+        return SourceLocator(source_id=source_id, label=label, anchor=anchor, metadata=enriched)
 
     def _build_source_cards(self, final_docs) -> tuple[dict, str]:
         source_map = {}
+        citation_manager = CitationManager()
         for doc in final_docs or []:
             metadata = getattr(doc, "metadata", {}) or {}
             content = getattr(doc, "page_content", "") or ""
-            enriched = self._ensure_source_metadata(metadata, metadata.get("source") or metadata.get("file_path") or metadata.get("filename") or "", content)
+            source_locator = self._build_source_locator(metadata, content)
+            enriched = source_locator.metadata
             title = enriched.get("source_title") or "unknown"
-            date = enriched.get("source_date") or "unknown"
+            date = enriched.get("source_date") or enriched.get("month_key") or "undated"
             actor = enriched.get("source_actor") or "unknown"
             source_type = enriched.get("source_type") or "unknown"
-            locator = enriched.get("source_locator") or "unknown"
+            source_locator_text = enriched.get("source_locator") or "unknown"
             role_kind = str(enriched.get("role") or enriched.get("speaker_role") or "unknown").strip().lower() or "unknown"
-            channel_key = str(
-                enriched.get("channel_type")
-                or self._extract_channel(f"{title}\n{content}")
-                or "unknown"
-            ).strip().lower() or "unknown"
-            stable_input = f"{title}|{date}|{locator}|{role_kind}|{channel_key}".lower()
-            stable_source_id = hashlib.sha1(stable_input.encode("utf-8")).hexdigest()[:12]
+            channel_key = str(enriched.get("channel_key") or "unknown channel").strip().lower() or "unknown channel"
+            stable_source_id = source_locator.source_id
+            sid = citation_manager.register(stable_source_id)
             entry = source_map.setdefault(
                 stable_source_id,
                 {
+                    "sid": sid,
                     "title": title,
                     "date": date,
                     "actor": actor,
                     "type": source_type,
-                    "locator": locator,
+                    "locator": source_locator_text,
                     "chunk_ids": [],
                     "role_kind": role_kind,
                     "channel_key": channel_key,
+                    "label": source_locator.label,
+                    "anchor": source_locator.anchor,
+                    "metadata": enriched,
+                    "excerpt": (content or "")[:900],
                 },
             )
-            chunk_id = str(enriched.get("chunk_id", "")).strip()
+            chunk_id = str((metadata or {}).get("chunk_id", "")).strip()
             if chunk_id and chunk_id not in entry["chunk_ids"]:
                 entry["chunk_ids"].append(chunk_id)
+            if not entry.get("excerpt") and content:
+                entry["excerpt"] = content[:900]
 
-        ordered_source_ids = sorted(source_map.keys())
+        ordered_source_ids = sorted(
+            source_map.keys(), key=lambda sid_key: int(source_map[sid_key].get("sid", "S999")[1:])
+        )
         lines = ["Sources:"]
-        for idx, source_id in enumerate(ordered_source_ids, start=1):
+        for source_id in ordered_source_ids:
             entry = source_map[source_id]
             lines.append(
-                f"- S{idx} -> ({entry['title']} • {entry['date']} • {entry['actor']} • {entry['type']} • {entry['locator']})"
+                f"- {entry['sid']} -> ({entry['label']})"
             )
         return source_map, "\n".join(lines)
 
     def _rewrite_evidence_pack_citations(self, answer_text, final_docs, source_map):
         if not answer_text:
             return answer_text
-        ordered_source_ids = sorted(source_map.keys())
-        label_by_source = {source_id: f"S{idx}" for idx, source_id in enumerate(ordered_source_ids, start=1)}
+        label_by_source = {
+            source_id: (entry or {}).get("sid", "")
+            for source_id, entry in (source_map or {}).items()
+        }
         chunk_to_source = {}
         for idx, doc in enumerate(final_docs or [], start=1):
             metadata = getattr(doc, "metadata", {}) or {}
             content = getattr(doc, "page_content", "") or ""
-            enriched = self._ensure_source_metadata(metadata, metadata.get("source") or metadata.get("file_path") or metadata.get("filename") or "", content)
-            title = enriched.get("source_title") or "unknown"
-            date = enriched.get("source_date") or "unknown"
-            locator = enriched.get("source_locator") or "unknown"
-            role_kind = str(enriched.get("role") or enriched.get("speaker_role") or "unknown").strip().lower() or "unknown"
-            channel_key = str(
-                enriched.get("channel_type")
-                or self._extract_channel(f"{title}\n{content}")
-                or "unknown"
-            ).strip().lower() or "unknown"
-            stable_input = f"{title}|{date}|{locator}|{role_kind}|{channel_key}".lower()
-            source_id = hashlib.sha1(stable_input.encode("utf-8")).hexdigest()[:12]
+            source_id = self._build_source_locator(metadata, content).source_id
             label = label_by_source.get(source_id)
             if not label:
                 continue
-            chunk_id = str(enriched.get("chunk_id", "")).strip()
+            chunk_id = str((metadata or {}).get("chunk_id", "")).strip()
             if chunk_id:
                 chunk_to_source[chunk_id.lower()] = label
                 chunk_to_source[f"chunk {chunk_id}".lower()] = label
@@ -4537,7 +4695,7 @@ class AgenticRAGApp:
         return False
 
     def _claim_level_sanitize(self, answer_text, context_text):
-        citation_re = re.compile(r"\[Chunk (\d+)\]")
+        citation_re = self._citation_references_regex()
         bullet_re = re.compile(r"^(\s*(?:[-*+]\s+|\d+[.)]\s+))(.*)$")
         chunks = self._extract_chunks(context_text)
         chunk_tokens = {num: self._claim_tokens(text) for num, text in chunks.items()}
@@ -4573,7 +4731,7 @@ class AgenticRAGApp:
                 bullet_prefix = bullet_match.group(1)
                 body = bullet_match.group(2)
 
-            bullet_citations = [int(num) for num in citation_re.findall(body)]
+            bullet_citations = self._extract_chunk_citation_numbers(body)
             sentences = self._sentence_split(body)
             if not sentences:
                 cleaned_lines.append(raw_line)
@@ -4586,7 +4744,7 @@ class AgenticRAGApp:
                     kept_sentences.append(sentence)
                     continue
 
-                sentence_citations = [int(num) for num in citation_re.findall(sentence)]
+                sentence_citations = self._extract_chunk_citation_numbers(sentence)
                 cited_chunks = sentence_citations or bullet_citations
                 if not cited_chunks and chunks:
                     best_chunk = None
@@ -4603,7 +4761,7 @@ class AgenticRAGApp:
                         cited_chunks = [best_chunk]
 
                 if not cited_chunks:
-                    failures.append("Factual sentence missing [Chunk N] citation.")
+                    failures.append("Factual sentence missing citation ([Chunk N] or [S#]).")
                     continue
 
                 if not self._claim_supported(
@@ -4642,7 +4800,7 @@ class AgenticRAGApp:
 
     def _validate_answer(self, answer_text, context_text, output_style):
         failures = []
-        citation_re = re.compile(r"\[Chunk (\d+)\]")
+        citation_re = self._citation_references_regex()
         heading_re = re.compile(r"^\s{0,3}#{1,6}\s+\S+")
         setext_re = re.compile(r"^[=-]{3,}\s*$")
         verb_re = re.compile(
@@ -4708,7 +4866,7 @@ class AgenticRAGApp:
         for paragraph in paragraphs:
             if needs_citation(paragraph) and not citation_re.search(paragraph):
                 failures.append(
-                    "Factual paragraph missing at least one [Chunk N] citation."
+                    "Factual paragraph missing at least one citation ([Chunk N] or [S#])."
                 )
 
         if output_style in {"Script / talk track", "Structured report"}:
@@ -4721,9 +4879,11 @@ class AgenticRAGApp:
                     word_count = len(quote_text.split())
                     if word_count > 25:
                         continue
-                    citations = citation_re.findall(paragraph)
-                    for citation in citations:
-                        chunk_num = int(citation)
+                    chunk_citations = self._extract_chunk_citation_numbers(paragraph)
+                    if not chunk_citations and re.search(r"\[S\d+(?:\s*,\s*S\d+)*\]", paragraph):
+                        section_has_quote = True
+                        break
+                    for chunk_num in chunk_citations:
                         chunk_text = chunks.get(chunk_num, "")
                         if quote_text in chunk_text:
                             section_has_quote = True
@@ -4743,13 +4903,13 @@ class AgenticRAGApp:
         failure_text = "\n".join(f"- {item}" for item in failures)
         repair_prompt = (
             "You are a repair assistant. Fix the draft using ONLY the provided context. "
-            "Rules: remove unsupported content, add correct [Chunk N] citations to every "
+            "Rules: remove unsupported content, add correct citations ([Chunk N] or [S#]) to every "
             "factual paragraph, include no placeholders, and omit unsupported content. "
             "Omit unsupported claims; deepen supported ones; do not ask for more docs or missing info; "
             "do not use placeholders. If evidence is thin, you may include one short 'Scope:' note "
             "at the top. "
             "For Script / talk track and Structured report styles, ensure at least one short "
-            "verbatim quote (<=25 words) per major section with a [Chunk N] citation, and "
+            "verbatim quote (<=25 words) per major section with a citation, and "
             "the quote must appear in the cited chunk text. "
             "Output ONLY the repaired answer."
         )
@@ -4825,7 +4985,7 @@ class AgenticRAGApp:
         return repaired
 
     def _append_missing_citations(self, answer_text, context_text):
-        citation_re = re.compile(r"\[Chunk (\d+)\]")
+        citation_re = self._citation_references_regex()
         paragraphs = [p for p in re.split(r"\n\s*\n", answer_text) if p.strip()]
         missing = [
             idx
@@ -6413,6 +6573,8 @@ class AgenticRAGApp:
                 used_chars = 0
                 was_truncated = False
                 packed_count = 0
+                citation_v2_enabled = self._frontier_enabled("citation_v2")
+                citation_manager = CitationManager()
 
                 for idx, doc in enumerate(doc_list, start=1):
                     metadata = getattr(doc, "metadata", {}) or {}
@@ -6424,8 +6586,14 @@ class AgenticRAGApp:
                         or "unknown"
                     )
                     chunk_id = metadata.get("chunk_id", "N/A")
+                    header_label = f"Chunk {idx}"
+                    if citation_v2_enabled:
+                        source_locator = self._build_source_locator(
+                            metadata, getattr(doc, "page_content", "") or ""
+                        )
+                        header_label = citation_manager.register(source_locator.source_id)
                     header = (
-                        f"[Chunk {idx} | chunk_id: {chunk_id} | "
+                        f"[{header_label} | chunk_id: {chunk_id} | "
                         f"score: {score} | source: {source}]"
                     )
                     content = doc.page_content.strip()
@@ -6921,7 +7089,12 @@ class AgenticRAGApp:
                     )
                     if source_cards_text.strip():
                         validated_answer = f"{validated_answer.rstrip()}\n\n{source_cards_text}"
-
+                elif self._frontier_enabled("citation_v2"):
+                    source_map, _ = self._build_source_cards(final_docs)
+                    self._latest_source_map = source_map
+                    validated_answer = self._rewrite_evidence_pack_citations(
+                        validated_answer, final_docs, source_map
+                    )
                 self.last_answer = validated_answer
                 self.append_chat("agent", f"AI: {validated_answer}")
                 self._append_history(AIMessage(content=validated_answer))
@@ -6933,18 +7106,27 @@ class AgenticRAGApp:
                     self._latest_source_map = source_map
                     self._latest_incidents = []
                     self._run_on_ui(self._refresh_evidence_pane, source_map, [], "")
-                    sources_text = "\n".join(
-                        [
-                            (
-                                f"- [Chunk {idx} | chunk_id: "
-                                f"{getattr(d, 'metadata', {}).get('chunk_id', 'N/A')} | score: "
-                                f"{getattr(d, 'metadata', {}).get('relevance_score', 'N/A')} | "
-                                f"source: "
-                                f"{(getattr(d, 'metadata', {}) or {}).get('source') or (getattr(d, 'metadata', {}) or {}).get('file_path') or (getattr(d, 'metadata', {}) or {}).get('filename') or 'unknown'}]"
-                            )
-                            for idx, d in enumerate(final_docs, start=1)
-                        ]
-                    )
+                    if self._frontier_enabled("citation_v2"):
+                        ordered = sorted(
+                            source_map.values(),
+                            key=lambda entry: int(str(entry.get("sid", "S999")).lstrip("S") or "999"),
+                        )
+                        sources_text = "\n".join(
+                            [f"- [{entry.get('sid', 'S?')} | {entry.get('label', 'unknown')}]" for entry in ordered]
+                        )
+                    else:
+                        sources_text = "\n".join(
+                            [
+                                (
+                                    f"- [Chunk {idx} | chunk_id: "
+                                    f"{getattr(d, 'metadata', {}).get('chunk_id', 'N/A')} | score: "
+                                    f"{getattr(d, 'metadata', {}).get('relevance_score', 'N/A')} | "
+                                    f"source: "
+                                    f"{(getattr(d, 'metadata', {}) or {}).get('source') or (getattr(d, 'metadata', {}) or {}).get('file_path') or (getattr(d, 'metadata', {}) or {}).get('filename') or 'unknown'}]"
+                                )
+                                for idx, d in enumerate(final_docs, start=1)
+                            ]
+                        )
                     self.append_chat("source", f"\nSources used:\n{sources_text}")
                 self._append_jsonl_telemetry(
                     {
@@ -7525,6 +7707,12 @@ class AgenticRAGApp:
                     )
                     if source_cards_text.strip():
                         validated_answer = f"{validated_answer.rstrip()}\n\n{source_cards_text}"
+                elif self._frontier_enabled("citation_v2"):
+                    source_map, _ = self._build_source_cards(final_docs)
+                    self._latest_source_map = source_map
+                    validated_answer = self._rewrite_evidence_pack_citations(
+                        validated_answer, final_docs, source_map
+                    )
                 self.last_answer = validated_answer
                 self.append_chat("agent", f"AI: {validated_answer}")
                 self._append_history(AIMessage(content=validated_answer))
@@ -7538,18 +7726,27 @@ class AgenticRAGApp:
                 self._latest_source_map = source_map
                 self._latest_incidents = []
                 self._run_on_ui(self._refresh_evidence_pane, source_map, [], "")
-                sources_text = "\n".join(
-                    [
-                        (
-                            f"- [Chunk {idx} | chunk_id: "
-                            f"{getattr(d, 'metadata', {}).get('chunk_id', 'N/A')} | score: "
-                            f"{getattr(d, 'metadata', {}).get('relevance_score', 'N/A')} | "
-                            f"source: "
-                            f"{(getattr(d, 'metadata', {}) or {}).get('source') or (getattr(d, 'metadata', {}) or {}).get('file_path') or (getattr(d, 'metadata', {}) or {}).get('filename') or 'unknown'}]"
-                        )
-                        for idx, d in enumerate(final_docs, start=1)
-                    ]
-                )
+                if self._frontier_enabled("citation_v2"):
+                    ordered = sorted(
+                        source_map.values(),
+                        key=lambda entry: int(str(entry.get("sid", "S999")).lstrip("S") or "999"),
+                    )
+                    sources_text = "\n".join(
+                        [f"- [{entry.get('sid', 'S?')} | {entry.get('label', 'unknown')}]" for entry in ordered]
+                    )
+                else:
+                    sources_text = "\n".join(
+                        [
+                            (
+                                f"- [Chunk {idx} | chunk_id: "
+                                f"{getattr(d, 'metadata', {}).get('chunk_id', 'N/A')} | score: "
+                                f"{getattr(d, 'metadata', {}).get('relevance_score', 'N/A')} | "
+                                f"source: "
+                                f"{(getattr(d, 'metadata', {}) or {}).get('source') or (getattr(d, 'metadata', {}) or {}).get('file_path') or (getattr(d, 'metadata', {}) or {}).get('filename') or 'unknown'}]"
+                            )
+                            for idx, d in enumerate(final_docs, start=1)
+                        ]
+                    )
                 self.append_chat("source", f"\nSources used:\n{sources_text}")
 
             self._append_jsonl_telemetry(
@@ -7629,6 +7826,8 @@ class AgenticRAGApp:
 # - Lexical search: query containing "Sam.Weekes@gbe.gov.uk" should not crash; should return [] or results; must not disable lexical_db_available.
 # - Agent loop: running with novelty tracking should not raise NameError; seen_chunk_ids should grow across iterations.
 # - Ingestion should not emit utcnow() deprecation warning.
+# - If citation_v2 enabled, answer uses [S#] and Sources shows readable labels (not chunk ids).
+# - If citation_v2 disabled, legacy [Chunk N] citations still work end-to-end.
 
 
 
