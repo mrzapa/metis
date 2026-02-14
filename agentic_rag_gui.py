@@ -264,6 +264,7 @@ class AgenticRAGApp:
         self.enable_langextract = tk.BooleanVar(value=False)
         self.enable_structured_incidents = tk.BooleanVar(value=False)
         self.enable_recursive_memory = tk.BooleanVar(value=False)
+        self.enable_recursive_retrieval = tk.BooleanVar(value=False)
         self.enable_citation_v2 = tk.BooleanVar(value=False)
         self.enable_agent_lightning_telemetry = tk.BooleanVar(value=False)
         self._frontier_evidence_pack_mode = False
@@ -627,6 +628,14 @@ class AgenticRAGApp:
                 data.get("enable_recursive_memory", self.enable_recursive_memory.get())
             )
         )
+        self.enable_recursive_retrieval.set(
+            bool(
+                data.get(
+                    "enable_recursive_retrieval",
+                    self.enable_recursive_retrieval.get(),
+                )
+            )
+        )
         self.enable_citation_v2.set(
             bool(data.get("enable_citation_v2", self.enable_citation_v2.get()))
         )
@@ -712,6 +721,7 @@ class AgenticRAGApp:
                 self.enable_structured_incidents.get()
             ),
             "enable_recursive_memory": bool(self.enable_recursive_memory.get()),
+            "enable_recursive_retrieval": bool(self.enable_recursive_retrieval.get()),
             "enable_citation_v2": bool(self.enable_citation_v2.get()),
             "enable_agent_lightning_telemetry": bool(
                 self.enable_agent_lightning_telemetry.get()
@@ -1199,6 +1209,11 @@ class AgenticRAGApp:
             self.frontier_options_frame,
             text="Enable recursive memory",
             variable=self.enable_recursive_memory,
+        ).pack(anchor="w")
+        ttk.Checkbutton(
+            self.frontier_options_frame,
+            text="Enable recursive retrieval mode",
+            variable=self.enable_recursive_retrieval,
         ).pack(anchor="w")
         ttk.Checkbutton(
             self.frontier_options_frame,
@@ -2847,9 +2862,12 @@ class AgenticRAGApp:
             )
             metadata = {
                 "doc_type": "digest",
+                "tree_level": 1,
                 "ingest_id": ingest_id,
                 "source": source_basename,
                 "digest_id": f"{ingest_id}-{digest_index}",
+                "node_id": f"l1:{ingest_id}-{digest_index}",
+                "parent_node_id": f"l2:{ingest_id}",
                 "child_chunk_ids": compact_ids,
             }
             if section_title:
@@ -2860,6 +2878,52 @@ class AgenticRAGApp:
                 Document(page_content=response.content.strip(), metadata=metadata)
             )
         return digest_docs
+
+    def _build_document_summary_node(
+        self,
+        digest_docs,
+        ingest_id,
+        source_basename,
+        doc_title,
+    ):
+        if not digest_docs:
+            return []
+        llm = self._get_llm_with_temperature(0.2)
+        section_rollup = []
+        for idx, digest_doc in enumerate(digest_docs, start=1):
+            metadata = getattr(digest_doc, "metadata", {}) or {}
+            section_title = metadata.get("section_title") or f"Section {idx}"
+            digest_id = metadata.get("digest_id", f"{ingest_id}-{idx}")
+            section_rollup.append(
+                f"[{digest_id}] {section_title}\n{digest_doc.page_content.strip()}"
+            )
+        system_prompt = (
+            "Create a concise document-level summary from section summaries. "
+            "Capture major themes, chronology, key actors, decisions, and outcomes. "
+            "Use bullets only with no introductory text."
+        )
+        response = llm.invoke(
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content="\n\n".join(section_rollup)),
+            ]
+        )
+        child_digest_ids = [
+            (getattr(doc, "metadata", {}) or {}).get("digest_id") for doc in digest_docs
+        ]
+        child_digest_ids = [item for item in child_digest_ids if item]
+        metadata = {
+            "doc_type": "doc_summary",
+            "tree_level": 2,
+            "ingest_id": ingest_id,
+            "source": source_basename,
+            "digest_id": f"doc-{ingest_id}",
+            "node_id": f"l2:{ingest_id}",
+            "child_digest_ids": json.dumps(child_digest_ids),
+        }
+        if doc_title:
+            metadata["doc_title"] = doc_title
+        return [Document(page_content=response.content.strip(), metadata=metadata)]
 
     def _build_mini_digest_documents(self, docs, query):
         groups = self._group_chunks_for_digest(docs)
@@ -5644,14 +5708,24 @@ class AgenticRAGApp:
 
             new_index_path = None
             digest_docs = []
+            summary_tree_docs = []
 
             if self.build_digest_index.get():
                 if db_type == "chroma":
-                    self.log("Building digest summaries...")
+                    self.log("Building summary tree (L1 sections, L2 document summary)...")
                     digest_docs = self._build_digest_documents(
                         docs, chunk_ingest_id, source_basename, doc_title
                     )
-                    self.log(f"Prepared {len(digest_docs)} digest summaries.")
+                    summary_tree_docs = [*digest_docs]
+                    summary_tree_docs.extend(
+                        self._build_document_summary_node(
+                            digest_docs, chunk_ingest_id, source_basename, doc_title
+                        )
+                    )
+                    self.log(
+                        f"Prepared summary tree nodes: L1={len(digest_docs)}, "
+                        f"L2={max(0, len(summary_tree_docs) - len(digest_docs))}."
+                    )
                 else:
                     self.log("Digest indexing is only supported for Chroma. Skipping.")
 
@@ -5718,18 +5792,18 @@ class AgenticRAGApp:
                 self._run_on_ui(self.progress.config, value=i + len(batch))
                 self.log(f"Indexed {min(i + batch_size, total_docs)}/{total_docs} chunks...")
 
-            if digest_docs:
-                self.log("Storing digest summaries...")
+            if summary_tree_docs:
+                self.log("Storing summary tree nodes...")
                 digest_store = Chroma(
                     collection_name=DIGEST_COLLECTION_NAME,
                     embedding_function=embeddings,
                     persist_directory=persist_dir,
                 )
-                total_digests = len(digest_docs)
+                total_digests = len(summary_tree_docs)
                 for i in range(0, total_digests, batch_size):
-                    batch = digest_docs[i : i + batch_size]
+                    batch = summary_tree_docs[i : i + batch_size]
                     digest_store.add_documents(batch)
-                self.log(f"Indexed {total_digests} digest summaries.")
+                self.log(f"Indexed {total_digests} summary tree nodes.")
 
             self.log("Ingestion Complete! You can now chat.")
             if new_index_path:
@@ -5861,6 +5935,10 @@ class AgenticRAGApp:
                 keyword in normalized_query for keyword in long_form_keywords
             )
             is_evidence_pack = self.is_evidence_pack_query(query, output_style)
+            recursive_mode_enabled = bool(self.enable_recursive_retrieval.get())
+            use_recursive_retrieval = (
+                recursive_mode_enabled and (is_long_form or is_evidence_pack)
+            )
             self._frontier_evidence_pack_mode = bool(is_evidence_pack)
             self._last_evidence_pack_synthesis_cards = []
             self._latest_source_map = {}
@@ -5874,6 +5952,7 @@ class AgenticRAGApp:
                 f"recursive_memory={self._frontier_enabled('recursive_memory')}, "
                 f"citation_v2={self._frontier_enabled('citation_v2')}, "
                 f"agent_lightning_telemetry={self._frontier_enabled('agent_lightning_telemetry')}, "
+                f"recursive_retrieval={int(use_recursive_retrieval)}, "
                 f"evidence_pack_mode={is_evidence_pack}"
             )
             if is_long_form:
@@ -5887,6 +5966,10 @@ class AgenticRAGApp:
                         f"{original_final_k} to {final_k} "
                         "(GUI value remains authoritative with long-form floor only)."
                     )
+            if recursive_mode_enabled and not use_recursive_retrieval:
+                self.log(
+                    "Recursive retrieval toggle is ON, but request is not long-form/evidence-pack; using default retrieval."
+                )
             self._append_jsonl_telemetry(
                 {
                     "event": "run_start",
@@ -5897,6 +5980,8 @@ class AgenticRAGApp:
                     "effective_final_k": final_k,
                     "agentic": int(self.agentic_mode.get()),
                     "output_style": output_style,
+                    "recursive_mode_enabled": int(recursive_mode_enabled),
+                    "recursive_mode_active": int(use_recursive_retrieval),
                 }
             )
             self._start_agent_lightning_run(run_id, query)
@@ -5946,6 +6031,8 @@ class AgenticRAGApp:
                     self.log(
                         f"Mini-digest routing enabled; boosted retrieval pool to {routing_candidate_k}."
                     )
+
+            recursive_expansion_cache = {}
 
             def _extract_json_payload(text):
                 cleaned = text.strip()
@@ -6244,7 +6331,7 @@ class AgenticRAGApp:
                     )
                 return search_kwargs_local
 
-            def _retrieve_digest_nodes(query_list, remaining_cap, k_value, digest_store):
+            def _retrieve_digest_nodes(query_list, remaining_cap, k_value, digest_store, tree_level=None):
                 if remaining_cap <= 0 or not digest_store:
                     return [], 0, True
                 filtered_queries = [q for q in query_list if q]
@@ -6269,6 +6356,13 @@ class AgenticRAGApp:
                         search_kwargs=_build_search_kwargs(query_k),
                     )
                     batch = retriever.invoke(sub_query)
+                    if tree_level is not None:
+                        batch = [
+                            doc
+                            for doc in batch
+                            if int((getattr(doc, "metadata", {}) or {}).get("tree_level", 1))
+                            == int(tree_level)
+                        ]
                     retrieved_count_local += len(batch)
                     docs_local.extend(batch)
                 docs_local = self._merge_dedupe_docs(docs_local)
@@ -6322,16 +6416,13 @@ class AgenticRAGApp:
                             },
                             include=["documents", "metadatas"],
                         )
-                        self.log("Digest expansion filter path: chroma $and")
-                    except Exception as exc:
-                        self.log(f"Digest expansion $and filter unsupported; retrying ingest_id-only path. ({exc})")
+                    except Exception:
                         try:
                             result = collection.get(
                                 where={"ingest_id": ingest_id},
                                 include=["documents", "metadatas"],
                             )
                             filtered_in_python = True
-                            self.log("Digest expansion filter path: ingest_id-only + python chunk_id filter")
                         except Exception as exc2:
                             self.log(f"Digest expansion failed; falling back to raw search. ({exc2})")
                             return [], False
@@ -6355,13 +6446,81 @@ class AgenticRAGApp:
                 digest_retrieved = 0
                 digest_selected = 0
                 raw_expanded_count = 0
+                levels_used = []
                 if digest_store:
-                    digest_docs, digest_retrieved, digest_cap_reached = (
-                        _retrieve_digest_nodes(
-                            query_list, remaining_cap, k_value, digest_store
+                    if use_recursive_retrieval:
+                        top_docs, top_retrieved, l2_cap_reached = _retrieve_digest_nodes(
+                            query_list,
+                            remaining_cap,
+                            k_value,
+                            digest_store,
+                            tree_level=2,
                         )
+                        if top_docs:
+                            levels_used.append("L2")
+                            digest_retrieved += top_retrieved
+                            selected_ingest_ids = {
+                                (getattr(doc, "metadata", {}) or {}).get("ingest_id")
+                                for doc in top_docs
+                            }
+                            selected_ingest_ids = {item for item in selected_ingest_ids if item}
+                            expanded_sections = []
+                            for ingest_id in selected_ingest_ids:
+                                cache_key = (tuple(query_list), ingest_id, "l1")
+                                if cache_key not in recursive_expansion_cache:
+                                    section_docs, section_retrieved, _ = _retrieve_digest_nodes(
+                                        query_list,
+                                        remaining_cap,
+                                        k_value,
+                                        digest_store,
+                                        tree_level=1,
+                                    )
+                                    section_docs = [
+                                        doc
+                                        for doc in section_docs
+                                        if (getattr(doc, "metadata", {}) or {}).get("ingest_id") == ingest_id
+                                    ]
+                                    recursive_expansion_cache[cache_key] = (section_docs, section_retrieved)
+                                cached_sections, section_retrieved = recursive_expansion_cache[cache_key]
+                                digest_retrieved += section_retrieved
+                                expanded_sections.extend(cached_sections)
+                            digest_docs = self._merge_dedupe_docs(expanded_sections)
+                            digest_selected = len(digest_docs)
+                            if digest_docs:
+                                levels_used.append("L1")
+                                raw_cache_key = (tuple(query_list), tuple(sorted(selected_ingest_ids)), "l0")
+                                if raw_cache_key not in recursive_expansion_cache:
+                                    raw_docs, raw_cap_reached = _expand_digest_nodes(
+                                        digest_docs, remaining_cap
+                                    )
+                                    recursive_expansion_cache[raw_cache_key] = (
+                                        raw_docs,
+                                        raw_cap_reached,
+                                    )
+                                raw_docs, raw_cap_reached = recursive_expansion_cache[raw_cache_key]
+                                raw_expanded_count = len(raw_docs)
+                                if raw_docs:
+                                    levels_used.append("L0")
+                                    self.log(
+                                        "Recursive retrieval path: "
+                                        f"L2 docs={len(top_docs)} -> L1 sections={len(digest_docs)} -> L0 chunks={len(raw_docs)}"
+                                    )
+                                    return (
+                                        raw_docs,
+                                        0,
+                                        l2_cap_reached or raw_cap_reached,
+                                        digest_docs,
+                                        raw_expanded_count,
+                                        digest_retrieved,
+                                        digest_selected,
+                                        levels_used,
+                                    )
+                    digest_docs, digest_retrieved, digest_cap_reached = _retrieve_digest_nodes(
+                        query_list, remaining_cap, k_value, digest_store, tree_level=1
                     )
                     digest_selected = len(digest_docs)
+                    if digest_docs:
+                        levels_used.extend(["L1", "L0"])
                     raw_docs, raw_cap_reached = _expand_digest_nodes(
                         digest_docs, remaining_cap
                     )
@@ -6375,6 +6534,7 @@ class AgenticRAGApp:
                             raw_expanded_count,
                             digest_retrieved,
                             digest_selected,
+                            levels_used,
                         )
                 raw_docs, retrieved_count, cap_reached = _retrieve_for_queries(
                     query_list, remaining_cap, k_value
@@ -6387,6 +6547,7 @@ class AgenticRAGApp:
                     0,
                     digest_retrieved,
                     digest_selected,
+                    ["L0"],
                 )
 
             def _retrieve_for_queries(query_list, remaining_cap, k_value):
@@ -6767,6 +6928,7 @@ class AgenticRAGApp:
                 selection_stats,
                 coverage_stats,
                 follow_up_queries,
+                levels_used=None,
             ):
                 truncation_note = (
                     f"{int(truncated_flag)} {trunc_used_chars}/{trunc_budget_chars}"
@@ -6775,8 +6937,8 @@ class AgenticRAGApp:
                     "Iter "
                     f"{iteration_id} telemetry | style={output_style}, "
                     f"agentic={int(agentic_mode)}, planner_subqueries={planner_subquery_count}, "
-                    f"queries={query_count}, digest={digest_retrieved_count}/"
-                    f"{digest_selected_count}, raw={raw_expanded_count}/"
+                    f"queries={query_count}, levels={'+'.join(levels_used or ['L0'])}, "
+                    f"digest={digest_retrieved_count}/{digest_selected_count}, raw={raw_expanded_count}/"
                     f"{raw_unique_count}/{packed_docs}, "
                     f"trunc={truncation_note}, cap_reached={int(cap_reached_flag)}, "
                     f"retrieved={retrieved_count}"
@@ -6806,6 +6968,7 @@ class AgenticRAGApp:
                             "raw_unique_count": raw_unique_count,
                             "retrieved_count": retrieved_count,
                             "cap_reached": bool(cap_reached_flag),
+                            "levels_used": levels_used or ["L0"],
                         },
                         "selection_stats": selection_stats,
                         "coverage_gate": {
@@ -6835,6 +6998,7 @@ class AgenticRAGApp:
                     raw_expanded_count,
                     digest_retrieved_count,
                     digest_selected_count,
+                    levels_used,
                 ) = _retrieve_with_digest(
                     queries, min(total_docs_cap, max_total_docs), routing_candidate_k
                 )
@@ -7102,6 +7266,7 @@ class AgenticRAGApp:
                     selection_stats,
                     coverage_stats,
                     follow_up_queries,
+                    levels_used,
                 )
                 _append_context_if_enabled("(single pass)", context_text, was_truncated)
 
@@ -7366,6 +7531,7 @@ class AgenticRAGApp:
                     raw_expanded_count,
                     digest_retrieved_count,
                     digest_selected_count,
+                    levels_used,
                 ) = _retrieve_with_digest(
                     iteration_queries, remaining_cap, routing_candidate_k
                 )
@@ -7641,6 +7807,7 @@ class AgenticRAGApp:
                     selection_stats,
                     coverage_stats,
                     follow_up_queries,
+                    levels_used,
                 )
                 _append_context_if_enabled(
                     f"(iteration {iteration})", context_text, was_truncated
