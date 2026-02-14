@@ -234,6 +234,8 @@ class AgenticRAGApp:
         self.enable_agent_lightning_telemetry = tk.BooleanVar(value=False)
         self._frontier_evidence_pack_mode = False
         self._last_evidence_pack_synthesis_cards = []
+        self._agent_lightning_runs_by_id = {}
+        self._agent_lightning_last_exportable_run = None
 
         self.vector_store = None
         self.index_embedding_signature = ""
@@ -1048,6 +1050,11 @@ class AgenticRAGApp:
         ttk.Button(
             action_frame, text="Copy Last Answer", command=self.copy_last_answer
         ).pack(side="left")
+        ttk.Button(
+            action_frame,
+            text="Export run as AgentLightning dataset",
+            command=self.export_run_as_agent_lightning_dataset,
+        ).pack(side="left", padx=8)
 
         # Options
         opt_frame = ttk.Frame(frame)
@@ -2050,6 +2057,157 @@ class AgenticRAGApp:
                 handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
         except Exception:
             return
+
+    def _agent_lightning_telemetry_enabled(self):
+        return bool(self._frontier_enabled("agent_lightning_telemetry"))
+
+    def _start_agent_lightning_run(self, run_id, query):
+        if not self._agent_lightning_telemetry_enabled():
+            return
+        run_payload = {
+            "run_id": run_id,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "query": query,
+            "knobs": {
+                "agentic_mode": bool(self.agentic_mode.get()),
+                "agentic_max_iterations": int(self.agentic_max_iterations.get()),
+                "retrieval_k": int(self.retrieval_k.get()),
+                "final_k": int(self.final_k.get()),
+                "search_type": str(self.search_type.get()),
+                "mmr_lambda": float(self.mmr_lambda.get()),
+                "use_sub_queries": bool(self.use_sub_queries.get()),
+                "use_reranker": bool(self.use_reranker.get()),
+                "enable_structured_incidents": bool(self.enable_structured_incidents.get()),
+                "output_style": str(self.output_style.get()),
+                "llm_provider": str(self.llm_provider.get()),
+                "llm_model": str(self._resolve_llm_model()),
+            },
+            "events": [],
+            "example": {
+                "query": query,
+                "incidents": [],
+                "final_output": "",
+            },
+        }
+        self._agent_lightning_runs_by_id[run_id] = run_payload
+
+    def _record_agent_lightning_event(self, run_id, event, payload):
+        if not self._agent_lightning_telemetry_enabled():
+            return
+        run_payload = self._agent_lightning_runs_by_id.get(run_id)
+        if not run_payload:
+            return
+        record = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "run_id": run_id,
+            "event": event,
+            **(payload or {}),
+        }
+        run_payload["events"].append(record)
+
+    def _build_incident_export_payload(self, docs):
+        incidents = {}
+        month_buckets = set()
+        dated_count = 0
+        undated_count = 0
+        for doc in docs or []:
+            metadata = getattr(doc, "metadata", {}) or {}
+            incident_key = metadata.get("incident_key") or self._build_incident_key(doc)
+            month_bucket = str(metadata.get("month_bucket") or "undated").strip() or "undated"
+            if month_bucket != "undated":
+                month_buckets.add(month_bucket)
+                dated_count += 1
+            else:
+                undated_count += 1
+            item = incidents.setdefault(
+                incident_key,
+                {
+                    "incident_key": incident_key,
+                    "month_bucket": month_bucket,
+                    "channel": str(metadata.get("channel_type") or self._extract_channel(getattr(doc, "page_content", "") or "")),
+                    "role": str(metadata.get("role_kind") or self._extract_role_kind(doc)),
+                    "chunk_ids": [],
+                },
+            )
+            chunk_id = str(metadata.get("chunk_id") or "")
+            if chunk_id and chunk_id not in item["chunk_ids"]:
+                item["chunk_ids"].append(chunk_id)
+        return {
+            "incidents": list(incidents.values()),
+            "incident_count": len(incidents),
+            "dated_count": dated_count,
+            "undated_count": undated_count,
+            "months_covered": sorted(month_buckets, key=self._month_sort_key),
+        }
+
+    @staticmethod
+    def _count_claim_like_sentences(text):
+        parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", str(text or "")) if p.strip()]
+        return len(parts)
+
+    @staticmethod
+    def _count_citations(text):
+        return len(re.findall(r"\[(?:Chunk\s+\d+|S\d+(?:\s*,\s*S\d+)*)\]", str(text or "")))
+
+    def _finalize_agent_lightning_run(self, run_id, final_docs, final_output):
+        if not self._agent_lightning_telemetry_enabled():
+            return
+        run_payload = self._agent_lightning_runs_by_id.get(run_id)
+        if not run_payload:
+            return
+        incident_payload = self._build_incident_export_payload(final_docs)
+        run_payload["example"]["incidents"] = incident_payload["incidents"]
+        run_payload["example"]["final_output"] = final_output
+        self._agent_lightning_last_exportable_run = run_payload
+
+    def export_run_as_agent_lightning_dataset(self):
+        if not self._agent_lightning_last_exportable_run:
+            messagebox.showinfo(
+                "AgentLightning export",
+                "No telemetry-enabled run available yet. Enable Agent Lightning telemetry and run a query first.",
+            )
+            return
+        parent_dir = filedialog.askdirectory(title="Select export directory")
+        if not parent_dir:
+            return
+        run_payload = self._agent_lightning_last_exportable_run
+        folder_name = f"agent_lightning_dataset_{run_payload['run_id']}"
+        export_dir = os.path.join(parent_dir, folder_name)
+        try:
+            os.makedirs(export_dir, exist_ok=True)
+            with open(os.path.join(export_dir, "config.json"), "w", encoding="utf-8") as handle:
+                json.dump(run_payload.get("knobs", {}), handle, indent=2, ensure_ascii=False, sort_keys=True)
+            with open(os.path.join(export_dir, "runs.jsonl"), "w", encoding="utf-8") as handle:
+                for event in run_payload.get("events", []):
+                    handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+            with open(os.path.join(export_dir, "examples.jsonl"), "w", encoding="utf-8") as handle:
+                example_payload = {
+                    "run_id": run_payload.get("run_id"),
+                    **(run_payload.get("example") or {}),
+                }
+                handle.write(json.dumps(example_payload, ensure_ascii=False, sort_keys=True) + "\n")
+            with open(os.path.join(export_dir, "agent_lightning_eval_stub.py"), "w", encoding="utf-8") as handle:
+                handle.write(
+                    "# Optional Agent Lightning benchmark/training stub.\n"
+                    "# This is intentionally commented so app runtime behavior is unchanged.\n"
+                    "#\n"
+                    "# from pathlib import Path\n"
+                    "# import json\n"
+                    "# import agent_lightning  # optional dependency\n"
+                    "#\n"
+                    "# dataset_dir = Path(__file__).resolve().parent\n"
+                    "# runs = [json.loads(line) for line in (dataset_dir / 'runs.jsonl').read_text(encoding='utf-8').splitlines() if line.strip()]\n"
+                    "# examples = [json.loads(line) for line in (dataset_dir / 'examples.jsonl').read_text(encoding='utf-8').splitlines() if line.strip()]\n"
+                    "# config = json.loads((dataset_dir / 'config.json').read_text(encoding='utf-8'))\n"
+                    "#\n"
+                    "# trainer = agent_lightning.Trainer(config=config)\n"
+                    "# trainer.benchmark(examples=examples, events=runs)\n"
+                    "# trainer.train_loop(examples=examples, events=runs)\n"
+                )
+            self.log(f"AgentLightning dataset exported to: {export_dir}")
+            messagebox.showinfo("AgentLightning export", f"Exported dataset to:\n{export_dir}")
+        except Exception as exc:
+            messagebox.showerror("AgentLightning export", f"Export failed:\n{exc}")
 
     def _ensure_lexical_db(self):
         db_path = self._get_lexical_db_path()
@@ -5259,6 +5417,7 @@ class AgenticRAGApp:
                     "output_style": output_style,
                 }
             )
+            self._start_agent_lightning_run(run_id, query)
             search_type = self.search_type.get() or "similarity"
             mmr_lambda = float(self.mmr_lambda.get())
             total_docs_cap = max(10, min(500, int(self.subquery_max_docs.get())))
@@ -5785,6 +5944,16 @@ class AgenticRAGApp:
                     f"dense={len(dense_ranked)}, lexical={len(lexical_ranked)} "
                     f"(ran={int(lexical_ran)}), fused={len(docs_local)}."
                 )
+                self._record_agent_lightning_event(
+                    run_id,
+                    "retrieval",
+                    {
+                        "queries": filtered_queries,
+                        "dense_k": int(dense_k),
+                        "lexical_k": int(lexical_k),
+                        "fused_k": int(len(docs_local)),
+                    },
+                )
                 if len(docs_local) > remaining_cap:
                     docs_local = docs_local[:remaining_cap]
                     cap_reached = True
@@ -5839,6 +6008,16 @@ class AgenticRAGApp:
                 self.log(
                     "RRF fusion retrieval combined dense+lexical results into "
                     f"{len(docs_local)} unique candidates."
+                )
+                self._record_agent_lightning_event(
+                    run_id,
+                    "retrieval",
+                    {
+                        "queries": filtered_queries,
+                        "dense_k": int(per_query_k),
+                        "lexical_k": int(per_query_k if self.lexical_db_available else 0),
+                        "fused_k": int(len(docs_local)),
+                    },
                 )
                 return docs_local, retrieved_count_local, cap_reached
 
@@ -6364,6 +6543,29 @@ class AgenticRAGApp:
                     "unique_incidents": unique_incidents_value,
                     "role_distribution": role_distribution,
                 }
+                self._record_agent_lightning_event(
+                    run_id,
+                    "selection",
+                    {
+                        "iter": 1,
+                        "final_k": int(final_k),
+                        "packed_count": int(packed_count),
+                        "unique_incidents": int(unique_incidents_value),
+                        "role_balance": role_distribution,
+                    },
+                )
+                extraction_payload = self._build_incident_export_payload(final_docs)
+                self._record_agent_lightning_event(
+                    run_id,
+                    "extraction",
+                    {
+                        "iter": 1,
+                        "incident_count": int(extraction_payload["incident_count"]),
+                        "dated_count": int(extraction_payload["dated_count"]),
+                        "undated_count": int(extraction_payload["undated_count"]),
+                        "months_covered": extraction_payload["months_covered"],
+                    },
+                )
                 _log_iteration_telemetry(
                     1,
                     self.output_style.get(),
@@ -6432,6 +6634,25 @@ class AgenticRAGApp:
                     synthesis_cards=self._last_evidence_pack_synthesis_cards,
                 )
                 validation_ms = int((time.perf_counter() - validation_started_at) * 1000)
+                self._record_agent_lightning_event(
+                    run_id,
+                    "generation",
+                    {
+                        "iter": 1,
+                        "latency_ms": int(generation_ms),
+                        "tokens_est": max(1, len(str(response_content or "")) // TOKENS_TO_CHARS_RATIO),
+                        "chars": len(str(response_content or "")),
+                    },
+                )
+                self._record_agent_lightning_event(
+                    run_id,
+                    "verification",
+                    {
+                        "iter": 1,
+                        "claims_dropped": max(0, self._count_claim_like_sentences(response_content) - self._count_claim_like_sentences(validated_answer)),
+                        "claims_cited": self._count_citations(validated_answer),
+                    },
+                )
                 self._append_jsonl_telemetry(
                     {
                         "event": "iteration_stage_timings",
@@ -6483,6 +6704,7 @@ class AgenticRAGApp:
                         },
                     }
                 )
+                self._finalize_agent_lightning_run(run_id, final_docs, validated_answer)
                 return
 
             try:
@@ -6500,6 +6722,7 @@ class AgenticRAGApp:
             checklist = []
             section_plan = []
             latest_answer = ""
+            validated_answer = ""
             latest_context_text = ""
             final_docs = []
             critic_queries = []
@@ -6834,6 +7057,29 @@ class AgenticRAGApp:
                     "new_incidents_added": new_incidents_added,
                     "role_distribution": role_distribution,
                 }
+                self._record_agent_lightning_event(
+                    run_id,
+                    "selection",
+                    {
+                        "iter": int(iteration),
+                        "final_k": int(final_k),
+                        "packed_count": int(packed_count),
+                        "unique_incidents": int(unique_incidents_value),
+                        "role_balance": role_distribution,
+                    },
+                )
+                extraction_payload = self._build_incident_export_payload(final_docs)
+                self._record_agent_lightning_event(
+                    run_id,
+                    "extraction",
+                    {
+                        "iter": int(iteration),
+                        "incident_count": int(extraction_payload["incident_count"]),
+                        "dated_count": int(extraction_payload["dated_count"]),
+                        "undated_count": int(extraction_payload["undated_count"]),
+                        "months_covered": extraction_payload["months_covered"],
+                    },
+                )
                 _log_iteration_telemetry(
                     iteration,
                     self.output_style.get(),
@@ -6984,6 +7230,25 @@ class AgenticRAGApp:
                     synthesis_cards=self._last_evidence_pack_synthesis_cards,
                 )
                 validation_ms = int((time.perf_counter() - validation_started_at) * 1000)
+                self._record_agent_lightning_event(
+                    run_id,
+                    "generation",
+                    {
+                        "iter": int(last_iteration_id),
+                        "latency_ms": int(generation_ms),
+                        "tokens_est": max(1, len(str(latest_answer or "")) // TOKENS_TO_CHARS_RATIO),
+                        "chars": len(str(latest_answer or "")),
+                    },
+                )
+                self._record_agent_lightning_event(
+                    run_id,
+                    "verification",
+                    {
+                        "iter": int(last_iteration_id),
+                        "claims_dropped": max(0, self._count_claim_like_sentences(latest_answer) - self._count_claim_like_sentences(validated_answer)),
+                        "claims_cited": self._count_citations(validated_answer),
+                    },
+                )
                 self._append_jsonl_telemetry(
                     {
                         "event": "iteration_stage_timings",
@@ -7034,6 +7299,7 @@ class AgenticRAGApp:
                     },
                 }
             )
+            self._finalize_agent_lightning_run(run_id, final_docs, validated_answer or latest_answer)
         except Exception as e:
             self.log(f"RAG Error ({stage} failure): {e}")
             self.append_chat("system", f"Error ({stage} failure): {e}")
