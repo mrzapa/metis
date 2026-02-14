@@ -39,6 +39,7 @@ except ImportError:
 
 RAW_COLLECTION_NAME = "rag_collection"
 DIGEST_COLLECTION_NAME = "rag_digest_collection"
+CONCEPT_COLLECTION_NAME = "rag_concept_cards"
 DIGEST_WINDOW_MIN = 10
 DIGEST_WINDOW_MAX = 20
 DIGEST_WINDOW_TARGET = 15
@@ -241,6 +242,8 @@ class AgenticRAGApp:
         self.chunk_size = tk.IntVar(value=1000)
         self.chunk_overlap = tk.IntVar(value=200)
         self.build_digest_index = tk.BooleanVar(value=True)
+        self.build_comprehension_index = tk.BooleanVar(value=False)
+        self.comprehension_extraction_depth = tk.StringVar(value="Standard")
 
         self.llm_model = tk.StringVar(value="claude-opus-4-6")
         self.llm_model_custom = tk.StringVar()
@@ -750,6 +753,23 @@ class AgenticRAGApp:
         self.build_digest_index.set(
             bool(data.get("build_digest_index", self.build_digest_index.get()))
         )
+        self.build_comprehension_index.set(
+            bool(
+                data.get(
+                    "build_comprehension_index",
+                    self.build_comprehension_index.get(),
+                )
+            )
+        )
+        extraction_depth = str(
+            data.get(
+                "comprehension_extraction_depth",
+                self.comprehension_extraction_depth.get(),
+            )
+        ).strip()
+        if extraction_depth not in {"Light", "Standard", "Deep"}:
+            extraction_depth = "Standard"
+        self.comprehension_extraction_depth.set(extraction_depth)
         self.llm_model.set(data.get("llm_model", self.llm_model.get()))
         self.llm_model_custom.set(data.get("llm_model_custom", self.llm_model_custom.get()))
         self.embedding_model.set(data.get("embedding_model", self.embedding_model.get()))
@@ -888,6 +908,10 @@ class AgenticRAGApp:
             "chunk_size": self.chunk_size.get(),
             "chunk_overlap": self.chunk_overlap.get(),
             "build_digest_index": self.build_digest_index.get(),
+            "build_comprehension_index": bool(self.build_comprehension_index.get()),
+            "comprehension_extraction_depth": str(
+                self.comprehension_extraction_depth.get()
+            ),
             "llm_model": self.llm_model.get(),
             "llm_model_custom": self.llm_model_custom.get(),
             "embedding_model": self.embedding_model.get(),
@@ -1177,6 +1201,28 @@ class AgenticRAGApp:
             text="Build digest index",
             variable=self.build_digest_index,
         ).pack(side="left", padx=(20, 0))
+
+        comprehension_frame = ttk.LabelFrame(
+            frame, text="Comprehension Index", padding=10
+        )
+        comprehension_frame.pack(fill="x", pady=(0, 10))
+
+        ttk.Checkbutton(
+            comprehension_frame,
+            text="Build Comprehension Index (langextract)",
+            variable=self.build_comprehension_index,
+        ).pack(side="left")
+
+        ttk.Label(comprehension_frame, text="Extraction depth:").pack(
+            side="left", padx=(20, 5)
+        )
+        ttk.Combobox(
+            comprehension_frame,
+            textvariable=self.comprehension_extraction_depth,
+            values=["Light", "Standard", "Deep"],
+            width=12,
+            state="readonly",
+        ).pack(side="left")
 
         # Action
         self.btn_ingest = ttk.Button(
@@ -2863,6 +2909,26 @@ class AgenticRAGApp:
                     USING fts5(text, content='chunks', content_rowid='rowid')
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS concept_cards(
+                        id TEXT PRIMARY KEY,
+                        title TEXT,
+                        kind TEXT,
+                        content_json TEXT,
+                        source_refs_json TEXT,
+                        card_text TEXT,
+                        ingest_id TEXT,
+                        created_at TEXT
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS concept_cards_fts
+                    USING fts5(title, kind, card_text, content='concept_cards', content_rowid='rowid')
+                    """
+                )
                 conn.commit()
             self.lexical_db_path = db_path
             self.lexical_db_available = True
@@ -2928,6 +2994,250 @@ class AgenticRAGApp:
             self.lexical_db_available = False
             self.log(f"Lexical chunk upsert skipped (SQLite/FTS5 issue). ({exc})")
             return False
+
+    def _depth_chunk_limit(self):
+        depth = str(self.comprehension_extraction_depth.get() or "Standard").strip()
+        if depth == "Light":
+            return 4
+        if depth == "Deep":
+            return 14
+        return 8
+
+    @staticmethod
+    def _truncate_for_card(text, max_chars=700):
+        compact = re.sub(r"\s+", " ", str(text or "")).strip()
+        if len(compact) <= max_chars:
+            return compact
+        return compact[: max_chars - 1].rstrip() + "…"
+
+    def _card_text_from_item(self, item):
+        title = str(item.get("title") or "").strip()
+        kind = str(item.get("kind") or "").strip()
+        content = item.get("content") or {}
+        if isinstance(content, dict):
+            content_blob = " ".join(str(v) for v in content.values() if v)
+        else:
+            content_blob = str(content)
+        return self._truncate_for_card(f"{kind}: {title}. {content_blob}", max_chars=1200)
+
+    def _upsert_concept_cards(self, ingest_id, cards):
+        if not cards or not self._ensure_lexical_db():
+            return 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with sqlite3.connect(self.lexical_db_path) as conn:
+            for card in cards:
+                conn.execute(
+                    """
+                    INSERT INTO concept_cards(id, title, kind, content_json, source_refs_json, card_text, ingest_id, created_at)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        title=excluded.title,
+                        kind=excluded.kind,
+                        content_json=excluded.content_json,
+                        source_refs_json=excluded.source_refs_json,
+                        card_text=excluded.card_text,
+                        ingest_id=excluded.ingest_id,
+                        created_at=excluded.created_at
+                    """,
+                    (
+                        card["id"],
+                        card.get("title", ""),
+                        card.get("kind", ""),
+                        json.dumps(card.get("content") or {}, ensure_ascii=False, sort_keys=True),
+                        json.dumps(card.get("source_refs") or [], ensure_ascii=False, sort_keys=True),
+                        card.get("card_text", ""),
+                        ingest_id,
+                        now_iso,
+                    ),
+                )
+            conn.execute("INSERT INTO concept_cards_fts(concept_cards_fts) VALUES('rebuild')")
+            conn.commit()
+        return len(cards)
+
+    def search_concepts(self, query: str, k: int = 8):
+        if not query or k <= 0 or not self._ensure_lexical_db():
+            return []
+        safe_q = self._fts5_sanitize_query(query)
+        if not safe_q:
+            return []
+        with sqlite3.connect(self.lexical_db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT c.id, c.title, c.kind, c.content_json, c.source_refs_json, c.card_text
+                FROM concept_cards_fts
+                JOIN concept_cards c ON c.rowid = concept_cards_fts.rowid
+                WHERE concept_cards_fts MATCH ?
+                ORDER BY bm25(concept_cards_fts) ASC
+                LIMIT ?
+                """,
+                (safe_q, int(k)),
+            ).fetchall()
+        results = []
+        for row in rows:
+            results.append(
+                {
+                    "id": row[0],
+                    "title": row[1],
+                    "kind": row[2],
+                    "content": json.loads(row[3] or "{}"),
+                    "source_refs": json.loads(row[4] or "[]"),
+                    "card_text": row[5] or "",
+                }
+            )
+        return results
+
+    def _build_outline_cards(self, docs, ingest_id, doc_title):
+        outline_items = []
+        seen = set()
+        for doc in docs:
+            md = getattr(doc, "metadata", {}) or {}
+            chapter = str(md.get("chapter_title") or "").strip()
+            section = str(md.get("section_title") or "").strip()
+            key = (md.get("chapter_idx"), chapter, md.get("section_idx"), section)
+            if key in seen:
+                continue
+            seen.add(key)
+            if chapter:
+                title = f"Chapter {md.get('chapter_idx') or '?'}: {chapter}" if md.get("chapter_idx") else chapter
+                outline_items.append({"title": title, "kind": "outline.chapter", "content": {"chapter": chapter, "chapter_idx": md.get("chapter_idx")}})
+            if section:
+                section_title = f"Section {md.get('section_idx') or '?'}: {section}" if md.get("section_idx") else section
+                outline_items.append({"title": section_title, "kind": "outline.section", "content": {"chapter": chapter, "section": section, "section_idx": md.get("section_idx")}})
+        if not outline_items:
+            outline_items.append({"title": doc_title or "Document", "kind": "outline.document", "content": {"title": doc_title or "Document"}})
+        cards = []
+        for item in outline_items:
+            cards.append({
+                "id": str(uuid.uuid4()),
+                "title": item["title"],
+                "kind": item["kind"],
+                "content": item["content"],
+                "source_refs": [],
+                "card_text": self._card_text_from_item(item),
+            })
+        return cards
+
+    def _extract_with_langextract(self, text_payload, prompt):
+        if langextract is None:
+            return []
+        try:
+            result = langextract.extract(text_payload, prompt=prompt)
+            if isinstance(result, dict):
+                return result.get("items") or result.get("extractions") or []
+            if isinstance(result, list):
+                return result
+        except Exception as exc:
+            self.log(f"Comprehension langextract pass failed; using heuristic fallback. ({exc})")
+        return []
+
+    def _build_comprehension_cards(self, docs, ingest_id, doc_title, source_map):
+        depth_limit = self._depth_chunk_limit()
+        sampled_docs = list(docs[:depth_limit]) if docs else []
+        if self.comprehension_extraction_depth.get() == "Deep":
+            sampled_docs = list(docs)
+        text_payload = [
+            {
+                "id": str((getattr(doc, "metadata", {}) or {}).get("chunk_id") or i + 1),
+                "text": self._truncate_for_card(getattr(doc, "page_content", ""), max_chars=2200),
+            }
+            for i, doc in enumerate(sampled_docs)
+        ]
+
+        cards = self._build_outline_cards(docs, ingest_id, doc_title)
+
+        concept_items = self._extract_with_langextract(
+            text_payload,
+            "Extract key concepts as JSON list entries with fields: term, definition, explanation.",
+        )
+        claim_items = self._extract_with_langextract(
+            text_payload,
+            "Extract key claims/arguments with fields: claim, support, counterpoints.",
+        )
+        quote_items = self._extract_with_langextract(
+            text_payload,
+            "Extract memorable quotes with fields: quote, why_memorable.",
+        )
+
+        if not concept_items:
+            for doc in sampled_docs[: max(2, depth_limit // 2)]:
+                first_sentence = re.split(r"(?<=[.!?])\s+", getattr(doc, "page_content", "") or "", maxsplit=1)[0]
+                if not first_sentence:
+                    continue
+                concept_items.append(
+                    {
+                        "term": self._truncate_for_card(first_sentence, max_chars=70),
+                        "definition": self._truncate_for_card(getattr(doc, "page_content", ""), max_chars=220),
+                        "explanation": "Heuristic concept extracted from representative chunk.",
+                    }
+                )
+        if not claim_items:
+            for doc in sampled_docs[: max(2, depth_limit // 3)]:
+                first_sentence = re.split(r"(?<=[.!?])\s+", getattr(doc, "page_content", "") or "", maxsplit=1)[0]
+                if first_sentence:
+                    claim_items.append(
+                        {
+                            "claim": self._truncate_for_card(first_sentence, max_chars=220),
+                            "support": "Grounded in source chunk context.",
+                            "counterpoints": "Not explicitly stated.",
+                        }
+                    )
+        if not quote_items:
+            quote_re = re.compile(r'([\"“][^\"”]{30,220}[\"”])')
+            for doc in sampled_docs:
+                match = quote_re.search(getattr(doc, "page_content", "") or "")
+                if match:
+                    quote_items.append({"quote": match.group(1), "why_memorable": "Direct phrasing from source."})
+                    if len(quote_items) >= 6:
+                        break
+
+        def _source_refs_for_doc(doc):
+            md = (getattr(doc, "metadata", {}) or {}).copy()
+            source_id = self._build_source_locator(md, getattr(doc, "page_content", "") or "").source_id
+            source_entry = (source_map or {}).get(source_id, {})
+            return [{
+                "sid": source_entry.get("sid", ""),
+                "source_id": source_id,
+                "locator": source_entry.get("locator") or md.get("source_locator") or "",
+                "chunk_id": md.get("chunk_id"),
+            }]
+
+        anchor_docs = sampled_docs or docs[:1]
+        for idx, item in enumerate(concept_items[:40]):
+            doc = anchor_docs[idx % len(anchor_docs)] if anchor_docs else None
+            source_refs = _source_refs_for_doc(doc) if doc else []
+            content = {
+                "term": str(item.get("term") or item.get("title") or "").strip(),
+                "definition": str(item.get("definition") or "").strip(),
+                "explanation": str(item.get("explanation") or "").strip(),
+            }
+            title = content["term"] or f"Concept {idx + 1}"
+            card = {"title": title, "kind": "concept", "content": content}
+            cards.append({"id": str(uuid.uuid4()), "title": title, "kind": "concept", "content": content, "source_refs": source_refs, "card_text": self._card_text_from_item(card)})
+
+        for idx, item in enumerate(claim_items[:40]):
+            doc = anchor_docs[idx % len(anchor_docs)] if anchor_docs else None
+            source_refs = _source_refs_for_doc(doc) if doc else []
+            content = {
+                "claim": str(item.get("claim") or "").strip(),
+                "support": str(item.get("support") or "").strip(),
+                "counterpoints": str(item.get("counterpoints") or "").strip(),
+            }
+            title = self._truncate_for_card(content["claim"] or f"Claim {idx + 1}", max_chars=90)
+            card = {"title": title, "kind": "claim", "content": content}
+            cards.append({"id": str(uuid.uuid4()), "title": title, "kind": "claim", "content": content, "source_refs": source_refs, "card_text": self._card_text_from_item(card)})
+
+        for idx, item in enumerate(quote_items[:20]):
+            doc = anchor_docs[idx % len(anchor_docs)] if anchor_docs else None
+            source_refs = _source_refs_for_doc(doc) if doc else []
+            content = {
+                "quote": str(item.get("quote") or "").strip(),
+                "why_memorable": str(item.get("why_memorable") or "").strip(),
+            }
+            title = self._truncate_for_card(content["quote"] or f"Quote {idx + 1}", max_chars=90)
+            card = {"title": title, "kind": "quote", "content": content}
+            cards.append({"id": str(uuid.uuid4()), "title": title, "kind": "quote", "content": content, "source_refs": source_refs, "card_text": self._card_text_from_item(card)})
+
+        return cards
 
     @staticmethod
     def _fts5_query_tokens(q: str) -> list[str]:
@@ -6320,6 +6630,22 @@ class AgenticRAGApp:
                 if self._upsert_lexical_chunks(docs):
                     self.log(f"Lexical sidecar updated: {self.lexical_db_path}")
 
+            concept_cards = []
+            if self.build_comprehension_index.get():
+                source_map_seed, _ = self._build_source_cards(docs)
+                concept_cards = self._build_comprehension_cards(
+                    docs,
+                    chunk_ingest_id,
+                    doc_title,
+                    source_map_seed,
+                )
+                stored_cards = self._upsert_concept_cards(chunk_ingest_id, concept_cards)
+                self.log(
+                    f"Comprehension index built: {stored_cards} concept cards "
+                    f"(depth={self.comprehension_extraction_depth.get()}, "
+                    f"langextract={'on' if langextract is not None else 'fallback'})."
+                )
+
             # 3. Initialize Vector DB & Embeddings
             self.log("Step 3/4: Initializing Vector Store...")
             embeddings = self.get_embeddings()
@@ -6422,6 +6748,35 @@ class AgenticRAGApp:
                     batch = summary_tree_docs[i : i + batch_size]
                     digest_store.add_documents(batch)
                 self.log(f"Indexed {total_digests} summary tree nodes.")
+
+            if concept_cards:
+                concept_docs = []
+                for card in concept_cards:
+                    concept_docs.append(
+                        Document(
+                            page_content=card.get("card_text") or "",
+                            metadata={
+                                "card_id": card.get("id"),
+                                "kind": card.get("kind"),
+                                "title": card.get("title"),
+                                "source_refs_json": json.dumps(card.get("source_refs") or [], ensure_ascii=False),
+                                "ingest_id": chunk_ingest_id,
+                                "source": source_basename,
+                                "content_type": "concept_card",
+                            },
+                        )
+                    )
+                if db_type == "chroma":
+                    concept_store = Chroma(
+                        collection_name=CONCEPT_COLLECTION_NAME,
+                        embedding_function=embeddings,
+                        persist_directory=persist_dir,
+                    )
+                    for i in range(0, len(concept_docs), batch_size):
+                        concept_store.add_documents(concept_docs[i : i + batch_size])
+                else:
+                    self.vector_store.add_documents(concept_docs)
+                self.log(f"Indexed {len(concept_docs)} concept cards for retrieval.")
 
             self.log("Ingestion Complete! You can now chat.")
             if new_index_path:
@@ -8887,6 +9242,9 @@ class AgenticRAGApp:
 # - If citation_v2 disabled, legacy [Chunk N] citations still work end-to-end.
 # - A generated answer includes [S#] citations and a Sources list with meaningful labels (not chunk-only labels).
 # - Source cards include chapter/section and char offset locator for book-like raw text ingestion.
+# - With "Build Comprehension Index" enabled, ingestion should create concept_cards rows in SQLite.
+# - search_concepts("...") should return relevant concept_cards (title/kind/card_text/source refs) for topical queries.
+# - Concept cards should preserve grounded S#-style source locators via source_refs_json entries.
 
 
 if __name__ == "__main__":
