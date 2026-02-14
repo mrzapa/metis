@@ -271,6 +271,7 @@ class AgenticRAGApp:
         self.enable_agent_lightning_telemetry = self.agent_lightning_enabled
         self._frontier_evidence_pack_mode = False
         self._last_evidence_pack_synthesis_cards = []
+        self._trace_events = []
         self._agent_lightning_runs_by_id = {}
         self._agent_lightning_last_exportable_run = None
         self._latest_source_map = {}
@@ -1079,6 +1080,10 @@ class AgenticRAGApp:
             left_pane, state="disabled", font=("Segoe UI", 10), wrap=tk.WORD
         )
         self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        self.chat_display.tag_config("citation", foreground="#1254a3", underline=1)
+        self.chat_display.tag_bind("citation", "<Button-1>", self._on_citation_click)
+        self.chat_display.tag_bind("citation", "<Enter>", lambda _e: self.chat_display.config(cursor="hand2"))
+        self.chat_display.tag_bind("citation", "<Leave>", lambda _e: self.chat_display.config(cursor=""))
 
         # Tag configuration for coloring
         self.chat_display.tag_config(
@@ -1233,6 +1238,17 @@ class AgenticRAGApp:
         self.evidence_notebook = ttk.Notebook(evidence_wrap)
         self.evidence_notebook.pack(fill=tk.BOTH, expand=True)
 
+        self.answer_tab = ttk.Frame(self.evidence_notebook)
+        self.evidence_notebook.add(self.answer_tab, text="Answer")
+        self.answer_text = scrolledtext.ScrolledText(
+            self.answer_tab, height=20, wrap=tk.WORD, state="disabled", font=("Segoe UI", 10)
+        )
+        self.answer_text.tag_config("citation", foreground="#1254a3", underline=1)
+        self.answer_text.tag_bind("citation", "<Button-1>", self._on_answer_citation_click)
+        self.answer_text.tag_bind("citation", "<Enter>", lambda _e: self.answer_text.config(cursor="hand2"))
+        self.answer_text.tag_bind("citation", "<Leave>", lambda _e: self.answer_text.config(cursor=""))
+        self.answer_text.pack(fill=tk.BOTH, expand=True)
+
         self.sources_tab = ttk.Frame(self.evidence_notebook)
         self.evidence_notebook.add(self.sources_tab, text="Sources")
         self.sources_tree = ttk.Treeview(
@@ -1260,29 +1276,19 @@ class AgenticRAGApp:
         )
         self.source_detail_text.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
-        self.incidents_tab = ttk.Frame(self.evidence_notebook)
-        self.evidence_notebook.add(self.incidents_tab, text="Incidents")
-        self.incidents_tree = ttk.Treeview(
-            self.incidents_tab,
-            columns=("when", "channel", "what", "evidence"),
-            show="headings",
-            height=8,
+        self.incidents_json_tab = ttk.Frame(self.evidence_notebook)
+        self.evidence_notebook.add(self.incidents_json_tab, text="Incidents JSON")
+        self.incidents_json_text = scrolledtext.ScrolledText(
+            self.incidents_json_tab, height=14, wrap=tk.NONE, state="disabled", font=("Consolas", 9)
         )
-        for col, label, width in [
-            ("when", "When", 90),
-            ("channel", "Channel", 70),
-            ("what", "What happened", 170),
-            ("evidence", "Evidence", 90),
-        ]:
-            self.incidents_tree.heading(col, text=label)
-            self.incidents_tree.column(col, width=width, anchor="w")
-        self.incidents_tree.pack(fill=tk.BOTH, expand=True)
-        self.incidents_tree.bind("<<TreeviewSelect>>", self._on_incident_selected)
+        self.incidents_json_text.pack(fill=tk.BOTH, expand=True)
 
-        self.incident_evidence_text = scrolledtext.ScrolledText(
-            self.incidents_tab, height=8, wrap=tk.WORD, state="disabled", font=("Consolas", 9)
+        self.trace_tab = ttk.Frame(self.evidence_notebook)
+        self.evidence_notebook.add(self.trace_tab, text="Trace")
+        self.trace_text = scrolledtext.ScrolledText(
+            self.trace_tab, height=14, wrap=tk.WORD, state="disabled", font=("Consolas", 9)
         )
-        self.incident_evidence_text.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+        self.trace_text.pack(fill=tk.BOTH, expand=True)
 
         self.grounding_tab = ttk.Frame(self.evidence_notebook)
         self.grounding_label_var = tk.StringVar(value="LangExtract grounding HTML is not available yet.")
@@ -1316,50 +1322,56 @@ class AgenticRAGApp:
         webbrowser.open_new_tab(f"file://{os.path.abspath(path)}")
 
     def _render_incident_evidence(self, incident):
-        lines = []
-        evidence_refs = list(incident.get("evidence_refs") or [])
-        quotes = list(incident.get("quotes") or [])
-        labels = list(incident.get("supporting_chunks") or [])
-        if labels:
-            lines.append("Supporting sources: " + ", ".join(labels))
-        for ref in evidence_refs:
-            label = str(ref.get("source_id") or "").strip()
-            quote = str(ref.get("quote") or "").strip()
-            if quote:
-                lines.append(f"- {label}: \"{quote}\"")
-        for idx, quote in enumerate(quotes, start=1):
-            if quote:
-                lines.append(f"- Quote {idx}: \"{quote}\"")
-        if not lines:
-            lines.append("No quote-level evidence captured for this incident.")
-        self.incident_evidence_text.config(state="normal")
-        self.incident_evidence_text.delete("1.0", tk.END)
-        self.incident_evidence_text.insert(tk.END, "\n".join(lines))
-        self.incident_evidence_text.config(state="disabled")
+        # Legacy method retained for compatibility with older call paths.
+        return
 
-    def _on_incident_selected(self, event=None):
-        selection = self.incidents_tree.selection()
-        if not selection:
+    def _set_readonly_text(self, widget, text):
+        widget.config(state="normal")
+        widget.delete("1.0", tk.END)
+        widget.insert(tk.END, text)
+        widget.config(state="disabled")
+
+    def _select_source_by_sid(self, sid):
+        if not sid:
             return
-        item_id = selection[0]
-        incident = self._incident_row_lookup.get(item_id)
-        if not incident:
+        if sid not in self.sources_tree.get_children():
             return
-        evidence_labels = set(incident.get("supporting_chunks") or [])
-        for source_item in self.sources_tree.get_children():
-            values = self.sources_tree.item(source_item, "values")
-            sid = values[0] if values else ""
-            tags = ("supporting",) if sid in evidence_labels else ()
-            self.sources_tree.item(source_item, tags=tags)
-        supporting_ids = [
-            item
-            for item in self.sources_tree.get_children()
-            if (self.sources_tree.item(item, "values") or [""])[0] in evidence_labels
-        ]
-        self.sources_tree.selection_set(supporting_ids)
-        if supporting_ids:
-            self.sources_tree.see(supporting_ids[0])
-        self._render_incident_evidence(incident)
+        self.evidence_notebook.select(self.sources_tab)
+        self.sources_tree.selection_set((sid,))
+        self.sources_tree.focus(sid)
+        self.sources_tree.see(sid)
+        self._on_source_selected()
+
+    def _on_citation_click(self, event=None):
+        try:
+            index = self.chat_display.index(f"@{event.x},{event.y}") if event else self.chat_display.index(tk.INSERT)
+            ranges = self.chat_display.tag_prevrange("citation", index)
+            if not ranges:
+                return
+            label = self.chat_display.get(ranges[0], ranges[1]).strip("[] \n,;")
+            self._select_source_by_sid(label)
+        except Exception:
+            return
+
+
+    def _on_answer_citation_click(self, event=None):
+        try:
+            index = self.answer_text.index(f"@{event.x},{event.y}") if event else self.answer_text.index(tk.INSERT)
+            ranges = self.answer_text.tag_prevrange("citation", index)
+            if not ranges:
+                return
+            label = self.answer_text.get(ranges[0], ranges[1]).strip("[] \n,;")
+            self._select_source_by_sid(label)
+        except Exception:
+            return
+
+    def _tag_citations_in_answer(self):
+        text = self.answer_text.get("1.0", tk.END)
+        self.answer_text.tag_remove("citation", "1.0", tk.END)
+        for match in re.finditer(r"S\d+", text or ""):
+            start = f"1.0+{match.start()}c"
+            end = f"1.0+{match.end()}c"
+            self.answer_text.tag_add("citation", start, end)
 
     def _on_source_selected(self, event=None):
         selection = self.sources_tree.selection()
@@ -1435,31 +1447,29 @@ class AgenticRAGApp:
             copied["supporting_chunks"] = sorted(set(normalized_support))
             normalized_incidents.append(copied)
 
-        self.incidents_tree.delete(*self.incidents_tree.get_children())
-        self._incident_row_lookup = {}
-        for idx, incident in enumerate(sorted(normalized_incidents, key=self._incident_sort_key_for_pack), start=1):
-            iid = f"inc-{idx}"
-            when_text = str(incident.get("date") or "").strip() or "Undated"
-            evidence_labels = ", ".join(incident.get("supporting_chunks") or [])
-            what_text = re.sub(r"\s+", " ", str(incident.get("what_happened") or "").strip())
-            self.incidents_tree.insert(
-                "",
-                tk.END,
-                iid=iid,
-                values=(when_text, incident.get("channel", ""), what_text[:120], evidence_labels),
-            )
-            self._incident_row_lookup[iid] = incident
+        incidents_blob = {"incidents": sorted(normalized_incidents, key=self._incident_sort_key_for_pack)}
+        self._set_readonly_text(
+            self.incidents_json_text,
+            json.dumps(incidents_blob, ensure_ascii=False, indent=2),
+        )
 
         self._latest_grounding_html_path = grounding_html_path or ""
         if self._latest_grounding_html_path and os.path.isfile(self._latest_grounding_html_path):
             self.grounding_label_var.set(f"Saved grounding HTML: {self._latest_grounding_html_path}")
         else:
             self.grounding_label_var.set("LangExtract grounding HTML is not available yet.")
-        self._render_incident_evidence({})
-        self.source_detail_text.config(state="normal")
-        self.source_detail_text.delete("1.0", tk.END)
-        self.source_detail_text.insert(tk.END, "Select a source to inspect label, metadata, and excerpt.")
-        self.source_detail_text.config(state="disabled")
+        self._set_readonly_text(
+            self.source_detail_text,
+            "Select an S# source row to inspect excerpt and metadata."
+        )
+
+    def _append_trace(self, msg):
+        stamped = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
+        self._trace_events.append(stamped)
+        if len(self._trace_events) > 500:
+            self._trace_events = self._trace_events[-500:]
+        if hasattr(self, "trace_text"):
+            self._set_readonly_text(self.trace_text, "\n".join(self._trace_events))
 
     def _save_langextract_grounding_html(self, payload):
         if not payload:
@@ -2256,6 +2266,7 @@ class AgenticRAGApp:
                 self.status_var.set(msg)
 
         self._run_on_ui(_append)
+        self._run_on_ui(self._append_trace, msg)
         self._emit_log_to_console(msg)
 
     @staticmethod
@@ -3631,13 +3642,14 @@ class AgenticRAGApp:
 
     def _get_evidence_pack_instruction(self):
         return (
-            "Evidence pack mode: Build a structured evidence pack with a clear chronology/timeline "
-            "of events, explicit impacts, grievances, and concrete examples. Emphasize dates, actors, "
-            "actions, outcomes, and supporting quotes. Only include claims supported by context; "
-            "omit details not present in context. Write incident entries using: When; What happened; "
-            "Impact; Evidence ([S#] citations). Do not provide coaching or advice. Ensure the output "
-            "contains no placeholders and does not ask for more docs or missing info. If evidence is "
-            "thin, allow one short 'Scope:' note at the top."
+            "Evidence pack mode: Produce a courtroom-ready evidence pack. Use only supported claims. "
+            "Required sections: (1) one-page overview covering allegations, themes, remedies sought; "
+            "(2) timeline table with columns date | what happened | impact | sources; "
+            "(3) key incidents (6-12) with consistent fields: date, actors, channel, what happened, impact, evidence; "
+            "(4) supporting incidents (2-4 concise bullets); "
+            "(5) witness list only when witnesses are explicitly present in evidence. "
+            "All factual lines must end in [S#] citations. Omit unsupported details, placeholders, and requests for more evidence. "
+            "If evidence is thin, include one short Scope note."
         )
 
     def _format_month_label(self, year, month):
@@ -4245,6 +4257,64 @@ class AgenticRAGApp:
         for card in selected:
             card.pop("strength", None)
         return selected
+
+    @staticmethod
+    def _has_witness_data(incidents):
+        for item in incidents or []:
+            people = item.get("people") or []
+            if isinstance(people, list) and any(str(p).strip() for p in people):
+                return True
+        return False
+
+    def _build_timeline_table(self, incidents):
+        rows = ["| Date | What happened | Impact | Sources |", "|---|---|---|---|"]
+        for incident in sorted(incidents or [], key=self._incident_sort_key_for_pack)[:12]:
+            when = str(incident.get("date") or incident.get("month_key") or "unknown").strip()
+            what = re.sub(r"\s+", " ", str(incident.get("what_happened") or "").strip()) or "n/a"
+            impact_raw = incident.get("impact") or {}
+            if isinstance(impact_raw, dict):
+                impact = "; ".join(
+                    [
+                        str(impact_raw.get("operational") or "").strip(),
+                        str(impact_raw.get("personal") or "").strip(),
+                    ]
+                ).strip("; ") or "n/a"
+            else:
+                impact = str(impact_raw).strip() or "n/a"
+            refs = [
+                str(x).strip()
+                for x in (incident.get("supporting_chunks") or [])
+                if re.match(r"^S\d+$", str(x).strip())
+            ]
+            sources = ", ".join(dict.fromkeys(refs)) or "n/a"
+            rows.append(f"| {when} | {what[:140]} | {impact[:120]} | {sources} |")
+        if len(rows) == 2:
+            rows.append("| unknown | No supported incidents extracted | n/a | n/a |")
+        return "\n".join(rows)
+
+    def _ensure_evidence_pack_template(self, answer_text, incidents):
+        text = str(answer_text or "").strip()
+        if not text:
+            return text
+        lowered = text.lower()
+        if "one-page overview" not in lowered:
+            text = (
+                "## One-page overview\n"
+                "- Allegations: grounded in cited incidents.\n"
+                "- Themes: chronology, impact, and escalation patterns.\n"
+                "- Remedies sought: reflect only items explicitly present in evidence.\n\n"
+            ) + text
+        if "timeline" not in lowered or "| date |" not in lowered:
+            timeline = self._build_timeline_table(incidents)
+            text = f"{text.rstrip()}\n\n## Timeline table\n{timeline}"
+        if "key incidents" not in text.lower():
+            text = f"{text.rstrip()}\n\n## Key incidents\n- Use fields: Date; Actors; Channel; What happened; Impact; Evidence [S#]."
+        if "supporting incidents" not in text.lower():
+            text = f"{text.rstrip()}\n\n## Supporting incidents\n- Include 2-4 concise incidents that broaden month/channel coverage with [S#]."
+        has_witness = self._has_witness_data(incidents)
+        if has_witness and "witness list" not in text.lower():
+            text = f"{text.rstrip()}\n\n## Witness list\n- Witnesses named in evidence only, each with supporting [S#] citations."
+        return text
 
     def _verify_evidence_pack_claims(self, answer_text, synthesis_cards):
         if not answer_text:
@@ -6003,6 +6073,8 @@ class AgenticRAGApp:
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         run_started_at = time.perf_counter()
         self._active_run_id = run_id
+        self._trace_events = []
+        self._run_on_ui(self._set_readonly_text, self.trace_text, "")
         try:
             self.log("Starting Retrieval...")
 
@@ -6405,10 +6477,12 @@ class AgenticRAGApp:
                     "Never output NOT FOUND IN CONTEXT (or variants), placeholders, or requests for user-supplied evidence. "
                     f"{tone_rule} "
                     "Required output format:\n"
-                    "1) One-page overview: allegation themes and overall impacts.\n"
-                    "2) Timeline of key incidents: bulleted; each bullet ends with [S#] citations.\n"
-                    "3) Supporting incidents (2-4 concise bullets) to widen month/channel coverage.\n"
-                    "4) Appendix: Source Cards list."
+                    "1) One-page overview (allegations, themes, remedies sought).\n"
+                    "2) Timeline table with columns: Date | What happened | Impact | Sources ([S#]).\n"
+                    "3) Key incidents (6-12) with consistent fields: Date; Actors; Channel; What happened; Impact; Evidence [S#].\n"
+                    "4) Supporting incidents (2-4 concise entries) to widen month/channel coverage.\n"
+                    "5) Witness list only if witnesses are explicitly present in evidence; otherwise omit.\n"
+                    "6) Appendix: Source Cards list."
                 )
                 stage_b_messages = [
                     SystemMessage(content=stage_b_prompt),
@@ -7524,6 +7598,10 @@ class AgenticRAGApp:
                 if is_evidence_pack:
                     source_map, source_cards_text = self._build_source_cards(final_docs)
                     self._latest_source_map = source_map
+                    validated_answer = self._ensure_evidence_pack_template(
+                        validated_answer,
+                        list(self._latest_incidents or []),
+                    )
                     self._run_on_ui(
                         self._refresh_evidence_pane,
                         source_map,
@@ -8210,6 +8288,10 @@ class AgenticRAGApp:
                 if is_evidence_pack:
                     source_map, source_cards_text = self._build_source_cards(final_docs)
                     self._latest_source_map = source_map
+                    validated_answer = self._ensure_evidence_pack_template(
+                        validated_answer,
+                        list(self._latest_incidents or []),
+                    )
                     self._run_on_ui(
                         self._refresh_evidence_pane,
                         source_map,
@@ -8290,10 +8372,24 @@ class AgenticRAGApp:
             if self._active_run_id == run_id:
                 self._active_run_id = None
 
+    def _tag_citations_in_chat(self, start_index, end_index):
+        text = self.chat_display.get(start_index, end_index)
+        for match in re.finditer(r"S\d+", text or ""):
+            start = self.chat_display.index(f"{start_index}+{match.start()}c")
+            end = self.chat_display.index(f"{start_index}+{match.end()}c")
+            self.chat_display.tag_add("citation", start, end)
+
     def append_chat(self, tag, message):
         def _append():
             self.chat_display.config(state="normal")
+            start = self.chat_display.index(tk.END)
             self.chat_display.insert(tk.END, message + "\n\n", tag)
+            end = self.chat_display.index(tk.END)
+            self._tag_citations_in_chat(start, end)
+            if tag == "agent" and hasattr(self, "answer_text"):
+                answer_body = str(message).replace("AI:", "", 1).strip()
+                self._set_readonly_text(self.answer_text, answer_body)
+                self._tag_citations_in_answer()
             self.chat_display.see(tk.END)
             self.chat_display.config(state="disabled")
 
