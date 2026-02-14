@@ -127,6 +127,17 @@ class SourceLocator:
     metadata: dict
 
 
+@dataclass
+class AgentProfile:
+    name: str
+    system_instructions: str = ""
+    style_template: str = ""
+    citation_policy: str = ""
+    retrieval_strategy: dict = field(default_factory=dict)
+    iteration_strategy: dict = field(default_factory=dict)
+    comprehension_pipeline_on_ingest: Optional[dict] = None
+
+
 class CitationManager:
     def __init__(self):
         self._label_by_source = {}
@@ -250,6 +261,18 @@ class AgenticRAGApp:
             "Structured report",
         ]
         self.output_style = tk.StringVar(value="Default answer")
+        self.mode_options = [
+            "Standard RAG Q&A",
+            "Book Tutor",
+            "Blinkist-style Summary",
+            "Research Analyst",
+            "Evidence Pack",
+        ]
+        self.selected_mode = tk.StringVar(value="Standard RAG Q&A")
+        self.profiles_dir = os.path.join(os.getcwd(), "profiles")
+        self.builtin_profiles = self._get_builtin_profiles()
+        self.selected_profile = tk.StringVar(value="Built-in: Default")
+        self.profile_options = []
         self.retrieval_k = tk.IntVar(value=25)
         self.final_k = tk.IntVar(value=5)
         self.fallback_final_k = tk.IntVar(value=self.final_k.get())
@@ -512,6 +535,166 @@ class AgenticRAGApp:
         self.system_instructions.set(template)
         self._run_on_ui(self._refresh_instructions_box)
 
+    def _get_builtin_profiles(self):
+        return {
+            "Built-in: Default": AgentProfile(name="Default"),
+            "Built-in: Tutor": AgentProfile(
+                name="Tutor",
+                style_template="Teach concept first, then short quiz and optional flashcards.",
+                citation_policy="Cite each factual teaching block using standard citation format.",
+                iteration_strategy={"agentic_mode": True, "max_iterations": 2},
+            ),
+            "Built-in: Blinkist": AgentProfile(
+                name="Blinkist",
+                style_template="Deliver a concise top-level summary with key insights.",
+                citation_policy="Use concise citations at end of each insight.",
+                retrieval_strategy={"retrieve_k": 20, "final_k": 4, "mmr_lambda": 0.6},
+            ),
+            "Built-in: Research Analyst": AgentProfile(
+                name="Research Analyst",
+                style_template="Structure output as claims, arguments, and counterclaims.",
+                citation_policy="Every claim and counterclaim requires citation.",
+                retrieval_strategy={"retrieve_k": 30, "final_k": 7, "mmr_lambda": 0.4},
+                iteration_strategy={"agentic_mode": True, "max_iterations": 3},
+            ),
+            "Built-in: Evidence Pack": AgentProfile(
+                name="Evidence Pack",
+                style_template="Courtroom-ready packet with chronology and incidents.",
+                citation_policy="Use [S#] style citations for factual lines.",
+                retrieval_strategy={"retrieve_k": 35, "final_k": 10, "mmr_lambda": 0.5},
+                iteration_strategy={"agentic_mode": True, "max_iterations": 3},
+            ),
+        }
+
+    def _ensure_profiles_dir(self):
+        os.makedirs(self.profiles_dir, exist_ok=True)
+
+    def _get_file_profile_options(self):
+        self._ensure_profiles_dir()
+        profile_files = []
+        for name in sorted(os.listdir(self.profiles_dir)):
+            if name.lower().endswith(".json"):
+                profile_files.append(name)
+        return [f"File: {name}" for name in profile_files]
+
+    def _refresh_profile_options(self):
+        self.profile_options = list(self.builtin_profiles.keys()) + self._get_file_profile_options()
+        if hasattr(self, "cb_profile"):
+            self.cb_profile["values"] = self.profile_options
+        if self.selected_profile.get() not in self.profile_options:
+            self.selected_profile.set("Built-in: Default")
+
+    def _profile_path_from_label(self, label):
+        if not str(label).startswith("File: "):
+            return ""
+        return os.path.join(self.profiles_dir, label.replace("File: ", "", 1))
+
+    def _load_profile_from_file(self, path):
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return AgentProfile(
+            name=data.get("name", os.path.splitext(os.path.basename(path))[0]),
+            system_instructions=data.get("system_instructions", ""),
+            style_template=data.get("style_template", ""),
+            citation_policy=data.get("citation_policy", ""),
+            retrieval_strategy=data.get("retrieval_strategy", {}),
+            iteration_strategy=data.get("iteration_strategy", {}),
+            comprehension_pipeline_on_ingest=data.get("comprehension_pipeline_on_ingest"),
+        )
+
+    def _get_selected_profile_obj(self):
+        label = self.selected_profile.get().strip()
+        if label in self.builtin_profiles:
+            return self.builtin_profiles[label]
+        path = self._profile_path_from_label(label)
+        if path and os.path.exists(path):
+            try:
+                return self._load_profile_from_file(path)
+            except (OSError, json.JSONDecodeError):
+                self.log(f"Failed to parse profile: {path}")
+        return self.builtin_profiles["Built-in: Default"]
+
+    def _apply_profile_to_controls(self, profile):
+        retrieval = profile.retrieval_strategy or {}
+        if "retrieve_k" in retrieval:
+            self.retrieval_k.set(max(1, int(retrieval["retrieve_k"])))
+        if "final_k" in retrieval:
+            self.final_k.set(max(1, int(retrieval["final_k"])))
+        if "mmr_lambda" in retrieval:
+            self.mmr_lambda.set(float(retrieval["mmr_lambda"]))
+        if "search_type" in retrieval and retrieval["search_type"] in {"similarity", "mmr"}:
+            self.search_type.set(retrieval["search_type"])
+
+        iteration = profile.iteration_strategy or {}
+        if "agentic_mode" in iteration:
+            self.agentic_mode.set(bool(iteration["agentic_mode"]))
+        if "max_iterations" in iteration:
+            self.agentic_max_iterations.set(
+                max(1, min(AGENTIC_MAX_ITERATIONS_HARD_CAP, int(iteration["max_iterations"])))
+            )
+
+        if profile.system_instructions:
+            self.system_instructions.set(profile.system_instructions)
+            self._refresh_instructions_box()
+
+    def load_selected_profile(self):
+        profile = self._get_selected_profile_obj()
+        self._apply_profile_to_controls(profile)
+        self.save_config()
+        self.append_chat("system", f"Loaded profile: {profile.name}")
+
+    def save_profile(self):
+        self._ensure_profiles_dir()
+        path = filedialog.asksaveasfilename(
+            title="Save Profile",
+            defaultextension=".json",
+            initialdir=self.profiles_dir,
+            filetypes=[("JSON files", "*.json")],
+        )
+        if not path:
+            return
+        profile = AgentProfile(
+            name=os.path.splitext(os.path.basename(path))[0],
+            system_instructions=self.system_instructions.get().strip(),
+            style_template="",
+            citation_policy="",
+            retrieval_strategy={
+                "retrieve_k": int(self.retrieval_k.get()),
+                "final_k": int(self.final_k.get()),
+                "mmr_lambda": float(self.mmr_lambda.get()),
+                "search_type": self.search_type.get().strip(),
+            },
+            iteration_strategy={
+                "agentic_mode": bool(self.agentic_mode.get()),
+                "max_iterations": int(self.agentic_max_iterations.get()),
+            },
+        )
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(asdict(profile), f, indent=2)
+        self._refresh_profile_options()
+        self.selected_profile.set(f"File: {os.path.basename(path)}")
+        self.save_config()
+
+    def duplicate_profile(self):
+        source = self._get_selected_profile_obj()
+        self._ensure_profiles_dir()
+        path = filedialog.asksaveasfilename(
+            title="Duplicate Profile As",
+            defaultextension=".json",
+            initialdir=self.profiles_dir,
+            initialfile=f"{source.name.lower().replace(' ', '_')}_copy.json",
+            filetypes=[("JSON files", "*.json")],
+        )
+        if not path:
+            return
+        clone = AgentProfile(**asdict(source))
+        clone.name = os.path.splitext(os.path.basename(path))[0]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(asdict(clone), f, indent=2)
+        self._refresh_profile_options()
+        self.selected_profile.set(f"File: {os.path.basename(path)}")
+        self.save_config()
+
     def _current_embedding_signature(self):
         provider = self.embedding_provider.get()
         try:
@@ -663,6 +846,12 @@ class AgenticRAGApp:
         if output_style not in self.output_style_options:
             output_style = "Default answer"
         self.output_style.set(output_style)
+        selected_mode = data.get("selected_mode", self.selected_mode.get())
+        if selected_mode not in self.mode_options:
+            selected_mode = "Standard RAG Q&A"
+        self.selected_mode.set(selected_mode)
+        self.selected_profile.set(data.get("selected_profile", self.selected_profile.get()))
+        self._refresh_profile_options()
 
         instructions = data.get("system_instructions", self.system_instructions.get())
         self.system_instructions.set(instructions or self.default_system_instructions)
@@ -732,6 +921,8 @@ class AgenticRAGApp:
             "selected_index_path": self.selected_index_path,
             "selected_collection_name": self.selected_collection_name,
             "output_style": self.output_style.get(),
+            "selected_mode": self.selected_mode.get(),
+            "selected_profile": self.selected_profile.get(),
         }
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
@@ -1156,6 +1347,38 @@ class AgenticRAGApp:
             state="readonly",
             width=22,
         ).pack(side="left", padx=(6, 0))
+
+        profile_frame = ttk.LabelFrame(left_pane, text="Mode & Agent Profile", padding=8)
+        profile_frame.pack(fill="x", pady=(4, 0))
+        ttk.Label(profile_frame, text="Mode:").grid(row=0, column=0, sticky="w")
+        ttk.Combobox(
+            profile_frame,
+            textvariable=self.selected_mode,
+            values=self.mode_options,
+            state="readonly",
+            width=24,
+        ).grid(row=0, column=1, sticky="w", padx=(6, 12))
+
+        ttk.Label(profile_frame, text="Profile:").grid(row=0, column=2, sticky="w")
+        self.cb_profile = ttk.Combobox(
+            profile_frame,
+            textvariable=self.selected_profile,
+            state="readonly",
+            width=30,
+        )
+        self.cb_profile.grid(row=0, column=3, sticky="ew", padx=(6, 0))
+        profile_frame.columnconfigure(3, weight=1)
+
+        ttk.Button(profile_frame, text="Save Profile", command=self.save_profile).grid(
+            row=1, column=1, sticky="w", pady=(8, 0)
+        )
+        ttk.Button(profile_frame, text="Load Profile", command=self.load_selected_profile).grid(
+            row=1, column=2, sticky="w", pady=(8, 0)
+        )
+        ttk.Button(profile_frame, text="Duplicate", command=self.duplicate_profile).grid(
+            row=1, column=3, sticky="w", padx=(6, 0), pady=(8, 0)
+        )
+        self._refresh_profile_options()
 
         agentic_frame = ttk.LabelFrame(left_pane, text="Agentic Options", padding=8)
         agentic_frame.pack(fill="x", pady=(5, 0))
@@ -3571,12 +3794,83 @@ class AgenticRAGApp:
         capped = max(1, int(caps.get("max_output_tokens", requested)))
         return min(requested, capped)
 
-    def _get_system_instructions(self):
-        instructions = self.system_instructions.get().strip()
-        if not instructions:
-            instructions = self.default_system_instructions
-            self.system_instructions.set(instructions)
+    def _get_mode_prompt_pack(self, mode_name):
+        mode = (mode_name or "").strip()
+        packs = {
+            "Standard RAG Q&A": "",
+            "Book Tutor": (
+                "Mode: Book Tutor. Use a Socratic teaching style. Start with a compact lesson, "
+                "then include 2-4 comprehension questions, and optionally add flashcards if useful."
+            ),
+            "Blinkist-style Summary": (
+                "Mode: Blinkist-style Summary. Produce a concise summary: big idea, key takeaways, "
+                "and practical actions. Keep it compact and structured."
+            ),
+            "Research Analyst": (
+                "Mode: Research Analyst. Structure output as claims, supporting arguments, and "
+                "counterclaims with evidence quality notes."
+            ),
+            "Evidence Pack": (
+                "Mode: Evidence Pack. Prepare evidence for formal review with chronology, incidents, "
+                "and strictly grounded citations."
+            ),
+        }
+        return packs.get(mode, "")
+
+    def _resolve_mode_profile_settings(self, query=None):
+        mode = self.selected_mode.get().strip() or "Standard RAG Q&A"
+        profile = self._get_selected_profile_obj()
+        retrieval = profile.retrieval_strategy or {}
+        iteration = profile.iteration_strategy or {}
+        resolved = {
+            "mode": mode,
+            "profile": profile,
+            "retrieve_k": max(1, int(retrieval.get("retrieve_k", self.retrieval_k.get()))),
+            "final_k": max(1, int(retrieval.get("final_k", self.final_k.get()))),
+            "mmr_lambda": float(retrieval.get("mmr_lambda", self.mmr_lambda.get())),
+            "search_type": retrieval.get("search_type", self.search_type.get()),
+            "agentic_mode": bool(iteration.get("agentic_mode", self.agentic_mode.get())),
+            "agentic_max_iterations": max(
+                1,
+                min(
+                    AGENTIC_MAX_ITERATIONS_HARD_CAP,
+                    int(iteration.get("max_iterations", self.agentic_max_iterations.get())),
+                ),
+            ),
+        }
+        resolved["mode_prompt_pack"] = self._get_mode_prompt_pack(mode)
+        inferred_evidence_pack = self.is_evidence_pack_query(query or "", self.output_style.get())
+        resolved["evidence_pack_mode"] = mode == "Evidence Pack" or (
+            mode == "Standard RAG Q&A" and inferred_evidence_pack
+        )
+        return resolved
+
+    def _get_system_instructions(self, resolved_settings=None):
+        base_instructions = self.system_instructions.get().strip() or self.default_system_instructions
+        if not self.system_instructions.get().strip():
+            self.system_instructions.set(base_instructions)
             self._run_on_ui(self._refresh_instructions_box)
+
+        profile = None
+        mode_prompt = ""
+        if resolved_settings:
+            profile = resolved_settings.get("profile")
+            mode_prompt = resolved_settings.get("mode_prompt_pack", "")
+        if profile is None:
+            profile = self._get_selected_profile_obj()
+            mode_prompt = self._get_mode_prompt_pack(self.selected_mode.get())
+
+        segments = [base_instructions]
+        if profile.system_instructions:
+            segments.append(f"Profile overlay:\n{profile.system_instructions}")
+        if profile.style_template:
+            segments.append(f"Profile style template:\n{profile.style_template}")
+        if profile.citation_policy:
+            segments.append(f"Profile citation policy:\n{profile.citation_policy}")
+        if mode_prompt:
+            segments.append(mode_prompt)
+        instructions = "\n\n".join(part for part in segments if part)
+
         if self._frontier_enabled("citation_v2"):
             instructions = instructions.replace("[Chunk N]", "[S#]")
             instructions = instructions.replace("Chunk 4", "S1")
@@ -3626,6 +3920,8 @@ class AgenticRAGApp:
     3) Output never contains "NOT FOUND IN CONTEXT".
     4) Jan 2026 incidents and Teams DM are surfaced when present.
     5) SQLite FTS exact-phrase queries surface in candidate pool when available.
+    6) Default mode produces identical output to before for the same prompt.
+    7) Switching mode changes system prompt and output structure deterministically.
     """
     def is_evidence_pack_query(self, query, output_style):
         normalized = f"{query} {output_style}".lower()
@@ -6080,9 +6376,11 @@ class AgenticRAGApp:
 
             # 1. Retrieval
             output_style = self.output_style.get().strip() or "Default answer"
-            retrieve_k = max(1, int(self.retrieval_k.get()))
-            user_final_k = max(1, int(self.final_k.get()))
+            resolved_settings = self._resolve_mode_profile_settings(query=query)
+            retrieve_k = max(1, int(resolved_settings["retrieve_k"]))
+            user_final_k = max(1, int(resolved_settings["final_k"]))
             final_k = user_final_k
+            mode_name = resolved_settings["mode"]
             provider = self.llm_provider.get()
             model_name = self._resolve_llm_model()
             gui_llm_max_tokens = max(1, int(self.llm_max_tokens.get()))
@@ -6112,7 +6410,7 @@ class AgenticRAGApp:
             is_long_form = any(
                 keyword in normalized_query for keyword in long_form_keywords
             )
-            is_evidence_pack = self.is_evidence_pack_query(query, output_style)
+            is_evidence_pack = bool(resolved_settings.get("evidence_pack_mode"))
             recursive_mode_enabled = bool(self.enable_recursive_retrieval.get())
             use_recursive_retrieval = (
                 recursive_mode_enabled and (is_long_form or is_evidence_pack)
@@ -6131,7 +6429,8 @@ class AgenticRAGApp:
                 f"citation_v2={self._frontier_enabled('citation_v2')}, "
                 f"agent_lightning_telemetry={self._frontier_enabled('agent_lightning_telemetry')}, "
                 f"recursive_retrieval={int(use_recursive_retrieval)}, "
-                f"evidence_pack_mode={is_evidence_pack}"
+                f"evidence_pack_mode={is_evidence_pack}, "
+                f"mode={mode_name}, profile={self.selected_profile.get()}"
             )
             if is_long_form:
                 boosted_final_k = max(final_k, 12)
@@ -6156,15 +6455,17 @@ class AgenticRAGApp:
                     "query": query,
                     "user_final_k": user_final_k,
                     "effective_final_k": final_k,
-                    "agentic": int(self.agentic_mode.get()),
+                    "agentic": int(resolved_settings["agentic_mode"]),
                     "output_style": output_style,
+                    "mode": mode_name,
+                    "profile": self.selected_profile.get(),
                     "recursive_mode_enabled": int(recursive_mode_enabled),
                     "recursive_mode_active": int(use_recursive_retrieval),
                 }
             )
             self._start_agent_lightning_run(run_id, query)
-            search_type = self.search_type.get() or "similarity"
-            mmr_lambda = float(self.mmr_lambda.get())
+            search_type = resolved_settings.get("search_type", self.search_type.get()) or "similarity"
+            mmr_lambda = float(resolved_settings.get("mmr_lambda", self.mmr_lambda.get()))
             total_docs_cap = max(10, min(500, int(self.subquery_max_docs.get())))
             persist_dir = self.selected_index_path
             if not persist_dir:
@@ -7160,7 +7461,7 @@ class AgenticRAGApp:
 
             seen_chunk_ids = set()
 
-            if not self.agentic_mode.get():
+            if not resolved_settings["agentic_mode"]:
                 iteration_started_at = time.perf_counter()
                 follow_up_queries = []
                 coverage_stats = {"triggered": False}
@@ -7249,7 +7550,7 @@ class AgenticRAGApp:
                     f"incidents={generic_cov['selected_incidents']}/{generic_cov['pool_incidents']}."
                 )
                 remaining_cap = max(0, total_docs_cap - len(docs))
-                if generic_followups and self.agentic_max_iterations.get() > 1 and remaining_cap > 0:
+                if generic_followups and resolved_settings["agentic_max_iterations"] > 1 and remaining_cap > 0:
                     self.log(f"Generic coverage gate triggered: follow-up queries={generic_followups}.")
                     follow_docs, follow_retrieved_count, follow_cap_reached = _retrieve_with_rrf(
                         generic_followups,
@@ -7478,7 +7779,7 @@ class AgenticRAGApp:
                 _log_iteration_telemetry(
                     1,
                     self.output_style.get(),
-                    self.agentic_mode.get(),
+                    resolved_settings["agentic_mode"],
                     planner_subquery_count,
                     len(queries),
                     digest_retrieved_count,
@@ -7509,7 +7810,7 @@ class AgenticRAGApp:
                     if is_evidence_pack
                     else ""
                 )
-                prompt_parts = [self._get_system_instructions()]
+                prompt_parts = [self._get_system_instructions(resolved_settings)]
                 if style_instruction:
                     prompt_parts.append(style_instruction)
                 if evidence_instruction:
@@ -7666,7 +7967,7 @@ class AgenticRAGApp:
                 return
 
             try:
-                max_iterations_value = int(self.agentic_max_iterations.get())
+                max_iterations_value = int(resolved_settings["agentic_max_iterations"])
             except (TypeError, ValueError):
                 max_iterations_value = 2
             HARD_CAP = AGENTIC_MAX_ITERATIONS_HARD_CAP
@@ -8089,7 +8390,7 @@ class AgenticRAGApp:
                 _log_iteration_telemetry(
                     iteration,
                     self.output_style.get(),
-                    self.agentic_mode.get(),
+                    resolved_settings["agentic_mode"],
                     planner_subquery_count,
                     len(iteration_queries),
                     digest_retrieved_count,
@@ -8129,7 +8430,7 @@ class AgenticRAGApp:
                     if is_evidence_pack
                     else ""
                 )
-                prompt_parts = [self._get_system_instructions()]
+                prompt_parts = [self._get_system_instructions(resolved_settings)]
                 if style_instruction:
                     prompt_parts.append(style_instruction)
                 if evidence_instruction:
