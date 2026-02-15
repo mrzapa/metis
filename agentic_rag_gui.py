@@ -238,10 +238,10 @@ class AgenticRAGApp:
             "Omit unsupported claims; deepen supported ones; do not ask for more docs or missing info; "
             "do not use placeholders. If evidence is thin, you may add one short 'Scope:' note at the "
             "top describing limitations. Every paragraph with factual content must end with one or more "
-            "[Chunk N] citations. Use the exact [Chunk N] format only; do not use alternative formats "
-            "(e.g., (1), [1], or inline URLs). Example: \"The policy was revised in 2023.\" [Chunk 4] "
+            "[S#] citations. Use the exact [S#] format only; do not use alternative formats "
+            "(e.g., (1), [1], or inline URLs). Example: \"The policy was revised in 2023.\" [S1] "
             "For Script / talk track and Structured report styles, include at least one short verbatim "
-            "quote (<=25 words) per major section with a [Chunk N] citation. "
+            "quote (<=25 words) per major section with an [S#] citation. "
             "Coverage rule: if N items are requested, output N items, omitting unsupported claims."
         )
         self.verbose_system_instructions = (
@@ -249,10 +249,10 @@ class AgenticRAGApp:
             "Never ask for details already present in the retrieved context. "
             "Omit unsupported claims; deepen supported ones; do not ask the user for missing info; "
             "do not use placeholders. Every paragraph with factual content must end with one or more "
-            "[Chunk N] citations. Use the exact [Chunk N] format only; do not use alternative formats "
-            "(e.g., (1), [1], or inline URLs). Example: \"The policy was revised in 2023.\" [Chunk 4] "
+            "[S#] citations. Use the exact [S#] format only; do not use alternative formats "
+            "(e.g., (1), [1], or inline URLs). Example: \"The policy was revised in 2023.\" [S1] "
             "For Script / talk track and Structured report styles, include at least one short verbatim "
-            "quote (<=25 words) per major section with a [Chunk N] citation. "
+            "quote (<=25 words) per major section with an [S#] citation. "
             "Provide a concise summary, cite evidence from the context, list key points, "
             "and explicitly note uncertainties or gaps."
         )
@@ -337,7 +337,7 @@ class AgenticRAGApp:
         self.enable_structured_incidents = tk.BooleanVar(value=False)
         self.enable_recursive_memory = tk.BooleanVar(value=False)
         self.enable_recursive_retrieval = tk.BooleanVar(value=False)
-        self.enable_citation_v2 = tk.BooleanVar(value=False)
+        self.enable_citation_v2 = tk.BooleanVar(value=True)
         self.enable_claim_level_grounding_citefix_lite = tk.BooleanVar(value=False)
         self.agent_lightning_enabled = tk.BooleanVar(value=False)
         self.enable_agent_lightning_telemetry = self.agent_lightning_enabled
@@ -2522,25 +2522,29 @@ class AgenticRAGApp:
         self.evidence_notebook.add(self.sources_tab, text="Sources")
         self.sources_tree = ttk.Treeview(
             self.sources_tab,
-            columns=("sid", "doc", "chapter", "section", "location", "speaker", "date"),
+            columns=("sid", "doc", "section", "location", "speaker", "timestamp", "snippet"),
             show="headings",
             height=10,
             selectmode="extended",
         )
         for col, label, width in [
             ("sid", "S#", 50),
-            ("doc", "Doc", 140),
-            ("chapter", "Chapter", 140),
-            ("section", "Section", 140),
-            ("location", "Locator", 220),
+            ("doc", "Document", 170),
+            ("section", "Section/Chapter", 180),
+            ("location", "Position", 180),
             ("speaker", "Speaker/Role", 120),
-            ("date", "Date/Month", 100),
+            ("timestamp", "Timestamp", 150),
+            ("snippet", "Snippet", 260),
         ]:
             self.sources_tree.heading(col, text=label)
             self.sources_tree.column(col, width=width, anchor="w")
         self.sources_tree.tag_configure("supporting", background="#fff4cc")
         self.sources_tree.pack(fill=tk.BOTH, expand=True)
         self.sources_tree.bind("<<TreeviewSelect>>", self._on_source_selected)
+
+        source_actions = ttk.Frame(self.sources_tab)
+        source_actions.pack(fill="x", pady=(6, 4))
+        ttk.Button(source_actions, text="Open selected source", command=self._open_selected_source).pack(side="left")
 
         self.source_detail_text = scrolledtext.ScrolledText(
             self.sources_tab, height=8, wrap=tk.WORD, state="disabled", font=("Consolas", 9)
@@ -2663,12 +2667,13 @@ class AgenticRAGApp:
             f"Citation: {entry.get('sid', '')}",
             f"Source Card: {entry.get('label', 'unknown')}",
             f"Doc: {entry.get('title', 'unknown')}",
-            f"Chapter: {entry.get('chapter', '-')}",
-            f"Section: {entry.get('section', '-')}",
+            f"Section hint: {entry.get('section_hint') or entry.get('section') or entry.get('chapter') or '-'}",
+            f"Position hint: {entry.get('position_hint') or entry.get('locator', 'unknown')}",
             f"Date/Month: {entry.get('date', entry.get('month_bucket', 'undated'))}",
+            f"Timestamp: {entry.get('timestamp') or '-'}",
             f"Speaker/Role: {entry.get('speaker', entry.get('actor', 'unknown'))}",
             f"Type: {entry.get('type', 'unknown')}",
-            f"Locator: {entry.get('locator', 'unknown')}",
+            f"Open path: {entry.get('file_path') or '-'}",
             f"Anchor: {entry.get('anchor', '') or '(none)'}",
             "",
             "Evidence snippet:",
@@ -2681,6 +2686,36 @@ class AgenticRAGApp:
         self.source_detail_text.delete("1.0", tk.END)
         self.source_detail_text.insert(tk.END, "\n".join(detail_lines))
         self.source_detail_text.config(state="disabled")
+
+
+    def _open_selected_source(self):
+        selection = self.sources_tree.selection()
+        if not selection:
+            messagebox.showinfo("Open source", "Select a source row first.")
+            return
+        item_id = selection[0]
+        source_id = self._source_id_by_tree_iid.get(item_id)
+        entry = (self._latest_source_map or {}).get(source_id or "", {})
+        file_path = str(entry.get("file_path") or ((entry.get("metadata") or {}).get("source_path")) or "").strip()
+        if file_path and os.path.isfile(file_path):
+            webbrowser.open_new_tab(f"file://{os.path.abspath(file_path)}")
+            return
+        excerpt = str(entry.get("excerpt") or "").strip() or "(no excerpt captured)"
+        popup = tk.Toplevel(self.root)
+        popup.title(f"{entry.get('sid', 'S?')} - {entry.get('title', 'Source')}")
+        popup.geometry("900x520")
+        viewer = scrolledtext.ScrolledText(popup, wrap=tk.WORD, font=("Consolas", 10))
+        viewer.pack(fill=tk.BOTH, expand=True)
+        viewer.insert(
+            tk.END,
+            f"Source: {entry.get('title', 'unknown')}\n"
+            f"Section: {entry.get('section_hint') or entry.get('section') or '-'}\n"
+            f"Position: {entry.get('position_hint') or entry.get('locator') or '-'}\n"
+            f"Speaker/Role: {entry.get('speaker', 'unknown')}\n"
+            f"Timestamp: {entry.get('timestamp') or entry.get('date') or 'unknown'}\n\n"
+            f"{excerpt}",
+        )
+        viewer.config(state="disabled")
 
     def _refresh_evidence_pane(self, source_map, incidents, grounding_html_path=""):
         self._source_id_by_tree_iid = {}
@@ -2696,12 +2731,10 @@ class AgenticRAGApp:
         for source_id in ordered_source_ids:
             entry = (source_map or {}).get(source_id, {})
             sid = label_by_source[source_id]
-            chapter_label = entry.get("chapter") or "-"
-            if chapter_label != "-" and entry.get("chapter_idx"):
-                chapter_label = f"{entry.get('chapter_idx')}. {chapter_label}"
-            section_label = entry.get("section") or "-"
+            section_label = entry.get("section_hint") or entry.get("section") or entry.get("chapter") or "-"
             if section_label != "-" and entry.get("section_idx"):
                 section_label = f"{entry.get('section_idx')}. {section_label}"
+            position_label = entry.get("position_hint") or entry.get("locator") or "unknown"
             self.sources_tree.insert(
                 "",
                 tk.END,
@@ -2709,11 +2742,11 @@ class AgenticRAGApp:
                 values=(
                     sid,
                     entry.get("title", "unknown"),
-                    chapter_label,
                     section_label,
-                    entry.get("locator", "unknown"),
+                    position_label,
                     entry.get("speaker", entry.get("actor", "unknown")),
-                    entry.get("date", entry.get("month_bucket", "unknown")),
+                    entry.get("timestamp") or entry.get("date", entry.get("month_bucket", "unknown")),
+                    entry.get("snippet_preview") or re.sub(r"\s+", " ", str(entry.get("excerpt") or "").strip())[:180],
                 ),
             )
             self._source_id_by_tree_iid[sid] = source_id
@@ -5945,13 +5978,48 @@ class AgenticRAGApp:
             return "chat"
         return "unknown"
 
+    @staticmethod
+    def _clean_source_title(value):
+        raw = str(value or "").strip()
+        if not raw:
+            return "unknown"
+        base = os.path.basename(raw)
+        stem, _ext = os.path.splitext(base)
+        title = stem or base
+        title = re.sub(r"[_-]+", " ", title)
+        title = re.sub(r"\s+", " ", title).strip(" -_	")
+        return title or "unknown"
+
+    @staticmethod
+    def _build_section_hint(meta):
+        for key in ("section_hint", "section_title", "chapter_title", "heading", "header"):
+            value = str(meta.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def _build_position_hint(meta):
+        page_num = meta.get("page") or meta.get("page_number")
+        if page_num is not None and str(page_num).strip():
+            return f"page {page_num}"
+        chunk_id = str(meta.get("chunk_id") or "?").strip() or "?"
+        char_start = meta.get("char_start")
+        char_end = meta.get("char_end")
+        if char_start is not None or char_end is not None:
+            start = "?" if char_start is None else str(char_start)
+            end = "?" if char_end is None else str(char_end)
+            return f"chunk {chunk_id}, chars {start}-{end}"
+        return f"chunk {chunk_id}"
+
     def _ensure_source_metadata(self, metadata, selected_file, content):
         meta = (metadata or {}).copy()
         source_title = (
-            str(meta.get("doc_title") or meta.get("title") or meta.get("source") or "").strip()
+            str(meta.get("source_title") or meta.get("doc_title") or meta.get("title") or meta.get("source") or "").strip()
         )
         if not source_title:
             source_title = os.path.basename(selected_file or "") or "unknown"
+        source_title = self._clean_source_title(source_title)
         source_type = str(meta.get("source_type") or "").strip().lower() or self._source_type_for_file(
             selected_file, meta
         )
@@ -5985,6 +6053,8 @@ class AgenticRAGApp:
             else:
                 locator = "chunk unknown"
         meta["source_title"] = source_title
+        meta["section_hint"] = self._build_section_hint(meta)
+        meta["position_hint"] = self._build_position_hint(meta)
         meta["source_type"] = source_type
         meta["source_date"] = source_date
         meta["source_actor"] = source_actor
@@ -6125,7 +6195,10 @@ class AgenticRAGApp:
             loc_parts.append(f"{ch_label} '{chapter_title}'")
         if section_title:
             loc_parts.append(f"§ '{section_title}'")
-        if enriched.get("page") or enriched.get("page_number"):
+        position_hint = str(enriched.get("position_hint") or "").strip()
+        if position_hint:
+            loc_parts.append(position_hint)
+        elif enriched.get("page") or enriched.get("page_number"):
             loc_parts.append(f"p. {enriched.get('page') or enriched.get('page_number')}")
         elif char_start is not None or char_end is not None:
             loc_parts.append(
@@ -6187,15 +6260,20 @@ class AgenticRAGApp:
                     "chapter_idx": enriched.get("chapter_idx"),
                     "section": str(enriched.get("section_title") or "").strip(),
                     "section_idx": enriched.get("section_idx"),
+                    "section_hint": str(enriched.get("section_hint") or enriched.get("section_title") or enriched.get("chapter_title") or "").strip(),
+                    "position_hint": str(enriched.get("position_hint") or "").strip(),
                     "speaker": str(enriched.get("speaker") or enriched.get("source_actor") or "").strip() or "unknown",
                     "month_bucket": str(enriched.get("month_key") or "undated"),
                     "chunk_ids": [],
                     "role_kind": role_kind,
                     "channel_key": channel_key,
+                    "timestamp": str(enriched.get("timestamp") or "").strip(),
+                    "file_path": str(enriched.get("source_path") or enriched.get("file_path") or "").strip(),
                     "label": source_locator.label,
                     "anchor": source_locator.anchor,
                     "metadata": enriched,
                     "excerpt": (content or "")[:900],
+                    "snippet_preview": re.sub(r"\s+", " ", (content or "").strip())[:180],
                 },
             )
             chunk_id = str((metadata or {}).get("chunk_id", "")).strip()
@@ -6211,7 +6289,7 @@ class AgenticRAGApp:
         for source_id in ordered_source_ids:
             entry = source_map[source_id]
             lines.append(
-                f"- {entry['sid']} {entry['locator']} | speaker={entry['speaker']} | month={entry['month_bucket']}"
+                f"- [{entry['sid']}] {entry['title']} | {entry.get('section_hint') or entry['locator']} | {entry.get('position_hint') or entry['locator']}"
             )
         return source_map, "\n".join(lines)
 
@@ -8206,6 +8284,7 @@ class AgenticRAGApp:
                         "message_index": index,
                         "evidence_kind": evidence_kind,
                         "source": source_basename,
+                        "source_path": self.selected_file,
                         "chunk_id": index,
                         "ingest_id": chunk_ingest_id,
                     }
@@ -8263,6 +8342,7 @@ class AgenticRAGApp:
                     metadata.update(
                         {
                             "source": source_basename,
+                            "source_path": self.selected_file,
                             "chunk_id": chunk_id,
                             "ingest_id": chunk_ingest_id,
                             "char_start": char_start,
