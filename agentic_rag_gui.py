@@ -498,6 +498,10 @@ class AgenticRAGApp:
         self._session_list_items = []
         self._assistant_message_counter = 0
         self.advanced_ui = tk.BooleanVar(value=False)
+        self.basic_mode = False
+        self.last_used_mode = "advanced"
+        self.basic_wizard_completed = False
+        self._wizard_state = {}
         self.ui_mode = tk.StringVar(value="light")
         self.history_profile_filter = tk.StringVar(value="All Profiles")
 
@@ -1402,8 +1406,16 @@ class AgenticRAGApp:
         self._run_startup_step(
             "apply_existing_indexes",
             _step,
-            self._startup_step_check_dependencies,
+            self._startup_step_select_mode,
         )
+
+    def _startup_step_select_mode(self):
+        def _step():
+            self._set_startup_status("Selecting startup mode…")
+            self._prompt_startup_mode_selection()
+            self._configure_chat_mode_ui()
+
+        self._run_startup_step("select_mode", _step, self._startup_step_check_dependencies)
 
     def _startup_step_check_dependencies(self):
         def _step():
@@ -2140,6 +2152,11 @@ class AgenticRAGApp:
 
         instructions = data.get("system_instructions", self.system_instructions.get())
         self.system_instructions.set(instructions or self.default_system_instructions)
+        saved_mode = str(data.get("last_used_mode", self.last_used_mode) or "advanced").strip().lower()
+        if saved_mode not in {"basic", "advanced"}:
+            saved_mode = "advanced"
+        self.last_used_mode = saved_mode
+        self.basic_mode = saved_mode == "basic"
         self.instructions_box.delete("1.0", tk.END)
         self.instructions_box.insert(tk.END, self.system_instructions.get())
 
@@ -2217,6 +2234,7 @@ class AgenticRAGApp:
             "output_style": self.output_style.get(),
             "selected_mode": self.selected_mode.get(),
             "selected_profile": self.selected_profile.get(),
+            "last_used_mode": "basic" if self.basic_mode else "advanced",
         }
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
@@ -2722,6 +2740,11 @@ class AgenticRAGApp:
         self.progress.pack(fill="x")
 
     def build_chat_tab(self):
+        for child in self.tab_chat.winfo_children():
+            child.destroy()
+        if self.basic_mode and not self.basic_wizard_completed:
+            self._build_basic_setup_wizard()
+            return
         if not hasattr(self, "use_sub_queries"):
             self.use_sub_queries = tk.BooleanVar(value=True)
         if not hasattr(self, "subquery_max_docs"):
@@ -2764,6 +2787,10 @@ class AgenticRAGApp:
         ttk.Entry(top_bar, textvariable=self.final_k, width=8).grid(row=1, column=3, sticky="w", padx=(6, 12), pady=(8, 0))
         ttk.Button(top_bar, text="Refresh Indexes", command=self._refresh_existing_indexes_async).grid(row=1, column=6, sticky="w", pady=(8, 0))
         ttk.Button(top_bar, text="Settings", command=lambda: self.notebook.select(self.tab_settings)).grid(row=1, column=7, sticky="e", pady=(8, 0))
+        if self.basic_mode:
+            ttk.Button(top_bar, text="Switch to Advanced", command=self.switch_to_advanced_mode).grid(row=2, column=7, sticky="e", pady=(8, 0))
+        else:
+            ttk.Button(top_bar, text="Run Setup Wizard", command=self.run_setup_wizard).grid(row=2, column=7, sticky="e", pady=(8, 0))
 
         content_split = ttk.Panedwindow(frame, orient=tk.HORIZONTAL)
         content_split.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
@@ -2975,6 +3002,300 @@ class AgenticRAGApp:
         self._grounding_tab_added = False
         self.enable_langextract.trace_add("write", self._toggle_grounding_tab)
         self._toggle_grounding_tab()
+
+    def _configure_chat_mode_ui(self):
+        self.basic_wizard_completed = False
+        self.root.after(0, self.build_chat_tab)
+
+    def _prompt_startup_mode_selection(self):
+        selected = {"mode": None}
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Choose startup mode")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        dialog.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        frame = ttk.Frame(dialog, padding=16)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Choose how you want to start Axiom:", style="Bold.TLabel").pack(anchor="w")
+        ttk.Label(
+            frame,
+            text=f"Last used mode: {self.last_used_mode.title()}",
+        ).pack(anchor="w", pady=(4, 12))
+
+        def _choose(mode_value):
+            selected["mode"] = mode_value
+            dialog.destroy()
+
+        ttk.Button(frame, text="Basic Mode", command=lambda: _choose("basic")).pack(fill="x")
+        ttk.Button(frame, text="Advanced Mode", command=lambda: _choose("advanced")).pack(fill="x", pady=(8, 0))
+
+        self.root.wait_window(dialog)
+
+        mode = selected["mode"] or self.last_used_mode
+        self.basic_mode = mode == "basic"
+        self.last_used_mode = mode
+        self.save_config()
+
+    def switch_to_advanced_mode(self):
+        self.basic_mode = False
+        self.last_used_mode = "advanced"
+        self.basic_wizard_completed = True
+        self.save_config()
+        self.build_chat_tab()
+
+    def run_setup_wizard(self):
+        self.basic_mode = True
+        self.last_used_mode = "basic"
+        self.basic_wizard_completed = False
+        self.save_config()
+        self.build_chat_tab()
+
+    def _build_basic_setup_wizard(self):
+        self._wizard_state = {
+            "step": 1,
+            "file_path": "",
+            "selected_index": self.existing_index_var.get() or "(default)",
+            "llm_provider": self.llm_provider.get(),
+            "llm_model": self.llm_model.get(),
+            "embedding_provider": self.embedding_provider.get(),
+            "embedding_model": self.embedding_model.get(),
+            "modes": [self.selected_mode.get()],
+        }
+        wrap = ttk.Frame(self.tab_chat, padding=18)
+        wrap.pack(fill=tk.BOTH, expand=True)
+        self._wizard_container = wrap
+        self._wizard_title = ttk.Label(wrap, text="Basic Setup Wizard", style="Header.TLabel")
+        self._wizard_title.pack(anchor="w")
+        self._wizard_step_label = ttk.Label(wrap, text="")
+        self._wizard_step_label.pack(anchor="w", pady=(4, 10))
+        self._wizard_content = ttk.Frame(wrap)
+        self._wizard_content.pack(fill=tk.BOTH, expand=True)
+        nav = ttk.Frame(wrap)
+        nav.pack(fill="x", pady=(10, 0))
+        self._wizard_back = ttk.Button(nav, text="Back", command=lambda: self._wizard_move(-1))
+        self._wizard_back.pack(side="left")
+        self._wizard_next = ttk.Button(nav, text="Next", command=lambda: self._wizard_move(1))
+        self._wizard_next.pack(side="right")
+        ttk.Button(nav, text="Switch to Advanced", command=self.switch_to_advanced_mode).pack(side="right", padx=(0, 8))
+        self._render_wizard_step()
+
+    def _wizard_move(self, delta):
+        if delta > 0 and not self._wizard_validate_current_step():
+            return
+        step = max(1, min(4, int(self._wizard_state.get("step", 1)) + delta))
+        self._wizard_state["step"] = step
+        self._render_wizard_step()
+
+    def _render_wizard_step(self):
+        step = int(self._wizard_state.get("step", 1))
+        for child in self._wizard_content.winfo_children():
+            child.destroy()
+        self._wizard_back.config(state="normal" if step > 1 else "disabled")
+        self._wizard_next.config(text="Confirm & Start" if step == 4 else "Next")
+        if step == 1:
+            self._render_wizard_step_one()
+        elif step == 2:
+            self._render_wizard_step_two()
+        elif step == 3:
+            self._render_wizard_step_three()
+        else:
+            self._render_wizard_step_four()
+
+    def _render_wizard_step_one(self):
+        self._wizard_step_label.config(text="Step 1 of 4: Select File or Index")
+        self._wizard_file_var = tk.StringVar(value=self._wizard_state.get("file_path", ""))
+        row = ttk.Frame(self._wizard_content)
+        row.pack(fill="x", pady=(0, 8))
+        ttk.Label(row, text="File (books/PDFs/text):").pack(side="left")
+        ttk.Entry(row, textvariable=self._wizard_file_var).pack(side="left", fill="x", expand=True, padx=(8, 8))
+        ttk.Button(row, text="Browse", command=self._wizard_browse_file).pack(side="left")
+
+        ttk.Label(self._wizard_content, text="Or choose an existing index:").pack(anchor="w")
+        index_values = ["(default)"] + list(self.existing_index_paths.keys())
+        self._wizard_index_var = tk.StringVar(value=self._wizard_state.get("selected_index", "(default)"))
+        ttk.Combobox(self._wizard_content, textvariable=self._wizard_index_var, values=index_values, state="readonly").pack(fill="x", pady=(4, 0))
+
+    def _wizard_browse_file(self):
+        chosen = filedialog.askopenfilename(filetypes=[("Supported", "*.txt *.md *.html *.htm *.pdf *.epub"), ("All files", "*.*")])
+        if chosen:
+            self._wizard_file_var.set(chosen)
+
+    def _render_wizard_step_two(self):
+        self._wizard_step_label.config(text="Step 2 of 4: Choose LLM and Embedding Models")
+        llm_values = ["openai", "anthropic", "google", "local_lm_studio"]
+        emb_values = ["voyage", "openai", "google", "local_huggingface"]
+        self._wizard_llm_provider = tk.StringVar(value=self._wizard_state.get("llm_provider", self.llm_provider.get()))
+        self._wizard_embedding_provider = tk.StringVar(value=self._wizard_state.get("embedding_provider", self.embedding_provider.get()))
+        self._wizard_llm_model = tk.StringVar(value=self._wizard_state.get("llm_model", self.llm_model.get()))
+        self._wizard_embedding_model = tk.StringVar(value=self._wizard_state.get("embedding_model", self.embedding_model.get()))
+
+        llm_frame = ttk.LabelFrame(self._wizard_content, text="LLM", padding=8)
+        llm_frame.pack(fill="x", pady=(0, 8))
+        ttk.Combobox(llm_frame, textvariable=self._wizard_llm_provider, values=llm_values, state="readonly").pack(fill="x")
+        self._wizard_llm_model_combo = ttk.Combobox(llm_frame, textvariable=self._wizard_llm_model, values=self._get_llm_model_options(self._wizard_llm_provider.get()), state="readonly")
+        self._wizard_llm_model_combo.pack(fill="x", pady=(6, 0))
+
+        emb_frame = ttk.LabelFrame(self._wizard_content, text="Embeddings", padding=8)
+        emb_frame.pack(fill="x")
+        ttk.Combobox(emb_frame, textvariable=self._wizard_embedding_provider, values=emb_values, state="readonly").pack(fill="x")
+        self._wizard_emb_model_combo = ttk.Combobox(emb_frame, textvariable=self._wizard_embedding_model, values=self._get_embedding_model_options(self._wizard_embedding_provider.get()), state="readonly")
+        self._wizard_emb_model_combo.pack(fill="x", pady=(6, 0))
+
+        self._wizard_llm_provider.trace_add("write", lambda *_: self._wizard_refresh_model_options())
+        self._wizard_embedding_provider.trace_add("write", lambda *_: self._wizard_refresh_model_options())
+
+    def _wizard_refresh_model_options(self):
+        llm_options = self._get_llm_model_options(self._wizard_llm_provider.get())
+        emb_options = self._get_embedding_model_options(self._wizard_embedding_provider.get())
+        self._wizard_llm_model_combo["values"] = llm_options
+        self._wizard_emb_model_combo["values"] = emb_options
+        if self._wizard_llm_model.get() not in llm_options:
+            self._wizard_llm_model.set(llm_options[0])
+        if self._wizard_embedding_model.get() not in emb_options:
+            self._wizard_embedding_model.set(emb_options[0])
+
+    def _render_wizard_step_three(self):
+        self._wizard_step_label.config(text="Step 3 of 4: Select Mode(s)")
+        label_map = {
+            "Q&A": "Question Answering",
+            "Summary": "Book Summary",
+            "Tutor": "Tutor",
+            "Research": "Blinkist-style summary",
+            "Evidence Pack": "Evidence Pack",
+        }
+        self._wizard_mode_list = tk.Listbox(self._wizard_content, selectmode=tk.MULTIPLE, height=8, exportselection=False)
+        self._wizard_mode_labels = []
+        for mode in self.mode_options:
+            display = label_map.get(mode, mode)
+            self._wizard_mode_list.insert(tk.END, display)
+            self._wizard_mode_labels.append((display, mode))
+        self._wizard_mode_list.pack(fill="both", expand=True)
+        selected_modes = set(self._wizard_state.get("modes", []))
+        for idx, (_display, mode) in enumerate(self._wizard_mode_labels):
+            if mode in selected_modes:
+                self._wizard_mode_list.selection_set(idx)
+
+    def _render_wizard_step_four(self):
+        self._wizard_step_label.config(text="Step 4 of 4: Confirm & Start")
+        summary = [
+            f"File: {self._wizard_state.get('file_path') or 'None'}",
+            f"Index: {self._wizard_state.get('selected_index') or '(default)'}",
+            f"LLM: {self._wizard_state.get('llm_provider')} / {self._wizard_state.get('llm_model')}",
+            f"Embedding: {self._wizard_state.get('embedding_provider')} / {self._wizard_state.get('embedding_model')}",
+            f"Modes: {', '.join(self._wizard_state.get('modes') or ['Q&A'])}",
+        ]
+        text = scrolledtext.ScrolledText(self._wizard_content, height=10, state="normal", wrap=tk.WORD)
+        text.pack(fill="both", expand=True)
+        text.insert(tk.END, "\n".join(summary))
+        text.config(state="disabled")
+
+    def _wizard_validate_current_step(self):
+        step = int(self._wizard_state.get("step", 1))
+        if step == 1:
+            self._wizard_state["file_path"] = (self._wizard_file_var.get() or "").strip()
+            self._wizard_state["selected_index"] = self._wizard_index_var.get()
+            if not self._wizard_state["file_path"] and not self._wizard_state["selected_index"]:
+                messagebox.showerror("Setup Wizard", "Choose a file or an existing index to continue.")
+                return False
+            return True
+        if step == 2:
+            self._wizard_state["llm_provider"] = self._wizard_llm_provider.get()
+            self._wizard_state["llm_model"] = self._wizard_llm_model.get()
+            self._wizard_state["embedding_provider"] = self._wizard_embedding_provider.get()
+            self._wizard_state["embedding_model"] = self._wizard_embedding_model.get()
+            return self._wizard_ensure_api_keys()
+        if step == 3:
+            selections = [self._wizard_mode_labels[i][1] for i in self._wizard_mode_list.curselection()]
+            if not selections:
+                messagebox.showerror("Setup Wizard", "Select at least one mode.")
+                return False
+            self._wizard_state["modes"] = selections
+            return True
+        if step == 4:
+            return self._wizard_confirm_and_start()
+        return True
+
+    def _wizard_ensure_api_keys(self):
+        required = []
+        llm_provider = self._wizard_state.get("llm_provider")
+        embedding_provider = self._wizard_state.get("embedding_provider")
+        key_map = {"openai": "openai", "anthropic": "anthropic", "google": "google", "voyage": "voyage"}
+        for provider in (llm_provider, embedding_provider):
+            key_name = key_map.get(provider)
+            if key_name and not self.api_keys[key_name].get().strip():
+                required.append((provider, key_name))
+        for provider, key_name in required:
+            try:
+                value = simpledialog.askstring("API Key Required", f"Enter API key for {provider}:", show="*", parent=self.root)
+            except Exception as exc:
+                messagebox.showerror("Setup Wizard", f"Failed to prompt for API key: {exc}")
+                return False
+            if not value:
+                messagebox.showerror("Setup Wizard", f"{provider} API key is required to continue.")
+                return False
+            self.api_keys[key_name].set(value.strip())
+        self.save_config()
+        return True
+
+    def _combine_mode_defaults(self, modes):
+        defaults = [self._mode_defaults(mode) for mode in modes if mode]
+        if not defaults:
+            return self._mode_defaults("Q&A")
+        return {
+            "retrieve_k": max(item["retrieve_k"] for item in defaults),
+            "final_k": max(item["final_k"] for item in defaults),
+            "mmr_lambda": round(sum(item["mmr_lambda"] for item in defaults) / len(defaults), 2),
+            "retrieval_mode": "hierarchical" if any(item["retrieval_mode"] == "hierarchical" for item in defaults) else "flat",
+            "agentic_mode": any(item["agentic_mode"] for item in defaults),
+            "max_iterations": max(item["max_iterations"] for item in defaults),
+        }
+
+    def _wizard_confirm_and_start(self):
+        try:
+            self.llm_provider.set(self._wizard_state.get("llm_provider", self.llm_provider.get()))
+            self.embedding_provider.set(self._wizard_state.get("embedding_provider", self.embedding_provider.get()))
+            self._sync_model_options()
+            self.llm_model.set(self._wizard_state.get("llm_model", self.llm_model.get()))
+            self.embedding_model.set(self._wizard_state.get("embedding_model", self.embedding_model.get()))
+
+            modes = self._wizard_state.get("modes") or ["Q&A"]
+            self.selected_mode.set(modes[0])
+            defaults = self._combine_mode_defaults(modes)
+            self.retrieval_k.set(defaults["retrieve_k"])
+            self.final_k.set(defaults["final_k"])
+            self.mmr_lambda.set(defaults["mmr_lambda"])
+            self.retrieval_mode.set(defaults["retrieval_mode"])
+            self.agentic_mode.set(defaults["agentic_mode"])
+            self.agentic_max_iterations.set(defaults["max_iterations"])
+
+            selected_index = self._wizard_state.get("selected_index")
+            if selected_index and selected_index != "(default)":
+                self.existing_index_var.set(selected_index)
+                self._on_existing_index_change()
+
+            file_path = (self._wizard_state.get("file_path") or "").strip()
+            if file_path:
+                self.selected_file = file_path
+                if hasattr(self, "lbl_file") and self._safe_widget_exists(self.lbl_file):
+                    self.lbl_file.config(text=file_path, foreground="black")
+                    self._update_file_info()
+                self.vector_db_type.set("chroma")
+                self.build_digest_index.set(True)
+                self.chunk_size.set(1200)
+                self.chunk_overlap.set(150)
+                self.start_ingestion()
+
+            self.basic_wizard_completed = True
+            self.save_config()
+            self.build_chat_tab()
+            self.notebook.select(self.tab_chat)
+            return True
+        except Exception as exc:
+            messagebox.showerror("Setup Wizard", f"Could not apply setup: {exc}")
+            return False
 
     def _toggle_grounding_tab(self, *args):
         should_show = bool(self.enable_langextract.get())
