@@ -42,6 +42,8 @@ except ImportError:
 
 RAW_COLLECTION_NAME = "rag_collection"
 DIGEST_COLLECTION_NAME = "rag_digest_collection"
+SECTION_DIGEST_COLLECTION_NAME = "section_digest_collection"
+BOOK_DIGEST_COLLECTION_NAME = "book_digest_collection"
 CONCEPT_COLLECTION_NAME = "rag_concept_cards"
 DIGEST_WINDOW_MIN = 10
 DIGEST_WINDOW_MAX = 20
@@ -364,10 +366,10 @@ class AgenticRAGApp:
         self.fallback_final_k = tk.IntVar(value=self.final_k.get())
         self.search_type = tk.StringVar(value="similarity")
         self.retrieval_mode_options = [
-            "Flat (Chunks)",
-            "Hierarchical (Digest→Chunk)",
+            "flat",
+            "hierarchical",
         ]
-        self.retrieval_mode = tk.StringVar(value="Flat (Chunks)")
+        self.retrieval_mode = tk.StringVar(value="flat")
         self.mmr_lambda = tk.DoubleVar(value=0.5)
         self.agentic_mode = tk.BooleanVar(value=False)
         self.agentic_max_iterations = tk.IntVar(value=2)
@@ -804,7 +806,13 @@ class AgenticRAGApp:
             extra.get("embedding_model_custom", self.embedding_model_custom.get())
         )
         self.search_type.set(extra.get("search_type", self.search_type.get()))
-        self.retrieval_mode.set(extra.get("retrieval_mode", self.retrieval_mode.get()))
+        retrieval_mode_value = str(extra.get("retrieval_mode", self.retrieval_mode.get()) or "").strip().lower()
+        if retrieval_mode_value in {"hierarchical (digest→chunk)", "hierarchical"}:
+            retrieval_mode_value = "hierarchical"
+        elif retrieval_mode_value in {"flat (chunks)", "flat"}:
+            retrieval_mode_value = "flat"
+        if retrieval_mode_value in self.retrieval_mode_options:
+            self.retrieval_mode.set(retrieval_mode_value)
         self.agentic_mode.set(bool(extra.get("agentic_mode", self.agentic_mode.get())))
         self.use_reranker.set(bool(extra.get("use_reranker", self.use_reranker.get())))
         self.use_sub_queries.set(bool(extra.get("use_sub_queries", self.use_sub_queries.get())))
@@ -1785,9 +1793,9 @@ class AgenticRAGApp:
         self.retrieval_k.set(data.get("retrieval_k", self.retrieval_k.get()))
         self.final_k.set(data.get("final_k", self.final_k.get()))
         self.search_type.set(data.get("search_type", self.search_type.get()))
-        retrieval_mode = data.get("retrieval_mode", self.retrieval_mode.get())
+        retrieval_mode = str(data.get("retrieval_mode", self.retrieval_mode.get()) or "").strip().lower()
         if retrieval_mode not in self.retrieval_mode_options:
-            retrieval_mode = "Flat (Chunks)"
+            retrieval_mode = "flat"
         self.retrieval_mode.set(retrieval_mode)
         self.mmr_lambda.set(data.get("mmr_lambda", self.mmr_lambda.get()))
         # New config fields: agentic_mode, agentic_max_iterations, show_retrieved_context
@@ -2286,7 +2294,7 @@ class AgenticRAGApp:
             state="readonly",
             width=12,
         ).grid(row=0, column=1, sticky="w", padx=(5, 15), pady=2)
-        ttk.Label(retrieval_section.content, text="Retrieval mode:").grid(row=0, column=2, sticky="w")
+        ttk.Label(retrieval_section.content, text="Search Mode:").grid(row=0, column=2, sticky="w")
         ttk.Combobox(
             retrieval_section.content,
             textvariable=self.retrieval_mode,
@@ -3108,7 +3116,7 @@ class AgenticRAGApp:
             system_prompt = (
                 "You generate search sub-queries for retrieval. "
                 "Return 3-5 concise sub-queries as a JSON array of strings. "
-                "Do not include any extra text."
+                "Explicitly detect missing months/sections and include targeted date, actor, and next chapter retrieval queries. Do not include any extra text."
             )
             messages = [
                 self._system_message(content=system_prompt),
@@ -5392,12 +5400,12 @@ class AgenticRAGApp:
         return any(re.search(pattern, text.lower()) for pattern in factual_patterns)
 
     def _resolve_retrieval_mode(self, query, resolved_settings, has_digest_store):
-        configured_mode = (self.retrieval_mode.get() or "Flat (Chunks)").strip()
+        configured_mode = str(self.retrieval_mode.get() or "flat").strip().lower()
         mode_name = (resolved_settings or {}).get("mode", "")
         should_default_hierarchical = mode_name in {"Book Tutor", "Blinkist-style Summary"}
         is_short_factual = self._is_short_factual_query(query)
-        if configured_mode == "Hierarchical (Digest→Chunk)":
-            return "hierarchical"
+        if configured_mode == "hierarchical":
+            return "hierarchical" if has_digest_store else "flat"
         if should_default_hierarchical and not is_short_factual and has_digest_store:
             return "hierarchical"
         return "flat"
@@ -5405,9 +5413,13 @@ class AgenticRAGApp:
     def search_digests(self, query, k, digest_store, tree_level=None, digest_scope=None):
         if not digest_store or not query:
             return []
+        search_kwargs = {"k": max(1, int(k))}
+        if self.search_type.get() == "mmr":
+            search_kwargs["fetch_k"] = max(search_kwargs["k"] + 1, min(60, search_kwargs["k"] * 4))
+            search_kwargs["lambda_mult"] = 0.35 if str(self.retrieval_mode.get()).strip().lower() == "hierarchical" else float(self.mmr_lambda.get())
         retriever = digest_store.as_retriever(
             search_type=self.search_type.get(),
-            search_kwargs={"k": max(1, int(k))},
+            search_kwargs=search_kwargs,
         )
         digest_docs = retriever.invoke(query)
         filtered = []
@@ -5500,6 +5512,44 @@ class AgenticRAGApp:
                 deduped.append(item)
         return deduped[:8]
 
+    def recursive_summarise(self, text, max_tokens=8000):
+        content = str(text or "").strip()
+        if not content:
+            return ""
+        token_limit = max(1200, int(max_tokens))
+        max_chars = token_limit * TOKENS_TO_CHARS_RATIO
+        if len(content) <= max_chars:
+            return content
+
+        llm = self._get_llm_with_temperature(0.2)
+        system_prompt = (
+            "You are a recursive summariser for long books and records. "
+            "Compress the text while preserving chronology, key actors, decisions, and dates. "
+            "Use concise bullets with no preamble."
+        )
+        segments = []
+        for idx in range(0, len(content), max_chars):
+            segments.append(content[idx : idx + max_chars])
+
+        partial_summaries = []
+        for segment in segments:
+            try:
+                response = llm.invoke(
+                    [
+                        self._system_message(content=system_prompt),
+                        self._human_message(content=segment),
+                    ]
+                )
+                partial_summaries.append(str(getattr(response, "content", "") or "").strip())
+            except Exception:
+                partial_summaries.append(segment[: max_chars // 2])
+
+        merged = "\n\n".join(item for item in partial_summaries if item)
+
+        if len(merged) <= max_chars or len(partial_summaries) <= 1:
+            return merged[:max_chars]
+        return self.recursive_summarise(merged, max_tokens=max_tokens)
+
     def _build_digest_documents(self, docs, ingest_id, source_basename, doc_title):
         groups = self._group_chunks_for_digest(docs)
         if not groups:
@@ -5519,6 +5569,7 @@ class AgenticRAGApp:
             ]
             compact_ids = self._compact_chunk_ids(chunk_ids)
             group_text = "\n\n".join(doc.page_content for doc in group_docs)
+            group_text = self.recursive_summarise(group_text, max_tokens=8000)
             if section_title:
                 human_content = (
                     f"Section title: {section_title}\n\nContent:\n{group_text}"
@@ -5541,6 +5592,7 @@ class AgenticRAGApp:
                 "node_id": f"l1:{ingest_id}-{digest_index}",
                 "parent_node_id": f"l2:{ingest_id}",
                 "child_chunk_ids": compact_ids,
+                "section_key": str(section_title or f"window-{digest_index}").strip(),
             }
             if section_title:
                 metadata["section_title"] = section_title
@@ -5574,10 +5626,11 @@ class AgenticRAGApp:
             "Return clear bullets capturing thesis, progression, and outcomes. "
             "End with a 'Key takeaways:' subsection with 5 bullets."
         )
+        summary_input = self.recursive_summarise("\n\n".join(section_rollup), max_tokens=8000)
         response = llm.invoke(
             [
                 self._system_message(content=system_prompt),
-                self._human_message(content="\n\n".join(section_rollup)),
+                self._human_message(content=summary_input),
             ]
         )
         child_digest_ids = [
@@ -5673,6 +5726,7 @@ class AgenticRAGApp:
             ]
             compact_ids = self._compact_chunk_ids(chunk_ids)
             group_text = "\n\n".join(doc.page_content for doc in group_docs)
+            group_text = self.recursive_summarise(group_text, max_tokens=8000)
             if section_title:
                 human_content = (
                     f"User query: {query}\n"
@@ -5690,6 +5744,7 @@ class AgenticRAGApp:
                 "doc_type": "mini_digest",
                 "digest_id": f"mini-{digest_index}",
                 "child_chunk_ids": compact_ids,
+                "section_key": str(section_title or f"window-{digest_index}").strip(),
             }
             if section_title:
                 metadata["section_title"] = section_title
@@ -5754,7 +5809,7 @@ class AgenticRAGApp:
             os.path.join(path, "index")
         )
 
-    def _has_digest_collection(self, persist_dir):
+    def _has_digest_collection(self, persist_dir, collection_name=DIGEST_COLLECTION_NAME):
         if not persist_dir or not os.path.isdir(persist_dir):
             return False
         try:
@@ -5763,7 +5818,7 @@ class AgenticRAGApp:
             return False
         try:
             digest_store = Chroma(
-                collection_name=DIGEST_COLLECTION_NAME,
+                collection_name=collection_name,
                 embedding_function=self.get_embeddings(),
                 persist_directory=persist_dir,
             )
@@ -9211,6 +9266,8 @@ class AgenticRAGApp:
 
             new_index_path = None
             digest_docs = []
+            section_digest_docs = []
+            book_digest_docs = []
             summary_tree_docs = []
             summary_tree_artifact_path = ""
 
@@ -9234,14 +9291,13 @@ class AgenticRAGApp:
                     )
                     digest_docs = [*part_digest_docs, *chapter_digest_docs, *section_digest_docs]
                     summary_tree_docs = [*chunk_summary_docs, *digest_docs]
-                    summary_tree_docs.extend(
-                        self._build_document_summary_node(
-                            part_digest_docs or chapter_digest_docs or section_digest_docs,
-                            chunk_ingest_id,
-                            source_basename,
-                            doc_title,
-                        )
+                    book_digest_docs = self._build_document_summary_node(
+                        part_digest_docs or chapter_digest_docs or section_digest_docs,
+                        chunk_ingest_id,
+                        source_basename,
+                        doc_title,
                     )
+                    summary_tree_docs.extend(book_digest_docs)
                     self.log(
                         "Prepared summary tree nodes: "
                         f"chunk_summaries={len(chunk_summary_docs)}, "
@@ -9333,6 +9389,26 @@ class AgenticRAGApp:
                     batch = summary_tree_docs[i : i + batch_size]
                     digest_store.add_documents(batch)
                 self.log(f"Indexed {total_digests} summary tree nodes.")
+
+                if section_digest_docs:
+                    section_digest_store = Chroma(
+                        collection_name=SECTION_DIGEST_COLLECTION_NAME,
+                        embedding_function=embeddings,
+                        persist_directory=persist_dir,
+                    )
+                    for i in range(0, len(section_digest_docs), batch_size):
+                        section_digest_store.add_documents(section_digest_docs[i : i + batch_size])
+                    self.log(f"Indexed {len(section_digest_docs)} section digests.")
+
+                if book_digest_docs:
+                    book_digest_store = Chroma(
+                        collection_name=BOOK_DIGEST_COLLECTION_NAME,
+                        embedding_function=embeddings,
+                        persist_directory=persist_dir,
+                    )
+                    for i in range(0, len(book_digest_docs), batch_size):
+                        book_digest_store.add_documents(book_digest_docs[i : i + batch_size])
+                    self.log(f"Indexed {len(book_digest_docs)} book digests.")
                 if summary_tree_artifact_path:
                     self.log(f"Summary tree artifact saved: {summary_tree_artifact_path}")
 
@@ -9593,27 +9669,38 @@ class AgenticRAGApp:
                 persist_dir = getattr(self.vector_store, "_persist_directory", None)
             if not persist_dir and self.vector_db_type.get() == "chroma":
                 persist_dir = self._get_chroma_persist_root()
-            digest_missing = (
-                not self.build_digest_index.get()
-                or (
-                    self.vector_db_type.get() == "chroma"
-                    and not self._has_digest_collection(persist_dir)
-                )
-            )
+            digest_missing = not self.build_digest_index.get()
             digest_store = None
-            if not digest_missing and self.vector_db_type.get() == "chroma":
+            section_digest_store = None
+            book_digest_store = None
+            if self.vector_db_type.get() == "chroma" and not digest_missing:
                 try:
                     embeddings = self.get_embeddings()
                     Chroma = _lazy_import_chroma()
-
                     digest_store = Chroma(
                         collection_name=DIGEST_COLLECTION_NAME,
                         embedding_function=embeddings,
                         persist_directory=persist_dir,
                     )
+                    if self._has_digest_collection(persist_dir, SECTION_DIGEST_COLLECTION_NAME):
+                        section_digest_store = Chroma(
+                            collection_name=SECTION_DIGEST_COLLECTION_NAME,
+                            embedding_function=embeddings,
+                            persist_directory=persist_dir,
+                        )
+                    if self._has_digest_collection(persist_dir, BOOK_DIGEST_COLLECTION_NAME):
+                        book_digest_store = Chroma(
+                            collection_name=BOOK_DIGEST_COLLECTION_NAME,
+                            embedding_function=embeddings,
+                            persist_directory=persist_dir,
+                        )
                 except Exception as exc:
                     self.log(f"Digest store unavailable; skipping digest tier. ({exc})")
                     digest_store = None
+                    section_digest_store = None
+                    book_digest_store = None
+            has_hierarchy_collections = bool(section_digest_store and book_digest_store)
+            digest_missing = digest_missing or not bool(digest_store)
             resolved_retrieval_mode = self._resolve_retrieval_mode(
                 query, resolved_settings, bool(digest_store)
             )
@@ -10253,6 +10340,14 @@ class AgenticRAGApp:
                     retrieved_count_local += len(batch)
                     docs_local.extend(batch)
                 docs_local = self._merge_dedupe_docs(docs_local)
+                if docs_local:
+                    docs_local = sorted(
+                        docs_local,
+                        key=lambda d: (
+                            ((getattr(d, "metadata", {}) or {}).get("section_key") or (getattr(d, "metadata", {}) or {}).get("section_title") or "") in seen_sections,
+                            -float((getattr(d, "metadata", {}) or {}).get("relevance_score", 0.0) or 0.0),
+                        ),
+                    )
                 if len(docs_local) > digest_cap:
                     docs_local = docs_local[:digest_cap]
                     cap_reached = True
@@ -10295,11 +10390,42 @@ class AgenticRAGApp:
                 if use_hierarchical_retrieval and digest_store:
                     working_queries = [q for q in query_list if q]
                     digest_docs = []
-                    # Acceptance test (logs): book-scale queries should emit digest search
-                    # then focused chunk expansion within selected chapters/sections.
-                    # Acceptance test (context): final selected chunks should reflect chapter diversity,
-                    # not only nearest-neighbor chunk locality.
-                    for iteration in range(MAX_HIERARCHICAL_RECURSION_ITERATIONS):
+                    chapter_cap = False
+                    section_cap = False
+                    if has_hierarchy_collections:
+                        book_docs, book_retrieved, chapter_cap = _retrieve_digest_nodes(
+                            working_queries,
+                            remaining_cap,
+                            max(2, min(4, k_value)),
+                            book_digest_store,
+                            tree_level=3,
+                            digest_scope="book",
+                        )
+                        target_section_ids = set()
+                        for book_doc in book_docs:
+                            metadata = getattr(book_doc, "metadata", {}) or {}
+                            for digest_id in json.loads(str(metadata.get("child_digest_ids") or "[]")):
+                                if digest_id:
+                                    target_section_ids.add(str(digest_id))
+                        section_docs, section_retrieved, section_cap = _retrieve_digest_nodes(
+                            working_queries,
+                            remaining_cap,
+                            k_value,
+                            section_digest_store,
+                            tree_level=1,
+                            digest_scope="section",
+                        )
+                        if target_section_ids:
+                            section_docs = [
+                                doc for doc in section_docs
+                                if str((getattr(doc, "metadata", {}) or {}).get("digest_id") or "") in target_section_ids
+                            ]
+                        digest_retrieved = book_retrieved + section_retrieved
+                        digest_docs = self._merge_dedupe_docs(section_docs)
+                        digest_selected = len(digest_docs)
+                        if digest_docs:
+                            levels_used.extend(["L3", "L1", "L0"])
+                    else:
                         chapter_docs, chapter_retrieved, chapter_cap = _retrieve_digest_nodes(
                             working_queries,
                             remaining_cap,
@@ -10319,23 +10445,8 @@ class AgenticRAGApp:
                         digest_docs = self._merge_dedupe_docs(chapter_docs + section_docs)
                         digest_retrieved = chapter_retrieved + section_retrieved
                         digest_selected = len(digest_docs)
-                        coverage_score = self._estimate_digest_coverage_score(digest_docs)
-                        self.log(
-                            "Hierarchical retrieval iteration "
-                            f"{iteration + 1}: selected_digests={digest_selected}, coverage_score={coverage_score}."
-                        )
-                        if coverage_score >= HIERARCHICAL_COVERAGE_MIN_SCORE or iteration + 1 >= MAX_HIERARCHICAL_RECURSION_ITERATIONS:
-                            break
-                        refined_queries = self._refine_digest_queries(working_queries, digest_docs)
-                        if refined_queries == working_queries:
-                            break
-                        working_queries = refined_queries
-                        self.log(
-                            "Coverage score below threshold; refining digest queries for another pass: "
-                            f"{working_queries}."
-                        )
-                    if digest_docs:
-                        levels_used.extend(["L1", "L0"])
+                        if digest_docs:
+                            levels_used.extend(["L1", "L0"])
                     raw_docs, raw_cap_reached = _expand_digest_nodes(digest_docs, remaining_cap)
                     raw_expanded_count = len(raw_docs)
                     if raw_docs:
@@ -10576,9 +10687,21 @@ class AgenticRAGApp:
                 pool_incidents = {i for i in pool_incidents if i}
                 selected_incidents = {i for i in selected_incidents if i}
 
+                pool_sections = {
+                    str((getattr(doc, "metadata", {}) or {}).get("section_key") or (getattr(doc, "metadata", {}) or {}).get("section_title") or (getattr(doc, "metadata", {}) or {}).get("chapter_title") or "").strip()
+                    for doc in pool_docs
+                }
+                selected_sections = {
+                    str((getattr(doc, "metadata", {}) or {}).get("section_key") or (getattr(doc, "metadata", {}) or {}).get("section_title") or (getattr(doc, "metadata", {}) or {}).get("chapter_title") or "").strip()
+                    for doc in selected_docs
+                }
+                pool_sections = {s for s in pool_sections if s}
+                selected_sections = {s for s in selected_sections if s}
+
                 missing_months = sorted(pool_months - selected_months, key=self._month_sort_key)
+                missing_sections = sorted(pool_sections - selected_sections)
                 lost_incident_diversity = len(pool_incidents) > len(selected_incidents)
-                triggered = bool(missing_months) or lost_incident_diversity
+                triggered = bool(missing_months) or lost_incident_diversity or bool(missing_sections)
                 queries = []
                 for month in missing_months[:max_queries]:
                     queries.append(f"{month} incident timeline what happened impact")
@@ -10586,6 +10709,9 @@ class AgenticRAGApp:
                         queries.append(f"{month} complaint escalation chronology")
                     if len(queries) >= max_queries:
                         break
+                if missing_sections and len(queries) < max_queries:
+                    section_hint = missing_sections[0]
+                    queries.append(f"{section_hint} next chapter events actors dates")
                 if lost_incident_diversity and not queries:
                     month_hint = sorted(pool_months, key=self._month_sort_key)[0] if pool_months else "recent"
                     queries.append(f"{month_hint} incident chronology evidence")
@@ -10595,6 +10721,7 @@ class AgenticRAGApp:
                     "selected_months": len(selected_months),
                     "pool_incidents": len(pool_incidents),
                     "selected_incidents": len(selected_incidents),
+                    "missing_sections": missing_sections[:6],
                 }
 
             def _trim_followup_swap_pool(existing_pool, follow_pool, cap_value, seen_ids=None):
@@ -10816,6 +10943,7 @@ class AgenticRAGApp:
                 )
 
             seen_chunk_ids = set()
+            seen_sections = set()
 
             if not resolved_settings["agentic_mode"]:
                 iteration_started_at = time.perf_counter()
@@ -11049,6 +11177,11 @@ class AgenticRAGApp:
                 seen_chunk_ids.update(
                     str((getattr(doc, "metadata", {}) or {}).get("chunk_id") or (getattr(doc, "metadata", {}) or {}).get("source_id") or self._doc_identity_key(doc))
                     for doc in final_docs
+                )
+                seen_sections.update(
+                    str((getattr(doc, "metadata", {}) or {}).get("section_key") or (getattr(doc, "metadata", {}) or {}).get("section_title") or (getattr(doc, "metadata", {}) or {}).get("chapter_title") or "")
+                    for doc in final_docs
+                    if str((getattr(doc, "metadata", {}) or {}).get("section_key") or (getattr(doc, "metadata", {}) or {}).get("section_title") or (getattr(doc, "metadata", {}) or {}).get("chapter_title") or "").strip()
                 )
                 if is_evidence_pack:
                     trunc_budget_chars = max(
@@ -11501,7 +11634,7 @@ class AgenticRAGApp:
                     )
                 else:
                     if not critic_queries:
-                        self.log("No critic follow-up queries; stopping iterations.")
+                        self.log("No critic follow-up queries and no missing sections/months detected; stopping iterations.")
                         break
                     iteration_queries = critic_queries
 
@@ -11728,6 +11861,11 @@ class AgenticRAGApp:
                 seen_chunk_ids.update(
                     str((getattr(doc, "metadata", {}) or {}).get("chunk_id") or (getattr(doc, "metadata", {}) or {}).get("source_id") or self._doc_identity_key(doc))
                     for doc in final_docs
+                )
+                seen_sections.update(
+                    str((getattr(doc, "metadata", {}) or {}).get("section_key") or (getattr(doc, "metadata", {}) or {}).get("section_title") or (getattr(doc, "metadata", {}) or {}).get("chapter_title") or "")
+                    for doc in final_docs
+                    if str((getattr(doc, "metadata", {}) or {}).get("section_key") or (getattr(doc, "metadata", {}) or {}).get("section_title") or (getattr(doc, "metadata", {}) or {}).get("chapter_title") or "").strip()
                 )
                 if is_evidence_pack:
                     trunc_budget_chars = max(
@@ -11978,7 +12116,7 @@ class AgenticRAGApp:
                         "'Scope:' note at top when evidence is thin. If any items are UNSUPPORTED, propose new "
                         "retrieval_queries. Return strict JSON with keys: "
                         "checklist_review (array of {item, status, citations}), "
-                        "retrieval_queries (array). Do not include extra text."
+                        "retrieval_queries (array). Explicitly add follow-up queries for any missing months or missing sections (including actor/date and next chapter prompts). Do not include extra text."
                     )
                     critic_messages = [
                         self._system_message(content=critic_prompt),
@@ -12003,7 +12141,11 @@ class AgenticRAGApp:
                         for item in critic_payload.get("retrieval_queries", [])
                         if str(item).strip()
                     ][:3]
-                    if not missing_items:
+                    missing_sections = [s for s in (coverage_stats.get("missing_sections") or []) if s]
+                    if missing_sections and len(critic_queries) < 3:
+                        critic_queries.append(f"{missing_sections[0]} next chapter timeline actors dates")
+                    critic_queries = [q for i, q in enumerate(critic_queries) if q and q not in critic_queries[:i]][:3]
+                    if not missing_items and not missing_sections:
                         critic_queries = []
 
             if latest_answer:
