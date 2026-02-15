@@ -184,6 +184,37 @@ class CitationManager:
     def as_dict(self) -> dict:
         return dict(self._label_by_source)
 
+
+
+class CollapsibleFrame(ttk.Frame):
+    def __init__(self, parent, title, expanded=False, **kwargs):
+        super().__init__(parent, **kwargs)
+        self._expanded = tk.BooleanVar(value=expanded)
+        header = ttk.Frame(self)
+        header.pack(fill="x")
+        self.btn = ttk.Button(header, text="▾" if expanded else "▸", width=2, command=self.toggle)
+        self.btn.pack(side="left")
+        ttk.Label(header, text=title, style="Bold.TLabel").pack(side="left", padx=(4, 0))
+        self.content = ttk.Frame(self)
+        if expanded:
+            self.content.pack(fill="x", pady=(6, 0))
+
+    def set_expanded(self, expanded):
+        expanded = bool(expanded)
+        if expanded != bool(self._expanded.get()):
+            self.toggle()
+
+    def toggle(self):
+        if self._expanded.get():
+            self.content.pack_forget()
+            self.btn.config(text="▸")
+            self._expanded.set(False)
+        else:
+            self.content.pack(fill="x", pady=(6, 0))
+            self.btn.config(text="▾")
+            self._expanded.set(True)
+
+
 class AgenticRAGApp:
     def __init__(self, root):
         self.root = root
@@ -585,32 +616,28 @@ class AgenticRAGApp:
         style.configure("Header.TLabel", font=("Segoe UI", 12, "bold"))
         style.configure("Status.TLabel", font=("Segoe UI", 9))
 
-        # Tabs
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # 1. Configuration Tab
-        self.tab_config = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_config, text="1. Configuration")
-        self.build_config_tab()
-
-        # 2. Ingestion Tab
-        self.tab_ingest = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_ingest, text="2. Data Ingestion")
-        self.build_ingest_tab()
-
-        # 3. Chat Tab
         self.tab_chat = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_chat, text="3. Agentic Chat")
+        self.notebook.add(self.tab_chat, text="Chat")
         self.build_chat_tab()
 
-        # Logs
-        log_frame = ttk.LabelFrame(self.root, text="System Logs")
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        self.log_area = scrolledtext.ScrolledText(
-            log_frame, height=8, state="disabled", font=("Consolas", 9)
-        )
-        self.log_area.pack(fill=tk.BOTH, expand=True)
+        self.tab_library = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_library, text="Library")
+        self.build_ingest_tab()
+
+        self.tab_history = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_history, text="History")
+        self.build_history_tab()
+
+        self.tab_settings = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_settings, text="Settings")
+        self.build_config_tab()
+
+        self.tab_logs = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_logs, text="Logs")
+        self.build_logs_tab()
 
         # Status Bar
         self.status_var = tk.StringVar(value="Ready")
@@ -662,6 +689,8 @@ class AgenticRAGApp:
         emb_options = self._get_embedding_model_options(emb_provider)
 
         self.cb_llm_model["values"] = llm_options
+        if hasattr(self, "cb_chat_model"):
+            self.cb_chat_model["values"] = llm_options
         self.cb_emb_model["values"] = emb_options
 
         if self.llm_model.get() not in llm_options:
@@ -1144,15 +1173,47 @@ class AgenticRAGApp:
         self.save_config()
         self.root.destroy()
 
+    def build_history_tab(self):
+        frame = ttk.Frame(self.tab_history, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        actions = ttk.LabelFrame(frame, text="Session Actions", padding=10)
+        actions.pack(fill="x")
+        ttk.Button(actions, text="Clear Chat", command=self.clear_chat).pack(side="left")
+        ttk.Button(actions, text="Save Chat Transcript", command=self.save_chat).pack(
+            side="left", padx=8
+        )
+
+    def build_logs_tab(self):
+        frame = ttk.Frame(self.tab_logs, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        self.log_area = scrolledtext.ScrolledText(
+            frame, height=8, state="disabled", font=("Consolas", 9)
+        )
+        self.log_area.pack(fill=tk.BOTH, expand=True)
+
     def build_config_tab(self):
-        frame = ttk.Frame(self.tab_config, padding=20)
+        frame = ttk.Frame(self.tab_settings, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
 
+        toggle_row = ttk.Frame(frame)
+        toggle_row.grid(row=0, column=0, columnspan=2, sticky="w", padx=5, pady=(0, 8))
+        ttk.Label(toggle_row, text="Detail level:").pack(side="left")
+        ttk.Checkbutton(
+            toggle_row,
+            text="Advanced",
+            variable=self.advanced_ui,
+            command=self._apply_basic_advanced_visibility,
+        ).pack(side="left", padx=(8, 0))
+
+        self.settings_model_section = CollapsibleFrame(frame, "Model & Provider", expanded=False)
+        self.settings_model_section.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+
         # --- LLM Provider Settings ---
-        llm_frame = ttk.LabelFrame(frame, text="LLM & Embedding Provider", padding=15)
-        llm_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        llm_frame = ttk.LabelFrame(self.settings_model_section.content, text="LLM & Embedding Provider", padding=15)
+        llm_frame.pack(fill="x", padx=2, pady=(0, 8))
         llm_frame.columnconfigure(1, weight=1)
 
         ttk.Label(llm_frame, text="Generation Provider:").grid(
@@ -1272,8 +1333,8 @@ class AgenticRAGApp:
         ).grid(row=13, column=1, sticky="w", padx=5, pady=(0, 5))
 
         # --- Vector DB Settings ---
-        db_frame = ttk.LabelFrame(frame, text="Vector Database Strategy", padding=15)
-        db_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        db_frame = ttk.LabelFrame(self.settings_model_section.content, text="Vector Database Strategy", padding=15)
+        db_frame.pack(fill="x", padx=2, pady=(0, 8))
 
         ttk.Radiobutton(
             db_frame,
@@ -1297,7 +1358,7 @@ class AgenticRAGApp:
         key_frame = ttk.LabelFrame(
             frame, text="API Keys (Required for selected services)", padding=15
         )
-        key_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
+        key_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
         key_frame.columnconfigure(1, weight=1)
 
         keys = [
@@ -1323,7 +1384,7 @@ class AgenticRAGApp:
             ).grid(row=i, column=1, sticky="w", padx=10, pady=2)
 
         deps_frame = ttk.LabelFrame(frame, text="Dependencies", padding=15)
-        deps_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
+        deps_frame.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
         deps_frame.columnconfigure(1, weight=1)
 
         ttk.Label(
@@ -1340,8 +1401,94 @@ class AgenticRAGApp:
             deps_frame, text="Install / Reinstall Dependencies", command=self.reinstall_dependencies
         ).grid(row=1, column=1, sticky="w", pady=(8, 0))
 
+
+        retrieval_section = CollapsibleFrame(frame, "Retrieval", expanded=False)
+        retrieval_section.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        self.settings_retrieval_section = retrieval_section
+        ttk.Label(retrieval_section.content, text="Search Type:").grid(row=0, column=0, sticky="w")
+        ttk.Combobox(
+            retrieval_section.content,
+            textvariable=self.search_type,
+            values=["similarity", "mmr"],
+            state="readonly",
+            width=12,
+        ).grid(row=0, column=1, sticky="w", padx=(5, 15), pady=2)
+        ttk.Label(retrieval_section.content, text="Retrieval mode:").grid(row=0, column=2, sticky="w")
+        ttk.Combobox(
+            retrieval_section.content,
+            textvariable=self.retrieval_mode,
+            values=self.retrieval_mode_options,
+            state="readonly",
+            width=28,
+        ).grid(row=0, column=3, sticky="w", padx=(5, 0), pady=2)
+        ttk.Label(retrieval_section.content, text="MMR lambda:").grid(row=1, column=0, sticky="w")
+        ttk.Entry(retrieval_section.content, textvariable=self.mmr_lambda, width=8).grid(row=1, column=1, sticky="w", padx=(5, 15), pady=2)
+        ttk.Checkbutton(
+            retrieval_section.content,
+            text="Use Cohere Reranker (Higher Precision)",
+            variable=self.use_reranker,
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(
+            retrieval_section.content,
+            text="Use Sub-Queries (Broader Recall)",
+            variable=self.use_sub_queries,
+        ).grid(row=2, column=2, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Label(retrieval_section.content, text="Max Merged Docs:").grid(row=3, column=0, sticky="w")
+        ttk.Entry(retrieval_section.content, textvariable=self.subquery_max_docs, width=8).grid(row=3, column=1, sticky="w", padx=(5, 15), pady=2)
+        ttk.Label(retrieval_section.content, text="Fallback Final K:").grid(row=3, column=2, sticky="w")
+        ttk.Entry(retrieval_section.content, textvariable=self.fallback_final_k, width=8).grid(row=3, column=3, sticky="w", padx=(5, 0), pady=2)
+
+        agentic_section = CollapsibleFrame(frame, "Agentic / Iterations", expanded=False)
+        agentic_section.grid(row=5, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        self.settings_agentic_section = agentic_section
+        ttk.Checkbutton(
+            agentic_section.content,
+            text="Agentic mode (iterate)",
+            variable=self.agentic_mode,
+        ).pack(anchor="w")
+        row = ttk.Frame(agentic_section.content)
+        row.pack(fill="x", pady=(6, 0))
+        ttk.Label(row, text="Max iterations:").pack(side="left")
+        ttk.Spinbox(
+            row,
+            from_=1,
+            to=AGENTIC_MAX_ITERATIONS_HARD_CAP,
+            textvariable=self.agentic_max_iterations,
+            width=4,
+        ).pack(side="left", padx=(6, 12))
+        ttk.Checkbutton(
+            row,
+            text="Show retrieved context in chat",
+            variable=self.show_retrieved_context,
+        ).pack(side="left")
+
+        frontier_section = CollapsibleFrame(frame, "Frontier", expanded=False)
+        frontier_section.grid(row=6, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        self.settings_frontier_section = frontier_section
+        ttk.Checkbutton(frontier_section.content, text="Enable langextract", variable=self.enable_langextract).pack(anchor="w")
+        ttk.Checkbutton(frontier_section.content, text="Enable structured incidents", variable=self.enable_structured_incidents).pack(anchor="w")
+        ttk.Checkbutton(frontier_section.content, text="Enable recursive memory", variable=self.enable_recursive_memory).pack(anchor="w")
+        ttk.Checkbutton(frontier_section.content, text="Enable recursive retrieval mode", variable=self.enable_recursive_retrieval).pack(anchor="w")
+        ttk.Checkbutton(frontier_section.content, text="Enable citation v2 (defaults ON in evidence-pack mode)", variable=self.enable_citation_v2).pack(anchor="w")
+        ttk.Checkbutton(frontier_section.content, text="Claim-level grounding (CiteFix-lite)", variable=self.enable_claim_level_grounding_citefix_lite).pack(anchor="w")
+        ttk.Checkbutton(frontier_section.content, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
+
+        self._apply_basic_advanced_visibility()
+
+    def _apply_basic_advanced_visibility(self):
+        advanced = bool(self.advanced_ui.get())
+        for section_name in (
+            "settings_model_section",
+            "settings_retrieval_section",
+            "settings_agentic_section",
+            "settings_frontier_section",
+        ):
+            section = getattr(self, section_name, None)
+            if section is not None:
+                section.set_expanded(advanced)
+
     def build_ingest_tab(self):
-        frame = ttk.Frame(self.tab_ingest, padding=20)
+        frame = ttk.Frame(self.tab_library, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
 
         # File Selection
@@ -1450,55 +1597,18 @@ class AgenticRAGApp:
             index_frame, text="Refresh", command=self._refresh_existing_indexes_async
         ).grid(row=0, column=2, padx=(5, 0))
 
-        retrieval_frame = ttk.LabelFrame(
-            frame, text="Retrieval Settings", padding=10
+        basic_frame = ttk.LabelFrame(frame, text="Basic Controls", padding=8)
+        basic_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(basic_frame, text="Model:").pack(side="left")
+        self.cb_chat_model = ttk.Combobox(
+            basic_frame, textvariable=self.llm_model, state="readonly", width=20
         )
-        retrieval_frame.pack(fill="x", pady=(0, 10))
-        retrieval_frame.columnconfigure(1, weight=1)
-        retrieval_frame.columnconfigure(3, weight=1)
-
-        ttk.Label(retrieval_frame, text="Retrieve K:").grid(
-            row=0, column=0, sticky="w"
-        )
-        ttk.Entry(retrieval_frame, textvariable=self.retrieval_k, width=8).grid(
-            row=0, column=1, sticky="w", padx=(5, 15)
-        )
-
-        ttk.Label(retrieval_frame, text="Final K:").grid(
-            row=0, column=2, sticky="w"
-        )
-        ttk.Entry(retrieval_frame, textvariable=self.final_k, width=8).grid(
-            row=0, column=3, sticky="w", padx=(5, 0)
-        )
-
-        ttk.Label(retrieval_frame, text="Search Type:").grid(
-            row=1, column=0, sticky="w", pady=(6, 0)
-        )
-        ttk.Combobox(
-            retrieval_frame,
-            textvariable=self.search_type,
-            values=["similarity", "mmr"],
-            state="readonly",
-            width=12,
-        ).grid(row=1, column=1, sticky="w", padx=(5, 15), pady=(6, 0))
-
-        ttk.Label(retrieval_frame, text="Retrieval mode:").grid(
-            row=2, column=0, sticky="w", pady=(6, 0)
-        )
-        ttk.Combobox(
-            retrieval_frame,
-            textvariable=self.retrieval_mode,
-            values=self.retrieval_mode_options,
-            state="readonly",
-            width=28,
-        ).grid(row=2, column=1, columnspan=3, sticky="w", padx=(5, 0), pady=(6, 0))
-
-        ttk.Label(retrieval_frame, text="MMR lambda:").grid(
-            row=1, column=2, sticky="w", pady=(6, 0)
-        )
-        ttk.Entry(retrieval_frame, textvariable=self.mmr_lambda, width=8).grid(
-            row=1, column=3, sticky="w", padx=(5, 0), pady=(6, 0)
-        )
+        self.cb_chat_model.pack(side="left", padx=(5, 12))
+        self.cb_chat_model.bind("<<ComboboxSelected>>", self._on_llm_model_change)
+        ttk.Label(basic_frame, text="Retrieve K:").pack(side="left")
+        ttk.Entry(basic_frame, textvariable=self.retrieval_k, width=6).pack(side="left", padx=(5, 12))
+        ttk.Label(basic_frame, text="Final K:").pack(side="left")
+        ttk.Entry(basic_frame, textvariable=self.final_k, width=6).pack(side="left", padx=(5, 0))
 
         content_split = ttk.Panedwindow(frame, orient=tk.HORIZONTAL)
         content_split.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
@@ -1542,12 +1652,6 @@ class AgenticRAGApp:
         # Quick Actions
         action_frame = ttk.Frame(left_pane)
         action_frame.pack(fill="x", pady=(8, 4))
-        ttk.Button(action_frame, text="Clear Chat", command=self.clear_chat).pack(
-            side="left"
-        )
-        ttk.Button(
-            action_frame, text="Save Chat Transcript", command=self.save_chat
-        ).pack(side="left", padx=8)
         ttk.Button(
             action_frame, text="Copy Last Answer", command=self.copy_last_answer
         ).pack(side="left")
@@ -1566,28 +1670,6 @@ class AgenticRAGApp:
             text="Export Eval Set",
             command=self.export_eval_set,
         ).pack(side="left", padx=8)
-
-        # Options
-        opt_frame = ttk.Frame(left_pane)
-        opt_frame.pack(fill="x", pady=5)
-        ttk.Checkbutton(
-            opt_frame,
-            text="Use Cohere Reranker (Higher Precision)",
-            variable=self.use_reranker,
-        ).pack(side="left")
-        ttk.Checkbutton(
-            opt_frame,
-            text="Use Sub-Queries (Broader Recall)",
-            variable=self.use_sub_queries,
-        ).pack(side="left", padx=(12, 0))
-        ttk.Label(opt_frame, text="Max Merged Docs:").pack(side="left", padx=(12, 4))
-        ttk.Entry(opt_frame, textvariable=self.subquery_max_docs, width=6).pack(
-            side="left"
-        )
-        ttk.Label(opt_frame, text="Fallback Final K:").pack(side="left", padx=(15, 4))
-        ttk.Entry(opt_frame, textvariable=self.fallback_final_k, width=6).pack(
-            side="left"
-        )
 
         output_frame = ttk.Frame(left_pane)
         output_frame.pack(fill="x", pady=(2, 4))
