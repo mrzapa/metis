@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox, simpledialog
+import tkinter.font as tkfont
 import threading
 import logging
 import os
@@ -20,9 +21,38 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-APP_NAME = "Agentic RAG"
+APP_NAME = "Axiom"
 APP_VERSION = "1.0"
-APP_SUBTITLE = "LangChain + Chroma/Weaviate + Cohere"
+APP_SUBTITLE = "Personal RAG Assistant"
+
+STYLE_CONFIG = {
+    "font_family": "SF Pro Text",
+    "fallback_font": "Segoe UI",
+    "radius": 12,
+    "padding": {"sm": 6, "md": 10, "lg": 16},
+    "themes": {
+        "light": {
+            "bg": "#F5F6F8",
+            "surface": "#FFFFFF",
+            "surface_alt": "#EEF1F6",
+            "text": "#101114",
+            "muted_text": "#495162",
+            "primary": "#0A84FF",
+            "border": "#D5DAE2",
+            "status": "#2D3340",
+        },
+        "dark": {
+            "bg": "#16181D",
+            "surface": "#1F232B",
+            "surface_alt": "#2A303B",
+            "text": "#F7F8FA",
+            "muted_text": "#C3CAD6",
+            "primary": "#64D2FF",
+            "border": "#3A4352",
+            "status": "#D7DCEA",
+        },
+    },
+}
 
 try:
     import langextract as lx
@@ -419,6 +449,9 @@ class AgenticRAGApp:
         self.session_title_llm_enabled = tk.BooleanVar(value=False)
         self._session_list_items = []
         self._assistant_message_counter = 0
+        self.advanced_ui = tk.BooleanVar(value=False)
+        self.ui_mode = tk.StringVar(value="light")
+        self.history_profile_filter = tk.StringVar(value="All Profiles")
 
         self._init_sessions_db()
 
@@ -691,6 +724,7 @@ class AgenticRAGApp:
         search_query = ""
         if hasattr(self, "history_search_var"):
             search_query = (self.history_search_var.get() or "").strip().lower()
+        selected_profile = (self.history_profile_filter.get() or "All Profiles").strip()
         with sqlite3.connect(self.session_db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
@@ -701,32 +735,31 @@ class AgenticRAGApp:
                 LIMIT 500
                 """
             ).fetchall()
+        all_profiles = {"All Profiles"}
         self._session_list_items = []
         for row in rows:
             item = dict(row)
-            haystack = f"{item.get('title', '')} {item.get('summary', '')}".lower()
+            profile_name = item.get("active_profile") or "-"
+            all_profiles.add(profile_name)
+            haystack = f"{item.get('title', '')} {item.get('summary', '')} {profile_name}".lower()
             if search_query and search_query not in haystack:
                 continue
+            if selected_profile != "All Profiles" and profile_name != selected_profile:
+                continue
             self._session_list_items.append(item)
+
+        if hasattr(self, "history_profile_filter_combo"):
+            values = ["All Profiles"] + sorted(v for v in all_profiles if v and v != "All Profiles")
+            self.history_profile_filter_combo["values"] = values
+            if self.history_profile_filter.get() not in values:
+                self.history_profile_filter.set("All Profiles")
 
         self.sessions_tree.delete(*self.sessions_tree.get_children())
         for row in self._session_list_items:
             title = (row["title"] or "Untitled").strip() or "Untitled"
             updated = (row["updated_at"] or "")[:19].replace("T", " ")
             iid = row["session_id"]
-            self.sessions_tree.insert(
-                "",
-                tk.END,
-                iid=iid,
-                values=(
-                    title,
-                    updated,
-                    row.get("active_profile") or "-",
-                    row.get("mode") or "-",
-                    row.get("index_id") or "(default)",
-                    row.get("llm_model") or "-",
-                ),
-            )
+            self.sessions_tree.insert("", tk.END, iid=iid, values=(title, updated, row.get("active_profile") or "-", "Resume"))
         self._refresh_history_details()
 
     def _on_history_search_change(self, _event=None):
@@ -1312,22 +1345,29 @@ class AgenticRAGApp:
         """Best-effort cross-platform icon loading without hard failure."""
         script_dir = os.path.dirname(os.path.abspath(__file__))
         assets_dir = os.path.join(script_dir, "assets")
-        ico_path = os.path.join(assets_dir, "app.ico")
-        png_path = os.path.join(assets_dir, "app.png")
+        icon_candidates_ico = [os.path.join(assets_dir, "axiom.ico"), os.path.join(assets_dir, "app.ico")]
+        icon_candidates_png = [os.path.join(assets_dir, "axiom.png"), os.path.join(assets_dir, "app.png")]
 
         # Keep a reference so Tk doesn't garbage-collect the icon image.
         self._app_icon_photo = None
 
-        if sys.platform.startswith("win") and os.path.exists(ico_path):
-            try:
-                self.root.iconbitmap(ico_path)
-            except Exception as exc:
-                logger.debug("unable to set .ico window icon: %s", exc)
+        if sys.platform.startswith("win"):
+            for ico_path in icon_candidates_ico:
+                if not os.path.exists(ico_path):
+                    continue
+                try:
+                    self.root.iconbitmap(ico_path)
+                    break
+                except Exception as exc:
+                    logger.debug("unable to set .ico window icon: %s", exc)
 
-        if os.path.exists(png_path):
+        for png_path in icon_candidates_png:
+            if not os.path.exists(png_path):
+                continue
             try:
                 self._app_icon_photo = tk.PhotoImage(file=png_path)
                 self.root.iconphoto(True, self._app_icon_photo)
+                break
             except Exception as exc:
                 logger.debug("unable to set .png window icon: %s", exc)
 
@@ -1407,43 +1447,65 @@ class AgenticRAGApp:
         return "\n\n".join(context_blocks), packed_count, truncated_flag
 
     def setup_ui(self):
-        # Styles
-        style = ttk.Style()
-        if "clam" in style.theme_names():
-            style.theme_use("clam")
-        style.configure("Bold.TLabel", font=("Segoe UI", 10, "bold"))
-        style.configure("Header.TLabel", font=("Segoe UI", 12, "bold"))
-        style.configure("Status.TLabel", font=("Segoe UI", 9))
+        self._apply_theme()
 
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.notebook = ttk.Notebook(self.root, style="App.TNotebook")
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=STYLE_CONFIG["padding"]["md"], pady=STYLE_CONFIG["padding"]["md"])
 
-        self.tab_chat = ttk.Frame(self.notebook)
+        self.tab_chat = ttk.Frame(self.notebook, style="Card.TFrame")
         self.notebook.add(self.tab_chat, text="Chat")
         self.build_chat_tab()
 
-        self.tab_library = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_library, text="Library")
-        self.build_ingest_tab()
-
-        self.tab_history = ttk.Frame(self.notebook)
+        self.tab_history = ttk.Frame(self.notebook, style="Card.TFrame")
         self.notebook.add(self.tab_history, text="History")
         self.build_history_tab()
 
-        self.tab_settings = ttk.Frame(self.notebook)
+        self.tab_library = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.notebook.add(self.tab_library, text="Library")
+        self.build_ingest_tab()
+
+        self.tab_settings = ttk.Frame(self.notebook, style="Card.TFrame")
         self.notebook.add(self.tab_settings, text="Settings")
         self.build_config_tab()
 
-        self.tab_logs = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_logs, text="Logs")
-        self.build_logs_tab()
-
-        # Status Bar
         self.status_var = tk.StringVar(value="Ready")
-        status_bar = ttk.Label(
-            self.root, textvariable=self.status_var, style="Status.TLabel", anchor="w"
-        )
-        status_bar.pack(fill="x", padx=10, pady=(0, 8))
+        status_bar = ttk.Label(self.root, textvariable=self.status_var, style="Status.TLabel", anchor="w")
+        status_bar.pack(fill="x", padx=STYLE_CONFIG["padding"]["md"], pady=(0, STYLE_CONFIG["padding"]["sm"]))
+
+        self._bind_accessibility_shortcuts()
+
+    def _apply_theme(self):
+        style = ttk.Style()
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+        palette = STYLE_CONFIG["themes"].get(self.ui_mode.get(), STYLE_CONFIG["themes"]["light"])
+        font_family = STYLE_CONFIG["font_family"] if STYLE_CONFIG["font_family"] in tkfont.families() else STYLE_CONFIG["fallback_font"]
+        self.root.configure(bg=palette["bg"])
+        style.configure("TFrame", background=palette["bg"])
+        style.configure("Card.TFrame", background=palette["surface"])
+        style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["border"], relief="flat")
+        style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
+        style.configure("TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10))
+        style.configure("Bold.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
+        style.configure("Header.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 13, "bold"))
+        style.configure("Status.TLabel", background=palette["bg"], foreground=palette["status"], font=(font_family, 9))
+        style.configure("TButton", padding=(12, 8), relief="flat")
+        style.configure("App.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(8, 6, 8, 0))
+        style.configure("App.TNotebook.Tab", padding=(16, 10), font=(font_family, 10, "bold"))
+        style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("!selected", palette["surface_alt"])], foreground=[("selected", palette["text"]), ("!selected", palette["muted_text"])])
+
+    def _bind_accessibility_shortcuts(self):
+        self.root.bind_all("<Control-Return>", lambda _e: self.send_message())
+        self.root.bind_all("<Control-l>", lambda _e: self._focus_chat_input())
+        self.root.bind_all("<Alt-1>", lambda _e: self.notebook.select(self.tab_chat))
+        self.root.bind_all("<Alt-2>", lambda _e: self.notebook.select(self.tab_history))
+        self.root.bind_all("<Alt-3>", lambda _e: self.notebook.select(self.tab_library))
+        self.root.bind_all("<Alt-4>", lambda _e: self.notebook.select(self.tab_settings))
+
+    def _focus_chat_input(self):
+        if hasattr(self, "txt_input"):
+            self.notebook.select(self.tab_chat)
+            self.txt_input.focus_set()
 
     def _run_on_ui(self, func, *args, **kwargs):
         if threading.current_thread() == self.main_thread:
@@ -1993,61 +2055,56 @@ class AgenticRAGApp:
         self.root.destroy()
 
     def build_history_tab(self):
-        frame = ttk.Frame(self.tab_history, padding=14)
+        frame = ttk.Frame(self.tab_history, padding=14, style="Card.TFrame")
         frame.pack(fill=tk.BOTH, expand=True)
 
-        actions = ttk.Frame(frame)
+        actions = ttk.Frame(frame, style="Card.TFrame")
         actions.pack(fill="x", pady=(0, 8))
-        ttk.Button(actions, text="New Chat", command=lambda: self.start_new_chat(load_in_ui=True)).pack(side="left")
-        ttk.Button(actions, text="Open/Resume", command=self.load_selected_session).pack(side="left", padx=(8, 0))
-        ttk.Button(actions, text="Rename", command=self.rename_selected_session).pack(side="left", padx=(8, 0))
-        ttk.Button(actions, text="Delete", command=self.delete_selected_session).pack(side="left", padx=(8, 0))
-        ttk.Button(actions, text="Export", command=self.export_selected_session).pack(side="left", padx=(8, 0))
-        ttk.Button(actions, text="Duplicate", command=self.duplicate_selected_session).pack(side="left", padx=(8, 0))
-        ttk.Button(actions, text="Refresh", command=self.refresh_sessions_list).pack(side="left", padx=(8, 0))
-        ttk.Checkbutton(
-            actions,
-            text="Auto-title with LLM",
-            variable=self.session_title_llm_enabled,
-        ).pack(side="right")
+        ttk.Button(actions, text="New Chat", command=lambda: self.start_new_chat(load_in_ui=True), takefocus=True).pack(side="left")
+        ttk.Button(actions, text="Open/Resume", command=self.load_selected_session, takefocus=True).pack(side="left", padx=(8, 0))
+        ttk.Button(actions, text="Rename", command=self.rename_selected_session, takefocus=True).pack(side="left", padx=(8, 0))
+        ttk.Button(actions, text="Delete", command=self.delete_selected_session, takefocus=True).pack(side="left", padx=(8, 0))
+        ttk.Button(actions, text="Export", command=self.export_selected_session, takefocus=True).pack(side="left", padx=(8, 0))
+        ttk.Button(actions, text="Refresh", command=self.refresh_sessions_list, takefocus=True).pack(side="left", padx=(8, 0))
 
-        search_row = ttk.Frame(frame)
+        search_row = ttk.Frame(frame, style="Card.TFrame")
         search_row.pack(fill="x", pady=(0, 8))
         ttk.Label(search_row, text="Search:").pack(side="left")
         self.history_search_var = tk.StringVar()
-        self.history_search_entry = ttk.Entry(search_row, textvariable=self.history_search_var)
-        self.history_search_entry.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        self.history_search_entry = ttk.Entry(search_row, textvariable=self.history_search_var, takefocus=True)
+        self.history_search_entry.pack(side="left", fill="x", expand=True, padx=(8, 10))
         self.history_search_entry.bind("<KeyRelease>", self._on_history_search_change)
+        ttk.Label(search_row, text="Profile filter:").pack(side="left")
+        self.history_profile_filter_combo = ttk.Combobox(search_row, textvariable=self.history_profile_filter, state="readonly", width=24)
+        self.history_profile_filter_combo.pack(side="left", padx=(8, 0))
+        self.history_profile_filter_combo.bind("<<ComboboxSelected>>", self._on_history_search_change)
 
         split = ttk.Panedwindow(frame, orient=tk.HORIZONTAL)
         split.pack(fill=tk.BOTH, expand=True)
 
-        left = ttk.Frame(split)
-        right = ttk.Frame(split)
+        left = ttk.Frame(split, style="Card.TFrame")
+        right = ttk.Frame(split, style="Card.TFrame")
         split.add(left, weight=3)
         split.add(right, weight=2)
 
         tree_wrap = ttk.LabelFrame(left, text="Saved Sessions", padding=8)
         tree_wrap.pack(fill=tk.BOTH, expand=True)
-        columns = ("title", "updated", "profile", "mode", "index", "model")
+        columns = ("title", "updated", "profile", "resume")
         self.sessions_tree = ttk.Treeview(tree_wrap, columns=columns, show="headings", selectmode="browse")
         self.sessions_tree.heading("title", text="Title")
-        self.sessions_tree.heading("updated", text="Updated")
+        self.sessions_tree.heading("updated", text="Date")
         self.sessions_tree.heading("profile", text="Profile")
-        self.sessions_tree.heading("mode", text="Mode")
-        self.sessions_tree.heading("index", text="Index")
-        self.sessions_tree.heading("model", text="Model")
-        self.sessions_tree.column("title", width=240, anchor="w")
-        self.sessions_tree.column("updated", width=150, anchor="w")
-        self.sessions_tree.column("profile", width=120, anchor="w")
-        self.sessions_tree.column("mode", width=110, anchor="w")
-        self.sessions_tree.column("index", width=180, anchor="w")
-        self.sessions_tree.column("model", width=140, anchor="w")
+        self.sessions_tree.heading("resume", text="Resume")
+        self.sessions_tree.column("title", width=280, anchor="w")
+        self.sessions_tree.column("updated", width=160, anchor="w")
+        self.sessions_tree.column("profile", width=170, anchor="w")
+        self.sessions_tree.column("resume", width=100, anchor="center")
         yscroll = ttk.Scrollbar(tree_wrap, orient="vertical", command=self.sessions_tree.yview)
         self.sessions_tree.configure(yscrollcommand=yscroll.set)
         self.sessions_tree.pack(side="left", fill=tk.BOTH, expand=True)
         yscroll.pack(side="right", fill="y")
         self.sessions_tree.bind("<Double-1>", lambda _e: self.load_selected_session())
+        self.sessions_tree.bind("<ButtonRelease-1>", self._on_history_tree_click)
         self.sessions_tree.bind("<<TreeviewSelect>>", self._refresh_history_details)
 
         details = ttk.LabelFrame(right, text="Session Details", padding=8)
@@ -2062,8 +2119,16 @@ class AgenticRAGApp:
         self.history_config_text.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
         ttk.Label(details, text="Last Run Telemetry", style="Bold.TLabel").pack(anchor="w")
-        self.history_telemetry_text = scrolledtext.ScrolledText(details, height=8, state="disabled", wrap=tk.WORD)
+        self.history_telemetry_text = scrolledtext.ScrolledText(details, height=10, state="disabled", wrap=tk.WORD)
         self.history_telemetry_text.pack(fill=tk.BOTH, expand=True)
+
+    def _on_history_tree_click(self, event):
+        if not hasattr(self, "sessions_tree"):
+            return
+        region = self.sessions_tree.identify("region", event.x, event.y)
+        column = self.sessions_tree.identify_column(event.x)
+        if region == "cell" and column == "#4":
+            self.load_selected_session()
 
     def build_logs_tab(self):
         frame = ttk.Frame(self.tab_logs, padding=20)
@@ -2089,8 +2154,20 @@ class AgenticRAGApp:
             command=self._apply_basic_advanced_visibility,
         ).pack(side="left", padx=(8, 0))
 
+        appearance_section = CollapsibleFrame(frame, "Appearance", expanded=False)
+        appearance_section.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        ttk.Label(appearance_section.content, text="Theme mode:").pack(side="left")
+        ttk.Combobox(
+            appearance_section.content,
+            textvariable=self.ui_mode,
+            values=["light", "dark"],
+            state="readonly",
+            width=10,
+        ).pack(side="left", padx=(8, 8))
+        ttk.Button(appearance_section.content, text="Apply Theme", command=self._apply_theme).pack(side="left")
+
         self.settings_model_section = CollapsibleFrame(frame, "Model & Provider", expanded=False)
-        self.settings_model_section.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        self.settings_model_section.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
         # --- LLM Provider Settings ---
         llm_frame = ttk.LabelFrame(self.settings_model_section.content, text="LLM & Embedding Provider", padding=15)
@@ -2265,7 +2342,7 @@ class AgenticRAGApp:
             ).grid(row=i, column=1, sticky="w", padx=10, pady=2)
 
         deps_frame = ttk.LabelFrame(frame, text="Dependencies", padding=15)
-        deps_frame.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
+        deps_frame.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
         deps_frame.columnconfigure(1, weight=1)
 
         ttk.Label(
@@ -2284,7 +2361,7 @@ class AgenticRAGApp:
 
 
         retrieval_section = CollapsibleFrame(frame, "Retrieval", expanded=False)
-        retrieval_section.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        retrieval_section.grid(row=5, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_retrieval_section = retrieval_section
         ttk.Label(retrieval_section.content, text="Search Type:").grid(row=0, column=0, sticky="w")
         ttk.Combobox(
@@ -2320,7 +2397,7 @@ class AgenticRAGApp:
         ttk.Entry(retrieval_section.content, textvariable=self.fallback_final_k, width=8).grid(row=3, column=3, sticky="w", padx=(5, 0), pady=2)
 
         agentic_section = CollapsibleFrame(frame, "Agentic / Iterations", expanded=False)
-        agentic_section.grid(row=5, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        agentic_section.grid(row=6, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_agentic_section = agentic_section
         ttk.Checkbutton(
             agentic_section.content,
@@ -2344,7 +2421,7 @@ class AgenticRAGApp:
         ).pack(side="left")
 
         frontier_section = CollapsibleFrame(frame, "Frontier", expanded=False)
-        frontier_section.grid(row=6, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        frontier_section.grid(row=7, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_frontier_section = frontier_section
         ttk.Checkbutton(frontier_section.content, text="Enable langextract", variable=self.enable_langextract).pack(anchor="w")
         ttk.Checkbutton(frontier_section.content, text="Structured Extraction", variable=self.enable_structured_extraction).pack(anchor="w")
@@ -2459,39 +2536,32 @@ class AgenticRAGApp:
         frame = ttk.Frame(self.tab_chat, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # Existing Index Selection
-        index_frame = ttk.LabelFrame(frame, text="Vector Store Selection", padding=10)
-        index_frame.pack(fill="x", pady=(0, 10))
-        index_frame.columnconfigure(1, weight=1)
+        top_bar = ttk.LabelFrame(frame, text="Conversation", padding=10)
+        top_bar.pack(fill="x", pady=(0, 10))
+        for col in (1, 3, 5):
+            top_bar.columnconfigure(col, weight=1)
 
-        ttk.Label(index_frame, text="Existing Index (optional):").grid(
-            row=0, column=0, sticky="w"
-        )
-        self.cb_existing_index = ttk.Combobox(
-            index_frame,
-            textvariable=self.existing_index_var,
-            state="readonly",
-        )
-        self.cb_existing_index.grid(row=0, column=1, sticky="ew", padx=5)
-        self.cb_existing_index.bind(
-            "<<ComboboxSelected>>", self._on_existing_index_change
-        )
-        ttk.Button(
-            index_frame, text="Refresh", command=self._refresh_existing_indexes_async
-        ).grid(row=0, column=2, padx=(5, 0))
+        ttk.Label(top_bar, text="Profile:").grid(row=0, column=0, sticky="w")
+        self.cb_profile = ttk.Combobox(top_bar, textvariable=self.selected_profile, state="readonly", width=24)
+        self.cb_profile.grid(row=0, column=1, sticky="ew", padx=(6, 12))
+        self._refresh_profile_options()
 
-        basic_frame = ttk.LabelFrame(frame, text="Basic Controls", padding=8)
-        basic_frame.pack(fill="x", pady=(0, 10))
-        ttk.Label(basic_frame, text="Model:").pack(side="left")
-        self.cb_chat_model = ttk.Combobox(
-            basic_frame, textvariable=self.llm_model, state="readonly", width=20
-        )
-        self.cb_chat_model.pack(side="left", padx=(5, 12))
+        ttk.Label(top_bar, text="Index:").grid(row=0, column=2, sticky="w")
+        self.cb_existing_index = ttk.Combobox(top_bar, textvariable=self.existing_index_var, state="readonly")
+        self.cb_existing_index.grid(row=0, column=3, sticky="ew", padx=(6, 12))
+        self.cb_existing_index.bind("<<ComboboxSelected>>", self._on_existing_index_change)
+
+        ttk.Label(top_bar, text="Model:").grid(row=0, column=4, sticky="w")
+        self.cb_chat_model = ttk.Combobox(top_bar, textvariable=self.llm_model, state="readonly", width=22)
+        self.cb_chat_model.grid(row=0, column=5, sticky="ew", padx=(6, 12))
         self.cb_chat_model.bind("<<ComboboxSelected>>", self._on_llm_model_change)
-        ttk.Label(basic_frame, text="Retrieve K:").pack(side="left")
-        ttk.Entry(basic_frame, textvariable=self.retrieval_k, width=6).pack(side="left", padx=(5, 12))
-        ttk.Label(basic_frame, text="Final K:").pack(side="left")
-        ttk.Entry(basic_frame, textvariable=self.final_k, width=6).pack(side="left", padx=(5, 0))
+
+        ttk.Label(top_bar, text="retrieve_k:").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(top_bar, textvariable=self.retrieval_k, width=8).grid(row=1, column=1, sticky="w", padx=(6, 12), pady=(8, 0))
+        ttk.Label(top_bar, text="final_k:").grid(row=1, column=2, sticky="w", pady=(8, 0))
+        ttk.Entry(top_bar, textvariable=self.final_k, width=8).grid(row=1, column=3, sticky="w", padx=(6, 12), pady=(8, 0))
+        ttk.Button(top_bar, text="Refresh Indexes", command=self._refresh_existing_indexes_async).grid(row=1, column=4, sticky="w", pady=(8, 0))
+        ttk.Button(top_bar, text="Settings", command=lambda: self.notebook.select(self.tab_settings)).grid(row=1, column=5, sticky="e", pady=(8, 0))
 
         content_split = ttk.Panedwindow(frame, orient=tk.HORIZONTAL)
         content_split.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
@@ -2571,8 +2641,17 @@ class AgenticRAGApp:
             width=22,
         ).pack(side="left", padx=(6, 0))
 
-        profile_frame = ttk.LabelFrame(left_pane, text="Mode & Agent Profile", padding=8)
-        profile_frame.pack(fill="x", pady=(4, 0))
+        logs_section = CollapsibleFrame(left_pane, "Logs & telemetry", expanded=False)
+        logs_section.pack(fill="both", pady=(6, 0))
+        self.log_area = scrolledtext.ScrolledText(logs_section.content, height=6, state="disabled", wrap=tk.WORD)
+        self.log_area.pack(fill=tk.BOTH, expand=True)
+
+        self.chat_settings_section = CollapsibleFrame(left_pane, "Advanced chat settings", expanded=False)
+        self.chat_settings_section.pack(fill="x", pady=(4, 0))
+
+        settings_content = self.chat_settings_section.content
+        profile_frame = ttk.LabelFrame(settings_content, text="Mode & Agent Profile", padding=8)
+        profile_frame.pack(fill="x", pady=(0, 6))
         ttk.Label(profile_frame, text="Mode:").grid(row=0, column=0, sticky="w")
         ttk.Combobox(
             profile_frame,
@@ -2582,111 +2661,27 @@ class AgenticRAGApp:
             width=24,
         ).grid(row=0, column=1, sticky="w", padx=(6, 12))
 
-        ttk.Label(profile_frame, text="Profile:").grid(row=0, column=2, sticky="w")
-        self.cb_profile = ttk.Combobox(
-            profile_frame,
-            textvariable=self.selected_profile,
-            state="readonly",
-            width=30,
-        )
-        self.cb_profile.grid(row=0, column=3, sticky="ew", padx=(6, 0))
-        profile_frame.columnconfigure(3, weight=1)
+        ttk.Button(profile_frame, text="Save Profile", command=self.save_profile).grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Button(profile_frame, text="Load Profile", command=self.load_selected_profile).grid(row=1, column=1, sticky="w", pady=(8, 0))
+        ttk.Button(profile_frame, text="Duplicate", command=self.duplicate_profile).grid(row=1, column=2, sticky="w", padx=(6, 0), pady=(8, 0))
 
-        ttk.Button(profile_frame, text="Save Profile", command=self.save_profile).grid(
-            row=1, column=1, sticky="w", pady=(8, 0)
-        )
-        ttk.Button(profile_frame, text="Load Profile", command=self.load_selected_profile).grid(
-            row=1, column=2, sticky="w", pady=(8, 0)
-        )
-        ttk.Button(profile_frame, text="Duplicate", command=self.duplicate_profile).grid(
-            row=1, column=3, sticky="w", padx=(6, 0), pady=(8, 0)
-        )
-        self._refresh_profile_options()
-
-        agentic_frame = ttk.LabelFrame(left_pane, text="Agentic Options", padding=8)
-        agentic_frame.pack(fill="x", pady=(5, 0))
-        ttk.Checkbutton(
-            agentic_frame,
-            text="Agentic mode (iterate)",
-            variable=self.agentic_mode,
-        ).pack(side="left")
+        agentic_frame = ttk.LabelFrame(settings_content, text="Agentic Options", padding=8)
+        agentic_frame.pack(fill="x", pady=(0, 6))
+        ttk.Checkbutton(agentic_frame, text="Agentic mode (iterate)", variable=self.agentic_mode).pack(side="left")
         ttk.Label(agentic_frame, text="Max iterations:").pack(side="left", padx=(12, 4))
-        ttk.Spinbox(
-            agentic_frame,
-            from_=1,
-            to=AGENTIC_MAX_ITERATIONS_HARD_CAP,
-            textvariable=self.agentic_max_iterations,
-            width=4,
-        ).pack(side="left")
-        ttk.Checkbutton(
-            agentic_frame,
-            text="Show retrieved context in chat",
-            variable=self.show_retrieved_context,
-        ).pack(side="left", padx=(12, 0))
+        ttk.Spinbox(agentic_frame, from_=1, to=AGENTIC_MAX_ITERATIONS_HARD_CAP, textvariable=self.agentic_max_iterations, width=4).pack(side="left")
+        ttk.Checkbutton(agentic_frame, text="Show retrieved context", variable=self.show_retrieved_context).pack(side="left", padx=(12, 0))
 
-        frontier_wrap = ttk.LabelFrame(left_pane, text="Advanced / Frontier", padding=8)
-        frontier_wrap.pack(fill="x", pady=(6, 0))
-        self.frontier_collapsed = tk.BooleanVar(value=True)
-
-        def _toggle_frontier_section():
-            if self.frontier_collapsed.get():
-                self.frontier_options_frame.pack(fill="x", pady=(6, 0))
-                self.frontier_toggle_btn.config(text="Hide")
-                self.frontier_collapsed.set(False)
-            else:
-                self.frontier_options_frame.pack_forget()
-                self.frontier_toggle_btn.config(text="Show")
-                self.frontier_collapsed.set(True)
-
-        header_row = ttk.Frame(frontier_wrap)
-        header_row.pack(fill="x")
-        ttk.Label(header_row, text="Optional frontier components").pack(side="left")
-        self.frontier_toggle_btn = ttk.Button(
-            header_row, text="Show", width=8, command=_toggle_frontier_section
-        )
-        self.frontier_toggle_btn.pack(side="right")
-
-        self.frontier_options_frame = ttk.Frame(frontier_wrap)
-        ttk.Checkbutton(
-            self.frontier_options_frame,
-            text="Enable langextract",
-            variable=self.enable_langextract,
-        ).pack(anchor="w")
-        ttk.Checkbutton(
-            self.frontier_options_frame,
-            text="Structured Extraction",
-            variable=self.enable_structured_extraction,
-        ).pack(anchor="w")
-        ttk.Checkbutton(
-            self.frontier_options_frame,
-            text="Enable structured incidents",
-            variable=self.enable_structured_incidents,
-        ).pack(anchor="w")
-        ttk.Checkbutton(
-            self.frontier_options_frame,
-            text="Enable recursive memory",
-            variable=self.enable_recursive_memory,
-        ).pack(anchor="w")
-        ttk.Checkbutton(
-            self.frontier_options_frame,
-            text="Enable recursive retrieval mode",
-            variable=self.enable_recursive_retrieval,
-        ).pack(anchor="w")
-        ttk.Checkbutton(
-            self.frontier_options_frame,
-            text="Enable citation v2 (defaults ON in evidence-pack mode)",
-            variable=self.enable_citation_v2,
-        ).pack(anchor="w")
-        ttk.Checkbutton(
-            self.frontier_options_frame,
-            text="Claim-level grounding (CiteFix-lite)",
-            variable=self.enable_claim_level_grounding_citefix_lite,
-        ).pack(anchor="w")
-        ttk.Checkbutton(
-            self.frontier_options_frame,
-            text="Agent Lightning traces",
-            variable=self.agent_lightning_enabled,
-        ).pack(anchor="w")
+        frontier_wrap = ttk.LabelFrame(settings_content, text="Frontier", padding=8)
+        frontier_wrap.pack(fill="x")
+        ttk.Checkbutton(frontier_wrap, text="Enable langextract", variable=self.enable_langextract).pack(anchor="w")
+        ttk.Checkbutton(frontier_wrap, text="Structured Extraction", variable=self.enable_structured_extraction).pack(anchor="w")
+        ttk.Checkbutton(frontier_wrap, text="Enable structured incidents", variable=self.enable_structured_incidents).pack(anchor="w")
+        ttk.Checkbutton(frontier_wrap, text="Enable recursive memory", variable=self.enable_recursive_memory).pack(anchor="w")
+        ttk.Checkbutton(frontier_wrap, text="Enable recursive retrieval mode", variable=self.enable_recursive_retrieval).pack(anchor="w")
+        ttk.Checkbutton(frontier_wrap, text="Enable citation v2", variable=self.enable_citation_v2).pack(anchor="w")
+        ttk.Checkbutton(frontier_wrap, text="Claim-level grounding (CiteFix-lite)", variable=self.enable_claim_level_grounding_citefix_lite).pack(anchor="w")
+        ttk.Checkbutton(frontier_wrap, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
 
         # Right evidence pane
         evidence_wrap = ttk.LabelFrame(right_pane, text="Evidence Navigator", padding=8)
