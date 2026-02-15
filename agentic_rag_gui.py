@@ -17,8 +17,6 @@ import webbrowser
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
-from langchain_core.documents import Document
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
 
@@ -188,29 +186,6 @@ class CitationManager:
 
 class AgenticRAGApp:
     def __init__(self, root):
-        import langchain
-
-        if not hasattr(langchain, "llm_cache"):
-            langchain.llm_cache = None
-            if hasattr(langchain, "globals") and hasattr(
-                langchain.globals, "set_llm_cache"
-            ):
-                langchain.globals.set_llm_cache(None)
-
-        if not hasattr(langchain, "verbose"):
-            langchain.verbose = False
-            if hasattr(langchain, "globals") and hasattr(
-                langchain.globals, "set_verbose"
-            ):
-                langchain.globals.set_verbose(False)
-
-        if not hasattr(langchain, "debug"):
-            langchain.debug = False
-            if hasattr(langchain, "globals") and hasattr(
-                langchain.globals, "set_debug"
-            ):
-                langchain.globals.set_debug(False)
-
         self.root = root
         self.root.title(
             f"{APP_NAME} — {APP_SUBTITLE}" if APP_SUBTITLE else APP_NAME
@@ -221,6 +196,11 @@ class AgenticRAGApp:
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
         self.telemetry_log_filename = "agentic_rag_runs.jsonl"
         self._active_run_id = None
+        self._startup_started_at = time.perf_counter()
+        self._startup_pipeline_finished = False
+        self._index_scan_in_progress = False
+        self._pending_selected_index_label = None
+        self._langchain_core_cache = None
         self.default_system_instructions = (
             "You are an expert analyst assistant. Use ONLY the provided context for factual claims. "
             "Never ask for details already present in the retrieved context. "
@@ -329,7 +309,6 @@ class AgenticRAGApp:
         self.enable_citation_v2 = tk.BooleanVar(value=False)
         self.enable_claim_level_grounding_citefix_lite = tk.BooleanVar(value=False)
         self.agent_lightning_enabled = tk.BooleanVar(value=False)
-        # Backward-compatible alias used by existing config/frontier plumbing.
         self.enable_agent_lightning_telemetry = self.agent_lightning_enabled
         self._frontier_evidence_pack_mode = False
         self._last_evidence_pack_synthesis_cards = []
@@ -358,13 +337,146 @@ class AgenticRAGApp:
         self.lexical_db_available = False
 
         self.setup_ui()
-        self.load_config()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self._schedule_startup_pipeline()
+
+    def _setup_langchain_globals(self):
+        langchain = _lazy_import_langchain()
+        if not hasattr(langchain, "llm_cache"):
+            langchain.llm_cache = None
+            if hasattr(langchain, "globals") and hasattr(langchain.globals, "set_llm_cache"):
+                langchain.globals.set_llm_cache(None)
+        if not hasattr(langchain, "verbose"):
+            langchain.verbose = False
+            if hasattr(langchain, "globals") and hasattr(langchain.globals, "set_verbose"):
+                langchain.globals.set_verbose(False)
+        if not hasattr(langchain, "debug"):
+            langchain.debug = False
+            if hasattr(langchain, "globals") and hasattr(langchain.globals, "set_debug"):
+                langchain.globals.set_debug(False)
+
+    def _lazy_lc_classes(self):
+        if self._langchain_core_cache is None:
+            self._langchain_core_cache = _lazy_import_langchain_core()
+        return self._langchain_core_cache
+
+    def _document(self, page_content="", metadata=None):
+        Document, _, _, _ = self._lazy_lc_classes()
+        return Document(page_content=page_content or "", metadata=metadata or {})
+
+    def _human_message(self, content=""):
+        _, _, HumanMessage, _ = self._lazy_lc_classes()
+        return HumanMessage(content=content)
+
+    def _ai_message(self, content=""):
+        _, AIMessage, _, _ = self._lazy_lc_classes()
+        return AIMessage(content=content)
+
+    def _system_message(self, content=""):
+        _, _, _, SystemMessage = self._lazy_lc_classes()
+        return SystemMessage(content=content)
+
+    def _is_human_message(self, value):
+        _, _, HumanMessage, _ = self._lazy_lc_classes()
+        return isinstance(value, HumanMessage)
+
+    def setup_ui(self):
+        style = ttk.Style()
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+        style.configure("Status.TLabel", font=("Segoe UI", 9))
+
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.tab_config = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_config, text="1. Configuration")
+        ttk.Label(self.tab_config, text="Loading configuration...").pack(anchor="w", padx=14, pady=14)
+
+        self.tab_ingest = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_ingest, text="2. Data Ingestion")
+        ttk.Label(self.tab_ingest, text="Loading ingestion tools...").pack(anchor="w", padx=14, pady=14)
+
+        self.tab_chat = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_chat, text="3. Agentic Chat")
+        chat_wrap = ttk.Frame(self.tab_chat, padding=14)
+        chat_wrap.pack(fill=tk.BOTH, expand=True)
+        self.chat_display = scrolledtext.ScrolledText(chat_wrap, state="disabled", height=12)
+        self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+        input_frame = ttk.Frame(chat_wrap)
+        input_frame.pack(fill="x")
+        self.txt_input = ttk.Entry(input_frame)
+        self.txt_input.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.txt_input.bind("<Return>", lambda _e: self.send_message())
+        ttk.Button(input_frame, text="Send", command=self.send_message).pack(side="right")
+
+        self.status_var = tk.StringVar(value="Ready")
+        self.startup_elapsed_var = tk.StringVar(value="0 ms")
+        status_wrap = ttk.Frame(self.root)
+        status_wrap.pack(fill="x", padx=10, pady=(0, 8))
+        ttk.Label(status_wrap, textvariable=self.status_var, style="Status.TLabel", anchor="w").pack(side="left")
+        ttk.Label(status_wrap, textvariable=self.startup_elapsed_var, style="Status.TLabel", anchor="e").pack(side="right")
+
+    def _schedule_startup_pipeline(self):
+        self.root.after(0, self._startup_step_build_full_ui)
+        self.root.after(50, self._startup_step_load_config)
+        self.root.after(100, self._startup_step_post_load)
+        self.root.after(150, self._startup_step_scan_indexes)
+        self.root.after(200, self._startup_step_check_dependencies)
+
+    def _set_startup_status(self, text):
+        elapsed_ms = int((time.perf_counter() - self._startup_started_at) * 1000)
+        if hasattr(self, "status_var"):
+            self.status_var.set(text)
+        if hasattr(self, "startup_elapsed_var"):
+            self.startup_elapsed_var.set(f"{elapsed_ms} ms")
+
+    def _startup_step_build_full_ui(self):
+        self._set_startup_status("Initialising UI...")
+        self.notebook.destroy()
+        self._build_full_ui()
+
+    def _startup_step_load_config(self):
+        self._set_startup_status("Loading settings...")
+        self.load_config()
+
+    def _startup_step_post_load(self):
+        self._set_startup_status("Applying runtime defaults...")
+        self._setup_langchain_globals()
         self._sync_model_options()
         self.vector_db_type.trace_add("write", self._on_vector_db_type_change)
 
-        # Defer dependency check slightly to allow UI to render first
-        self.root.after(100, self.check_dependencies)
+    def _startup_step_scan_indexes(self):
+        self._refresh_existing_indexes_async(reason="Loading indexes…")
+
+    def _startup_step_check_dependencies(self):
+        self._set_startup_status("Checking deps…")
+        self.check_dependencies()
+        self._startup_pipeline_finished = True
+        self._set_startup_status("Ready")
+
+    def _build_full_ui(self):
+        style = ttk.Style()
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+        style.configure("Bold.TLabel", font=("Segoe UI", 10, "bold"))
+        style.configure("Header.TLabel", font=("Segoe UI", 12, "bold"))
+        style.configure("Status.TLabel", font=("Segoe UI", 9))
+
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.tab_config = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_config, text="1. Configuration")
+        self.build_config_tab()
+
+        self.tab_ingest = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_ingest, text="2. Data Ingestion")
+        self.build_ingest_tab()
+
+        self.tab_chat = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_chat, text="3. Agentic Chat")
+        self.build_chat_tab()
 
     def load_icon(self):
         """Best-effort cross-platform icon loading without hard failure."""
@@ -953,13 +1065,10 @@ class AgenticRAGApp:
 
         self._sync_model_options()
         self._refresh_compatibility_warning()
-        self._refresh_existing_indexes()
         if self.selected_index_path:
-            selection_label = self._format_index_label(
+            self._pending_selected_index_label = self._format_index_label(
                 self.selected_index_path, self.selected_collection_name
             )
-            if selection_label in self.existing_index_paths:
-                self.existing_index_var.set(selection_label)
 
     def save_config(self):
         try:
@@ -1338,9 +1447,8 @@ class AgenticRAGApp:
             "<<ComboboxSelected>>", self._on_existing_index_change
         )
         ttk.Button(
-            index_frame, text="Refresh", command=self._refresh_existing_indexes
+            index_frame, text="Refresh", command=self._refresh_existing_indexes_async
         ).grid(row=0, column=2, padx=(5, 0))
-        self._refresh_existing_indexes()
 
         retrieval_frame = ttk.LabelFrame(
             frame, text="Retrieval Settings", padding=10
@@ -1908,7 +2016,7 @@ class AgenticRAGApp:
         if (
             current_query
             and history
-            and isinstance(history[-1], HumanMessage)
+            and self._is_human_message(history[-1])
             and history[-1].content == current_query
         ):
             history = history[:-1]
@@ -1947,8 +2055,8 @@ class AgenticRAGApp:
                 "Do not include any extra text."
             )
             messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=query),
+                self._system_message(content=system_prompt),
+                self._human_message(content=query),
             ]
             response = llm.invoke(messages)
             candidates = self._parse_subquery_response(response.content)
@@ -2745,7 +2853,7 @@ class AgenticRAGApp:
         )
 
     def _on_vector_db_type_change(self, *_args):
-        self._refresh_existing_indexes()
+        self._refresh_existing_indexes_async(reason="Loading indexes…")
 
     def _get_chroma_persist_root(self):
         return os.path.join(os.getcwd(), "chroma_db")
@@ -3679,7 +3787,7 @@ class AgenticRAGApp:
             metadata["chunk_db_id"] = chunk_id
             metadata["lexical_score"] = float(score)
             metadata["lexical_match"] = True
-            docs.append(Document(page_content=text or "", metadata=metadata))
+            docs.append(self._document(page_content=text or "", metadata=metadata))
         return docs
 
     @staticmethod
@@ -3817,8 +3925,8 @@ class AgenticRAGApp:
             group_text = "\n\n".join(doc.page_content for doc in chunk_docs[:DIGEST_WINDOW_MAX])
             response = llm.invoke(
                 [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=f"Chapter title: {chapter_title}\n\nContent:\n{group_text}"),
+                    self._system_message(content=system_prompt),
+                    self._human_message(content=f"Chapter title: {chapter_title}\n\nContent:\n{group_text}"),
                 ]
             )
             metadata = {
@@ -3837,7 +3945,7 @@ class AgenticRAGApp:
                 metadata["chapter_idx"] = int(chapter_idx)
             if doc_title:
                 metadata["doc_title"] = doc_title
-            digest_docs.append(Document(page_content=response.content.strip(), metadata=metadata))
+            digest_docs.append(self._document(page_content=response.content.strip(), metadata=metadata))
         return digest_docs
 
     @staticmethod
@@ -3923,7 +4031,7 @@ class AgenticRAGApp:
             if str(meta.get("chunk_id")) not in chunk_id_set:
                 continue
             meta["digest_window"] = digest_id
-            docs.append(Document(page_content=content or "", metadata=meta))
+            docs.append(self._document(page_content=content or "", metadata=meta))
             if len(docs) >= max_expand:
                 break
         return docs
@@ -3994,8 +4102,8 @@ class AgenticRAGApp:
                 human_content = f"Content:\n{group_text}"
             response = llm.invoke(
                 [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=human_content),
+                    self._system_message(content=system_prompt),
+                    self._human_message(content=human_content),
                 ]
             )
             metadata = {
@@ -4014,7 +4122,7 @@ class AgenticRAGApp:
             if doc_title:
                 metadata["doc_title"] = doc_title
             digest_docs.append(
-                Document(page_content=response.content.strip(), metadata=metadata)
+                self._document(page_content=response.content.strip(), metadata=metadata)
             )
         return digest_docs
 
@@ -4043,8 +4151,8 @@ class AgenticRAGApp:
         )
         response = llm.invoke(
             [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content="\n\n".join(section_rollup)),
+                self._system_message(content=system_prompt),
+                self._human_message(content="\n\n".join(section_rollup)),
             ]
         )
         child_digest_ids = [
@@ -4062,7 +4170,7 @@ class AgenticRAGApp:
         }
         if doc_title:
             metadata["doc_title"] = doc_title
-        return [Document(page_content=response.content.strip(), metadata=metadata)]
+        return [self._document(page_content=response.content.strip(), metadata=metadata)]
 
     def _build_mini_digest_documents(self, docs, query):
         groups = self._group_chunks_for_digest(docs)
@@ -4092,8 +4200,8 @@ class AgenticRAGApp:
                 human_content = f"User query: {query}\n\nContent:\n{group_text}"
             response = llm.invoke(
                 [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=human_content),
+                    self._system_message(content=system_prompt),
+                    self._human_message(content=human_content),
                 ]
             )
             metadata = {
@@ -4104,7 +4212,7 @@ class AgenticRAGApp:
             if section_title:
                 metadata["section_title"] = section_title
             digest_docs.append(
-                Document(page_content=response.content.strip(), metadata=metadata)
+                self._document(page_content=response.content.strip(), metadata=metadata)
             )
         return digest_docs
 
@@ -4168,7 +4276,7 @@ class AgenticRAGApp:
         if not persist_dir or not os.path.isdir(persist_dir):
             return False
         try:
-            from langchain_chroma import Chroma
+            Chroma = _lazy_import_chroma()
         except ImportError:
             return False
         try:
@@ -4216,8 +4324,19 @@ class AgenticRAGApp:
                         indexes.append(path)
         return indexes
 
-    def _refresh_existing_indexes(self):
-        indexes = self._list_existing_indexes()
+    def _refresh_existing_indexes_async(self, reason="Loading indexes…"):
+        if self._index_scan_in_progress:
+            return
+        self._index_scan_in_progress = True
+        self._set_startup_status(reason)
+
+        def _worker():
+            indexes = self._list_existing_indexes()
+            self._run_on_ui(self._apply_existing_indexes, indexes)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_existing_indexes(self, indexes):
         display_values = ["(default)"]
         self.existing_index_paths = {}
         for path in indexes:
@@ -4229,17 +4348,17 @@ class AgenticRAGApp:
             self.existing_index_paths[digest_label] = (path, DIGEST_COLLECTION_NAME)
         if hasattr(self, "cb_existing_index"):
             self.cb_existing_index["values"] = display_values
-        if self.existing_index_var.get() not in display_values:
-            if self.selected_index_path:
-                candidate = self._format_index_label(
-                    self.selected_index_path, self.selected_collection_name
-                )
-                if candidate in display_values:
-                    self.existing_index_var.set(candidate)
-                else:
-                    self.existing_index_var.set("(default)")
-            else:
-                self.existing_index_var.set("(default)")
+
+        desired = self.existing_index_var.get()
+        if self._pending_selected_index_label:
+            desired = self._pending_selected_index_label
+            self._pending_selected_index_label = None
+        if desired not in display_values:
+            desired = "(default)"
+        self.existing_index_var.set(desired)
+        self._index_scan_in_progress = False
+        if self._startup_pipeline_finished:
+            self._set_startup_status("Ready")
 
     def _get_selected_index_path(self):
         selection = self.existing_index_var.get()
@@ -4270,7 +4389,7 @@ class AgenticRAGApp:
             embeddings = self.get_embeddings()
             if db_type == "chroma":
                 try:
-                    from langchain_chroma import Chroma
+                    Chroma = _lazy_import_chroma()
                 except ImportError as err:
                     self._prompt_dependency_install(
                         ["langchain-chroma", "chromadb"], "Chroma vector store", err
@@ -6034,8 +6153,8 @@ class AgenticRAGApp:
         )
         response = llm.invoke(
             [
-                SystemMessage(content=fallback_prompt),
-                HumanMessage(content=json.dumps(docs_payload, ensure_ascii=False)),
+                self._system_message(content=fallback_prompt),
+                self._human_message(content=json.dumps(docs_payload, ensure_ascii=False)),
             ]
         )
         payload = {}
@@ -6706,8 +6825,8 @@ class AgenticRAGApp:
             "Output ONLY the repaired answer."
         )
         repair_messages = [
-            SystemMessage(content=repair_prompt),
-            HumanMessage(
+            self._system_message(content=repair_prompt),
+            self._human_message(
                 content=(
                     f"OUTPUT_STYLE: {output_style}\n\n"
                     f"FAILURES:\n{failure_text}\n\n"
@@ -7020,6 +7139,9 @@ class AgenticRAGApp:
             self.llm_temperature.set(original_temperature)
 
     def start_ingestion(self):
+        if not self._startup_pipeline_finished:
+            messagebox.showinfo("Please wait", "Initialisation is still running. Please retry in a moment.")
+            return
         if not self.selected_file:
             messagebox.showerror("Error", "Please select a file first.")
             return
@@ -7306,7 +7428,7 @@ class AgenticRAGApp:
                         metadata, self.selected_file, prefixed_content
                     )
                     chatgpt_docs.append(
-                        Document(page_content=prefixed_content, metadata=metadata)
+                        self._document(page_content=prefixed_content, metadata=metadata)
                     )
 
             if chatgpt_docs is not None:
@@ -7440,7 +7562,7 @@ class AgenticRAGApp:
                 os.makedirs(persist_root, exist_ok=True)
                 new_index_path = persist_dir
                 try:
-                    from langchain_chroma import Chroma
+                    Chroma = _lazy_import_chroma()
                 except ImportError as err:
                     self._prompt_dependency_install(
                         ["langchain-chroma", "chromadb"], "Chroma vector store", err
@@ -7455,8 +7577,7 @@ class AgenticRAGApp:
                 )
             elif db_type == "weaviate":
                 try:
-                    import weaviate
-                    from langchain_weaviate import WeaviateVectorStore
+                    weaviate, WeaviateVectorStore = _lazy_import_weaviate_stack()
                 except ImportError as err:
                     self._prompt_dependency_install(
                         ["langchain-weaviate", "weaviate-client"],
@@ -7510,7 +7631,7 @@ class AgenticRAGApp:
                 concept_docs = []
                 for card in concept_cards:
                     concept_docs.append(
-                        Document(
+                        self._document(
                             page_content=card.get("card_text") or "",
                             metadata={
                                 "card_id": card.get("id"),
@@ -7538,15 +7659,16 @@ class AgenticRAGApp:
             self.log("Ingestion Complete! You can now chat.")
             if new_index_path:
                 def _select_new_index():
-                    self._refresh_existing_indexes()
                     selection_label = self._format_index_label(new_index_path)
-                    self.existing_index_var.set(selection_label)
+                    self._pending_selected_index_label = selection_label
                     self.selected_index_path = new_index_path
                     self.selected_collection_name = RAW_COLLECTION_NAME
                     self.save_config()
+                    self._refresh_existing_indexes_async(reason="Loading indexes…")
+
                 self._run_on_ui(_select_new_index)
             else:
-                self._run_on_ui(self._refresh_existing_indexes)
+                self._run_on_ui(self._refresh_existing_indexes_async)
             self._run_on_ui(
                 messagebox.showinfo,
                 "Success",
@@ -7560,13 +7682,16 @@ class AgenticRAGApp:
             self._run_on_ui(self.btn_ingest.config, state="normal")
 
     def send_message(self):
+        if not self._startup_pipeline_finished:
+            self.append_chat("system", "Initialisation not finished yet. Please retry in a moment.")
+            return
         query = self.txt_input.get()
         if not query:
             return
 
         self.txt_input.delete(0, tk.END)
         self.append_chat("user", f"You: {query}")
-        self._append_history(HumanMessage(content=query))
+        self._append_history(self._human_message(content=query))
 
         if self.index_embedding_signature:
             current_signature = self._current_embedding_signature()
@@ -7596,7 +7721,7 @@ class AgenticRAGApp:
                     collection_name = (
                         selected_collection or self.selected_collection_name or RAW_COLLECTION_NAME
                     )
-                    from langchain_chroma import Chroma
+                    Chroma = _lazy_import_chroma()
 
                     self.vector_store = Chroma(
                         collection_name=collection_name,
@@ -7741,7 +7866,7 @@ class AgenticRAGApp:
             if not digest_missing and self.vector_db_type.get() == "chroma":
                 try:
                     embeddings = self.get_embeddings()
-                    from langchain_chroma import Chroma
+                    Chroma = _lazy_import_chroma()
 
                     digest_store = Chroma(
                         collection_name=DIGEST_COLLECTION_NAME,
@@ -7943,8 +8068,8 @@ class AgenticRAGApp:
                             "If no incidents are supported, return {\"incidents\": []}."
                         )
                         stage_a_messages = [
-                            SystemMessage(content=stage_a_prompt),
-                            HumanMessage(
+                            self._system_message(content=stage_a_prompt),
+                            self._human_message(
                                 content=(
                                     f"User request:\n{query_text}\n\n"
                                     f"FINAL_DOCS:\n{working_context}{coverage_note}"
@@ -8051,8 +8176,8 @@ class AgenticRAGApp:
                     "6) Appendix: Source Cards list."
                 )
                 stage_b_messages = [
-                    SystemMessage(content=stage_b_prompt),
-                    HumanMessage(
+                    self._system_message(content=stage_b_prompt),
+                    self._human_message(
                         content=(
                             f"User request:\n{query_text}{section_text}{checklist_block}\n\n"
                             f"INCIDENT_SYNTHESIS_CARDS (from Stage A Incident objects):\n{cards_json}\n\n"
@@ -8126,8 +8251,8 @@ class AgenticRAGApp:
                     "- Omit-if-unsupported everywhere; do not include empty strings, null placeholders, or fallback text."
                 )
                 stage_a_messages = [
-                    SystemMessage(content=stage_a_prompt),
-                    HumanMessage(
+                    self._system_message(content=stage_a_prompt),
+                    self._human_message(
                         content=(
                             f"User request:\n{query_text}\n\n"
                             f"SOURCE_CARDS:\n{source_cards_text}\n\n"
@@ -8161,8 +8286,8 @@ class AgenticRAGApp:
                     "If PLAN_JSON has fewer than requested supported items, output only supported items without explanatory filler."
                 )
                 stage_b_messages = [
-                    SystemMessage(content=stage_b_prompt),
-                    HumanMessage(
+                    self._system_message(content=stage_b_prompt),
+                    self._human_message(
                         content=(
                             f"User request:\n{query_text}\n\n"
                             f"PLAN_JSON:\n{json.dumps(stage_a_payload, ensure_ascii=False, indent=2)}\n\n"
@@ -8238,8 +8363,8 @@ class AgenticRAGApp:
                     "- Omit placeholders or TODO markers.\n"
                 )
                 stage_a_messages = [
-                    SystemMessage(content=stage_a_prompt),
-                    HumanMessage(
+                    self._system_message(content=stage_a_prompt),
+                    self._human_message(
                         content=(
                             f"User request:\n{query_text}\n\n"
                             f"SOURCE_CARDS:\n{source_cards_text}\n\n"
@@ -9231,9 +9356,9 @@ class AgenticRAGApp:
                 system_prompt = "\n\n".join(prompt_parts)
                 history_window = self._get_history_window(current_query=query)
                 messages = [
-                    SystemMessage(content=system_prompt),
+                    self._system_message(content=system_prompt),
                     *history_window,
-                    HumanMessage(content=query),
+                    self._human_message(content=query),
                 ]
                 generation_started_at = time.perf_counter()
                 generation_ms = 0
@@ -9350,7 +9475,7 @@ class AgenticRAGApp:
                     )
                 self.last_answer = validated_answer
                 self.append_chat("agent", f"AI: {validated_answer}")
-                self._append_history(AIMessage(content=validated_answer))
+                self._append_history(self._ai_message(content=validated_answer))
 
                 if is_evidence_pack:
                     self.append_chat("source", f"\n{source_cards_text}")
@@ -9446,8 +9571,8 @@ class AgenticRAGApp:
                             "Do not include any extra text."
                         )
                     planner_messages = [
-                        SystemMessage(content=planner_prompt),
-                        HumanMessage(
+                        self._system_message(content=planner_prompt),
+                        self._human_message(
                             content=json.dumps(
                                 {
                                     "query": query,
@@ -9877,9 +10002,9 @@ class AgenticRAGApp:
                 system_prompt = "\n\n".join(prompt_parts)
                 history_window = self._get_history_window(current_query=query)
                 messages = [
-                    SystemMessage(content=system_prompt),
+                    self._system_message(content=system_prompt),
                     *history_window,
-                    HumanMessage(content=query),
+                    self._human_message(content=query),
                 ]
                 generation_started_at = time.perf_counter()
                 generation_ms = 0
@@ -9956,8 +10081,8 @@ class AgenticRAGApp:
                         "retrieval_queries (array). Do not include extra text."
                     )
                     critic_messages = [
-                        SystemMessage(content=critic_prompt),
-                        HumanMessage(
+                        self._system_message(content=critic_prompt),
+                        self._human_message(
                             content=(
                                 f"Checklist:\n{checklist_text}\n\n"
                                 f"Answer:\n{latest_answer}"
@@ -10056,7 +10181,7 @@ class AgenticRAGApp:
                     )
                 self.last_answer = validated_answer
                 self.append_chat("agent", f"AI: {validated_answer}")
-                self._append_history(AIMessage(content=validated_answer))
+                self._append_history(self._ai_message(content=validated_answer))
 
             if is_evidence_pack:
                 if not latest_answer:
