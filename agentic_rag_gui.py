@@ -2247,8 +2247,7 @@ class AgenticRAGApp:
         self.root.destroy()
 
     def build_history_tab(self):
-        frame = ttk.Frame(self.tab_history, padding=14, style="Card.TFrame")
-        frame.pack(fill=tk.BOTH, expand=True)
+        frame = self._create_scrollable_tab_frame(self.tab_history, padding=14)
 
         actions = ttk.Frame(frame, style="Card.TFrame")
         actions.pack(fill="x", pady=(0, 8))
@@ -2330,9 +2329,33 @@ class AgenticRAGApp:
         )
         self.log_area.pack(fill=tk.BOTH, expand=True)
 
+    def _create_scrollable_tab_frame(self, tab, *, padding=20):
+        container = ttk.Frame(tab)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(container, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill=tk.BOTH, expand=True)
+
+        content_frame = ttk.Frame(canvas, padding=padding)
+        window_id = canvas.create_window((0, 0), window=content_frame, anchor="nw")
+
+        def _on_content_configure(_event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(event):
+            canvas.itemconfigure(window_id, width=event.width)
+
+        content_frame.bind("<Configure>", _on_content_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        return content_frame
+
     def build_config_tab(self):
-        frame = ttk.Frame(self.tab_settings, padding=20)
-        frame.pack(fill=tk.BOTH, expand=True)
+        frame = self._create_scrollable_tab_frame(self.tab_settings, padding=20)
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
 
@@ -2659,8 +2682,7 @@ class AgenticRAGApp:
                 section.set_expanded(advanced)
 
     def build_ingest_tab(self):
-        frame = ttk.Frame(self.tab_library, padding=20)
-        frame.pack(fill=tk.BOTH, expand=True)
+        frame = self._create_scrollable_tab_frame(self.tab_library, padding=20)
 
         # File Selection
         sel_frame = ttk.Frame(frame)
