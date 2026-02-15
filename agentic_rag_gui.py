@@ -17,7 +17,10 @@ import html
 import webbrowser
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from langchain_core.documents import Document
 
 logger = logging.getLogger(__name__)
 
@@ -5133,7 +5136,7 @@ class AgenticRAGApp:
             return ""
         return " OR ".join(f'"{token}"*' for token in tokens)
 
-    def lexical_search(self, query: str, k: int) -> list[Document]:
+    def lexical_search(self, query: str, k: int) -> list["Document"]:
         if not query or k <= 0:
             return []
         if not self.lexical_db_available:
