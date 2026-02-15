@@ -337,6 +337,66 @@ class CollapsibleFrame(ttk.Frame):
 
 
 class AgenticRAGApp:
+    MODE_PRESETS = {
+        "Q&A": {
+            "retrieve_k": 100,
+            "final_k": 20,
+            "agentic_iterations": 3,
+            "mmr_lambda": 0.5,
+            "style": "Default answer",
+            "retrieval_mode": "flat",
+            "agentic_mode": False,
+        },
+        "Book Summary": {
+            "retrieve_k": 200,
+            "final_k": 40,
+            "agentic_iterations": 6,
+            "mmr_lambda": 0.3,
+            "style": "Detailed answer",
+            "retrieval_mode": "hierarchical",
+            "agentic_mode": True,
+        },
+        "Blinkist": {
+            "retrieve_k": 180,
+            "final_k": 32,
+            "agentic_iterations": 5,
+            "mmr_lambda": 0.35,
+            "style": "Blinkist-style summary",
+            "retrieval_mode": "hierarchical",
+            "agentic_mode": True,
+        },
+        "Tutor": {
+            "retrieve_k": 140,
+            "final_k": 28,
+            "agentic_iterations": 5,
+            "mmr_lambda": 0.45,
+            "style": "Detailed answer",
+            "retrieval_mode": "hierarchical",
+            "agentic_mode": True,
+        },
+        "Research": {
+            "retrieve_k": 160,
+            "final_k": 30,
+            "agentic_iterations": 5,
+            "mmr_lambda": 0.4,
+            "style": "Structured report",
+            "retrieval_mode": "hierarchical",
+            "agentic_mode": True,
+        },
+        "Evidence Pack": {
+            "retrieve_k": 220,
+            "final_k": 60,
+            "agentic_iterations": 6,
+            "mmr_lambda": 0.25,
+            "style": "Structured report",
+            "retrieval_mode": "hierarchical",
+            "agentic_mode": True,
+            "enable_langextract": True,
+            "build_comprehension_index": True,
+            "prefer_comprehension_index": True,
+        },
+    }
+
     def __init__(self, root):
         self.root = root
         self.root.title(
@@ -3076,6 +3136,13 @@ class AgenticRAGApp:
         self.build_chat_tab()
 
     def _build_basic_setup_wizard(self):
+        runtime_to_preset = {
+            "Summary": "Book Summary",
+            "Q&A": "Q&A",
+            "Tutor": "Tutor",
+            "Research": "Research",
+            "Evidence Pack": "Evidence Pack",
+        }
         self._wizard_state = {
             "step": 1,
             "file_path": "",
@@ -3084,7 +3151,7 @@ class AgenticRAGApp:
             "llm_model": self.llm_model.get(),
             "embedding_provider": self.embedding_provider.get(),
             "embedding_model": self.embedding_model.get(),
-            "modes": [self.selected_mode.get()],
+            "modes": [runtime_to_preset.get(self.selected_mode.get(), "Q&A")],
         }
         wrap = ttk.Frame(self.tab_chat, padding=18)
         wrap.pack(fill=tk.BOTH, expand=True)
@@ -3181,19 +3248,19 @@ class AgenticRAGApp:
 
     def _render_wizard_step_three(self):
         self._wizard_step_label.config(text="Step 3 of 4: Select Mode(s)")
-        label_map = {
-            "Q&A": "Question Answering",
-            "Summary": "Book Summary",
-            "Tutor": "Tutor",
-            "Research": "Blinkist-style summary",
-            "Evidence Pack": "Evidence Pack",
-        }
+        self._wizard_preset_modes = [
+            "Q&A",
+            "Book Summary",
+            "Blinkist",
+            "Tutor",
+            "Research",
+            "Evidence Pack",
+        ]
         self._wizard_mode_list = tk.Listbox(self._wizard_content, selectmode=tk.MULTIPLE, height=8, exportselection=False)
         self._wizard_mode_labels = []
-        for mode in self.mode_options:
-            display = label_map.get(mode, mode)
-            self._wizard_mode_list.insert(tk.END, display)
-            self._wizard_mode_labels.append((display, mode))
+        for mode in self._wizard_preset_modes:
+            self._wizard_mode_list.insert(tk.END, mode)
+            self._wizard_mode_labels.append((mode, mode))
         self._wizard_mode_list.pack(fill="both", expand=True)
         selected_modes = set(self._wizard_state.get("modes", []))
         for idx, (_display, mode) in enumerate(self._wizard_mode_labels):
@@ -3263,17 +3330,47 @@ class AgenticRAGApp:
         return True
 
     def _combine_mode_defaults(self, modes):
-        defaults = [self._mode_defaults(mode) for mode in modes if mode]
+        defaults = [self.MODE_PRESETS[mode] for mode in modes if mode in self.MODE_PRESETS]
         if not defaults:
-            return self._mode_defaults("Q&A")
-        return {
-            "retrieve_k": max(item["retrieve_k"] for item in defaults),
-            "final_k": max(item["final_k"] for item in defaults),
-            "mmr_lambda": round(sum(item["mmr_lambda"] for item in defaults) / len(defaults), 2),
-            "retrieval_mode": "hierarchical" if any(item["retrieval_mode"] == "hierarchical" for item in defaults) else "flat",
-            "agentic_mode": any(item["agentic_mode"] for item in defaults),
-            "max_iterations": max(item["max_iterations"] for item in defaults),
+            defaults = [self.MODE_PRESETS["Q&A"]]
+
+        merged = {}
+        primary_style = ""
+        for idx, item in enumerate(defaults):
+            for key, value in item.items():
+                if isinstance(value, bool):
+                    merged[key] = bool(value or merged.get(key, False))
+                elif isinstance(value, (int, float)):
+                    merged[key] = max(value, merged.get(key, value))
+                elif key == "style":
+                    if idx == 0 and not primary_style:
+                        primary_style = value
+                elif key == "retrieval_mode" and value == "hierarchical":
+                    merged[key] = "hierarchical"
+                elif key not in merged:
+                    merged[key] = value
+
+        merged.setdefault("retrieval_mode", "flat")
+        merged.setdefault("agentic_mode", bool(merged.get("agentic_iterations", 1) > 1))
+        merged["style"] = primary_style or merged.get("style") or "Default answer"
+        return merged
+
+    def _preset_mode_to_runtime_mode(self, selected_modes):
+        if not selected_modes:
+            return "Q&A"
+        mode_priority = {
+            "Evidence Pack": "Evidence Pack",
+            "Tutor": "Tutor",
+            "Blinkist": "Summary",
+            "Book Summary": "Summary",
+            "Research": "Research",
+            "Q&A": "Q&A",
         }
+        for mode in selected_modes:
+            mapped = mode_priority.get(mode)
+            if mapped:
+                return mapped
+        return "Q&A"
 
     def _wizard_confirm_and_start(self):
         try:
@@ -3284,14 +3381,24 @@ class AgenticRAGApp:
             self.embedding_model.set(self._wizard_state.get("embedding_model", self.embedding_model.get()))
 
             modes = self._wizard_state.get("modes") or ["Q&A"]
-            self.selected_mode.set(modes[0])
+            self.selected_mode.set(self._preset_mode_to_runtime_mode(modes))
             defaults = self._combine_mode_defaults(modes)
             self.retrieval_k.set(defaults["retrieve_k"])
             self.final_k.set(defaults["final_k"])
             self.mmr_lambda.set(defaults["mmr_lambda"])
             self.retrieval_mode.set(defaults["retrieval_mode"])
             self.agentic_mode.set(defaults["agentic_mode"])
-            self.agentic_max_iterations.set(defaults["max_iterations"])
+            self.agentic_max_iterations.set(int(defaults.get("agentic_iterations", 2)))
+            output_style = defaults.get("style")
+            if output_style in self.output_style_options:
+                self.output_style.set(output_style)
+
+            if defaults.get("enable_langextract"):
+                self.enable_langextract.set(True)
+            if defaults.get("build_comprehension_index"):
+                self.build_comprehension_index.set(True)
+            if defaults.get("prefer_comprehension_index"):
+                self.prefer_comprehension_index.set(True)
 
             selected_index = self._wizard_state.get("selected_index")
             if selected_index and selected_index != "(default)":
