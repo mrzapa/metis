@@ -284,6 +284,7 @@ class AgenticRAGApp:
         self.build_digest_index = tk.BooleanVar(value=True)
         self.build_comprehension_index = tk.BooleanVar(value=False)
         self.comprehension_extraction_depth = tk.StringVar(value="Standard")
+        self.prefer_comprehension_index = tk.BooleanVar(value=True)
 
         self.llm_model = tk.StringVar(value="claude-opus-4-6")
         self.llm_model_custom = tk.StringVar()
@@ -1603,6 +1604,14 @@ class AgenticRAGApp:
                 )
             )
         )
+        self.prefer_comprehension_index.set(
+            bool(
+                data.get(
+                    "prefer_comprehension_index",
+                    self.prefer_comprehension_index.get(),
+                )
+            )
+        )
         extraction_depth = str(
             data.get(
                 "comprehension_extraction_depth",
@@ -1760,6 +1769,7 @@ class AgenticRAGApp:
             "chunk_overlap": self.chunk_overlap.get(),
             "build_digest_index": self.build_digest_index.get(),
             "build_comprehension_index": bool(self.build_comprehension_index.get()),
+            "prefer_comprehension_index": bool(self.prefer_comprehension_index.get()),
             "comprehension_extraction_depth": str(
                 self.comprehension_extraction_depth.get()
             ),
@@ -2171,6 +2181,7 @@ class AgenticRAGApp:
         ttk.Checkbutton(frontier_section.content, text="Enable structured incidents", variable=self.enable_structured_incidents).pack(anchor="w")
         ttk.Checkbutton(frontier_section.content, text="Enable recursive memory", variable=self.enable_recursive_memory).pack(anchor="w")
         ttk.Checkbutton(frontier_section.content, text="Enable recursive retrieval mode", variable=self.enable_recursive_retrieval).pack(anchor="w")
+        ttk.Checkbutton(frontier_section.content, text="Prefer Comprehension Index for summaries/teaching", variable=self.prefer_comprehension_index).pack(anchor="w")
         ttk.Checkbutton(frontier_section.content, text="Enable citation v2 (defaults ON in evidence-pack mode)", variable=self.enable_citation_v2).pack(anchor="w")
         ttk.Checkbutton(frontier_section.content, text="Claim-level grounding (CiteFix-lite)", variable=self.enable_claim_level_grounding_citefix_lite).pack(anchor="w")
         ttk.Checkbutton(frontier_section.content, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
@@ -4189,6 +4200,31 @@ class AgenticRAGApp:
                     USING fts5(title, kind, card_text, content='concept_cards', content_rowid='rowid')
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS comprehension_artifacts(
+                        id TEXT PRIMARY KEY,
+                        ingest_id TEXT,
+                        artifact_type TEXT,
+                        name TEXT,
+                        text TEXT,
+                        definition TEXT,
+                        aliases_json TEXT,
+                        chapter TEXT,
+                        support_quote TEXT,
+                        source_locator TEXT,
+                        why_it_matters TEXT,
+                        content_json TEXT,
+                        created_at TEXT
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS comprehension_artifacts_fts
+                    USING fts5(name, text, definition, support_quote, why_it_matters, content='comprehension_artifacts', content_rowid='rowid')
+                    """
+                )
                 conn.commit()
             self.lexical_db_path = db_path
             self.lexical_db_available = True
@@ -4313,6 +4349,134 @@ class AgenticRAGApp:
             conn.execute("INSERT INTO concept_cards_fts(concept_cards_fts) VALUES('rebuild')")
             conn.commit()
         return len(cards)
+
+    def _write_comprehension_jsonl(self, ingest_id, artifacts):
+        if not ingest_id or not artifacts:
+            return ""
+        base_dir = self.selected_index_path or self._get_chroma_persist_root()
+        out_dir = os.path.join(base_dir, "comprehension")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"comprehension_{ingest_id}.jsonl")
+        with open(out_path, "w", encoding="utf-8") as handle:
+            for item in artifacts:
+                handle.write(json.dumps(item, ensure_ascii=False) + "\n")
+        return out_path
+
+    def _upsert_comprehension_artifacts(self, ingest_id, artifacts):
+        if not artifacts or not self._ensure_lexical_db():
+            return 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with sqlite3.connect(self.lexical_db_path) as conn:
+            for item in artifacts:
+                content = item.get("content") or {}
+                conn.execute(
+                    """
+                    INSERT INTO comprehension_artifacts(
+                        id, ingest_id, artifact_type, name, text, definition, aliases_json, chapter,
+                        support_quote, source_locator, why_it_matters, content_json, created_at
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        ingest_id=excluded.ingest_id,
+                        artifact_type=excluded.artifact_type,
+                        name=excluded.name,
+                        text=excluded.text,
+                        definition=excluded.definition,
+                        aliases_json=excluded.aliases_json,
+                        chapter=excluded.chapter,
+                        support_quote=excluded.support_quote,
+                        source_locator=excluded.source_locator,
+                        why_it_matters=excluded.why_it_matters,
+                        content_json=excluded.content_json,
+                        created_at=excluded.created_at
+                    """,
+                    (
+                        item.get("id") or str(uuid.uuid4()),
+                        ingest_id,
+                        item.get("artifact_type", ""),
+                        item.get("name", ""),
+                        item.get("text", ""),
+                        item.get("definition", ""),
+                        json.dumps(item.get("aliases") or [], ensure_ascii=False),
+                        item.get("chapter", ""),
+                        item.get("support_quote", ""),
+                        item.get("source_locator", ""),
+                        item.get("why_it_matters", ""),
+                        json.dumps(content, ensure_ascii=False, sort_keys=True),
+                        now_iso,
+                    ),
+                )
+            conn.execute("INSERT INTO comprehension_artifacts_fts(comprehension_artifacts_fts) VALUES('rebuild')")
+            conn.commit()
+        return len(artifacts)
+
+    def search_comprehension_artifacts(self, query: str, k: int = 12):
+        if not query or k <= 0 or not self._ensure_lexical_db():
+            return []
+        safe_q = self._fts5_sanitize_query(query)
+        if not safe_q:
+            return []
+        with sqlite3.connect(self.lexical_db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT c.id, c.artifact_type, c.name, c.text, c.definition, c.aliases_json,
+                       c.chapter, c.support_quote, c.source_locator, c.why_it_matters, c.content_json
+                FROM comprehension_artifacts_fts
+                JOIN comprehension_artifacts c ON c.rowid = comprehension_artifacts_fts.rowid
+                WHERE comprehension_artifacts_fts MATCH ?
+                ORDER BY bm25(comprehension_artifacts_fts) ASC
+                LIMIT ?
+                """,
+                (safe_q, int(k)),
+            ).fetchall()
+        out = []
+        for row in rows:
+            out.append(
+                {
+                    "id": row[0],
+                    "artifact_type": row[1],
+                    "name": row[2] or "",
+                    "text": row[3] or "",
+                    "definition": row[4] or "",
+                    "aliases": json.loads(row[5] or "[]"),
+                    "chapter": row[6] or "",
+                    "support_quote": row[7] or "",
+                    "source_locator": row[8] or "",
+                    "why_it_matters": row[9] or "",
+                    "content": json.loads(row[10] or "{}"),
+                }
+            )
+        return out
+
+    def _is_comprehension_first_query(self, query_text):
+        text = (query_text or "").lower()
+        if not text:
+            return False
+        triggers = ("summarise", "summarize", "teach me", "blinkist", "key ideas", "key takeaways")
+        return any(token in text for token in triggers)
+
+    def _render_comprehension_context(self, artifacts):
+        if not artifacts:
+            return ""
+        lines = ["COMPREHENSION_ARTIFACTS (prefer these first, then corroborate with raw context):"]
+        for item in artifacts:
+            kind = str(item.get("artifact_type") or "").strip()
+            loc = str(item.get("source_locator") or "").strip() or "unknown"
+            if kind == "concept":
+                lines.append(
+                    f"- Concept(name={item.get('name','')}, definition={item.get('definition','')}, aliases={item.get('aliases',[])}, chapter={item.get('chapter','')}, source_locator={loc})"
+                )
+            elif kind == "claim":
+                lines.append(
+                    f"- Claim(text={item.get('text','')}, support_quote={item.get('support_quote','')}, source_locator={loc})"
+                )
+            elif kind == "takeaway":
+                lines.append(
+                    f"- Takeaway(text={item.get('text','')}, why_it_matters={item.get('why_it_matters','')}, source_locator={loc})"
+                )
+            else:
+                lines.append(f"- {kind.title()}: {item.get('text') or item.get('name')} (source_locator={loc})")
+        return "\n".join(lines)
 
     def search_concepts(self, query: str, k: int = 8):
         if not query or k <= 0 or not self._ensure_lexical_db():
@@ -4498,6 +4662,103 @@ class AgenticRAGApp:
             cards.append({"id": str(uuid.uuid4()), "title": title, "kind": "quote", "content": content, "source_refs": source_refs, "card_text": self._card_text_from_item(card)})
 
         return cards
+
+    def _build_comprehension_artifacts(self, docs, ingest_id, source_map):
+        depth_limit = self._depth_chunk_limit()
+        sampled_docs = list(docs[:depth_limit]) if docs else []
+        if self.comprehension_extraction_depth.get() == "Deep":
+            sampled_docs = list(docs)
+        text_payload = [
+            {
+                "id": str((getattr(doc, "metadata", {}) or {}).get("chunk_id") or i + 1),
+                "text": self._truncate_for_card(getattr(doc, "page_content", ""), max_chars=2200),
+            }
+            for i, doc in enumerate(sampled_docs)
+        ]
+
+        concept_items = self._extract_with_langextract(
+            text_payload,
+            "Extract concepts with fields: name, definition, aliases(list), chapter.",
+        )
+        claim_items = self._extract_with_langextract(
+            text_payload,
+            "Extract claims with fields: text, support_quote, source_locator.",
+        )
+        takeaway_items = self._extract_with_langextract(
+            text_payload,
+            "Extract blinkist-style takeaways with fields: text, why_it_matters, source_locator.",
+        )
+        framework_items = self._extract_with_langextract(
+            text_payload,
+            "Extract framework/process steps with fields: name, steps(list), source_locator.",
+        )
+        entity_items = self._extract_with_langextract(
+            text_payload,
+            "Extract entities/characters with fields: name, role, source_locator.",
+        )
+
+        if not concept_items:
+            for doc in sampled_docs[:4]:
+                md = getattr(doc, "metadata", {}) or {}
+                sentence = re.split(r"(?<=[.!?])\s+", getattr(doc, "page_content", "") or "", maxsplit=1)[0]
+                if sentence:
+                    concept_items.append({"name": self._truncate_for_card(sentence, 80), "definition": self._truncate_for_card(doc.page_content, 220), "aliases": [], "chapter": md.get("chapter_title") or ""})
+        if not claim_items:
+            for doc in sampled_docs[:4]:
+                sentence = re.split(r"(?<=[.!?])\s+", getattr(doc, "page_content", "") or "", maxsplit=1)[0]
+                if sentence:
+                    claim_items.append({"text": self._truncate_for_card(sentence, 220), "support_quote": self._truncate_for_card(sentence, 140)})
+        if not takeaway_items:
+            for doc in sampled_docs[:4]:
+                sentence = re.split(r"(?<=[.!?])\s+", getattr(doc, "page_content", "") or "", maxsplit=1)[0]
+                if sentence:
+                    takeaway_items.append({"text": self._truncate_for_card(sentence, 180), "why_it_matters": "Captures a central idea from the book."})
+
+        def _locator_for_doc(doc):
+            md = (getattr(doc, "metadata", {}) or {}).copy()
+            source_id = self._build_source_locator(md, getattr(doc, "page_content", "") or "").source_id
+            source_entry = (source_map or {}).get(source_id, {})
+            return source_entry.get("locator") or md.get("source_locator") or ""
+
+        artifacts = []
+        anchor_docs = sampled_docs or docs[:1]
+
+        def _mk(kind, idx, payload):
+            doc = anchor_docs[idx % len(anchor_docs)] if anchor_docs else None
+            locator = _locator_for_doc(doc) if doc else str(payload.get("source_locator") or "")
+            chapter = ""
+            if doc:
+                chapter = str(((getattr(doc, "metadata", {}) or {}).get("chapter_title") or "")).strip()
+            return {
+                "id": str(uuid.uuid4()),
+                "ingest_id": ingest_id,
+                "artifact_type": kind,
+                "name": str(payload.get("name") or "").strip(),
+                "text": str(payload.get("text") or payload.get("claim") or "").strip(),
+                "definition": str(payload.get("definition") or "").strip(),
+                "aliases": payload.get("aliases") or [],
+                "chapter": str(payload.get("chapter") or chapter or "").strip(),
+                "support_quote": str(payload.get("support_quote") or payload.get("support") or "").strip(),
+                "source_locator": str(locator or "").strip(),
+                "why_it_matters": str(payload.get("why_it_matters") or "").strip(),
+                "content": payload,
+            }
+
+        for i, item in enumerate(concept_items[:40]):
+            artifacts.append(_mk("concept", i, item if isinstance(item, dict) else {"name": str(item)}))
+        for i, item in enumerate(claim_items[:40]):
+            artifacts.append(_mk("claim", i, item if isinstance(item, dict) else {"text": str(item)}))
+        for i, item in enumerate(takeaway_items[:40]):
+            artifacts.append(_mk("takeaway", i, item if isinstance(item, dict) else {"text": str(item)}))
+        for i, item in enumerate(framework_items[:20]):
+            payload = item if isinstance(item, dict) else {"text": str(item)}
+            payload.setdefault("text", str(payload.get("steps") or ""))
+            artifacts.append(_mk("framework", i, payload))
+        for i, item in enumerate(entity_items[:20]):
+            payload = item if isinstance(item, dict) else {"name": str(item)}
+            payload.setdefault("text", str(payload.get("role") or ""))
+            artifacts.append(_mk("entity", i, payload))
+        return artifacts
 
     @staticmethod
     def _fts5_query_tokens(q: str) -> list[str]:
@@ -8373,6 +8634,7 @@ class AgenticRAGApp:
                     self.log(f"Lexical sidecar updated: {self.lexical_db_path}")
 
             concept_cards = []
+            comprehension_artifacts = []
             if self.build_comprehension_index.get():
                 source_map_seed, _ = self._build_source_cards(docs)
                 concept_cards = self._build_comprehension_cards(
@@ -8381,12 +8643,21 @@ class AgenticRAGApp:
                     doc_title,
                     source_map_seed,
                 )
+                comprehension_artifacts = self._build_comprehension_artifacts(
+                    docs,
+                    chunk_ingest_id,
+                    source_map_seed,
+                )
                 stored_cards = self._upsert_concept_cards(chunk_ingest_id, concept_cards)
+                stored_artifacts = self._upsert_comprehension_artifacts(chunk_ingest_id, comprehension_artifacts)
+                jsonl_path = self._write_comprehension_jsonl(chunk_ingest_id, comprehension_artifacts)
                 self.log(
-                    f"Comprehension index built: {stored_cards} concept cards "
+                    f"Comprehension index built: {stored_cards} concept cards, {stored_artifacts} structured artifacts "
                     f"(depth={self.comprehension_extraction_depth.get()}, "
                     f"langextract={'on' if langextract is not None else 'fallback'})."
                 )
+                if jsonl_path:
+                    self.log(f"Comprehension JSONL exported: {jsonl_path}")
 
             # 3. Initialize Vector DB & Embeddings
             self.log("Step 3/4: Initializing Vector Store...")
@@ -8672,6 +8943,15 @@ class AgenticRAGApp:
                 keyword in normalized_query for keyword in long_form_keywords
             )
             is_evidence_pack = bool(resolved_settings.get("evidence_pack_mode"))
+            comprehension_first_intent = self._is_comprehension_first_query(query) or output_style == "Blinkist-style summary" or mode_name in {"Book Tutor", "Blinkist-style Summary"}
+            use_comprehension_first = bool(self.prefer_comprehension_index.get() and comprehension_first_intent)
+            precomputed_comprehension_artifacts = []
+            if use_comprehension_first:
+                precomputed_comprehension_artifacts = self.search_comprehension_artifacts(query, k=18)
+                self.log(
+                    "Comprehension routing: queried structured index first "
+                    f"({len(precomputed_comprehension_artifacts)} artifacts), then retrieving raw chunks for corroboration."
+                )
             recursive_mode_enabled = bool(self.enable_recursive_retrieval.get())
             use_recursive_retrieval = (
                 recursive_mode_enabled and (is_long_form or is_evidence_pack)
@@ -9076,6 +9356,7 @@ class AgenticRAGApp:
                     return ""
 
                 concept_cards = self.search_concepts(query_text, k=16)
+                comprehension_artifacts = self.search_comprehension_artifacts(query_text, k=24)
                 chapter_digests = []
                 for digest_doc in digest_docs:
                     metadata = getattr(digest_doc, "metadata", {}) or {}
@@ -9106,7 +9387,7 @@ class AgenticRAGApp:
 
                 stage_a_prompt = (
                     "You are Stage A planner for Blinkist-style summary mode. "
-                    "Build a strict JSON plan using chapter digests + concept cards as the primary evidence, "
+                    "Build a strict JSON plan using COMPREHENSION_ARTIFACTS + chapter digests + concept cards as the primary evidence, "
                     "and SOURCE_CARDS for grounding labels. Prefer chapter/section level coverage over chunk-local detail. "
                     "Do not ask for more information. Omit unsupported claims and fields entirely. "
                     "Never emit placeholders like NOT FOUND.\n\n"
@@ -9135,7 +9416,8 @@ class AgenticRAGApp:
                             f"User request:\n{query_text}\n\n"
                             f"SOURCE_CARDS:\n{source_cards_text}\n\n"
                             f"CHAPTER_DIGESTS:\n{json.dumps(chapter_digests, ensure_ascii=False, indent=2)}\n\n"
-                            f"CONCEPT_CARDS:\n{json.dumps(compact_cards, ensure_ascii=False, indent=2)}"
+                            f"CONCEPT_CARDS:\n{json.dumps(compact_cards, ensure_ascii=False, indent=2)}\n\n"
+                            f"COMPREHENSION_ARTIFACTS:\n{json.dumps(comprehension_artifacts, ensure_ascii=False, indent=2)}"
                         )
                     ),
                 ]
@@ -9183,6 +9465,7 @@ class AgenticRAGApp:
                     return ""
 
                 concept_cards = self.search_concepts(query_text, k=20)
+                comprehension_artifacts = self.search_comprehension_artifacts(query_text, k=24)
                 chapter_digests = []
                 for digest_doc in digest_docs:
                     metadata = getattr(digest_doc, "metadata", {}) or {}
@@ -9219,8 +9502,8 @@ class AgenticRAGApp:
                 )
                 stage_a_prompt = (
                     "You are Stage A planner for Book Tutor mode. "
-                    "Build strict JSON for a lesson grounded in SOURCE_CARDS, CHAPTER_DIGESTS, and CONCEPT_CARDS. "
-                    "Prefer concept cards and chapter digests first; only rely on raw chunk detail when required to fill unsupported gaps. "
+                    "Build strict JSON for a lesson grounded in SOURCE_CARDS, CHAPTER_DIGESTS, CONCEPT_CARDS, and COMPREHENSION_ARTIFACTS. "
+                    "Prefer structured comprehension artifacts and chapter digests first; only rely on raw chunk detail when required to fill unsupported gaps. "
                     "Use plain English and the book's framing. Keep citations minimal and claim-level with S# labels. "
                     "Return only supported content; omit unsupported points entirely.\n\n"
                     "Return ONLY valid JSON:\n"
@@ -9247,7 +9530,8 @@ class AgenticRAGApp:
                             f"User request:\n{query_text}\n\n"
                             f"SOURCE_CARDS:\n{source_cards_text}\n\n"
                             f"CHAPTER_DIGESTS:\n{json.dumps(chapter_digests, ensure_ascii=False, indent=2)}\n\n"
-                            f"CONCEPT_CARDS:\n{json.dumps(compact_cards, ensure_ascii=False, indent=2)}"
+                            f"CONCEPT_CARDS:\n{json.dumps(compact_cards, ensure_ascii=False, indent=2)}\n\n"
+                            f"COMPREHENSION_ARTIFACTS:\n{json.dumps(comprehension_artifacts, ensure_ascii=False, indent=2)}"
                         )
                     ),
                 ]
@@ -10225,7 +10509,25 @@ class AgenticRAGApp:
                     if is_evidence_pack
                     else ""
                 )
+                comprehension_artifacts = []
+                comprehension_context = ""
+                if use_comprehension_first:
+                    comprehension_artifacts = precomputed_comprehension_artifacts or self.search_comprehension_artifacts(query, k=18)
+                    if not comprehension_artifacts and final_docs:
+                        source_map_seed, _ = self._build_source_cards(final_docs)
+                        on_demand_artifacts = self._build_comprehension_artifacts(final_docs, "on_demand", source_map_seed)
+                        if on_demand_artifacts:
+                            self._upsert_comprehension_artifacts("on_demand", on_demand_artifacts)
+                            self._write_comprehension_jsonl("on_demand", on_demand_artifacts)
+                            comprehension_artifacts = on_demand_artifacts[:18]
+                            self.log("Comprehension index built on-demand from retrieved chunks.")
+                    comprehension_context = self._render_comprehension_context(comprehension_artifacts)
                 prompt_parts = [self._get_system_instructions(resolved_settings)]
+                if comprehension_context:
+                    prompt_parts.append(
+                        "Comprehension-first rule: Start from COMPREHENSION_ARTIFACTS (concepts, claims, takeaways, frameworks, entities), then corroborate with raw CONTEXT for citations and gap-filling."
+                    )
+                    prompt_parts.append(comprehension_context)
                 if style_instruction:
                     prompt_parts.append(style_instruction)
                 if evidence_instruction:
@@ -10868,7 +11170,25 @@ class AgenticRAGApp:
                     if is_evidence_pack
                     else ""
                 )
+                comprehension_artifacts = []
+                comprehension_context = ""
+                if use_comprehension_first:
+                    comprehension_artifacts = precomputed_comprehension_artifacts or self.search_comprehension_artifacts(query, k=18)
+                    if not comprehension_artifacts and final_docs:
+                        source_map_seed, _ = self._build_source_cards(final_docs)
+                        on_demand_artifacts = self._build_comprehension_artifacts(final_docs, "on_demand", source_map_seed)
+                        if on_demand_artifacts:
+                            self._upsert_comprehension_artifacts("on_demand", on_demand_artifacts)
+                            self._write_comprehension_jsonl("on_demand", on_demand_artifacts)
+                            comprehension_artifacts = on_demand_artifacts[:18]
+                            self.log("Comprehension index built on-demand from retrieved chunks.")
+                    comprehension_context = self._render_comprehension_context(comprehension_artifacts)
                 prompt_parts = [self._get_system_instructions(resolved_settings)]
+                if comprehension_context:
+                    prompt_parts.append(
+                        "Comprehension-first rule: Start from COMPREHENSION_ARTIFACTS (concepts, claims, takeaways, frameworks, entities), then corroborate with raw CONTEXT for citations and gap-filling."
+                    )
+                    prompt_parts.append(comprehension_context)
                 if style_instruction:
                     prompt_parts.append(style_instruction)
                 if evidence_instruction:
