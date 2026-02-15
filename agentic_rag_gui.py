@@ -8,6 +8,7 @@ import sys
 import time
 import json
 import subprocess
+import importlib
 import importlib.util
 import re
 import hashlib
@@ -77,6 +78,35 @@ try:
 except ImportError:
     agent_lightning = None
     logger.info("optional dependency not installed: agent_lightning")
+
+
+def _lazy_import_langchain():
+    try:
+        return importlib.import_module("langchain")
+    except ImportError as err:
+        raise ImportError(
+            "LangChain is not installed. Install required dependencies (e.g. 'langchain') "
+            "and run dependency check/install from the app."
+        ) from err
+
+
+def _lazy_import_langchain_core():
+    try:
+        module = importlib.import_module("langchain_core")
+        documents = importlib.import_module("langchain_core.documents")
+        messages = importlib.import_module("langchain_core.messages")
+    except ImportError as err:
+        raise ImportError(
+            "langchain-core is not installed. Install required dependencies (e.g. "
+            "'langchain-core' or meta package 'langchain') and run dependency "
+            "check/install from the app."
+        ) from err
+    return (
+        documents.Document,
+        messages.AIMessage,
+        messages.HumanMessage,
+        messages.SystemMessage,
+    )
 
 # --- Libraries check is done inside the class to prevent instant crash ---
 # Required: pip install langchain langchain-community langchain-openai langchain-anthropic langchain-google-genai langchain-cohere langchain-text-splitters chromadb beautifulsoup4 tiktoken
@@ -1222,7 +1252,11 @@ class AgenticRAGApp:
             return None
 
     def _setup_langchain_globals(self):
-        langchain = _lazy_import_langchain()
+        try:
+            langchain = _lazy_import_langchain()
+        except ImportError as err:
+            self.log(f"LangChain runtime not available yet: {err}")
+            return
         if not hasattr(langchain, "llm_cache"):
             langchain.llm_cache = None
             if hasattr(langchain, "globals") and hasattr(langchain.globals, "set_llm_cache"):
