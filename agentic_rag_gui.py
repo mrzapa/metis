@@ -390,6 +390,7 @@ class AgenticRAGApp:
         self._agent_lightning_trace_events_by_run = {}
         self._agent_lightning_run_summaries = []
         self._latest_source_map = {}
+        self._latest_blinkist_plan = {}
         self._latest_incidents = []
         self._latest_grounding_html_path = ""
         self._source_id_by_tree_iid = {}
@@ -4393,6 +4394,21 @@ class AgenticRAGApp:
                 )
                 conn.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS summary_tree_nodes(
+                        id TEXT PRIMARY KEY,
+                        ingest_id TEXT,
+                        tree_level INTEGER,
+                        digest_scope TEXT,
+                        node_title TEXT,
+                        source TEXT,
+                        summary_text TEXT,
+                        metadata_json TEXT,
+                        created_at TEXT
+                    )
+                    """
+                )
+                conn.execute(
+                    """
                     CREATE VIRTUAL TABLE IF NOT EXISTS comprehension_artifacts_fts
                     USING fts5(name, text, definition, support_quote, why_it_matters, content='comprehension_artifacts', content_rowid='rowid')
                     """
@@ -4624,7 +4640,7 @@ class AgenticRAGApp:
         text = (query_text or "").lower()
         if not text:
             return False
-        triggers = ("summarise", "summarize", "teach me", "blinkist", "key ideas", "key takeaways")
+        triggers = ("summarise", "summarize", "teach me", "blinkist", "key ideas", "key takeaways", "expand key idea", "zoom")
         return any(token in text for token in triggers)
 
     def _render_comprehension_context(self, artifacts):
@@ -5203,6 +5219,85 @@ class AgenticRAGApp:
             digest_docs.append(self._document(page_content=response.content.strip(), metadata=metadata))
         return digest_docs
 
+    def _build_chunk_summary_nodes(self, docs, ingest_id, source_basename, doc_title):
+        chunk_nodes = []
+        for doc in docs:
+            metadata = (getattr(doc, "metadata", {}) or {}).copy()
+            chunk_id = metadata.get("chunk_id")
+            if chunk_id is None:
+                continue
+            chunk_text = str(getattr(doc, "page_content", "") or "").strip()
+            first_sentence = re.split(r"(?<=[.!?])\s+", chunk_text, maxsplit=1)[0].strip()
+            short_summary = self._truncate_for_card(first_sentence or chunk_text, max_chars=180)
+            node_meta = {
+                "doc_type": "chunk_summary",
+                "digest_scope": "chunk",
+                "tree_level": 0,
+                "ingest_id": ingest_id,
+                "source": source_basename,
+                "digest_id": f"chunk-{ingest_id}-{chunk_id}",
+                "node_id": f"l0:{ingest_id}:{chunk_id}",
+                "parent_node_id": f"l1:{ingest_id}",
+                "chunk_id": chunk_id,
+                "chapter_idx": metadata.get("chapter_idx"),
+                "chapter_title": metadata.get("chapter_title", ""),
+                "section_idx": metadata.get("section_idx"),
+                "section_title": metadata.get("section_title", ""),
+            }
+            if doc_title:
+                node_meta["doc_title"] = doc_title
+            chunk_nodes.append(self._document(page_content=short_summary, metadata=node_meta))
+        return chunk_nodes
+
+    def _build_part_digest_documents(self, chapter_digest_docs, ingest_id, source_basename, doc_title):
+        if not chapter_digest_docs:
+            return []
+        grouped_parts = {}
+        for chapter_doc in chapter_digest_docs:
+            meta = getattr(chapter_doc, "metadata", {}) or {}
+            part_idx = meta.get("part_idx")
+            part_title = str(meta.get("part_title") or "").strip()
+            if part_idx is None:
+                chapter_idx = meta.get("chapter_idx")
+                if isinstance(chapter_idx, int):
+                    part_idx = ((chapter_idx - 1) // 5) + 1
+            if part_idx is None and not part_title:
+                part_idx = 1
+            part_key = (part_idx if part_idx is not None else "na", part_title or f"Part {part_idx or 1}")
+            grouped_parts.setdefault(part_key, []).append(chapter_doc)
+        llm = self._get_llm_with_temperature(0.2)
+        part_nodes = []
+        for ordinal, ((part_idx, part_title), chapter_docs) in enumerate(sorted(grouped_parts.items(), key=lambda item: str(item[0][0])), start=1):
+            rollup = []
+            chapter_ids = []
+            for chapter_doc in chapter_docs:
+                md = getattr(chapter_doc, "metadata", {}) or {}
+                chapter_ids.append(str(md.get("digest_id") or ""))
+                rollup.append(f"- {md.get('chapter_title') or md.get('chapter_idx') or 'Chapter'}\n{chapter_doc.page_content}")
+            response = llm.invoke(
+                [
+                    self._system_message(content="Summarize this part in 5-8 bullets focused on themes and progression. Bullets only."),
+                    self._human_message(content=f"Part: {part_title}\n\nChapter summaries:\n" + "\n\n".join(rollup)),
+                ]
+            )
+            metadata = {
+                "doc_type": "part_digest",
+                "digest_scope": "part",
+                "tree_level": 2,
+                "ingest_id": ingest_id,
+                "source": source_basename,
+                "digest_id": f"part-{ingest_id}-{ordinal}",
+                "node_id": f"l2:part:{ingest_id}:{ordinal}",
+                "parent_node_id": f"l3:{ingest_id}",
+                "part_idx": int(part_idx) if str(part_idx).isdigit() else None,
+                "part_title": part_title,
+                "child_digest_ids": json.dumps([cid for cid in chapter_ids if cid]),
+            }
+            if doc_title:
+                metadata["doc_title"] = doc_title
+            part_nodes.append(self._document(page_content=str(response.content or "").strip(), metadata=metadata))
+        return part_nodes
+
     @staticmethod
     def _is_short_factual_query(query):
         text = (query or "").strip()
@@ -5400,9 +5495,9 @@ class AgenticRAGApp:
                 f"[{digest_id}] {section_title}\n{digest_doc.page_content.strip()}"
             )
         system_prompt = (
-            "Create a concise document-level summary from section summaries. "
-            "Capture major themes, chronology, key actors, decisions, and outcomes. "
-            "Use bullets only with no introductory text."
+            "Create a concise whole-book summary from chapter/part summaries. "
+            "Return clear bullets capturing thesis, progression, and outcomes. "
+            "End with a 'Key takeaways:' subsection with 5 bullets."
         )
         response = llm.invoke(
             [
@@ -5415,17 +5510,74 @@ class AgenticRAGApp:
         ]
         child_digest_ids = [item for item in child_digest_ids if item]
         metadata = {
-            "doc_type": "doc_summary",
-            "tree_level": 2,
+            "doc_type": "book_summary",
+            "digest_scope": "book",
+            "tree_level": 3,
             "ingest_id": ingest_id,
             "source": source_basename,
-            "digest_id": f"doc-{ingest_id}",
-            "node_id": f"l2:{ingest_id}",
+            "digest_id": f"book-{ingest_id}",
+            "node_id": f"l3:{ingest_id}",
             "child_digest_ids": json.dumps(child_digest_ids),
         }
         if doc_title:
             metadata["doc_title"] = doc_title
         return [self._document(page_content=response.content.strip(), metadata=metadata)]
+
+    def _persist_summary_tree(self, ingest_id, summary_nodes, persist_dir):
+        if not summary_nodes:
+            return ""
+        payload = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for node in summary_nodes:
+            md = getattr(node, "metadata", {}) or {}
+            payload.append({"metadata": md, "summary": str(getattr(node, "page_content", "") or "")})
+        if self._ensure_lexical_db():
+            with sqlite3.connect(self.lexical_db_path) as conn:
+                for item in payload:
+                    md = item["metadata"]
+                    conn.execute(
+                        """
+                        INSERT INTO summary_tree_nodes(
+                            id, ingest_id, tree_level, digest_scope, node_title, source, summary_text, metadata_json, created_at
+                        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            ingest_id=excluded.ingest_id,
+                            tree_level=excluded.tree_level,
+                            digest_scope=excluded.digest_scope,
+                            node_title=excluded.node_title,
+                            source=excluded.source,
+                            summary_text=excluded.summary_text,
+                            metadata_json=excluded.metadata_json,
+                            created_at=excluded.created_at
+                        """,
+                        (
+                            str(md.get("node_id") or md.get("digest_id") or str(uuid.uuid4())),
+                            ingest_id,
+                            int(md.get("tree_level", 0)),
+                            str(md.get("digest_scope") or ""),
+                            str(md.get("chapter_title") or md.get("part_title") or md.get("doc_title") or ""),
+                            str(md.get("source") or ""),
+                            item["summary"],
+                            json.dumps(md, ensure_ascii=False, sort_keys=True),
+                            now_iso,
+                        ),
+                    )
+                conn.commit()
+        out_path = ""
+        if persist_dir:
+            try:
+                os.makedirs(persist_dir, exist_ok=True)
+                out_path = os.path.join(persist_dir, f"summary_tree_{ingest_id}.json")
+                with open(out_path, "w", encoding="utf-8") as handle:
+                    json.dump(payload, handle, ensure_ascii=False, indent=2)
+            except OSError:
+                out_path = ""
+        return out_path
+
+    @staticmethod
+    def _extract_zoom_key_idea_index(query_text):
+        match = re.search(r"(?:expand|zoom|drill\s*down\s*on)\s+(?:key\s+idea\s*)?#?(\d{1,2})", str(query_text or ""), re.I)
+        return int(match.group(1)) if match else None
 
     def _build_mini_digest_documents(self, docs, query):
         groups = self._group_chunks_for_digest(docs)
@@ -8838,28 +8990,43 @@ class AgenticRAGApp:
             new_index_path = None
             digest_docs = []
             summary_tree_docs = []
+            summary_tree_artifact_path = ""
 
             if self.build_digest_index.get():
                 if db_type == "chroma":
-                    self.log("Building summary tree (L1 sections, L2 document summary)...")
+                    self.log("Building summary tree (L0 chunk, L1 chapter/section, L2 part, L3 book)...")
+                    chunk_summary_docs = self._build_chunk_summary_nodes(
+                        docs, chunk_ingest_id, source_basename, doc_title
+                    )
                     section_digest_docs = self._build_digest_documents(
                         docs, chunk_ingest_id, source_basename, doc_title
                     )
                     chapter_digest_docs = self._build_chapter_digest_documents(
                         docs, chunk_ingest_id, source_basename, doc_title
                     )
-                    digest_docs = [*chapter_digest_docs, *section_digest_docs]
-                    summary_tree_docs = [*digest_docs]
+                    part_digest_docs = self._build_part_digest_documents(
+                        chapter_digest_docs,
+                        chunk_ingest_id,
+                        source_basename,
+                        doc_title,
+                    )
+                    digest_docs = [*part_digest_docs, *chapter_digest_docs, *section_digest_docs]
+                    summary_tree_docs = [*chunk_summary_docs, *digest_docs]
                     summary_tree_docs.extend(
                         self._build_document_summary_node(
-                            digest_docs, chunk_ingest_id, source_basename, doc_title
+                            part_digest_docs or chapter_digest_docs or section_digest_docs,
+                            chunk_ingest_id,
+                            source_basename,
+                            doc_title,
                         )
                     )
                     self.log(
                         "Prepared summary tree nodes: "
+                        f"chunk_summaries={len(chunk_summary_docs)}, "
                         f"chapter_digests={len(chapter_digest_docs)}, "
                         f"section_digests={len(section_digest_docs)}, "
-                        f"L2={max(0, len(summary_tree_docs) - len(digest_docs))}."
+                        f"part_digests={len(part_digest_docs)}, "
+                        f"book_nodes={max(0, len(summary_tree_docs) - len(chunk_summary_docs) - len(digest_docs))}."
                     )
                 else:
                     self.log("Digest indexing is only supported for Chroma. Skipping.")
@@ -8873,6 +9040,12 @@ class AgenticRAGApp:
                 )
                 os.makedirs(persist_root, exist_ok=True)
                 new_index_path = persist_dir
+                if summary_tree_docs:
+                    summary_tree_artifact_path = self._persist_summary_tree(
+                        chunk_ingest_id,
+                        summary_tree_docs,
+                        persist_dir,
+                    )
                 try:
                     Chroma = _lazy_import_chroma()
                 except ImportError as err:
@@ -8938,6 +9111,8 @@ class AgenticRAGApp:
                     batch = summary_tree_docs[i : i + batch_size]
                     digest_store.add_documents(batch)
                 self.log(f"Indexed {total_digests} summary tree nodes.")
+                if summary_tree_artifact_path:
+                    self.log(f"Summary tree artifact saved: {summary_tree_artifact_path}")
 
             if concept_cards:
                 concept_docs = []
@@ -9538,24 +9713,75 @@ class AgenticRAGApp:
                 if not source_map:
                     return ""
 
+                zoom_key_idea = self._extract_zoom_key_idea_index(query_text)
+                label_to_source = {
+                    locator.label: source_id
+                    for source_id, locator in source_map.items()
+                    if getattr(locator, "label", "")
+                }
+
                 concept_cards = self.search_concepts(query_text, k=16)
                 comprehension_artifacts = self.search_comprehension_artifacts(query_text, k=24)
                 chapter_digests = []
+                part_digests = []
+                book_summary_text = ""
                 for digest_doc in digest_docs:
                     metadata = getattr(digest_doc, "metadata", {}) or {}
                     digest_scope = str(metadata.get("digest_scope") or "").strip().lower()
-                    if digest_scope not in {"chapter", "section"}:
-                        continue
-                    chapter_digests.append(
-                        {
-                            "digest_scope": digest_scope,
-                            "chapter_idx": metadata.get("chapter_idx"),
-                            "chapter_title": str(metadata.get("chapter_title") or "").strip(),
-                            "section_idx": metadata.get("section_idx"),
-                            "section_title": str(metadata.get("section_title") or "").strip(),
-                            "summary": str(getattr(digest_doc, "page_content", "") or "").strip(),
+                    payload = {
+                        "digest_scope": digest_scope,
+                        "chapter_idx": metadata.get("chapter_idx"),
+                        "chapter_title": str(metadata.get("chapter_title") or "").strip(),
+                        "section_idx": metadata.get("section_idx"),
+                        "section_title": str(metadata.get("section_title") or "").strip(),
+                        "part_idx": metadata.get("part_idx"),
+                        "part_title": str(metadata.get("part_title") or "").strip(),
+                        "summary": str(getattr(digest_doc, "page_content", "") or "").strip(),
+                    }
+                    if digest_scope in {"chapter", "section"}:
+                        chapter_digests.append(payload)
+                    elif digest_scope == "part":
+                        part_digests.append(payload)
+                    elif digest_scope == "book":
+                        book_summary_text = payload.get("summary") or ""
+
+                if zoom_key_idea and isinstance(self._latest_blinkist_plan, dict):
+                    key_ideas = self._latest_blinkist_plan.get("key_ideas") or []
+                    idx = int(zoom_key_idea) - 1
+                    if 0 <= idx < len(key_ideas):
+                        selected_idea = key_ideas[idx] or {}
+                        selected_labels = [
+                            str(s).strip() for s in (selected_idea.get("sources") or []) if str(s).strip()
+                        ]
+                        selected_source_ids = {
+                            label_to_source.get(label) for label in selected_labels if label in label_to_source
                         }
-                    )
+                        supporting_docs = []
+                        for doc in doc_list:
+                            metadata = getattr(doc, "metadata", {}) or {}
+                            source_id = self._build_source_locator(metadata, getattr(doc, "page_content", "") or "").source_id
+                            if source_id in selected_source_ids:
+                                supporting_docs.append(doc)
+                        _, supporting_cards = self._build_source_cards(supporting_docs or doc_list[:10])
+                        stage_zoom_prompt = (
+                            "You are the Blinkist zoom tool. Expand the selected key idea with a chapter-aware explanation. "
+                            "Use only provided key idea payload, chapter summaries, and source cards. "
+                            "Structure: (1) Idea restatement, (2) Deeper explanation, (3) Chapter evidence map, (4) Practical application checklist. "
+                            "Cite supported claims with [S#]."
+                        )
+                        stage_zoom_messages = [
+                            self._system_message(content=stage_zoom_prompt),
+                            self._human_message(
+                                content=(
+                                    f"User request:\n{query_text}\n\n"
+                                    f"KEY_IDEA:\n{json.dumps(selected_idea, ensure_ascii=False, indent=2)}\n\n"
+                                    f"CHAPTER_DIGESTS:\n{json.dumps(chapter_digests[:8], ensure_ascii=False, indent=2)}\n\n"
+                                    f"SOURCE_CARDS:\n{supporting_cards}"
+                                )
+                            ),
+                        ]
+                        stage_zoom_response = llm.invoke(stage_zoom_messages)
+                        return str(stage_zoom_response.content or "")
 
                 compact_cards = []
                 for card in concept_cards[:16]:
@@ -9570,25 +9796,25 @@ class AgenticRAGApp:
 
                 stage_a_prompt = (
                     "You are Stage A planner for Blinkist-style summary mode. "
-                    "Build a strict JSON plan using COMPREHENSION_ARTIFACTS + chapter digests + concept cards as the primary evidence, "
-                    "and SOURCE_CARDS for grounding labels. Prefer chapter/section level coverage over chunk-local detail. "
+                    "Build a strict JSON plan using BOOK_SUMMARY + PART_DIGESTS + CHAPTER_DIGESTS as the primary evidence, "
+                    "then corroborate with COMPREHENSION_ARTIFACTS, concept cards, and SOURCE_CARDS. "
                     "Do not ask for more information. Omit unsupported claims and fields entirely. "
                     "Never emit placeholders like NOT FOUND.\n\n"
                     "Return ONLY valid JSON with keys:\n"
                     "{\n"
                     "  \"premise\": \"single sentence\",\n"
-                    "  \"key_ideas\": [{\"title\":\"\",\"what\":\"\",\"why\":\"\",\"how\":\"\",\"sources\":[\"S#\"]}],\n"
-                    "  \"exercises\": [{\"title\":\"\",\"steps\":[\"\"],\"sources\":[\"S#\"]}],\n"
-                    "  \"memorable_quotes\": [{\"quote\":\"\",\"why_it_matters\":\"\",\"sources\":[\"S#\"]}],\n"
-                    "  \"remember_three\": [\"\"],\n"
+                    "  \"key_ideas\": [{\"title\":\"\",\"what\":\"\",\"why\":\"\",\"how\":\"\",\"sources\":[\"S#\"],\"supporting_chapters\":[\"\"]}],\n"
+                    "  \"actionable_takeaways\": [{\"title\":\"\",\"steps\":[\"\"],\"sources\":[\"S#\"]}],\n"
+                    "  \"memorable_quotes\": [{\"quote\":\"\",\"why_it_matters\":\"\",\"source_locator\":\"\",\"sources\":[\"S#\"]}],\n"
+                    "  \"key_takeaways\": [\"\"],\n"
                     "  \"chapter_mini_summaries\": [{\"chapter\":\"\",\"summary\":\"\",\"sources\":[\"S#\"]}]\n"
                     "}\n\n"
                     "Rules:\n"
                     "- premise: exactly 1 line.\n"
-                    "- key_ideas: 8-12 items, each must include what/why/how plus S# source labels.\n"
-                    "- exercises: up to 3 items grounded in supported ideas; omit any unsupported exercise.\n"
-                    "- memorable_quotes: up to 5 short grounded quotes; omit unsupported quotes.\n"
-                    "- remember_three: exactly 3 concise points.\n"
+                    "- key_ideas: exactly 10 items, each with what/why/how, supporting_chapters, and S# labels.\n"
+                    "- actionable_takeaways: exactly 5 items grounded in supported ideas.\n"
+                    "- memorable_quotes: exactly 3 short grounded quotes with source_locator and S# labels.\n"
+                    "- key_takeaways: 3-5 concise whole-book bullets.\n"
                     "- chapter_mini_summaries is optional: include only when chapter-level support exists.\n"
                     "- Omit-if-unsupported everywhere; do not include empty strings, null placeholders, or fallback text."
                 )
@@ -9597,6 +9823,8 @@ class AgenticRAGApp:
                     self._human_message(
                         content=(
                             f"User request:\n{query_text}\n\n"
+                            f"BOOK_SUMMARY:\n{book_summary_text}\n\n"
+                            f"PART_DIGESTS:\n{json.dumps(part_digests, ensure_ascii=False, indent=2)}\n\n"
                             f"SOURCE_CARDS:\n{source_cards_text}\n\n"
                             f"CHAPTER_DIGESTS:\n{json.dumps(chapter_digests, ensure_ascii=False, indent=2)}\n\n"
                             f"CONCEPT_CARDS:\n{json.dumps(compact_cards, ensure_ascii=False, indent=2)}\n\n"
@@ -9608,6 +9836,7 @@ class AgenticRAGApp:
                 stage_a_payload = _extract_json_payload(stage_a_response.content)
                 if not isinstance(stage_a_payload, dict):
                     stage_a_payload = {}
+                self._latest_blinkist_plan = stage_a_payload
 
                 stage_b_prompt = (
                     "You are Stage B renderer for Blinkist-style summary mode. "
@@ -9616,15 +9845,15 @@ class AgenticRAGApp:
                     "Never output placeholders, NOT FOUND text, or requests for additional user info.\n\n"
                     "Template (follow exactly):\n"
                     "1) Premise (1 line)\n"
-                    "2) Key Ideas (8-12)\n"
+                    "2) 10 Key Ideas\n"
                     "   - For each idea use exactly:\n"
                     "     Idea N — <title>\n"
                     "     What it is: ... [S#]\n"
                     "     Why it matters: ... [S#]\n"
                     "     How to apply: ... [S#]\n"
-                    "3) 3 Actionable Exercises\n"
-                    "4) 5 Memorable Quotes (grounded)\n"
-                    "5) If you only remember 3 things...\n"
+                    "3) 5 Actionable Takeaways\n"
+                    "4) 3 Memorable Quotes (with source locator)\n"
+                    "5) Whole-book key takeaways\n"
                     "6) Optional: Chapter-by-chapter mini-summaries (append only if present in PLAN_JSON).\n\n"
                     "If PLAN_JSON has fewer than requested supported items, output only supported items without explanatory filler."
                 )
