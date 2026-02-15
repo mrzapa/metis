@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, scrolledtext, messagebox
+from tkinter import ttk, filedialog, scrolledtext, messagebox, simpledialog
 import threading
 import logging
 import os
@@ -438,6 +438,9 @@ class AgenticRAGApp:
             "search_type": self.search_type.get(),
             "retrieval_mode": self.retrieval_mode.get(),
             "agentic_mode": bool(self.agentic_mode.get()),
+            "use_reranker": bool(self.use_reranker.get()),
+            "use_sub_queries": bool(self.use_sub_queries.get()),
+            "subquery_max_docs": int(self.subquery_max_docs.get()),
         }
         return json.dumps(payload, ensure_ascii=False)
 
@@ -557,73 +560,84 @@ class AgenticRAGApp:
         self.refresh_sessions_list()
 
     def refresh_sessions_list(self):
-        if not hasattr(self, "sessions_listbox"):
+        if not hasattr(self, "sessions_tree"):
             return
+        search_query = ""
+        if hasattr(self, "history_search_var"):
+            search_query = (self.history_search_var.get() or "").strip().lower()
         with sqlite3.connect(self.session_db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
-                SELECT session_id, updated_at, title, active_profile, mode
+                SELECT session_id, updated_at, title, summary, active_profile, mode, index_id, llm_model
                 FROM sessions
                 ORDER BY updated_at DESC
                 LIMIT 500
                 """
             ).fetchall()
-        self._session_list_items = [dict(row) for row in rows]
-        self.sessions_listbox.delete(0, tk.END)
+        self._session_list_items = []
+        for row in rows:
+            item = dict(row)
+            haystack = f"{item.get('title', '')} {item.get('summary', '')}".lower()
+            if search_query and search_query not in haystack:
+                continue
+            self._session_list_items.append(item)
+
+        self.sessions_tree.delete(*self.sessions_tree.get_children())
         for row in self._session_list_items:
-            title = (row["title"] or "Untitled").strip()
+            title = (row["title"] or "Untitled").strip() or "Untitled"
             updated = (row["updated_at"] or "")[:19].replace("T", " ")
-            self.sessions_listbox.insert(
+            iid = row["session_id"]
+            self.sessions_tree.insert(
+                "",
                 tk.END,
-                f"{title}  •  {updated}  •  {row['mode'] or '-'}  •  {row['active_profile'] or '-'}",
+                iid=iid,
+                values=(
+                    title,
+                    updated,
+                    row.get("active_profile") or "-",
+                    row.get("mode") or "-",
+                    row.get("index_id") or "(default)",
+                    row.get("llm_model") or "-",
+                ),
             )
+        self._refresh_history_details()
 
-    def _selected_history_session_id(self):
-        if not hasattr(self, "sessions_listbox"):
-            return None
-        selected = self.sessions_listbox.curselection()
-        if not selected:
-            return None
-        idx = int(selected[0])
-        if idx < 0 or idx >= len(self._session_list_items):
-            return None
-        return self._session_list_items[idx]["session_id"]
+    def _on_history_search_change(self, _event=None):
+        self.refresh_sessions_list()
 
-    def load_selected_session(self):
-        session_id = self._selected_history_session_id()
-        if not session_id:
-            messagebox.showinfo("No Session", "Select a session to load.")
-            return
+    def _session_row_by_id(self, session_id):
+        for row in self._session_list_items:
+            if row.get("session_id") == session_id:
+                return row
+        return None
+
+    def _fetch_session_and_messages(self, session_id):
         with sqlite3.connect(self.session_db_path) as conn:
             conn.row_factory = sqlite3.Row
             session = conn.execute(
                 "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
             ).fetchone()
             messages = conn.execute(
-                "SELECT role, content FROM messages WHERE session_id = ? ORDER BY ts ASC",
+                """
+                SELECT role, content, ts, run_id, sources_json
+                FROM messages
+                WHERE session_id = ?
+                ORDER BY ts ASC
+                """,
                 (session_id,),
             ).fetchall()
-        if not session:
-            return
-        self.current_session_id = session_id
-        self.clear_chat()
-        self.chat_history = []
-        for row in messages:
-            role = (row["role"] or "").strip().lower()
-            content = row["content"] or ""
-            if role == "user":
-                self.append_chat("user", f"You: {content}")
-                self._append_history(self._human_message(content=content))
-            elif role == "assistant":
-                self.append_chat("agent", f"AI: {content}")
-                self._append_history(self._ai_message(content=content))
-                self.last_answer = content
-            elif role == "system":
-                self.append_chat("system", content)
-            elif role == "source":
-                self.append_chat("source", content)
+        return session, messages
 
+    def _selected_history_session_id(self):
+        if not hasattr(self, "sessions_tree"):
+            return None
+        selected = self.sessions_tree.selection()
+        if not selected:
+            return None
+        return selected[0]
+
+    def _restore_session_state(self, session):
         self.selected_profile.set(session["active_profile"] or self.selected_profile.get())
         self.selected_mode.set(session["mode"] or self.selected_mode.get())
         self.llm_provider.set(session["llm_provider"] or self.llm_provider.get())
@@ -643,6 +657,7 @@ class AgenticRAGApp:
             extra = json.loads(session["extra_json"] or "{}")
         except json.JSONDecodeError:
             extra = {}
+
         self.output_style.set(extra.get("output_style", self.output_style.get()))
         self.llm_temperature.set(float(extra.get("llm_temperature", self.llm_temperature.get())))
         self.llm_max_tokens.set(int(extra.get("llm_max_tokens", self.llm_max_tokens.get())))
@@ -654,13 +669,23 @@ class AgenticRAGApp:
         self.search_type.set(extra.get("search_type", self.search_type.get()))
         self.retrieval_mode.set(extra.get("retrieval_mode", self.retrieval_mode.get()))
         self.agentic_mode.set(bool(extra.get("agentic_mode", self.agentic_mode.get())))
+        self.use_reranker.set(bool(extra.get("use_reranker", self.use_reranker.get())))
+        self.use_sub_queries.set(bool(extra.get("use_sub_queries", self.use_sub_queries.get())))
+        try:
+            if extra.get("subquery_max_docs") is not None:
+                self.subquery_max_docs.set(int(extra.get("subquery_max_docs")))
+        except (TypeError, ValueError):
+            pass
         self.session_title_llm_enabled.set(
             bool(extra.get("session_title_llm_enabled", self.session_title_llm_enabled.get()))
         )
+
+        previous_index = (self.selected_index_path, self.selected_collection_name)
         self.selected_index_path = extra.get("selected_index_path", self.selected_index_path)
         self.selected_collection_name = extra.get(
             "selected_collection_name", self.selected_collection_name
         )
+        new_index = (self.selected_index_path, self.selected_collection_name)
         if self.selected_index_path:
             self._pending_selected_index_label = self._format_index_label(
                 self.selected_index_path,
@@ -669,8 +694,203 @@ class AgenticRAGApp:
 
         self._refresh_profile_options()
         self._sync_model_options()
-        self._refresh_existing_indexes_async(reason="Loading indexes…")
+        if new_index != previous_index:
+            self._refresh_existing_indexes_async(reason="Loading indexes…")
+
+    def load_selected_session(self):
+        session_id = self._selected_history_session_id()
+        if not session_id:
+            messagebox.showinfo("No Session", "Select a session to load.")
+            return
+        session, messages = self._fetch_session_and_messages(session_id)
+        if not session:
+            return
+        self.current_session_id = session_id
+        self.clear_chat()
+        self.chat_history = []
+        for row in messages:
+            role = (row["role"] or "").strip().lower()
+            content = row["content"] or ""
+            if role == "user":
+                self.append_chat("user", f"You: {content}")
+                self._append_history(self._human_message(content=content))
+            elif role == "assistant":
+                self.append_chat("agent", f"AI: {content}")
+                self._append_history(self._ai_message(content=content))
+                self.last_answer = content
+            elif role == "system":
+                self.append_chat("system", content)
+            elif role == "source":
+                self.append_chat("source", content)
+        self._restore_session_state(session)
         self.append_chat("system", f"Loaded session: {session['title'] or session_id}")
+        self.notebook.select(self.tab_chat)
+
+    def rename_selected_session(self):
+        session_id = self._selected_history_session_id()
+        if not session_id:
+            messagebox.showinfo("No Session", "Select a session to rename.")
+            return
+        row = self._session_row_by_id(session_id) or {}
+        current_title = (row.get("title") or "Untitled").strip() or "Untitled"
+        new_title = simpledialog.askstring(
+            "Rename Session",
+            "New session title:",
+            initialvalue=current_title,
+            parent=self.root,
+        )
+        if new_title is None:
+            return
+        new_title = new_title.strip()
+        if not new_title:
+            messagebox.showwarning("Invalid Title", "Session title cannot be empty.")
+            return
+        with sqlite3.connect(self.session_db_path) as conn:
+            conn.execute(
+                "UPDATE sessions SET title = ?, updated_at = ? WHERE session_id = ?",
+                (new_title, self._now_iso(), session_id),
+            )
+        self.refresh_sessions_list()
+
+    def duplicate_selected_session(self):
+        session_id = self._selected_history_session_id()
+        if not session_id:
+            messagebox.showinfo("No Session", "Select a session to duplicate.")
+            return
+        session, _messages = self._fetch_session_and_messages(session_id)
+        if not session:
+            return
+
+        new_session_id = str(uuid.uuid4())
+        title = (session["title"] or "Untitled").strip() or "Untitled"
+        clone_title = f"Copy of {title}"
+        ts = self._now_iso()
+        with sqlite3.connect(self.session_db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions(
+                    session_id, created_at, updated_at, title, summary,
+                    active_profile, mode, index_id, vector_backend,
+                    llm_provider, llm_model, embed_model,
+                    retrieve_k, final_k, mmr_lambda, agentic_iterations, extra_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_session_id,
+                    ts,
+                    ts,
+                    clone_title,
+                    session["summary"],
+                    session["active_profile"],
+                    session["mode"],
+                    session["index_id"],
+                    session["vector_backend"],
+                    session["llm_provider"],
+                    session["llm_model"],
+                    session["embed_model"],
+                    session["retrieve_k"],
+                    session["final_k"],
+                    session["mmr_lambda"],
+                    session["agentic_iterations"],
+                    session["extra_json"],
+                ),
+            )
+
+        self.current_session_id = new_session_id
+        self.clear_chat()
+        self.chat_history = []
+        self._restore_session_state(session)
+        self.append_chat("system", f"Started duplicated session: {clone_title}")
+        self.refresh_sessions_list()
+        if self.sessions_tree.exists(new_session_id):
+            self.sessions_tree.selection_set(new_session_id)
+            self.sessions_tree.focus(new_session_id)
+            self.sessions_tree.see(new_session_id)
+        self.notebook.select(self.tab_chat)
+
+    def _session_export_payload(self, session, messages):
+        payload = dict(session)
+        payload["messages"] = []
+        for msg in messages:
+            record = {
+                "role": msg["role"],
+                "content": msg["content"],
+                "ts": msg["ts"],
+                "run_id": msg["run_id"],
+                "sources": [],
+            }
+            try:
+                parsed = json.loads(msg["sources_json"] or "[]")
+                if isinstance(parsed, list):
+                    record["sources"] = parsed
+            except json.JSONDecodeError:
+                pass
+            payload["messages"].append(record)
+        return payload
+
+    def export_selected_session(self):
+        session_id = self._selected_history_session_id()
+        if not session_id:
+            messagebox.showinfo("No Session", "Select a session to export.")
+            return
+        session, messages = self._fetch_session_and_messages(session_id)
+        if not session:
+            return
+
+        save_dir = filedialog.askdirectory(title="Select export directory")
+        if not save_dir:
+            return
+
+        title = (session["title"] or "Untitled").strip() or "Untitled"
+        slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", title).strip("_") or "session"
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base = os.path.join(save_dir, f"{slug}_{stamp}")
+        md_path = f"{base}.md"
+        json_path = f"{base}.json"
+
+        payload = self._session_export_payload(session, messages)
+        lines = [
+            f"# Session Export: {title}",
+            "",
+            f"- Session ID: `{session_id}`",
+            f"- Updated: `{session['updated_at'] or ''}`",
+            f"- Profile: `{session['active_profile'] or '-'}`",
+            f"- Mode: `{session['mode'] or '-'}`",
+            f"- Index: `{session['index_id'] or '(default)'}`",
+            f"- Model: `{session['llm_model'] or '-'}`",
+            "",
+            "## Summary",
+            (session["summary"] or "(none)"),
+            "",
+            "## Transcript + Sources",
+            "",
+        ]
+        for idx, msg in enumerate(payload["messages"], start=1):
+            role = (msg.get("role") or "unknown").capitalize()
+            ts = msg.get("ts") or ""
+            lines.append(f"### {idx}. {role} ({ts})")
+            lines.append(msg.get("content") or "")
+            sources = msg.get("sources") or []
+            if sources:
+                lines.append("")
+                lines.append("Sources:")
+                for source in sources:
+                    lines.append(
+                        f"- source={source.get('source') or '-'} | "
+                        f"chunk_id={source.get('chunk_id') or '-'} | "
+                        f"score={source.get('score') if source.get('score') is not None else '-'}"
+                    )
+            lines.append("")
+
+        try:
+            with open(md_path, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(lines).strip() + "\n")
+            with open(json_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+            self.log(f"Session exported to {md_path} and {json_path}")
+            messagebox.showinfo("Session Export", f"Exported:\n{md_path}\n{json_path}")
+        except OSError as exc:
+            messagebox.showerror("Export Failed", f"Could not export session: {exc}")
 
     def delete_selected_session(self):
         session_id = self._selected_history_session_id()
@@ -682,6 +902,87 @@ class AgenticRAGApp:
         if self.current_session_id == session_id:
             self.start_new_chat(load_in_ui=True)
         self.refresh_sessions_list()
+
+    def _load_last_run_telemetry(self, run_id):
+        if not run_id:
+            return None
+        log_path = self._get_telemetry_log_path()
+        if not os.path.exists(log_path):
+            return None
+        latest = None
+        try:
+            with open(log_path, "r", encoding="utf-8") as handle:
+                for raw_line in handle:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if payload.get("run_id") == run_id:
+                        latest = payload
+        except OSError:
+            return None
+        return latest
+
+    def _refresh_history_details(self, _event=None):
+        if not hasattr(self, "history_summary_text"):
+            return
+        session_id = self._selected_history_session_id()
+        summary_text = ""
+        config_text = ""
+        telemetry_text = ""
+
+        if session_id:
+            session, messages = self._fetch_session_and_messages(session_id)
+            if session:
+                title = (session["title"] or "Untitled").strip() or "Untitled"
+                summary = (session["summary"] or "").strip() or "(No summary saved.)"
+                summary_text = (
+                    f"Title: {title}\n"
+                    f"Session ID: {session_id}\n"
+                    f"Updated: {session['updated_at'] or ''}\n"
+                    f"Messages: {len(messages)}\n\n"
+                    f"Summary:\n{summary}"
+                )
+
+                extra = {}
+                try:
+                    extra = json.loads(session["extra_json"] or "{}")
+                except json.JSONDecodeError:
+                    extra = {}
+                snapshot = {
+                    "profile": session["active_profile"],
+                    "mode": session["mode"],
+                    "index": session["index_id"],
+                    "llm_provider": session["llm_provider"],
+                    "llm_model": session["llm_model"],
+                    "embed_model": session["embed_model"],
+                    "retrieve_k": session["retrieve_k"],
+                    "final_k": session["final_k"],
+                    "mmr_lambda": session["mmr_lambda"],
+                    "agentic_iterations": session["agentic_iterations"],
+                    "extra": extra,
+                }
+                config_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
+
+                run_id = None
+                for msg in reversed(messages):
+                    if msg["run_id"]:
+                        run_id = msg["run_id"]
+                        break
+                telemetry = self._load_last_run_telemetry(run_id)
+                if telemetry:
+                    telemetry_text = json.dumps(telemetry, ensure_ascii=False, indent=2)
+                elif run_id:
+                    telemetry_text = f"No telemetry event found for run_id={run_id}."
+                else:
+                    telemetry_text = "No run telemetry available for this session."
+
+        self._set_readonly_text(self.history_summary_text, summary_text)
+        self._set_readonly_text(self.history_config_text, config_text)
+        self._set_readonly_text(self.history_telemetry_text, telemetry_text)
 
     def _maybe_autotitle_session(self, first_user_text):
         text = (first_user_text or "").strip()
@@ -1513,29 +1814,77 @@ class AgenticRAGApp:
         self.root.destroy()
 
     def build_history_tab(self):
-        frame = ttk.Frame(self.tab_history, padding=20)
+        frame = ttk.Frame(self.tab_history, padding=14)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        actions = ttk.LabelFrame(frame, text="Session Actions", padding=10)
-        actions.pack(fill="x")
+        actions = ttk.Frame(frame)
+        actions.pack(fill="x", pady=(0, 8))
         ttk.Button(actions, text="New Chat", command=lambda: self.start_new_chat(load_in_ui=True)).pack(side="left")
-        ttk.Button(actions, text="Load Selected", command=self.load_selected_session).pack(side="left", padx=8)
-        ttk.Button(actions, text="Delete Selected", command=self.delete_selected_session).pack(side="left")
-        ttk.Button(actions, text="Refresh", command=self.refresh_sessions_list).pack(side="left", padx=8)
+        ttk.Button(actions, text="Open/Resume", command=self.load_selected_session).pack(side="left", padx=(8, 0))
+        ttk.Button(actions, text="Rename", command=self.rename_selected_session).pack(side="left", padx=(8, 0))
+        ttk.Button(actions, text="Delete", command=self.delete_selected_session).pack(side="left", padx=(8, 0))
+        ttk.Button(actions, text="Export", command=self.export_selected_session).pack(side="left", padx=(8, 0))
+        ttk.Button(actions, text="Duplicate", command=self.duplicate_selected_session).pack(side="left", padx=(8, 0))
+        ttk.Button(actions, text="Refresh", command=self.refresh_sessions_list).pack(side="left", padx=(8, 0))
         ttk.Checkbutton(
             actions,
-            text="Auto-title with LLM (optional)",
+            text="Auto-title with LLM",
             variable=self.session_title_llm_enabled,
         ).pack(side="right")
 
-        ttk.Button(actions, text="Clear Chat View", command=self.clear_chat).pack(side="left", padx=(16, 0))
-        ttk.Button(actions, text="Save Chat Transcript", command=self.save_chat).pack(side="left", padx=8)
+        search_row = ttk.Frame(frame)
+        search_row.pack(fill="x", pady=(0, 8))
+        ttk.Label(search_row, text="Search:").pack(side="left")
+        self.history_search_var = tk.StringVar()
+        self.history_search_entry = ttk.Entry(search_row, textvariable=self.history_search_var)
+        self.history_search_entry.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        self.history_search_entry.bind("<KeyRelease>", self._on_history_search_change)
 
-        list_frame = ttk.LabelFrame(frame, text="Saved Sessions", padding=10)
-        list_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-        self.sessions_listbox = tk.Listbox(list_frame, height=20)
-        self.sessions_listbox.pack(fill=tk.BOTH, expand=True)
-        self.sessions_listbox.bind("<Double-1>", lambda _e: self.load_selected_session())
+        split = ttk.Panedwindow(frame, orient=tk.HORIZONTAL)
+        split.pack(fill=tk.BOTH, expand=True)
+
+        left = ttk.Frame(split)
+        right = ttk.Frame(split)
+        split.add(left, weight=3)
+        split.add(right, weight=2)
+
+        tree_wrap = ttk.LabelFrame(left, text="Saved Sessions", padding=8)
+        tree_wrap.pack(fill=tk.BOTH, expand=True)
+        columns = ("title", "updated", "profile", "mode", "index", "model")
+        self.sessions_tree = ttk.Treeview(tree_wrap, columns=columns, show="headings", selectmode="browse")
+        self.sessions_tree.heading("title", text="Title")
+        self.sessions_tree.heading("updated", text="Updated")
+        self.sessions_tree.heading("profile", text="Profile")
+        self.sessions_tree.heading("mode", text="Mode")
+        self.sessions_tree.heading("index", text="Index")
+        self.sessions_tree.heading("model", text="Model")
+        self.sessions_tree.column("title", width=240, anchor="w")
+        self.sessions_tree.column("updated", width=150, anchor="w")
+        self.sessions_tree.column("profile", width=120, anchor="w")
+        self.sessions_tree.column("mode", width=110, anchor="w")
+        self.sessions_tree.column("index", width=180, anchor="w")
+        self.sessions_tree.column("model", width=140, anchor="w")
+        yscroll = ttk.Scrollbar(tree_wrap, orient="vertical", command=self.sessions_tree.yview)
+        self.sessions_tree.configure(yscrollcommand=yscroll.set)
+        self.sessions_tree.pack(side="left", fill=tk.BOTH, expand=True)
+        yscroll.pack(side="right", fill="y")
+        self.sessions_tree.bind("<Double-1>", lambda _e: self.load_selected_session())
+        self.sessions_tree.bind("<<TreeviewSelect>>", self._refresh_history_details)
+
+        details = ttk.LabelFrame(right, text="Session Details", padding=8)
+        details.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(details, text="Summary", style="Bold.TLabel").pack(anchor="w")
+        self.history_summary_text = scrolledtext.ScrolledText(details, height=8, state="disabled", wrap=tk.WORD)
+        self.history_summary_text.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        ttk.Label(details, text="Config Snapshot", style="Bold.TLabel").pack(anchor="w")
+        self.history_config_text = scrolledtext.ScrolledText(details, height=10, state="disabled", wrap=tk.WORD)
+        self.history_config_text.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        ttk.Label(details, text="Last Run Telemetry", style="Bold.TLabel").pack(anchor="w")
+        self.history_telemetry_text = scrolledtext.ScrolledText(details, height=8, state="disabled", wrap=tk.WORD)
+        self.history_telemetry_text.pack(fill=tk.BOTH, expand=True)
 
     def build_logs_tab(self):
         frame = ttk.Frame(self.tab_logs, padding=20)
