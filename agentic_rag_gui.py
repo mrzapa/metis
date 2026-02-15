@@ -25,10 +25,11 @@ APP_VERSION = "1.0"
 APP_SUBTITLE = "LangChain + Chroma/Weaviate + Cohere"
 
 try:
-    import langextract
+    import langextract as lx
 except ImportError:
-    langextract = None
+    lx = None
     logger.info("optional dependency not installed: langextract")
+langextract = lx
 
 try:
     import agent_lightning
@@ -375,6 +376,7 @@ class AgenticRAGApp:
         self.use_sub_queries = tk.BooleanVar(value=True)
         self.subquery_max_docs = tk.IntVar(value=200)
         self.enable_langextract = tk.BooleanVar(value=False)
+        self.enable_structured_extraction = tk.BooleanVar(value=False)
         self.enable_structured_incidents = tk.BooleanVar(value=False)
         self.enable_recursive_memory = tk.BooleanVar(value=False)
         self.enable_recursive_retrieval = tk.BooleanVar(value=False)
@@ -392,6 +394,7 @@ class AgenticRAGApp:
         self._latest_source_map = {}
         self._latest_blinkist_plan = {}
         self._latest_incidents = []
+        self._latest_extracted_events = []
         self._latest_grounding_html_path = ""
         self._source_id_by_tree_iid = {}
 
@@ -1823,6 +1826,14 @@ class AgenticRAGApp:
         self.enable_langextract.set(
             bool(data.get("enable_langextract", self.enable_langextract.get()))
         )
+        self.enable_structured_extraction.set(
+            bool(
+                data.get(
+                    "enable_structured_extraction",
+                    self.enable_structured_extraction.get(),
+                )
+            )
+        )
         self.enable_structured_incidents.set(
             bool(
                 data.get(
@@ -1942,6 +1953,9 @@ class AgenticRAGApp:
             "subquery_max_docs": subquery_max_docs,
             "fallback_final_k": self.fallback_final_k.get(),
             "enable_langextract": bool(self.enable_langextract.get()),
+            "enable_structured_extraction": bool(
+                self.enable_structured_extraction.get()
+            ),
             "enable_structured_incidents": bool(
                 self.enable_structured_incidents.get()
             ),
@@ -2325,6 +2339,7 @@ class AgenticRAGApp:
         frontier_section.grid(row=6, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_frontier_section = frontier_section
         ttk.Checkbutton(frontier_section.content, text="Enable langextract", variable=self.enable_langextract).pack(anchor="w")
+        ttk.Checkbutton(frontier_section.content, text="Structured Extraction", variable=self.enable_structured_extraction).pack(anchor="w")
         ttk.Checkbutton(frontier_section.content, text="Enable structured incidents", variable=self.enable_structured_incidents).pack(anchor="w")
         ttk.Checkbutton(frontier_section.content, text="Enable recursive memory", variable=self.enable_recursive_memory).pack(anchor="w")
         ttk.Checkbutton(frontier_section.content, text="Enable recursive retrieval mode", variable=self.enable_recursive_retrieval).pack(anchor="w")
@@ -2631,6 +2646,11 @@ class AgenticRAGApp:
         ).pack(anchor="w")
         ttk.Checkbutton(
             self.frontier_options_frame,
+            text="Structured Extraction",
+            variable=self.enable_structured_extraction,
+        ).pack(anchor="w")
+        ttk.Checkbutton(
+            self.frontier_options_frame,
             text="Enable structured incidents",
             variable=self.enable_structured_incidents,
         ).pack(anchor="w")
@@ -2716,6 +2736,27 @@ class AgenticRAGApp:
             self.incidents_json_tab, height=14, wrap=tk.NONE, state="disabled", font=("Consolas", 9)
         )
         self.incidents_json_text.pack(fill=tk.BOTH, expand=True)
+
+        self.events_tab = ttk.Frame(self.evidence_notebook)
+        self.evidence_notebook.add(self.events_tab, text="Events")
+        self.events_tree = ttk.Treeview(
+            self.events_tab,
+            columns=("date", "actors", "action", "impact", "sid"),
+            show="headings",
+            height=10,
+            selectmode="browse",
+        )
+        for col, label, width in [
+            ("date", "Date", 100),
+            ("actors", "Actors", 180),
+            ("action", "Action", 260),
+            ("impact", "Impact", 260),
+            ("sid", "Source", 70),
+        ]:
+            self.events_tree.heading(col, text=label)
+            self.events_tree.column(col, width=width, anchor="w")
+        self.events_tree.pack(fill=tk.BOTH, expand=True)
+        self.events_tree.bind("<<TreeviewSelect>>", self._on_event_selected)
 
         self.trace_tab = ttk.Frame(self.evidence_notebook)
         self.evidence_notebook.add(self.trace_tab, text="Trace")
@@ -2847,6 +2888,39 @@ class AgenticRAGApp:
         self.source_detail_text.config(state="disabled")
 
 
+    def _on_event_selected(self, event=None):
+        selection = self.events_tree.selection() if hasattr(self, "events_tree") else ()
+        if not selection:
+            return
+        item = self.events_tree.item(selection[0])
+        sid = ""
+        values = item.get("values") or []
+        if len(values) >= 5:
+            sid = str(values[4]).strip()
+        if sid:
+            self._select_source_by_sid(sid)
+
+    def _render_events_tab(self, events):
+        if not hasattr(self, "events_tree"):
+            return
+        self.events_tree.delete(*self.events_tree.get_children())
+        for idx, event in enumerate(events or [], start=1):
+            actors = event.get("actors") or []
+            if isinstance(actors, str):
+                actors = [actors]
+            self.events_tree.insert(
+                "",
+                tk.END,
+                iid=f"event-{idx}",
+                values=(
+                    event.get("date") or "undated",
+                    ", ".join([str(a).strip() for a in actors if str(a).strip()]) or "-",
+                    str(event.get("action") or "").strip()[:220],
+                    str(event.get("impact") or "").strip()[:220],
+                    str(event.get("source_citation") or ""),
+                ),
+            )
+
     def _open_selected_source(self):
         selection = self.sources_tree.selection()
         if not selection:
@@ -2935,6 +3009,7 @@ class AgenticRAGApp:
             self.grounding_label_var.set(f"Saved grounding HTML: {self._latest_grounding_html_path}")
         else:
             self.grounding_label_var.set("LangExtract grounding HTML is not available yet.")
+        self._render_events_tab(getattr(self, "_latest_extracted_events", []))
         self._set_readonly_text(
             self.source_detail_text,
             "Select an S# source row to inspect excerpt and metadata."
@@ -6644,6 +6719,15 @@ class AgenticRAGApp:
         meta["source_date"] = source_date
         meta["source_actor"] = source_actor
         meta["source_locator"] = locator
+        meta["file_path"] = str(meta.get("file_path") or meta.get("source_path") or selected_file or "").strip()
+        meta["source_path"] = str(meta.get("source_path") or meta.get("file_path") or selected_file or "").strip()
+        meta["source_section"] = str(
+            meta.get("source_section")
+            or meta.get("section_title")
+            or meta.get("heading")
+            or meta.get("chapter_title")
+            or ""
+        ).strip()
         meta.setdefault("role", str(meta.get("speaker_role") or meta.get("role") or "unknown"))
         meta.setdefault(
             "speaker",
@@ -6653,6 +6737,7 @@ class AgenticRAGApp:
         if not channel_key:
             channel_key = self._extract_channel(f"{source_title}\n{content}") or "unknown"
         meta["channel_key"] = channel_key
+        meta["channel"] = str(meta.get("channel") or channel_key or "unknown").strip().lower() or "unknown"
         date_for_month = meta.get("month_key") or source_date or raw_date
         month_key = ""
         if date_for_month:
@@ -7513,6 +7598,136 @@ class AgenticRAGApp:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         except Exception as exc:
             self.log(f"Incident cache write failed. ({exc})")
+
+    def _parse_json_payload(self, text):
+        cleaned = str(text or "").strip()
+        if not cleaned:
+            return {}
+        cleaned = cleaned.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:].strip()
+        try:
+            return json.loads(cleaned)
+        except Exception:
+            match = re.search(r"\{[\s\S]*\}", cleaned)
+            if match:
+                try:
+                    return json.loads(match.group(0))
+                except Exception:
+                    return {}
+        return {}
+
+    def extract_structured_events(self, docs: list) -> list[dict]:
+        if not docs:
+            return []
+        source_map, _ = self._build_source_cards(docs)
+        by_chunk = {}
+        rows = []
+        for doc in docs:
+            metadata = getattr(doc, "metadata", {}) or {}
+            content = str(getattr(doc, "page_content", "") or "")
+            enriched = self._ensure_source_metadata(
+                metadata,
+                metadata.get("source") or metadata.get("file_path") or metadata.get("filename") or "",
+                content,
+            )
+            source_id = self._build_source_locator(enriched, content).source_id
+            row = {
+                "chunk_id": str(enriched.get("chunk_id") or ""),
+                "source_id": source_id,
+                "text": content,
+            }
+            rows.append(row)
+            if row["chunk_id"]:
+                by_chunk[row["chunk_id"]] = source_id
+        prompt = (
+            "Extract all dated events, entities, actions and impacts from the following text. "
+            "Return a JSON object with key events, where each event has date, actors, action, impact, "
+            "span_start, span_end, chunk_id, source_id."
+        )
+        events = []
+        if bool(self.enable_structured_extraction.get()) and lx is not None:
+            try:
+                extracted = lx.extract(rows, prompt=prompt)
+                payload = extracted if isinstance(extracted, dict) else {}
+                events = payload.get("events", []) if isinstance(payload, dict) else []
+            except Exception as exc:
+                self.log(f"Structured extraction via langextract failed; using LLM fallback. ({exc})")
+        if not events:
+            llm = self.get_llm()
+            response = llm.invoke(
+                [
+                    self._system_message(content=prompt + " Use only provided evidence. JSON only."),
+                    self._human_message(content=json.dumps(rows, ensure_ascii=False)),
+                ]
+            )
+            payload = self._parse_json_payload(getattr(response, "content", ""))
+            events = payload.get("events", []) if isinstance(payload, dict) else []
+
+        normalized = []
+        for event in events or []:
+            if not isinstance(event, dict):
+                continue
+            chunk_id = str(event.get("chunk_id") or "").strip()
+            source_id = str(event.get("source_id") or by_chunk.get(chunk_id) or "").strip()
+            sid = ""
+            if source_id and source_id in source_map:
+                sid = source_map[source_id].get("sid", "")
+            normalized.append(
+                {
+                    "date": str(event.get("date") or "undated").strip() or "undated",
+                    "actors": event.get("actors") or [],
+                    "action": str(event.get("action") or "").strip(),
+                    "impact": str(event.get("impact") or "").strip(),
+                    "span_start": event.get("span_start"),
+                    "span_end": event.get("span_end"),
+                    "chunk_id": chunk_id,
+                    "source_id": source_id,
+                    "source_citation": sid,
+                }
+            )
+        normalized.sort(key=lambda item: str(item.get("date") or "undated"))
+        return normalized
+
+    @staticmethod
+    def _is_summary_or_pack_mode(mode, output_style):
+        summary_styles = {"Brief / exec summary", "Blinkist-style summary"}
+        return mode in {"Evidence Pack", "Blinkist-style Summary"} or output_style in summary_styles
+
+    def _timeline_text(self, events):
+        lines = []
+        for idx, event in enumerate(events or [], start=1):
+            actors = event.get("actors") or []
+            if isinstance(actors, str):
+                actors = [actors]
+            sid = event.get("source_citation")
+            suffix = f" [{sid}]" if sid else ""
+            lines.append(
+                f"{idx}. {event.get('date', 'undated')} | Actors: {', '.join([str(a) for a in actors if str(a).strip()]) or '-'} | "
+                f"Action: {event.get('action', '')} | Impact: {event.get('impact', '')}{suffix}"
+            )
+        return "\n".join(lines)
+
+    def _sources_section_from_events(self, events, source_map):
+        used = []
+        seen = set()
+        for event in events or []:
+            source_id = str(event.get("source_id") or "").strip()
+            if not source_id or source_id in seen or source_id not in (source_map or {}):
+                continue
+            seen.add(source_id)
+            used.append(source_map[source_id])
+        if not used:
+            return ""
+        lines = ["Sources:"]
+        ordered = sorted(used, key=lambda x: int(str(x.get("sid", "S999")).lstrip("S") or "999"))
+        for item in ordered:
+            lines.append(
+                f"[{item.get('sid', 'S?')}] → {item.get('title', 'Unknown')} → "
+                f"{item.get('section_hint') or item.get('section') or item.get('chapter') or '-'} → "
+                f"{item.get('channel_key', 'unknown')} → {item.get('month_bucket', 'undated')}"
+            )
+        return "\n".join(lines)
 
     def _extract_incidents_langextract(self, final_docs, source_map) -> list[Incident]:
         if not final_docs:
@@ -8870,6 +9085,9 @@ class AgenticRAGApp:
                         "evidence_kind": evidence_kind,
                         "source": source_basename,
                         "source_path": self.selected_file,
+                        "file_path": self.selected_file,
+                        "channel": self._extract_channel(content),
+                        "source_section": "chat_message",
                         "chunk_id": index,
                         "ingest_id": chunk_ingest_id,
                     }
@@ -8928,6 +9146,7 @@ class AgenticRAGApp:
                         {
                             "source": source_basename,
                             "source_path": self.selected_file,
+                            "file_path": self.selected_file,
                             "chunk_id": chunk_id,
                             "ingest_id": chunk_ingest_id,
                             "char_start": char_start,
@@ -8946,6 +9165,9 @@ class AgenticRAGApp:
                         metadata["section_title"] = active_section.get("section_title")
                     if active_section.get("section_idx"):
                         metadata["section_idx"] = active_section.get("section_idx")
+                    metadata["source_section"] = str(
+                        metadata.get("section_title") or metadata.get("chapter_title") or ""
+                    ).strip()
                     metadata = self._ensure_source_metadata(
                         metadata, self.selected_file, doc.page_content
                     )
@@ -10890,6 +11112,13 @@ class AgenticRAGApp:
                 )
                 extract_started_at = time.perf_counter()
                 extraction_payload = self._build_incident_export_payload(final_docs)
+                structured_events = []
+                timeline_text = ""
+                timeline_source_map, _ = self._build_source_cards(final_docs)
+                if self._is_summary_or_pack_mode(resolved_settings.get("mode"), self.output_style.get()):
+                    structured_events = self.extract_structured_events(final_docs)
+                    timeline_text = self._timeline_text(structured_events)
+                self._latest_extracted_events = list(structured_events)
                 self._record_agent_lightning_span(
                     run_id,
                     "ExtractIncidents",
@@ -10967,7 +11196,13 @@ class AgenticRAGApp:
                     prompt_parts.append(style_instruction)
                 if evidence_instruction:
                     prompt_parts.append(evidence_instruction)
-                prompt_parts.append(f"CONTEXT:\n{context_text}")
+                if timeline_text:
+                    prompt_parts.append(
+                        "TIMELINE OF EVENTS (authoritative):\n"
+                        f"{timeline_text}\n\nUse this timeline of events instead of the raw text. Do not invent details not present in the timeline."
+                    )
+                else:
+                    prompt_parts.append(f"CONTEXT:\n{context_text}")
                 system_prompt = "\n\n".join(prompt_parts)
                 history_window = self._get_history_window(current_query=query)
                 messages = [
@@ -11088,6 +11323,9 @@ class AgenticRAGApp:
                     validated_answer = self._rewrite_evidence_pack_citations(
                         validated_answer, final_docs, source_map
                     )
+                event_sources_section = self._sources_section_from_events(structured_events, timeline_source_map)
+                if event_sources_section:
+                    validated_answer = f"{validated_answer.rstrip()}\n\n{event_sources_section}"
                 self.last_answer = validated_answer
                 self._record_trace_stage(
                     run_id,
@@ -11551,6 +11789,13 @@ class AgenticRAGApp:
                 )
                 extract_started_at = time.perf_counter()
                 extraction_payload = self._build_incident_export_payload(final_docs)
+                structured_events = []
+                timeline_text = ""
+                timeline_source_map, _ = self._build_source_cards(final_docs)
+                if self._is_summary_or_pack_mode(resolved_settings.get("mode"), self.output_style.get()):
+                    structured_events = self.extract_structured_events(final_docs)
+                    timeline_text = self._timeline_text(structured_events)
+                self._latest_extracted_events = list(structured_events)
                 self._record_agent_lightning_span(
                     run_id,
                     "ExtractIncidents",
@@ -11647,7 +11892,13 @@ class AgenticRAGApp:
                     "is thin, you may add one short 'Scope:' note at the top."
                 )
                 prompt_parts.append(f"CHECKLIST:\n{checklist_text}")
-                prompt_parts.append(f"CONTEXT:\n{context_text}{coverage_note}")
+                if timeline_text:
+                    prompt_parts.append(
+                        "TIMELINE OF EVENTS (authoritative):\n"
+                        f"{timeline_text}\n\nUse this timeline of events instead of the raw text. Do not invent details not present in the timeline."
+                    )
+                else:
+                    prompt_parts.append(f"CONTEXT:\n{context_text}{coverage_note}")
                 system_prompt = "\n\n".join(prompt_parts)
                 history_window = self._get_history_window(current_query=query)
                 messages = [
@@ -11828,6 +12079,9 @@ class AgenticRAGApp:
                     validated_answer = self._rewrite_evidence_pack_citations(
                         validated_answer, final_docs, source_map
                     )
+                event_sources_section = self._sources_section_from_events(structured_events, timeline_source_map)
+                if event_sources_section:
+                    validated_answer = f"{validated_answer.rstrip()}\n\n{event_sources_section}"
                 self.last_answer = validated_answer
                 self._record_trace_stage(
                     run_id,
