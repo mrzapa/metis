@@ -16,7 +16,7 @@ import html
 import webbrowser
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -139,6 +139,26 @@ class AgentProfile:
     retrieval_strategy: dict = field(default_factory=dict)
     iteration_strategy: dict = field(default_factory=dict)
     comprehension_pipeline_on_ingest: Optional[dict] = None
+
+
+@dataclass
+class TraceEvent:
+    run_id: str
+    event_id: str
+    stage: str
+    event_type: str
+    timestamp: str
+    iteration: int = 0
+    latency_ms: Optional[int] = None
+    prompt: Optional[dict[str, Any]] = None
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    retrieval_results: Optional[dict[str, Any]] = None
+    citations_chosen: list[str] = field(default_factory=list)
+    validator: Optional[dict[str, Any]] = None
+    payload: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 class CitationManager:
@@ -309,6 +329,8 @@ class AgenticRAGApp:
         self._trace_events = []
         self._agent_lightning_runs_by_id = {}
         self._agent_lightning_last_exportable_run = None
+        self._agent_lightning_trace_events_by_run = {}
+        self._agent_lightning_run_summaries = []
         self._latest_source_map = {}
         self._latest_incidents = []
         self._latest_grounding_html_path = ""
@@ -1398,9 +1420,14 @@ class AgenticRAGApp:
         ).pack(side="left", padx=8)
         ttk.Button(
             action_frame,
-            text="Export run as AgentLightning dataset",
+            text="Export Run as Agent Lightning Dataset",
             command=self.export_run_as_agent_lightning_dataset,
         ).pack(side="left")
+        ttk.Button(
+            action_frame,
+            text="Export Eval Set",
+            command=self.export_eval_set,
+        ).pack(side="left", padx=8)
 
         # Options
         opt_frame = ttk.Frame(left_pane)
@@ -1543,7 +1570,7 @@ class AgenticRAGApp:
         ).pack(anchor="w")
         ttk.Checkbutton(
             self.frontier_options_frame,
-            text="Enable Agent Lightning telemetry",
+            text="Agent Lightning traces",
             variable=self.agent_lightning_enabled,
         ).pack(anchor="w")
 
@@ -2724,6 +2751,112 @@ class AgenticRAGApp:
         return bool(self.agent_lightning_enabled.get())
 
     @staticmethod
+    def _trace_stage_from_node(node_name):
+        stage_map = {
+            "Ingest": "ingest",
+            "Retrieve": "retrieve",
+            "Rerank": "rerank",
+            "Select": "select",
+            "Synthesize": "generate",
+            "VerifyCitations": "verify",
+            "ExtractIncidents": "select",
+        }
+        return stage_map.get(str(node_name), str(node_name).lower())
+
+    def _append_trace_event(self, run_id, event: TraceEvent):
+        if not self._agent_lightning_telemetry_enabled():
+            return
+        bucket = self._agent_lightning_trace_events_by_run.setdefault(run_id, [])
+        bucket.append(event.to_dict())
+
+    def _trace_from_span(self, run_id, node, iteration, latency_ms, input_payload=None, output_payload=None, metrics=None):
+        stage = self._trace_stage_from_node(node)
+        prompt_payload = None
+        retrieval_payload = None
+        validator_payload = None
+        citations = []
+        payload = {
+            "input": input_payload if isinstance(input_payload, (dict, list, str, int, float, bool)) else str(input_payload),
+            "output": output_payload if isinstance(output_payload, (dict, list, str, int, float, bool)) else str(output_payload),
+            "metrics": metrics or {},
+        }
+        if stage == "generate":
+            prompt_payload = {"context": input_payload or {}, "response_preview": str(output_payload or "")[:1000]}
+        if stage == "retrieve":
+            retrieval_payload = output_payload if isinstance(output_payload, dict) else {"result": output_payload}
+        if stage == "verify":
+            out_text = str(output_payload or "")
+            citations = sorted(set(re.findall(r"\[(?:Chunk\s+\d+|S\d+(?:\s*,\s*S\d+)*)\]", out_text)))
+            validator_payload = {
+                "outcome": "pass" if (metrics or {}).get("citation_pass_rate", 0) >= 0.6 else "needs_review",
+                "metrics": metrics or {},
+            }
+        event = TraceEvent(
+            run_id=run_id,
+            event_id=str(uuid.uuid4()),
+            stage=stage,
+            event_type="span",
+            timestamp=datetime.now().isoformat(timespec="seconds"),
+            iteration=int(iteration or 0),
+            latency_ms=int(latency_ms or 0),
+            prompt=prompt_payload,
+            retrieval_results=retrieval_payload,
+            citations_chosen=citations,
+            validator=validator_payload,
+            payload=payload,
+        )
+        self._append_trace_event(run_id, event)
+
+    def _trace_from_event(self, run_id, event_name, payload):
+        event_name = str(event_name)
+        stage = {
+            "ingestion": "ingest",
+            "retrieval": "retrieve",
+            "selection": "select",
+            "generation": "generate",
+            "verification": "verify",
+            "rerank": "rerank",
+        }.get(event_name, event_name)
+        payload = payload or {}
+        citations = []
+        validator_payload = None
+        retrieval_payload = None
+        tool_calls = []
+        if stage == "retrieve":
+            retrieval_payload = {
+                "queries": payload.get("queries", []),
+                "dense_k": payload.get("dense_k"),
+                "lexical_k": payload.get("lexical_k"),
+                "fused_k": payload.get("fused_k"),
+            }
+            tool_calls = [
+                {"tool": "vector_retriever", "args": {"k": payload.get("dense_k")}},
+                {"tool": "lexical_search", "args": {"k": payload.get("lexical_k")}},
+            ]
+        if stage == "verify":
+            validator_payload = {
+                "claims_dropped": payload.get("claims_dropped", 0),
+                "claims_cited": payload.get("claims_cited", 0),
+            }
+        if stage == "generate":
+            citations = payload.get("citations", []) if isinstance(payload.get("citations"), list) else []
+        event = TraceEvent(
+            run_id=run_id,
+            event_id=str(uuid.uuid4()),
+            stage=stage,
+            event_type="event",
+            timestamp=datetime.now().isoformat(timespec="seconds"),
+            iteration=int(payload.get("iter", 0) or 0),
+            latency_ms=payload.get("latency_ms"),
+            tool_calls=tool_calls,
+            retrieval_results=retrieval_payload,
+            citations_chosen=citations,
+            validator=validator_payload,
+            payload=dict(payload),
+        )
+        self._append_trace_event(run_id, event)
+
+    @staticmethod
     def _payload_size_hint(payload):
         if payload is None:
             return 0
@@ -2743,18 +2876,28 @@ class AgenticRAGApp:
         run_payload = self._agent_lightning_runs_by_id.get(run_id)
         if not run_payload:
             return
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
         event = {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "run_id": run_id,
             "event": "node_span",
             "node": str(node),
             "iter": int(iteration or 0),
-            "latency_ms": int((time.perf_counter() - started_at) * 1000),
+            "latency_ms": latency_ms,
             "input_size": int(self._payload_size_hint(input_payload)),
             "output_size": int(self._payload_size_hint(output_payload)),
             "metrics": metrics or {},
         }
         run_payload.setdefault("trajectory_events", []).append(event)
+        self._trace_from_span(
+            run_id,
+            node,
+            iteration,
+            latency_ms,
+            input_payload=input_payload,
+            output_payload=output_payload,
+            metrics=metrics,
+        )
 
     def _start_agent_lightning_run(self, run_id, query):
         if not self._agent_lightning_telemetry_enabled():
@@ -2779,6 +2922,7 @@ class AgenticRAGApp:
             },
             "events": [],
             "trajectory_events": [],
+            "trace_events": [],
             "trajectory_path": "",
             "example": {
                 "query": query,
@@ -2787,6 +2931,7 @@ class AgenticRAGApp:
             },
         }
         self._agent_lightning_runs_by_id[run_id] = run_payload
+        self._agent_lightning_trace_events_by_run[run_id] = []
 
     def _record_agent_lightning_event(self, run_id, event, payload):
         if not self._agent_lightning_telemetry_enabled():
@@ -2801,6 +2946,7 @@ class AgenticRAGApp:
             **(payload or {}),
         }
         run_payload["events"].append(record)
+        self._trace_from_event(run_id, event, payload or {})
 
     def _build_incident_export_payload(self, docs):
         incidents = {}
@@ -2882,56 +3028,164 @@ class AgenticRAGApp:
             self.log(f"Agent Lightning trajectory saved: {trajectory_path}")
         except Exception as exc:
             self.log(f"Agent Lightning trajectory export skipped ({exc}).")
+        trace_events = list(self._agent_lightning_trace_events_by_run.get(run_id, []))
+        run_payload["trace_events"] = trace_events
+        summary = {
+            "run_id": run_id,
+            "query": run_payload.get("query", ""),
+            "final_output": str(final_output or ""),
+            "trace_event_count": len(trace_events),
+            "created_at": run_payload.get("created_at"),
+        }
+        self._agent_lightning_run_summaries.append(summary)
+        if len(self._agent_lightning_run_summaries) > 100:
+            self._agent_lightning_run_summaries = self._agent_lightning_run_summaries[-100:]
         self._agent_lightning_last_exportable_run = run_payload
+
+    def _write_jsonl(self, path, records):
+        with open(path, "w", encoding="utf-8") as handle:
+            for record in records or []:
+                handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+
+    def _compute_offline_eval_metrics(self, run_payload):
+        trace_events = list((run_payload or {}).get("trace_events") or [])
+        verifier_events = [e for e in trace_events if e.get("stage") == "verify"]
+        generation_events = [e for e in trace_events if e.get("stage") == "generate"]
+        retrieval_events = [e for e in trace_events if e.get("stage") == "retrieve"]
+        citation_total = 0
+        for event in verifier_events:
+            validator = event.get("validator") or {}
+            metrics = validator.get("metrics") or {}
+            citation_total += float(metrics.get("citation_pass_rate", 0) or 0)
+        avg_citation_pass_rate = citation_total / max(1, len(verifier_events))
+        avg_generation_latency = sum(int(e.get("latency_ms") or 0) for e in generation_events) / max(1, len(generation_events))
+        return {
+            "prompt_count": 1,
+            "trace_event_count": len(trace_events),
+            "retrieval_event_count": len(retrieval_events),
+            "generation_event_count": len(generation_events),
+            "verification_event_count": len(verifier_events),
+            "avg_citation_pass_rate": round(avg_citation_pass_rate, 4),
+            "avg_generation_latency_ms": int(avg_generation_latency),
+        }
 
     def export_run_as_agent_lightning_dataset(self):
         if not self._agent_lightning_last_exportable_run:
             messagebox.showinfo(
                 "AgentLightning export",
-                "No telemetry-enabled run available yet. Enable Agent Lightning telemetry and run a query first.",
+                "No telemetry-enabled run available yet. Enable Agent Lightning traces and run a query first.",
             )
             return
         parent_dir = filedialog.askdirectory(title="Select export directory")
         if not parent_dir:
             return
         run_payload = self._agent_lightning_last_exportable_run
-        folder_name = f"agent_lightning_dataset_{run_payload['run_id']}"
+        run_id = run_payload.get("run_id")
+        folder_name = f"agent_lightning_dataset_{run_id}"
         export_dir = os.path.join(parent_dir, folder_name)
         try:
             os.makedirs(export_dir, exist_ok=True)
+            trace_events = list(run_payload.get("trace_events") or self._agent_lightning_trace_events_by_run.get(run_id, []))
+            self._write_jsonl(os.path.join(export_dir, "trace_events.jsonl"), trace_events)
+            self._write_jsonl(os.path.join(export_dir, "runs.jsonl"), run_payload.get("events", []))
+            example_payload = {"run_id": run_id, **(run_payload.get("example") or {})}
+            self._write_jsonl(os.path.join(export_dir, "examples.jsonl"), [example_payload])
+            metrics = self._compute_offline_eval_metrics(run_payload)
+            manifest = {
+                "manifest_version": 1,
+                "dataset_type": "agent_lightning_trace_dataset",
+                "run_id": run_id,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "query": run_payload.get("query", ""),
+                "files": {
+                    "config": "config.json",
+                    "runs": "runs.jsonl",
+                    "examples": "examples.jsonl",
+                    "trace_events": "trace_events.jsonl",
+                    "eval_metrics": "eval_metrics.json",
+                },
+                "counts": {
+                    "events": len(run_payload.get("events", [])),
+                    "trajectory_events": len(run_payload.get("trajectory_events", [])),
+                    "trace_events": len(trace_events),
+                },
+            }
             with open(os.path.join(export_dir, "config.json"), "w", encoding="utf-8") as handle:
                 json.dump(run_payload.get("knobs", {}), handle, indent=2, ensure_ascii=False, sort_keys=True)
-            with open(os.path.join(export_dir, "runs.jsonl"), "w", encoding="utf-8") as handle:
-                for event in run_payload.get("events", []):
-                    handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
-            with open(os.path.join(export_dir, "examples.jsonl"), "w", encoding="utf-8") as handle:
-                example_payload = {
-                    "run_id": run_payload.get("run_id"),
-                    **(run_payload.get("example") or {}),
-                }
-                handle.write(json.dumps(example_payload, ensure_ascii=False, sort_keys=True) + "\n")
-            with open(os.path.join(export_dir, "agent_lightning_eval_stub.py"), "w", encoding="utf-8") as handle:
-                handle.write(
-                    "# Optional Agent Lightning benchmark/training stub.\n"
-                    "# This is intentionally commented so app runtime behavior is unchanged.\n"
-                    "#\n"
-                    "# from pathlib import Path\n"
-                    "# import json\n"
-                    "# import agent_lightning  # optional dependency\n"
-                    "#\n"
-                    "# dataset_dir = Path(__file__).resolve().parent\n"
-                    "# runs = [json.loads(line) for line in (dataset_dir / 'runs.jsonl').read_text(encoding='utf-8').splitlines() if line.strip()]\n"
-                    "# examples = [json.loads(line) for line in (dataset_dir / 'examples.jsonl').read_text(encoding='utf-8').splitlines() if line.strip()]\n"
-                    "# config = json.loads((dataset_dir / 'config.json').read_text(encoding='utf-8'))\n"
-                    "#\n"
-                    "# trainer = agent_lightning.Trainer(config=config)\n"
-                    "# trainer.benchmark(examples=examples, events=runs)\n"
-                    "# trainer.train_loop(examples=examples, events=runs)\n"
-                )
+            with open(os.path.join(export_dir, "manifest.json"), "w", encoding="utf-8") as handle:
+                json.dump(manifest, handle, indent=2, ensure_ascii=False, sort_keys=True)
+            with open(os.path.join(export_dir, "eval_metrics.json"), "w", encoding="utf-8") as handle:
+                json.dump(metrics, handle, indent=2, ensure_ascii=False, sort_keys=True)
             self.log(f"AgentLightning dataset exported to: {export_dir}")
             messagebox.showinfo("AgentLightning export", f"Exported dataset to:\n{export_dir}")
         except Exception as exc:
             messagebox.showerror("AgentLightning export", f"Export failed:\n{exc}")
+
+    def export_eval_set(self):
+        if not self._agent_lightning_run_summaries:
+            messagebox.showinfo(
+                "Export Eval Set",
+                "No telemetry-enabled runs are available yet. Enable Agent Lightning traces and run at least one query first.",
+            )
+            return
+        parent_dir = filedialog.askdirectory(title="Select eval export directory")
+        if not parent_dir:
+            return
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        export_dir = os.path.join(parent_dir, f"agent_lightning_eval_set_{timestamp}")
+        try:
+            os.makedirs(export_dir, exist_ok=True)
+            eval_examples = []
+            suite_metrics = {
+                "run_count": 0,
+                "avg_trace_events": 0,
+                "avg_citation_pass_rate": 0.0,
+                "avg_generation_latency_ms": 0,
+            }
+            total_trace_events = 0
+            total_citation = 0.0
+            total_generation_latency = 0
+            for summary in self._agent_lightning_run_summaries:
+                run_id = summary.get("run_id")
+                run_payload = self._agent_lightning_runs_by_id.get(run_id) or {}
+                metrics = self._compute_offline_eval_metrics(run_payload)
+                eval_examples.append(
+                    {
+                        "run_id": run_id,
+                        "prompt": summary.get("query", ""),
+                        "response": summary.get("final_output", ""),
+                        "metrics": metrics,
+                    }
+                )
+                suite_metrics["run_count"] += 1
+                total_trace_events += int(metrics.get("trace_event_count", 0))
+                total_citation += float(metrics.get("avg_citation_pass_rate", 0.0))
+                total_generation_latency += int(metrics.get("avg_generation_latency_ms", 0))
+            count = max(1, suite_metrics["run_count"])
+            suite_metrics["avg_trace_events"] = int(total_trace_events / count)
+            suite_metrics["avg_citation_pass_rate"] = round(total_citation / count, 4)
+            suite_metrics["avg_generation_latency_ms"] = int(total_generation_latency / count)
+            self._write_jsonl(os.path.join(export_dir, "eval_set.jsonl"), eval_examples)
+            with open(os.path.join(export_dir, "metrics.json"), "w", encoding="utf-8") as handle:
+                json.dump(suite_metrics, handle, indent=2, ensure_ascii=False, sort_keys=True)
+            with open(os.path.join(export_dir, "manifest.json"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "manifest_version": 1,
+                        "dataset_type": "agent_lightning_eval_set",
+                        "created_at": datetime.now().isoformat(timespec="seconds"),
+                        "files": {"eval_set": "eval_set.jsonl", "metrics": "metrics.json"},
+                        "run_count": suite_metrics["run_count"],
+                    },
+                    handle,
+                    indent=2,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            self.log(f"Eval set exported to: {export_dir}")
+            messagebox.showinfo("Export Eval Set", f"Exported eval set to:\n{export_dir}")
+        except Exception as exc:
+            messagebox.showerror("Export Eval Set", f"Export failed:\n{exc}")
 
     def _ensure_lexical_db(self):
         db_path = self._get_lexical_db_path()
@@ -9921,6 +10175,7 @@ class AgenticRAGApp:
 # - If citation_v2 enabled, answer uses [S#] and Sources shows readable labels (not chunk ids).
 # - If citation_v2 disabled, legacy [Chunk N] citations still work end-to-end.
 # - A generated answer includes [S#] citations and a Sources list with meaningful labels (not chunk-only labels).
+# - Acceptance test (comment): trace export creates non-empty trace_events.jsonl with run_id, stage, event_type, latency_ms, payload fields.
 # - Source cards include chapter/section and char offset locator for book-like raw text ingestion.
 # - With "Build Comprehension Index" enabled, ingestion should create concept_cards rows in SQLite.
 # - search_concepts("...") should return relevant concept_cards (title/kind/card_text/source refs) for topical queries.
