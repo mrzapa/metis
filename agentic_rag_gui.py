@@ -22,6 +22,10 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
 
+APP_NAME = "Agentic RAG"
+APP_VERSION = "1.0"
+APP_SUBTITLE = "LangChain + Chroma/Weaviate + Cohere"
+
 try:
     import langextract
 except ImportError:
@@ -208,7 +212,10 @@ class AgenticRAGApp:
                 langchain.globals.set_debug(False)
 
         self.root = root
-        self.root.title("Agentic RAG: LangChain + Chroma/Weaviate + Cohere")
+        self.root.title(
+            f"{APP_NAME} — {APP_SUBTITLE}" if APP_SUBTITLE else APP_NAME
+        )
+        self.load_icon()
         self.root.geometry("1200x900")
         self.main_thread = threading.current_thread()
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
@@ -358,6 +365,29 @@ class AgenticRAGApp:
 
         # Defer dependency check slightly to allow UI to render first
         self.root.after(100, self.check_dependencies)
+
+    def load_icon(self):
+        """Best-effort cross-platform icon loading without hard failure."""
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        assets_dir = os.path.join(script_dir, "assets")
+        ico_path = os.path.join(assets_dir, "app.ico")
+        png_path = os.path.join(assets_dir, "app.png")
+
+        # Keep a reference so Tk doesn't garbage-collect the icon image.
+        self._app_icon_photo = None
+
+        if sys.platform.startswith("win") and os.path.exists(ico_path):
+            try:
+                self.root.iconbitmap(ico_path)
+            except Exception as exc:
+                logger.debug("unable to set .ico window icon: %s", exc)
+
+        if os.path.exists(png_path):
+            try:
+                self._app_icon_photo = tk.PhotoImage(file=png_path)
+                self.root.iconphoto(True, self._app_icon_photo)
+            except Exception as exc:
+                logger.debug("unable to set .png window icon: %s", exc)
 
     def _get_required_packages(self):
         return [
