@@ -163,6 +163,46 @@ class TraceEvent:
         return asdict(self)
 
 
+class TraceStore:
+    def __init__(self, base_dir: str):
+        self.base_dir = base_dir
+        self.runs_dir = os.path.join(base_dir, "runs")
+        self.runs_jsonl = os.path.join(base_dir, "runs.jsonl")
+        os.makedirs(self.runs_dir, exist_ok=True)
+
+    def append(self, record: dict[str, Any]) -> None:
+        if not isinstance(record, dict):
+            return
+        run_id = str(record.get("run_id") or "unknown")
+        run_path = os.path.join(self.runs_dir, f"{run_id}.jsonl")
+        line = json.dumps(record, ensure_ascii=False, sort_keys=True)
+        for path in (self.runs_jsonl, run_path):
+            try:
+                with open(path, "a", encoding="utf-8") as handle:
+                    handle.write(line + "\n")
+            except OSError:
+                continue
+
+    def read_run(self, run_id: str) -> list[dict[str, Any]]:
+        path = os.path.join(self.runs_dir, f"{run_id}.jsonl")
+        if not run_id or not os.path.exists(path):
+            return []
+        events = []
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                for raw_line in handle:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        events.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        except OSError:
+            return []
+        return events
+
+
 class CitationManager:
     def __init__(self):
         self._label_by_source = {}
@@ -368,9 +408,11 @@ class AgenticRAGApp:
         self.lexical_db_path = None
         self.lexical_db_available = False
         self.session_db_path = os.path.join(os.getcwd(), "rag_sessions.db")
+        self.trace_store = TraceStore(os.path.join(os.getcwd(), "trace_store"))
         self.current_session_id = None
         self.session_title_llm_enabled = tk.BooleanVar(value=False)
         self._session_list_items = []
+        self._assistant_message_counter = 0
 
         self._init_sessions_db()
 
@@ -423,6 +465,21 @@ class AgenticRAGApp:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_messages_session_ts ON messages(session_id, ts)"
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS message_feedback(
+                    feedback_id TEXT PRIMARY KEY,
+                    session_id TEXT,
+                    run_id TEXT,
+                    vote INTEGER,
+                    note TEXT,
+                    ts TEXT
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_feedback_session ON message_feedback(session_id, ts)"
             )
 
     def _collect_session_extra_json(self):
@@ -552,6 +609,68 @@ class AgenticRAGApp:
                 ),
             )
 
+    def _record_trace_stage(self, run_id, stage, event_type, payload=None, iteration=0):
+        if not run_id:
+            return
+        event = {
+            "timestamp": self._now_iso(),
+            "session_id": self.current_session_id,
+            "run_id": run_id,
+            "iteration": int(iteration or 0),
+            "stage": str(stage),
+            "event_type": str(event_type),
+            "payload": payload or {},
+        }
+        self.trace_store.append(event)
+
+    @staticmethod
+    def _source_locators_from_docs(documents, max_items=20):
+        locators = []
+        for doc in (documents or [])[:max_items]:
+            metadata = getattr(doc, "metadata", {}) or {}
+            source = str(metadata.get("source") or metadata.get("file_path") or metadata.get("filename") or "unknown")
+            locator = {
+                "source_id": str(metadata.get("chunk_id") or metadata.get("id") or hashlib.md5(source.encode("utf-8", errors="ignore")).hexdigest()[:12]),
+                "label": source,
+                "anchor": str(metadata.get("char_range") or metadata.get("char_start") or metadata.get("section_title") or ""),
+                "metadata": {
+                    "score": metadata.get("relevance_score"),
+                    "month_bucket": metadata.get("month_bucket"),
+                    "channel": metadata.get("channel_type"),
+                    "role": metadata.get("role_kind"),
+                },
+            }
+            locators.append(locator)
+        return locators
+
+    def _record_feedback(self, run_id, vote, note):
+        if not self.current_session_id:
+            return
+        with sqlite3.connect(self.session_db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO message_feedback(feedback_id, session_id, run_id, vote, note, ts)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (str(uuid.uuid4()), self.current_session_id, run_id, int(vote), str(note or ""), self._now_iso()),
+            )
+        self._record_trace_stage(
+            run_id,
+            "feedback",
+            "user_feedback",
+            payload={"vote": int(vote), "note": str(note or "")},
+        )
+
+    def _submit_feedback(self, run_id, vote):
+        vote_icon = "👍" if int(vote) > 0 else "👎"
+        note = simpledialog.askstring(
+            "Message Feedback",
+            f"{vote_icon} feedback noted. Optional comment:",
+            parent=self.root,
+        )
+        self._record_feedback(run_id=run_id, vote=vote, note=note or "")
+        self.log(f"Saved feedback for run {run_id}: vote={vote_icon}")
+
     def start_new_chat(self, load_in_ui=True):
         self.current_session_id = str(uuid.uuid4())
         self._upsert_session_row(session_id=self.current_session_id, title="New Chat")
@@ -629,6 +748,19 @@ class AgenticRAGApp:
                 (session_id,),
             ).fetchall()
         return session, messages
+
+    def _fetch_feedback_for_session(self, session_id):
+        with sqlite3.connect(self.session_db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute(
+                """
+                SELECT feedback_id, session_id, run_id, vote, note, ts
+                FROM message_feedback
+                WHERE session_id = ?
+                ORDER BY ts ASC
+                """,
+                (session_id,),
+            ).fetchall()
 
     def _selected_history_session_id(self):
         if not hasattr(self, "sessions_tree"):
@@ -716,7 +848,7 @@ class AgenticRAGApp:
                 self.append_chat("user", f"You: {content}")
                 self._append_history(self._human_message(content=content))
             elif role == "assistant":
-                self.append_chat("agent", f"AI: {content}")
+                self.append_chat("agent", f"AI: {content}", run_id=row["run_id"])
                 self._append_history(self._ai_message(content=content))
                 self.last_answer = content
             elif role == "system":
@@ -812,6 +944,7 @@ class AgenticRAGApp:
     def _session_export_payload(self, session, messages):
         payload = dict(session)
         payload["messages"] = []
+        run_ids = set()
         for msg in messages:
             record = {
                 "role": msg["role"],
@@ -820,6 +953,8 @@ class AgenticRAGApp:
                 "run_id": msg["run_id"],
                 "sources": [],
             }
+            if msg["run_id"]:
+                run_ids.add(msg["run_id"])
             try:
                 parsed = json.loads(msg["sources_json"] or "[]")
                 if isinstance(parsed, list):
@@ -827,6 +962,9 @@ class AgenticRAGApp:
             except json.JSONDecodeError:
                 pass
             payload["messages"].append(record)
+        feedback_rows = self._fetch_feedback_for_session(session["session_id"])
+        payload["feedback"] = [dict(row) for row in feedback_rows]
+        payload["traces"] = {run_id: self.trace_store.read_run(run_id) for run_id in sorted(run_ids)}
         return payload
 
     def export_selected_session(self):
@@ -881,6 +1019,14 @@ class AgenticRAGApp:
                         f"chunk_id={source.get('chunk_id') or '-'} | "
                         f"score={source.get('score') if source.get('score') is not None else '-'}"
                     )
+            lines.append("")
+
+        feedback = payload.get("feedback") or []
+        if feedback:
+            lines.extend(["## Feedback", ""])
+            for item in feedback:
+                vote = "👍" if int(item.get("vote") or 0) > 0 else "👎"
+                lines.append(f"- {vote} run_id={item.get('run_id') or '-'} @ {item.get('ts') or ''}: {item.get('note') or ''}")
             lines.append("")
 
         try:
@@ -2378,11 +2524,12 @@ class AgenticRAGApp:
             text="Export notes to Markdown",
             command=self.export_notes_to_markdown,
         ).pack(side="left", padx=8)
-        ttk.Button(
-            action_frame,
-            text="Export Run as Agent Lightning Dataset",
-            command=self.export_run_as_agent_lightning_dataset,
-        ).pack(side="left")
+        if agent_lightning is not None:
+            ttk.Button(
+                action_frame,
+                text="Export to Agent Lightning format",
+                command=self.export_run_as_agent_lightning_dataset,
+            ).pack(side="left")
         ttk.Button(
             action_frame,
             text="Export Eval Set",
@@ -3842,33 +3989,41 @@ class AgenticRAGApp:
             return len(str(payload))
 
     def _record_agent_lightning_span(self, run_id, node, iteration, started_at, input_payload=None, output_payload=None, metrics=None):
-        if not self._agent_lightning_telemetry_enabled():
-            return
-        run_payload = self._agent_lightning_runs_by_id.get(run_id)
-        if not run_payload:
-            return
         latency_ms = int((time.perf_counter() - started_at) * 1000)
-        event = {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "run_id": run_id,
-            "event": "node_span",
+        stage = self._trace_stage_from_node(node)
+        payload = {
             "node": str(node),
-            "iter": int(iteration or 0),
             "latency_ms": latency_ms,
-            "input_size": int(self._payload_size_hint(input_payload)),
-            "output_size": int(self._payload_size_hint(output_payload)),
+            "input": input_payload if isinstance(input_payload, (dict, list, str, int, float, bool)) else str(input_payload),
+            "output": output_payload if isinstance(output_payload, (dict, list, str, int, float, bool)) else str(output_payload),
             "metrics": metrics or {},
         }
-        run_payload.setdefault("trajectory_events", []).append(event)
-        self._trace_from_span(
-            run_id,
-            node,
-            iteration,
-            latency_ms,
-            input_payload=input_payload,
-            output_payload=output_payload,
-            metrics=metrics,
-        )
+        self._record_trace_stage(run_id, stage, "span", payload=payload, iteration=iteration)
+        if self._agent_lightning_telemetry_enabled():
+            run_payload = self._agent_lightning_runs_by_id.get(run_id)
+            if not run_payload:
+                return
+            event = {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "run_id": run_id,
+                "event": "node_span",
+                "node": str(node),
+                "iter": int(iteration or 0),
+                "latency_ms": latency_ms,
+                "input_size": int(self._payload_size_hint(input_payload)),
+                "output_size": int(self._payload_size_hint(output_payload)),
+                "metrics": metrics or {},
+            }
+            run_payload.setdefault("trajectory_events", []).append(event)
+            self._trace_from_span(
+                run_id,
+                node,
+                iteration,
+                latency_ms,
+                input_payload=input_payload,
+                output_payload=output_payload,
+                metrics=metrics,
+            )
 
     def _start_agent_lightning_run(self, run_id, query):
         if not self._agent_lightning_telemetry_enabled():
@@ -3905,19 +4060,26 @@ class AgenticRAGApp:
         self._agent_lightning_trace_events_by_run[run_id] = []
 
     def _record_agent_lightning_event(self, run_id, event, payload):
-        if not self._agent_lightning_telemetry_enabled():
-            return
-        run_payload = self._agent_lightning_runs_by_id.get(run_id)
-        if not run_payload:
-            return
-        record = {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "run_id": run_id,
-            "event": event,
-            **(payload or {}),
-        }
-        run_payload["events"].append(record)
-        self._trace_from_event(run_id, event, payload or {})
+        payload = payload or {}
+        stage = {
+            "retrieval": "retrieval",
+            "verification": "validation",
+            "generation": "final_answer",
+            "selection": "rerank",
+        }.get(str(event), str(event))
+        self._record_trace_stage(run_id, stage, str(event), payload=payload, iteration=payload.get("iter", 0))
+        if self._agent_lightning_telemetry_enabled():
+            run_payload = self._agent_lightning_runs_by_id.get(run_id)
+            if not run_payload:
+                return
+            record = {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "run_id": run_id,
+                "event": event,
+                **payload,
+            }
+            run_payload["events"].append(record)
+            self._trace_from_event(run_id, event, payload)
 
     def _build_incident_export_payload(self, docs):
         incidents = {}
@@ -4057,8 +4219,17 @@ class AgenticRAGApp:
         try:
             os.makedirs(export_dir, exist_ok=True)
             trace_events = list(run_payload.get("trace_events") or self._agent_lightning_trace_events_by_run.get(run_id, []))
-            self._write_jsonl(os.path.join(export_dir, "trace_events.jsonl"), trace_events)
+            local_trace_events = self.trace_store.read_run(run_id)
+            merged_trace = trace_events + [event for event in local_trace_events if event not in trace_events]
+            self._write_jsonl(os.path.join(export_dir, "trace_events.jsonl"), merged_trace)
             self._write_jsonl(os.path.join(export_dir, "runs.jsonl"), run_payload.get("events", []))
+            with sqlite3.connect(self.session_db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                feedback_rows = conn.execute(
+                    "SELECT feedback_id, session_id, run_id, vote, note, ts FROM message_feedback WHERE run_id = ? ORDER BY ts ASC",
+                    (run_id,),
+                ).fetchall()
+            self._write_jsonl(os.path.join(export_dir, "feedback.jsonl"), [dict(row) for row in feedback_rows])
             example_payload = {"run_id": run_id, **(run_payload.get("example") or {})}
             self._write_jsonl(os.path.join(export_dir, "examples.jsonl"), [example_payload])
             metrics = self._compute_offline_eval_metrics(run_payload)
@@ -4074,11 +4245,12 @@ class AgenticRAGApp:
                     "examples": "examples.jsonl",
                     "trace_events": "trace_events.jsonl",
                     "eval_metrics": "eval_metrics.json",
+                    "feedback": "feedback.jsonl",
                 },
                 "counts": {
                     "events": len(run_payload.get("events", [])),
                     "trajectory_events": len(run_payload.get("trajectory_events", [])),
-                    "trace_events": len(trace_events),
+                    "trace_events": len(merged_trace),
                 },
             }
             with open(os.path.join(export_dir, "config.json"), "w", encoding="utf-8") as handle:
@@ -9004,6 +9176,17 @@ class AgenticRAGApp:
                     "recursive_mode_active": int(use_recursive_retrieval),
                 }
             )
+            self._record_trace_stage(
+                run_id,
+                "planner",
+                "run_start",
+                payload={
+                    "query": query,
+                    "output_style": output_style,
+                    "mode": mode_name,
+                    "agentic": bool(resolved_settings["agentic_mode"]),
+                },
+            )
             self._start_agent_lightning_run(run_id, query)
             search_type = resolved_settings.get("search_type", self.search_type.get()) or "similarity"
             mmr_lambda = float(resolved_settings.get("mmr_lambda", self.mmr_lambda.get()))
@@ -9908,6 +10091,15 @@ class AgenticRAGApp:
                     candidates = fallback[:final_k]
                 else:
                     candidates = candidates[:final_k]
+                self._record_trace_stage(
+                    run_id,
+                    "rerank",
+                    "selected_candidates",
+                    payload={
+                        "selected_count": len(candidates),
+                        "source_locators": self._source_locators_from_docs(candidates),
+                    },
+                )
                 return candidates
 
             def _coverage_followup_from_metadata(pool_docs, selected_docs, max_queries=2):
@@ -10157,6 +10349,20 @@ class AgenticRAGApp:
                         },
                     }
                 )
+                self._record_trace_stage(
+                    run_id,
+                    "context_pack",
+                    "iteration_summary",
+                    payload={
+                        "packed_count": int(packed_docs),
+                        "was_truncated": bool(truncated_flag),
+                        "used_chars": int(trunc_used_chars),
+                        "budget_chars": int(trunc_budget_chars),
+                        "query_count": int(query_count),
+                        "planner_subqueries": int(planner_subquery_count),
+                    },
+                    iteration=iteration_id,
+                )
 
             seen_chunk_ids = set()
 
@@ -10199,7 +10405,7 @@ class AgenticRAGApp:
                     1,
                     retrieve_started_at,
                     input_payload={"queries": queries, "k": routing_candidate_k},
-                    output_payload={"docs": len(docs), "levels": levels_used},
+                    output_payload={"docs": len(docs), "levels": levels_used, "source_locators": self._source_locators_from_docs(docs)},
                     metrics={
                         "dense_count": int(raw_expanded_count),
                         "lexical_count": int(digest_selected_count),
@@ -10225,7 +10431,7 @@ class AgenticRAGApp:
                     1,
                     rerank_started_at,
                     input_payload={"candidate_docs": len(docs), "query": query},
-                    output_payload={"candidate_docs": len(candidate_docs)},
+                    output_payload={"candidate_docs": len(candidate_docs), "source_locators": self._source_locators_from_docs(candidate_docs)},
                     metrics={"novelty": len({(getattr(d, 'metadata', {}) or {}).get('chunk_id', '') for d in candidate_docs if (getattr(d, 'metadata', {}) or {}).get('chunk_id', '')})},
                 )
                 select_started_at = time.perf_counter()
@@ -10654,7 +10860,16 @@ class AgenticRAGApp:
                         validated_answer, final_docs, source_map
                     )
                 self.last_answer = validated_answer
-                self.append_chat("agent", f"AI: {validated_answer}")
+                self._record_trace_stage(
+                    run_id,
+                    "final_answer",
+                    "assistant_message",
+                    payload={
+                        "answer_chars": len(str(validated_answer or "")),
+                        "citation_count": self._count_citations(validated_answer),
+                    },
+                )
+                self.append_chat("agent", f"AI: {validated_answer}", run_id=run_id)
                 self._append_history(self._ai_message(content=validated_answer))
                 self._insert_session_message(
                     role="assistant",
@@ -10847,7 +11062,7 @@ class AgenticRAGApp:
                     iteration,
                     retrieve_started_at,
                     input_payload={"queries": iteration_queries, "remaining_cap": remaining_cap},
-                    output_payload={"docs": len(docs), "levels": levels_used},
+                    output_payload={"docs": len(docs), "levels": levels_used, "source_locators": self._source_locators_from_docs(docs)},
                     metrics={"dense_count": int(raw_expanded_count), "lexical_count": int(digest_selected_count), "recursive_levels": levels_used or ["L0"]},
                 )
                 total_retrieved += len(docs)
@@ -10876,7 +11091,7 @@ class AgenticRAGApp:
                     iteration,
                     rerank_started_at,
                     input_payload={"candidate_docs": len(all_docs)},
-                    output_payload={"candidate_docs": len(candidate_docs)},
+                    output_payload={"candidate_docs": len(candidate_docs), "source_locators": self._source_locators_from_docs(candidate_docs)},
                     metrics={"novelty": len({(getattr(d, 'metadata', {}) or {}).get('chunk_id', '') for d in candidate_docs if (getattr(d, 'metadata', {}) or {}).get('chunk_id', '')})},
                 )
                 select_started_at = time.perf_counter()
@@ -11385,7 +11600,16 @@ class AgenticRAGApp:
                         validated_answer, final_docs, source_map
                     )
                 self.last_answer = validated_answer
-                self.append_chat("agent", f"AI: {validated_answer}")
+                self._record_trace_stage(
+                    run_id,
+                    "final_answer",
+                    "assistant_message",
+                    payload={
+                        "answer_chars": len(str(validated_answer or "")),
+                        "citation_count": self._count_citations(validated_answer),
+                    },
+                )
+                self.append_chat("agent", f"AI: {validated_answer}", run_id=run_id)
                 self._append_history(self._ai_message(content=validated_answer))
                 self._insert_session_message(
                     role="assistant",
@@ -11460,18 +11684,33 @@ class AgenticRAGApp:
             start = self.chat_display.index(f"{start_index}+{match.start()}c")
             end = self.chat_display.index(f"{start_index}+{match.end()}c")
             self.chat_display.tag_add("citation", start, end)
-
-    def append_chat(self, tag, message):
+    def append_chat(self, tag, message, run_id=None):
         def _append():
             self.chat_display.config(state="normal")
             start = self.chat_display.index(tk.END)
-            self.chat_display.insert(tk.END, message + "\n\n", tag)
+            self.chat_display.insert(tk.END, message + "\n", tag)
             end = self.chat_display.index(tk.END)
             self._tag_citations_in_chat(start, end)
-            if tag == "agent" and hasattr(self, "answer_text"):
-                answer_body = str(message).replace("AI:", "", 1).strip()
-                self._set_readonly_text(self.answer_text, answer_body)
-                self._tag_citations_in_answer()
+            if tag == "agent":
+                if run_id:
+                    self._assistant_message_counter += 1
+                    up_tag = f"feedback_up_{self._assistant_message_counter}"
+                    down_tag = f"feedback_down_{self._assistant_message_counter}"
+                    self.chat_display.insert(tk.END, "   ")
+                    self.chat_display.insert(tk.END, "👍", up_tag)
+                    self.chat_display.insert(tk.END, "  ")
+                    self.chat_display.insert(tk.END, "👎", down_tag)
+                    self.chat_display.tag_config(up_tag, foreground="#1b7f3a", underline=1)
+                    self.chat_display.tag_config(down_tag, foreground="#a12f2f", underline=1)
+                    self.chat_display.tag_bind(up_tag, "<Button-1>", lambda _e, rid=run_id: self._submit_feedback(rid, 1))
+                    self.chat_display.tag_bind(down_tag, "<Button-1>", lambda _e, rid=run_id: self._submit_feedback(rid, -1))
+                self.chat_display.insert(tk.END, "\n\n")
+                if hasattr(self, "answer_text"):
+                    answer_body = str(message).replace("AI:", "", 1).strip()
+                    self._set_readonly_text(self.answer_text, answer_body)
+                    self._tag_citations_in_answer()
+            else:
+                self.chat_display.insert(tk.END, "\n")
             self.chat_display.see(tk.END)
             self.chat_display.config(state="disabled")
 
