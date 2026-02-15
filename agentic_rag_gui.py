@@ -366,10 +366,349 @@ class AgenticRAGApp:
         self.selected_collection_name = RAW_COLLECTION_NAME
         self.lexical_db_path = None
         self.lexical_db_available = False
+        self.session_db_path = os.path.join(os.getcwd(), "rag_sessions.db")
+        self.current_session_id = None
+        self.session_title_llm_enabled = tk.BooleanVar(value=False)
+        self._session_list_items = []
+
+        self._init_sessions_db()
 
         self.setup_ui()
+        self.start_new_chat(load_in_ui=False)
+        self.refresh_sessions_list()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self._schedule_startup_pipeline()
+
+    def _now_iso(self):
+        return datetime.now(timezone.utc).isoformat()
+
+    def _init_sessions_db(self):
+        with sqlite3.connect(self.session_db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sessions(
+                    session_id TEXT PRIMARY KEY,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    title TEXT,
+                    summary TEXT,
+                    active_profile TEXT,
+                    mode TEXT,
+                    index_id TEXT,
+                    vector_backend TEXT,
+                    llm_provider TEXT,
+                    llm_model TEXT,
+                    embed_model TEXT,
+                    retrieve_k INT,
+                    final_k INT,
+                    mmr_lambda REAL,
+                    agentic_iterations INT,
+                    extra_json TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS messages(
+                    message_id TEXT PRIMARY KEY,
+                    session_id TEXT,
+                    ts TEXT,
+                    role TEXT,
+                    content TEXT,
+                    run_id TEXT,
+                    sources_json TEXT
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_session_ts ON messages(session_id, ts)"
+            )
+
+    def _collect_session_extra_json(self):
+        payload = {
+            "selected_index_path": self.selected_index_path,
+            "selected_collection_name": self.selected_collection_name,
+            "output_style": self.output_style.get(),
+            "session_title_llm_enabled": bool(self.session_title_llm_enabled.get()),
+            "llm_temperature": float(self.llm_temperature.get()),
+            "llm_max_tokens": int(self.llm_max_tokens.get()),
+            "embedding_provider": self.embedding_provider.get(),
+            "embedding_model_custom": self.embedding_model_custom.get(),
+            "llm_model_custom": self.llm_model_custom.get(),
+            "search_type": self.search_type.get(),
+            "retrieval_mode": self.retrieval_mode.get(),
+            "agentic_mode": bool(self.agentic_mode.get()),
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
+    def _upsert_session_row(self, *, session_id, title=None, summary=None):
+        ts = self._now_iso()
+        resolved_title = title or "New Chat"
+        with sqlite3.connect(self.session_db_path) as conn:
+            existing = conn.execute(
+                "SELECT session_id FROM sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE sessions
+                    SET updated_at = ?,
+                        title = COALESCE(?, title),
+                        summary = COALESCE(?, summary),
+                        active_profile = ?,
+                        mode = ?,
+                        index_id = ?,
+                        vector_backend = ?,
+                        llm_provider = ?,
+                        llm_model = ?,
+                        embed_model = ?,
+                        retrieve_k = ?,
+                        final_k = ?,
+                        mmr_lambda = ?,
+                        agentic_iterations = ?,
+                        extra_json = ?
+                    WHERE session_id = ?
+                    """,
+                    (
+                        ts,
+                        title,
+                        summary,
+                        self.selected_profile.get(),
+                        self.selected_mode.get(),
+                        self._format_index_label(
+                            self.selected_index_path, self.selected_collection_name
+                        )
+                        if self.selected_index_path
+                        else "(default)",
+                        self.vector_db_type.get(),
+                        self.llm_provider.get(),
+                        self._resolve_llm_model(),
+                        self._resolve_embedding_model(),
+                        int(self.retrieval_k.get()),
+                        int(self.final_k.get()),
+                        float(self.mmr_lambda.get()),
+                        int(self.agentic_max_iterations.get()),
+                        self._collect_session_extra_json(),
+                        session_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO sessions(
+                        session_id, created_at, updated_at, title, summary,
+                        active_profile, mode, index_id, vector_backend,
+                        llm_provider, llm_model, embed_model,
+                        retrieve_k, final_k, mmr_lambda, agentic_iterations, extra_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        ts,
+                        ts,
+                        resolved_title,
+                        summary,
+                        self.selected_profile.get(),
+                        self.selected_mode.get(),
+                        self._format_index_label(
+                            self.selected_index_path, self.selected_collection_name
+                        )
+                        if self.selected_index_path
+                        else "(default)",
+                        self.vector_db_type.get(),
+                        self.llm_provider.get(),
+                        self._resolve_llm_model(),
+                        self._resolve_embedding_model(),
+                        int(self.retrieval_k.get()),
+                        int(self.final_k.get()),
+                        float(self.mmr_lambda.get()),
+                        int(self.agentic_max_iterations.get()),
+                        self._collect_session_extra_json(),
+                    ),
+                )
+
+    def _insert_session_message(self, *, role, content, run_id=None, sources_json=None):
+        if not self.current_session_id:
+            return
+        self._upsert_session_row(session_id=self.current_session_id)
+        with sqlite3.connect(self.session_db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO messages(message_id, session_id, ts, role, content, run_id, sources_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    self.current_session_id,
+                    self._now_iso(),
+                    role,
+                    content,
+                    run_id,
+                    sources_json,
+                ),
+            )
+
+    def start_new_chat(self, load_in_ui=True):
+        self.current_session_id = str(uuid.uuid4())
+        self._upsert_session_row(session_id=self.current_session_id, title="New Chat")
+        if load_in_ui:
+            self.clear_chat()
+            self.append_chat("system", "Started a new chat session.")
+        self.refresh_sessions_list()
+
+    def refresh_sessions_list(self):
+        if not hasattr(self, "sessions_listbox"):
+            return
+        with sqlite3.connect(self.session_db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT session_id, updated_at, title, active_profile, mode
+                FROM sessions
+                ORDER BY updated_at DESC
+                LIMIT 500
+                """
+            ).fetchall()
+        self._session_list_items = [dict(row) for row in rows]
+        self.sessions_listbox.delete(0, tk.END)
+        for row in self._session_list_items:
+            title = (row["title"] or "Untitled").strip()
+            updated = (row["updated_at"] or "")[:19].replace("T", " ")
+            self.sessions_listbox.insert(
+                tk.END,
+                f"{title}  •  {updated}  •  {row['mode'] or '-'}  •  {row['active_profile'] or '-'}",
+            )
+
+    def _selected_history_session_id(self):
+        if not hasattr(self, "sessions_listbox"):
+            return None
+        selected = self.sessions_listbox.curselection()
+        if not selected:
+            return None
+        idx = int(selected[0])
+        if idx < 0 or idx >= len(self._session_list_items):
+            return None
+        return self._session_list_items[idx]["session_id"]
+
+    def load_selected_session(self):
+        session_id = self._selected_history_session_id()
+        if not session_id:
+            messagebox.showinfo("No Session", "Select a session to load.")
+            return
+        with sqlite3.connect(self.session_db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            session = conn.execute(
+                "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            messages = conn.execute(
+                "SELECT role, content FROM messages WHERE session_id = ? ORDER BY ts ASC",
+                (session_id,),
+            ).fetchall()
+        if not session:
+            return
+        self.current_session_id = session_id
+        self.clear_chat()
+        self.chat_history = []
+        for row in messages:
+            role = (row["role"] or "").strip().lower()
+            content = row["content"] or ""
+            if role == "user":
+                self.append_chat("user", f"You: {content}")
+                self._append_history(self._human_message(content=content))
+            elif role == "assistant":
+                self.append_chat("agent", f"AI: {content}")
+                self._append_history(self._ai_message(content=content))
+                self.last_answer = content
+            elif role == "system":
+                self.append_chat("system", content)
+            elif role == "source":
+                self.append_chat("source", content)
+
+        self.selected_profile.set(session["active_profile"] or self.selected_profile.get())
+        self.selected_mode.set(session["mode"] or self.selected_mode.get())
+        self.llm_provider.set(session["llm_provider"] or self.llm_provider.get())
+        self.llm_model.set(session["llm_model"] or self.llm_model.get())
+        self.embedding_model.set(session["embed_model"] or self.embedding_model.get())
+        if session["retrieve_k"]:
+            self.retrieval_k.set(int(session["retrieve_k"]))
+        if session["final_k"]:
+            self.final_k.set(int(session["final_k"]))
+        if session["mmr_lambda"] is not None:
+            self.mmr_lambda.set(float(session["mmr_lambda"]))
+        if session["agentic_iterations"]:
+            self.agentic_max_iterations.set(int(session["agentic_iterations"]))
+
+        extra = {}
+        try:
+            extra = json.loads(session["extra_json"] or "{}")
+        except json.JSONDecodeError:
+            extra = {}
+        self.output_style.set(extra.get("output_style", self.output_style.get()))
+        self.llm_temperature.set(float(extra.get("llm_temperature", self.llm_temperature.get())))
+        self.llm_max_tokens.set(int(extra.get("llm_max_tokens", self.llm_max_tokens.get())))
+        self.embedding_provider.set(extra.get("embedding_provider", self.embedding_provider.get()))
+        self.llm_model_custom.set(extra.get("llm_model_custom", self.llm_model_custom.get()))
+        self.embedding_model_custom.set(
+            extra.get("embedding_model_custom", self.embedding_model_custom.get())
+        )
+        self.search_type.set(extra.get("search_type", self.search_type.get()))
+        self.retrieval_mode.set(extra.get("retrieval_mode", self.retrieval_mode.get()))
+        self.agentic_mode.set(bool(extra.get("agentic_mode", self.agentic_mode.get())))
+        self.session_title_llm_enabled.set(
+            bool(extra.get("session_title_llm_enabled", self.session_title_llm_enabled.get()))
+        )
+        self.selected_index_path = extra.get("selected_index_path", self.selected_index_path)
+        self.selected_collection_name = extra.get(
+            "selected_collection_name", self.selected_collection_name
+        )
+        if self.selected_index_path:
+            self._pending_selected_index_label = self._format_index_label(
+                self.selected_index_path,
+                self.selected_collection_name,
+            )
+
+        self._refresh_profile_options()
+        self._sync_model_options()
+        self._refresh_existing_indexes_async(reason="Loading indexes…")
+        self.append_chat("system", f"Loaded session: {session['title'] or session_id}")
+
+    def delete_selected_session(self):
+        session_id = self._selected_history_session_id()
+        if not session_id:
+            return
+        with sqlite3.connect(self.session_db_path) as conn:
+            conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        if self.current_session_id == session_id:
+            self.start_new_chat(load_in_ui=True)
+        self.refresh_sessions_list()
+
+    def _maybe_autotitle_session(self, first_user_text):
+        text = (first_user_text or "").strip()
+        if not text:
+            return
+        default_title = (text[:72] + "…") if len(text) > 72 else text
+        self._upsert_session_row(session_id=self.current_session_id, title=default_title)
+
+    def _sources_to_json(self, docs):
+        if not docs:
+            return None
+        records = []
+        for d in docs:
+            metadata = getattr(d, "metadata", {}) or {}
+            records.append(
+                {
+                    "chunk_id": metadata.get("chunk_id"),
+                    "source": metadata.get("source")
+                    or metadata.get("file_path")
+                    or metadata.get("filename"),
+                    "score": metadata.get("relevance_score"),
+                }
+            )
+        try:
+            return json.dumps(records, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return None
 
     def _setup_langchain_globals(self):
         langchain = _lazy_import_langchain()
@@ -1179,10 +1518,24 @@ class AgenticRAGApp:
 
         actions = ttk.LabelFrame(frame, text="Session Actions", padding=10)
         actions.pack(fill="x")
-        ttk.Button(actions, text="Clear Chat", command=self.clear_chat).pack(side="left")
-        ttk.Button(actions, text="Save Chat Transcript", command=self.save_chat).pack(
-            side="left", padx=8
-        )
+        ttk.Button(actions, text="New Chat", command=lambda: self.start_new_chat(load_in_ui=True)).pack(side="left")
+        ttk.Button(actions, text="Load Selected", command=self.load_selected_session).pack(side="left", padx=8)
+        ttk.Button(actions, text="Delete Selected", command=self.delete_selected_session).pack(side="left")
+        ttk.Button(actions, text="Refresh", command=self.refresh_sessions_list).pack(side="left", padx=8)
+        ttk.Checkbutton(
+            actions,
+            text="Auto-title with LLM (optional)",
+            variable=self.session_title_llm_enabled,
+        ).pack(side="right")
+
+        ttk.Button(actions, text="Clear Chat View", command=self.clear_chat).pack(side="left", padx=(16, 0))
+        ttk.Button(actions, text="Save Chat Transcript", command=self.save_chat).pack(side="left", padx=8)
+
+        list_frame = ttk.LabelFrame(frame, text="Saved Sessions", padding=10)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        self.sessions_listbox = tk.Listbox(list_frame, height=20)
+        self.sessions_listbox.pack(fill=tk.BOTH, expand=True)
+        self.sessions_listbox.bind("<Double-1>", lambda _e: self.load_selected_session())
 
     def build_logs_tab(self):
         frame = ttk.Frame(self.tab_logs, padding=20)
@@ -1653,8 +2006,13 @@ class AgenticRAGApp:
         action_frame = ttk.Frame(left_pane)
         action_frame.pack(fill="x", pady=(8, 4))
         ttk.Button(
-            action_frame, text="Copy Last Answer", command=self.copy_last_answer
+            action_frame,
+            text="New Chat",
+            command=lambda: self.start_new_chat(load_in_ui=True),
         ).pack(side="left")
+        ttk.Button(
+            action_frame, text="Copy Last Answer", command=self.copy_last_answer
+        ).pack(side="left", padx=(8, 0))
         ttk.Button(
             action_frame,
             text="Export notes to Markdown",
@@ -7774,6 +8132,15 @@ class AgenticRAGApp:
         self.txt_input.delete(0, tk.END)
         self.append_chat("user", f"You: {query}")
         self._append_history(self._human_message(content=query))
+        self._insert_session_message(role="user", content=query)
+        with sqlite3.connect(self.session_db_path) as conn:
+            count_row = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user'",
+                (self.current_session_id,),
+            ).fetchone()
+        if count_row and int(count_row[0]) == 1:
+            self._maybe_autotitle_session(query)
+        self.refresh_sessions_list()
 
         if self.index_embedding_signature:
             current_signature = self._current_embedding_signature()
@@ -9558,6 +9925,13 @@ class AgenticRAGApp:
                 self.last_answer = validated_answer
                 self.append_chat("agent", f"AI: {validated_answer}")
                 self._append_history(self._ai_message(content=validated_answer))
+                self._insert_session_message(
+                    role="assistant",
+                    content=validated_answer,
+                    run_id=run_id,
+                    sources_json=self._sources_to_json(final_docs),
+                )
+                self._run_on_ui(self.refresh_sessions_list)
 
                 if is_evidence_pack:
                     self.append_chat("source", f"\n{source_cards_text}")
@@ -10264,6 +10638,13 @@ class AgenticRAGApp:
                 self.last_answer = validated_answer
                 self.append_chat("agent", f"AI: {validated_answer}")
                 self._append_history(self._ai_message(content=validated_answer))
+                self._insert_session_message(
+                    role="assistant",
+                    content=validated_answer,
+                    run_id=run_id,
+                    sources_json=self._sources_to_json(final_docs),
+                )
+                self._run_on_ui(self.refresh_sessions_list)
 
             if is_evidence_pack:
                 if not latest_answer:
