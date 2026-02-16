@@ -582,6 +582,7 @@ class AgenticRAGApp:
         self.advanced_ui = tk.BooleanVar(value=False)
         self.basic_mode = False
         self.last_used_mode = "advanced"
+        self.startup_mode_setting = tk.StringVar(value="advanced")
         self.basic_wizard_completed = False
         self._wizard_state = {}
         self.ui_mode = tk.StringVar(value="light")
@@ -593,9 +594,6 @@ class AgenticRAGApp:
 
         self._init_sessions_db()
 
-        self.setup_ui()
-        self.start_new_chat(load_in_ui=False)
-        self.refresh_sessions_list()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self._schedule_startup_pipeline()
 
@@ -1462,8 +1460,7 @@ class AgenticRAGApp:
 
     def _startup_step_prepare_ui_state(self):
         def _step():
-            self._set_startup_status("Initialising UI...")
-            self._ensure_tab_aliases()
+            self._set_startup_status("Preparing startup…")
 
         self._run_startup_step("prepare_ui_state", _step, self._startup_step_load_config)
 
@@ -1472,14 +1469,33 @@ class AgenticRAGApp:
             self._set_startup_status("Loading settings...")
             self.load_config()
 
-        self._run_startup_step("load_config", _step, self._startup_step_post_load)
+        self._run_startup_step("load_config", _step, self._startup_step_select_mode)
+
+    def _startup_step_select_mode(self):
+        def _step():
+            self._set_startup_status("Selecting startup mode…")
+            self._prompt_startup_mode_selection()
+
+        self._run_startup_step("select_mode", _step, self._startup_step_build_ui)
+
+    def _startup_step_build_ui(self):
+        def _step():
+            self._set_startup_status("Building interface…")
+            self.setup_ui()
+            self.start_new_chat(load_in_ui=False)
+            self.refresh_sessions_list()
+            self._ensure_tab_aliases()
+
+        self._run_startup_step("build_ui", _step, self._startup_step_post_load)
 
     def _startup_step_post_load(self):
         def _step():
             self._set_startup_status("Applying runtime defaults...")
             self._setup_langchain_globals()
             self._sync_model_options()
-            self.vector_db_type.trace_add("write", self._on_vector_db_type_change)
+            if not getattr(self, "_vector_db_trace_installed", False):
+                self.vector_db_type.trace_add("write", self._on_vector_db_type_change)
+                self._vector_db_trace_installed = True
 
         self._run_startup_step("post_load", _step, self._startup_step_scan_indexes)
 
@@ -1492,16 +1508,8 @@ class AgenticRAGApp:
         self._run_startup_step(
             "apply_existing_indexes",
             _step,
-            self._startup_step_select_mode,
+            self._startup_step_check_dependencies,
         )
-
-    def _startup_step_select_mode(self):
-        def _step():
-            self._set_startup_status("Selecting startup mode…")
-            self._prompt_startup_mode_selection()
-            self._configure_chat_mode_ui()
-
-        self._run_startup_step("select_mode", _step, self._startup_step_check_dependencies)
 
     def _startup_step_check_dependencies(self):
         def _step():
@@ -1517,29 +1525,6 @@ class AgenticRAGApp:
             self.tab_config = self.tab_settings
         if hasattr(self, "tab_library"):
             self.tab_ingest = self.tab_library
-
-    def _build_full_ui(self):
-        style = ttk.Style()
-        if "clam" in style.theme_names():
-            style.theme_use("clam")
-        style.configure("Bold.TLabel", font=("Segoe UI", 10, "bold"))
-        style.configure("Header.TLabel", font=("Segoe UI", 12, "bold"))
-        style.configure("Status.TLabel", font=("Segoe UI", 9))
-
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        self.tab_config = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_config, text="1. Configuration")
-        self.build_config_tab()
-
-        self.tab_ingest = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_ingest, text="2. Data Ingestion")
-        self.build_ingest_tab()
-
-        self.tab_chat = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_chat, text="3. Agentic Chat")
-        self.build_chat_tab()
 
     def load_icon(self):
         """Best-effort cross-platform icon loading without hard failure."""
@@ -1844,10 +1829,12 @@ class AgenticRAGApp:
         llm_options = self._get_llm_model_options(llm_provider)
         emb_options = self._get_embedding_model_options(emb_provider)
 
-        self.cb_llm_model["values"] = llm_options
-        if hasattr(self, "cb_chat_model"):
+        if hasattr(self, "cb_llm_model") and self._safe_widget_exists(self.cb_llm_model):
+            self.cb_llm_model["values"] = llm_options
+        if hasattr(self, "cb_chat_model") and self._safe_widget_exists(self.cb_chat_model):
             self.cb_chat_model["values"] = llm_options
-        self.cb_emb_model["values"] = emb_options
+        if hasattr(self, "cb_emb_model") and self._safe_widget_exists(self.cb_emb_model):
+            self.cb_emb_model["values"] = emb_options
 
         if self.llm_model.get() not in llm_options:
             self.llm_model.set(llm_options[0])
@@ -1861,13 +1848,16 @@ class AgenticRAGApp:
         emb_custom_enabled = self.embedding_model.get() == "custom"
         hf_enabled = self.embedding_provider.get() == "local_huggingface"
 
-        self.llm_model_custom_entry.config(
-            state="normal" if llm_custom_enabled else "disabled"
-        )
-        self.embedding_model_custom_entry.config(
-            state="normal" if emb_custom_enabled else "disabled"
-        )
-        self.btn_browse_hf_model.config(state="normal" if hf_enabled else "disabled")
+        if hasattr(self, "llm_model_custom_entry") and self._safe_widget_exists(self.llm_model_custom_entry):
+            self.llm_model_custom_entry.config(
+                state="normal" if llm_custom_enabled else "disabled"
+            )
+        if hasattr(self, "embedding_model_custom_entry") and self._safe_widget_exists(self.embedding_model_custom_entry):
+            self.embedding_model_custom_entry.config(
+                state="normal" if emb_custom_enabled else "disabled"
+            )
+        if hasattr(self, "btn_browse_hf_model") and self._safe_widget_exists(self.btn_browse_hf_model):
+            self.btn_browse_hf_model.config(state="normal" if hf_enabled else "disabled")
 
     def _on_llm_provider_change(self, event=None):
         self._sync_model_options()
@@ -2133,6 +2123,8 @@ class AgenticRAGApp:
         return f"{provider}:{model}".strip(":")
 
     def _refresh_compatibility_warning(self):
+        if not hasattr(self, "compat_warning") or not self._safe_widget_exists(self.compat_warning):
+            return
         if not self.index_embedding_signature:
             self.compat_warning.config(text="")
             return
@@ -2331,9 +2323,11 @@ class AgenticRAGApp:
         if saved_mode not in {"basic", "advanced"}:
             saved_mode = "advanced"
         self.last_used_mode = saved_mode
+        self.startup_mode_setting.set(saved_mode)
         self.basic_mode = saved_mode == "basic"
-        self.instructions_box.delete("1.0", tk.END)
-        self.instructions_box.insert(tk.END, self.system_instructions.get())
+        if hasattr(self, "instructions_box") and self._safe_widget_exists(self.instructions_box):
+            self.instructions_box.delete("1.0", tk.END)
+            self.instructions_box.insert(tk.END, self.system_instructions.get())
 
         self._sync_model_options()
         self._refresh_compatibility_warning()
@@ -2606,7 +2600,16 @@ class AgenticRAGApp:
             text="Advanced",
             variable=self.advanced_ui,
             command=self._apply_basic_advanced_visibility,
-        ).pack(side="left", padx=(8, 0))
+        ).pack(side="left", padx=(8, 16))
+        ttk.Label(toggle_row, text="Startup mode:").pack(side="left")
+        ttk.Combobox(
+            toggle_row,
+            textvariable=self.startup_mode_setting,
+            values=["advanced", "basic"],
+            state="readonly",
+            width=10,
+        ).pack(side="left", padx=(8, 8))
+        ttk.Button(toggle_row, text="Apply", command=self._apply_startup_mode_setting).pack(side="left")
 
         appearance_section = CollapsibleFrame(frame, "Appearance", expanded=False)
         appearance_section.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
@@ -3282,10 +3285,6 @@ class AgenticRAGApp:
         self._toggle_grounding_tab()
         self._update_current_state_strip()
 
-    def _configure_chat_mode_ui(self):
-        self.basic_wizard_completed = False
-        self.root.after(0, self.build_chat_tab)
-
     def _prompt_startup_mode_selection(self):
         selected = {"mode": None}
 
@@ -3294,11 +3293,10 @@ class AgenticRAGApp:
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.resizable(False, False)
-        dialog.protocol("WM_DELETE_WINDOW", lambda: None)
 
         frame = ttk.Frame(dialog, padding=16)
         frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text="Choose how you want to start Axiom:", style="Bold.TLabel").pack(anchor="w")
+        ttk.Label(frame, text="Choose how you want to start Axiom:").pack(anchor="w")
         ttk.Label(
             frame,
             text=f"Last used mode: {self.last_used_mode.title()}",
@@ -3310,17 +3308,24 @@ class AgenticRAGApp:
 
         ttk.Button(frame, text="Basic Mode", command=lambda: _choose("basic")).pack(fill="x")
         ttk.Button(frame, text="Advanced Mode", command=lambda: _choose("advanced")).pack(fill="x", pady=(8, 0))
+        ttk.Label(
+            frame,
+            text="Basic mode runs a guided setup wizard before chat.",
+            foreground="#6b7280",
+        ).pack(anchor="w", pady=(10, 0))
 
         self.root.wait_window(dialog)
 
         mode = selected["mode"] or self.last_used_mode
         self.basic_mode = mode == "basic"
         self.last_used_mode = mode
+        self.startup_mode_setting.set(mode)
         self.save_config()
 
     def switch_to_advanced_mode(self):
         self.basic_mode = False
         self.last_used_mode = "advanced"
+        self.startup_mode_setting.set("advanced")
         self.basic_wizard_completed = True
         self.save_config()
         self.build_chat_tab()
@@ -3328,27 +3333,27 @@ class AgenticRAGApp:
     def run_setup_wizard(self):
         self.basic_mode = True
         self.last_used_mode = "basic"
+        self.startup_mode_setting.set("basic")
         self.basic_wizard_completed = False
         self.save_config()
         self.build_chat_tab()
 
     def _build_basic_setup_wizard(self):
-        runtime_to_preset = {
-            "Summary": "Book Summary",
-            "Q&A": "Q&A",
-            "Tutor": "Tutor",
-            "Research": "Research",
-            "Evidence Pack": "Evidence Pack",
-        }
         self._wizard_state = {
             "step": 1,
             "file_path": "",
             "selected_index": self.existing_index_var.get() or "(default)",
+            "chunk_size": int(self.chunk_size.get()),
+            "chunk_overlap": int(self.chunk_overlap.get()),
+            "build_digest_index": bool(self.build_digest_index.get()),
+            "build_comprehension_index": bool(self.build_comprehension_index.get()),
+            "comprehension_extraction_depth": self.comprehension_extraction_depth.get(),
+            "prefer_comprehension_index": bool(self.prefer_comprehension_index.get()),
             "llm_provider": self.llm_provider.get(),
             "llm_model": self.llm_model.get(),
             "embedding_provider": self.embedding_provider.get(),
             "embedding_model": self.embedding_model.get(),
-            "modes": [runtime_to_preset.get(self.selected_mode.get(), "Q&A")],
+            "mode_preset": "Q&A",
         }
         wrap = ttk.Frame(self.tab_chat, padding=18)
         wrap.pack(fill=tk.BOTH, expand=True)
@@ -3371,7 +3376,7 @@ class AgenticRAGApp:
     def _wizard_move(self, delta):
         if delta > 0 and not self._wizard_validate_current_step():
             return
-        step = max(1, min(4, int(self._wizard_state.get("step", 1)) + delta))
+        step = max(1, min(6, int(self._wizard_state.get("step", 1)) + delta))
         self._wizard_state["step"] = step
         self._render_wizard_step()
 
@@ -3380,18 +3385,22 @@ class AgenticRAGApp:
         for child in self._wizard_content.winfo_children():
             child.destroy()
         self._wizard_back.config(state="normal" if step > 1 else "disabled")
-        self._wizard_next.config(text="Confirm & Start" if step == 4 else "Next")
+        self._wizard_next.config(text="Finish" if step == 6 else "Next")
         if step == 1:
             self._render_wizard_step_one()
         elif step == 2:
             self._render_wizard_step_two()
         elif step == 3:
             self._render_wizard_step_three()
-        else:
+        elif step == 4:
             self._render_wizard_step_four()
+        elif step == 5:
+            self._render_wizard_step_five()
+        else:
+            self._render_wizard_step_six()
 
     def _render_wizard_step_one(self):
-        self._wizard_step_label.config(text="Step 1 of 4: Select File or Index")
+        self._wizard_step_label.config(text="Step 1 of 6: Choose file or existing index")
         self._wizard_file_var = tk.StringVar(value=self._wizard_state.get("file_path", ""))
         row = ttk.Frame(self._wizard_content)
         row.pack(fill="x", pady=(0, 8))
@@ -3401,7 +3410,10 @@ class AgenticRAGApp:
 
         ttk.Label(self._wizard_content, text="Or choose an existing index:").pack(anchor="w")
         index_values = ["(default)"] + list(self.existing_index_paths.keys())
-        self._wizard_index_var = tk.StringVar(value=self._wizard_state.get("selected_index", "(default)"))
+        selected_index = self._wizard_state.get("selected_index", "(default)")
+        if selected_index not in index_values:
+            selected_index = "(default)"
+        self._wizard_index_var = tk.StringVar(value=selected_index)
         ttk.Combobox(self._wizard_content, textvariable=self._wizard_index_var, values=index_values, state="readonly").pack(fill="x", pady=(4, 0))
 
     def _wizard_browse_file(self):
@@ -3410,7 +3422,44 @@ class AgenticRAGApp:
             self._wizard_file_var.set(chosen)
 
     def _render_wizard_step_two(self):
-        self._wizard_step_label.config(text="Step 2 of 4: Choose LLM and Embedding Models")
+        self._wizard_step_label.config(text="Step 2 of 6: Recommended ingestion settings")
+        info = ttk.LabelFrame(self._wizard_content, text="Recommended defaults", padding=8)
+        info.pack(fill="x", pady=(0, 8))
+        ttk.Label(info, text="Chunk size: 1200").pack(anchor="w")
+        ttk.Label(info, text="Chunk overlap: 150").pack(anchor="w")
+        ttk.Label(info, text="Build digest index: On").pack(anchor="w")
+        ttk.Label(info, text="Comprehension index: Off (enable later for long-form coaching)").pack(anchor="w")
+
+        self._wizard_chunk_size = tk.IntVar(value=int(self._wizard_state.get("chunk_size", 1200)))
+        self._wizard_chunk_overlap = tk.IntVar(value=int(self._wizard_state.get("chunk_overlap", 150)))
+        self._wizard_build_digest = tk.BooleanVar(value=bool(self._wizard_state.get("build_digest_index", True)))
+        self._wizard_build_comprehension = tk.BooleanVar(value=bool(self._wizard_state.get("build_comprehension_index", False)))
+        self._wizard_comp_depth = tk.StringVar(value=self._wizard_state.get("comprehension_extraction_depth", "Standard"))
+        self._wizard_prefer_comp = tk.BooleanVar(value=bool(self._wizard_state.get("prefer_comprehension_index", True)))
+
+        form = ttk.Frame(self._wizard_content)
+        form.pack(fill="x")
+        ttk.Label(form, text="Chunk size").grid(row=0, column=0, sticky="w")
+        ttk.Entry(form, textvariable=self._wizard_chunk_size, width=10).grid(row=0, column=1, sticky="w", padx=(8, 16))
+        ttk.Label(form, text="Chunk overlap").grid(row=0, column=2, sticky="w")
+        ttk.Entry(form, textvariable=self._wizard_chunk_overlap, width=10).grid(row=0, column=3, sticky="w", padx=(8, 0))
+        ttk.Checkbutton(form, text="Build digest index", variable=self._wizard_build_digest).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(form, text="Build comprehension index", variable=self._wizard_build_comprehension).grid(row=1, column=2, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(form, text="Extraction depth").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Combobox(form, textvariable=self._wizard_comp_depth, values=["Light", "Standard", "Deep"], state="readonly", width=12).grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+        ttk.Checkbutton(form, text="Prefer comprehension index when available", variable=self._wizard_prefer_comp).grid(row=2, column=2, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(self._wizard_content, text="Apply recommended settings", command=self._wizard_apply_recommended_ingestion).pack(anchor="w", pady=(10, 0))
+
+    def _wizard_apply_recommended_ingestion(self):
+        self._wizard_chunk_size.set(1200)
+        self._wizard_chunk_overlap.set(150)
+        self._wizard_build_digest.set(True)
+        self._wizard_build_comprehension.set(False)
+        self._wizard_comp_depth.set("Standard")
+        self._wizard_prefer_comp.set(True)
+
+    def _render_wizard_step_three(self):
+        self._wizard_step_label.config(text="Step 3 of 6: Choose LLM and embedding providers/models")
         llm_values = ["openai", "anthropic", "google", "local_lm_studio"]
         emb_values = ["voyage", "openai", "google", "local_huggingface"]
         self._wizard_llm_provider = tk.StringVar(value=self._wizard_state.get("llm_provider", self.llm_provider.get()))
@@ -3443,35 +3492,56 @@ class AgenticRAGApp:
         if self._wizard_embedding_model.get() not in emb_options:
             self._wizard_embedding_model.set(emb_options[0])
 
-    def _render_wizard_step_three(self):
-        self._wizard_step_label.config(text="Step 3 of 4: Select Mode(s)")
-        self._wizard_preset_modes = [
-            "Q&A",
-            "Book Summary",
-            "Blinkist",
-            "Tutor",
-            "Research",
-            "Evidence Pack",
-        ]
-        self._wizard_mode_list = tk.Listbox(self._wizard_content, selectmode=tk.MULTIPLE, height=8, exportselection=False)
-        self._wizard_mode_labels = []
-        for mode in self._wizard_preset_modes:
-            self._wizard_mode_list.insert(tk.END, mode)
-            self._wizard_mode_labels.append((mode, mode))
-        self._wizard_mode_list.pack(fill="both", expand=True)
-        selected_modes = set(self._wizard_state.get("modes", []))
-        for idx, (_display, mode) in enumerate(self._wizard_mode_labels):
-            if mode in selected_modes:
-                self._wizard_mode_list.selection_set(idx)
-
     def _render_wizard_step_four(self):
-        self._wizard_step_label.config(text="Step 4 of 4: Confirm & Start")
+        self._wizard_step_label.config(text="Step 4 of 6: Provide required API keys")
+        key_map = {"openai": "openai", "anthropic": "anthropic", "google": "google", "voyage": "voyage", "cohere": "cohere"}
+        required = []
+        for provider in (self._wizard_state.get("llm_provider"), self._wizard_state.get("embedding_provider")):
+            key_name = key_map.get(provider)
+            if key_name and key_name not in required:
+                required.append(key_name)
+
+        self._wizard_api_key_vars = {}
+        self._wizard_api_key_required = required
+        if not required:
+            ttk.Label(self._wizard_content, text="No external API keys are required for the selected providers.").pack(anchor="w")
+            return
+
+        for key_name in required:
+            row = ttk.Frame(self._wizard_content)
+            row.pack(fill="x", pady=(0, 8))
+            has_saved = bool(self.api_keys[key_name].get().strip())
+            ttk.Label(row, text=f"{key_name.title()} API key:", width=22).pack(side="left")
+            value_var = tk.StringVar(value="")
+            self._wizard_api_key_vars[key_name] = value_var
+            ttk.Entry(row, textvariable=value_var, show="*").pack(side="left", fill="x", expand=True, padx=(8, 8))
+            status = "Saved key available" if has_saved else "Required"
+            ttk.Label(row, text=status, foreground="#6b7280").pack(side="left")
+
+    def _render_wizard_step_five(self):
+        self._wizard_step_label.config(text="Step 5 of 6: Choose a mode preset")
+        self._wizard_mode_preset = tk.StringVar(value=self._wizard_state.get("mode_preset", "Q&A"))
+        presets = [
+            ("Q&A", "Direct question answering over your indexed content."),
+            ("Book summary", "High-level and structured summary outputs."),
+            ("Tutor", "Teaching-first explanations with guided progression."),
+            ("Research", "Broader retrieval and analytical response style."),
+        ]
+        for name, desc in presets:
+            card = ttk.Frame(self._wizard_content)
+            card.pack(fill="x", pady=(0, 8))
+            ttk.Radiobutton(card, text=name, value=name, variable=self._wizard_mode_preset).pack(anchor="w")
+            ttk.Label(card, text=desc, foreground="#6b7280").pack(anchor="w", padx=(24, 0))
+
+    def _render_wizard_step_six(self):
+        self._wizard_step_label.config(text="Step 6 of 6: Confirm and start")
         summary = [
             f"File: {self._wizard_state.get('file_path') or 'None'}",
             f"Index: {self._wizard_state.get('selected_index') or '(default)'}",
+            f"Chunking: {self._wizard_state.get('chunk_size')} / overlap {self._wizard_state.get('chunk_overlap')}",
             f"LLM: {self._wizard_state.get('llm_provider')} / {self._wizard_state.get('llm_model')}",
             f"Embedding: {self._wizard_state.get('embedding_provider')} / {self._wizard_state.get('embedding_model')}",
-            f"Modes: {', '.join(self._wizard_state.get('modes') or ['Q&A'])}",
+            f"Mode preset: {self._wizard_state.get('mode_preset')}",
         ]
         text = scrolledtext.ScrolledText(self._wizard_content, height=10, state="normal", wrap=tk.WORD)
         text.pack(fill="both", expand=True)
@@ -3483,91 +3553,61 @@ class AgenticRAGApp:
         if step == 1:
             self._wizard_state["file_path"] = (self._wizard_file_var.get() or "").strip()
             self._wizard_state["selected_index"] = self._wizard_index_var.get()
-            if not self._wizard_state["file_path"] and not self._wizard_state["selected_index"]:
-                messagebox.showerror("Setup Wizard", "Choose a file or an existing index to continue.")
+            if not self._wizard_state["file_path"] and self._wizard_state["selected_index"] == "(default)":
+                messagebox.showerror("Setup Wizard", "Choose a file or select an existing index to continue.")
                 return False
             return True
         if step == 2:
+            try:
+                chunk_size = int(self._wizard_chunk_size.get())
+                chunk_overlap = int(self._wizard_chunk_overlap.get())
+            except (TypeError, ValueError):
+                messagebox.showerror("Setup Wizard", "Chunk settings must be integers.")
+                return False
+            if chunk_size <= 0 or chunk_overlap < 0:
+                messagebox.showerror("Setup Wizard", "Chunk settings must be positive.")
+                return False
+            self._wizard_state["chunk_size"] = chunk_size
+            self._wizard_state["chunk_overlap"] = chunk_overlap
+            self._wizard_state["build_digest_index"] = bool(self._wizard_build_digest.get())
+            self._wizard_state["build_comprehension_index"] = bool(self._wizard_build_comprehension.get())
+            self._wizard_state["comprehension_extraction_depth"] = self._wizard_comp_depth.get()
+            self._wizard_state["prefer_comprehension_index"] = bool(self._wizard_prefer_comp.get())
+            return True
+        if step == 3:
             self._wizard_state["llm_provider"] = self._wizard_llm_provider.get()
             self._wizard_state["llm_model"] = self._wizard_llm_model.get()
             self._wizard_state["embedding_provider"] = self._wizard_embedding_provider.get()
             self._wizard_state["embedding_model"] = self._wizard_embedding_model.get()
-            return self._wizard_ensure_api_keys()
-        if step == 3:
-            selections = [self._wizard_mode_labels[i][1] for i in self._wizard_mode_list.curselection()]
-            if not selections:
-                messagebox.showerror("Setup Wizard", "Select at least one mode.")
-                return False
-            self._wizard_state["modes"] = selections
             return True
         if step == 4:
+            return self._wizard_apply_api_keys_from_form()
+        if step == 5:
+            self._wizard_state["mode_preset"] = self._wizard_mode_preset.get() or "Q&A"
+            return True
+        if step == 6:
             return self._wizard_confirm_and_start()
         return True
 
-    def _wizard_ensure_api_keys(self):
-        required = []
-        llm_provider = self._wizard_state.get("llm_provider")
-        embedding_provider = self._wizard_state.get("embedding_provider")
-        key_map = {"openai": "openai", "anthropic": "anthropic", "google": "google", "voyage": "voyage"}
-        for provider in (llm_provider, embedding_provider):
-            key_name = key_map.get(provider)
-            if key_name and not self.api_keys[key_name].get().strip():
-                required.append((provider, key_name))
-        for provider, key_name in required:
-            try:
-                value = simpledialog.askstring("API Key Required", f"Enter API key for {provider}:", show="*", parent=self.root)
-            except Exception as exc:
-                messagebox.showerror("Setup Wizard", f"Failed to prompt for API key: {exc}")
+    def _wizard_apply_api_keys_from_form(self):
+        for key_name in self._wizard_api_key_required:
+            entered_value = (self._wizard_api_key_vars.get(key_name, tk.StringVar()).get() or "").strip()
+            if entered_value:
+                self.api_keys[key_name].set(entered_value)
+            if not self.api_keys[key_name].get().strip():
+                messagebox.showerror("Setup Wizard", f"{key_name.title()} API key is required to continue.")
                 return False
-            if not value:
-                messagebox.showerror("Setup Wizard", f"{provider} API key is required to continue.")
-                return False
-            self.api_keys[key_name].set(value.strip())
         self.save_config()
         return True
 
-    def _combine_mode_defaults(self, modes):
-        defaults = [self.MODE_PRESETS[mode] for mode in modes if mode in self.MODE_PRESETS]
-        if not defaults:
-            defaults = [self.MODE_PRESETS["Q&A"]]
-
-        merged = {}
-        primary_style = ""
-        for idx, item in enumerate(defaults):
-            for key, value in item.items():
-                if isinstance(value, bool):
-                    merged[key] = bool(value or merged.get(key, False))
-                elif isinstance(value, (int, float)):
-                    merged[key] = max(value, merged.get(key, value))
-                elif key == "style":
-                    if idx == 0 and not primary_style:
-                        primary_style = value
-                elif key == "retrieval_mode" and value == "hierarchical":
-                    merged[key] = "hierarchical"
-                elif key not in merged:
-                    merged[key] = value
-
-        merged.setdefault("retrieval_mode", "flat")
-        merged.setdefault("agentic_mode", bool(merged.get("agentic_iterations", 1) > 1))
-        merged["style"] = primary_style or merged.get("style") or "Default answer"
-        return merged
-
-    def _preset_mode_to_runtime_mode(self, selected_modes):
-        if not selected_modes:
-            return "Q&A"
-        mode_priority = {
-            "Evidence Pack": "Evidence Pack",
-            "Tutor": "Tutor",
-            "Blinkist": "Summary",
-            "Book Summary": "Summary",
-            "Research": "Research",
+    def _mode_preset_to_runtime_mode(self, preset):
+        mapping = {
             "Q&A": "Q&A",
+            "Book summary": "Summary",
+            "Tutor": "Tutor",
+            "Research": "Research",
         }
-        for mode in selected_modes:
-            mapped = mode_priority.get(mode)
-            if mapped:
-                return mapped
-        return "Q&A"
+        return mapping.get(preset, "Q&A")
 
     def _wizard_confirm_and_start(self):
         try:
@@ -3577,9 +3617,17 @@ class AgenticRAGApp:
             self.llm_model.set(self._wizard_state.get("llm_model", self.llm_model.get()))
             self.embedding_model.set(self._wizard_state.get("embedding_model", self.embedding_model.get()))
 
-            modes = self._wizard_state.get("modes") or ["Q&A"]
-            self.selected_mode.set(self._preset_mode_to_runtime_mode(modes))
-            defaults = self._combine_mode_defaults(modes)
+            self.chunk_size.set(int(self._wizard_state.get("chunk_size", self.chunk_size.get())))
+            self.chunk_overlap.set(int(self._wizard_state.get("chunk_overlap", self.chunk_overlap.get())))
+            self.build_digest_index.set(bool(self._wizard_state.get("build_digest_index", self.build_digest_index.get())))
+            self.build_comprehension_index.set(bool(self._wizard_state.get("build_comprehension_index", self.build_comprehension_index.get())))
+            self.comprehension_extraction_depth.set(self._wizard_state.get("comprehension_extraction_depth", self.comprehension_extraction_depth.get()))
+            self.prefer_comprehension_index.set(bool(self._wizard_state.get("prefer_comprehension_index", self.prefer_comprehension_index.get())))
+
+            preset = self._wizard_state.get("mode_preset", "Q&A")
+            runtime_mode = self._mode_preset_to_runtime_mode(preset)
+            self.selected_mode.set(runtime_mode)
+            defaults = self.MODE_PRESETS.get(runtime_mode, self.MODE_PRESETS["Q&A"])
             self.retrieval_k.set(defaults["retrieve_k"])
             self.final_k.set(defaults["final_k"])
             self.mmr_lambda.set(defaults["mmr_lambda"])
@@ -3589,13 +3637,6 @@ class AgenticRAGApp:
             output_style = defaults.get("style")
             if output_style in self.output_style_options:
                 self.output_style.set(output_style)
-
-            if defaults.get("enable_langextract"):
-                self.enable_langextract.set(True)
-            if defaults.get("build_comprehension_index"):
-                self.build_comprehension_index.set(True)
-            if defaults.get("prefer_comprehension_index"):
-                self.prefer_comprehension_index.set(True)
 
             selected_index = self._wizard_state.get("selected_index")
             if selected_index and selected_index != "(default)":
@@ -3609,12 +3650,9 @@ class AgenticRAGApp:
                     self.lbl_file.config(text=file_path, foreground="black")
                     self._update_file_info()
                 self.vector_db_type.set("chroma")
-                self.build_digest_index.set(True)
-                self.chunk_size.set(1200)
-                self.chunk_overlap.set(150)
                 self.start_ingestion()
-            self._update_current_state_strip()
 
+            self._update_current_state_strip()
             self.basic_wizard_completed = True
             self.save_config()
             self.build_chat_tab()
@@ -3623,6 +3661,18 @@ class AgenticRAGApp:
         except Exception as exc:
             messagebox.showerror("Setup Wizard", f"Could not apply setup: {exc}")
             return False
+
+    def _apply_startup_mode_setting(self):
+        selected = (self.startup_mode_setting.get() or "advanced").strip().lower()
+        if selected not in {"basic", "advanced"}:
+            selected = "advanced"
+        self.last_used_mode = selected
+        self.basic_mode = selected == "basic"
+        if self.basic_mode:
+            self.basic_wizard_completed = False
+        self.save_config()
+        if hasattr(self, "tab_chat"):
+            self.build_chat_tab()
 
     def _toggle_grounding_tab(self, *args):
         should_show = bool(self.enable_langextract.get())
@@ -9602,8 +9652,9 @@ class AgenticRAGApp:
         return "\n\n".join(updated)
 
     def _refresh_instructions_box(self):
-        self.instructions_box.delete("1.0", tk.END)
-        self.instructions_box.insert(tk.END, self.system_instructions.get())
+        if hasattr(self, "instructions_box") and self._safe_widget_exists(self.instructions_box):
+            self.instructions_box.delete("1.0", tk.END)
+            self.instructions_box.insert(tk.END, self.system_instructions.get())
 
     def _resolve_llm_model(self):
         selected = self.llm_model.get().strip()
