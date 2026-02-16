@@ -26,6 +26,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+class JobCancelledError(RuntimeError):
+    """Raised when a cooperative background job is cancelled."""
+
 MODE_ALIASES = {
     "Standard RAG Q&A": "Q&A",
     "Book Tutor": "Tutor",
@@ -436,6 +440,9 @@ class AgenticRAGApp:
         self._index_switch_in_progress = False
         self._index_switch_request_id = 0
         self._ingestion_in_progress = False
+        self._active_job_type = None
+        self._active_job_cancel_event = None
+        self._active_job_lock = threading.Lock()
         self._pending_selected_index_label = None
         self._langchain_core_cache = None
         self.default_system_instructions = (
@@ -1426,26 +1433,124 @@ class AgenticRAGApp:
     def _clear_error_state(self):
         self._error_state = None
 
-    def _reset_ingestion_ui_state(self, status_text=None):
-        self._ingestion_in_progress = False
+    def _set_job_ui_busy(self, job_type, busy):
+        is_ingestion = job_type == "ingestion"
+        is_rag = job_type == "rag"
+
         if hasattr(self, "btn_ingest") and self._safe_widget_exists(self.btn_ingest):
-            self.btn_ingest.config(state="normal")
+            if busy and is_rag:
+                self.btn_ingest.config(state="disabled")
+            elif not self._ingestion_in_progress:
+                ingest_ready = bool(self.selected_file) and bool(self._resolve_embedding_model())
+                self.btn_ingest.config(state="normal" if ingest_ready else "disabled")
+
+        if hasattr(self, "btn_send") and self._safe_widget_exists(self.btn_send):
+            if busy:
+                self.btn_send.config(state="disabled")
+            else:
+                self.btn_send.config(state="normal" if not self._get_current_state_warnings() else "disabled")
+
+        if hasattr(self, "txt_input") and self._safe_widget_exists(self.txt_input):
+            self.txt_input.config(state="disabled" if busy and is_rag else "normal")
+
+        if hasattr(self, "cb_existing_index") and self._safe_widget_exists(self.cb_existing_index):
+            selector_busy = bool(
+                self._index_switch_in_progress
+                or self._ingestion_in_progress
+                or self._active_run_id
+                or busy
+            )
+            self.cb_existing_index.config(state="disabled" if selector_busy else "readonly")
+
         if hasattr(self, "progress") and self._safe_widget_exists(self.progress):
-            self._set_progress_running(self.progress, False)
-        if status_text:
-            self._set_startup_status(status_text)
+            self._set_progress_running(self.progress, busy and is_ingestion)
+
+        if hasattr(self, "rag_progress") and self._safe_widget_exists(self.rag_progress):
+            self._set_progress_running(self.rag_progress, busy and is_rag)
+
+        if hasattr(self, "btn_cancel_ingest") and self._safe_widget_exists(self.btn_cancel_ingest):
+            self.btn_cancel_ingest.config(state="normal" if busy and is_ingestion else "disabled")
+
+        if hasattr(self, "btn_cancel_rag") and self._safe_widget_exists(self.btn_cancel_rag):
+            self.btn_cancel_rag.config(state="normal" if busy and is_rag else "disabled")
+
         self._update_current_state_strip()
 
-    def _set_rag_run_ui_state(self, running):
-        can_run = not self._get_current_state_warnings()
-        state = "disabled" if running or not can_run else "normal"
-        if hasattr(self, "btn_send") and self._safe_widget_exists(self.btn_send):
-            self.btn_send.config(state=state)
-        if hasattr(self, "txt_input") and self._safe_widget_exists(self.txt_input):
-            self.txt_input.config(state="disabled" if running else "normal")
-        if hasattr(self, "rag_progress"):
-            self._set_progress_running(self.rag_progress, running)
-        self._update_current_state_strip()
+    def _job_cancel_checkpoint(self, cancel_event, job_type, stage):
+        if cancel_event is not None and cancel_event.is_set():
+            raise JobCancelledError(f"{job_type.capitalize()} cancelled during {stage}.")
+
+    def cancel_active_job(self, expected_job_type=None):
+        with self._active_job_lock:
+            active_job_type = self._active_job_type
+            cancel_event = self._active_job_cancel_event
+        if not active_job_type or cancel_event is None:
+            return
+        if expected_job_type and expected_job_type != active_job_type:
+            return
+        cancel_event.set()
+        self.log(f"Cancellation requested for {active_job_type} job.")
+        self._set_startup_status(f"Cancelling {active_job_type}…")
+
+    def _finish_job(self, job_type):
+        cancelled = False
+        with self._active_job_lock:
+            if self._active_job_type == job_type:
+                cancelled = bool(
+                    self._active_job_cancel_event and self._active_job_cancel_event.is_set()
+                )
+                self._active_job_type = None
+                self._active_job_cancel_event = None
+
+        if job_type == "ingestion":
+            self._ingestion_in_progress = False
+        elif job_type == "rag" and self._active_run_id == "job-rag-pending":
+            self._active_run_id = None
+
+        self._set_job_ui_busy(job_type, False)
+
+        if cancelled:
+            self._set_startup_status(f"{job_type.capitalize()} cancelled")
+        elif self._error_state is None:
+            self._set_startup_status("Ready")
+
+    def start_job(self, job_type, target_fn, args=(), busy_status=None):
+        with self._active_job_lock:
+            if self._active_job_type is not None:
+                self.log(
+                    f"Cannot start {job_type}; active job is {self._active_job_type}."
+                )
+                return False
+            cancel_event = threading.Event()
+            self._active_job_type = job_type
+            self._active_job_cancel_event = cancel_event
+
+        if job_type == "ingestion":
+            self._ingestion_in_progress = True
+        elif job_type == "rag":
+            self._active_run_id = "job-rag-pending"
+
+        self._clear_error_state()
+        self._set_job_ui_busy(job_type, True)
+        self._set_startup_status(busy_status or f"{job_type.capitalize()} in progress…")
+
+        def _runner():
+            try:
+                target_fn(*args, cancel_event=cancel_event)
+            except JobCancelledError as exc:
+                self.log(str(exc))
+            except Exception as exc:
+                self._report_transition_error(
+                    transition=f"job::{job_type}",
+                    exc=exc,
+                    user_message=f"{job_type.capitalize()} job failed.",
+                    show_messagebox=True,
+                )
+            finally:
+                self._run_on_ui(self._finish_job, job_type)
+
+        threading.Thread(target=_runner, daemon=True).start()
+        return True
 
     def _run_startup_step(self, step_name, step_func, next_step=None):
         try:
@@ -3196,7 +3301,15 @@ class AgenticRAGApp:
             text="Start Ingestion (Process -> Chunk -> Embed -> Store)",
             command=self.start_ingestion,
         )
-        self.btn_ingest.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        self.btn_ingest.pack(fill="x", pady=(0, UI_SPACING["s"]))
+
+        self.btn_cancel_ingest = ttk.Button(
+            frame,
+            text="Cancel Ingestion",
+            command=lambda: self.cancel_active_job("ingestion"),
+            state="disabled",
+        )
+        self.btn_cancel_ingest.pack(fill="x", pady=(0, UI_SPACING["m"]))
 
         self.progress = ttk.Progressbar(frame, orient="horizontal", mode="indeterminate")
         self.progress.pack(fill="x")
@@ -3236,8 +3349,17 @@ class AgenticRAGApp:
         self.state_warning_label = ttk.Label(frame, textvariable=self.current_warning_var, foreground="#a33")
         self.state_warning_label.pack(fill="x", pady=(0, UI_SPACING["s"]))
 
-        self.rag_progress = ttk.Progressbar(frame, orient="horizontal", mode="indeterminate")
-        self.rag_progress.pack(fill="x", pady=(0, UI_SPACING["s"]))
+        rag_progress_row = ttk.Frame(frame)
+        rag_progress_row.pack(fill="x", pady=(0, UI_SPACING["s"]))
+        self.rag_progress = ttk.Progressbar(rag_progress_row, orient="horizontal", mode="indeterminate")
+        self.rag_progress.pack(side="left", fill="x", expand=True)
+        self.btn_cancel_rag = ttk.Button(
+            rag_progress_row,
+            text="Cancel",
+            command=lambda: self.cancel_active_job("rag"),
+            state="disabled",
+        )
+        self.btn_cancel_rag.pack(side="left", padx=(UI_SPACING["s"], 0))
 
         top_bar = ttk.LabelFrame(frame, text="Conversation", padding=10)
         top_bar.pack(fill="x", pady=(0, 10))
@@ -10183,12 +10305,10 @@ class AgenticRAGApp:
             messagebox.showerror("Error", "Please select a file first.")
             return
 
-        self._ingestion_in_progress = True
         self._clear_error_state()
-        self._set_startup_status("Starting ingestion…")
-        self._set_progress_running(getattr(self, "progress", None), True)
         embedding_provider = self.embedding_provider.get()
         ingest_ctx = {
+            "selected_file": self.selected_file,
             "chunk_size": int(self.chunk_size.get()),
             "chunk_overlap": int(self.chunk_overlap.get()),
             "vector_db_type": self.vector_db_type.get(),
@@ -10204,16 +10324,21 @@ class AgenticRAGApp:
             "weaviate_key": self.api_keys["weaviate_key"].get(),
         }
 
-        threading.Thread(target=self._ingest_process, args=(ingest_ctx,), daemon=True).start()
+        self.start_job(
+            "ingestion",
+            self._ingest_process,
+            args=(ingest_ctx,),
+            busy_status="Ingestion in progress…",
+        )
 
-    def _ingest_process(self, ingest_ctx):
+    def _ingest_process(self, ingest_ctx, cancel_event=None):
         previous_vector_store = self.vector_store
         previous_index_path = self.selected_index_path
         previous_collection_name = self.selected_collection_name
         previous_signature = self.index_embedding_signature
+        selected_file = ingest_ctx.get("selected_file")
         try:
-            self._run_on_ui(self.btn_ingest.config, state="disabled")
-            self._run_on_ui(self._set_progress_running, getattr(self, "progress", None), True)
+            self._job_cancel_checkpoint(cancel_event, "ingestion", "startup")
             self._frontier_evidence_pack_mode = False
             self.log("Starting ingestion pipeline...")
             self._run_on_ui(self._set_startup_status, "Ingestion in progress…")
@@ -10231,7 +10356,7 @@ class AgenticRAGApp:
             text_content = ""
 
             chatgpt_messages = None
-            if self.selected_file.lower().endswith(".html"):
+            if selected_file.lower().endswith(".html"):
                 from bs4 import BeautifulSoup
                 from bs4 import NavigableString
 
@@ -10426,7 +10551,7 @@ class AgenticRAGApp:
                             continue
                         _process_children(child, lines)
 
-                with open(self.selected_file, "r", encoding="utf-8", errors="ignore") as f:
+                with open(selected_file, "r", encoding="utf-8", errors="ignore") as f:
                     soup = BeautifulSoup(f, "html.parser")
                     doc_title = None
                     if soup.title and soup.title.string:
@@ -10445,7 +10570,7 @@ class AgenticRAGApp:
                         _process_children(root, lines)
                         text_content = "\n".join(lines)
             else:
-                with open(self.selected_file, "r", encoding="utf-8") as f:
+                with open(selected_file, "r", encoding="utf-8") as f:
                     text_content = f.read()
                 doc_title = None
 
@@ -10459,7 +10584,7 @@ class AgenticRAGApp:
                 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
             chunk_ingest_id = datetime.now(timezone.utc).isoformat()
-            source_basename = os.path.basename(self.selected_file)
+            source_basename = os.path.basename(selected_file)
             chatgpt_docs = None
             if chatgpt_messages:
                 chatgpt_docs = []
@@ -10481,8 +10606,8 @@ class AgenticRAGApp:
                         "message_index": index,
                         "evidence_kind": evidence_kind,
                         "source": source_basename,
-                        "source_path": self.selected_file,
-                        "file_path": self.selected_file,
+                        "source_path": selected_file,
+                        "file_path": selected_file,
                         "channel": self._extract_channel(content),
                         "source_section": "chat_message",
                         "chunk_id": index,
@@ -10493,7 +10618,7 @@ class AgenticRAGApp:
                     if doc_title:
                         metadata["doc_title"] = doc_title
                     metadata = self._ensure_source_metadata(
-                        metadata, self.selected_file, prefixed_content
+                        metadata, selected_file, prefixed_content
                     )
                     chatgpt_docs.append(
                         self._document(page_content=prefixed_content, metadata=metadata)
@@ -10542,8 +10667,8 @@ class AgenticRAGApp:
                     metadata.update(
                         {
                             "source": source_basename,
-                            "source_path": self.selected_file,
-                            "file_path": self.selected_file,
+                            "source_path": selected_file,
+                            "file_path": selected_file,
                             "chunk_id": chunk_id,
                             "ingest_id": chunk_ingest_id,
                             "char_start": char_start,
@@ -10566,7 +10691,7 @@ class AgenticRAGApp:
                         metadata.get("section_title") or metadata.get("chapter_title") or ""
                     ).strip()
                     metadata = self._ensure_source_metadata(
-                        metadata, self.selected_file, doc.page_content
+                        metadata, selected_file, doc.page_content
                     )
                     doc.metadata = metadata
             self.log(f"Created {len(docs)} text chunks.")
@@ -10654,7 +10779,7 @@ class AgenticRAGApp:
             if db_type == "chroma":
                 persist_root = self._get_chroma_persist_root()
                 index_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                safe_stem = self._safe_file_stem(self.selected_file)
+                safe_stem = self._safe_file_stem(selected_file)
                 persist_dir = os.path.join(
                     persist_root, f"{safe_stem}__{index_id}"
                 )
@@ -10714,6 +10839,7 @@ class AgenticRAGApp:
             self._run_on_ui(self.progress.config, maximum=total_docs, value=0)
 
             for i in range(0, total_docs, batch_size):
+                self._job_cancel_checkpoint(cancel_event, "ingestion", "chunk embedding")
                 batch = docs[i : i + batch_size]
                 self.vector_store.add_documents(batch)
                 self._run_on_ui(self.progress.config, value=i + len(batch))
@@ -10728,6 +10854,7 @@ class AgenticRAGApp:
                 )
                 total_digests = len(summary_tree_docs)
                 for i in range(0, total_digests, batch_size):
+                    self._job_cancel_checkpoint(cancel_event, "ingestion", "digest indexing")
                     batch = summary_tree_docs[i : i + batch_size]
                     digest_store.add_documents(batch)
                 self.log(f"Indexed {total_digests} summary tree nodes.")
@@ -10739,6 +10866,7 @@ class AgenticRAGApp:
                         persist_directory=persist_dir,
                     )
                     for i in range(0, len(section_digest_docs), batch_size):
+                        self._job_cancel_checkpoint(cancel_event, "ingestion", "section digest indexing")
                         section_digest_store.add_documents(section_digest_docs[i : i + batch_size])
                     self.log(f"Indexed {len(section_digest_docs)} section digests.")
 
@@ -10749,6 +10877,7 @@ class AgenticRAGApp:
                         persist_directory=persist_dir,
                     )
                     for i in range(0, len(book_digest_docs), batch_size):
+                        self._job_cancel_checkpoint(cancel_event, "ingestion", "book digest indexing")
                         book_digest_store.add_documents(book_digest_docs[i : i + batch_size])
                     self.log(f"Indexed {len(book_digest_docs)} book digests.")
                 if summary_tree_artifact_path:
@@ -10778,6 +10907,7 @@ class AgenticRAGApp:
                         persist_directory=persist_dir,
                     )
                     for i in range(0, len(concept_docs), batch_size):
+                        self._job_cancel_checkpoint(cancel_event, "ingestion", "concept indexing")
                         concept_store.add_documents(concept_docs[i : i + batch_size])
                 else:
                     self.vector_store.add_documents(concept_docs)
@@ -10804,6 +10934,14 @@ class AgenticRAGApp:
                 "File successfully ingested into Vector Database.",
             )
 
+        except JobCancelledError:
+            self.vector_store = previous_vector_store
+            self.selected_index_path = previous_index_path
+            self.selected_collection_name = previous_collection_name
+            self.index_embedding_signature = previous_signature
+            self.save_config()
+            self.log("Ingestion cancelled before completion.")
+            self._run_on_ui(self._set_startup_status, "Ingestion cancelled")
         except Exception as e:
             self.vector_store = previous_vector_store
             self.selected_index_path = previous_index_path
@@ -10816,8 +10954,6 @@ class AgenticRAGApp:
                 user_message="Ingestion failed. Partial results were not activated.",
                 show_messagebox=True,
             )
-        finally:
-            self._run_on_ui(self._reset_ingestion_ui_state, "Ready")
 
 
     def send_message(self):
@@ -10949,11 +11085,14 @@ class AgenticRAGApp:
         }
         rag_ctx["system_instructions"] = self._get_system_instructions(resolved_settings)
 
-        self._run_on_ui(self._set_rag_run_ui_state, True)
-        self._run_on_ui(self._set_startup_status, "RAG run in progress…")
-        threading.Thread(target=self._rag_pipeline, args=(rag_ctx, query), daemon=True).start()
+        self.start_job(
+            "rag",
+            self._rag_pipeline,
+            args=(rag_ctx, query),
+            busy_status="RAG run in progress…",
+        )
 
-    def _rag_pipeline(self, rag_ctx, query):
+    def _rag_pipeline(self, rag_ctx, query, cancel_event=None):
         stage = "retrieval"
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         run_started_at = time.perf_counter()
@@ -10961,6 +11100,7 @@ class AgenticRAGApp:
         self._trace_events = []
         self._run_on_ui(self._set_readonly_text, self.trace_text, "")
         try:
+            self._job_cancel_checkpoint(cancel_event, "rag", "startup")
             self.log("Starting Retrieval...")
             self._run_on_ui(self._set_startup_status, "RAG retrieval started…")
 
@@ -12359,6 +12499,7 @@ class AgenticRAGApp:
             seen_sections = set()
 
             if not resolved_settings["agentic_mode"]:
+                self._job_cancel_checkpoint(cancel_event, "rag", "retrieval")
                 iteration_started_at = time.perf_counter()
                 follow_up_queries = []
                 coverage_stats = {"triggered": False}
@@ -12711,6 +12852,7 @@ class AgenticRAGApp:
                 )
                 _append_context_if_enabled("(single pass)", context_text, was_truncated)
 
+                self._job_cancel_checkpoint(cancel_event, "rag", "pre-generation")
                 self.log("Generating Answer...")
                 llm = self.get_llm(rag_ctx.get("llm_ctx"))
                 style_instruction = self._get_output_style_instruction()
@@ -12961,6 +13103,7 @@ class AgenticRAGApp:
             stagnant_iterations = 0
             last_unique_incident_count = 0
             for iteration in range(1, max_iterations + 1):
+                self._job_cancel_checkpoint(cancel_event, "rag", f"iteration {iteration}")
                 iteration_started_at = time.perf_counter()
                 follow_up_queries = []
                 coverage_stats = {"triggered": False}
@@ -13396,6 +13539,7 @@ class AgenticRAGApp:
                     f"(iteration {iteration})", context_text, was_truncated
                 )
 
+                self._job_cancel_checkpoint(cancel_event, "rag", "pre-generation")
                 self.log("Generating Answer...")
                 llm = self.get_llm(rag_ctx.get("llm_ctx"))
                 checklist_text = "\n".join(f"- {item}" for item in checklist)
@@ -13563,6 +13707,7 @@ class AgenticRAGApp:
                         critic_queries = []
 
             if latest_answer:
+                self._job_cancel_checkpoint(cancel_event, "rag", "validation")
                 validation_started_at = time.perf_counter()
                 validated_answer = self._validate_and_repair(
                     latest_answer,
@@ -13704,6 +13849,18 @@ class AgenticRAGApp:
             self._finalize_agent_lightning_run(run_id, final_docs, validated_answer or latest_answer)
             self._clear_error_state()
             self._run_on_ui(self._set_startup_status, "RAG run complete")
+        except JobCancelledError:
+            self.log("RAG run cancelled before completion.")
+            self.append_chat("system", "RAG run cancelled.")
+            self._append_jsonl_telemetry(
+                {
+                    "event": "run_cancelled",
+                    "run_id": run_id,
+                    "iter": 0,
+                    "stage": stage,
+                }
+            )
+            self._run_on_ui(self._set_startup_status, "RAG run cancelled")
         except Exception as e:
             self._report_transition_error(
                 transition=f"rag::{stage}",
@@ -13722,11 +13879,8 @@ class AgenticRAGApp:
                 }
             )
         finally:
-            self._run_on_ui(self._set_rag_run_ui_state, False)
             if self._active_run_id == run_id:
                 self._active_run_id = None
-            if self._error_state is None:
-                self._run_on_ui(self._set_startup_status, "Ready")
 
     def _tag_citations_in_chat(self, start_index, end_index):
         text = self.chat_display.get(start_index, end_index)
