@@ -67,6 +67,9 @@ STYLE_CONFIG = {
     },
 }
 
+UI_SPACING = {"xs": 4, "s": 8, "m": 12, "l": 18}
+FORM_WIDTHS = {"label": 22, "input": 28}
+
 try:
     import langextract as lx
 except ImportError:
@@ -583,6 +586,10 @@ class AgenticRAGApp:
         self._wizard_state = {}
         self.ui_mode = tk.StringVar(value="light")
         self.history_profile_filter = tk.StringVar(value="All Profiles")
+        self.current_state_var = tk.StringVar(
+            value="Index: Not selected | LLM: -- | Embeddings: -- | Mode: --"
+        )
+        self.current_warning_var = tk.StringVar(value="")
 
         self._init_sessions_db()
 
@@ -1422,16 +1429,20 @@ class AgenticRAGApp:
         if hasattr(self, "btn_ingest") and self._safe_widget_exists(self.btn_ingest):
             self.btn_ingest.config(state="normal")
         if hasattr(self, "progress") and self._safe_widget_exists(self.progress):
-            self.progress.config(value=0)
+            self._set_progress_running(self.progress, False)
         if status_text:
             self._set_startup_status(status_text)
+        self._update_current_state_strip()
 
     def _set_rag_run_ui_state(self, running):
-        state = "disabled" if running else "normal"
+        can_run = not self._get_current_state_warnings()
+        state = "disabled" if running or not can_run else "normal"
         if hasattr(self, "btn_send") and self._safe_widget_exists(self.btn_send):
             self.btn_send.config(state=state)
         if hasattr(self, "txt_input") and self._safe_widget_exists(self.txt_input):
-            self.txt_input.config(state=state)
+            self.txt_input.config(state="disabled" if running else "normal")
+        if hasattr(self, "rag_progress"):
+            self._set_progress_running(self.rag_progress, running)
 
     def _run_startup_step(self, step_name, step_func, next_step=None):
         try:
@@ -1659,10 +1670,16 @@ class AgenticRAGApp:
         self._ensure_tab_aliases()
 
         self.status_var = tk.StringVar(value="Ready")
-        status_bar = ttk.Label(self.root, textvariable=self.status_var, style="Status.TLabel", anchor="w")
-        status_bar.pack(fill="x", padx=STYLE_CONFIG["padding"]["md"], pady=(0, STYLE_CONFIG["padding"]["sm"]))
+        status_wrap = ttk.Frame(self.root, style="TFrame")
+        status_wrap.pack(fill="x", padx=STYLE_CONFIG["padding"]["md"], pady=(0, STYLE_CONFIG["padding"]["sm"]))
+        status_bar = ttk.Label(status_wrap, textvariable=self.status_var, style="Status.TLabel", anchor="w")
+        status_bar.pack(side="left", fill="x", expand=True)
+        self.status_state_bar = ttk.Label(status_wrap, textvariable=self.current_state_var, style="Status.TLabel", anchor="e")
+        self.status_state_bar.pack(side="right", padx=(UI_SPACING["s"], 0))
 
         self._bind_accessibility_shortcuts()
+        self._install_ui_state_watchers()
+        self._update_current_state_strip()
 
     def _apply_theme(self):
         style = ttk.Style()
@@ -1687,6 +1704,7 @@ class AgenticRAGApp:
     def _bind_accessibility_shortcuts(self):
         self.root.bind_all("<Control-Return>", lambda _e: self.send_message())
         self.root.bind_all("<Control-l>", lambda _e: self._focus_chat_input())
+        self.root.bind_all("<Escape>", lambda _e: self._focus_chat_input())
         self.root.bind_all("<Alt-1>", lambda _e: self.notebook.select(self.tab_chat))
         self.root.bind_all("<Alt-2>", lambda _e: self.notebook.select(self.tab_history))
         self.root.bind_all("<Alt-3>", lambda _e: self.notebook.select(self.tab_library))
@@ -1696,6 +1714,84 @@ class AgenticRAGApp:
         if hasattr(self, "txt_input"):
             self.notebook.select(self.tab_chat)
             self.txt_input.focus_set()
+
+
+    def _install_ui_state_watchers(self):
+        if getattr(self, "_ui_watchers_installed", False):
+            return
+        self._ui_watchers_installed = True
+        watched_vars = [
+            self.selected_mode,
+            self.llm_provider,
+            self.llm_model,
+            self.embedding_provider,
+            self.embedding_model,
+            self.existing_index_var,
+        ]
+        for var in watched_vars:
+            var.trace_add("write", lambda *_: self._run_on_ui(self._update_current_state_strip))
+
+    @staticmethod
+    def _shorten_path(path, max_len=54):
+        if not path:
+            return "Not selected"
+        display = path
+        try:
+            display = os.path.relpath(path, os.getcwd())
+        except ValueError:
+            pass
+        if len(display) <= max_len:
+            return display
+        return f"...{display[-(max_len - 3):]}"
+
+    def _get_current_state_warnings(self):
+        warnings = []
+        if not self._resolve_llm_model():
+            warnings.append("Select a valid LLM model")
+        if not self._resolve_embedding_model():
+            warnings.append("Select a valid embedding model")
+        selected_path, _ = self._get_selected_index_path()
+        if not selected_path:
+            warnings.append("No active index. Build or load one in Library")
+        elif not os.path.isdir(selected_path):
+            warnings.append("Selected index path is unavailable")
+        return warnings
+
+    def _update_current_state_strip(self):
+        active_index_path, active_collection = self._get_selected_index_path()
+        if active_index_path and active_collection and active_collection != RAW_COLLECTION_NAME:
+            index_label = f"{self._shorten_path(active_index_path)} ({active_collection})"
+        else:
+            index_label = self._shorten_path(active_index_path)
+        llm_label = f"{self.llm_provider.get()}/{self._resolve_llm_model() or '--'}"
+        emb_label = f"{self.embedding_provider.get()}/{self._resolve_embedding_model() or '--'}"
+        mode_label = self.selected_mode.get() or "--"
+
+        self.current_state_var.set(
+            f"Index: {index_label} | LLM: {llm_label} | Embeddings: {emb_label} | Mode: {mode_label}"
+        )
+        warnings = self._get_current_state_warnings()
+        self.current_warning_var.set("⚠ " + " • ".join(warnings) if warnings else "")
+
+        if hasattr(self, "btn_send") and self._safe_widget_exists(self.btn_send):
+            if warnings or getattr(self, "_active_run_id", None):
+                self.btn_send.config(state="disabled")
+            else:
+                self.btn_send.config(state="normal")
+
+        if hasattr(self, "btn_ingest") and self._safe_widget_exists(self.btn_ingest):
+            ingest_ready = bool(self.selected_file) and bool(self._resolve_embedding_model())
+            self.btn_ingest.config(state="normal" if ingest_ready else "disabled")
+
+    def _set_progress_running(self, bar, running):
+        if not bar or not self._safe_widget_exists(bar):
+            return
+        if running:
+            bar.configure(mode="indeterminate")
+            bar.start(10)
+        else:
+            bar.stop()
+            bar.configure(mode="indeterminate")
 
     def _run_on_ui(self, func, *args, **kwargs):
         if threading.current_thread() == self.main_thread:
@@ -1775,17 +1871,21 @@ class AgenticRAGApp:
 
     def _on_llm_provider_change(self, event=None):
         self._sync_model_options()
+        self._update_current_state_strip()
 
     def _on_embedding_provider_change(self, event=None):
         self._sync_model_options()
         self._refresh_compatibility_warning()
+        self._update_current_state_strip()
 
     def _on_llm_model_change(self, event=None):
         self._toggle_custom_entries()
+        self._update_current_state_strip()
 
     def _on_embedding_model_change(self, event=None):
         self._toggle_custom_entries()
         self._refresh_compatibility_warning()
+        self._update_current_state_strip()
 
     def _on_instructions_change(self, event=None):
         self.system_instructions.set(self.instructions_box.get("1.0", tk.END).strip())
@@ -2480,7 +2580,7 @@ class AgenticRAGApp:
             child.destroy()
 
         _settings_outer_frame, self.settings_canvas, frame = self._make_scrollable_frame(self.tab_settings)
-        frame.configure(padding=20)
+        frame.configure(padding=UI_SPACING["l"])
         if not getattr(self, "_settings_wheel_binding_installed", False):
             self.root.bind_all("<MouseWheel>", self._handle_settings_mousewheel, add="+")
             self.root.bind_all("<Button-4>", self._handle_settings_mousewheel, add="+")
@@ -2489,8 +2589,17 @@ class AgenticRAGApp:
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
 
+        header = ttk.Frame(frame)
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=UI_SPACING["xs"], pady=(0, UI_SPACING["s"]))
+        ttk.Label(header, text="Settings", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(
+            header,
+            text="Configure providers and defaults used by Library and Chat.",
+            foreground="#6b7280",
+        ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+
         toggle_row = ttk.Frame(frame)
-        toggle_row.grid(row=0, column=0, columnspan=2, sticky="w", padx=5, pady=(0, 8))
+        toggle_row.grid(row=1, column=0, columnspan=2, sticky="w", padx=5, pady=(0, 8))
         ttk.Label(toggle_row, text="Detail level:").pack(side="left")
         ttk.Checkbutton(
             toggle_row,
@@ -2500,7 +2609,7 @@ class AgenticRAGApp:
         ).pack(side="left", padx=(8, 0))
 
         appearance_section = CollapsibleFrame(frame, "Appearance", expanded=False)
-        appearance_section.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        appearance_section.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
         ttk.Label(appearance_section.content, text="Theme mode:").pack(side="left")
         ttk.Combobox(
             appearance_section.content,
@@ -2512,7 +2621,7 @@ class AgenticRAGApp:
         ttk.Button(appearance_section.content, text="Apply Theme", command=self._apply_theme).pack(side="left")
 
         self.settings_model_section = CollapsibleFrame(frame, "Model & Provider", expanded=False)
-        self.settings_model_section.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        self.settings_model_section.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
         # --- LLM Provider Settings ---
         llm_frame = ttk.LabelFrame(self.settings_model_section.content, text="LLM & Embedding Provider", padding=15)
@@ -2661,7 +2770,7 @@ class AgenticRAGApp:
         key_frame = ttk.LabelFrame(
             frame, text="API Keys (Required for selected services)", padding=15
         )
-        key_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
+        key_frame.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
         key_frame.columnconfigure(1, weight=1)
 
         keys = [
@@ -2687,7 +2796,7 @@ class AgenticRAGApp:
             ).grid(row=i, column=1, sticky="w", padx=10, pady=2)
 
         deps_frame = ttk.LabelFrame(frame, text="Dependencies", padding=15)
-        deps_frame.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
+        deps_frame.grid(row=5, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
         deps_frame.columnconfigure(1, weight=1)
 
         ttk.Label(
@@ -2706,7 +2815,7 @@ class AgenticRAGApp:
 
 
         retrieval_section = CollapsibleFrame(frame, "Retrieval", expanded=False)
-        retrieval_section.grid(row=5, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        retrieval_section.grid(row=6, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_retrieval_section = retrieval_section
         ttk.Label(retrieval_section.content, text="Search Type:").grid(row=0, column=0, sticky="w")
         ttk.Combobox(
@@ -2742,7 +2851,7 @@ class AgenticRAGApp:
         ttk.Entry(retrieval_section.content, textvariable=self.fallback_final_k, width=8).grid(row=3, column=3, sticky="w", padx=(5, 0), pady=2)
 
         agentic_section = CollapsibleFrame(frame, "Agentic / Iterations", expanded=False)
-        agentic_section.grid(row=6, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        agentic_section.grid(row=7, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_agentic_section = agentic_section
         ttk.Checkbutton(
             agentic_section.content,
@@ -2766,7 +2875,7 @@ class AgenticRAGApp:
         ).pack(side="left")
 
         frontier_section = CollapsibleFrame(frame, "Frontier", expanded=False)
-        frontier_section.grid(row=7, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        frontier_section.grid(row=8, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_frontier_section = frontier_section
         ttk.Checkbutton(frontier_section.content, text="Enable langextract", variable=self.enable_langextract).pack(anchor="w")
         ttk.Checkbutton(frontier_section.content, text="Structured Extraction", variable=self.enable_structured_extraction).pack(anchor="w")
@@ -2779,7 +2888,7 @@ class AgenticRAGApp:
         ttk.Checkbutton(frontier_section.content, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
 
         profile_section = CollapsibleFrame(frame, "Profiles", expanded=True)
-        profile_section.grid(row=8, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        profile_section.grid(row=9, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         profile_row = ttk.Frame(profile_section.content)
         profile_row.pack(fill="x")
         ttk.Label(profile_row, text="Profile list:").pack(side="left")
@@ -2812,11 +2921,19 @@ class AgenticRAGApp:
                 section.set_expanded(advanced)
 
     def build_ingest_tab(self):
-        frame = self._create_scrollable_tab_frame(self.tab_library, padding=20)
+        frame = self._create_scrollable_tab_frame(self.tab_library, padding=UI_SPACING["l"])
 
-        # File Selection
-        sel_frame = ttk.Frame(frame)
-        sel_frame.pack(fill="x", pady=10)
+        header = ttk.Frame(frame)
+        header.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        ttk.Label(header, text="Library & Ingestion", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(
+            header,
+            text="Select or build an index here, then use it directly in Chat.",
+            foreground="#6b7280",
+        ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+
+        sel_frame = ttk.LabelFrame(frame, text="1) Source file", padding=UI_SPACING["m"])
+        sel_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
 
         ttk.Label(
             sel_frame,
@@ -2829,28 +2946,18 @@ class AgenticRAGApp:
         self.lbl_file_info.pack(anchor="w")
 
         file_btn_frame = ttk.Frame(sel_frame)
-        file_btn_frame.pack(anchor="w")
-        btn_browse = ttk.Button(
-            file_btn_frame, text="Browse File...", command=self.browse_file
-        )
-        btn_browse.pack(side="left")
-        ttk.Button(
-            file_btn_frame, text="Clear Selection", command=self.clear_selected_file
-        ).pack(side="left", padx=8)
+        file_btn_frame.pack(anchor="w", pady=(UI_SPACING["s"], 0))
+        ttk.Button(file_btn_frame, text="Browse File...", command=self.browse_file).pack(side="left")
+        ttk.Button(file_btn_frame, text="Clear Selection", command=self.clear_selected_file).pack(side="left", padx=8)
 
-        # Chunking Config
-        chunk_frame = ttk.LabelFrame(frame, text="Chunking Strategy", padding=10)
-        chunk_frame.pack(fill="x", pady=10)
+        chunk_frame = ttk.LabelFrame(frame, text="2) Chunking strategy", padding=UI_SPACING["m"])
+        chunk_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
 
-        ttk.Label(chunk_frame, text="Chunk Size (chars):").pack(side="left")
-        ttk.Entry(chunk_frame, textvariable=self.chunk_size, width=10).pack(
-            side="left", padx=5
-        )
+        ttk.Label(chunk_frame, text="Chunk Size (chars):", width=FORM_WIDTHS["label"]).pack(side="left")
+        ttk.Entry(chunk_frame, textvariable=self.chunk_size, width=10).pack(side="left", padx=5)
 
-        ttk.Label(chunk_frame, text="Overlap (chars):").pack(side="left", padx=(20, 0))
-        ttk.Entry(chunk_frame, textvariable=self.chunk_overlap, width=10).pack(
-            side="left", padx=5
-        )
+        ttk.Label(chunk_frame, text="Overlap (chars):", width=FORM_WIDTHS["label"]).pack(side="left", padx=(20, 0))
+        ttk.Entry(chunk_frame, textvariable=self.chunk_overlap, width=10).pack(side="left", padx=5)
 
         ttk.Checkbutton(
             chunk_frame,
@@ -2858,10 +2965,8 @@ class AgenticRAGApp:
             variable=self.build_digest_index,
         ).pack(side="left", padx=(20, 0))
 
-        comprehension_frame = ttk.LabelFrame(
-            frame, text="Comprehension Index", padding=10
-        )
-        comprehension_frame.pack(fill="x", pady=(0, 10))
+        comprehension_frame = ttk.LabelFrame(frame, text="3) Optional comprehension index", padding=UI_SPACING["m"])
+        comprehension_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
 
         ttk.Checkbutton(
             comprehension_frame,
@@ -2869,9 +2974,7 @@ class AgenticRAGApp:
             variable=self.build_comprehension_index,
         ).pack(side="left")
 
-        ttk.Label(comprehension_frame, text="Extraction depth:").pack(
-            side="left", padx=(20, 5)
-        )
+        ttk.Label(comprehension_frame, text="Extraction depth:").pack(side="left", padx=(20, 5))
         ttk.Combobox(
             comprehension_frame,
             textvariable=self.comprehension_extraction_depth,
@@ -2880,16 +2983,21 @@ class AgenticRAGApp:
             state="readonly",
         ).pack(side="left")
 
-        # Action
         self.btn_ingest = ttk.Button(
             frame,
             text="Start Ingestion (Process -> Chunk -> Embed -> Store)",
             command=self.start_ingestion,
         )
-        self.btn_ingest.pack(fill="x", pady=20)
+        self.btn_ingest.pack(fill="x", pady=(0, UI_SPACING["m"]))
 
-        self.progress = ttk.Progressbar(frame, orient="horizontal", mode="determinate")
+        self.progress = ttk.Progressbar(frame, orient="horizontal", mode="indeterminate")
         self.progress.pack(fill="x")
+        ttk.Label(
+            frame,
+            text="Progress is shown while indexing runs. Detailed stage output appears in Logs.",
+            foreground="#6b7280",
+        ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+        self._update_current_state_strip()
 
     def build_chat_tab(self):
         for child in self.tab_chat.winfo_children():
@@ -2901,8 +3009,27 @@ class AgenticRAGApp:
             self.use_sub_queries = tk.BooleanVar(value=True)
         if not hasattr(self, "subquery_max_docs"):
             self.subquery_max_docs = tk.IntVar(value=200)
-        frame = ttk.Frame(self.tab_chat, padding=20)
+        frame = ttk.Frame(self.tab_chat, padding=UI_SPACING["l"])
         frame.pack(fill=tk.BOTH, expand=True)
+
+        header = ttk.Frame(frame)
+        header.pack(fill="x", pady=(0, UI_SPACING["s"]))
+        ttk.Label(header, text="Chat", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(
+            header,
+            text="Flow: Library builds index → Chat uses current index → Settings configures providers.",
+            foreground="#6b7280",
+        ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+
+        state_strip = ttk.Frame(frame, style="Card.TFrame")
+        state_strip.pack(fill="x", pady=(0, UI_SPACING["s"]))
+        ttk.Label(state_strip, text="Current State:", style="Bold.TLabel").pack(side="left", padx=(0, UI_SPACING["xs"]))
+        ttk.Label(state_strip, textvariable=self.current_state_var).pack(side="left", fill="x", expand=True)
+        self.state_warning_label = ttk.Label(frame, textvariable=self.current_warning_var, foreground="#a33")
+        self.state_warning_label.pack(fill="x", pady=(0, UI_SPACING["s"]))
+
+        self.rag_progress = ttk.Progressbar(frame, orient="horizontal", mode="indeterminate")
+        self.rag_progress.pack(fill="x", pady=(0, UI_SPACING["s"]))
 
         top_bar = ttk.LabelFrame(frame, text="Conversation", padding=10)
         top_bar.pack(fill="x", pady=(0, 10))
@@ -2910,7 +3037,7 @@ class AgenticRAGApp:
             top_bar.columnconfigure(col, weight=1)
 
         ttk.Label(top_bar, text="Profile:").grid(row=0, column=0, sticky="w")
-        self.cb_profile = ttk.Combobox(top_bar, textvariable=self.selected_profile, state="readonly", width=24)
+        self.cb_profile = ttk.Combobox(top_bar, textvariable=self.selected_profile, state="readonly", width=FORM_WIDTHS["input"])
         self.cb_profile.grid(row=0, column=1, sticky="ew", padx=(6, 12))
         self._refresh_profile_options()
 
@@ -2964,24 +3091,13 @@ class AgenticRAGApp:
 
         # Tag configuration for coloring
         self.chat_display.tag_config(
-            "user", foreground="blue", font=("Segoe UI", 10, "bold")
+            "user", foreground="#1f4fb2", font=("Segoe UI", 10, "bold"), spacing1=8, spacing3=8
         )
-        self.chat_display.tag_config("agent", foreground="green")
+        self.chat_display.tag_config("agent", foreground="#166534", spacing1=8, spacing3=12)
         self.chat_display.tag_config(
-            "system", foreground="gray", font=("Segoe UI", 8, "italic")
+            "system", foreground="#6b7280", font=("Segoe UI", 9, "italic"), spacing1=6, spacing3=6
         )
         self.chat_display.tag_config("source", foreground="#888888", font=("Consolas", 8))
-
-        # Input
-        input_frame = ttk.Frame(left_pane)
-        input_frame.pack(fill="x")
-
-        self.txt_input = ttk.Entry(input_frame, font=("Segoe UI", 11))
-        self.txt_input.pack(side="left", fill="both", expand=True, padx=(0, 10))
-        self.txt_input.bind("<Return>", lambda e: self.send_message())
-
-        self.btn_send = ttk.Button(input_frame, text="Send", command=self.send_message)
-        self.btn_send.pack(side="right")
 
         # Quick Actions
         action_frame = ttk.Frame(left_pane)
@@ -3055,6 +3171,16 @@ class AgenticRAGApp:
         ttk.Checkbutton(frontier_wrap, text="Enable citation v2", variable=self.enable_citation_v2).pack(anchor="w")
         ttk.Checkbutton(frontier_wrap, text="Claim-level grounding (CiteFix-lite)", variable=self.enable_claim_level_grounding_citefix_lite).pack(anchor="w")
         ttk.Checkbutton(frontier_wrap, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
+
+        # Sticky input composer
+        input_frame = ttk.Frame(left_pane)
+        input_frame.pack(fill="x", side="bottom", pady=(UI_SPACING["s"], 0))
+        self.txt_input = tk.Text(input_frame, height=3, font=("Segoe UI", 11), wrap=tk.WORD)
+        self.txt_input.pack(side="left", fill="both", expand=True, padx=(0, UI_SPACING["s"]))
+        self.txt_input.bind("<Control-Return>", lambda _e: (self.send_message(), "break")[1])
+
+        self.btn_send = ttk.Button(input_frame, text="Send", command=self.send_message)
+        self.btn_send.pack(side="right")
 
         # Right evidence pane
         evidence_wrap = ttk.LabelFrame(right_pane, text="Evidence Navigator", padding=8)
@@ -3154,6 +3280,7 @@ class AgenticRAGApp:
         self._grounding_tab_added = False
         self.enable_langextract.trace_add("write", self._toggle_grounding_tab)
         self._toggle_grounding_tab()
+        self._update_current_state_strip()
 
     def _configure_chat_mode_ui(self):
         self.basic_wizard_completed = False
@@ -3486,6 +3613,7 @@ class AgenticRAGApp:
                 self.chunk_size.set(1200)
                 self.chunk_overlap.set(150)
                 self.start_ingestion()
+            self._update_current_state_strip()
 
             self.basic_wizard_completed = True
             self.save_config()
@@ -6644,6 +6772,7 @@ class AgenticRAGApp:
             ),
             daemon=True,
         ).start()
+        self._update_current_state_strip()
 
     def _load_existing_index(
         self,
@@ -6686,6 +6815,7 @@ class AgenticRAGApp:
                     f"{self._format_index_label(selected_path, selected_collection)}."
                 )
                 self._run_on_ui(self._set_startup_status, "Ready")
+                self._run_on_ui(self._update_current_state_strip)
             elif db_type == "weaviate":
                 raise RuntimeError(
                     "Weaviate indexes must be loaded via server connection. Please ingest or connect first."
@@ -6697,6 +6827,7 @@ class AgenticRAGApp:
             self.selected_collection_name = previous_collection
             self.save_config()
             self._run_on_ui(self.existing_index_var.set, previous_label)
+            self._run_on_ui(self._update_current_state_strip)
             self._report_transition_error(
                 transition="index::load",
                 exc=exc,
@@ -6938,12 +7069,14 @@ class AgenticRAGApp:
             self.selected_file = f
             self.lbl_file.config(text=f, foreground="black")
             self._update_file_info()
+            self._update_current_state_strip()
 
     def clear_selected_file(self):
         self.selected_file = None
         self.lbl_file.config(text="No file selected", foreground="gray")
         if hasattr(self, "lbl_file_info"):
             self.lbl_file_info.config(text="")
+        self._update_current_state_strip()
 
     def _update_file_info(self):
         if not self.selected_file:
@@ -9692,6 +9825,7 @@ class AgenticRAGApp:
 
         self._clear_error_state()
         self._set_startup_status("Starting ingestion…")
+        self._set_progress_running(getattr(self, "progress", None), True)
         embedding_provider = self.embedding_provider.get()
         ingest_ctx = {
             "chunk_size": int(self.chunk_size.get()),
@@ -9718,7 +9852,7 @@ class AgenticRAGApp:
         previous_signature = self.index_embedding_signature
         try:
             self._run_on_ui(self.btn_ingest.config, state="disabled")
-            self._run_on_ui(self.progress.config, value=0)
+            self._run_on_ui(self._set_progress_running, getattr(self, "progress", None), True)
             self._frontier_evidence_pack_mode = False
             self.log("Starting ingestion pipeline...")
             self._run_on_ui(self._set_startup_status, "Ingestion in progress…")
@@ -10330,11 +10464,17 @@ class AgenticRAGApp:
             self.append_chat("system", "Initialisation not finished yet. Please retry in a moment.")
             return
         self._clear_error_state()
-        query = self.txt_input.get()
+        warnings = self._get_current_state_warnings()
+        if warnings:
+            self.append_chat("system", "Cannot start run: " + "; ".join(warnings))
+            self._update_current_state_strip()
+            return
+
+        query = self.txt_input.get("1.0", tk.END).strip()
         if not query:
             return
 
-        self.txt_input.delete(0, tk.END)
+        self.txt_input.delete("1.0", tk.END)
         self.append_chat("user", f"You: {query}")
         self._append_history(self._human_message(content=query))
         self._insert_session_message(role="user", content=query)
