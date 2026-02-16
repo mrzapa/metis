@@ -108,6 +108,23 @@ def _lazy_import_langchain_core():
         messages.SystemMessage,
     )
 
+
+def _lazy_import_chroma():
+    try:
+        module = importlib.import_module("langchain_chroma")
+        return module.Chroma
+    except ImportError:
+        pass
+    try:
+        module = importlib.import_module("langchain_community.vectorstores")
+        return module.Chroma
+    except ImportError as err:
+        raise ImportError(
+            "Chroma integration is not installed. Install required dependencies "
+            "(e.g. 'langchain-chroma' and 'chromadb') and run dependency "
+            "check/install from the app."
+        ) from err
+
 # --- Libraries check is done inside the class to prevent instant crash ---
 # Required: pip install langchain langchain-community langchain-openai langchain-anthropic langchain-google-genai langchain-cohere langchain-text-splitters chromadb beautifulsoup4 tiktoken
 
@@ -1359,45 +1376,8 @@ class AgenticRAGApp:
         _, _, HumanMessage, _ = self._lazy_lc_classes()
         return isinstance(value, HumanMessage)
 
-    def setup_ui(self):
-        style = ttk.Style()
-        if "clam" in style.theme_names():
-            style.theme_use("clam")
-        style.configure("Status.TLabel", font=("Segoe UI", 9))
-
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        self.tab_config = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_config, text="1. Configuration")
-        ttk.Label(self.tab_config, text="Loading configuration...").pack(anchor="w", padx=14, pady=14)
-
-        self.tab_ingest = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_ingest, text="2. Data Ingestion")
-        ttk.Label(self.tab_ingest, text="Loading ingestion tools...").pack(anchor="w", padx=14, pady=14)
-
-        self.tab_chat = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_chat, text="3. Agentic Chat")
-        chat_wrap = ttk.Frame(self.tab_chat, padding=14)
-        chat_wrap.pack(fill=tk.BOTH, expand=True)
-        self.chat_display = scrolledtext.ScrolledText(chat_wrap, state="disabled", height=12)
-        self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
-        input_frame = ttk.Frame(chat_wrap)
-        input_frame.pack(fill="x")
-        self.txt_input = ttk.Entry(input_frame)
-        self.txt_input.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self.txt_input.bind("<Return>", lambda _e: self.send_message())
-        ttk.Button(input_frame, text="Send", command=self.send_message).pack(side="right")
-
-        self.status_var = tk.StringVar(value="Ready")
-        self.startup_elapsed_var = tk.StringVar(value="0 ms")
-        status_wrap = ttk.Frame(self.root)
-        status_wrap.pack(fill="x", padx=10, pady=(0, 8))
-        ttk.Label(status_wrap, textvariable=self.status_var, style="Status.TLabel", anchor="w").pack(side="left")
-        ttk.Label(status_wrap, textvariable=self.startup_elapsed_var, style="Status.TLabel", anchor="e").pack(side="right")
-
     def _schedule_startup_pipeline(self):
-        self.root.after(0, self._startup_step_build_full_ui)
+        self.root.after(0, self._startup_step_prepare_ui_state)
 
     def _safe_widget_exists(self, widget):
         try:
@@ -1434,12 +1414,12 @@ class AgenticRAGApp:
         if hasattr(self, "startup_elapsed_var"):
             self.startup_elapsed_var.set(f"{elapsed_ms} ms")
 
-    def _startup_step_build_full_ui(self):
+    def _startup_step_prepare_ui_state(self):
         def _step():
             self._set_startup_status("Initialising UI...")
             self._ensure_tab_aliases()
 
-        self._run_startup_step("build_full_ui", _step, self._startup_step_load_config)
+        self._run_startup_step("prepare_ui_state", _step, self._startup_step_load_config)
 
     def _startup_step_load_config(self):
         def _step():
@@ -2380,14 +2360,6 @@ class AgenticRAGApp:
         column = self.sessions_tree.identify_column(event.x)
         if region == "cell" and column == "#4":
             self.load_selected_session()
-
-    def build_logs_tab(self):
-        frame = ttk.Frame(self.tab_logs, padding=20)
-        frame.pack(fill=tk.BOTH, expand=True)
-        self.log_area = scrolledtext.ScrolledText(
-            frame, height=8, state="disabled", font=("Consolas", 9)
-        )
-        self.log_area.pack(fill=tk.BOTH, expand=True)
 
     def _create_scrollable_tab_frame(self, tab, *, padding=20):
         container = ttk.Frame(tab)
@@ -3799,20 +3771,6 @@ class AgenticRAGApp:
             seen.add(key)
             merged.append(doc)
         return merged
-
-    @staticmethod
-    def _doc_identity_key(doc):
-        metadata = getattr(doc, "metadata", {}) or {}
-        content = (getattr(doc, "page_content", "") or "").strip()
-        chunk_id = metadata.get("chunk_id")
-        ingest_id = metadata.get("ingest_id")
-        if chunk_id is not None and ingest_id:
-            return f"{ingest_id}:{chunk_id}"
-        chunk_db_id = metadata.get("chunk_db_id")
-        if chunk_db_id:
-            return f"chunk_db:{chunk_db_id}"
-        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        return f"content:{content_hash}"
 
     def _fuse_ranked_results(self, ranked_lists, k_rrf=60, fused_pool_size=600):
         score_by_key = {}
