@@ -2603,7 +2603,16 @@ class AgenticRAGApp:
         for child in self.tab_settings.winfo_children():
             child.destroy()
 
+        if not hasattr(self, "settings_search_var"):
+            self.settings_search_var = tk.StringVar(value="")
+        if not hasattr(self, "settings_view_mode"):
+            self.settings_view_mode = tk.StringVar(value="advanced" if self.advanced_ui.get() else "recommended")
+        if not getattr(self, "_settings_search_trace_installed", False):
+            self.settings_search_var.trace_add("write", lambda *_: self._apply_settings_filters())
+            self._settings_search_trace_installed = True
+
         _settings_outer_frame, self.settings_canvas, frame = self._make_scrollable_frame(self.tab_settings)
+        self.settings_root_frame = frame
         frame.configure(padding=UI_SPACING["l"])
         if not getattr(self, "_settings_wheel_binding_installed", False):
             self.root.bind_all("<MouseWheel>", self._handle_settings_mousewheel, add="+")
@@ -2612,6 +2621,8 @@ class AgenticRAGApp:
             self._settings_wheel_binding_installed = True
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
+        self._settings_section_meta = []
+        self._settings_search_rows = []
 
         header = ttk.Frame(frame)
         header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=UI_SPACING["xs"], pady=(0, UI_SPACING["s"]))
@@ -2622,15 +2633,30 @@ class AgenticRAGApp:
             foreground="#6b7280",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
+        search_row = ttk.Frame(frame)
+        search_row.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        search_row.columnconfigure(1, weight=1)
+        ttk.Label(search_row, text="Search settings:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(search_row, textvariable=self.settings_search_var).grid(row=0, column=1, sticky="ew", padx=(8, 8))
+        ttk.Button(search_row, text="Clear", command=lambda: self.settings_search_var.set("")).grid(row=0, column=2, sticky="e")
+
         toggle_row = ttk.Frame(frame)
-        toggle_row.grid(row=1, column=0, columnspan=2, sticky="w", padx=5, pady=(0, 8))
-        ttk.Label(toggle_row, text="Detail level:").pack(side="left")
-        ttk.Checkbutton(
+        toggle_row.grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=(0, 8))
+        ttk.Label(toggle_row, text="View:").pack(side="left")
+        ttk.Radiobutton(
+            toggle_row,
+            text="Recommended",
+            value="recommended",
+            variable=self.settings_view_mode,
+            command=self._on_settings_view_mode_change,
+        ).pack(side="left", padx=(8, 16))
+        ttk.Radiobutton(
             toggle_row,
             text="Advanced",
-            variable=self.advanced_ui,
-            command=self._apply_basic_advanced_visibility,
-        ).pack(side="left", padx=(8, 16))
+            value="advanced",
+            variable=self.settings_view_mode,
+            command=self._on_settings_view_mode_change,
+        ).pack(side="left", padx=(0, 16))
         ttk.Label(toggle_row, text="Startup mode:").pack(side="left")
         ttk.Combobox(
             toggle_row,
@@ -2642,7 +2668,8 @@ class AgenticRAGApp:
         ttk.Button(toggle_row, text="Apply", command=self._apply_startup_mode_setting).pack(side="left")
 
         appearance_section = CollapsibleFrame(frame, "Appearance", expanded=False)
-        appearance_section.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        appearance_section.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        self._register_settings_section(appearance_section, "Appearance")
         ttk.Label(appearance_section.content, text="Theme mode:").pack(side="left")
         ttk.Combobox(
             appearance_section.content,
@@ -2654,7 +2681,8 @@ class AgenticRAGApp:
         ttk.Button(appearance_section.content, text="Apply Theme", command=self._apply_theme).pack(side="left")
 
         self.settings_model_section = CollapsibleFrame(frame, "Model & Provider", expanded=False)
-        self.settings_model_section.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        self.settings_model_section.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        self._register_settings_section(self.settings_model_section, "Model & Provider")
 
         # --- LLM Provider Settings ---
         llm_frame = ttk.LabelFrame(self.settings_model_section.content, text="LLM & Embedding Provider", padding=15)
@@ -2848,8 +2876,9 @@ class AgenticRAGApp:
 
 
         retrieval_section = CollapsibleFrame(frame, "Retrieval", expanded=False)
-        retrieval_section.grid(row=6, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        retrieval_section.grid(row=7, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_retrieval_section = retrieval_section
+        self._register_settings_section(self.settings_retrieval_section, "Retrieval")
         ttk.Label(retrieval_section.content, text="Search Type:").grid(row=0, column=0, sticky="w")
         ttk.Combobox(
             retrieval_section.content,
@@ -2884,8 +2913,9 @@ class AgenticRAGApp:
         ttk.Entry(retrieval_section.content, textvariable=self.fallback_final_k, width=8).grid(row=3, column=3, sticky="w", padx=(5, 0), pady=2)
 
         agentic_section = CollapsibleFrame(frame, "Agentic / Iterations", expanded=False)
-        agentic_section.grid(row=7, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        agentic_section.grid(row=8, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_agentic_section = agentic_section
+        self._register_settings_section(self.settings_agentic_section, "Agentic / Iterations", advanced_only=True)
         ttk.Checkbutton(
             agentic_section.content,
             text="Agentic mode (iterate)",
@@ -2908,8 +2938,9 @@ class AgenticRAGApp:
         ).pack(side="left")
 
         frontier_section = CollapsibleFrame(frame, "Frontier", expanded=False)
-        frontier_section.grid(row=8, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        frontier_section.grid(row=9, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_frontier_section = frontier_section
+        self._register_settings_section(self.settings_frontier_section, "Frontier", advanced_only=True)
         ttk.Checkbutton(frontier_section.content, text="Enable langextract", variable=self.enable_langextract).pack(anchor="w")
         ttk.Checkbutton(frontier_section.content, text="Structured Extraction", variable=self.enable_structured_extraction).pack(anchor="w")
         ttk.Checkbutton(frontier_section.content, text="Enable structured incidents", variable=self.enable_structured_incidents).pack(anchor="w")
@@ -2921,7 +2952,8 @@ class AgenticRAGApp:
         ttk.Checkbutton(frontier_section.content, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
 
         profile_section = CollapsibleFrame(frame, "Profiles", expanded=True)
-        profile_section.grid(row=9, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        profile_section.grid(row=10, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        self._register_settings_section(profile_section, "Profiles")
         profile_row = ttk.Frame(profile_section.content)
         profile_row.pack(fill="x")
         ttk.Label(profile_row, text="Profile list:").pack(side="left")
@@ -2939,10 +2971,152 @@ class AgenticRAGApp:
         ttk.Button(profile_row, text="Duplicate", command=self.duplicate_profile).pack(side="left", padx=(8, 0))
 
         self._refresh_profile_options()
+        self._index_settings_search_rows()
+        self._apply_basic_advanced_visibility()
+
+    def _register_settings_section(self, section, title, advanced_only=False):
+        if not hasattr(self, "_settings_section_meta"):
+            self._settings_section_meta = []
+        self._settings_section_meta.append(
+            {
+                "section": section,
+                "title": title,
+                "title_norm": title.lower(),
+                "advanced_only": bool(advanced_only),
+            }
+        )
+
+    def _settings_widget_text(self, widget):
+        parts = []
+        if "text" in widget.keys():
+            text = widget.cget("text")
+            if text:
+                parts.append(str(text))
+        for child in widget.winfo_children():
+            parts.append(self._settings_widget_text(child))
+        return " ".join(part for part in parts if part).strip()
+
+    def _index_settings_search_rows(self):
+        self._settings_search_rows = []
+        for section_meta in getattr(self, "_settings_section_meta", []):
+            section = section_meta["section"]
+            self._collect_settings_rows(section.content, section_meta)
+
+    def _collect_settings_rows(self, container, section_meta):
+        children = container.winfo_children()
+        grid_children = [w for w in children if w.winfo_manager() == "grid"]
+        row_groups = {}
+        for widget in grid_children:
+            row = int(widget.grid_info().get("row", 0))
+            row_groups.setdefault(row, []).append(widget)
+        for row_widgets in row_groups.values():
+            text = " ".join(self._settings_widget_text(widget) for widget in row_widgets).strip()
+            self._settings_search_rows.append(
+                {
+                    "widgets": row_widgets,
+                    "section": section_meta,
+                    "text_norm": text.lower(),
+                    "advanced_only": section_meta["advanced_only"] or self._is_advanced_settings_row(text),
+                    "visible": True,
+                    "manager": "grid",
+                }
+            )
+
+        for widget in children:
+            if widget.winfo_manager() != "pack":
+                continue
+            grandchildren = widget.winfo_children()
+            has_layouted_grandchildren = any(
+                child.winfo_manager() in {"grid", "pack"} for child in grandchildren
+            )
+            if has_layouted_grandchildren:
+                self._collect_settings_rows(widget, section_meta)
+                continue
+            text = self._settings_widget_text(widget)
+            self._settings_search_rows.append(
+                {
+                    "widgets": [widget],
+                    "section": section_meta,
+                    "text_norm": text.lower(),
+                    "advanced_only": section_meta["advanced_only"] or self._is_advanced_settings_row(text),
+                    "visible": True,
+                    "manager": "pack",
+                    "pack_info": widget.pack_info(),
+                }
+            )
+
+    def _is_advanced_settings_row(self, row_text):
+        text = (row_text or "").lower()
+        advanced_keywords = (
+            "custom",
+            "mmr",
+            "reranker",
+            "sub-queries",
+            "max merged docs",
+            "fallback",
+            "agentic",
+            "recursive",
+            "structured",
+            "citation v2",
+            "claim-level",
+            "langextract",
+            "agent lightning",
+            "dependency",
+        )
+        return any(keyword in text for keyword in advanced_keywords)
+
+    def _set_settings_row_visibility(self, row_entry, visible):
+        if row_entry["visible"] == visible:
+            return
+        if row_entry["manager"] == "grid":
+            for widget in row_entry["widgets"]:
+                if visible:
+                    widget.grid()
+                else:
+                    widget.grid_remove()
+        else:
+            widget = row_entry["widgets"][0]
+            if visible:
+                info = {k: v for k, v in row_entry["pack_info"].items() if k != "in"}
+                widget.pack(**info)
+            else:
+                widget.pack_forget()
+        row_entry["visible"] = visible
+
+    def _apply_settings_filters(self):
+        query = self.settings_search_var.get().strip().lower() if hasattr(self, "settings_search_var") else ""
+        advanced = bool(self.advanced_ui.get())
+
+        for row_entry in getattr(self, "_settings_search_rows", []):
+            query_ok = (not query) or (query in row_entry["text_norm"])
+            mode_ok = advanced or not row_entry["advanced_only"]
+            self._set_settings_row_visibility(row_entry, query_ok and mode_ok)
+
+        for section_meta in getattr(self, "_settings_section_meta", []):
+            section = section_meta["section"]
+            section_rows = [row for row in getattr(self, "_settings_search_rows", []) if row["section"] is section_meta]
+            has_visible_rows = any(row["visible"] for row in section_rows)
+            mode_ok = advanced or not section_meta["advanced_only"]
+            section_match = query and query in section_meta["title_norm"]
+            section_visible = mode_ok and (has_visible_rows or section_match or (not query))
+
+            if section_visible:
+                section.grid()
+                if query and (has_visible_rows or section_match):
+                    section.set_expanded(True)
+                elif not query:
+                    section.set_expanded(advanced)
+            else:
+                section.grid_remove()
+
+    def _on_settings_view_mode_change(self):
+        self.advanced_ui.set(self.settings_view_mode.get() == "advanced")
         self._apply_basic_advanced_visibility()
 
     def _apply_basic_advanced_visibility(self):
         advanced = bool(self.advanced_ui.get())
+        if hasattr(self, "settings_view_mode"):
+            self.settings_view_mode.set("advanced" if advanced else "recommended")
         for section_name in (
             "settings_model_section",
             "settings_retrieval_section",
@@ -2952,6 +3126,7 @@ class AgenticRAGApp:
             section = getattr(self, section_name, None)
             if section is not None:
                 section.set_expanded(advanced)
+        self._apply_settings_filters()
 
     def build_ingest_tab(self):
         frame = self._create_scrollable_tab_frame(self.tab_library, padding=UI_SPACING["l"])
