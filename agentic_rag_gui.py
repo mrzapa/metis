@@ -2421,8 +2421,71 @@ class AgenticRAGApp:
 
         return content_frame
 
+    def _make_scrollable_frame(self, parent):
+        outer_frame = ttk.Frame(parent)
+        outer_frame.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(outer_frame, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(outer_frame, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill=tk.BOTH, expand=True)
+
+        inner_frame = ttk.Frame(canvas)
+        inner_window_id = canvas.create_window((0, 0), window=inner_frame, anchor="nw")
+
+        def _sync_scroll_region(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _sync_inner_width(event):
+            canvas.itemconfigure(inner_window_id, width=event.width)
+
+        inner_frame.bind("<Configure>", _sync_scroll_region)
+        canvas.bind("<Configure>", _sync_inner_width)
+
+        return outer_frame, canvas, inner_frame
+
+    def _handle_settings_mousewheel(self, event):
+        canvas = getattr(self, "settings_canvas", None)
+        if canvas is None or not canvas.winfo_exists():
+            return None
+
+        pointer_widget = canvas.winfo_containing(canvas.winfo_pointerx(), canvas.winfo_pointery())
+        current = pointer_widget
+        while current is not None and current != canvas:
+            current = current.master
+        if current != canvas:
+            return None
+
+        if event.num == 4:
+            step = -1
+        elif event.num == 5:
+            step = 1
+        elif sys.platform == "darwin":
+            step = -int(event.delta)
+            if step == 0 and event.delta != 0:
+                step = -1 if event.delta > 0 else 1
+        else:
+            step = -int(event.delta / 120)
+            if step == 0 and event.delta != 0:
+                step = -1 if event.delta > 0 else 1
+
+        if step != 0:
+            canvas.yview_scroll(step, "units")
+        return "break"
+
     def build_config_tab(self):
-        frame = self._create_scrollable_tab_frame(self.tab_settings, padding=20)
+        for child in self.tab_settings.winfo_children():
+            child.destroy()
+
+        _settings_outer_frame, self.settings_canvas, frame = self._make_scrollable_frame(self.tab_settings)
+        frame.configure(padding=20)
+        if not getattr(self, "_settings_wheel_binding_installed", False):
+            self.root.bind_all("<MouseWheel>", self._handle_settings_mousewheel, add="+")
+            self.root.bind_all("<Button-4>", self._handle_settings_mousewheel, add="+")
+            self.root.bind_all("<Button-5>", self._handle_settings_mousewheel, add="+")
+            self._settings_wheel_binding_installed = True
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
 
