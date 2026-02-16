@@ -16,6 +16,7 @@ import sqlite3
 import uuid
 import html
 import webbrowser
+import traceback
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
@@ -427,6 +428,7 @@ class AgenticRAGApp:
         self._active_run_id = None
         self._startup_started_at = time.perf_counter()
         self._startup_pipeline_finished = False
+        self._error_state = None
         self._index_scan_in_progress = False
         self._pending_selected_index_label = None
         self._langchain_core_cache = None
@@ -1387,16 +1389,49 @@ class AgenticRAGApp:
 
     def _startup_error(self, step_name, exc):
         self._startup_pipeline_finished = False
-        error_msg = f"Startup step '{step_name}' failed: {exc}"
-        print(error_msg, file=sys.stderr)
-        try:
-            self.log(error_msg)
-        except Exception:
-            print(error_msg)
-        try:
-            messagebox.showerror("Startup Error", error_msg)
-        except Exception:
-            print("Startup Error dialog could not be displayed.", file=sys.stderr)
+        self._report_transition_error(
+            transition=f"startup::{step_name}",
+            exc=exc,
+            user_message=f"Startup failed during '{step_name}'.",
+            show_messagebox=True,
+        )
+        self._set_startup_status("Startup failed")
+
+    def _report_transition_error(self, transition, exc, user_message=None, show_messagebox=False):
+        concise = user_message or f"{transition} failed: {exc}"
+        details = traceback.format_exc()
+        self._error_state = {
+            "transition": transition,
+            "error": str(exc),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        self.log(f"ERROR [{transition}] {concise} ({exc})")
+        self.log(f"Details [{transition}]\n{details.rstrip()}")
+        self._run_on_ui(self._set_startup_status, concise)
+        if show_messagebox:
+            self._run_on_ui(
+                messagebox.showerror,
+                "Operation Error",
+                f"{concise}\n\nDetails are available in the Logs pane.",
+            )
+
+    def _clear_error_state(self):
+        self._error_state = None
+
+    def _reset_ingestion_ui_state(self, status_text=None):
+        if hasattr(self, "btn_ingest") and self._safe_widget_exists(self.btn_ingest):
+            self.btn_ingest.config(state="normal")
+        if hasattr(self, "progress") and self._safe_widget_exists(self.progress):
+            self.progress.config(value=0)
+        if status_text:
+            self._set_startup_status(status_text)
+
+    def _set_rag_run_ui_state(self, running):
+        state = "disabled" if running else "normal"
+        if hasattr(self, "btn_send") and self._safe_widget_exists(self.btn_send):
+            self.btn_send.config(state=state)
+        if hasattr(self, "txt_input") and self._safe_widget_exists(self.txt_input):
+            self.txt_input.config(state=state)
 
     def _run_startup_step(self, step_name, step_func, next_step=None):
         try:
@@ -2882,8 +2917,8 @@ class AgenticRAGApp:
         self.txt_input.pack(side="left", fill="both", expand=True, padx=(0, 10))
         self.txt_input.bind("<Return>", lambda e: self.send_message())
 
-        btn_send = ttk.Button(input_frame, text="Send", command=self.send_message)
-        btn_send.pack(side="right")
+        self.btn_send = ttk.Button(input_frame, text="Send", command=self.send_message)
+        self.btn_send.pack(side="right")
 
         # Quick Actions
         action_frame = ttk.Frame(left_pane)
@@ -6471,7 +6506,17 @@ class AgenticRAGApp:
         self._set_startup_status(reason)
 
         def _worker():
-            indexes = self._list_existing_indexes(db_type=db_type)
+            try:
+                indexes = self._list_existing_indexes(db_type=db_type)
+            except Exception as exc:
+                self._index_scan_in_progress = False
+                self._report_transition_error(
+                    transition="index::scan",
+                    exc=exc,
+                    user_message="Failed to scan existing indexes.",
+                    show_messagebox=False,
+                )
+                return
             self._run_on_ui(self._apply_existing_indexes, indexes)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -6517,16 +6562,36 @@ class AgenticRAGApp:
             "api_key": self.api_keys[embedding_provider].get() if embedding_provider in self.api_keys else "",
             "model_name": self._resolve_embedding_model(),
         }
-        self.selected_index_path = selected_path
-        self.selected_collection_name = selected_collection
-        self.save_config()
+        previous_path = self.selected_index_path
+        previous_collection = self.selected_collection_name
+        previous_label = self._format_index_label(
+            previous_path, previous_collection
+        ) if previous_path else "(default)"
+        self._set_startup_status("Loading selected index…")
         threading.Thread(
             target=self._load_existing_index,
-            args=(selected_path, selected_collection, db_type, embedding_ctx),
+            args=(
+                selected_path,
+                selected_collection,
+                db_type,
+                embedding_ctx,
+                previous_path,
+                previous_collection,
+                previous_label,
+            ),
             daemon=True,
         ).start()
 
-    def _load_existing_index(self, selected_path, selected_collection, db_type, embedding_ctx):
+    def _load_existing_index(
+        self,
+        selected_path,
+        selected_collection,
+        db_type,
+        embedding_ctx,
+        previous_path=None,
+        previous_collection=RAW_COLLECTION_NAME,
+        previous_label="(default)",
+    ):
         try:
             self.log(
                 "Loading existing index from "
@@ -6541,27 +6606,42 @@ class AgenticRAGApp:
                         ["langchain-chroma", "chromadb"], "Chroma vector store", err
                     )
                     return
-                self.vector_store = Chroma(
+                loaded_store = Chroma(
                     collection_name=selected_collection,
                     embedding_function=embeddings,
                     persist_directory=selected_path,
                 )
+                self.vector_store = loaded_store
+                self.selected_index_path = selected_path
+                self.selected_collection_name = selected_collection
                 self._ensure_lexical_db()
                 self.index_embedding_signature = self._current_embedding_signature()
                 self.save_config()
+                self._clear_error_state()
                 self.log(
                     "Active index set to "
                     f"{self._format_index_label(selected_path, selected_collection)}."
                 )
+                self._run_on_ui(self._set_startup_status, "Ready")
             elif db_type == "weaviate":
-                self.log(
-                    "Weaviate indexes must be loaded via server connection. "
-                    "Please ingest or connect first."
+                raise RuntimeError(
+                    "Weaviate indexes must be loaded via server connection. Please ingest or connect first."
                 )
             else:
-                self.log(f"Unknown vector DB type: {db_type}")
+                raise ValueError(f"Unknown vector DB type: {db_type}")
         except Exception as exc:
-            self.log(f"Failed to load existing index: {exc}")
+            self.selected_index_path = previous_path
+            self.selected_collection_name = previous_collection
+            self.save_config()
+            self._run_on_ui(self.existing_index_var.set, previous_label)
+            self._report_transition_error(
+                transition="index::load",
+                exc=exc,
+                user_message=(
+                    "Failed to load selected index. Reverted to previous active index."
+                ),
+                show_messagebox=True,
+            )
 
     def check_dependencies(self):
         def has_module(module_name):
@@ -9547,6 +9627,8 @@ class AgenticRAGApp:
             messagebox.showerror("Error", "Please select a file first.")
             return
 
+        self._clear_error_state()
+        self._set_startup_status("Starting ingestion…")
         embedding_provider = self.embedding_provider.get()
         ingest_ctx = {
             "chunk_size": int(self.chunk_size.get()),
@@ -9567,10 +9649,16 @@ class AgenticRAGApp:
         threading.Thread(target=self._ingest_process, args=(ingest_ctx,), daemon=True).start()
 
     def _ingest_process(self, ingest_ctx):
+        previous_vector_store = self.vector_store
+        previous_index_path = self.selected_index_path
+        previous_collection_name = self.selected_collection_name
+        previous_signature = self.index_embedding_signature
         try:
             self._run_on_ui(self.btn_ingest.config, state="disabled")
+            self._run_on_ui(self.progress.config, value=0)
             self._frontier_evidence_pack_mode = False
             self.log("Starting ingestion pipeline...")
+            self._run_on_ui(self._set_startup_status, "Ingestion in progress…")
             self.log(
                 "Frontier flags (ingestion): "
                 f"langextract={self._frontier_enabled('langextract')}, "
@@ -10138,6 +10226,8 @@ class AgenticRAGApp:
                 self.log(f"Indexed {len(concept_docs)} concept cards for retrieval.")
 
             self.log("Ingestion Complete! You can now chat.")
+            self._clear_error_state()
+            self._run_on_ui(self._set_startup_status, "Ingestion complete")
             if new_index_path:
                 def _select_new_index():
                     selection_label = self._format_index_label(new_index_path)
@@ -10157,15 +10247,26 @@ class AgenticRAGApp:
             )
 
         except Exception as e:
-            self.log(f"INGESTION ERROR: {str(e)}")
-            self._run_on_ui(messagebox.showerror, "Error", f"Ingestion failed:\n{str(e)}")
+            self.vector_store = previous_vector_store
+            self.selected_index_path = previous_index_path
+            self.selected_collection_name = previous_collection_name
+            self.index_embedding_signature = previous_signature
+            self.save_config()
+            self._report_transition_error(
+                transition="ingestion::pipeline",
+                exc=e,
+                user_message="Ingestion failed. Partial results were not activated.",
+                show_messagebox=True,
+            )
         finally:
-            self._run_on_ui(self.btn_ingest.config, state="normal")
+            self._run_on_ui(self._reset_ingestion_ui_state, "Ready")
+
 
     def send_message(self):
         if not self._startup_pipeline_finished:
             self.append_chat("system", "Initialisation not finished yet. Please retry in a moment.")
             return
+        self._clear_error_state()
         query = self.txt_input.get()
         if not query:
             return
@@ -10232,6 +10333,12 @@ class AgenticRAGApp:
                     )
                     return
             except Exception as e:
+                self._report_transition_error(
+                    transition="rag::preflight_index_load",
+                    exc=e,
+                    user_message="Unable to start RAG run because no usable index is available.",
+                    show_messagebox=False,
+                )
                 self.append_chat("system", f"Error: Please ingest a file first. ({e})")
                 return
 
@@ -10278,6 +10385,8 @@ class AgenticRAGApp:
         }
         rag_ctx["system_instructions"] = self._get_system_instructions(resolved_settings)
 
+        self._run_on_ui(self._set_rag_run_ui_state, True)
+        self._run_on_ui(self._set_startup_status, "RAG run in progress…")
         threading.Thread(target=self._rag_pipeline, args=(rag_ctx, query), daemon=True).start()
 
     def _rag_pipeline(self, rag_ctx, query):
@@ -10289,6 +10398,7 @@ class AgenticRAGApp:
         self._run_on_ui(self._set_readonly_text, self.trace_text, "")
         try:
             self.log("Starting Retrieval...")
+            self._run_on_ui(self._set_startup_status, "RAG retrieval started…")
 
             # 1. Retrieval
             output_style = rag_ctx["output_style"]
@@ -13028,8 +13138,15 @@ class AgenticRAGApp:
                 }
             )
             self._finalize_agent_lightning_run(run_id, final_docs, validated_answer or latest_answer)
+            self._clear_error_state()
+            self._run_on_ui(self._set_startup_status, "RAG run complete")
         except Exception as e:
-            self.log(f"RAG Error ({stage} failure): {e}")
+            self._report_transition_error(
+                transition=f"rag::{stage}",
+                exc=e,
+                user_message=f"RAG run failed during {stage}.",
+                show_messagebox=True,
+            )
             self.append_chat("system", f"Error ({stage} failure): {e}")
             self._append_jsonl_telemetry(
                 {
@@ -13041,8 +13158,11 @@ class AgenticRAGApp:
                 }
             )
         finally:
+            self._run_on_ui(self._set_rag_run_ui_state, False)
             if self._active_run_id == run_id:
                 self._active_run_id = None
+            if self._error_state is None:
+                self._run_on_ui(self._set_startup_status, "Ready")
 
     def _tag_citations_in_chat(self, start_index, end_index):
         text = self.chat_display.get(start_index, end_index)
@@ -13162,4 +13282,14 @@ if __name__ == "__main__":
         app = AgenticRAGApp(root)
         root.mainloop()
     except Exception as e:
-        print(f"Startup Error: {e}")
+        detail = traceback.format_exc()
+        concise = f"Startup Error: {e}"
+        print(concise, file=sys.stderr)
+        print(detail, file=sys.stderr)
+        try:
+            messagebox.showerror(
+                "Startup Error",
+                f"{concise}\n\nDetails have been written to stderr.",
+            )
+        except Exception:
+            pass
