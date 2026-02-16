@@ -433,6 +433,9 @@ class AgenticRAGApp:
         self._startup_pipeline_finished = False
         self._error_state = None
         self._index_scan_in_progress = False
+        self._index_switch_in_progress = False
+        self._index_switch_request_id = 0
+        self._ingestion_in_progress = False
         self._pending_selected_index_label = None
         self._langchain_core_cache = None
         self.default_system_instructions = (
@@ -994,21 +997,21 @@ class AgenticRAGApp:
             bool(extra.get("session_title_llm_enabled", self.session_title_llm_enabled.get()))
         )
 
-        previous_index = (self.selected_index_path, self.selected_collection_name)
-        self.selected_index_path = extra.get("selected_index_path", self.selected_index_path)
-        self.selected_collection_name = extra.get(
+        restored_index_path = extra.get("selected_index_path", self.selected_index_path)
+        restored_collection = extra.get(
             "selected_collection_name", self.selected_collection_name
         )
-        new_index = (self.selected_index_path, self.selected_collection_name)
-        if self.selected_index_path:
-            self._pending_selected_index_label = self._format_index_label(
-                self.selected_index_path,
-                self.selected_collection_name,
-            )
 
         self._refresh_profile_options()
         self._sync_model_options()
-        if new_index != previous_index:
+        if restored_index_path:
+            self.set_active_index(
+                restored_index_path,
+                restored_collection,
+                source="history_restore",
+                lazy_load=True,
+            )
+        else:
             self._refresh_existing_indexes_async(reason="Loading indexes…")
 
     def load_selected_session(self):
@@ -1424,6 +1427,7 @@ class AgenticRAGApp:
         self._error_state = None
 
     def _reset_ingestion_ui_state(self, status_text=None):
+        self._ingestion_in_progress = False
         if hasattr(self, "btn_ingest") and self._safe_widget_exists(self.btn_ingest):
             self.btn_ingest.config(state="normal")
         if hasattr(self, "progress") and self._safe_widget_exists(self.progress):
@@ -1441,6 +1445,7 @@ class AgenticRAGApp:
             self.txt_input.config(state="disabled" if running else "normal")
         if hasattr(self, "rag_progress"):
             self._set_progress_running(self.rag_progress, running)
+        self._update_current_state_strip()
 
     def _run_startup_step(self, step_name, step_func, next_step=None):
         try:
@@ -1731,6 +1736,10 @@ class AgenticRAGApp:
 
     def _get_current_state_warnings(self):
         warnings = []
+        if self._index_switch_in_progress:
+            warnings.append("Index switch in progress")
+        if self._ingestion_in_progress:
+            warnings.append("Ingestion is running")
         if not self._resolve_llm_model():
             warnings.append("Select a valid LLM model")
         if not self._resolve_embedding_model():
@@ -1742,12 +1751,29 @@ class AgenticRAGApp:
             warnings.append("Selected index path is unavailable")
         return warnings
 
+    def _is_active_index_loaded(self):
+        if not self.vector_store or not self.selected_index_path:
+            return False
+        persist_dir = getattr(self.vector_store, "_persist_directory", None)
+        if persist_dir and os.path.abspath(persist_dir) != os.path.abspath(self.selected_index_path):
+            return False
+        active_collection = getattr(self.vector_store, "_collection_name", None)
+        if active_collection and active_collection != self.selected_collection_name:
+            return False
+        return True
+
     def _update_current_state_strip(self):
         active_index_path, active_collection = self._get_selected_index_path()
         if active_index_path and active_collection and active_collection != RAW_COLLECTION_NAME:
             index_label = f"{self._shorten_path(active_index_path)} ({active_collection})"
         else:
             index_label = self._shorten_path(active_index_path)
+        if active_index_path:
+            if self._index_switch_in_progress:
+                load_state = "loading"
+            else:
+                load_state = "loaded" if self._is_active_index_loaded() else "not loaded"
+            index_label = f"{index_label} [{load_state}]"
         llm_label = f"{self.llm_provider.get()}/{self._resolve_llm_model() or '--'}"
         emb_label = f"{self.embedding_provider.get()}/{self._resolve_embedding_model() or '--'}"
         mode_label = self.selected_mode.get() or "--"
@@ -1764,8 +1790,12 @@ class AgenticRAGApp:
             else:
                 self.btn_send.config(state="normal")
 
+        if hasattr(self, "cb_existing_index") and self._safe_widget_exists(self.cb_existing_index):
+            selector_busy = bool(self._index_switch_in_progress or self._ingestion_in_progress or self._active_run_id)
+            self.cb_existing_index.config(state="disabled" if selector_busy else "readonly")
+
         if hasattr(self, "btn_ingest") and self._safe_widget_exists(self.btn_ingest):
-            ingest_ready = bool(self.selected_file) and bool(self._resolve_embedding_model())
+            ingest_ready = bool(self.selected_file) and bool(self._resolve_embedding_model()) and not self._ingestion_in_progress
             self.btn_ingest.config(state="normal" if ingest_ready else "disabled")
 
     def _set_progress_running(self, bar, running):
@@ -6789,13 +6819,100 @@ class AgenticRAGApp:
     def _get_selected_index_path(self):
         selection = self.existing_index_var.get()
         if not selection or selection == "(default)":
-            return self.selected_index_path, self.selected_collection_name
+            return None, RAW_COLLECTION_NAME
         return self.existing_index_paths.get(selection, (selection, RAW_COLLECTION_NAME))
 
-    def _on_existing_index_change(self, _event=None):
-        selected_path, selected_collection = self._get_selected_index_path()
-        if not selected_path:
+    def _active_index_label(self):
+        if not self.selected_index_path:
+            return "(default)"
+        return self._format_index_label(self.selected_index_path, self.selected_collection_name)
+
+    def _sync_index_selector_to_active(self):
+        desired = self._active_index_label()
+        if desired != "(default)" and self.selected_index_path:
+            self.existing_index_paths[desired] = (self.selected_index_path, self.selected_collection_name)
+        if hasattr(self, "cb_existing_index") and self._safe_widget_exists(self.cb_existing_index):
+            values = list(self.cb_existing_index.cget("values") or [])
+            if desired not in values:
+                values.append(desired)
+                self.cb_existing_index["values"] = values
+        self.existing_index_var.set(desired)
+
+    def _teardown_vector_store(self):
+        old_store = self.vector_store
+        self.vector_store = None
+        if old_store is None:
             return
+        for attr in ("close", "aclose"):
+            closer = getattr(old_store, attr, None)
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:
+                    pass
+
+    def set_active_index(self, index_path, collection_name=None, *, source="unknown", lazy_load=True, internal_request=False):
+        if threading.current_thread() != self.main_thread:
+            self._run_on_ui(
+                self.set_active_index,
+                index_path,
+                collection_name,
+                source=source,
+                lazy_load=lazy_load,
+                internal_request=internal_request,
+            )
+            return False
+
+        target_collection = collection_name or RAW_COLLECTION_NAME
+        previous_path = self.selected_index_path
+        previous_collection = self.selected_collection_name
+        previous_label = self._active_index_label()
+
+        if self._index_switch_in_progress:
+            self._set_startup_status("Index switch already in progress.")
+            self._sync_index_selector_to_active()
+            return False
+        if self._ingestion_in_progress and not internal_request:
+            self._set_startup_status("Cannot switch index while ingestion is running.")
+            self.append_chat("system", "Index switch blocked: ingestion is currently running.")
+            self._sync_index_selector_to_active()
+            return False
+        if self._active_run_id and not internal_request:
+            self._set_startup_status("Cannot switch index during an active chat run.")
+            self.append_chat("system", "Index switch blocked: wait for the current run to finish.")
+            self._sync_index_selector_to_active()
+            return False
+
+        if index_path:
+            normalized_path = os.path.abspath(index_path)
+            if not os.path.isdir(normalized_path):
+                self._set_startup_status("Selected index path is unavailable.")
+                self.append_chat("system", f"Index switch failed: path not found ({normalized_path}).")
+                self._sync_index_selector_to_active()
+                return False
+        else:
+            normalized_path = None
+
+        self._teardown_vector_store()
+        self.selected_index_path = normalized_path
+        self.selected_collection_name = target_collection
+        self.save_config()
+        self._sync_index_selector_to_active()
+        self._update_current_state_strip()
+
+        if not normalized_path:
+            self._set_startup_status("Active index cleared.")
+            return True
+
+        if not lazy_load:
+            self._set_startup_status(
+                f"Selected index: {self._format_index_label(normalized_path, target_collection)} (lazy load pending)."
+            )
+            return True
+
+        self._index_switch_in_progress = True
+        self._index_switch_request_id += 1
+        request_id = self._index_switch_request_id
         db_type = self.vector_db_type.get()
         embedding_provider = self.embedding_provider.get()
         embedding_ctx = {
@@ -6803,89 +6920,103 @@ class AgenticRAGApp:
             "api_key": self.api_keys[embedding_provider].get() if embedding_provider in self.api_keys else "",
             "model_name": self._resolve_embedding_model(),
         }
-        previous_path = self.selected_index_path
-        previous_collection = self.selected_collection_name
-        previous_label = self._format_index_label(
-            previous_path, previous_collection
-        ) if previous_path else "(default)"
-        self._set_startup_status("Loading selected index…")
-        threading.Thread(
-            target=self._load_existing_index,
-            args=(
-                selected_path,
-                selected_collection,
-                db_type,
-                embedding_ctx,
+        self._set_startup_status(
+            f"Loading selected index: {self._format_index_label(normalized_path, target_collection)}…"
+        )
+
+        def _worker():
+            loaded_store = None
+            failure = None
+            try:
+                embeddings = self.get_embeddings(embedding_ctx)
+                if db_type == "chroma":
+                    Chroma = _lazy_import_chroma()
+                    loaded_store = Chroma(
+                        collection_name=target_collection,
+                        embedding_function=embeddings,
+                        persist_directory=normalized_path,
+                    )
+                elif db_type == "weaviate":
+                    raise RuntimeError(
+                        "Weaviate indexes must be loaded via server connection. Please ingest or connect first."
+                    )
+                else:
+                    raise ValueError(f"Unknown vector DB type: {db_type}")
+            except Exception as exc:
+                failure = exc
+
+            self._run_on_ui(
+                self._finish_set_active_index,
+                request_id,
+                normalized_path,
+                target_collection,
                 previous_path,
                 previous_collection,
                 previous_label,
-            ),
-            daemon=True,
-        ).start()
-        self._update_current_state_strip()
+                loaded_store,
+                failure,
+                source,
+            )
 
-    def _load_existing_index(
+        threading.Thread(target=_worker, daemon=True).start()
+        self._update_current_state_strip()
+        return True
+
+    def _finish_set_active_index(
         self,
+        request_id,
         selected_path,
         selected_collection,
-        db_type,
-        embedding_ctx,
-        previous_path=None,
-        previous_collection=RAW_COLLECTION_NAME,
-        previous_label="(default)",
+        previous_path,
+        previous_collection,
+        previous_label,
+        loaded_store,
+        failure,
+        source,
     ):
-        try:
-            self.log(
-                "Loading existing index from "
-                f"{self._format_index_label(selected_path, selected_collection)}..."
-            )
-            embeddings = self.get_embeddings(embedding_ctx)
-            if db_type == "chroma":
-                try:
-                    Chroma = _lazy_import_chroma()
-                except ImportError as err:
-                    self._prompt_dependency_install(
-                        ["langchain-chroma", "chromadb"], "Chroma vector store", err
-                    )
-                    return
-                loaded_store = Chroma(
-                    collection_name=selected_collection,
-                    embedding_function=embeddings,
-                    persist_directory=selected_path,
-                )
-                self.vector_store = loaded_store
-                self.selected_index_path = selected_path
-                self.selected_collection_name = selected_collection
-                self._ensure_lexical_db()
-                self.index_embedding_signature = self._current_embedding_signature()
-                self.save_config()
-                self._clear_error_state()
-                self.log(
-                    "Active index set to "
-                    f"{self._format_index_label(selected_path, selected_collection)}."
-                )
-                self._run_on_ui(self._set_startup_status, "Ready")
-                self._run_on_ui(self._update_current_state_strip)
-            elif db_type == "weaviate":
-                raise RuntimeError(
-                    "Weaviate indexes must be loaded via server connection. Please ingest or connect first."
-                )
-            else:
-                raise ValueError(f"Unknown vector DB type: {db_type}")
-        except Exception as exc:
+        if request_id != self._index_switch_request_id:
+            return
+        self._index_switch_in_progress = False
+        if failure is not None:
             self.selected_index_path = previous_path
             self.selected_collection_name = previous_collection
             self.save_config()
-            self._run_on_ui(self.existing_index_var.set, previous_label)
-            self._run_on_ui(self._update_current_state_strip)
+            self._sync_index_selector_to_active()
+            self._update_current_state_strip()
             self._report_transition_error(
-                transition="index::load",
-                exc=exc,
-                user_message=(
-                    "Failed to load selected index. Reverted to previous active index."
-                ),
+                transition=f"index::set_active::{source}",
+                exc=failure,
+                user_message="Failed to switch index. Reverted to previous active index.",
                 show_messagebox=True,
             )
+            return
+
+        self.vector_store = loaded_store
+        self.selected_index_path = selected_path
+        self.selected_collection_name = selected_collection
+        self._ensure_lexical_db()
+        self.index_embedding_signature = self._current_embedding_signature()
+        self.save_config()
+        self._clear_error_state()
+        self._set_startup_status(
+            f"Active index: {self._format_index_label(selected_path, selected_collection)}"
+        )
+        self.log(
+            "Active index set to "
+            f"{self._format_index_label(selected_path, selected_collection)}."
+        )
+        self._sync_index_selector_to_active()
+        self._update_current_state_strip()
+
+    def _on_existing_index_change(self, _event=None):
+        selected_path, selected_collection = self._get_selected_index_path()
+        self.set_active_index(
+            selected_path,
+            selected_collection,
+            source="chat_selector",
+            lazy_load=True,
+        )
+
 
     def check_dependencies(self):
         def has_module(module_name):
@@ -9870,10 +10001,14 @@ class AgenticRAGApp:
         if not self._startup_pipeline_finished:
             messagebox.showinfo("Please wait", "Initialisation is still running. Please retry in a moment.")
             return
+        if self._ingestion_in_progress:
+            messagebox.showinfo("Ingestion Running", "Ingestion is already running.")
+            return
         if not self.selected_file:
             messagebox.showerror("Error", "Please select a file first.")
             return
 
+        self._ingestion_in_progress = True
         self._clear_error_state()
         self._set_startup_status("Starting ingestion…")
         self._set_progress_running(getattr(self, "progress", None), True)
@@ -10477,15 +10612,15 @@ class AgenticRAGApp:
             self._clear_error_state()
             self._run_on_ui(self._set_startup_status, "Ingestion complete")
             if new_index_path:
-                def _select_new_index():
-                    selection_label = self._format_index_label(new_index_path)
-                    self._pending_selected_index_label = selection_label
-                    self.selected_index_path = new_index_path
-                    self.selected_collection_name = RAW_COLLECTION_NAME
-                    self.save_config()
-                    self._refresh_existing_indexes_async(reason="Loading indexes…")
-
-                self._run_on_ui(_select_new_index)
+                self._run_on_ui(
+                    self.set_active_index,
+                    new_index_path,
+                    RAW_COLLECTION_NAME,
+                    source="library_completion",
+                    lazy_load=True,
+                    internal_request=True,
+                )
+                self._run_on_ui(self._refresh_existing_indexes_async, "Loading indexes…")
             else:
                 self._run_on_ui(self._refresh_existing_indexes_async)
             self._run_on_ui(
