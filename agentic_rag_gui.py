@@ -6449,8 +6449,8 @@ class AgenticRAGApp:
             return f"{label} (digest)"
         return label
 
-    def _list_existing_indexes(self):
-        db_type = self.vector_db_type.get()
+    def _list_existing_indexes(self, db_type=None):
+        db_type = db_type if db_type is not None else self.vector_db_type.get()
         indexes = []
         if db_type == "chroma":
             base_dir = self._get_chroma_persist_root()
@@ -6466,11 +6466,12 @@ class AgenticRAGApp:
     def _refresh_existing_indexes_async(self, reason="Loading indexes…"):
         if self._index_scan_in_progress:
             return
+        db_type = self.vector_db_type.get()
         self._index_scan_in_progress = True
         self._set_startup_status(reason)
 
         def _worker():
-            indexes = self._list_existing_indexes()
+            indexes = self._list_existing_indexes(db_type=db_type)
             self._run_on_ui(self._apply_existing_indexes, indexes)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -6509,23 +6510,29 @@ class AgenticRAGApp:
         selected_path, selected_collection = self._get_selected_index_path()
         if not selected_path:
             return
+        db_type = self.vector_db_type.get()
+        embedding_provider = self.embedding_provider.get()
+        embedding_ctx = {
+            "provider": embedding_provider,
+            "api_key": self.api_keys[embedding_provider].get() if embedding_provider in self.api_keys else "",
+            "model_name": self._resolve_embedding_model(),
+        }
         self.selected_index_path = selected_path
         self.selected_collection_name = selected_collection
         self.save_config()
         threading.Thread(
             target=self._load_existing_index,
-            args=(selected_path, selected_collection),
+            args=(selected_path, selected_collection, db_type, embedding_ctx),
             daemon=True,
         ).start()
 
-    def _load_existing_index(self, selected_path, selected_collection):
+    def _load_existing_index(self, selected_path, selected_collection, db_type, embedding_ctx):
         try:
             self.log(
                 "Loading existing index from "
                 f"{self._format_index_label(selected_path, selected_collection)}..."
             )
-            db_type = self.vector_db_type.get()
-            embeddings = self.get_embeddings()
+            embeddings = self.get_embeddings(embedding_ctx)
             if db_type == "chroma":
                 try:
                     Chroma = _lazy_import_chroma()
@@ -9340,11 +9347,16 @@ class AgenticRAGApp:
             return custom
         return selected or custom
 
-    def get_embeddings(self):
+    def get_embeddings(self, embedding_ctx=None):
         """Factory for embedding model"""
-        provider = self.embedding_provider.get()
-        api_key = self.api_keys[provider].get() if provider in self.api_keys else ""
-        model_name = self._resolve_embedding_model()
+        if embedding_ctx is None:
+            provider = self.embedding_provider.get()
+            api_key = self.api_keys[provider].get() if provider in self.api_keys else ""
+            model_name = self._resolve_embedding_model()
+        else:
+            provider = str(embedding_ctx.get("provider") or "").strip()
+            api_key = str(embedding_ctx.get("api_key") or "")
+            model_name = str(embedding_ctx.get("model_name") or "").strip()
 
         if provider == "openai":
             try:
@@ -9417,14 +9429,28 @@ class AgenticRAGApp:
 
         raise ValueError(f"Unknown embedding provider: {provider}")
 
-    def get_llm(self):
+    def get_llm(self, llm_ctx=None):
         """Factory for LLM"""
-        validated = self._validate_model_settings()
-        if not validated:
-            raise ValueError("Invalid model settings")
-        temperature, gui_llm_max_tokens = validated
-        provider = self.llm_provider.get()
-        model_name = self._resolve_llm_model()
+        if llm_ctx is None:
+            validated = self._validate_model_settings()
+            if not validated:
+                raise ValueError("Invalid model settings")
+            temperature, gui_llm_max_tokens = validated
+            provider = self.llm_provider.get()
+            model_name = self._resolve_llm_model()
+            key_values = {
+                "openai": self.api_keys["openai"].get(),
+                "anthropic": self.api_keys["anthropic"].get(),
+                "google": self.api_keys["google"].get(),
+            }
+            local_url = self.local_llm_url.get()
+        else:
+            provider = str(llm_ctx.get("provider") or "").strip()
+            model_name = str(llm_ctx.get("model_name") or "").strip()
+            temperature = float(llm_ctx.get("temperature", 0.0))
+            gui_llm_max_tokens = max(1, int(llm_ctx.get("max_tokens", 1)))
+            key_values = dict(llm_ctx.get("api_keys") or {})
+            local_url = str(llm_ctx.get("local_url") or "")
         output_max_tokens = self._get_capped_output_tokens(
             provider, model_name, gui_llm_max_tokens
         )
@@ -9436,7 +9462,7 @@ class AgenticRAGApp:
                 self._prompt_dependency_install(["langchain-openai"], "OpenAI LLM", err)
                 raise
 
-            key = self.api_keys["openai"].get()
+            key = key_values.get("openai", "")
             return ChatOpenAI(
                 api_key=key,
                 model=model_name,
@@ -9453,7 +9479,7 @@ class AgenticRAGApp:
                 )
                 raise
 
-            key = self.api_keys["anthropic"].get()
+            key = key_values.get("anthropic", "")
             return ChatAnthropic(
                 api_key=key,
                 model=model_name,
@@ -9470,7 +9496,7 @@ class AgenticRAGApp:
                 )
                 raise
 
-            key = self.api_keys["google"].get()
+            key = key_values.get("google", "")
             return ChatGoogleGenerativeAI(
                 google_api_key=key,
                 model=model_name,
@@ -9487,7 +9513,7 @@ class AgenticRAGApp:
                 )
                 raise
 
-            url = self.local_llm_url.get()
+            url = local_url
             self.log(f"Connecting to Local LLM at {url}...")
             # LM Studio uses OpenAI compatible endpoint
             return ChatOpenAI(
@@ -9500,7 +9526,12 @@ class AgenticRAGApp:
 
         raise ValueError(f"Unknown LLM provider: {provider}")
 
-    def _get_llm_with_temperature(self, temperature):
+    def _get_llm_with_temperature(self, temperature, llm_ctx=None):
+        if llm_ctx is not None:
+            overridden_ctx = dict(llm_ctx)
+            overridden_ctx["temperature"] = temperature
+            return self.get_llm(overridden_ctx)
+
         original_temperature = self.llm_temperature.get()
         self.llm_temperature.set(temperature)
         try:
@@ -9516,9 +9547,26 @@ class AgenticRAGApp:
             messagebox.showerror("Error", "Please select a file first.")
             return
 
-        threading.Thread(target=self._ingest_process, daemon=True).start()
+        embedding_provider = self.embedding_provider.get()
+        ingest_ctx = {
+            "chunk_size": int(self.chunk_size.get()),
+            "chunk_overlap": int(self.chunk_overlap.get()),
+            "vector_db_type": self.vector_db_type.get(),
+            "build_comprehension_index": bool(self.build_comprehension_index.get()),
+            "comprehension_extraction_depth": int(self.comprehension_extraction_depth.get()),
+            "build_digest_index": bool(self.build_digest_index.get()),
+            "embedding_ctx": {
+                "provider": embedding_provider,
+                "api_key": self.api_keys[embedding_provider].get() if embedding_provider in self.api_keys else "",
+                "model_name": self._resolve_embedding_model(),
+            },
+            "weaviate_url": self.api_keys["weaviate_url"].get(),
+            "weaviate_key": self.api_keys["weaviate_key"].get(),
+        }
 
-    def _ingest_process(self):
+        threading.Thread(target=self._ingest_process, args=(ingest_ctx,), daemon=True).start()
+
+    def _ingest_process(self, ingest_ctx):
         try:
             self._run_on_ui(self.btn_ingest.config, state="disabled")
             self._frontier_evidence_pack_mode = False
@@ -9809,8 +9857,8 @@ class AgenticRAGApp:
                 docs = chatgpt_docs
             else:
                 splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=self.chunk_size.get(),
-                    chunk_overlap=self.chunk_overlap.get(),
+                    chunk_size=ingest_ctx["chunk_size"],
+                    chunk_overlap=ingest_ctx["chunk_overlap"],
                     separators=["\n\n", "\n", ".", " ", ""],
                 )
                 docs = splitter.create_documents([text_content])
@@ -9841,7 +9889,7 @@ class AgenticRAGApp:
                     if char_start < 0:
                         char_start = search_cursor
                     char_end = char_start + len(chunk_body)
-                    search_cursor = max(search_cursor, max(char_end - self.chunk_overlap.get(), char_start))
+                    search_cursor = max(search_cursor, max(char_end - ingest_ctx["chunk_overlap"], char_start))
                     active_chapter = self._structure_at_offset(char_start, chapter_markers)
                     active_section = self._structure_at_offset(char_start, section_markers)
                     metadata = (doc.metadata or {}).copy()
@@ -9877,14 +9925,14 @@ class AgenticRAGApp:
                     doc.metadata = metadata
             self.log(f"Created {len(docs)} text chunks.")
 
-            db_type = self.vector_db_type.get()
+            db_type = ingest_ctx["vector_db_type"]
             if db_type == "chroma":
                 if self._upsert_lexical_chunks(docs):
                     self.log(f"Lexical sidecar updated: {self.lexical_db_path}")
 
             concept_cards = []
             comprehension_artifacts = []
-            if self.build_comprehension_index.get():
+            if ingest_ctx["build_comprehension_index"]:
                 source_map_seed, _ = self._build_source_cards(docs)
                 concept_cards = self._build_comprehension_cards(
                     docs,
@@ -9902,7 +9950,7 @@ class AgenticRAGApp:
                 jsonl_path = self._write_comprehension_jsonl(chunk_ingest_id, comprehension_artifacts)
                 self.log(
                     f"Comprehension index built: {stored_cards} concept cards, {stored_artifacts} structured artifacts "
-                    f"(depth={self.comprehension_extraction_depth.get()}, "
+                    f"(depth={ingest_ctx['comprehension_extraction_depth']}, "
                     f"langextract={'on' if langextract is not None else 'fallback'})."
                 )
                 if jsonl_path:
@@ -9910,7 +9958,7 @@ class AgenticRAGApp:
 
             # 3. Initialize Vector DB & Embeddings
             self.log("Step 3/4: Initializing Vector Store...")
-            embeddings = self.get_embeddings()
+            embeddings = self.get_embeddings(ingest_ctx.get("embedding_ctx"))
 
             new_index_path = None
             digest_docs = []
@@ -9919,7 +9967,7 @@ class AgenticRAGApp:
             summary_tree_docs = []
             summary_tree_artifact_path = ""
 
-            if self.build_digest_index.get():
+            if ingest_ctx["build_digest_index"]:
                 if db_type == "chroma":
                     self.log("Building summary tree (L0 chunk, L1 chapter/section, L2 part, L3 book)...")
                     chunk_summary_docs = self._build_chunk_summary_nodes(
@@ -9997,8 +10045,8 @@ class AgenticRAGApp:
                     )
                     raise
 
-                url = self.api_keys["weaviate_url"].get()
-                key = self.api_keys["weaviate_key"].get()
+                url = ingest_ctx["weaviate_url"]
+                key = ingest_ctx["weaviate_key"]
                 auth = weaviate.auth.AuthApiKey(api_key=key) if key else None
 
                 client = weaviate.Client(url=url, auth_client_secret=auth)
@@ -10187,9 +10235,52 @@ class AgenticRAGApp:
                 self.append_chat("system", f"Error: Please ingest a file first. ({e})")
                 return
 
-        threading.Thread(target=self._rag_pipeline, args=(query,), daemon=True).start()
+        embedding_provider = self.embedding_provider.get()
+        llm_provider = self.llm_provider.get()
+        resolved_settings = self._resolve_mode_profile_settings(query=query)
+        rag_ctx = {
+            "output_style": self.output_style.get().strip() or "Default answer",
+            "resolved_settings": resolved_settings,
+            "provider": llm_provider,
+            "model_name": self._resolve_llm_model(),
+            "gui_llm_max_tokens": max(1, int(self.llm_max_tokens.get())),
+            "prefer_comprehension_index": bool(self.prefer_comprehension_index.get()),
+            "enable_recursive_retrieval": bool(self.enable_recursive_retrieval.get()),
+            "selected_profile": self.selected_profile.get(),
+            "search_type": self.search_type.get(),
+            "mmr_lambda": float(self.mmr_lambda.get()),
+            "subquery_max_docs": max(1, int(self.subquery_max_docs.get())),
+            "vector_db_type": self.vector_db_type.get(),
+            "build_digest_index": bool(self.build_digest_index.get()),
+            "enable_recursive_memory": bool(self.enable_recursive_memory.get()),
+            "enable_langextract": bool(self.enable_langextract.get()),
+            "use_reranker": bool(self.use_reranker.get()),
+            "cohere_api_key": self.api_keys["cohere"].get(),
+            "show_retrieved_context": bool(self.show_retrieved_context.get()),
+            "use_sub_queries": bool(self.use_sub_queries.get()),
+            "llm_ctx": {
+                "provider": llm_provider,
+                "model_name": self._resolve_llm_model(),
+                "temperature": float(self.llm_temperature.get()),
+                "max_tokens": max(1, int(self.llm_max_tokens.get())),
+                "api_keys": {
+                    "openai": self.api_keys["openai"].get(),
+                    "anthropic": self.api_keys["anthropic"].get(),
+                    "google": self.api_keys["google"].get(),
+                },
+                "local_url": self.local_llm_url.get(),
+            },
+            "embedding_ctx": {
+                "provider": embedding_provider,
+                "api_key": self.api_keys[embedding_provider].get() if embedding_provider in self.api_keys else "",
+                "model_name": self._resolve_embedding_model(),
+            },
+        }
+        rag_ctx["system_instructions"] = self._get_system_instructions(resolved_settings)
 
-    def _rag_pipeline(self, query):
+        threading.Thread(target=self._rag_pipeline, args=(rag_ctx, query), daemon=True).start()
+
+    def _rag_pipeline(self, rag_ctx, query):
         stage = "retrieval"
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         run_started_at = time.perf_counter()
@@ -10200,15 +10291,15 @@ class AgenticRAGApp:
             self.log("Starting Retrieval...")
 
             # 1. Retrieval
-            output_style = self.output_style.get().strip() or "Default answer"
-            resolved_settings = self._resolve_mode_profile_settings(query=query)
+            output_style = rag_ctx["output_style"]
+            resolved_settings = rag_ctx["resolved_settings"]
             retrieve_k = max(1, int(resolved_settings["retrieve_k"]))
             user_final_k = max(1, int(resolved_settings["final_k"]))
             final_k = user_final_k
             mode_name = resolved_settings["mode"]
-            provider = self.llm_provider.get()
-            model_name = self._resolve_llm_model()
-            gui_llm_max_tokens = max(1, int(self.llm_max_tokens.get()))
+            provider = rag_ctx["provider"]
+            model_name = rag_ctx["model_name"]
+            gui_llm_max_tokens = rag_ctx["gui_llm_max_tokens"]
             caps = self.get_model_caps(provider, model_name)
             output_max_tokens = self._get_capped_output_tokens(
                 provider, model_name, gui_llm_max_tokens
@@ -10237,7 +10328,7 @@ class AgenticRAGApp:
             )
             is_evidence_pack = bool(resolved_settings.get("evidence_pack_mode"))
             comprehension_first_intent = self._is_comprehension_first_query(query) or output_style == "Blinkist-style summary" or mode_name in {"Tutor", "Summary", "Research"}
-            use_comprehension_first = bool(self.prefer_comprehension_index.get() and comprehension_first_intent)
+            use_comprehension_first = bool(rag_ctx["prefer_comprehension_index"] and comprehension_first_intent)
             precomputed_comprehension_artifacts = []
             if use_comprehension_first:
                 precomputed_comprehension_artifacts = self.search_comprehension_artifacts(query, k=18)
@@ -10245,7 +10336,7 @@ class AgenticRAGApp:
                     "Comprehension routing: queried structured index first "
                     f"({len(precomputed_comprehension_artifacts)} artifacts), then retrieving raw chunks for corroboration."
                 )
-            recursive_mode_enabled = bool(self.enable_recursive_retrieval.get())
+            recursive_mode_enabled = bool(rag_ctx["enable_recursive_retrieval"])
             use_recursive_retrieval = (
                 recursive_mode_enabled and (is_long_form or is_evidence_pack)
             )
@@ -10264,7 +10355,7 @@ class AgenticRAGApp:
                 f"agent_lightning_telemetry={self._frontier_enabled('agent_lightning_telemetry')}, "
                 f"recursive_retrieval={int(use_recursive_retrieval)}, "
                 f"evidence_pack_mode={is_evidence_pack}, "
-                f"mode={mode_name}, profile={self.selected_profile.get()}"
+                f"mode={mode_name}, profile={rag_ctx['selected_profile']}"
             )
             if is_long_form:
                 boosted_final_k = max(final_k, 12)
@@ -10292,7 +10383,7 @@ class AgenticRAGApp:
                     "agentic": int(resolved_settings["agentic_mode"]),
                     "output_style": output_style,
                     "mode": mode_name,
-                    "profile": self.selected_profile.get(),
+                    "profile": rag_ctx["selected_profile"],
                     "recursive_mode_enabled": int(recursive_mode_enabled),
                     "recursive_mode_active": int(use_recursive_retrieval),
                 }
@@ -10309,21 +10400,21 @@ class AgenticRAGApp:
                 },
             )
             self._start_agent_lightning_run(run_id, query)
-            search_type = resolved_settings.get("search_type", self.search_type.get()) or "similarity"
-            mmr_lambda = float(resolved_settings.get("mmr_lambda", self.mmr_lambda.get()))
-            total_docs_cap = max(10, min(500, int(self.subquery_max_docs.get())))
+            search_type = resolved_settings.get("search_type", rag_ctx["search_type"]) or "similarity"
+            mmr_lambda = float(resolved_settings.get("mmr_lambda", rag_ctx["mmr_lambda"]))
+            total_docs_cap = max(10, min(500, int(rag_ctx["subquery_max_docs"])))
             persist_dir = self.selected_index_path
             if not persist_dir:
                 persist_dir = getattr(self.vector_store, "_persist_directory", None)
-            if not persist_dir and self.vector_db_type.get() == "chroma":
+            if not persist_dir and rag_ctx["vector_db_type"] == "chroma":
                 persist_dir = self._get_chroma_persist_root()
-            digest_missing = not self.build_digest_index.get()
+            digest_missing = not rag_ctx["build_digest_index"]
             digest_store = None
             section_digest_store = None
             book_digest_store = None
-            if self.vector_db_type.get() == "chroma" and not digest_missing:
+            if rag_ctx["vector_db_type"] == "chroma" and not digest_missing:
                 try:
-                    embeddings = self.get_embeddings()
+                    embeddings = self.get_embeddings(rag_ctx.get("embedding_ctx"))
                     Chroma = _lazy_import_chroma()
                     digest_store = Chroma(
                         collection_name=DIGEST_COLLECTION_NAME,
@@ -10497,8 +10588,8 @@ class AgenticRAGApp:
 
             def _run_evidence_pack_two_stage(llm, query_text, context_text, doc_list, checklist_text="", section_plan_items=None, coverage_note=""):
                 section_plan_items = section_plan_items or []
-                recursive_memory_enabled = bool(self.enable_recursive_memory.get())
-                use_langextract_incidents = bool(langextract is not None and self.enable_langextract.get())
+                recursive_memory_enabled = bool(rag_ctx["enable_recursive_memory"])
+                use_langextract_incidents = bool(langextract is not None and rag_ctx["enable_langextract"])
                 _source_map_seed, _source_cards_text = self._build_source_cards(doc_list)
                 scope_note = ""
 
@@ -11269,13 +11360,13 @@ class AgenticRAGApp:
             ):
                 candidates = self._promote_lexical_overlap(doc_list, rerank_query)
                 rerank_top_n = min(len(candidates), max(final_k * 6, 80))
-                if self.use_reranker.get() and self.api_keys["cohere"].get():
+                if rag_ctx["use_reranker"] and rag_ctx["cohere_api_key"]:
                     try:
                         self.log("Reranking with Cohere...")
                         from langchain_cohere import CohereRerank
 
                         compressor = CohereRerank(
-                            cohere_api_key=self.api_keys["cohere"].get(),
+                            cohere_api_key=rag_ctx["cohere_api_key"],
                             top_n=rerank_top_n,
                             model="rerank-english-v3.0",
                         )
@@ -11498,7 +11589,7 @@ class AgenticRAGApp:
                 )
 
             def _append_context_if_enabled(iteration_label, context_text, truncated_flag):
-                if not self.show_retrieved_context.get():
+                if not rag_ctx["show_retrieved_context"]:
                     return
                 status = " (truncated)" if truncated_flag else ""
                 self.append_chat(
@@ -11599,7 +11690,7 @@ class AgenticRAGApp:
                 coverage_stats = {"triggered": False}
                 planner_started_at = time.perf_counter()
                 queries = [query]
-                if self.use_sub_queries.get():
+                if rag_ctx["use_sub_queries"]:
                     sub_queries = self._generate_sub_queries(query)
                     if sub_queries:
                         queries = [query, *sub_queries]
@@ -11612,7 +11703,7 @@ class AgenticRAGApp:
                     output_payload={"queries": queries},
                     metrics={"subquery_count": max(0, len(queries) - 1)},
                 )
-                max_total_docs = max(1, int(self.subquery_max_docs.get()))
+                max_total_docs = max(1, int(rag_ctx["subquery_max_docs"]))
                 retrieve_started_at = time.perf_counter()
                 (
                     docs,
@@ -11872,7 +11963,7 @@ class AgenticRAGApp:
                     selected_distribution,
                 )
                 planner_subquery_count = 0
-                if self.use_sub_queries.get():
+                if rag_ctx["use_sub_queries"]:
                     planner_subquery_count = max(0, len(queries) - 1)
                 selection_stats = {
                     "candidate_k": candidate_k,
@@ -11896,7 +11987,7 @@ class AgenticRAGApp:
                 structured_events = []
                 timeline_text = ""
                 timeline_source_map, _ = self._build_source_cards(final_docs)
-                if self._is_summary_or_pack_mode(resolved_settings.get("mode"), self.output_style.get()):
+                if self._is_summary_or_pack_mode(resolved_settings.get("mode"), rag_ctx["output_style"]):
                     structured_events = self.extract_structured_events(final_docs)
                     timeline_text = self._timeline_text(structured_events)
                 self._latest_extracted_events = list(structured_events)
@@ -11922,7 +12013,7 @@ class AgenticRAGApp:
                 )
                 _log_iteration_telemetry(
                     1,
-                    self.output_style.get(),
+                    rag_ctx["output_style"],
                     resolved_settings["agentic_mode"],
                     planner_subquery_count,
                     len(queries),
@@ -11947,7 +12038,7 @@ class AgenticRAGApp:
                 _append_context_if_enabled("(single pass)", context_text, was_truncated)
 
                 self.log("Generating Answer...")
-                llm = self.get_llm()
+                llm = self.get_llm(rag_ctx.get("llm_ctx"))
                 style_instruction = self._get_output_style_instruction()
                 evidence_instruction = (
                     self._get_evidence_pack_instruction()
@@ -11967,7 +12058,7 @@ class AgenticRAGApp:
                             comprehension_artifacts = on_demand_artifacts[:18]
                             self.log("Comprehension index built on-demand from retrieved chunks.")
                     comprehension_context = self._render_comprehension_context(comprehension_artifacts)
-                prompt_parts = [self._get_system_instructions(resolved_settings)]
+                prompt_parts = [rag_ctx["system_instructions"]]
                 if comprehension_context:
                     prompt_parts.append(
                         "Comprehension-first rule: Start from COMPREHENSION_ARTIFACTS (concepts, claims, takeaways, frameworks, entities), then corroborate with raw CONTEXT for citations and gap-filling."
@@ -11993,7 +12084,7 @@ class AgenticRAGApp:
                 ]
                 generation_started_at = time.perf_counter()
                 generation_ms = 0
-                is_blinkist_summary_style = self.output_style.get().strip() == "Blinkist-style summary"
+                is_blinkist_summary_style = rag_ctx["output_style"].strip() == "Blinkist-style summary"
                 is_tutor_mode = resolved_settings.get("mode") == "Tutor"
                 if is_evidence_pack:
                     response_content = _run_evidence_pack_two_stage(
@@ -12200,7 +12291,7 @@ class AgenticRAGApp:
                 follow_up_queries = []
                 coverage_stats = {"triggered": False}
                 if iteration == 1:
-                    planner_llm = self._get_llm_with_temperature(0.2)
+                    planner_llm = self._get_llm_with_temperature(0.2, rag_ctx.get("llm_ctx"))
                     if is_evidence_pack:
                         planner_prompt = (
                             "You are an evidence-pack retrieval planner. Given the user query and "
@@ -12579,7 +12670,7 @@ class AgenticRAGApp:
                 structured_events = []
                 timeline_text = ""
                 timeline_source_map, _ = self._build_source_cards(final_docs)
-                if self._is_summary_or_pack_mode(resolved_settings.get("mode"), self.output_style.get()):
+                if self._is_summary_or_pack_mode(resolved_settings.get("mode"), rag_ctx["output_style"]):
                     structured_events = self.extract_structured_events(final_docs)
                     timeline_text = self._timeline_text(structured_events)
                 self._latest_extracted_events = list(structured_events)
@@ -12605,7 +12696,7 @@ class AgenticRAGApp:
                 )
                 _log_iteration_telemetry(
                     iteration,
-                    self.output_style.get(),
+                    rag_ctx["output_style"],
                     resolved_settings["agentic_mode"],
                     planner_subquery_count,
                     len(iteration_queries),
@@ -12632,7 +12723,7 @@ class AgenticRAGApp:
                 )
 
                 self.log("Generating Answer...")
-                llm = self.get_llm()
+                llm = self.get_llm(rag_ctx.get("llm_ctx"))
                 checklist_text = "\n".join(f"- {item}" for item in checklist)
                 coverage_note = ""
                 if iteration > 1:
@@ -12659,7 +12750,7 @@ class AgenticRAGApp:
                             comprehension_artifacts = on_demand_artifacts[:18]
                             self.log("Comprehension index built on-demand from retrieved chunks.")
                     comprehension_context = self._render_comprehension_context(comprehension_artifacts)
-                prompt_parts = [self._get_system_instructions(resolved_settings)]
+                prompt_parts = [rag_ctx["system_instructions"]]
                 if comprehension_context:
                     prompt_parts.append(
                         "Comprehension-first rule: Start from COMPREHENSION_ARTIFACTS (concepts, claims, takeaways, frameworks, entities), then corroborate with raw CONTEXT for citations and gap-filling."
@@ -12695,7 +12786,7 @@ class AgenticRAGApp:
                 ]
                 generation_started_at = time.perf_counter()
                 generation_ms = 0
-                is_blinkist_summary_style = self.output_style.get().strip() == "Blinkist-style summary"
+                is_blinkist_summary_style = rag_ctx["output_style"].strip() == "Blinkist-style summary"
                 is_tutor_mode = resolved_settings.get("mode") == "Tutor"
                 if is_evidence_pack:
                     latest_answer = _run_evidence_pack_two_stage(
@@ -12756,7 +12847,7 @@ class AgenticRAGApp:
                     )
                     break
                 if iteration < max_iterations:
-                    critic_llm = self._get_llm_with_temperature(0.2)
+                    critic_llm = self._get_llm_with_temperature(0.2, rag_ctx.get("llm_ctx"))
                     critic_prompt = (
                         "You are a critic. Review the answer against the checklist. "
                         "For each checklist item, mark it as FOUND with citations or "
