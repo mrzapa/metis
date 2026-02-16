@@ -17,6 +17,7 @@ import uuid
 import html
 import webbrowser
 import traceback
+import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
@@ -13977,6 +13978,170 @@ class AgenticRAGApp:
             messagebox.showerror("Export Failed", f"Could not export notes: {exc}")
 
 
+def run_smoke_test():
+    """Run a fast, non-destructive self-test and return process exit code."""
+
+    failures = []
+    warnings = []
+
+    def _check(name, fn):
+        try:
+            fn()
+            print(f"[PASS] {name}")
+        except Exception as exc:
+            failures.append((name, exc))
+            print(f"[FAIL] {name}: {exc}")
+
+    def _run_core_checks(app, include_ui_checks, root=None):
+        def _config_roundtrip():
+            app.llm_provider.set("openai")
+            app.chunk_size.set(777)
+            app.selected_mode.set("Tutor")
+            app.save_config()
+
+            app.llm_provider.set("anthropic")
+            app.chunk_size.set(111)
+            app.selected_mode.set("Q&A")
+            app.load_config()
+
+            assert app.llm_provider.get() == "openai"
+            assert int(app.chunk_size.get()) == 777
+            assert app.selected_mode.get() == "Tutor"
+
+        def _sessions_db_init_insert_read():
+            app.llm_model.set(app.llm_model.get() or "dummy-llm")
+            app.llm_model_custom.set(app.llm_model_custom.get() or "")
+            app.embedding_model.set(app.embedding_model.get() or "dummy-embed")
+            app.embedding_model_custom.set(app.embedding_model_custom.get() or "")
+            app.selected_profile.set(app.selected_profile.get() or "Default")
+            app.selected_mode.set(app.selected_mode.get() or "Q&A")
+            app.current_session_id = str(uuid.uuid4())
+            app._upsert_session_row(session_id=app.current_session_id, title="Smoke Test Session")
+            app._insert_session_message(role="user", content="hello from smoke test")
+            session, messages = app._fetch_session_and_messages(app.current_session_id)
+            assert session is not None
+            assert len(messages) >= 1
+            assert messages[-1]["content"] == "hello from smoke test"
+
+        def _index_refresh_logic():
+            app._apply_existing_indexes([])
+            assert app.existing_index_var.get() == "(default)"
+            assert isinstance(app.existing_index_paths, dict)
+
+        _check("config load/save roundtrip", _config_roundtrip)
+        _check("sessions DB init + insert/read", _sessions_db_init_insert_read)
+        _check("index list refresh logic", _index_refresh_logic)
+
+        if include_ui_checks:
+            def _ui_build_functions_construct():
+                app.setup_ui()
+                root.update_idletasks()
+                assert hasattr(app, "tab_chat")
+                assert hasattr(app, "tab_history")
+                assert hasattr(app, "tab_library")
+                assert hasattr(app, "tab_settings")
+
+            _check("UI build construction", _ui_build_functions_construct)
+
+    def _run_with_ui():
+        original_scheduler = AgenticRAGApp._schedule_startup_pipeline
+        AgenticRAGApp._schedule_startup_pipeline = lambda _self: None
+        root = None
+        app = None
+        temp_dir_obj = tempfile.TemporaryDirectory(prefix="agentic_rag_smoke_")
+        temp_dir = temp_dir_obj.name
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            app = AgenticRAGApp(root)
+            app.config_path = os.path.join(temp_dir, "smoke_config.json")
+            app.session_db_path = os.path.join(temp_dir, "smoke_sessions.db")
+            app._init_sessions_db()
+            _run_core_checks(app, include_ui_checks=True, root=root)
+        finally:
+            AgenticRAGApp._schedule_startup_pipeline = original_scheduler
+            if root is not None:
+                try:
+                    root.destroy()
+                except Exception:
+                    pass
+            temp_dir_obj.cleanup()
+
+    def _run_headless_core_checks():
+        class _Var:
+            def __init__(self, value=None):
+                self._value = value
+
+            def get(self):
+                return self._value
+
+            def set(self, value):
+                self._value = value
+
+            def trace_add(self, *_args, **_kwargs):
+                return None
+
+        class _FakeRoot:
+            def title(self, *_args, **_kwargs):
+                return None
+
+            def geometry(self, *_args, **_kwargs):
+                return None
+
+            def protocol(self, *_args, **_kwargs):
+                return None
+
+            def after(self, *_args, **_kwargs):
+                return None
+
+        original_scheduler = AgenticRAGApp._schedule_startup_pipeline
+        original_string_var = tk.StringVar
+        original_int_var = tk.IntVar
+        original_double_var = tk.DoubleVar
+        original_bool_var = tk.BooleanVar
+        AgenticRAGApp._schedule_startup_pipeline = lambda _self: None
+        tk.StringVar = _Var
+        tk.IntVar = _Var
+        tk.DoubleVar = _Var
+        tk.BooleanVar = _Var
+
+        temp_dir_obj = tempfile.TemporaryDirectory(prefix="agentic_rag_smoke_headless_")
+        temp_dir = temp_dir_obj.name
+        try:
+            app = AgenticRAGApp(_FakeRoot())
+            app.config_path = os.path.join(temp_dir, "smoke_config.json")
+            app.session_db_path = os.path.join(temp_dir, "smoke_sessions.db")
+            app._init_sessions_db()
+            _run_core_checks(app, include_ui_checks=False, root=None)
+        finally:
+            AgenticRAGApp._schedule_startup_pipeline = original_scheduler
+            tk.StringVar = original_string_var
+            tk.IntVar = original_int_var
+            tk.DoubleVar = original_double_var
+            tk.BooleanVar = original_bool_var
+            temp_dir_obj.cleanup()
+
+    try:
+        _run_with_ui()
+    except tk.TclError as exc:
+        warnings.append(f"Tk/display unavailable; UI smoke checks skipped ({exc})")
+        print(f"[WARN] {warnings[-1]}")
+        _run_headless_core_checks()
+
+    if failures:
+        print("SMOKE TEST: FAIL")
+        for name, exc in failures:
+            print(f" - {name}: {exc}")
+        return 1
+
+    if warnings:
+        print("SMOKE TEST: PASS (with warnings)")
+        return 0
+
+    print("SMOKE TEST: PASS")
+    return 0
+
+
 # Acceptance tests (comments only; do not execute):
 # - Digest expansion: when filtering by ingest_id + chunk_id list, Chroma get should not throw "exactly one operator".
 # - Lexical search: query containing "Sam.Weekes@gbe.gov.uk" should not crash; should return [] or results; must not disable lexical_db_available.
@@ -13995,6 +14160,8 @@ class AgenticRAGApp:
 
 
 if __name__ == "__main__":
+    if any(arg in {"--smoke", "--selftest"} for arg in sys.argv[1:]):
+        sys.exit(run_smoke_test())
     try:
         root = tk.Tk()
         app = AgenticRAGApp(root)
