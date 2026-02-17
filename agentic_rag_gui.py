@@ -4515,10 +4515,10 @@ class AgenticRAGApp:
         diagnostics_notebook = self.create_notebook(diagnostics_tab, style="App.TNotebook")
         diagnostics_notebook.pack(fill=tk.BOTH, expand=True)
 
-        config_tab = self.create_frame(notebook, style="Card.TFrame", padding=UI_SPACING["m"])
-        telemetry_tab = self.create_frame(notebook, style="Card.TFrame", padding=UI_SPACING["m"])
-        notebook.add(config_tab, text="Config")
-        notebook.add(telemetry_tab, text="Telemetry")
+        config_tab = self.create_frame(diagnostics_notebook, style="Card.TFrame", padding=UI_SPACING["m"])
+        telemetry_tab = self.create_frame(diagnostics_notebook, style="Card.TFrame", padding=UI_SPACING["m"])
+        diagnostics_notebook.add(config_tab, text="Config")
+        diagnostics_notebook.add(telemetry_tab, text="Telemetry")
 
         self.history_config_rows_wrap = self.create_frame(config_tab, style="Card.TFrame")
         self.history_config_rows_wrap.pack(fill="x")
