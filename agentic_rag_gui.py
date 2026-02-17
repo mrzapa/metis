@@ -866,6 +866,7 @@ class AgenticRAGApp:
         self.chunk_size = tk.IntVar(value=1000)
         self.chunk_overlap = tk.IntVar(value=200)
         self.structure_aware_ingestion = tk.BooleanVar(value=False)
+        self.semantic_layout_ingestion = tk.BooleanVar(value=False)
         self.build_digest_index = tk.BooleanVar(value=True)
         self.build_comprehension_index = tk.BooleanVar(value=False)
         self.comprehension_extraction_depth = tk.StringVar(value="Standard")
@@ -940,6 +941,7 @@ class AgenticRAGApp:
         self._frontier_evidence_pack_mode = False
         self._last_evidence_pack_synthesis_cards = []
         self._latest_sht_tree = []
+        self._latest_semantic_regions = []
         self._latest_sht_doc_title = ""
         self._trace_events = []
         self._agent_lightning_runs_by_id = {}
@@ -2554,6 +2556,7 @@ class AgenticRAGApp:
                 "chunk size": "Chunk length affects recall vs latency: larger chunks add context but reduce precision.",
                 "overlap": "Overlap preserves context across chunk boundaries; too much increases index size.",
                 "build digest index": "Create summary-oriented nodes for faster high-level synthesis queries.",
+                "semantic layout": "Experimental PDF preprocessing that groups text into coarse semantic regions with coordinates.",
                 "comprehension index": "Build a structured comprehension layer for teaching and deep summary tasks.",
                 "extraction depth": "Controls how deeply comprehension extraction analyzes the source.",
                 "start ingestion": "Run ingest pipeline (parse, chunk, embed, store) for the selected file.",
@@ -3456,6 +3459,14 @@ class AgenticRAGApp:
                 )
             )
         )
+        self.semantic_layout_ingestion.set(
+            bool(
+                data.get(
+                    "semantic_layout_ingestion",
+                    self.semantic_layout_ingestion.get(),
+                )
+            )
+        )
         self.prefer_comprehension_index.set(
             bool(
                 data.get(
@@ -3652,6 +3663,7 @@ class AgenticRAGApp:
             "build_digest_index": self.build_digest_index.get(),
             "build_comprehension_index": bool(self.build_comprehension_index.get()),
             "structure_aware_ingestion": bool(self.structure_aware_ingestion.get()),
+            "semantic_layout_ingestion": bool(self.semantic_layout_ingestion.get()),
             "prefer_comprehension_index": bool(self.prefer_comprehension_index.get()),
             "comprehension_extraction_depth": str(
                 self.comprehension_extraction_depth.get()
@@ -4633,14 +4645,14 @@ class AgenticRAGApp:
 
         supported_formats = ttk.Label(
             sel_frame,
-            text=f"Supported: {' '.join(SUPPORTED_INGEST_EXTENSIONS)}",
+            text=f"Supported: {' '.join(SUPPORTED_INGEST_EXTENSIONS)} • Semantic Layout (PDF, experimental)",
             style="Muted.TLabel",
         )
         supported_formats.pack(anchor="w", pady=(UI_SPACING["xs"], 0))
         self._tip(
             supported_formats,
             "Supported ingestion types: .txt/.md use plain text parsing, .html/.htm strip markup to text, "
-            ".pdf uses PDF extraction (layout may vary by document), and .epub parses ebook sections.",
+            ".pdf uses PDF extraction (layout may vary by document), and .epub parses ebook sections. Semantic Layout adds coarse PDF regions (paragraph/table) and is experimental.",
         )
 
         self.lbl_file = ttk.Label(sel_frame, text="No file selected", style="Muted.TLabel")
@@ -4672,6 +4684,12 @@ class AgenticRAGApp:
             chunk_frame,
             text="Structure-aware",
             variable=self.structure_aware_ingestion,
+        ).pack(side="left", padx=(20, 0))
+
+        ttk.Checkbutton(
+            chunk_frame,
+            text="Semantic Layout (experimental)",
+            variable=self.semantic_layout_ingestion,
         ).pack(side="left", padx=(20, 0))
 
         comprehension_frame = ttk.LabelFrame(frame, text="3) Optional comprehension index", padding=UI_SPACING["m"])
@@ -4752,6 +4770,43 @@ class AgenticRAGApp:
         self._set_readonly_text(
             self.document_outline_text,
             "No SHT outline available yet. Enable Structure-aware and ingest a document with confident headers.",
+        )
+
+        semantic_frame = ttk.LabelFrame(frame, text="5) Semantic Regions", padding=UI_SPACING["m"])
+        semantic_frame.pack(fill="both", expand=True, pady=(UI_SPACING["m"], 0))
+        ttk.Label(
+            semantic_frame,
+            text="Populated when Semantic Layout segmentation succeeds.",
+            style="Muted.TLabel",
+        ).pack(anchor="w", pady=(0, UI_SPACING["s"]))
+
+        self.semantic_region_tree = ttk.Treeview(
+            semantic_frame,
+            columns=("label", "page", "type", "bbox"),
+            show="headings",
+            height=8,
+        )
+        for col, label, width in [
+            ("label", "Region", 180),
+            ("page", "Page", 90),
+            ("type", "Type", 120),
+            ("bbox", "Coordinates", 340),
+        ]:
+            self.semantic_region_tree.heading(col, text=label)
+            self.semantic_region_tree.column(col, width=width, anchor="w")
+        self.semantic_region_tree.pack(fill="both", expand=True)
+
+        self.semantic_region_text = scrolledtext.ScrolledText(
+            semantic_frame,
+            height=4,
+            wrap=tk.WORD,
+            state="disabled",
+            font=("Consolas", 9),
+        )
+        self.semantic_region_text.pack(fill="both", expand=True, pady=(UI_SPACING["s"], 0))
+        self._set_readonly_text(
+            self.semantic_region_text,
+            "No semantic regions available yet. Enable Semantic Layout (experimental) and ingest a PDF.",
         )
         self._apply_tooltips_for_tab("library", frame)
         self._update_current_state_strip()
@@ -5608,6 +5663,36 @@ class AgenticRAGApp:
     def _header_path_label(header_path):
         value = str(header_path or "").strip()
         return value or "(No header path)"
+
+    def _refresh_semantic_region_panel(self):
+        if not hasattr(self, "semantic_region_tree"):
+            return
+        regions = list(getattr(self, "_latest_semantic_regions", []) or [])
+        self.semantic_region_tree.delete(*self.semantic_region_tree.get_children())
+        if not regions:
+            self._set_readonly_text(
+                self.semantic_region_text,
+                "No semantic regions available yet. Enable Semantic Layout (experimental) and ingest a PDF.",
+            )
+            return
+
+        for idx, region in enumerate(regions, start=1):
+            label = str(region.get("region_label") or f"R{idx}")
+            page_label = f"p{region.get('page')}" if region.get("page") is not None else "-"
+            region_type = str(region.get("region_type") or "region")
+            bbox = region.get("bbox") or {}
+            bbox_label = (
+                f"x0={bbox.get('x0', 0):.1f}, y0={bbox.get('top', 0):.1f}, "
+                f"x1={bbox.get('x1', 0):.1f}, y1={bbox.get('bottom', 0):.1f}"
+                if bbox
+                else "-"
+            )
+            self.semantic_region_tree.insert("", tk.END, values=(label, page_label, region_type, bbox_label))
+
+        self._set_readonly_text(
+            self.semantic_region_text,
+            f"Loaded semantic layout regions: {len(regions)}",
+        )
 
     def _refresh_document_outline_panel(self):
         if not hasattr(self, "document_outline_tree"):
@@ -9915,6 +10000,182 @@ class AgenticRAGApp:
         )
         return (match.group("num") or "").strip() if match else ""
 
+    def _extract_pdf_layout_elements(self, selected_file):
+        elements = []
+        try:
+            import pdfplumber
+        except ImportError:
+            pdfplumber = None
+
+        if pdfplumber is not None:
+            with pdfplumber.open(selected_file) as pdf_doc:
+                for page_idx, page in enumerate(pdf_doc.pages, start=1):
+                    words = page.extract_words(
+                        use_text_flow=True,
+                        keep_blank_chars=False,
+                        extra_attrs=["size", "fontname"],
+                    )
+                    for word in words:
+                        text = str(word.get("text") or "").strip()
+                        if not text:
+                            continue
+                        elements.append(
+                            {
+                                "text": text,
+                                "page": page_idx,
+                                "bbox": {
+                                    "x0": float(word.get("x0") or 0.0),
+                                    "top": float(word.get("top") or 0.0),
+                                    "x1": float(word.get("x1") or 0.0),
+                                    "bottom": float(word.get("bottom") or 0.0),
+                                },
+                                "font_size": float(word.get("size") or 0.0),
+                                "font_name": str(word.get("fontname") or ""),
+                            }
+                        )
+            return elements
+
+        try:
+            import fitz
+        except ImportError:
+            fitz = None
+        if fitz is None:
+            return elements
+
+        doc = fitz.open(selected_file)
+        try:
+            for page_idx, page in enumerate(doc, start=1):
+                words = page.get_text("words")
+                for item in words:
+                    if len(item) < 5:
+                        continue
+                    x0, y0, x1, y1, text = item[:5]
+                    text = str(text or "").strip()
+                    if not text:
+                        continue
+                    elements.append(
+                        {
+                            "text": text,
+                            "page": page_idx,
+                            "bbox": {"x0": float(x0), "top": float(y0), "x1": float(x1), "bottom": float(y1)},
+                            "font_size": 0.0,
+                            "font_name": "",
+                        }
+                    )
+        finally:
+            doc.close()
+        return elements
+
+    def _group_pdf_elements_semantic_regions(self, elements):
+        if not elements:
+            return []
+
+        def _sort_key(item):
+            bbox = item.get("bbox") or {}
+            return (int(item.get("page") or 0), float(bbox.get("top") or 0.0), float(bbox.get("x0") or 0.0))
+
+        ordered = sorted(elements, key=_sort_key)
+        font_values = [float(e.get("font_size") or 0.0) for e in ordered if float(e.get("font_size") or 0.0) > 0]
+        body_font = (sum(font_values) / len(font_values)) if font_values else 10.0
+
+        regions = []
+        current = None
+
+        def _new_region(seed, region_type):
+            bbox = seed.get("bbox") or {}
+            return {
+                "page": int(seed.get("page") or 0),
+                "region_type": region_type,
+                "texts": [str(seed.get("text") or "")],
+                "bbox": {
+                    "x0": float(bbox.get("x0") or 0.0),
+                    "top": float(bbox.get("top") or 0.0),
+                    "x1": float(bbox.get("x1") or 0.0),
+                    "bottom": float(bbox.get("bottom") or 0.0),
+                },
+                "font_sizes": [float(seed.get("font_size") or 0.0)],
+            }
+
+        def _guess_type(item):
+            text = str(item.get("text") or "")
+            tokens = [tok.strip() for tok in re.split(r"\s+", text) if tok.strip()]
+            if "|" in text or (len(tokens) > 3 and text.count("  ") >= 1):
+                return "table"
+            if float(item.get("font_size") or 0.0) >= body_font * 1.25:
+                return "heading"
+            return "paragraph"
+
+        for element in ordered:
+            bbox = element.get("bbox") or {}
+            top = float(bbox.get("top") or 0.0)
+            x0 = float(bbox.get("x0") or 0.0)
+            region_type = _guess_type(element)
+            if current is None:
+                current = _new_region(element, region_type)
+                continue
+
+            prev_bbox = current.get("bbox") or {}
+            vertical_gap = top - float(prev_bbox.get("bottom") or 0.0)
+            horizontal_shift = abs(x0 - float(prev_bbox.get("x0") or 0.0))
+            same_page = int(element.get("page") or 0) == int(current.get("page") or 0)
+            same_type = region_type == current.get("region_type")
+            should_merge = same_page and same_type and vertical_gap <= max(18.0, body_font * 1.7) and horizontal_shift <= 42.0
+
+            if not should_merge:
+                regions.append(current)
+                current = _new_region(element, region_type)
+                continue
+
+            current["texts"].append(str(element.get("text") or ""))
+            current["bbox"]["x0"] = min(float(current["bbox"].get("x0") or 0.0), float(bbox.get("x0") or 0.0))
+            current["bbox"]["top"] = min(float(current["bbox"].get("top") or 0.0), top)
+            current["bbox"]["x1"] = max(float(current["bbox"].get("x1") or 0.0), float(bbox.get("x1") or 0.0))
+            current["bbox"]["bottom"] = max(float(current["bbox"].get("bottom") or 0.0), float(bbox.get("bottom") or 0.0))
+            current["font_sizes"].append(float(element.get("font_size") or 0.0))
+
+        if current is not None:
+            regions.append(current)
+
+        for idx, region in enumerate(regions, start=1):
+            region["region_label"] = f"p{region.get('page')}-r{idx}"
+            region["text"] = " ".join(region.get("texts") or []).strip()
+            avg_font = [f for f in region.get("font_sizes") or [] if f > 0]
+            region["font_size_avg"] = (sum(avg_font) / len(avg_font)) if avg_font else 0.0
+        return [r for r in regions if r.get("text")]
+
+    def _build_semantic_layout_documents(self, regions, selected_file, source_basename, ingest_id, doc_title=None):
+        docs = []
+        for idx, region in enumerate(regions or [], start=1):
+            text = str(region.get("text") or "").strip()
+            if not text:
+                continue
+            page_num = region.get("page")
+            region_type = str(region.get("region_type") or "paragraph")
+            bbox = region.get("bbox") or {}
+            region_label = str(region.get("region_label") or f"p{page_num}-r{idx}")
+            metadata = {
+                "source": source_basename,
+                "source_path": selected_file,
+                "file_path": selected_file,
+                "chunk_id": idx,
+                "ingest_id": ingest_id,
+                "content_type": "semantic_region",
+                "region_type": region_type,
+                "region_label": region_label,
+                "page": page_num,
+                "coordinates": {
+                    "x0": float(bbox.get("x0") or 0.0),
+                    "top": float(bbox.get("top") or 0.0),
+                    "x1": float(bbox.get("x1") or 0.0),
+                    "bottom": float(bbox.get("bottom") or 0.0),
+                },
+            }
+            if doc_title:
+                metadata["doc_title"] = doc_title
+            metadata = self._ensure_source_metadata(metadata, selected_file, text)
+            docs.append(self._document(page_content=text, metadata=metadata))
+        return docs
+
     def _extract_pdf_line_candidates(self, selected_file):
         candidates = []
         global_cursor = 0
@@ -12370,8 +12631,10 @@ class AgenticRAGApp:
 
         self._clear_error_state()
         self._latest_sht_tree = []
+        self._latest_semantic_regions = []
         self._latest_sht_doc_title = ""
         self._run_on_ui(self._refresh_document_outline_panel)
+        self._run_on_ui(self._refresh_semantic_region_panel)
         embedding_provider = self.embedding_provider.get()
         ingest_ctx = {
             "selected_file": self.selected_file,
@@ -12382,6 +12645,7 @@ class AgenticRAGApp:
             "comprehension_extraction_depth": int(self.comprehension_extraction_depth.get()),
             "build_digest_index": bool(self.build_digest_index.get()),
             "structure_aware": bool(self.structure_aware_ingestion.get()),
+            "semantic_layout": bool(self.semantic_layout_ingestion.get()),
             "embedding_ctx": {
                 "provider": embedding_provider,
                 "api_key": self.api_keys[embedding_provider].get() if embedding_provider in self.api_keys else "",
@@ -12426,6 +12690,7 @@ class AgenticRAGApp:
             doc_title = None
 
             chatgpt_messages = None
+            semantic_regions = []
             if selected_file.lower().endswith(".html"):
                 from bs4 import BeautifulSoup
                 from bs4 import NavigableString
@@ -12640,6 +12905,18 @@ class AgenticRAGApp:
                         _process_children(root, lines)
                         text_content = "\n".join(lines)
             elif selected_file.lower().endswith(".pdf"):
+                if ingest_ctx.get("semantic_layout"):
+                    try:
+                        layout_elements = self._extract_pdf_layout_elements(selected_file)
+                        semantic_regions = self._group_pdf_elements_semantic_regions(layout_elements)
+                        self._latest_semantic_regions = semantic_regions
+                        self.log(
+                            f"Semantic Layout: extracted {len(layout_elements)} PDF elements and built {len(semantic_regions)} coarse regions."
+                        )
+                    except Exception as layout_err:
+                        semantic_regions = []
+                        self._latest_semantic_regions = []
+                        self.log(f"Semantic Layout failed ({layout_err}); falling back to regular chunking.")
                 try:
                     pdf_candidates = self._extract_pdf_line_candidates(selected_file)
                     structured_text, used_structured_headers, pdf_structure_tree = self._build_structured_text_from_pdf_candidates(
@@ -12682,6 +12959,8 @@ class AgenticRAGApp:
                     text_content = f.read()
                 doc_title = None
 
+            if not selected_file.lower().endswith(".pdf"):
+                self._latest_semantic_regions = []
             self._latest_sht_doc_title = str(doc_title or os.path.basename(selected_file or "") or "document")
             self.log(f"File loaded. Raw text length: {len(text_content)} characters.")
 
@@ -13058,6 +13337,7 @@ class AgenticRAGApp:
 
             self.log("Ingestion Complete! You can now chat.")
             self._run_on_ui(self._refresh_document_outline_panel)
+            self._run_on_ui(self._refresh_semantic_region_panel)
             self._clear_error_state()
             self._run_on_ui(self._set_startup_status, "Ingestion complete")
             if new_index_path:
@@ -13088,14 +13368,18 @@ class AgenticRAGApp:
             self.index_embedding_signature = previous_signature
             self.save_config()
             self._latest_sht_tree = []
+            self._latest_semantic_regions = []
             self._latest_sht_doc_title = ""
             self.log("Ingestion cancelled before completion.")
             self._run_on_ui(self._refresh_document_outline_panel)
+            self._run_on_ui(self._refresh_semantic_region_panel)
             self._run_on_ui(self._set_startup_status, "Ingestion cancelled")
         except Exception as e:
             self._latest_sht_tree = []
+            self._latest_semantic_regions = []
             self._latest_sht_doc_title = ""
             self._run_on_ui(self._refresh_document_outline_panel)
+            self._run_on_ui(self._refresh_semantic_region_panel)
             self.vector_store = previous_vector_store
             self.selected_index_path = previous_index_path
             self.selected_collection_name = previous_collection_name
