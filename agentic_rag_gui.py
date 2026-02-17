@@ -1744,11 +1744,12 @@ class AgenticRAGApp:
         if not hasattr(self, "history_summary_fields"):
             return
         session_id = self._selected_history_session_id()
-        summary_text = ""
         config_text = ""
         telemetry_text = ""
         telemetry = None
         run_id = ""
+        config_rows = []
+        telemetry_rows = []
 
         summary_defaults = {
             "Title": "-",
@@ -1761,6 +1762,7 @@ class AgenticRAGApp:
         }
         for key, default_value in summary_defaults.items():
             self.history_summary_fields[key].set(default_value)
+        self.history_synopsis_var.set("(No summary saved.)")
         self._history_summary_blob = ""
         self._selected_session_folder = ""
 
@@ -1793,7 +1795,7 @@ class AgenticRAGApp:
                 }
                 for key, value in summary_values.items():
                     self.history_summary_fields[key].set(value)
-                summary_text = summary
+                self.history_synopsis_var.set(summary)
                 self._history_summary_blob = "\n".join(
                     [f"{key}: {value}" for key, value in summary_values.items()] + ["", f"Summary:\n{summary}"]
                 )
@@ -1812,6 +1814,7 @@ class AgenticRAGApp:
                     "extra": extra,
                 }
                 config_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
+                config_rows = self._build_history_key_value_rows(snapshot)
 
                 for msg in reversed(messages):
                     if msg["run_id"]:
@@ -1824,10 +1827,17 @@ class AgenticRAGApp:
                     telemetry_text = f"No telemetry event found for run_id={run_id}."
                 else:
                     telemetry_text = "No run telemetry available for this session."
+                telemetry_rows = self._build_history_key_value_rows(telemetry if isinstance(telemetry, dict) else {"status": telemetry_text})
 
-        self._set_readonly_text(self.history_summary_text, summary_text)
+        if not config_rows:
+            config_rows = [("status", "No config snapshot available.")]
+        if not telemetry_rows:
+            telemetry_rows = [("status", "No run telemetry available for this session.")]
+
         self._set_readonly_text(self.history_config_text, config_text)
         self._set_readonly_text(self.history_telemetry_text, telemetry_text)
+        self._render_history_card_rows(self.history_config_rows_wrap, config_rows)
+        self._render_history_card_rows(self.history_telemetry_rows_wrap, telemetry_rows)
         self._populate_telemetry_fields(telemetry, run_id)
 
     def _populate_telemetry_fields(self, telemetry, run_id=""):
@@ -1867,6 +1877,46 @@ class AgenticRAGApp:
         }
         for key, value in values.items():
             self.history_telemetry_fields[key].set(str(value))
+
+    def _build_history_key_value_rows(self, payload, prefix=""):
+        if not isinstance(payload, dict):
+            return []
+
+        rows = []
+        for key in sorted(payload.keys(), key=lambda item: str(item)):
+            value = payload.get(key)
+            label = f"{prefix}.{key}" if prefix else str(key)
+            if isinstance(value, dict):
+                rows.extend(self._build_history_key_value_rows(value, label))
+                continue
+            if isinstance(value, list):
+                display_value = ", ".join(str(item) for item in value) if value else "[]"
+            elif value in (None, ""):
+                display_value = "-"
+            else:
+                display_value = str(value)
+            rows.append((label, display_value))
+        return rows
+
+    def _render_history_card_rows(self, container, rows):
+        for child in container.winfo_children():
+            child.destroy()
+
+        for key, value in rows:
+            row = self.create_frame(container, style="Card.TFrame")
+            row.pack(fill="x", pady=(0, UI_SPACING["xs"]))
+            row.grid_columnconfigure(1, weight=1)
+            self.create_label(row, text=str(key), style="Caption.TLabel").grid(row=0, column=0, sticky="nw", padx=(0, UI_SPACING["s"]), pady=UI_SPACING["xs"])
+            self.create_label(row, text=str(value), style="TLabel", wraplength=520, justify="left").grid(row=0, column=1, sticky="w", pady=UI_SPACING["xs"])
+
+    def _toggle_history_raw_panel(self, panel, toggle_var, button):
+        is_open = bool(toggle_var.get())
+        if is_open:
+            panel.pack(fill=tk.BOTH, expand=True, pady=(UI_SPACING["s"], 0))
+            button.configure(text="Hide Raw JSON")
+        else:
+            panel.pack_forget()
+            button.configure(text="Show Raw JSON")
 
     def _copy_history_session_id(self):
         session_id = self.history_summary_fields.get("Session ID").get() if hasattr(self, "history_summary_fields") else ""
@@ -4214,57 +4264,99 @@ class AgenticRAGApp:
         summary_grid.grid_columnconfigure(1, weight=1)
 
         actions_row = self.create_frame(summary_card, style="Card.TFrame")
-        actions_row.pack(fill="x", pady=(8, 0))
-        copy_id_btn = self.create_button(actions_row, text="Copy Session ID", command=self._copy_history_session_id, takefocus=True)
+        actions_row.pack(fill="x", pady=(UI_SPACING["s"], 0))
+        copy_id_btn = self.create_button(actions_row, text="Copy Session ID", command=self._copy_history_session_id, takefocus=True, style="Secondary.TButton")
         copy_id_btn.pack(side="left")
-        copy_summary_btn = self.create_button(actions_row, text="Copy Summary", command=self._copy_history_summary, takefocus=True)
-        copy_summary_btn.pack(side="left", padx=(8, 0))
-        open_folder_btn = self.create_button(actions_row, text="Open Session Folder", command=self._open_selected_session_folder, takefocus=True)
-        open_folder_btn.pack(side="left", padx=(8, 0))
-        export_json_btn = self.create_button(actions_row, text="Export JSON", command=self._export_selected_session_json, takefocus=True)
-        export_json_btn.pack(side="left", padx=(8, 0))
+        copy_summary_btn = self.create_button(actions_row, text="Copy Summary", command=self._copy_history_summary, takefocus=True, style="Secondary.TButton")
+        copy_summary_btn.pack(side="left", padx=(UI_SPACING["s"], 0))
+        open_folder_btn = self.create_button(actions_row, text="Open Session Folder", command=self._open_selected_session_folder, takefocus=True, style="Secondary.TButton")
+        open_folder_btn.pack(side="left", padx=(UI_SPACING["s"], 0))
+        export_json_btn = self.create_button(actions_row, text="Export JSON", command=self._export_selected_session_json, takefocus=True, style="Secondary.TButton")
+        export_json_btn.pack(side="left", padx=(UI_SPACING["s"], 0))
 
         self._tip(copy_id_btn, "Copy the selected session UUID to your clipboard.")
         self._tip(copy_summary_btn, "Copy summary metadata and synopsis as plain text.")
         self._tip(open_folder_btn, "Open the selected index/session folder when available.")
         self._tip(export_json_btn, "Export this session as a standalone JSON file.")
 
-        summary_text_card = self.create_frame(details, style="Card.TFrame")
-        summary_text_card.pack(fill="x", pady=(0, 10))
-        self.create_label(summary_text_card, text="Synopsis", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
-        self.history_summary_text = self.create_rich_text_surface(summary_text_card, surface_id="history_summary", height=5, wrap=tk.WORD, state="disabled", relief="flat", borderwidth=1)
-        self.history_summary_text.pack(fill="x")
+        synopsis_card = self.create_frame(details, style="Card.TFrame")
+        synopsis_card.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        synopsis_row = self.create_frame(synopsis_card, style="Card.TFrame")
+        synopsis_row.pack(fill="x")
+        synopsis_row.grid_columnconfigure(1, weight=1)
+        self.create_label(synopsis_row, text="Synopsis", style="Caption.TLabel").grid(row=0, column=0, sticky="nw", padx=(0, UI_SPACING["s"]), pady=UI_SPACING["xs"])
+        self.history_synopsis_var = tk.StringVar(value="(No summary saved.)")
+        self.create_label(synopsis_row, textvariable=self.history_synopsis_var, style="TLabel", wraplength=500, justify="left").grid(row=0, column=1, sticky="w", pady=UI_SPACING["xs"])
 
         notebook = self.create_notebook(details, style="App.TNotebook")
         notebook.pack(fill=tk.BOTH, expand=True)
 
-        config_tab = self.create_frame(notebook, style="Card.TFrame", padding=8)
-        telemetry_tab = self.create_frame(notebook, style="Card.TFrame", padding=8)
+        config_tab = self.create_frame(notebook, style="Card.TFrame", padding=UI_SPACING["m"])
+        telemetry_tab = self.create_frame(notebook, style="Card.TFrame", padding=UI_SPACING["m"])
         notebook.add(config_tab, text="Config")
         notebook.add(telemetry_tab, text="Telemetry")
 
-        self.history_config_text = self.create_rich_text_surface(config_tab, surface_id="history_config", wrap=tk.NONE, state="disabled", height=12, relief="flat", borderwidth=1)
-        cfg_y = ttk.Scrollbar(config_tab, orient="vertical", command=self.history_config_text.yview)
-        cfg_x = ttk.Scrollbar(config_tab, orient="horizontal", command=self.history_config_text.xview)
+        self.history_config_rows_wrap = self.create_frame(config_tab, style="Card.TFrame")
+        self.history_config_rows_wrap.pack(fill="x")
+        self._render_history_card_rows(self.history_config_rows_wrap, [("status", "No config snapshot available.")])
+
+        config_raw_toggle = self.create_frame(config_tab, style="Card.TFrame")
+        config_raw_toggle.pack(fill="x", pady=(UI_SPACING["s"], 0))
+        self.history_config_raw_visible = tk.BooleanVar(value=False)
+        self.history_config_raw_btn = self.create_button(
+            config_raw_toggle,
+            text="Show Raw JSON",
+            style="Secondary.TButton",
+            command=lambda: (
+                self.history_config_raw_visible.set(not self.history_config_raw_visible.get()),
+                self._toggle_history_raw_panel(self.history_config_raw_panel, self.history_config_raw_visible, self.history_config_raw_btn),
+            ),
+            takefocus=True,
+        )
+        self.history_config_raw_btn.pack(side="left")
+
+        self.history_config_raw_panel = self.create_frame(config_tab, style="Card.TFrame")
+        self.history_config_text = self.create_rich_text_surface(self.history_config_raw_panel, surface_id="history_config", wrap=tk.NONE, state="disabled", height=12, relief="flat", borderwidth=1)
+        cfg_y = ttk.Scrollbar(self.history_config_raw_panel, orient="vertical", command=self.history_config_text.yview)
+        cfg_x = ttk.Scrollbar(self.history_config_raw_panel, orient="horizontal", command=self.history_config_text.xview)
         self.history_config_text.configure(yscrollcommand=cfg_y.set, xscrollcommand=cfg_x.set)
         self.history_config_text.pack(side="top", fill=tk.BOTH, expand=True)
         cfg_y.pack(side="right", fill="y")
         cfg_x.pack(side="bottom", fill="x")
 
         telemetry_fields_wrap = self.create_frame(telemetry_tab, style="Card.TFrame")
-        telemetry_fields_wrap.pack(fill="x", pady=(0, 8))
+        telemetry_fields_wrap.pack(fill="x", pady=(0, UI_SPACING["s"]))
         self.history_telemetry_fields = {}
         telemetry_keys = ["Run ID", "Event", "Stage", "Status", "Duration (ms)", "Prompt Tokens", "Completion Tokens", "Total Tokens", "Cost"]
         for row_index, key in enumerate(telemetry_keys):
             var = tk.StringVar(value="-")
             self.history_telemetry_fields[key] = var
-            self.create_label(telemetry_fields_wrap, text=f"{key}:", style="Muted.TLabel").grid(row=row_index, column=0, sticky="w", padx=(0, 10), pady=2)
-            self.create_label(telemetry_fields_wrap, textvariable=var, style="TLabel").grid(row=row_index, column=1, sticky="w", pady=2)
+            self.create_label(telemetry_fields_wrap, text=f"{key}:", style="Muted.TLabel").grid(row=row_index, column=0, sticky="w", padx=(0, UI_SPACING["s"]), pady=UI_SPACING["xs"])
+            self.create_label(telemetry_fields_wrap, textvariable=var, style="TLabel").grid(row=row_index, column=1, sticky="w", pady=UI_SPACING["xs"])
 
-        self.create_label(telemetry_tab, text="Raw telemetry", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
-        self.history_telemetry_text = self.create_rich_text_surface(telemetry_tab, surface_id="history_telemetry", wrap=tk.NONE, state="disabled", height=8, relief="flat", borderwidth=1)
-        telem_y = ttk.Scrollbar(telemetry_tab, orient="vertical", command=self.history_telemetry_text.yview)
-        telem_x = ttk.Scrollbar(telemetry_tab, orient="horizontal", command=self.history_telemetry_text.xview)
+        self.history_telemetry_rows_wrap = self.create_frame(telemetry_tab, style="Card.TFrame")
+        self.history_telemetry_rows_wrap.pack(fill="x", pady=(0, UI_SPACING["s"]))
+        self._render_history_card_rows(self.history_telemetry_rows_wrap, [("status", "No run telemetry available for this session.")])
+
+        telemetry_raw_toggle = self.create_frame(telemetry_tab, style="Card.TFrame")
+        telemetry_raw_toggle.pack(fill="x")
+        self.history_telemetry_raw_visible = tk.BooleanVar(value=False)
+        self.history_telemetry_raw_btn = self.create_button(
+            telemetry_raw_toggle,
+            text="Show Raw JSON",
+            style="Secondary.TButton",
+            command=lambda: (
+                self.history_telemetry_raw_visible.set(not self.history_telemetry_raw_visible.get()),
+                self._toggle_history_raw_panel(self.history_telemetry_raw_panel, self.history_telemetry_raw_visible, self.history_telemetry_raw_btn),
+            ),
+            takefocus=True,
+        )
+        self.history_telemetry_raw_btn.pack(side="left")
+
+        self.history_telemetry_raw_panel = self.create_frame(telemetry_tab, style="Card.TFrame")
+        self.history_telemetry_text = self.create_rich_text_surface(self.history_telemetry_raw_panel, surface_id="history_telemetry", wrap=tk.NONE, state="disabled", height=8, relief="flat", borderwidth=1)
+        telem_y = ttk.Scrollbar(self.history_telemetry_raw_panel, orient="vertical", command=self.history_telemetry_text.yview)
+        telem_x = ttk.Scrollbar(self.history_telemetry_raw_panel, orient="horizontal", command=self.history_telemetry_text.xview)
         self.history_telemetry_text.configure(yscrollcommand=telem_y.set, xscrollcommand=telem_x.set)
         self.history_telemetry_text.pack(side="top", fill=tk.BOTH, expand=True)
         telem_y.pack(side="right", fill="y")
