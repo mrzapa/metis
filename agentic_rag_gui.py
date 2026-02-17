@@ -46,6 +46,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# High-complexity adapter decisions for backend portability.
+# - tk/scrolled Text widgets are retained for rich tag support (citations/click handlers),
+#   keyboard shortcuts, and predictable copy/export behavior across ttk/ttkbootstrap/CTk.
+# - ttk.Treeview is retained because CTk has no feature-complete tree/grid equivalent with
+#   heading configuration, row tags, and stable selection APIs used by history/sources/events.
+HIGH_COMPLEXITY_WIDGET_DECISIONS = {
+    "scrolled_text": "embed_tk",
+    "text": "embed_tk",
+    "treeview": "embed_ttk",
+}
+
 
 class JobCancelledError(RuntimeError):
     """Raised when a cooperative background job is cancelled."""
@@ -4097,12 +4108,35 @@ class AgenticRAGApp:
         return ttk.Notebook(parent, **kwargs)
 
     def create_treeview(self, parent, **kwargs):
+        """Adapter for complex list controls.
+
+        Intentionally keeps ttk.Treeview even in CTk mode because there is no native,
+        feature-parity CTk tree widget for row tags, heading controls, and selection APIs.
+        """
         return ttk.Treeview(parent, **kwargs)
 
     def create_textbox(self, parent, *, scrolled=False, **kwargs):
+        """Adapter for rich text surfaces.
+
+        Intentionally keeps Tk Text/ScrolledText in CTk mode because citation tags,
+        tag_bind click handlers, and text editing shortcuts rely on mature Tk Text APIs.
+        """
         if scrolled:
             return scrolledtext.ScrolledText(parent, **kwargs)
         return tk.Text(parent, **kwargs)
+
+    def create_rich_text_surface(self, parent, *, surface_id, scrolled=False, **kwargs):
+        """Backend-agnostic API for high-complexity text widgets.
+
+        surface_id is used for explicit adapter decisions/documentation and future swaps.
+        """
+        _ = HIGH_COMPLEXITY_WIDGET_DECISIONS["scrolled_text" if scrolled else "text"]
+        return self.create_textbox(parent, scrolled=scrolled, **kwargs)
+
+    def create_complex_tree(self, parent, *, tree_id, **kwargs):
+        """Backend-agnostic API for high-complexity tree/list widgets."""
+        _ = HIGH_COMPLEXITY_WIDGET_DECISIONS["treeview"]
+        return self.create_treeview(parent, **kwargs)
 
     def build_history_tab(self):
         frame = self._create_scrollable_tab_frame(self.tab_history, padding=UI_SPACING["l"])
@@ -4144,7 +4178,7 @@ class AgenticRAGApp:
         tree_wrap = self.create_frame(left, text="Saved Sessions", padding=UI_SPACING["m"], kind="labelframe")
         tree_wrap.pack(fill=tk.BOTH, expand=True)
         columns = ("title", "updated", "profile", "resume")
-        self.sessions_tree = self.create_treeview(tree_wrap, columns=columns, show="headings", selectmode="browse", style="History.Treeview")
+        self.sessions_tree = self.create_complex_tree(tree_wrap, tree_id="history_sessions", columns=columns, show="headings", selectmode="browse", style="History.Treeview")
         self.sessions_tree.heading("title", text="Title")
         self.sessions_tree.heading("updated", text="Date")
         self.sessions_tree.heading("profile", text="Profile")
@@ -4198,7 +4232,7 @@ class AgenticRAGApp:
         summary_text_card = self.create_frame(details, style="Card.TFrame")
         summary_text_card.pack(fill="x", pady=(0, 10))
         self.create_label(summary_text_card, text="Synopsis", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
-        self.history_summary_text = self.create_textbox(summary_text_card, height=5, wrap=tk.WORD, state="disabled", relief="flat", borderwidth=1)
+        self.history_summary_text = self.create_rich_text_surface(summary_text_card, surface_id="history_summary", height=5, wrap=tk.WORD, state="disabled", relief="flat", borderwidth=1)
         self.history_summary_text.pack(fill="x")
 
         notebook = self.create_notebook(details, style="App.TNotebook")
@@ -4209,7 +4243,7 @@ class AgenticRAGApp:
         notebook.add(config_tab, text="Config")
         notebook.add(telemetry_tab, text="Telemetry")
 
-        self.history_config_text = self.create_textbox(config_tab, wrap=tk.NONE, state="disabled", height=12, relief="flat", borderwidth=1)
+        self.history_config_text = self.create_rich_text_surface(config_tab, surface_id="history_config", wrap=tk.NONE, state="disabled", height=12, relief="flat", borderwidth=1)
         cfg_y = ttk.Scrollbar(config_tab, orient="vertical", command=self.history_config_text.yview)
         cfg_x = ttk.Scrollbar(config_tab, orient="horizontal", command=self.history_config_text.xview)
         self.history_config_text.configure(yscrollcommand=cfg_y.set, xscrollcommand=cfg_x.set)
@@ -4228,7 +4262,7 @@ class AgenticRAGApp:
             self.create_label(telemetry_fields_wrap, textvariable=var, style="TLabel").grid(row=row_index, column=1, sticky="w", pady=2)
 
         self.create_label(telemetry_tab, text="Raw telemetry", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
-        self.history_telemetry_text = self.create_textbox(telemetry_tab, wrap=tk.NONE, state="disabled", height=8, relief="flat", borderwidth=1)
+        self.history_telemetry_text = self.create_rich_text_surface(telemetry_tab, surface_id="history_telemetry", wrap=tk.NONE, state="disabled", height=8, relief="flat", borderwidth=1)
         telem_y = ttk.Scrollbar(telemetry_tab, orient="vertical", command=self.history_telemetry_text.yview)
         telem_x = ttk.Scrollbar(telemetry_tab, orient="horizontal", command=self.history_telemetry_text.xview)
         self.history_telemetry_text.configure(yscrollcommand=telem_y.set, xscrollcommand=telem_x.set)
@@ -5322,8 +5356,8 @@ class AgenticRAGApp:
         content_split.add(right_pane, weight=2)
 
         # Chat Display
-        self.chat_display = self.create_textbox(
-            left_pane, state="disabled", font=("Segoe UI", 10), wrap=tk.WORD, scrolled=True
+        self.chat_display = self.create_rich_text_surface(
+            left_pane, surface_id="chat_display", state="disabled", font=("Segoe UI", 10), wrap=tk.WORD, scrolled=True
         )
         self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, UI_SPACING["m"]))
         self.chat_display.tag_config("citation", underline=1)
@@ -5387,7 +5421,7 @@ class AgenticRAGApp:
 
         logs_section = CollapsibleFrame(left_pane, "Logs & telemetry", expanded=False)
         logs_section.pack(fill="both", pady=(6, 0))
-        self.log_area = self.create_textbox(logs_section.content, height=6, state="disabled", wrap=tk.WORD, scrolled=True)
+        self.log_area = self.create_rich_text_surface(logs_section.content, surface_id="chat_logs", height=6, state="disabled", wrap=tk.WORD, scrolled=True)
         self.log_area.pack(fill=tk.BOTH, expand=True)
 
         self.chat_settings_section = CollapsibleFrame(left_pane, "Advanced chat settings", expanded=False)
@@ -5432,7 +5466,7 @@ class AgenticRAGApp:
         # Sticky input composer
         input_frame = self.create_frame(left_pane, style="Card.Flat.TFrame", padding=UI_SPACING["s"])
         input_frame.pack(fill="x", side="bottom", pady=(UI_SPACING["s"], 0))
-        self.txt_input = self.create_textbox(input_frame, height=3, font=("Segoe UI", 11), wrap=tk.WORD)
+        self.txt_input = self.create_rich_text_surface(input_frame, surface_id="chat_input", height=3, font=("Segoe UI", 11), wrap=tk.WORD)
         self.txt_input.pack(side="left", fill="both", expand=True, padx=(0, UI_SPACING["s"]))
         self.txt_input.bind("<Control-Return>", lambda _e: (self.send_message(), "break")[1])
 
@@ -5447,8 +5481,8 @@ class AgenticRAGApp:
 
         self.answer_tab = self.create_frame(self.evidence_notebook)
         self.evidence_notebook.add(self.answer_tab, text="Answer")
-        self.answer_text = self.create_textbox(
-            self.answer_tab, height=20, wrap=tk.WORD, state="disabled", font=("Segoe UI", 10)
+        self.answer_text = self.create_rich_text_surface(
+            self.answer_tab, surface_id="answer_text", height=20, wrap=tk.WORD, state="disabled", font=("Segoe UI", 10)
         )
         self.answer_text.tag_config("citation", underline=1)
         self.answer_text.tag_bind("citation", "<Button-1>", self._on_answer_citation_click)
@@ -5458,8 +5492,9 @@ class AgenticRAGApp:
 
         self.sources_tab = self.create_frame(self.evidence_notebook)
         self.evidence_notebook.add(self.sources_tab, text="Sources")
-        self.sources_tree = self.create_treeview(
+        self.sources_tree = self.create_complex_tree(
             self.sources_tab,
+            tree_id="sources_tree",
             columns=("sid", "doc", "section", "location", "speaker", "timestamp", "snippet"),
             show="tree headings",
             height=10,
@@ -5486,22 +5521,22 @@ class AgenticRAGApp:
         source_actions.pack(fill="x", pady=(6, 4))
         self.create_button(source_actions, text="Open selected source", command=self._open_selected_source, style="Secondary.TButton").pack(side="left")
 
-        self.source_detail_text = self.create_textbox(
-            self.sources_tab, height=8, wrap=tk.WORD, state="disabled", font=("Consolas", 9)
+        self.source_detail_text = self.create_rich_text_surface(
+            self.sources_tab, surface_id="source_detail", height=8, wrap=tk.WORD, state="disabled", font=("Consolas", 9)
         )
         self.source_detail_text.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
         self.incidents_json_tab = self.create_frame(self.evidence_notebook)
         self.evidence_notebook.add(self.incidents_json_tab, text="Incidents JSON")
-        self.incidents_json_text = self.create_textbox(
-            self.incidents_json_tab, height=14, wrap=tk.NONE, state="disabled", font=("Consolas", 9)
+        self.incidents_json_text = self.create_rich_text_surface(
+            self.incidents_json_tab, surface_id="incidents_json", height=14, wrap=tk.NONE, state="disabled", font=("Consolas", 9)
         )
         self.incidents_json_text.pack(fill=tk.BOTH, expand=True)
 
         self.events_tab = self.create_frame(self.evidence_notebook)
         self.evidence_notebook.add(self.events_tab, text="Events")
-        self.events_tree = self.create_treeview(
-            self.events_tab,
+        self.events_tree = self.create_complex_tree(
+            self.events_tab, tree_id="events_tree",
             columns=("date", "actors", "action", "impact", "sid"),
             show="headings",
             height=10,
@@ -5521,8 +5556,8 @@ class AgenticRAGApp:
 
         self.trace_tab = self.create_frame(self.evidence_notebook)
         self.evidence_notebook.add(self.trace_tab, text="Trace")
-        self.trace_text = self.create_textbox(
-            self.trace_tab, height=14, wrap=tk.WORD, state="disabled", font=("Consolas", 9)
+        self.trace_text = self.create_rich_text_surface(
+            self.trace_tab, surface_id="trace_text", height=14, wrap=tk.WORD, state="disabled", font=("Consolas", 9)
         )
         self.trace_text.pack(fill=tk.BOTH, expand=True)
 
