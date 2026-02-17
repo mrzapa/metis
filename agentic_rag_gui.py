@@ -9726,6 +9726,204 @@ class AgenticRAGApp:
         return chapter_markers, section_markers
 
     @staticmethod
+    def _extract_numbering_pattern(text):
+        candidate = str(text or "").strip()
+        if not candidate:
+            return ""
+        match = re.match(
+            r"^(?P<num>(?:\d+(?:\.\d+)*|[IVXLCDM]+|[A-Z]))[\).:]?\s+",
+            candidate,
+            flags=re.IGNORECASE,
+        )
+        return (match.group("num") or "").strip() if match else ""
+
+    def _extract_pdf_line_candidates(self, selected_file):
+        candidates = []
+        global_cursor = 0
+        try:
+            import pdfplumber
+        except ImportError:
+            pdfplumber = None
+
+        if pdfplumber is not None:
+            with pdfplumber.open(selected_file) as pdf_doc:
+                for page_idx, page in enumerate(pdf_doc.pages, start=1):
+                    words = page.extract_words(
+                        use_text_flow=True,
+                        keep_blank_chars=False,
+                        extra_attrs=["size", "fontname"],
+                    )
+                    current_line = []
+                    last_top = None
+                    line_tolerance = 2.5
+                    for word in words:
+                        top = float(word.get("top") or 0.0)
+                        if last_top is None or abs(top - last_top) <= line_tolerance:
+                            current_line.append(word)
+                        else:
+                            line_text = " ".join(str(w.get("text") or "").strip() for w in current_line).strip()
+                            if line_text:
+                                font_sizes = [float(w.get("size") or 0.0) for w in current_line if w.get("size")]
+                                font_names = [str(w.get("fontname") or "") for w in current_line]
+                                avg_font = sum(font_sizes) / len(font_sizes) if font_sizes else 0.0
+                                font_blob = " ".join(font_names).lower()
+                                is_bold = any(token in font_blob for token in ["bold", "black", "demi"])
+                                is_italic = any(token in font_blob for token in ["italic", "oblique"])
+                                candidates.append(
+                                    {
+                                        "text": line_text,
+                                        "page": page_idx,
+                                        "char_start": global_cursor,
+                                        "font_size": avg_font,
+                                        "is_bold": bool(is_bold),
+                                        "is_italic": bool(is_italic),
+                                        "font_weight": "bold" if is_bold else "normal",
+                                        "numbering": self._extract_numbering_pattern(line_text),
+                                        "x0": float(min(w.get("x0") or 0.0 for w in current_line)),
+                                        "top": float(min(w.get("top") or 0.0 for w in current_line)),
+                                    }
+                                )
+                                global_cursor += len(line_text) + 1
+                            current_line = [word]
+                        last_top = top
+
+                    if current_line:
+                        line_text = " ".join(str(w.get("text") or "").strip() for w in current_line).strip()
+                        if line_text:
+                            font_sizes = [float(w.get("size") or 0.0) for w in current_line if w.get("size")]
+                            font_names = [str(w.get("fontname") or "") for w in current_line]
+                            avg_font = sum(font_sizes) / len(font_sizes) if font_sizes else 0.0
+                            font_blob = " ".join(font_names).lower()
+                            is_bold = any(token in font_blob for token in ["bold", "black", "demi"])
+                            is_italic = any(token in font_blob for token in ["italic", "oblique"])
+                            candidates.append(
+                                {
+                                    "text": line_text,
+                                    "page": page_idx,
+                                    "char_start": global_cursor,
+                                    "font_size": avg_font,
+                                    "is_bold": bool(is_bold),
+                                    "is_italic": bool(is_italic),
+                                    "font_weight": "bold" if is_bold else "normal",
+                                    "numbering": self._extract_numbering_pattern(line_text),
+                                    "x0": float(min(w.get("x0") or 0.0 for w in current_line)),
+                                    "top": float(min(w.get("top") or 0.0 for w in current_line)),
+                                }
+                            )
+                            global_cursor += len(line_text) + 1
+            return candidates
+
+        from pypdf import PdfReader
+
+        reader = PdfReader(selected_file)
+        for page_idx, page in enumerate(reader.pages, start=1):
+            text = page.extract_text() or ""
+            for raw_line in text.splitlines():
+                line_text = raw_line.strip()
+                if not line_text:
+                    continue
+                candidates.append(
+                    {
+                        "text": line_text,
+                        "page": page_idx,
+                        "char_start": global_cursor,
+                        "font_size": 0.0,
+                        "is_bold": False,
+                        "is_italic": False,
+                        "font_weight": "unknown",
+                        "numbering": self._extract_numbering_pattern(line_text),
+                        "x0": 0.0,
+                        "top": 0.0,
+                    }
+                )
+                global_cursor += len(line_text) + 1
+        return candidates
+
+    @staticmethod
+    def _score_pdf_header_candidate(candidate, body_font_size):
+        text = str(candidate.get("text") or "").strip()
+        if not text:
+            return 0.0
+        words = text.split()
+        score = 0.0
+        font_size = float(candidate.get("font_size") or 0.0)
+        if font_size > 0 and body_font_size > 0:
+            if font_size >= body_font_size + 2.0:
+                score += 0.45
+            elif font_size >= body_font_size + 1.0:
+                score += 0.3
+        if candidate.get("is_bold"):
+            score += 0.25
+        if candidate.get("is_italic"):
+            score += 0.05
+        if candidate.get("numbering"):
+            score += 0.25
+        if 1 <= len(words) <= 12:
+            score += 0.1
+        if text.endswith(":"):
+            score += 0.05
+        if re.search(r"[.!?]$", text):
+            score -= 0.1
+        return max(0.0, min(score, 1.0))
+
+    @staticmethod
+    def _normalize_pdf_header_levels(candidates):
+        normalized = []
+        for candidate in candidates:
+            line = dict(candidate)
+            score = float(line.get("header_confidence") or 0.0)
+            if score < 0.55:
+                line["header_level"] = None
+                normalized.append(line)
+                continue
+
+            numbering = str(line.get("numbering") or "").strip()
+            if numbering and re.match(r"^\d+(?:\.\d+)*$", numbering):
+                level = min(4, numbering.count(".") + 1)
+            elif numbering and re.match(r"^[IVXLCDM]+$", numbering, flags=re.IGNORECASE):
+                level = 1
+            elif numbering and re.match(r"^[A-Z]$", numbering):
+                level = 2
+            elif score >= 0.85:
+                level = 1
+            elif score >= 0.72:
+                level = 2
+            else:
+                level = 3
+            line["header_level"] = level
+            normalized.append(line)
+        return normalized
+
+    def _build_structured_text_from_pdf_candidates(self, candidates):
+        if not candidates:
+            return "", False
+
+        font_sizes = [float(c.get("font_size") or 0.0) for c in candidates if float(c.get("font_size") or 0.0) > 0]
+        body_font_size = sorted(font_sizes)[len(font_sizes) // 2] if font_sizes else 0.0
+        scored = []
+        for candidate in candidates:
+            enriched = dict(candidate)
+            enriched["header_confidence"] = self._score_pdf_header_candidate(candidate, body_font_size)
+            scored.append(enriched)
+        normalized = self._normalize_pdf_header_levels(scored)
+
+        header_confidences = [float(c.get("header_confidence") or 0.0) for c in normalized if c.get("header_level")]
+        avg_conf = (sum(header_confidences) / len(header_confidences)) if header_confidences else 0.0
+        use_structured = bool(header_confidences) and avg_conf >= 0.62
+
+        lines = []
+        for candidate in normalized:
+            line_text = str(candidate.get("text") or "").strip()
+            if not line_text:
+                continue
+            header_level = candidate.get("header_level") if use_structured else None
+            if header_level:
+                lines.append(f"{'#' * int(header_level)} {line_text}")
+            else:
+                lines.append(line_text)
+        return "\n".join(lines), use_structured
+
+    @staticmethod
     def _structure_at_offset(offset, markers):
         active = None
         for marker in markers:
@@ -11942,6 +12140,7 @@ class AgenticRAGApp:
             # 1. Load & Clean
             self.log("Step 1/4: Parsing File...")
             text_content = ""
+            doc_title = None
 
             chatgpt_messages = None
             if selected_file.lower().endswith(".html"):
@@ -12157,6 +12356,32 @@ class AgenticRAGApp:
                         root = soup.body or soup
                         _process_children(root, lines)
                         text_content = "\n".join(lines)
+            elif selected_file.lower().endswith(".pdf"):
+                try:
+                    pdf_candidates = self._extract_pdf_line_candidates(selected_file)
+                    structured_text, used_structured_headers = self._build_structured_text_from_pdf_candidates(
+                        pdf_candidates
+                    )
+                    if used_structured_headers:
+                        self.log(
+                            f"PDF parser: extracted {len(pdf_candidates)} line candidates with header signals."
+                        )
+                    else:
+                        self.log(
+                            "PDF parser: low header confidence, falling back to flat line ingestion."
+                        )
+                    text_content = structured_text
+                except Exception as pdf_err:
+                    self.log(f"PDF structured parsing failed ({pdf_err}); falling back to flat extraction.")
+                    try:
+                        from pypdf import PdfReader
+
+                        reader = PdfReader(selected_file)
+                        text_content = "\n".join(
+                            (page.extract_text() or "") for page in reader.pages
+                        )
+                    except Exception:
+                        text_content = ""
             else:
                 with open(selected_file, "r", encoding="utf-8") as f:
                     text_content = f.read()
