@@ -18,6 +18,7 @@ import html
 import webbrowser
 import traceback
 import tempfile
+import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
@@ -42,6 +43,81 @@ MODE_ALIASES = {
 APP_NAME = "Axiom"
 APP_VERSION = "1.0"
 APP_SUBTITLE = "Personal RAG Assistant"
+TEST_MODE_SAMPLE_PROMPT = "Summarize this document"
+TEST_MODE_SAMPLE_TEXT = """Axiom Test Mode Sample Document
+
+This sample is intentionally small and deterministic so developers can validate
+the full indexing and chat flow quickly.
+
+The product team shipped a pilot feature called Smart Digest in March 2026.
+During week one, users reported that setup took too long.
+
+The team ran three changes:
+1) Reduced onboarding steps from six to three.
+2) Added in-app examples for first-time users.
+3) Improved retrieval defaults for concise answers.
+
+Outcome after two weeks:
+- Time-to-first-answer dropped from 11 minutes to 3 minutes.
+- Daily active usage increased by 27 percent.
+- Support tickets about "how do I start" decreased by 41 percent.
+
+Risks noted:
+- If examples are too generic, users may trust incorrect assumptions.
+- Teams still need clear citations when summarizing evidence.
+
+Conclusion:
+Fast setup plus grounded retrieval improves adoption, but trust depends on
+transparent sourcing and predictable outputs.
+"""
+
+
+class MockEmbeddings:
+    """Small deterministic embeddings backend for local/test use."""
+
+    def __init__(self, dimensions: int = 32):
+        self.dimensions = max(8, int(dimensions))
+
+    def _embed(self, text: str):
+        payload = (text or "").encode("utf-8", errors="ignore")
+        digest = hashlib.sha256(payload).digest()
+        values = []
+        for idx in range(self.dimensions):
+            byte = digest[idx % len(digest)]
+            values.append((byte / 255.0) * 2.0 - 1.0)
+        return values
+
+    def embed_documents(self, texts):
+        return [self._embed(text) for text in texts]
+
+    def embed_query(self, text):
+        return self._embed(text)
+
+
+class MockChatModel:
+    """Deterministic local chat model for Test Mode demos."""
+
+    def __init__(self, make_ai_message):
+        self._make_ai_message = make_ai_message
+
+    def invoke(self, messages):
+        user_text = ""
+        for msg in reversed(messages or []):
+            if getattr(msg, "type", "") == "human":
+                user_text = str(getattr(msg, "content", "")).strip()
+                break
+        if not user_text:
+            user_text = "(no user prompt provided)"
+        response = (
+            "[Mock/Test Backend]\n"
+            "Sample is ready and retrieval is local-only.\n"
+            f"Deterministic response to: {user_text}\n\n"
+            "Quick summary:\n"
+            "- Smart Digest pilot reduced setup friction.\n"
+            "- Time-to-first-answer improved from 11m to 3m.\n"
+            "- Adoption rose while support tickets fell."
+        )
+        return self._make_ai_message(response)
 
 STYLE_CONFIG = {
     "font_family": "SF Pro Text",
@@ -759,6 +835,11 @@ class AgenticRAGApp:
         self.last_used_mode = "advanced"
         self.startup_mode_setting = tk.StringVar(value="advanced")
         self.basic_wizard_completed = False
+        self.test_mode_active = False
+        self._test_mode_temp_dir = ""
+        self._test_mode_sample_file = ""
+        self._test_mode_auto_started = False
+        self.test_mode_banner_var = tk.StringVar(value="")
         self._wizard_state = {}
         self.ui_mode = tk.StringVar(value="space_dust")
         self._active_palette = STYLE_CONFIG["themes"]["space_dust"]
@@ -1923,6 +2004,8 @@ class AgenticRAGApp:
             self.check_dependencies()
             self._startup_pipeline_finished = True
             self._set_startup_status("Ready")
+            if self.last_used_mode == "test":
+                self._start_test_mode_flow_once()
 
         self._run_startup_step("check_dependencies", _step)
 
@@ -2458,6 +2541,7 @@ class AgenticRAGApp:
             ],
             "google": ["gemini-1.5-flash", "gemini-1.5-pro", "custom"],
             "local_lm_studio": ["custom"],
+            "mock": ["mock-test-v1"],
         }
         return options.get(provider, ["custom"])
 
@@ -2473,6 +2557,7 @@ class AgenticRAGApp:
                 "voyage-4",
                 "custom",
             ],
+            "mock": ["mock-embed-v1"],
         }
         return options.get(provider, ["custom"])
 
@@ -2974,11 +3059,12 @@ class AgenticRAGApp:
         instructions = data.get("system_instructions", self.system_instructions.get())
         self.system_instructions.set(instructions or self.default_system_instructions)
         saved_mode = str(data.get("last_used_mode", self.last_used_mode) or "advanced").strip().lower()
-        if saved_mode not in {"basic", "advanced"}:
+        if saved_mode not in {"basic", "advanced", "test"}:
             saved_mode = "advanced"
         self.last_used_mode = saved_mode
         self.startup_mode_setting.set(saved_mode)
         self.basic_mode = saved_mode == "basic"
+        self.test_mode_active = saved_mode == "test"
         if hasattr(self, "instructions_box") and self._safe_widget_exists(self.instructions_box):
             self.instructions_box.delete("1.0", tk.END)
             self.instructions_box.insert(tk.END, self.system_instructions.get())
@@ -3057,7 +3143,7 @@ class AgenticRAGApp:
             "output_style": self.output_style.get(),
             "selected_mode": self.selected_mode.get(),
             "selected_profile": self.selected_profile.get(),
-            "last_used_mode": "basic" if self.basic_mode else "advanced",
+            "last_used_mode": self.last_used_mode,
         }
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
@@ -3349,7 +3435,7 @@ class AgenticRAGApp:
         ttk.Combobox(
             toggle_row,
             textvariable=self.startup_mode_setting,
-            values=["advanced", "basic"],
+            values=["advanced", "basic", "test"],
             state="readonly",
             width=10,
         ).pack(side="left", padx=(8, 8))
@@ -3383,7 +3469,7 @@ class AgenticRAGApp:
         cb_llm = ttk.Combobox(
             llm_frame,
             textvariable=self.llm_provider,
-            values=["openai", "anthropic", "google", "local_lm_studio"],
+            values=["openai", "anthropic", "google", "local_lm_studio", "mock"],
             state="readonly",
         )
         cb_llm.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
@@ -3415,7 +3501,7 @@ class AgenticRAGApp:
         cb_emb = ttk.Combobox(
             llm_frame,
             textvariable=self.embedding_provider,
-            values=["voyage", "openai", "google", "local_huggingface"],
+            values=["voyage", "openai", "google", "local_huggingface", "mock"],
             state="readonly",
         )
         cb_emb.grid(row=3, column=1, sticky="ew", padx=5, pady=5)
@@ -3939,6 +4025,12 @@ class AgenticRAGApp:
             text="Flow: Library builds index → Chat uses current index → Settings configures providers.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+        if self.test_mode_active:
+            ttk.Label(
+                header,
+                textvariable=self.test_mode_banner_var,
+                style="Success.TLabel",
+            ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
         state_strip = ttk.Frame(frame, style="Card.TFrame")
         state_strip.pack(fill="x", pady=(0, UI_SPACING["s"]))
@@ -3998,6 +4090,8 @@ class AgenticRAGApp:
             ttk.Button(top_bar, text="Switch to Advanced", command=self.switch_to_advanced_mode).grid(row=2, column=7, sticky="e", pady=(8, 0))
         else:
             ttk.Button(top_bar, text="Run Setup Wizard", command=self.run_setup_wizard).grid(row=2, column=7, sticky="e", pady=(8, 0))
+        if self.test_mode_active:
+            ttk.Button(top_bar, text="Reset test environment", command=self.reset_test_environment).grid(row=2, column=6, sticky="w", pady=(8, 0))
 
         content_split = ttk.Panedwindow(frame, orient=tk.HORIZONTAL)
         content_split.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
@@ -4234,9 +4328,10 @@ class AgenticRAGApp:
 
         ttk.Button(frame, text="Basic Mode", command=lambda: _choose("basic")).pack(fill="x")
         ttk.Button(frame, text="Advanced Mode", command=lambda: _choose("advanced")).pack(fill="x", pady=(8, 0))
+        ttk.Button(frame, text="Test Mode", command=lambda: _choose("test")).pack(fill="x", pady=(8, 0))
         ttk.Label(
             frame,
-            text="Basic mode runs a guided setup wizard before chat.",
+            text="Basic mode runs a guided setup wizard before chat. Test mode auto-builds a local mock demo.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(10, 0))
 
@@ -4244,12 +4339,14 @@ class AgenticRAGApp:
 
         mode = selected["mode"] or self.last_used_mode
         self.basic_mode = mode == "basic"
+        self.test_mode_active = mode == "test"
         self.last_used_mode = mode
         self.startup_mode_setting.set(mode)
         self.save_config()
 
     def switch_to_advanced_mode(self):
         self.basic_mode = False
+        self.test_mode_active = False
         self.last_used_mode = "advanced"
         self.startup_mode_setting.set("advanced")
         self.basic_wizard_completed = True
@@ -4258,11 +4355,82 @@ class AgenticRAGApp:
 
     def run_setup_wizard(self):
         self.basic_mode = True
+        self.test_mode_active = False
         self.last_used_mode = "basic"
         self.startup_mode_setting.set("basic")
         self.basic_wizard_completed = False
         self.save_config()
         self.build_chat_tab()
+
+    def _ensure_test_mode_environment(self):
+        if not self._test_mode_temp_dir:
+            self._test_mode_temp_dir = tempfile.mkdtemp(prefix="axiom_test_mode_")
+        sample_path = os.path.join(self._test_mode_temp_dir, "sample_document.txt")
+        with open(sample_path, "w", encoding="utf-8") as handle:
+            handle.write(TEST_MODE_SAMPLE_TEXT)
+        self._test_mode_sample_file = sample_path
+        return sample_path
+
+    def _start_test_mode_flow_once(self):
+        if self._test_mode_auto_started:
+            return
+        self._test_mode_auto_started = True
+        self.test_mode_active = True
+        self.basic_mode = False
+        self.last_used_mode = "test"
+        self.startup_mode_setting.set("test")
+        self.llm_provider.set("mock")
+        self.embedding_provider.set("mock")
+        self.llm_model.set("mock-test-v1")
+        self.embedding_model.set("mock-embed-v1")
+        self.chunk_size.set(450)
+        self.chunk_overlap.set(80)
+        self.retrieval_k.set(8)
+        self.final_k.set(4)
+        self.build_digest_index.set(False)
+        self.build_comprehension_index.set(False)
+        sample_file = self._ensure_test_mode_environment()
+        self.selected_file = sample_file
+        self.test_mode_banner_var.set("Preparing sample index for Test Mode…")
+        self._sync_model_options()
+        self.build_chat_tab()
+        self.notebook.select(self.tab_chat)
+        if hasattr(self, "lbl_file") and self._safe_widget_exists(self.lbl_file):
+            self.lbl_file.config(text=sample_file, style="TLabel")
+            self._update_file_info()
+        self.start_ingestion()
+
+    def _post_test_mode_ingestion_ui(self):
+        self.test_mode_banner_var.set("Sample is ready (mock backend).")
+        self.notebook.select(self.tab_chat)
+        if hasattr(self, "txt_input") and self._safe_widget_exists(self.txt_input):
+            self.txt_input.delete("1.0", tk.END)
+            self.txt_input.insert(tk.END, TEST_MODE_SAMPLE_PROMPT)
+            self._focus_chat_input()
+
+    def reset_test_environment(self):
+        if self._ingestion_in_progress or self._rag_in_progress:
+            messagebox.showinfo("Test Mode", "Wait for active jobs to finish before resetting test mode.")
+            return
+        self._teardown_vector_store()
+        temp_dir = self._test_mode_temp_dir
+        self._test_mode_temp_dir = ""
+        self._test_mode_sample_file = ""
+        self._test_mode_auto_started = False
+        self.test_mode_active = False
+        self.last_used_mode = "advanced"
+        self.startup_mode_setting.set("advanced")
+        self.selected_file = None
+        self.selected_index_path = None
+        self.selected_collection_name = RAW_COLLECTION_NAME
+        self.existing_index_var.set("(default)")
+        self.test_mode_banner_var.set("")
+        if temp_dir and os.path.isdir(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        self._refresh_existing_indexes_async(reason="Loading indexes…")
+        self.build_chat_tab()
+        self._update_current_state_strip()
+        self.save_config()
 
     def _build_basic_setup_wizard(self):
         self._wizard_state = {
@@ -4590,12 +4758,15 @@ class AgenticRAGApp:
 
     def _apply_startup_mode_setting(self):
         selected = (self.startup_mode_setting.get() or "advanced").strip().lower()
-        if selected not in {"basic", "advanced"}:
+        if selected not in {"basic", "advanced", "test"}:
             selected = "advanced"
         self.last_used_mode = selected
         self.basic_mode = selected == "basic"
+        self.test_mode_active = selected == "test"
         if self.basic_mode:
             self.basic_wizard_completed = False
+        if self.test_mode_active:
+            self._start_test_mode_flow_once()
         self.save_config()
         if hasattr(self, "tab_chat"):
             self.build_chat_tab()
@@ -5724,6 +5895,10 @@ class AgenticRAGApp:
         self._refresh_existing_indexes_async(reason="Loading indexes…")
 
     def _get_chroma_persist_root(self):
+        if self.test_mode_active:
+            base = self._test_mode_temp_dir or tempfile.mkdtemp(prefix="axiom_test_mode_")
+            self._test_mode_temp_dir = base
+            return os.path.join(base, "chroma_db")
         return os.path.join(os.getcwd(), "chroma_db")
 
     def _get_lexical_db_path(self):
@@ -8228,6 +8403,7 @@ class AgenticRAGApp:
                 "max_context_tokens": 8192,
                 "max_output_tokens": 2048,
             },
+            "mock": {"max_context_tokens": 8192, "max_output_tokens": 1024},
         }
         caps.update(provider_defaults.get(provider_name, {}))
 
@@ -10789,6 +10965,9 @@ class AgenticRAGApp:
             self.log(f"Loading local HuggingFace embeddings ({resolved_model})...")
             return HuggingFaceEmbeddings(model_name=resolved_model)
 
+        if provider == "mock":
+            return MockEmbeddings()
+
         raise ValueError(f"Unknown embedding provider: {provider}")
 
     def get_llm(self, llm_ctx=None):
@@ -10885,6 +11064,9 @@ class AgenticRAGApp:
                 temperature=temperature,
                 max_tokens=output_max_tokens,
             )
+
+        if provider == "mock":
+            return MockChatModel(self._make_ai_message)
 
         raise ValueError(f"Unknown LLM provider: {provider}")
 
@@ -11535,11 +11717,14 @@ class AgenticRAGApp:
                 self._run_on_ui(self._refresh_existing_indexes_async, "Loading indexes…")
             else:
                 self._run_on_ui(self._refresh_existing_indexes_async)
-            self._run_on_ui(
-                messagebox.showinfo,
-                "Success",
-                "File successfully ingested into Vector Database.",
-            )
+            if self.test_mode_active:
+                self._run_on_ui(self._post_test_mode_ingestion_ui)
+            else:
+                self._run_on_ui(
+                    messagebox.showinfo,
+                    "Success",
+                    "File successfully ingested into Vector Database.",
+                )
 
         except JobCancelledError:
             self.vector_store = previous_vector_store
