@@ -939,6 +939,8 @@ class AgenticRAGApp:
         self.enable_agent_lightning_telemetry = self.agent_lightning_enabled
         self._frontier_evidence_pack_mode = False
         self._last_evidence_pack_synthesis_cards = []
+        self._latest_sht_tree = []
+        self._latest_sht_doc_title = ""
         self._trace_events = []
         self._agent_lightning_runs_by_id = {}
         self._agent_lightning_last_exportable_run = None
@@ -1531,6 +1533,42 @@ class AgenticRAGApp:
             self.sessions_tree.see(new_session_id)
         self.notebook.select(self.tab_chat)
 
+    @staticmethod
+    def _normalize_export_source_item(source):
+        if not isinstance(source, dict):
+            return {}
+        item = dict(source)
+        item["header_path"] = str(item.get("header_path") or "").strip()
+        return item
+
+    def _append_sources_markdown(self, lines, sources):
+        normalized = [self._normalize_export_source_item(source) for source in (sources or []) if isinstance(source, dict)]
+        if not normalized:
+            return
+        has_header_groups = any(item.get("header_path") for item in normalized)
+        lines.append("Sources:")
+        if not has_header_groups:
+            for source in normalized:
+                lines.append(
+                    f"- source={source.get('source') or '-'} | "
+                    f"chunk_id={source.get('chunk_id') or '-'} | "
+                    f"score={source.get('score') if source.get('score') is not None else '-'}"
+                )
+            return
+
+        grouped = {}
+        for item in normalized:
+            grouped.setdefault(self._header_path_label(item.get("header_path")), []).append(item)
+        for header_label, items in grouped.items():
+            lines.append(f"- {header_label}")
+            for source in items:
+                evidence_id = source.get("chunk_id") or source.get("node_id") or "-"
+                lines.append(
+                    f"  - source={source.get('source') or '-'} | "
+                    f"evidence={evidence_id} | "
+                    f"score={source.get('score') if source.get('score') is not None else '-'}"
+                )
+
     def _session_export_payload(self, session, messages):
         payload = dict(session)
         payload["messages"] = []
@@ -1548,7 +1586,7 @@ class AgenticRAGApp:
             try:
                 parsed = json.loads(msg["sources_json"] or "[]")
                 if isinstance(parsed, list):
-                    record["sources"] = parsed
+                    record["sources"] = [self._normalize_export_source_item(item) for item in parsed if isinstance(item, dict)]
             except json.JSONDecodeError:
                 pass
             payload["messages"].append(record)
@@ -1602,13 +1640,7 @@ class AgenticRAGApp:
             sources = msg.get("sources") or []
             if sources:
                 lines.append("")
-                lines.append("Sources:")
-                for source in sources:
-                    lines.append(
-                        f"- source={source.get('source') or '-'} | "
-                        f"chunk_id={source.get('chunk_id') or '-'} | "
-                        f"score={source.get('score') if source.get('score') is not None else '-'}"
-                    )
+                self._append_sources_markdown(lines, sources)
             lines.append("")
 
         feedback = payload.get("feedback") or []
@@ -1863,9 +1895,17 @@ class AgenticRAGApp:
         records = []
         for d in docs:
             metadata = getattr(d, "metadata", {}) or {}
+            header_path = str(
+                metadata.get("header_path")
+                or metadata.get("source_section")
+                or ""
+            ).strip()
             records.append(
                 {
                     "chunk_id": metadata.get("chunk_id"),
+                    "node_id": metadata.get("node_id"),
+                    "content_type": metadata.get("content_type"),
+                    "header_path": header_path,
                     "source": metadata.get("source")
                     or metadata.get("file_path")
                     or metadata.get("filename"),
@@ -4676,6 +4716,43 @@ class AgenticRAGApp:
             text="Progress is shown while indexing runs. Detailed stage output appears in Logs.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+
+        outline_frame = ttk.LabelFrame(frame, text="4) Document Outline", padding=UI_SPACING["m"])
+        outline_frame.pack(fill="both", expand=True, pady=(UI_SPACING["m"], 0))
+        ttk.Label(
+            outline_frame,
+            text="Populated after successful structure-aware ingestion when an SHT is generated.",
+            style="Muted.TLabel",
+        ).pack(anchor="w", pady=(0, UI_SPACING["s"]))
+
+        self.document_outline_tree = ttk.Treeview(
+            outline_frame,
+            columns=("title", "span", "pages"),
+            show="tree headings",
+            height=8,
+        )
+        self.document_outline_tree.heading("#0", text="Header Path")
+        self.document_outline_tree.column("#0", width=320, anchor="w")
+        self.document_outline_tree.heading("title", text="Node Title")
+        self.document_outline_tree.column("title", width=240, anchor="w")
+        self.document_outline_tree.heading("span", text="Char Span")
+        self.document_outline_tree.column("span", width=140, anchor="w")
+        self.document_outline_tree.heading("pages", text="Pages")
+        self.document_outline_tree.column("pages", width=100, anchor="w")
+        self.document_outline_tree.pack(fill="both", expand=True)
+
+        self.document_outline_text = scrolledtext.ScrolledText(
+            outline_frame,
+            height=5,
+            wrap=tk.WORD,
+            state="disabled",
+            font=("Consolas", 9),
+        )
+        self.document_outline_text.pack(fill="both", expand=True, pady=(UI_SPACING["s"], 0))
+        self._set_readonly_text(
+            self.document_outline_text,
+            "No SHT outline available yet. Enable Structure-aware and ingest a document with confident headers.",
+        )
         self._apply_tooltips_for_tab("library", frame)
         self._update_current_state_strip()
 
@@ -4906,10 +4983,12 @@ class AgenticRAGApp:
         self.sources_tree = ttk.Treeview(
             self.sources_tab,
             columns=("sid", "doc", "section", "location", "speaker", "timestamp", "snippet"),
-            show="headings",
+            show="tree headings",
             height=10,
             selectmode="extended",
         )
+        self.sources_tree.heading("#0", text="Header Path")
+        self.sources_tree.column("#0", width=240, anchor="w")
         for col, label, width in [
             ("sid", "S#", 50),
             ("doc", "Document", 170),
@@ -5482,7 +5561,7 @@ class AgenticRAGApp:
     def _select_source_by_sid(self, sid):
         if not sid:
             return
-        if sid not in self.sources_tree.get_children():
+        if not self.sources_tree.exists(sid):
             return
         self.evidence_notebook.select(self.sources_tab)
         self.sources_tree.selection_set((sid,))
@@ -5524,6 +5603,65 @@ class AgenticRAGApp:
             start = f"1.0+{match.start()}c"
             end = f"1.0+{match.end()}c"
             self.answer_text.tag_add("citation", start, end)
+
+    @staticmethod
+    def _header_path_label(header_path):
+        value = str(header_path or "").strip()
+        return value or "(No header path)"
+
+    def _refresh_document_outline_panel(self):
+        if not hasattr(self, "document_outline_tree"):
+            return
+        outline_tree = list(getattr(self, "_latest_sht_tree", []) or [])
+        self.document_outline_tree.delete(*self.document_outline_tree.get_children())
+        if not outline_tree:
+            self._set_readonly_text(
+                self.document_outline_text,
+                "No SHT outline available yet. Enable Structure-aware and ingest a document with confident headers.",
+            )
+            return
+
+        by_parent = {None: []}
+        for node in outline_tree:
+            parent_id = str(node.get("parent_id") or "").strip() or None
+            by_parent.setdefault(parent_id, []).append(node)
+
+        def _node_sort_key(item):
+            span = item.get("char_span") or (0, 0)
+            return int(span[0] or 0)
+
+        id_to_iid = {}
+
+        def _add_children(parent_node_id, parent_iid=""):
+            for node in sorted(by_parent.get(parent_node_id, []), key=_node_sort_key):
+                node_id = str(node.get("id") or "").strip()
+                node_title = str(node.get("node_title") or "").strip() or "(untitled)"
+                header_path = " > ".join(self._normalize_header_path_tokens(node.get("header_path")))
+                path_label = header_path or node_title
+                char_span = node.get("char_span") or (None, None)
+                span_label = f"{char_span[0]}-{char_span[1]}" if char_span else "-"
+                page_span = node.get("page_span") or (None, None)
+                if page_span[0] is None and page_span[1] is None:
+                    page_label = "-"
+                else:
+                    page_label = f"{page_span[0]}-{page_span[1]}"
+                iid = node_id or f"outline-{len(id_to_iid)+1}"
+                self.document_outline_tree.insert(
+                    parent_iid,
+                    tk.END,
+                    iid=iid,
+                    text=path_label,
+                    values=(node_title, span_label, page_label),
+                )
+                id_to_iid[node_id] = iid
+                _add_children(node_id, iid)
+
+        _add_children(None, "")
+        doc_title = str(getattr(self, "_latest_sht_doc_title", "") or "").strip() or "current document"
+        self._set_readonly_text(
+            self.document_outline_text,
+            f"Loaded outline for {doc_title}. Nodes: {len(outline_tree)}",
+        )
 
     def _on_source_selected(self, event=None):
         selection = self.sources_tree.selection()
@@ -5634,22 +5772,55 @@ class AgenticRAGApp:
             for source_id in ordered_source_ids
         }
         self.sources_tree.delete(*self.sources_tree.get_children())
+        has_header_groups = any(
+            str((source_map or {}).get(source_id, {}).get("header_path") or "").strip()
+            for source_id in ordered_source_ids
+        )
+        grouped_sources = {}
         for source_id in ordered_source_ids:
             entry = (source_map or {}).get(source_id, {})
+            header_group = self._header_path_label(entry.get("header_path")) if has_header_groups else ""
+            grouped_sources.setdefault(header_group, []).append((source_id, entry))
+
+        parent_iid_by_group = {}
+        for source_id in ordered_source_ids:
+            entry = (source_map or {}).get(source_id, {})
+            header_group = self._header_path_label(entry.get("header_path")) if has_header_groups else ""
+            parent_iid = ""
+            if has_header_groups:
+                parent_iid = parent_iid_by_group.get(header_group)
+                if not parent_iid:
+                    parent_iid = f"group::{len(parent_iid_by_group)+1}"
+                    parent_iid_by_group[header_group] = parent_iid
+                    self.sources_tree.insert(
+                        "",
+                        tk.END,
+                        iid=parent_iid,
+                        text=header_group,
+                        values=("", f"{len(grouped_sources.get(header_group, []))} evidence item(s)", "", "", "", "", ""),
+                        open=True,
+                    )
             sid = label_by_source[source_id]
             section_label = entry.get("section_hint") or entry.get("section") or entry.get("chapter") or "-"
             if section_label != "-" and entry.get("section_idx"):
                 section_label = f"{entry.get('section_idx')}. {section_label}"
             position_label = entry.get("position_hint") or entry.get("locator") or "unknown"
+            chunk_or_node = str(entry.get("chunk_ids") or "").strip()
+            if isinstance(entry.get("chunk_ids"), list):
+                chunk_or_node = ",".join([str(v) for v in entry.get("chunk_ids") if str(v).strip()])
+            if not chunk_or_node:
+                chunk_or_node = str(entry.get("node_id") or "").strip()
+            evidence_suffix = f" ({chunk_or_node})" if chunk_or_node else ""
             self.sources_tree.insert(
-                "",
+                parent_iid,
                 tk.END,
                 iid=sid,
+                text=(entry.get("header_path") or "") if has_header_groups else "",
                 values=(
                     sid,
                     entry.get("title", "unknown"),
                     section_label,
-                    position_label,
+                    f"{position_label}{evidence_suffix}",
                     entry.get("speaker", entry.get("actor", "unknown")),
                     entry.get("timestamp") or entry.get("date", entry.get("month_bucket", "unknown")),
                     entry.get("snippet_preview") or re.sub(r"\s+", " ", str(entry.get("excerpt") or "").strip())[:180],
@@ -10126,6 +10297,9 @@ class AgenticRAGApp:
                     "section_idx": enriched.get("section_idx"),
                     "section_hint": str(enriched.get("section_hint") or enriched.get("section_title") or enriched.get("chapter_title") or "").strip(),
                     "position_hint": str(enriched.get("position_hint") or "").strip(),
+                    "header_path": str(enriched.get("header_path") or "").strip(),
+                    "header_path_tokens": list(enriched.get("header_path_tokens") or []),
+                    "node_id": str(enriched.get("node_id") or "").strip(),
                     "speaker": str(enriched.get("speaker") or enriched.get("source_actor") or "").strip() or "unknown",
                     "month_bucket": str(enriched.get("month_key") or "undated"),
                     "chunk_ids": [],
@@ -10143,6 +10317,12 @@ class AgenticRAGApp:
             chunk_id = str((metadata or {}).get("chunk_id", "")).strip()
             if chunk_id and chunk_id not in entry["chunk_ids"]:
                 entry["chunk_ids"].append(chunk_id)
+            if not entry.get("header_path"):
+                entry["header_path"] = str(enriched.get("header_path") or "").strip()
+            if not entry.get("header_path_tokens"):
+                entry["header_path_tokens"] = list(enriched.get("header_path_tokens") or [])
+            if not entry.get("node_id"):
+                entry["node_id"] = str(enriched.get("node_id") or "").strip()
             if not entry.get("excerpt") and content:
                 entry["excerpt"] = content[:900]
 
@@ -10150,11 +10330,27 @@ class AgenticRAGApp:
             source_map.keys(), key=lambda sid_key: int(source_map[sid_key].get("sid", "S999")[1:])
         )
         lines = ["Sources:"]
-        for source_id in ordered_source_ids:
-            entry = source_map[source_id]
-            lines.append(
-                f"- [{entry['sid']}] {entry['title']} | {entry.get('section_hint') or entry['locator']} | {entry.get('position_hint') or entry['locator']}"
-            )
+        has_header_groups = any(str((source_map[sid_key] or {}).get("header_path") or "").strip() for sid_key in ordered_source_ids)
+        if has_header_groups:
+            grouped = {}
+            for source_id in ordered_source_ids:
+                entry = source_map[source_id]
+                grouped.setdefault(self._header_path_label(entry.get("header_path")), []).append(entry)
+            for header_label, items in grouped.items():
+                lines.append(f"- {header_label}")
+                for entry in items:
+                    evidence_label = ", ".join([str(cid) for cid in (entry.get("chunk_ids") or []) if str(cid).strip()])
+                    if not evidence_label:
+                        evidence_label = str(entry.get("node_id") or "").strip() or "-"
+                    lines.append(
+                        f"  - [{entry['sid']}] {entry['title']} | {entry.get('position_hint') or entry['locator']} | evidence={evidence_label}"
+                    )
+        else:
+            for source_id in ordered_source_ids:
+                entry = source_map[source_id]
+                lines.append(
+                    f"- [{entry['sid']}] {entry['title']} | {entry.get('section_hint') or entry['locator']} | {entry.get('position_hint') or entry['locator']}"
+                )
         return source_map, "\n".join(lines)
 
     def _generate_mock_answer(self, query, final_docs):
@@ -12173,6 +12369,9 @@ class AgenticRAGApp:
             return
 
         self._clear_error_state()
+        self._latest_sht_tree = []
+        self._latest_sht_doc_title = ""
+        self._run_on_ui(self._refresh_document_outline_panel)
         embedding_provider = self.embedding_provider.get()
         ingest_ctx = {
             "selected_file": self.selected_file,
@@ -12483,6 +12682,7 @@ class AgenticRAGApp:
                     text_content = f.read()
                 doc_title = None
 
+            self._latest_sht_doc_title = str(doc_title or os.path.basename(selected_file or "") or "document")
             self.log(f"File loaded. Raw text length: {len(text_content)} characters.")
 
             # 2. Split
@@ -12857,6 +13057,7 @@ class AgenticRAGApp:
                 self.log(f"Indexed {len(concept_docs)} concept cards for retrieval.")
 
             self.log("Ingestion Complete! You can now chat.")
+            self._run_on_ui(self._refresh_document_outline_panel)
             self._clear_error_state()
             self._run_on_ui(self._set_startup_status, "Ingestion complete")
             if new_index_path:
@@ -12886,9 +13087,15 @@ class AgenticRAGApp:
             self.selected_collection_name = previous_collection_name
             self.index_embedding_signature = previous_signature
             self.save_config()
+            self._latest_sht_tree = []
+            self._latest_sht_doc_title = ""
             self.log("Ingestion cancelled before completion.")
+            self._run_on_ui(self._refresh_document_outline_panel)
             self._run_on_ui(self._set_startup_status, "Ingestion cancelled")
         except Exception as e:
+            self._latest_sht_tree = []
+            self._latest_sht_doc_title = ""
+            self._run_on_ui(self._refresh_document_outline_panel)
             self.vector_store = previous_vector_store
             self.selected_index_path = previous_index_path
             self.selected_collection_name = previous_collection_name
