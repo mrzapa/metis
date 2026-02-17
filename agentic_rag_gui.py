@@ -25,6 +25,22 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from sht_builder import build_sht_tree
 
+UI_BACKEND = "ttk"
+CTK_MODULE = None
+TTKBOOTSTRAP_MODULE = None
+
+try:
+    import customtkinter as CTK_MODULE
+
+    UI_BACKEND = "ctk"
+except ImportError:
+    try:
+        import ttkbootstrap as TTKBOOTSTRAP_MODULE
+
+        UI_BACKEND = "ttkbootstrap"
+    except ImportError:
+        UI_BACKEND = "ttk"
+
 if TYPE_CHECKING:
     from langchain_core.documents import Document
 
@@ -791,6 +807,8 @@ class AgenticRAGApp:
 
     def __init__(self, root):
         self.root = root
+        self.ui_backend = UI_BACKEND
+        self._ttkbootstrap_style = None
         self.root.title(
             f"{APP_NAME} — {APP_SUBTITLE}" if APP_SUBTITLE else APP_NAME
         )
@@ -992,6 +1010,7 @@ class AgenticRAGApp:
         self._wizard_state = {}
         self._latest_auto_recommendation = {}
         self.ui_mode = tk.StringVar(value="space_dust")
+        self._configure_ui_backend_defaults()
         self._active_palette = STYLE_CONFIG["themes"]["space_dust"]
         self.tooltip_manager = TooltipManager(self.root, lambda: getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"]))
         self.history_profile_filter = tk.StringVar(value="All Profiles")
@@ -2362,9 +2381,31 @@ class AgenticRAGApp:
         self._update_current_state_strip()
         self._apply_theme()
 
+    def _configure_ui_backend_defaults(self):
+        if not isinstance(self.root, tk.Misc):
+            return
+
+        if self.ui_backend == "ctk" and CTK_MODULE is not None:
+            CTK_MODULE.set_appearance_mode("dark")
+            CTK_MODULE.set_default_color_theme("dark-blue")
+            return
+
+        if self.ui_backend == "ttkbootstrap" and TTKBOOTSTRAP_MODULE is not None:
+            self._ttkbootstrap_style = TTKBOOTSTRAP_MODULE.Style(theme="darkly")
+            palette = STYLE_CONFIG["themes"]["space_dust"]
+            self._ttkbootstrap_style.configure(".", background=palette["bg"], foreground=palette["text"])
+            self._ttkbootstrap_style.configure("TFrame", background=palette["bg"])
+            self._ttkbootstrap_style.configure("TLabel", background=palette["surface"], foreground=palette["text"])
+            self._ttkbootstrap_style.configure("TNotebook", background=palette["bg"])
+            self._ttkbootstrap_style.configure("TNotebook.Tab", background=palette["surface_alt"], foreground=palette["text"])
+            self._ttkbootstrap_style.configure("TButton", background=palette["primary"], foreground=palette["selection_fg"])
+            self._ttkbootstrap_style.configure("TEntry", fieldbackground=palette["surface_alt"], foreground=palette["text"])
+            self._ttkbootstrap_style.configure("Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"])
+            self.root.configure(bg=palette["bg"])
+
     def _apply_theme(self):
         style = ttk.Style()
-        if "clam" in style.theme_names():
+        if self.ui_backend != "ttkbootstrap" and "clam" in style.theme_names():
             style.theme_use("clam")
         palette = STYLE_CONFIG["themes"].get(self.ui_mode.get(), STYLE_CONFIG["themes"]["space_dust"])
         font_family = STYLE_CONFIG["font_family"] if STYLE_CONFIG["font_family"] in tkfont.families() else STYLE_CONFIG["fallback_font"]
