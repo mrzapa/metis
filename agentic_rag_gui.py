@@ -925,6 +925,7 @@ class AgenticRAGApp:
         self.mmr_lambda = tk.DoubleVar(value=0.5)
         self.agentic_mode = tk.BooleanVar(value=False)
         self.agentic_max_iterations = tk.IntVar(value=2)
+        self.deepread_mode = tk.BooleanVar(value=False)
         self.show_retrieved_context = tk.BooleanVar(value=False)
         self.use_reranker = tk.BooleanVar(value=True)
         self.use_sub_queries = tk.BooleanVar(value=True)
@@ -3530,6 +3531,7 @@ class AgenticRAGApp:
         self.show_retrieved_context.set(
             data.get("show_retrieved_context", self.show_retrieved_context.get())
         )
+        self.deepread_mode.set(bool(data.get("deepread_mode", self.deepread_mode.get())))
         self.use_reranker.set(data.get("use_reranker", self.use_reranker.get()))
         self.use_sub_queries.set(
             bool(data.get("use_sub_queries", self.use_sub_queries.get()))
@@ -3689,6 +3691,7 @@ class AgenticRAGApp:
             "agentic_mode": self.agentic_mode.get(),
             "agentic_max_iterations": max_iterations,
             "show_retrieved_context": self.show_retrieved_context.get(),
+            "deepread_mode": bool(self.deepread_mode.get()),
             "use_reranker": self.use_reranker.get(),
             "use_sub_queries": bool(self.use_sub_queries.get()),
             "subquery_max_docs": subquery_max_docs,
@@ -4991,6 +4994,7 @@ class AgenticRAGApp:
         agentic_frame = ttk.LabelFrame(settings_content, text="Agentic Options", padding=8)
         agentic_frame.pack(fill="x", pady=(0, 6))
         ttk.Checkbutton(agentic_frame, text="Agentic mode (iterate)", variable=self.agentic_mode).pack(side="left")
+        ttk.Checkbutton(agentic_frame, text="DeepRead (locate → read)", variable=self.deepread_mode).pack(side="left", padx=(10, 0))
         ttk.Label(agentic_frame, text="Max iterations:").pack(side="left", padx=(12, 4))
         ttk.Spinbox(agentic_frame, from_=1, to=AGENTIC_MAX_ITERATIONS_HARD_CAP, textvariable=self.agentic_max_iterations, width=4).pack(side="left")
         ttk.Checkbutton(agentic_frame, text="Show retrieved context", variable=self.show_retrieved_context).pack(side="left", padx=(12, 0))
@@ -5850,7 +5854,10 @@ class AgenticRAGApp:
         self._source_id_by_tree_iid = {}
         ordered_source_ids = sorted(
             (source_map or {}).keys(),
-            key=lambda source_id: int(str((source_map or {}).get(source_id, {}).get("sid", "S999")).lstrip("S") or "999"),
+            key=lambda source_id: (
+                int((source_map or {}).get(source_id, {}).get("deepread_round") or 10**6),
+                int(str((source_map or {}).get(source_id, {}).get("sid", "S999")).lstrip("S") or "999"),
+            ),
         )
         label_by_source = {
             source_id: str((source_map or {}).get(source_id, {}).get("sid") or source_id)
@@ -5887,8 +5894,13 @@ class AgenticRAGApp:
                     )
             sid = label_by_source[source_id]
             section_label = entry.get("section_hint") or entry.get("section") or entry.get("chapter") or "-"
+            breadcrumb = str(entry.get("deepread_header_path") or entry.get("header_path") or "").strip()
+            if breadcrumb:
+                section_label = breadcrumb
             if section_label != "-" and entry.get("section_idx"):
                 section_label = f"{entry.get('section_idx')}. {section_label}"
+            if entry.get("deepread_round"):
+                section_label = f"[Round {entry.get('deepread_round')}] {section_label}"
             position_label = entry.get("position_hint") or entry.get("locator") or "unknown"
             chunk_or_node = str(entry.get("chunk_ids") or "").strip()
             if isinstance(entry.get("chunk_ids"), list):
@@ -10573,6 +10585,9 @@ class AgenticRAGApp:
                     "metadata": enriched,
                     "excerpt": (content or "")[:900],
                     "snippet_preview": re.sub(r"\s+", " ", (content or "").strip())[:180],
+                    "deepread_round": enriched.get("deepread_round"),
+                    "deepread_section_key": str(enriched.get("deepread_section_key") or "").strip(),
+                    "deepread_header_path": str(enriched.get("deepread_header_path") or "").strip(),
                 },
             )
             chunk_id = str((metadata or {}).get("chunk_id", "")).strip()
@@ -10588,7 +10603,11 @@ class AgenticRAGApp:
                 entry["excerpt"] = content[:900]
 
         ordered_source_ids = sorted(
-            source_map.keys(), key=lambda sid_key: int(source_map[sid_key].get("sid", "S999")[1:])
+            source_map.keys(),
+            key=lambda sid_key: (
+                int((source_map[sid_key] or {}).get("deepread_round") or 10**6),
+                int(source_map[sid_key].get("sid", "S999")[1:]),
+            ),
         )
         lines = ["Sources:"]
         has_header_groups = any(str((source_map[sid_key] or {}).get("header_path") or "").strip() for sid_key in ordered_source_ids)
@@ -13501,6 +13520,7 @@ class AgenticRAGApp:
             "use_reranker": bool(self.use_reranker.get()),
             "cohere_api_key": self.api_keys["cohere"].get(),
             "show_retrieved_context": bool(self.show_retrieved_context.get()),
+            "deepread_mode": bool(self.deepread_mode.get()),
             "use_sub_queries": bool(self.use_sub_queries.get()),
             "llm_ctx": {
                 "provider": llm_provider,
@@ -13597,6 +13617,7 @@ class AgenticRAGApp:
             use_recursive_retrieval = (
                 recursive_mode_enabled and (is_long_form or is_evidence_pack)
             )
+            deepread_enabled = bool(rag_ctx.get("deepread_mode"))
             self._frontier_evidence_pack_mode = bool(is_evidence_pack)
             self._last_evidence_pack_synthesis_cards = []
             self._latest_source_map = {}
@@ -13612,7 +13633,7 @@ class AgenticRAGApp:
                 f"agent_lightning_telemetry={self._frontier_enabled('agent_lightning_telemetry')}, "
                 f"recursive_retrieval={int(use_recursive_retrieval)}, "
                 f"evidence_pack_mode={is_evidence_pack}, "
-                f"mode={mode_name}, profile={rag_ctx['selected_profile']}"
+                f"mode={mode_name}, profile={rag_ctx['selected_profile']}, deepread={int(deepread_enabled)}"
             )
             if is_long_form:
                 boosted_final_k = max(final_k, 12)
@@ -14609,6 +14630,100 @@ class AgenticRAGApp:
                 )
                 return docs_local, retrieved_count_local, cap_reached
 
+            def _deepread_retrieve_headers(header_query, k_value):
+                if not header_query or not hasattr(self.vector_store, "_collection"):
+                    return []
+                capped_k = max(3, min(int(k_value or 8), 24))
+                retriever = self.vector_store.as_retriever(
+                    search_type=search_type,
+                    search_kwargs=_build_search_kwargs(capped_k),
+                )
+                ranked = []
+                for doc in retriever.invoke(header_query):
+                    metadata = getattr(doc, "metadata", {}) or {}
+                    header_path = str(metadata.get("header_path") or "").strip()
+                    node_id = str(metadata.get("node_id") or "").strip()
+                    if not header_path and not node_id:
+                        continue
+                    key = node_id or header_path.lower()
+                    if any(item.get("key") == key for item in ranked):
+                        continue
+                    ranked.append(
+                        {
+                            "key": key,
+                            "node_id": node_id,
+                            "header_path": header_path,
+                            "score": float(metadata.get("relevance_score") or metadata.get("rrf_score") or 0.0),
+                            "metadata": metadata,
+                        }
+                    )
+                    if len(ranked) >= capped_k:
+                        break
+                if not ranked:
+                    digest_hits = self.search_digests(header_query, min(capped_k, 12), digest_store)
+                    for hit in digest_hits:
+                        metadata = getattr(hit, "metadata", {}) or {}
+                        header_path = str(metadata.get("header_path") or metadata.get("section_title") or metadata.get("chapter_title") or "").strip()
+                        node_id = str(metadata.get("node_id") or "").strip()
+                        key = node_id or header_path.lower()
+                        if not key or any(item.get("key") == key for item in ranked):
+                            continue
+                        ranked.append(
+                            {
+                                "key": key,
+                                "node_id": node_id,
+                                "header_path": header_path,
+                                "score": float(metadata.get("relevance_score") or metadata.get("rrf_score") or 0.0),
+                                "metadata": metadata,
+                            }
+                        )
+                        if len(ranked) >= capped_k:
+                            break
+                return ranked
+
+            def _deepread_read_section(header_hit, span_len=3):
+                if not header_hit or not hasattr(self.vector_store, "_collection"):
+                    return []
+                metadata = dict(header_hit.get("metadata") or {})
+                ingest_id = metadata.get("ingest_id")
+                node_id = str(header_hit.get("node_id") or metadata.get("node_id") or "").strip()
+                header_path = str(header_hit.get("header_path") or metadata.get("header_path") or "").strip()
+                if not ingest_id:
+                    return []
+                try:
+                    fetched = self.vector_store._collection.get(
+                        where={"ingest_id": ingest_id},
+                        include=["documents", "metadatas"],
+                    )
+                except Exception:
+                    return []
+                rows = []
+                for content, chunk_meta in zip(fetched.get("documents") or [], fetched.get("metadatas") or []):
+                    chunk_meta = chunk_meta or {}
+                    if node_id and str(chunk_meta.get("node_id") or "").strip() == node_id:
+                        rows.append((content, chunk_meta))
+                        continue
+                    chunk_header_path = str(chunk_meta.get("header_path") or "").strip()
+                    if header_path and chunk_header_path and chunk_header_path.startswith(header_path):
+                        rows.append((content, chunk_meta))
+                if not rows:
+                    return []
+                rows.sort(
+                    key=lambda item: (
+                        int((item[1] or {}).get("char_start") or 0),
+                        str((item[1] or {}).get("chunk_id") or ""),
+                    )
+                )
+                selected = rows[: max(1, int(span_len or 3))]
+                docs_local = []
+                breadcrumb = header_path or str(metadata.get("section_title") or metadata.get("chapter_title") or "").strip()
+                for content, chunk_meta in selected:
+                    enriched_meta = dict(chunk_meta or {})
+                    enriched_meta.setdefault("header_path", breadcrumb)
+                    enriched_meta.setdefault("node_id", node_id)
+                    docs_local.append(self._document(page_content=content or "", metadata=enriched_meta))
+                return docs_local
+
             def _select_evidence_pack(
                 doc_list,
                 rerank_query,
@@ -14941,7 +15056,7 @@ class AgenticRAGApp:
             seen_chunk_ids = set()
             seen_sections = set()
 
-            if not resolved_settings["agentic_mode"]:
+            if not resolved_settings["agentic_mode"] and not deepread_enabled:
                 self._job_cancel_checkpoint(cancel_event, "rag", "retrieval")
                 iteration_started_at = time.perf_counter()
                 follow_up_queries = []
@@ -15644,24 +15759,68 @@ class AgenticRAGApp:
                     self.log("Total retrieved document cap reached; stopping iterations.")
                     break
                 retrieve_started_at = time.perf_counter()
-                (
-                    docs,
-                    retrieved_count,
-                    cap_reached,
-                    digest_docs,
-                    raw_expanded_count,
-                    digest_retrieved_count,
-                    digest_selected_count,
-                    levels_used,
-                ) = _retrieve_with_digest(
-                    iteration_queries, remaining_cap, routing_candidate_k
-                )
+                digest_docs = []
+                raw_expanded_count = 0
+                digest_retrieved_count = 0
+                digest_selected_count = 0
+                levels_used = ["L0"]
+                if deepread_enabled:
+                    header_hits = _deepread_retrieve_headers(iteration_queries[0] if iteration_queries else query, routing_candidate_k)
+                    deepread_candidates = []
+                    for hit in header_hits:
+                        section_key = str(hit.get("node_id") or hit.get("header_path") or "").strip()
+                        if not section_key or section_key in seen_sections:
+                            continue
+                        read_docs = _deepread_read_section(hit, span_len=3)
+                        if not read_docs:
+                            continue
+                        for read_doc in read_docs:
+                            read_meta = getattr(read_doc, "metadata", {}) or {}
+                            read_meta["deepread_round"] = iteration
+                            read_meta["deepread_header_path"] = str(hit.get("header_path") or read_meta.get("header_path") or "").strip()
+                            read_meta["deepread_section_key"] = section_key
+                            read_doc.metadata = read_meta
+                        deepread_candidates.extend(read_docs)
+                        seen_sections.add(section_key)
+                        if len(deepread_candidates) >= remaining_cap:
+                            break
+                    docs = self._merge_dedupe_docs(deepread_candidates)
+                    if not docs:
+                        (
+                            docs,
+                            retrieved_count,
+                            cap_reached,
+                            digest_docs,
+                            raw_expanded_count,
+                            digest_retrieved_count,
+                            digest_selected_count,
+                            levels_used,
+                        ) = _retrieve_with_digest(
+                            iteration_queries, remaining_cap, routing_candidate_k
+                        )
+                    else:
+                        retrieved_count = len(docs)
+                        cap_reached = len(docs) >= remaining_cap
+                        levels_used = ["DeepRead"]
+                else:
+                    (
+                        docs,
+                        retrieved_count,
+                        cap_reached,
+                        digest_docs,
+                        raw_expanded_count,
+                        digest_retrieved_count,
+                        digest_selected_count,
+                        levels_used,
+                    ) = _retrieve_with_digest(
+                        iteration_queries, remaining_cap, routing_candidate_k
+                    )
                 self._record_agent_lightning_span(
                     run_id,
                     "Retrieve",
                     iteration,
                     retrieve_started_at,
-                    input_payload={"queries": iteration_queries, "remaining_cap": remaining_cap},
+                    input_payload={"queries": iteration_queries, "remaining_cap": remaining_cap, "deepread": bool(deepread_enabled)},
                     output_payload={"docs": len(docs), "levels": levels_used, "source_locators": self._source_locators_from_docs(docs)},
                     metrics={"dense_count": int(raw_expanded_count), "lexical_count": int(digest_selected_count), "recursive_levels": levels_used or ["L0"]},
                 )
