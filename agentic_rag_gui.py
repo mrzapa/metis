@@ -137,6 +137,61 @@ class MockChatModel:
         )
         return self._make_ai_message(response)
 
+
+class LocalLlamaCppChatModel:
+    """Small invoke(messages) adapter around llama-cpp-python."""
+
+    def __init__(
+        self,
+        app,
+        model_path,
+        n_ctx=2048,
+        temperature=0.0,
+        max_tokens=512,
+        n_gpu_layers=0,
+        n_threads=0,
+    ):
+        self._make_ai_message = app._ai_message
+        Llama = _lazy_import_llama_cpp()
+        kwargs = {
+            "model_path": model_path,
+            "n_ctx": max(256, int(n_ctx)),
+            "verbose": False,
+        }
+        if int(n_gpu_layers) > 0:
+            kwargs["n_gpu_layers"] = int(n_gpu_layers)
+        if int(n_threads) > 0:
+            kwargs["n_threads"] = int(n_threads)
+        self._llm = Llama(**kwargs)
+        self._temperature = float(temperature)
+        self._max_tokens = max(1, int(max_tokens))
+
+    def invoke(self, messages):
+        payload = []
+        for msg in messages or []:
+            msg_type = str(getattr(msg, "type", ""))
+            role = "assistant" if msg_type in {"ai", "assistant"} else "user"
+            if msg_type == "system":
+                role = "system"
+            payload.append(
+                {
+                    "role": role,
+                    "content": str(getattr(msg, "content", "") or ""),
+                }
+            )
+
+        result = self._llm.create_chat_completion(
+            messages=payload,
+            temperature=self._temperature,
+            max_tokens=self._max_tokens,
+        )
+        content = ""
+        try:
+            content = result["choices"][0]["message"]["content"]
+        except Exception:
+            content = ""
+        return self._make_ai_message(content or "")
+
 STYLE_CONFIG = {
     "font_family": "SF Pro Text",
     "fallback_font": "Segoe UI",
@@ -266,6 +321,16 @@ def _lazy_import_chroma():
             "Chroma integration is not installed. Install required dependencies "
             "(e.g. 'langchain-chroma' and 'chromadb') and run dependency "
             "check/install from the app."
+        ) from err
+
+
+def _lazy_import_llama_cpp():
+    try:
+        module = importlib.import_module("llama_cpp")
+        return module.Llama
+    except ImportError as err:
+        raise ImportError(
+            "llama-cpp-python is not installed. Install it from Settings (Local GGUF section)."
         ) from err
 
 # --- Libraries check is done inside the class to prevent instant crash ---
@@ -751,6 +816,10 @@ class AgenticRAGApp:
         self.embedding_provider = tk.StringVar(value="voyage")
         self.vector_db_type = tk.StringVar(value="chroma")
         self.local_llm_url = tk.StringVar(value="http://localhost:1234/v1")
+        self.local_gguf_model_path = tk.StringVar()
+        self.local_gguf_context_length = tk.IntVar(value=2048)
+        self.local_gguf_gpu_layers = tk.IntVar(value=0)
+        self.local_gguf_threads = tk.IntVar(value=0)
         self.chunk_size = tk.IntVar(value=1000)
         self.chunk_overlap = tk.IntVar(value=200)
         self.build_digest_index = tk.BooleanVar(value=True)
@@ -944,6 +1013,10 @@ class AgenticRAGApp:
             "embedding_provider": self.embedding_provider.get(),
             "embedding_model_custom": self.embedding_model_custom.get(),
             "llm_model_custom": self.llm_model_custom.get(),
+            "local_gguf_model_path": self.local_gguf_model_path.get(),
+            "local_gguf_context_length": int(self.local_gguf_context_length.get()),
+            "local_gguf_gpu_layers": int(self.local_gguf_gpu_layers.get()),
+            "local_gguf_threads": int(self.local_gguf_threads.get()),
             "search_type": self.search_type.get(),
             "retrieval_mode": self.retrieval_mode.get(),
             "agentic_mode": bool(self.agentic_mode.get()),
@@ -1247,6 +1320,13 @@ class AgenticRAGApp:
         self.llm_max_tokens.set(int(extra.get("llm_max_tokens", self.llm_max_tokens.get())))
         self.embedding_provider.set(extra.get("embedding_provider", self.embedding_provider.get()))
         self.llm_model_custom.set(extra.get("llm_model_custom", self.llm_model_custom.get()))
+        self.local_gguf_model_path.set(extra.get("local_gguf_model_path", self.local_gguf_model_path.get()))
+        try:
+            self.local_gguf_context_length.set(int(extra.get("local_gguf_context_length", self.local_gguf_context_length.get())))
+            self.local_gguf_gpu_layers.set(int(extra.get("local_gguf_gpu_layers", self.local_gguf_gpu_layers.get())))
+            self.local_gguf_threads.set(int(extra.get("local_gguf_threads", self.local_gguf_threads.get())))
+        except (TypeError, ValueError):
+            pass
         self.embedding_model_custom.set(
             extra.get("embedding_model_custom", self.embedding_model_custom.get())
         )
@@ -2392,6 +2472,11 @@ class AgenticRAGApp:
                 "browse local hf model": "Point to a local Hugging Face embedding model directory.",
                 "force embedding compatibility": "Bypass compatibility guardrails; useful only when you know dimensions match.",
                 "local llm url": "Endpoint for local LM Studio/OpenAI-compatible servers.",
+                "local gguf model": "Path to a local .gguf file used by llama-cpp-python when provider is local_gguf.",
+                "local gguf context length": "Context window for local GGUF inference. Start with 2048 for small local models.",
+                "local gguf gpu layers": "Optional GPU offload layers. Keep at 0 unless you've configured local GPU inference.",
+                "local gguf cpu threads": "Optional thread override. Keep at 0 to use library defaults.",
+                "install llama-cpp-python": "Installs the optional local runtime for GGUF models.",
                 "temperature": "Higher temperature increases creativity; lower temperature improves consistency.",
                 "max tokens": "Caps response length to control cost and latency.",
                 "system instructions": "Global behavior prompt. Strong instructions improve consistency across sessions.",
@@ -2442,9 +2527,15 @@ class AgenticRAGApp:
             self.embedding_provider,
             self.embedding_model,
             self.existing_index_var,
+            self.local_gguf_model_path,
+            self.local_gguf_context_length,
+            self.local_gguf_gpu_layers,
+            self.local_gguf_threads,
         ]
         for var in watched_vars:
             var.trace_add("write", lambda *_: self._run_on_ui(self._update_current_state_strip))
+        for var in (self.llm_provider, self.local_gguf_model_path):
+            var.trace_add("write", lambda *_: self._run_on_ui(self._update_local_gguf_ui_state))
 
     @staticmethod
     def _shorten_path(path, max_len=54):
@@ -2474,6 +2565,11 @@ class AgenticRAGApp:
             warnings.append("No active index. Build or load one in Library")
         elif not os.path.isdir(selected_path):
             warnings.append("Selected index path is unavailable")
+        if self.llm_provider.get() == "local_gguf":
+            if not self._local_gguf_dependency_available():
+                warnings.append("local_gguf disabled: install llama-cpp-python")
+            elif not os.path.isfile((self.local_gguf_model_path.get() or "").strip()):
+                warnings.append("local_gguf disabled: select a valid GGUF model file")
         return warnings
 
     def _is_active_index_loaded(self):
@@ -2559,6 +2655,7 @@ class AgenticRAGApp:
             ],
             "google": ["gemini-1.5-flash", "gemini-1.5-pro", "custom"],
             "local_lm_studio": ["custom"],
+            "local_gguf": ["custom"],
             "mock": ["mock-test-v1"],
         }
         return options.get(provider, ["custom"])
@@ -2599,6 +2696,7 @@ class AgenticRAGApp:
             self.embedding_model.set(emb_options[0])
 
         self._toggle_custom_entries()
+        self._update_local_gguf_ui_state()
 
     def _toggle_custom_entries(self):
         llm_custom_enabled = self.llm_model.get() == "custom"
@@ -2615,6 +2713,18 @@ class AgenticRAGApp:
             )
         if hasattr(self, "btn_browse_hf_model") and self._safe_widget_exists(self.btn_browse_hf_model):
             self.btn_browse_hf_model.config(state="normal" if hf_enabled else "disabled")
+
+        gguf_enabled = self.llm_provider.get() == "local_gguf"
+        for widget_name in (
+            "local_gguf_model_entry",
+            "local_gguf_browse_btn",
+            "local_gguf_ctx_entry",
+            "local_gguf_gpu_layers_entry",
+            "local_gguf_threads_entry",
+        ):
+            widget = getattr(self, widget_name, None)
+            if widget is not None and self._safe_widget_exists(widget):
+                widget.config(state="normal" if gguf_enabled else "disabled")
 
     def _on_llm_provider_change(self, event=None):
         self._sync_model_options()
@@ -2904,6 +3014,52 @@ class AgenticRAGApp:
             self._toggle_custom_entries()
             self._refresh_compatibility_warning()
 
+    def browse_gguf_model(self):
+        path = filedialog.askopenfilename(
+            title="Select GGUF model",
+            filetypes=[("GGUF models", "*.gguf"), ("All files", "*.*")],
+        )
+        if path:
+            self.local_gguf_model_path.set(path)
+            self._update_local_gguf_ui_state()
+
+    def _local_gguf_dependency_available(self):
+        return importlib.util.find_spec("llama_cpp") is not None
+
+    def install_local_llama_cpp_dependency(self):
+        threading.Thread(
+            target=self.install_packages,
+            args=(["llama-cpp-python"],),
+            daemon=True,
+        ).start()
+
+    def _update_local_gguf_ui_state(self):
+        if not hasattr(self, "local_gguf_dependency_status") or not self._safe_widget_exists(self.local_gguf_dependency_status):
+            return
+        provider = self.llm_provider.get() == "local_gguf"
+        dep_ok = self._local_gguf_dependency_available()
+        path = (self.local_gguf_model_path.get() or "").strip()
+        path_ok = bool(path) and os.path.isfile(path)
+
+        if not dep_ok:
+            self.local_gguf_dependency_status.config(
+                text="local_gguf unavailable: llama-cpp-python is missing. Click install and restart the app.",
+                style="Danger.TLabel",
+            )
+            self.local_gguf_install_btn.config(state="normal")
+        elif provider and not path_ok:
+            self.local_gguf_dependency_status.config(
+                text="Select a valid .gguf model file to enable local inference.",
+                style="Danger.TLabel",
+            )
+            self.local_gguf_install_btn.config(state="disabled")
+        else:
+            self.local_gguf_dependency_status.config(
+                text="Local GGUF runtime ready.",
+                style="Success.TLabel",
+            )
+            self.local_gguf_install_btn.config(state="disabled")
+
     def load_config(self):
         if not os.path.exists(self.config_path):
             return
@@ -2923,6 +3079,10 @@ class AgenticRAGApp:
         )
         self.vector_db_type.set(data.get("vector_db_type", self.vector_db_type.get()))
         self.local_llm_url.set(data.get("local_llm_url", self.local_llm_url.get()))
+        self.local_gguf_model_path.set(data.get("local_gguf_model_path", self.local_gguf_model_path.get()))
+        self.local_gguf_context_length.set(data.get("local_gguf_context_length", self.local_gguf_context_length.get()))
+        self.local_gguf_gpu_layers.set(data.get("local_gguf_gpu_layers", self.local_gguf_gpu_layers.get()))
+        self.local_gguf_threads.set(data.get("local_gguf_threads", self.local_gguf_threads.get()))
         self.chunk_size.set(data.get("chunk_size", self.chunk_size.get()))
         self.chunk_overlap.set(data.get("chunk_overlap", self.chunk_overlap.get()))
         self.build_digest_index.set(
@@ -3111,6 +3271,10 @@ class AgenticRAGApp:
             "embedding_provider": self.embedding_provider.get(),
             "vector_db_type": self.vector_db_type.get(),
             "local_llm_url": self.local_llm_url.get(),
+            "local_gguf_model_path": self.local_gguf_model_path.get(),
+            "local_gguf_context_length": self.local_gguf_context_length.get(),
+            "local_gguf_gpu_layers": self.local_gguf_gpu_layers.get(),
+            "local_gguf_threads": self.local_gguf_threads.get(),
             "chunk_size": self.chunk_size.get(),
             "chunk_overlap": self.chunk_overlap.get(),
             "build_digest_index": self.build_digest_index.get(),
@@ -3487,7 +3651,7 @@ class AgenticRAGApp:
         cb_llm = ttk.Combobox(
             llm_frame,
             textvariable=self.llm_provider,
-            values=["openai", "anthropic", "google", "local_lm_studio", "mock"],
+            values=["openai", "anthropic", "google", "local_lm_studio", "local_gguf", "mock"],
             state="readonly",
         )
         cb_llm.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
@@ -3571,23 +3735,65 @@ class AgenticRAGApp:
             row=9, column=1, sticky="ew", padx=5, pady=5
         )
 
-        ttk.Label(llm_frame, text="Temperature:").grid(row=10, column=0, sticky="w")
+        ttk.Label(llm_frame, text="Local GGUF model (.gguf):").grid(row=10, column=0, sticky="w")
+        gguf_path_row = ttk.Frame(llm_frame)
+        gguf_path_row.grid(row=10, column=1, sticky="ew", padx=5, pady=5)
+        gguf_path_row.columnconfigure(0, weight=1)
+        self.local_gguf_model_entry = ttk.Entry(gguf_path_row, textvariable=self.local_gguf_model_path)
+        self.local_gguf_model_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.local_gguf_browse_btn = ttk.Button(gguf_path_row, text="Browse...", command=self.browse_gguf_model)
+        self.local_gguf_browse_btn.grid(row=0, column=1, sticky="e")
+
+        ttk.Label(llm_frame, text="Local GGUF context length:").grid(row=11, column=0, sticky="w")
+        self.local_gguf_ctx_entry = ttk.Entry(llm_frame, textvariable=self.local_gguf_context_length)
+        self.local_gguf_ctx_entry.grid(row=11, column=1, sticky="ew", padx=5, pady=5)
+
+        ttk.Label(llm_frame, text="Local GGUF GPU layers (optional):").grid(row=12, column=0, sticky="w")
+        self.local_gguf_gpu_layers_entry = ttk.Entry(llm_frame, textvariable=self.local_gguf_gpu_layers)
+        self.local_gguf_gpu_layers_entry.grid(row=12, column=1, sticky="ew", padx=5, pady=5)
+
+        ttk.Label(llm_frame, text="Local GGUF CPU threads (optional):").grid(row=13, column=0, sticky="w")
+        self.local_gguf_threads_entry = ttk.Entry(llm_frame, textvariable=self.local_gguf_threads)
+        self.local_gguf_threads_entry.grid(row=13, column=1, sticky="ew", padx=5, pady=5)
+
+        self.local_gguf_help = ttk.Label(
+            llm_frame,
+            text=(
+                "For small local models (Phi-class), choose provider 'local_gguf', select a GGUF file, "
+                "then tune context/max tokens. Keep GPU layers and threads at 0 for safe defaults."
+            ),
+            style="Muted.TLabel",
+            wraplength=500,
+            justify="left",
+        )
+        self.local_gguf_help.grid(row=14, column=1, sticky="w", padx=5, pady=(0, 5))
+
+        self.local_gguf_dependency_status = ttk.Label(llm_frame, text="", style="Muted.TLabel", wraplength=500, justify="left")
+        self.local_gguf_dependency_status.grid(row=15, column=1, sticky="w", padx=5, pady=(0, 4))
+        self.local_gguf_install_btn = ttk.Button(
+            llm_frame,
+            text="Install llama-cpp-python",
+            command=self.install_local_llama_cpp_dependency,
+        )
+        self.local_gguf_install_btn.grid(row=16, column=1, sticky="w", padx=5, pady=(0, 6))
+
+        ttk.Label(llm_frame, text="Temperature:").grid(row=17, column=0, sticky="w")
         ttk.Entry(llm_frame, textvariable=self.llm_temperature).grid(
-            row=10, column=1, sticky="ew", padx=5, pady=5
+            row=17, column=1, sticky="ew", padx=5, pady=5
         )
 
-        ttk.Label(llm_frame, text="Max Tokens:").grid(row=11, column=0, sticky="w")
+        ttk.Label(llm_frame, text="Max Tokens:").grid(row=18, column=0, sticky="w")
         ttk.Entry(llm_frame, textvariable=self.llm_max_tokens).grid(
-            row=11, column=1, sticky="ew", padx=5, pady=5
+            row=18, column=1, sticky="ew", padx=5, pady=5
         )
 
         ttk.Label(llm_frame, text="System Instructions:").grid(
-            row=12, column=0, sticky="nw"
+            row=19, column=0, sticky="nw"
         )
         self.instructions_box = scrolledtext.ScrolledText(
             llm_frame, height=6, font=("Segoe UI", 9)
         )
-        self.instructions_box.grid(row=12, column=1, sticky="ew", padx=5, pady=5)
+        self.instructions_box.grid(row=19, column=1, sticky="ew", padx=5, pady=5)
         self.instructions_box.insert(tk.END, self.system_instructions.get())
         self.instructions_box.bind("<KeyRelease>", self._on_instructions_change)
         ttk.Checkbutton(
@@ -3595,7 +3801,9 @@ class AgenticRAGApp:
             text="Verbose/Analytical mode",
             variable=self.verbose_mode,
             command=self._on_verbose_mode_toggle,
-        ).grid(row=13, column=1, sticky="w", padx=5, pady=(0, 5))
+        ).grid(row=20, column=1, sticky="w", padx=5, pady=(0, 5))
+
+        self._update_local_gguf_ui_state()
 
         # --- Vector DB Settings ---
         db_frame = ttk.LabelFrame(self.settings_model_section.content, text="Vector Database Strategy", padding=15)
@@ -4572,7 +4780,7 @@ class AgenticRAGApp:
 
     def _render_wizard_step_three(self):
         self._wizard_step_label.config(text="Step 3 of 6: Choose LLM and embedding providers/models")
-        llm_values = ["openai", "anthropic", "google", "local_lm_studio"]
+        llm_values = ["openai", "anthropic", "google", "local_lm_studio", "local_gguf"]
         emb_values = ["voyage", "openai", "google", "local_huggingface"]
         self._wizard_llm_provider = tk.StringVar(value=self._wizard_state.get("llm_provider", self.llm_provider.get()))
         self._wizard_embedding_provider = tk.StringVar(value=self._wizard_state.get("embedding_provider", self.embedding_provider.get()))
@@ -8181,6 +8389,7 @@ class AgenticRAGApp:
                 ["langchain-google-genai"],
             ),
             "local_lm_studio": ("langchain_openai", "ChatOpenAI", ["langchain-openai"]),
+            "local_gguf": ("llama_cpp", "Llama", ["llama-cpp-python"]),
         }
         if llm_provider in llm_checks:
             module_name, symbol_name, packages = llm_checks[llm_provider]
@@ -8421,6 +8630,7 @@ class AgenticRAGApp:
                 "max_context_tokens": 8192,
                 "max_output_tokens": 2048,
             },
+            "local_gguf": {"max_context_tokens": 8192, "max_output_tokens": 2048},
             "mock": {"max_context_tokens": 8192, "max_output_tokens": 1024},
         }
         caps.update(provider_defaults.get(provider_name, {}))
@@ -11051,6 +11261,10 @@ class AgenticRAGApp:
                 "google": self.api_keys["google"].get(),
             }
             local_url = self.local_llm_url.get()
+            local_gguf_model_path = self.local_gguf_model_path.get()
+            local_gguf_context_length = max(256, int(self.local_gguf_context_length.get()))
+            local_gguf_gpu_layers = max(0, int(self.local_gguf_gpu_layers.get()))
+            local_gguf_threads = max(0, int(self.local_gguf_threads.get()))
         else:
             provider = str(llm_ctx.get("provider") or "").strip()
             model_name = str(llm_ctx.get("model_name") or "").strip()
@@ -11058,6 +11272,11 @@ class AgenticRAGApp:
             gui_llm_max_tokens = max(1, int(llm_ctx.get("max_tokens", 1)))
             key_values = dict(llm_ctx.get("api_keys") or {})
             local_url = str(llm_ctx.get("local_url") or "")
+            local_gguf_model_path = str(llm_ctx.get("local_gguf_model_path") or "")
+            local_gguf_context_length = max(256, int(llm_ctx.get("local_gguf_context_length", 2048)))
+            local_gguf_gpu_layers = max(0, int(llm_ctx.get("local_gguf_gpu_layers", 0)))
+            local_gguf_threads = max(0, int(llm_ctx.get("local_gguf_threads", 0)))
+
         output_max_tokens = self._get_capped_output_tokens(
             provider, model_name, gui_llm_max_tokens
         )
@@ -11131,8 +11350,29 @@ class AgenticRAGApp:
                 max_tokens=output_max_tokens,
             )
 
+        if provider == "local_gguf":
+            if not self._local_gguf_dependency_available():
+                self._run_on_ui(self._update_local_gguf_ui_state)
+                raise ValueError(
+                    "local_gguf unavailable: llama-cpp-python is not installed. Use Settings → Install llama-cpp-python."
+                )
+            model_path = (local_gguf_model_path or "").strip()
+            if not model_path or not os.path.isfile(model_path):
+                self._run_on_ui(self._update_local_gguf_ui_state)
+                raise ValueError("local_gguf model path is invalid. Choose a valid .gguf file in Settings.")
+            self.log(f"Loading local GGUF model: {model_path}")
+            return LocalLlamaCppChatModel(
+                self,
+                model_path=model_path,
+                n_ctx=local_gguf_context_length,
+                temperature=temperature,
+                max_tokens=output_max_tokens,
+                n_gpu_layers=local_gguf_gpu_layers,
+                n_threads=local_gguf_threads,
+            )
+
         if provider == "mock":
-            return MockChatModel(self._make_ai_message)
+            return MockChatModel(self._ai_message)
 
         raise ValueError(f"Unknown LLM provider: {provider}")
 
@@ -11934,6 +12174,10 @@ class AgenticRAGApp:
                     "google": self.api_keys["google"].get(),
                 },
                 "local_url": self.local_llm_url.get(),
+                "local_gguf_model_path": self.local_gguf_model_path.get(),
+                "local_gguf_context_length": max(256, int(self.local_gguf_context_length.get())),
+                "local_gguf_gpu_layers": max(0, int(self.local_gguf_gpu_layers.get())),
+                "local_gguf_threads": max(0, int(self.local_gguf_threads.get())),
             },
             "embedding_ctx": {
                 "provider": embedding_provider,
