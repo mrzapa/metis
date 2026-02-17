@@ -301,7 +301,7 @@ STYLE_CONFIG = {
     },
 }
 
-UI_SPACING = {"xs": 4, "s": 8, "m": 12, "l": 18}
+UI_SPACING = {"xs": 4, "s": 8, "m": 12, "l": 18, "xl": 24}
 FORM_WIDTHS = {"label": 22, "input": 28}
 
 try:
@@ -698,16 +698,17 @@ class TooltipManager:
 
 class CollapsibleFrame(ttk.Frame):
     def __init__(self, parent, title, expanded=False, **kwargs):
+        kwargs.setdefault("style", "Card.Elevated.TFrame")
         super().__init__(parent, **kwargs)
         self._expanded = tk.BooleanVar(value=expanded)
-        header = ttk.Frame(self)
-        header.pack(fill="x")
-        self.btn = ttk.Button(header, text="▾" if expanded else "▸", width=2, command=self.toggle)
+        header = ttk.Frame(self, style="Card.Elevated.TFrame")
+        header.pack(fill="x", padx=UI_SPACING["s"], pady=(UI_SPACING["s"], 0))
+        self.btn = ttk.Button(header, text="▾" if expanded else "▸", width=2, command=self.toggle, style="Secondary.TButton")
         self.btn.pack(side="left")
-        ttk.Label(header, text=title, style="Bold.TLabel").pack(side="left", padx=(4, 0))
-        self.content = ttk.Frame(self)
+        ttk.Label(header, text=title, style="Bold.TLabel").pack(side="left", padx=(UI_SPACING["xs"], 0))
+        self.content = ttk.Frame(self, style="Card.Elevated.TFrame")
         if expanded:
-            self.content.pack(fill="x", pady=(6, 0))
+            self.content.pack(fill="x", padx=UI_SPACING["s"], pady=(UI_SPACING["s"], UI_SPACING["s"]))
 
     def set_expanded(self, expanded):
         expanded = bool(expanded)
@@ -720,7 +721,7 @@ class CollapsibleFrame(ttk.Frame):
             self.btn.config(text="▸")
             self._expanded.set(False)
         else:
-            self.content.pack(fill="x", pady=(6, 0))
+            self.content.pack(fill="x", padx=UI_SPACING["s"], pady=(UI_SPACING["s"], UI_SPACING["s"]))
             self.btn.config(text="▾")
             self._expanded.set(True)
 
@@ -2314,16 +2315,25 @@ class AgenticRAGApp:
         style.configure(".", background=palette["bg"], foreground=palette["text"], fieldbackground=palette["surface_alt"])
         style.configure("TFrame", background=palette["bg"], borderwidth=0, relief="flat")
         style.configure("Card.TFrame", background=palette["surface"], borderwidth=0, relief="flat")
-        style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["outline"], borderwidth=1, relief="flat")
+        style.configure("Card.Elevated.TFrame", background=palette["surface"], borderwidth=1, bordercolor=palette["outline"], relief="flat")
+        style.configure("Card.Flat.TFrame", background=palette["surface_alt"], borderwidth=0, relief="flat")
+        style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["outline"], borderwidth=0, relief="flat")
         style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
         style.configure("TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10))
         style.configure("Bold.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
         style.configure("Header.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 13, "bold"))
         style.configure("Muted.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=(font_family, 10))
+        style.configure("Caption.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=(font_family, 9))
         style.configure("Danger.TLabel", background=palette["surface"], foreground=palette["danger"], font=(font_family, 10, "bold"))
         style.configure("Status.TLabel", background=palette["bg"], foreground=palette["status"], font=(font_family, 9))
         style.configure("TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"], focuscolor=palette["surface_alt"])
         style.map("TButton", background=[("active", palette["secondary"]), ("pressed", palette["primary"])], foreground=[("active", palette["selection_fg"])])
+        style.configure("Primary.TButton", padding=(14, 9), relief="flat", borderwidth=0, background=palette["primary"], foreground="#061018")
+        style.map("Primary.TButton", background=[("active", palette["secondary"]), ("pressed", palette["tertiary"]), ("disabled", palette["outline"])], foreground=[("disabled", palette["muted_text"])])
+        style.configure("Secondary.TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"])
+        style.map("Secondary.TButton", background=[("active", palette["surface"]), ("pressed", palette["outline"]), ("disabled", palette["surface_alt"])], foreground=[("disabled", palette["muted_text"])])
+        style.configure("Danger.TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["danger"], foreground="#14080A")
+        style.map("Danger.TButton", background=[("active", "#ff92a1"), ("pressed", "#e7687a"), ("disabled", palette["outline"])], foreground=[("disabled", palette["muted_text"])])
         style.configure("TRadiobutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], indicatordiameter=14, relief="flat")
         style.map("TRadiobutton", foreground=[("disabled", palette["muted_text"])], indicatorcolor=[("selected", palette["primary"]), ("!selected", palette["surface_alt"])])
         style.configure("TCheckbutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], relief="flat")
@@ -2333,9 +2343,9 @@ class AgenticRAGApp:
         style.configure("TCombobox", fieldbackground=palette["surface_alt"], background=palette["surface_alt"], foreground=palette["text"], arrowcolor=palette["muted_text"], bordercolor=palette["outline"], relief="flat")
         style.map("TCombobox", fieldbackground=[("readonly", palette["surface_alt"])], selectbackground=[("readonly", palette["selection_bg"])], selectforeground=[("readonly", palette["selection_fg"])])
         style.configure("Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=24, relief="flat")
-        style.map("Treeview", background=[("selected", palette["selection_bg"])], foreground=[("selected", palette["selection_fg"])])
+        style.map("Treeview", background=[("selected", palette["selection_bg"]), ("active", palette["surface"])], foreground=[("selected", palette["selection_fg"]), ("active", palette["text"])])
         style.configure("History.Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=30, relief="flat")
-        style.map("History.Treeview", background=[("selected", palette["selection_bg"])], foreground=[("selected", palette["selection_fg"])])
+        style.map("History.Treeview", background=[("selected", palette["selection_bg"]), ("active", palette["surface"])], foreground=[("selected", palette["selection_fg"]), ("active", palette["text"])])
         style.configure("Treeview.Heading", background=palette["surface"], foreground=palette["muted_text"], borderwidth=0, relief="flat")
         style.map("Treeview.Heading", background=[("active", palette["surface_alt"])])
         style.configure("Vertical.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["muted_text"], relief="flat")
@@ -3653,27 +3663,32 @@ class AgenticRAGApp:
         self.root.destroy()
 
     def build_history_tab(self):
-        frame = self._create_scrollable_tab_frame(self.tab_history, padding=14)
+        frame = self._create_scrollable_tab_frame(self.tab_history, padding=UI_SPACING["l"])
+
+        header = ttk.Frame(frame, style="Card.TFrame")
+        header.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        ttk.Label(header, text="History", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(header, text="Resume prior sessions and inspect metadata without leaving chat.", style="Caption.TLabel").pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
         actions = ttk.Frame(frame, style="Card.TFrame")
-        actions.pack(fill="x", pady=(0, 8))
-        ttk.Button(actions, text="New Chat", command=lambda: self.start_new_chat(load_in_ui=True), takefocus=True).pack(side="left")
-        ttk.Button(actions, text="Open/Resume", command=self.load_selected_session, takefocus=True).pack(side="left", padx=(8, 0))
-        ttk.Button(actions, text="Rename", command=self.rename_selected_session, takefocus=True).pack(side="left", padx=(8, 0))
-        ttk.Button(actions, text="Delete", command=self.delete_selected_session, takefocus=True).pack(side="left", padx=(8, 0))
-        ttk.Button(actions, text="Export", command=self.export_selected_session, takefocus=True).pack(side="left", padx=(8, 0))
-        ttk.Button(actions, text="Refresh", command=self.refresh_sessions_list, takefocus=True).pack(side="left", padx=(8, 0))
+        actions.pack(fill="x", pady=(0, UI_SPACING["s"]))
+        ttk.Button(actions, text="New Chat", command=lambda: self.start_new_chat(load_in_ui=True), takefocus=True, style="Primary.TButton").pack(side="left")
+        ttk.Button(actions, text="Open/Resume", command=self.load_selected_session, takefocus=True, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
+        ttk.Button(actions, text="Rename", command=self.rename_selected_session, takefocus=True, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
+        ttk.Button(actions, text="Delete", command=self.delete_selected_session, takefocus=True, style="Danger.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
+        ttk.Button(actions, text="Export", command=self.export_selected_session, takefocus=True, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
+        ttk.Button(actions, text="Refresh", command=self.refresh_sessions_list, takefocus=True, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
 
         search_row = ttk.Frame(frame, style="Card.TFrame")
-        search_row.pack(fill="x", pady=(0, 8))
-        ttk.Label(search_row, text="Search:").pack(side="left")
+        search_row.pack(fill="x", pady=(0, UI_SPACING["s"]))
+        ttk.Label(search_row, text="Search", style="Muted.TLabel").pack(side="left")
         self.history_search_var = tk.StringVar()
         self.history_search_entry = ttk.Entry(search_row, textvariable=self.history_search_var, takefocus=True)
-        self.history_search_entry.pack(side="left", fill="x", expand=True, padx=(8, 10))
+        self.history_search_entry.pack(side="left", fill="x", expand=True, padx=(UI_SPACING["s"], UI_SPACING["m"]))
         self.history_search_entry.bind("<KeyRelease>", self._on_history_search_change)
-        ttk.Label(search_row, text="Profile filter:").pack(side="left")
+        ttk.Label(search_row, text="Profile", style="Muted.TLabel").pack(side="left")
         self.history_profile_filter_combo = ttk.Combobox(search_row, textvariable=self.history_profile_filter, state="readonly", width=24)
-        self.history_profile_filter_combo.pack(side="left", padx=(8, 0))
+        self.history_profile_filter_combo.pack(side="left", padx=(UI_SPACING["s"], 0))
         self.history_profile_filter_combo.bind("<<ComboboxSelected>>", self._on_history_search_change)
 
         split = ttk.Panedwindow(frame, orient=tk.HORIZONTAL)
@@ -3684,7 +3699,7 @@ class AgenticRAGApp:
         split.add(left, weight=3)
         split.add(right, weight=2)
 
-        tree_wrap = ttk.LabelFrame(left, text="Saved Sessions", padding=10)
+        tree_wrap = ttk.LabelFrame(left, text="Saved Sessions", padding=UI_SPACING["m"])
         tree_wrap.pack(fill=tk.BOTH, expand=True)
         columns = ("title", "updated", "profile", "resume")
         self.sessions_tree = ttk.Treeview(tree_wrap, columns=columns, show="headings", selectmode="browse", style="History.Treeview")
@@ -3705,11 +3720,11 @@ class AgenticRAGApp:
         self.sessions_tree.bind("<<TreeviewSelect>>", self._refresh_history_details)
         self._tip(self.sessions_tree, "Double-click a row to resume. Click the ▶ Resume action column for quick load.")
 
-        details = ttk.LabelFrame(right, text="Session Details", padding=10)
+        details = ttk.LabelFrame(right, text="Session Details", padding=UI_SPACING["m"])
         details.pack(fill=tk.BOTH, expand=True)
 
-        summary_card = ttk.LabelFrame(details, text="Summary", padding=10)
-        summary_card.pack(fill="x", pady=(0, 10))
+        summary_card = ttk.LabelFrame(details, text="Summary", padding=UI_SPACING["m"])
+        summary_card.pack(fill="x", pady=(0, UI_SPACING["m"]))
         summary_grid = ttk.Frame(summary_card, style="Card.TFrame")
         summary_grid.pack(fill="x")
 
@@ -3718,8 +3733,8 @@ class AgenticRAGApp:
         for row_index, key in enumerate(summary_keys):
             var = tk.StringVar(value="-")
             self.history_summary_fields[key] = var
-            ttk.Label(summary_grid, text=f"{key}:", style="Muted.TLabel").grid(row=row_index, column=0, sticky="nw", padx=(0, 10), pady=2)
-            ttk.Label(summary_grid, textvariable=var, style="TLabel", wraplength=500, justify="left").grid(row=row_index, column=1, sticky="w", pady=2)
+            ttk.Label(summary_grid, text=f"{key}", style="Caption.TLabel").grid(row=row_index, column=0, sticky="nw", padx=(0, UI_SPACING["s"]), pady=UI_SPACING["xs"])
+            ttk.Label(summary_grid, textvariable=var, style="TLabel", wraplength=500, justify="left").grid(row=row_index, column=1, sticky="w", pady=UI_SPACING["xs"])
         summary_grid.grid_columnconfigure(1, weight=1)
 
         actions_row = ttk.Frame(summary_card, style="Card.TFrame")
@@ -3904,16 +3919,16 @@ class AgenticRAGApp:
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
-        search_row = ttk.Frame(frame)
-        search_row.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        search_row = ttk.Frame(frame, style="Card.TFrame")
+        search_row.grid(row=1, column=0, columnspan=2, sticky="ew", padx=UI_SPACING["xs"], pady=(0, UI_SPACING["s"]))
         search_row.columnconfigure(1, weight=1)
-        ttk.Label(search_row, text="Search settings:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(search_row, textvariable=self.settings_search_var).grid(row=0, column=1, sticky="ew", padx=(8, 8))
-        ttk.Button(search_row, text="Clear", command=lambda: self.settings_search_var.set("")).grid(row=0, column=2, sticky="e")
+        ttk.Label(search_row, text="Search settings", style="Muted.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Entry(search_row, textvariable=self.settings_search_var).grid(row=0, column=1, sticky="ew", padx=(UI_SPACING["s"], UI_SPACING["s"]))
+        ttk.Button(search_row, text="Clear", command=lambda: self.settings_search_var.set(""), style="Secondary.TButton").grid(row=0, column=2, sticky="e")
 
-        toggle_row = ttk.Frame(frame)
-        toggle_row.grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=(0, 8))
-        ttk.Label(toggle_row, text="View:").pack(side="left")
+        toggle_row = ttk.Frame(frame, style="Card.TFrame")
+        toggle_row.grid(row=2, column=0, columnspan=2, sticky="w", padx=UI_SPACING["xs"], pady=(0, UI_SPACING["s"]))
+        ttk.Label(toggle_row, text="View", style="Muted.TLabel").pack(side="left")
         ttk.Radiobutton(
             toggle_row,
             text="Recommended",
@@ -3928,7 +3943,7 @@ class AgenticRAGApp:
             variable=self.settings_view_mode,
             command=self._on_settings_view_mode_change,
         ).pack(side="left", padx=(0, 16))
-        ttk.Label(toggle_row, text="Startup mode:").pack(side="left")
+        ttk.Label(toggle_row, text="Startup mode", style="Muted.TLabel").pack(side="left")
         ttk.Combobox(
             toggle_row,
             textvariable=self.startup_mode_setting,
@@ -3936,7 +3951,7 @@ class AgenticRAGApp:
             state="readonly",
             width=10,
         ).pack(side="left", padx=(8, 8))
-        ttk.Button(toggle_row, text="Apply", command=self._apply_startup_mode_setting).pack(side="left")
+        ttk.Button(toggle_row, text="Apply", command=self._apply_startup_mode_setting, style="Secondary.TButton").pack(side="left")
 
         appearance_section = CollapsibleFrame(frame, "Appearance", expanded=False)
         appearance_section.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
@@ -3949,7 +3964,7 @@ class AgenticRAGApp:
             state="readonly",
             width=10,
         ).pack(side="left", padx=(8, 8))
-        ttk.Button(appearance_section.content, text="Apply Theme", command=self._apply_theme).pack(side="left")
+        ttk.Button(appearance_section.content, text="Apply Theme", command=self._apply_theme, style="Primary.TButton").pack(side="left")
 
         self.settings_model_section = CollapsibleFrame(frame, "Model & Provider", expanded=False)
         self.settings_model_section.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
@@ -4548,11 +4563,11 @@ class AgenticRAGApp:
 
         header = ttk.Frame(frame)
         header.pack(fill="x", pady=(0, UI_SPACING["m"]))
-        ttk.Label(header, text="Library & Ingestion", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(header, text="Library", style="Header.TLabel").pack(anchor="w")
         ttk.Label(
             header,
-            text="Select or build an index here, then use it directly in Chat.",
-            style="Muted.TLabel",
+            text="Build and manage your retrieval index, then use it from Chat.",
+            style="Caption.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
         sel_frame = ttk.LabelFrame(frame, text="1) Source file", padding=UI_SPACING["m"])
@@ -4583,8 +4598,8 @@ class AgenticRAGApp:
 
         file_btn_frame = ttk.Frame(sel_frame)
         file_btn_frame.pack(anchor="w", pady=(UI_SPACING["s"], 0))
-        ttk.Button(file_btn_frame, text="Browse File...", command=self.browse_file).pack(side="left")
-        ttk.Button(file_btn_frame, text="Clear Selection", command=self.clear_selected_file).pack(side="left", padx=8)
+        ttk.Button(file_btn_frame, text="Browse File...", command=self.browse_file, style="Primary.TButton").pack(side="left")
+        ttk.Button(file_btn_frame, text="Clear Selection", command=self.clear_selected_file, style="Secondary.TButton").pack(side="left", padx=UI_SPACING["s"])
 
         chunk_frame = ttk.LabelFrame(frame, text="2) Chunking strategy", padding=UI_SPACING["m"])
         chunk_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
@@ -4621,8 +4636,9 @@ class AgenticRAGApp:
 
         self.btn_ingest = ttk.Button(
             frame,
-            text="Start Ingestion (Process -> Chunk -> Embed -> Store)",
+            text="Build Index (Process → Chunk → Embed → Store)",
             command=self.start_ingestion,
+            style="Primary.TButton",
         )
         self.btn_ingest.pack(fill="x", pady=(0, UI_SPACING["s"]))
 
@@ -4631,6 +4647,7 @@ class AgenticRAGApp:
             text="Cancel Ingestion",
             command=lambda: self.cancel_active_job("ingestion"),
             state="disabled",
+            style="Danger.TButton",
         )
         self.btn_cancel_ingest.pack(fill="x", pady=(0, UI_SPACING["m"]))
 
@@ -4662,8 +4679,8 @@ class AgenticRAGApp:
         ttk.Label(header, text="Chat", style="Header.TLabel").pack(anchor="w")
         ttk.Label(
             header,
-            text="Flow: Library builds index → Chat uses current index → Settings configures providers.",
-            style="Muted.TLabel",
+            text="Flow: Library builds index → Chat answers with evidence → Settings tunes behavior.",
+            style="Caption.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
         if self.test_mode_active:
             ttk.Label(
@@ -4672,7 +4689,7 @@ class AgenticRAGApp:
                 style="Success.TLabel",
             ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
-        state_strip = ttk.Frame(frame, style="Card.TFrame")
+        state_strip = ttk.Frame(frame, style="Card.Flat.TFrame", padding=UI_SPACING["s"])
         state_strip.pack(fill="x", pady=(0, UI_SPACING["s"]))
         ttk.Label(state_strip, text="Current State:", style="Bold.TLabel").pack(side="left", padx=(0, UI_SPACING["xs"]))
         ttk.Label(state_strip, textvariable=self.current_state_var).pack(side="left", fill="x", expand=True)
@@ -4691,8 +4708,8 @@ class AgenticRAGApp:
         )
         self.btn_cancel_rag.pack(side="left", padx=(UI_SPACING["s"], 0))
 
-        top_bar = ttk.LabelFrame(frame, text="Conversation", padding=10)
-        top_bar.pack(fill="x", pady=(0, 10))
+        top_bar = ttk.LabelFrame(frame, text="Conversation Setup", padding=UI_SPACING["m"])
+        top_bar.pack(fill="x", pady=(0, UI_SPACING["m"]))
         for col in (1, 3, 5, 7):
             top_bar.columnconfigure(col, weight=1)
 
@@ -4724,20 +4741,20 @@ class AgenticRAGApp:
         ttk.Entry(top_bar, textvariable=self.retrieval_k, width=8).grid(row=1, column=1, sticky="w", padx=(6, 12), pady=(8, 0))
         ttk.Label(top_bar, text="final_k:").grid(row=1, column=2, sticky="w", pady=(8, 0))
         ttk.Entry(top_bar, textvariable=self.final_k, width=8).grid(row=1, column=3, sticky="w", padx=(6, 12), pady=(8, 0))
-        ttk.Button(top_bar, text="Refresh Indexes", command=self._refresh_existing_indexes_async).grid(row=1, column=6, sticky="w", pady=(8, 0))
-        ttk.Button(top_bar, text="Settings", command=lambda: self.notebook.select(self.tab_settings)).grid(row=1, column=7, sticky="e", pady=(8, 0))
+        ttk.Button(top_bar, text="Refresh Indexes", command=self._refresh_existing_indexes_async, style="Secondary.TButton").grid(row=1, column=6, sticky="w", pady=(8, 0))
+        ttk.Button(top_bar, text="Settings", command=lambda: self.notebook.select(self.tab_settings), style="Secondary.TButton").grid(row=1, column=7, sticky="e", pady=(8, 0))
         if self.basic_mode:
-            ttk.Button(top_bar, text="Switch to Advanced", command=self.switch_to_advanced_mode).grid(row=2, column=7, sticky="e", pady=(8, 0))
+            ttk.Button(top_bar, text="Switch to Advanced", command=self.switch_to_advanced_mode, style="Secondary.TButton").grid(row=2, column=7, sticky="e", pady=(8, 0))
         else:
-            ttk.Button(top_bar, text="Run Setup Wizard", command=self.run_setup_wizard).grid(row=2, column=7, sticky="e", pady=(8, 0))
+            ttk.Button(top_bar, text="Run Setup Wizard", command=self.run_setup_wizard, style="Secondary.TButton").grid(row=2, column=7, sticky="e", pady=(8, 0))
         if self.test_mode_active:
-            ttk.Button(top_bar, text="Reset test environment", command=self.reset_test_environment).grid(row=2, column=6, sticky="w", pady=(8, 0))
+            ttk.Button(top_bar, text="Reset test environment", command=self.reset_test_environment, style="Danger.TButton").grid(row=2, column=6, sticky="w", pady=(8, 0))
 
         content_split = ttk.Panedwindow(frame, orient=tk.HORIZONTAL)
         content_split.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        left_pane = ttk.Frame(content_split)
-        right_pane = ttk.Frame(content_split, width=380)
+        left_pane = ttk.Frame(content_split, style="Card.Elevated.TFrame", padding=UI_SPACING["m"])
+        right_pane = ttk.Frame(content_split, width=380, style="Card.Elevated.TFrame", padding=UI_SPACING["m"])
         content_split.add(left_pane, weight=4)
         content_split.add(right_pane, weight=2)
 
@@ -4745,7 +4762,7 @@ class AgenticRAGApp:
         self.chat_display = scrolledtext.ScrolledText(
             left_pane, state="disabled", font=("Segoe UI", 10), wrap=tk.WORD
         )
-        self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, UI_SPACING["m"]))
         self.chat_display.tag_config("citation", underline=1)
         self.chat_display.tag_bind("citation", "<Button-1>", self._on_citation_click)
         self.chat_display.tag_bind("citation", "<Enter>", lambda _e: self.chat_display.config(cursor="hand2"))
@@ -4762,32 +4779,37 @@ class AgenticRAGApp:
         self.chat_display.tag_config("source", font=("Consolas", 8))
 
         # Quick Actions
-        action_frame = ttk.Frame(left_pane)
-        action_frame.pack(fill="x", pady=(8, 4))
+        action_frame = ttk.Frame(left_pane, style="Card.TFrame")
+        action_frame.pack(fill="x", pady=(UI_SPACING["s"], UI_SPACING["xs"]))
         ttk.Button(
             action_frame,
             text="New Chat",
             command=lambda: self.start_new_chat(load_in_ui=True),
+            style="Secondary.TButton",
         ).pack(side="left")
         ttk.Button(
-            action_frame, text="Copy Last Answer", command=self.copy_last_answer
-        ).pack(side="left", padx=(8, 0))
+            action_frame, text="Copy Last Answer", command=self.copy_last_answer,
+            style="Secondary.TButton",
+        ).pack(side="left", padx=(UI_SPACING["s"], 0))
         ttk.Button(
             action_frame,
             text="Export notes to Markdown",
             command=self.export_notes_to_markdown,
-        ).pack(side="left", padx=8)
+            style="Secondary.TButton",
+        ).pack(side="left", padx=UI_SPACING["s"])
         if agent_lightning is not None:
             ttk.Button(
                 action_frame,
                 text="Export to Agent Lightning format",
                 command=self.export_run_as_agent_lightning_dataset,
+                style="Secondary.TButton",
             ).pack(side="left")
         ttk.Button(
             action_frame,
             text="Export Eval Set",
             command=self.export_eval_set,
-        ).pack(side="left", padx=8)
+            style="Secondary.TButton",
+        ).pack(side="left", padx=UI_SPACING["s"])
 
         output_frame = ttk.Frame(left_pane)
         output_frame.pack(fill="x", pady=(2, 4))
@@ -4835,17 +4857,17 @@ class AgenticRAGApp:
         ttk.Checkbutton(frontier_wrap, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
 
         # Sticky input composer
-        input_frame = ttk.Frame(left_pane)
+        input_frame = ttk.Frame(left_pane, style="Card.Flat.TFrame", padding=UI_SPACING["s"])
         input_frame.pack(fill="x", side="bottom", pady=(UI_SPACING["s"], 0))
         self.txt_input = tk.Text(input_frame, height=3, font=("Segoe UI", 11), wrap=tk.WORD)
         self.txt_input.pack(side="left", fill="both", expand=True, padx=(0, UI_SPACING["s"]))
         self.txt_input.bind("<Control-Return>", lambda _e: (self.send_message(), "break")[1])
 
-        self.btn_send = ttk.Button(input_frame, text="Send", command=self.send_message)
+        self.btn_send = ttk.Button(input_frame, text="Send", command=self.send_message, style="Primary.TButton")
         self.btn_send.pack(side="right")
 
         # Right evidence pane
-        evidence_wrap = ttk.LabelFrame(right_pane, text="Evidence Navigator", padding=8)
+        evidence_wrap = ttk.LabelFrame(right_pane, text="Evidence Navigator", padding=UI_SPACING["m"])
         evidence_wrap.pack(fill=tk.BOTH, expand=True)
         self.evidence_notebook = ttk.Notebook(evidence_wrap)
         self.evidence_notebook.pack(fill=tk.BOTH, expand=True)
@@ -4887,7 +4909,7 @@ class AgenticRAGApp:
 
         source_actions = ttk.Frame(self.sources_tab)
         source_actions.pack(fill="x", pady=(6, 4))
-        ttk.Button(source_actions, text="Open selected source", command=self._open_selected_source).pack(side="left")
+        ttk.Button(source_actions, text="Open selected source", command=self._open_selected_source, style="Secondary.TButton").pack(side="left")
 
         self.source_detail_text = scrolledtext.ScrolledText(
             self.sources_tab, height=8, wrap=tk.WORD, state="disabled", font=("Consolas", 9)
@@ -4931,13 +4953,14 @@ class AgenticRAGApp:
 
         self.grounding_tab = ttk.Frame(self.evidence_notebook)
         self.grounding_label_var = tk.StringVar(value="LangExtract grounding HTML is not available yet.")
-        ttk.Label(self.grounding_tab, textvariable=self.grounding_label_var, wraplength=300).pack(
+        ttk.Label(self.grounding_tab, textvariable=self.grounding_label_var, wraplength=300, style="Caption.TLabel").pack(
             fill="x", anchor="w", pady=(0, 8)
         )
         ttk.Button(
             self.grounding_tab,
             text="Open grounding HTML",
             command=self._open_grounding_html,
+            style="Secondary.TButton",
         ).pack(anchor="w")
         self._grounding_tab_added = False
         self.enable_langextract.trace_add("write", self._toggle_grounding_tab)
