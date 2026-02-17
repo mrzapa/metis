@@ -5550,10 +5550,16 @@ class AgenticRAGApp:
         source_actions = self.create_frame(self.sources_tab)
         source_actions.pack(fill="x", pady=(6, 4))
         self.create_button(source_actions, text="Open selected source", command=self._open_selected_source, style="Secondary.TButton").pack(side="left")
+        self.create_button(source_actions, text="Copy breadcrumb", command=self._copy_selected_source_breadcrumb, style="Secondary.TButton").pack(side="left", padx=(6, 0))
+        self.create_button(source_actions, text="Open section", command=self._open_selected_source_section, style="Secondary.TButton").pack(side="left", padx=(6, 0))
 
         self.source_detail_text = self.create_rich_text_surface(
             self.sources_tab, surface_id="source_detail", height=8, wrap=tk.WORD, state="disabled", font=("Consolas", 9)
         )
+        self.source_detail_text.tag_config("open_section_link", foreground="#2563eb", underline=1)
+        self.source_detail_text.tag_bind("open_section_link", "<Button-1>", self._open_selected_source_section)
+        self.source_detail_text.tag_bind("open_section_link", "<Enter>", lambda _e: self.source_detail_text.config(cursor="hand2"))
+        self.source_detail_text.tag_bind("open_section_link", "<Leave>", lambda _e: self.source_detail_text.config(cursor=""))
         self.source_detail_text.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
         self.incidents_json_tab = self.create_frame(self.evidence_notebook)
@@ -6257,21 +6263,18 @@ class AgenticRAGApp:
         )
 
     def _on_source_selected(self, event=None):
-        selection = self.sources_tree.selection()
-        if not selection:
-            return
-        item_id = selection[0]
-        source_id = self._source_id_by_tree_iid.get(item_id)
-        entry = (self._latest_source_map or {}).get(source_id or "", {})
+        source_id, entry = self._selected_source_entry()
         if not entry:
             return
         metadata_blob = json.dumps(entry.get("metadata") or {}, ensure_ascii=False, indent=2, sort_keys=True)
         excerpt = str(entry.get("excerpt") or "").strip() or "(no excerpt captured)"
+        breadcrumb = str(entry.get("breadcrumb") or "").strip() or "-"
         detail_lines = [
             f"Citation: {entry.get('sid', '')}",
             f"Source Card: {entry.get('label', 'unknown')}",
             f"Doc: {entry.get('title', 'unknown')}",
             f"Section hint: {entry.get('section_hint') or entry.get('section') or entry.get('chapter') or '-'}",
+            f"Breadcrumb: {breadcrumb}",
             f"Position hint: {entry.get('position_hint') or entry.get('locator', 'unknown')}",
             f"Date/Month: {entry.get('date', entry.get('month_bucket', 'undated'))}",
             f"Timestamp: {entry.get('timestamp') or '-'}",
@@ -6289,6 +6292,10 @@ class AgenticRAGApp:
         self.source_detail_text.config(state="normal")
         self.source_detail_text.delete("1.0", tk.END)
         self.source_detail_text.insert(tk.END, "\n".join(detail_lines))
+        open_section_line = "\n\nOpen section in outline"
+        link_start = self.source_detail_text.index(tk.END)
+        self.source_detail_text.insert(tk.END, open_section_line)
+        self.source_detail_text.tag_add("open_section_link", link_start, f"{link_start}+{len(open_section_line)}c")
         self.source_detail_text.config(state="disabled")
 
 
@@ -6326,13 +6333,10 @@ class AgenticRAGApp:
             )
 
     def _open_selected_source(self):
-        selection = self.sources_tree.selection()
-        if not selection:
+        source_id, entry = self._selected_source_entry()
+        if not source_id:
             messagebox.showinfo("Open source", "Select a source row first.")
             return
-        item_id = selection[0]
-        source_id = self._source_id_by_tree_iid.get(item_id)
-        entry = (self._latest_source_map or {}).get(source_id or "", {})
         file_path = str(entry.get("file_path") or ((entry.get("metadata") or {}).get("source_path")) or "").strip()
         if file_path and os.path.isfile(file_path):
             webbrowser.open_new_tab(f"file://{os.path.abspath(file_path)}")
@@ -6353,6 +6357,87 @@ class AgenticRAGApp:
             f"{excerpt}",
         )
         viewer.config(state="disabled")
+
+    def _selected_source_entry(self):
+        selection = self.sources_tree.selection() if hasattr(self, "sources_tree") else ()
+        if not selection:
+            return "", {}
+        item_id = selection[0]
+        source_id = (self._source_id_by_tree_iid or {}).get(item_id)
+        entry = (self._latest_source_map or {}).get(source_id or "", {})
+        return source_id or "", entry or {}
+
+    def _copy_selected_source_breadcrumb(self):
+        source_id, entry = self._selected_source_entry()
+        if not source_id:
+            messagebox.showinfo("Copy breadcrumb", "Select a source row first.")
+            return
+        breadcrumb = str(entry.get("breadcrumb") or "").strip()
+        if not breadcrumb:
+            messagebox.showinfo("Copy breadcrumb", "No breadcrumb is available for the selected source.")
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(breadcrumb)
+        self.root.update_idletasks()
+        self.log(f"Copied breadcrumb for {entry.get('sid', source_id)}")
+
+    def _open_selected_source_section(self, event=None):
+        source_id, entry = self._selected_source_entry()
+        if not source_id:
+            messagebox.showinfo("Open section", "Select a source row first.")
+            return
+        node_id = str(entry.get("node_id") or "").strip()
+        breadcrumb = str(entry.get("breadcrumb") or "").strip()
+        if self._open_outline_node(node_id=node_id, breadcrumb=breadcrumb):
+            return
+        messagebox.showinfo(
+            "Open section",
+            "Could not locate a matching outline node from node_id or breadcrumb.",
+        )
+
+    def _open_outline_node(self, node_id="", breadcrumb=""):
+        if not hasattr(self, "document_outline_tree"):
+            return False
+        tree = self.document_outline_tree
+        if node_id and tree.exists(node_id):
+            self._focus_outline_iid(node_id)
+            return True
+        tokens = self._normalize_header_path_tokens(breadcrumb)
+        if not tokens:
+            return False
+        token_label = " > ".join(tokens).lower()
+        candidate_iids = []
+        for iid in tree.get_children(""):
+            candidate_iids.extend(self._flatten_tree_iids(tree, iid))
+        for iid in candidate_iids:
+            if str(tree.item(iid, "text") or "").strip().lower() == token_label:
+                self._focus_outline_iid(iid)
+                return True
+        for iid in candidate_iids:
+            path_text = str(tree.item(iid, "text") or "").strip().lower()
+            if token_label and token_label in path_text:
+                self._focus_outline_iid(iid)
+                return True
+        return False
+
+    def _focus_outline_iid(self, iid):
+        tree = self.document_outline_tree
+        parent = tree.parent(iid)
+        while parent:
+            tree.item(parent, open=True)
+            parent = tree.parent(parent)
+        tree.selection_set((iid,))
+        tree.focus(iid)
+        tree.see(iid)
+        self.log(f"Opened outline node: {iid}")
+
+    @staticmethod
+    def _flatten_tree_iids(tree, parent_iid=""):
+        out = []
+        for child in tree.get_children(parent_iid):
+            out.append(child)
+            out.extend(AgenticRAGApp._flatten_tree_iids(tree, child))
+        return out
 
     def _refresh_evidence_pane(self, source_map, incidents, grounding_html_path=""):
         self._source_id_by_tree_iid = {}
@@ -6381,6 +6466,9 @@ class AgenticRAGApp:
         parent_iid_by_group = {}
         for source_id in ordered_source_ids:
             entry = (source_map or {}).get(source_id, {})
+            breadcrumb = str(entry.get("deepread_header_path") or entry.get("header_path") or "").strip()
+            if breadcrumb:
+                entry["breadcrumb"] = breadcrumb
             header_group = self._header_path_label(entry.get("header_path")) if has_header_groups else ""
             parent_iid = ""
             if has_header_groups:
@@ -6398,7 +6486,6 @@ class AgenticRAGApp:
                     )
             sid = label_by_source[source_id]
             section_label = entry.get("section_hint") or entry.get("section") or entry.get("chapter") or "-"
-            breadcrumb = str(entry.get("deepread_header_path") or entry.get("header_path") or "").strip()
             if breadcrumb:
                 section_label = breadcrumb
             if section_label != "-" and entry.get("section_idx"):
