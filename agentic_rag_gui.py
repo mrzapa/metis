@@ -9588,6 +9588,10 @@ class AgenticRAGApp:
 
     def _ensure_source_metadata(self, metadata, selected_file, content):
         meta = (metadata or {}).copy()
+        header_path_tokens = self._normalize_header_path_tokens(meta.get("header_path_tokens") or meta.get("header_path"))
+        header_path = " > ".join(header_path_tokens)
+        meta["header_path_tokens"] = header_path_tokens
+        meta["header_path"] = header_path
         source_title = (
             str(meta.get("source_title") or meta.get("doc_title") or meta.get("title") or meta.get("source") or "").strip()
         )
@@ -9637,6 +9641,7 @@ class AgenticRAGApp:
         meta["source_path"] = str(meta.get("source_path") or meta.get("file_path") or selected_file or "").strip()
         meta["source_section"] = str(
             meta.get("source_section")
+            or meta.get("header_path")
             or meta.get("section_title")
             or meta.get("heading")
             or meta.get("chapter_title")
@@ -9953,6 +9958,54 @@ class AgenticRAGApp:
                 source_text=source_text,
             )
         return source_text, use_structured, structure_tree
+
+    @staticmethod
+    def _normalize_header_path_tokens(header_path_value):
+        if isinstance(header_path_value, list):
+            return [str(part).strip() for part in header_path_value if str(part).strip()]
+        if isinstance(header_path_value, tuple):
+            return [str(part).strip() for part in header_path_value if str(part).strip()]
+        if header_path_value is None:
+            return []
+        text = str(header_path_value).strip()
+        if not text:
+            return []
+        return [part.strip() for part in text.split(" > ") if part.strip()]
+
+    def _build_sht_node_documents(self, structure_tree, selected_file, source_basename, ingest_id, doc_title=None):
+        node_docs = []
+        for node in structure_tree or []:
+            header_path_tokens = self._normalize_header_path_tokens(node.get("header_path"))
+            header_path = " > ".join(header_path_tokens)
+            node_content = str(node.get("node_content") or "").strip()
+            if not header_path and not node_content:
+                continue
+            page_content = f"{header_path}: {node_content}" if header_path else node_content
+            char_span = node.get("char_span") or (None, None)
+            page_span = node.get("page_span") or (None, None)
+            metadata = {
+                "source": source_basename,
+                "source_path": selected_file,
+                "file_path": selected_file,
+                "ingest_id": ingest_id,
+                "content_type": "sht_node",
+                "header_path": header_path,
+                "header_path_tokens": header_path_tokens,
+                "node_id": str(node.get("id") or "").strip() or None,
+                "parent_node_id": str(node.get("parent_id") or "").strip() or None,
+                "tree_level": int(node.get("level") or 0),
+                "node_title": str(node.get("node_title") or "").strip(),
+                "char_start": char_span[0],
+                "char_end": char_span[1],
+                "page_start": page_span[0],
+                "page_end": page_span[1],
+                "source_section": header_path,
+            }
+            if doc_title:
+                metadata["doc_title"] = doc_title
+            metadata = self._ensure_source_metadata(metadata, selected_file, page_content)
+            node_docs.append(self._document(page_content=page_content, metadata=metadata))
+        return node_docs
 
     @staticmethod
     def _structure_at_offset(offset, markers):
@@ -12490,6 +12543,29 @@ class AgenticRAGApp:
                 )
                 docs = splitter.create_documents([text_content])
 
+            structure_tree = list(getattr(self, "_latest_sht_tree", []) or [])
+            retrieval_strategy = str(ingest_ctx.get("structure_retrieval_strategy") or "hybrid").strip().lower()
+            sht_node_docs = []
+            if ingest_ctx.get("structure_aware") and structure_tree:
+                sht_node_docs = self._build_sht_node_documents(
+                    structure_tree=structure_tree,
+                    selected_file=selected_file,
+                    source_basename=source_basename,
+                    ingest_id=chunk_ingest_id,
+                    doc_title=doc_title,
+                )
+                if sht_node_docs:
+                    if retrieval_strategy in {"sht_only", "structured_only", "node_only"}:
+                        docs = sht_node_docs
+                        self.log(
+                            f"Structure-aware retrieval strategy '{retrieval_strategy}' active: using {len(sht_node_docs)} SHT node documents."
+                        )
+                    else:
+                        docs.extend(sht_node_docs)
+                        self.log(
+                            f"Structure-aware retrieval strategy '{retrieval_strategy}' active: appended {len(sht_node_docs)} SHT node documents to flat chunks."
+                        )
+
             chapter_markers, section_markers = self._detect_structure_markers(text_content)
 
             def _last_section_title(text):
@@ -12506,6 +12582,16 @@ class AgenticRAGApp:
                 last_section_title = None
                 search_cursor = 0
                 for chunk_id, doc in enumerate(docs, start=1):
+                    if str((doc.metadata or {}).get("content_type") or "").strip().lower() == "sht_node":
+                        metadata = (doc.metadata or {}).copy()
+                        metadata.setdefault("chunk_id", chunk_id)
+                        metadata.setdefault("source", source_basename)
+                        metadata.setdefault("source_path", selected_file)
+                        metadata.setdefault("file_path", selected_file)
+                        metadata.setdefault("ingest_id", chunk_ingest_id)
+                        metadata = self._ensure_source_metadata(metadata, selected_file, doc.page_content)
+                        doc.metadata = metadata
+                        continue
                     section_title = _last_section_title(doc.page_content)
                     if section_title:
                         last_section_title = section_title
