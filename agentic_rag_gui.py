@@ -480,6 +480,7 @@ class EvidenceRef:
     span_start: Optional[int] = None
     span_end: Optional[int] = None
     chunk_id: str = ""
+    breadcrumb: str = ""
 
 
 @dataclass
@@ -1584,6 +1585,20 @@ class AgenticRAGApp:
             return {}
         item = dict(source)
         item["header_path"] = str(item.get("header_path") or "").strip()
+        breadcrumb_tokens = AgenticRAGApp._normalize_header_path_tokens(
+            item.get("breadcrumb_tokens")
+            or item.get("breadcrumb")
+            or item.get("header_path_tokens")
+            or item.get("header_path")
+            or item.get("source_section")
+            or [
+                item.get("section_title"),
+                item.get("chapter_title"),
+                item.get("source_title") or item.get("title") or item.get("source"),
+            ]
+        )
+        item["breadcrumb_tokens"] = breadcrumb_tokens
+        item["breadcrumb"] = " > ".join(breadcrumb_tokens)
         return item
 
     def _append_sources_markdown(self, lines, sources):
@@ -1945,12 +1960,27 @@ class AgenticRAGApp:
                 or metadata.get("source_section")
                 or ""
             ).strip()
+            breadcrumb_tokens = self._normalize_header_path_tokens(
+                metadata.get("breadcrumb_tokens")
+                or metadata.get("breadcrumb")
+                or metadata.get("header_path_tokens")
+                or metadata.get("header_path")
+                or metadata.get("source_section")
+                or [
+                    metadata.get("section_title"),
+                    metadata.get("chapter_title"),
+                    metadata.get("source_title") or metadata.get("title") or metadata.get("source"),
+                ]
+            )
+            breadcrumb = " > ".join(breadcrumb_tokens)
             records.append(
                 {
                     "chunk_id": metadata.get("chunk_id"),
                     "node_id": metadata.get("node_id"),
                     "content_type": metadata.get("content_type"),
                     "header_path": header_path,
+                    "breadcrumb": breadcrumb,
+                    "breadcrumb_tokens": breadcrumb_tokens,
                     "source": metadata.get("source")
                     or metadata.get("file_path")
                     or metadata.get("filename"),
@@ -11234,6 +11264,18 @@ class AgenticRAGApp:
                     "position_hint": str(enriched.get("position_hint") or "").strip(),
                     "header_path": str(enriched.get("header_path") or "").strip(),
                     "header_path_tokens": list(enriched.get("header_path_tokens") or []),
+                    "breadcrumb_tokens": self._normalize_header_path_tokens(
+                        enriched.get("breadcrumb_tokens")
+                        or enriched.get("breadcrumb")
+                        or enriched.get("header_path_tokens")
+                        or enriched.get("header_path")
+                        or enriched.get("source_section")
+                        or [
+                            enriched.get("section_title"),
+                            enriched.get("chapter_title"),
+                            enriched.get("source_title") or enriched.get("title") or enriched.get("source"),
+                        ]
+                    ),
                     "node_id": str(enriched.get("node_id") or "").strip(),
                     "speaker": str(enriched.get("speaker") or enriched.get("source_actor") or "").strip() or "unknown",
                     "month_bucket": str(enriched.get("month_key") or "undated"),
@@ -11252,6 +11294,7 @@ class AgenticRAGApp:
                     "deepread_header_path": str(enriched.get("deepread_header_path") or "").strip(),
                 },
             )
+            entry["breadcrumb"] = " > ".join(entry.get("breadcrumb_tokens") or [])
             chunk_id = str((metadata or {}).get("chunk_id", "")).strip()
             if chunk_id and chunk_id not in entry["chunk_ids"]:
                 entry["chunk_ids"].append(chunk_id)
@@ -11259,6 +11302,21 @@ class AgenticRAGApp:
                 entry["header_path"] = str(enriched.get("header_path") or "").strip()
             if not entry.get("header_path_tokens"):
                 entry["header_path_tokens"] = list(enriched.get("header_path_tokens") or [])
+            if not entry.get("breadcrumb_tokens"):
+                entry["breadcrumb_tokens"] = self._normalize_header_path_tokens(
+                    enriched.get("breadcrumb_tokens")
+                    or enriched.get("breadcrumb")
+                    or enriched.get("header_path_tokens")
+                    or enriched.get("header_path")
+                    or enriched.get("source_section")
+                    or [
+                        enriched.get("section_title"),
+                        enriched.get("chapter_title"),
+                        enriched.get("source_title") or enriched.get("title") or enriched.get("source"),
+                    ]
+                )
+            if not entry.get("breadcrumb"):
+                entry["breadcrumb"] = " > ".join(entry.get("breadcrumb_tokens") or [])
             if not entry.get("node_id"):
                 entry["node_id"] = str(enriched.get("node_id") or "").strip()
             if not entry.get("excerpt") and content:
@@ -11422,6 +11480,7 @@ class AgenticRAGApp:
             span_start=item.get("span_start") if isinstance(item.get("span_start"), int) else None,
             span_end=item.get("span_end") if isinstance(item.get("span_end"), int) else None,
             chunk_id=str(item.get("chunk_id", "")).strip(),
+            breadcrumb=str(item.get("breadcrumb") or "").strip(),
         )
 
     def _build_incident_id(self, incident):
@@ -11465,6 +11524,7 @@ class AgenticRAGApp:
                     "span_end": ref.span_end,
                     "quote_anchor": ref.quote,
                     "chunk_id": ref.chunk_id,
+                    "breadcrumb": ref.breadcrumb,
                 }
             )
         operational_impact = str(incident.operational_impact or "").strip()
@@ -12114,6 +12174,10 @@ class AgenticRAGApp:
             return []
         ordered_source_ids = sorted(source_map.keys())
         source_label_by_id = {source_id: f"S{idx}" for idx, source_id in enumerate(ordered_source_ids, start=1)}
+        breadcrumb_by_source_id = {
+            source_id: str((source_map.get(source_id) or {}).get("breadcrumb") or "").strip()
+            for source_id in ordered_source_ids
+        }
         docs_payload = []
         chunk_lookup = {}
         for doc in final_docs:
@@ -12142,6 +12206,7 @@ class AgenticRAGApp:
                         "source_label": source_label_by_id.get(source_id, ""),
                         "chunk_id": chunk_id,
                         "date": date,
+                        "breadcrumb": breadcrumb_by_source_id.get(source_id, ""),
                     },
                 }
             )
@@ -12168,7 +12233,10 @@ class AgenticRAGApp:
                     for ref in item.get("evidence_refs", []):
                         if not isinstance(ref, dict):
                             continue
-                        refs.append(self._evidence_ref_from_dict(ref))
+                        evidence_ref = self._evidence_ref_from_dict(ref)
+                        if not evidence_ref.breadcrumb:
+                            evidence_ref.breadcrumb = breadcrumb_by_source_id.get(evidence_ref.source_id, "")
+                        refs.append(evidence_ref)
                     incident = Incident(
                         incident_id="",
                         date_start=self._extract_iso_date(item.get("date_start")) or None,
@@ -12212,7 +12280,14 @@ class AgenticRAGApp:
         for item in payload.get("incidents", []):
             if not isinstance(item, dict):
                 continue
-            refs = [self._evidence_ref_from_dict(ref) for ref in item.get("evidence_refs", []) if isinstance(ref, dict)]
+            refs = []
+            for ref in item.get("evidence_refs", []):
+                if not isinstance(ref, dict):
+                    continue
+                evidence_ref = self._evidence_ref_from_dict(ref)
+                if not evidence_ref.breadcrumb:
+                    evidence_ref.breadcrumb = breadcrumb_by_source_id.get(evidence_ref.source_id, "")
+                refs.append(evidence_ref)
             incident = Incident(
                 incident_id="",
                 date_start=self._extract_iso_date(item.get("date_start")) or None,
