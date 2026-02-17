@@ -1186,6 +1186,7 @@ class AgenticRAGApp:
         self.selected_collection_name = RAW_COLLECTION_NAME
         self.lexical_db_path = None
         self.lexical_db_available = False
+        self._citation_tip = None
         self.session_db_path = os.path.join(os.getcwd(), "rag_sessions.db")
         self.trace_store = TraceStore(os.path.join(os.getcwd(), "trace_store"))
         self.current_session_id = None
@@ -4759,6 +4760,7 @@ class AgenticRAGApp:
         appearance_section = CollapsibleFrame(frame, "Appearance", expanded=False)
         appearance_section.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
         self._register_settings_section(appearance_section, "Appearance")
+        self.create_label(appearance_section.content, text="Controls the visual theme applied to the entire interface.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
         self.create_label(appearance_section.content, text="Theme mode:").pack(side="left")
         self.create_combobox(
             appearance_section.content,
@@ -4772,6 +4774,7 @@ class AgenticRAGApp:
         self.settings_model_section = CollapsibleFrame(frame, "Model & Provider", expanded=False)
         self.settings_model_section.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
         self._register_settings_section(self.settings_model_section, "Model & Provider")
+        self.create_label(self.settings_model_section.content, text="Set the LLM provider, generation model, embedding model, vector DB, API keys, and local model registry.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
 
         # --- LLM Provider Settings ---
         llm_frame = self.create_frame(self.settings_model_section.content, text="LLM & Embedding Provider", padding=15, kind="labelframe")
@@ -5112,49 +5115,51 @@ class AgenticRAGApp:
         retrieval_section.grid(row=7, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_retrieval_section = retrieval_section
         self._register_settings_section(self.settings_retrieval_section, "Retrieval")
-        self.create_label(retrieval_section.content, text="Search Type:").grid(row=0, column=0, sticky="w")
+        self.create_label(retrieval_section.content, text="Controls search type, retrieval mode, MMR parameters, reranking, and sub-query expansion.", style="Muted.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
+        self.create_label(retrieval_section.content, text="Search Type:").grid(row=1, column=0, sticky="w")
         self.create_combobox(
             retrieval_section.content,
             textvariable=self.search_type,
             values=["similarity", "mmr"],
             state="readonly",
             width=12,
-        ).grid(row=0, column=1, sticky="w", padx=(5, 15), pady=2)
-        self.create_label(retrieval_section.content, text="Search Mode:").grid(row=0, column=2, sticky="w")
+        ).grid(row=1, column=1, sticky="w", padx=(5, 15), pady=2)
+        self.create_label(retrieval_section.content, text="Search Mode:").grid(row=1, column=2, sticky="w")
         self.create_combobox(
             retrieval_section.content,
             textvariable=self.retrieval_mode,
             values=self.retrieval_mode_options,
             state="readonly",
             width=28,
-        ).grid(row=0, column=3, sticky="w", padx=(5, 0), pady=2)
-        self.create_label(retrieval_section.content, text="MMR lambda:").grid(row=1, column=0, sticky="w")
-        self.create_entry(retrieval_section.content, textvariable=self.mmr_lambda, width=8).grid(row=1, column=1, sticky="w", padx=(5, 15), pady=2)
+        ).grid(row=1, column=3, sticky="w", padx=(5, 0), pady=2)
+        self.create_label(retrieval_section.content, text="MMR lambda:").grid(row=2, column=0, sticky="w")
+        self.create_entry(retrieval_section.content, textvariable=self.mmr_lambda, width=8).grid(row=2, column=1, sticky="w", padx=(5, 15), pady=2)
         self.create_checkbox(
             retrieval_section.content,
             text="Use Cohere Reranker (Higher Precision)",
             variable=self.use_reranker,
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
         self.create_checkbox(
             retrieval_section.content,
             text="Use Sub-Queries (Broader Recall)",
             variable=self.use_sub_queries,
-        ).grid(row=2, column=2, columnspan=2, sticky="w", pady=(4, 0))
-        self.create_label(retrieval_section.content, text="Max Merged Docs:").grid(row=3, column=0, sticky="w")
-        self.create_entry(retrieval_section.content, textvariable=self.subquery_max_docs, width=8).grid(row=3, column=1, sticky="w", padx=(5, 15), pady=2)
-        self.create_label(retrieval_section.content, text="Fallback Final K:").grid(row=3, column=2, sticky="w")
-        self.create_entry(retrieval_section.content, textvariable=self.fallback_final_k, width=8).grid(row=3, column=3, sticky="w", padx=(5, 0), pady=2)
+        ).grid(row=3, column=2, columnspan=2, sticky="w", pady=(4, 0))
+        self.create_label(retrieval_section.content, text="Max Merged Docs:").grid(row=4, column=0, sticky="w")
+        self.create_entry(retrieval_section.content, textvariable=self.subquery_max_docs, width=8).grid(row=4, column=1, sticky="w", padx=(5, 15), pady=2)
+        self.create_label(retrieval_section.content, text="Fallback Final K:").grid(row=4, column=2, sticky="w")
+        self.create_entry(retrieval_section.content, textvariable=self.fallback_final_k, width=8).grid(row=4, column=3, sticky="w", padx=(5, 0), pady=2)
         self.create_button(
             retrieval_section.content,
             text="Apply Auto recommendations",
             command=lambda: self._apply_auto_recommendations(),
             style="Secondary.TButton",
-        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         agentic_section = CollapsibleFrame(frame, "Agentic / Iterations", expanded=False)
         agentic_section.grid(row=8, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_agentic_section = agentic_section
         self._register_settings_section(self.settings_agentic_section, "Agentic / Iterations", advanced_only=True)
+        self.create_label(agentic_section.content, text="Enables multi-iteration retrieval where a critic refines queries between passes to improve coverage.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
         self.create_checkbox(
             agentic_section.content,
             text="Agentic mode (iterate)",
@@ -5180,6 +5185,7 @@ class AgenticRAGApp:
         frontier_section.grid(row=9, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_frontier_section = frontier_section
         self._register_settings_section(self.settings_frontier_section, "Frontier", advanced_only=True)
+        self.create_label(frontier_section.content, text="Experimental features: citation v2, structured extraction, recursive memory, and agent tracing. May be unstable.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
         self.create_checkbox(frontier_section.content, text="Enable langextract", variable=self.enable_langextract).pack(anchor="w")
         self.create_checkbox(frontier_section.content, text="Structured Extraction", variable=self.enable_structured_extraction).pack(anchor="w")
         self.create_checkbox(frontier_section.content, text="Enable structured incidents", variable=self.enable_structured_incidents).pack(anchor="w")
@@ -5193,6 +5199,7 @@ class AgenticRAGApp:
         profile_section = CollapsibleFrame(frame, "Profiles", expanded=True)
         profile_section.grid(row=10, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self._register_settings_section(profile_section, "Profiles")
+        self.create_label(profile_section.content, text="Save and restore named configuration snapshots to switch between different use-case setups quickly.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
         profile_row = self.create_frame(profile_section.content)
         profile_row.pack(fill="x")
         self.create_label(profile_row, text="Profile list:").pack(side="left")
@@ -5689,8 +5696,8 @@ class AgenticRAGApp:
         self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, UI_SPACING["m"]))
         self.chat_display.tag_config("citation", underline=1)
         self.chat_display.tag_bind("citation", "<Button-1>", self._on_citation_click)
-        self.chat_display.tag_bind("citation", "<Enter>", lambda _e: self.chat_display.config(cursor="hand2"))
-        self.chat_display.tag_bind("citation", "<Leave>", lambda _e: self.chat_display.config(cursor=""))
+        self.chat_display.tag_bind("citation", "<Enter>", self._on_citation_hover)
+        self.chat_display.tag_bind("citation", "<Leave>", self._on_citation_leave)
 
         # Tag configuration for coloring
         self.chat_display.tag_config(
@@ -5808,13 +5815,23 @@ class AgenticRAGApp:
 
         self.answer_tab = self.create_frame(self.evidence_notebook)
         self.evidence_notebook.add(self.answer_tab, text="Answer")
+        answer_action_bar = self.create_frame(self.answer_tab)
+        answer_action_bar.pack(fill="x", pady=(0, UI_SPACING["xs"]))
+        self.create_button(
+            answer_action_bar, text="Copy Answer", command=self.copy_last_answer,
+            style="Secondary.TButton",
+        ).pack(side="left", padx=(0, UI_SPACING["xs"]))
+        self.create_button(
+            answer_action_bar, text="Export Answer…", command=self.export_notes_to_markdown,
+            style="Secondary.TButton",
+        ).pack(side="left")
         self.answer_text = self.create_rich_text_surface(
             self.answer_tab, surface_id="answer_text", height=20, wrap=tk.WORD, state="disabled", font=("Segoe UI", 10)
         )
         self.answer_text.tag_config("citation", underline=1)
         self.answer_text.tag_bind("citation", "<Button-1>", self._on_answer_citation_click)
-        self.answer_text.tag_bind("citation", "<Enter>", lambda _e: self.answer_text.config(cursor="hand2"))
-        self.answer_text.tag_bind("citation", "<Leave>", lambda _e: self.answer_text.config(cursor=""))
+        self.answer_text.tag_bind("citation", "<Enter>", self._on_citation_hover)
+        self.answer_text.tag_bind("citation", "<Leave>", self._on_citation_leave)
         self.answer_text.pack(fill=tk.BOTH, expand=True)
 
         self.sources_tab = self.create_frame(self.evidence_notebook)
@@ -6435,6 +6452,50 @@ class AgenticRAGApp:
         self.sources_tree.see(sid)
         self._on_source_selected()
 
+    def _on_citation_hover(self, event):
+        widget = event.widget
+        widget.config(cursor="hand2")
+        try:
+            index = widget.index(f"@{event.x},{event.y}")
+            ranges = widget.tag_prevrange("citation", index)
+            if not ranges:
+                return
+            raw = widget.get(ranges[0], ranges[1]).strip()
+            match = re.search(r"S\d+", raw)
+            if not match:
+                return
+            sid = match.group(0)
+            source_map = getattr(self, "_latest_source_map", {}) or {}
+            entry = source_map.get(sid) or {}
+            label = entry.get("label") or entry.get("source") or sid
+            snippet = entry.get("snippet") or ""
+            tip = label if not snippet else f"{label}\n{snippet[:120]}"
+            if self._citation_tip:
+                try:
+                    self._citation_tip.destroy()
+                except Exception:
+                    pass
+            tw = tk.Toplevel(self.root)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{event.x_root + 14}+{event.y_root + 14}")
+            tk.Label(
+                tw, text=tip, justify="left", background="#ffffe0",
+                relief="solid", borderwidth=1, wraplength=280,
+                font=("Segoe UI", 9),
+            ).pack()
+            self._citation_tip = tw
+        except Exception:
+            pass
+
+    def _on_citation_leave(self, event):
+        event.widget.config(cursor="")
+        if self._citation_tip:
+            try:
+                self._citation_tip.destroy()
+            except Exception:
+                pass
+            self._citation_tip = None
+
     def _on_citation_click(self, event=None):
         try:
             index = self.chat_display.index(f"@{event.x},{event.y}") if event else self.chat_display.index(tk.INSERT)
@@ -6445,8 +6506,8 @@ class AgenticRAGApp:
             match = re.search(r"S\d+", raw)
             if match:
                 self._select_source_by_sid(match.group(0))
-        except Exception:
-            return
+        except Exception as e:
+            self.log(f"Citation navigation error: {e}")
 
 
     def _on_answer_citation_click(self, event=None):
@@ -6459,8 +6520,8 @@ class AgenticRAGApp:
             match = re.search(r"S\d+", raw)
             if match:
                 self._select_source_by_sid(match.group(0))
-        except Exception:
-            return
+        except Exception as e:
+            self.log(f"Citation navigation error: {e}")
 
     def _tag_citations_in_answer(self):
         text = self.answer_text.get("1.0", tk.END)
@@ -8908,6 +8969,7 @@ class AgenticRAGApp:
                         )
                     ):
                         self.lexical_db_available = False
+                        self._run_on_ui(self._set_startup_status, "Lexical search unavailable — using semantic search only.")
                     self.log(
                         f"Lexical search failed after retry; continuing without it. ({retry_exc})"
                     )
@@ -8923,6 +8985,7 @@ class AgenticRAGApp:
                     )
                 ):
                     self.lexical_db_available = False
+                    self._run_on_ui(self._set_startup_status, "Lexical search unavailable — using semantic search only.")
                 self.log(f"Lexical search failed; continuing without it. ({exc})")
                 return []
         except Exception as exc:
@@ -8937,6 +9000,7 @@ class AgenticRAGApp:
                 )
             ):
                 self.lexical_db_available = False
+                self._run_on_ui(self._set_startup_status, "Lexical search unavailable — using semantic search only.")
             self.log(f"Lexical search failed; continuing without it. ({exc})")
             return []
 
@@ -9232,7 +9296,7 @@ class AgenticRAGApp:
         search_kwargs = {"k": max(1, int(k))}
         if self.search_type.get() == "mmr":
             search_kwargs["fetch_k"] = max(search_kwargs["k"] + 1, min(60, search_kwargs["k"] * 4))
-            search_kwargs["lambda_mult"] = 0.35 if str(self.retrieval_mode.get()).strip().lower() == "hierarchical" else float(self.mmr_lambda.get())
+            search_kwargs["lambda_mult"] = 0.5 if str(self.retrieval_mode.get()).strip().lower() == "hierarchical" else float(self.mmr_lambda.get())
         retriever = digest_store.as_retriever(
             search_type=self.search_type.get(),
             search_kwargs=search_kwargs,
@@ -14093,6 +14157,7 @@ class AgenticRAGApp:
                 except Exception as pdf_err:
                     self._latest_sht_tree = []
                     self.log(f"PDF structured parsing failed ({pdf_err}); falling back to flat extraction.")
+                    self._run_on_ui(self._set_startup_status, "PDF structured parsing failed — using flat text extraction.")
                     try:
                         from pypdf import PdfReader
 
@@ -14166,7 +14231,7 @@ class AgenticRAGApp:
                 splitter = RecursiveCharacterTextSplitter(
                     chunk_size=ingest_ctx["chunk_size"],
                     chunk_overlap=ingest_ctx["chunk_overlap"],
-                    separators=["\n\n", "\n", ".", " ", ""],
+                    separators=["\n\n", "\n", ". ", "! ", "? ", ".", " ", ""],
                 )
                 docs = splitter.create_documents([text_content])
 
@@ -15451,7 +15516,7 @@ class AgenticRAGApp:
             def _build_search_kwargs(k_value):
                 search_kwargs_local = {"k": k_value}
                 if search_type == "mmr":
-                    fetch_k = min(max(4 * k_value, 50), 200)
+                    fetch_k = min(max(4 * k_value, 30), 200)
                     if fetch_k <= k_value:
                         fetch_k = k_value + 1
                     search_kwargs_local.update(
@@ -15885,6 +15950,7 @@ class AgenticRAGApp:
                         candidates = compressed_docs
                     except Exception as exc:
                         self.log(f"Rerank Error (Using raw retrieval instead): {exc}")
+                        self._run_on_ui(self._set_startup_status, "Reranker unavailable — using unranked results.")
                 group_limit = 1 if evidence_pack_mode else MAX_GROUP_DOCS
                 candidates = self._apply_coverage_selection(
                     candidates,
@@ -16212,6 +16278,7 @@ class AgenticRAGApp:
                 )
                 max_total_docs = max(1, int(rag_ctx["subquery_max_docs"]))
                 retrieve_started_at = time.perf_counter()
+                self._run_on_ui(self._set_startup_status, f"Retrieving documents ({len(queries)} quer{'ies' if len(queries) != 1 else 'y'})…")
                 (
                     docs,
                     retrieved_count,
@@ -16240,6 +16307,7 @@ class AgenticRAGApp:
                 self.log(
                     f"Retrieved {len(docs)} initial candidates from {len(queries)} query(s)."
                 )
+                self._run_on_ui(self._set_startup_status, f"Retrieved {len(docs)} candidates — selecting top {final_k}…")
                 rerank_started_at = time.perf_counter()
                 if use_mini_digest:
                     routed_docs = self._route_with_mini_digest(docs, query, final_k)
@@ -16546,6 +16614,7 @@ class AgenticRAGApp:
 
                 self._job_cancel_checkpoint(cancel_event, "rag", "pre-generation")
                 self.log("Generating Answer...")
+                self._run_on_ui(self._set_startup_status, f"Synthesizing answer from {len(final_docs)} sources…")
                 llm = self.get_llm(rag_ctx.get("llm_ctx"))
                 style_instruction = self._get_output_style_instruction()
                 evidence_instruction = (
@@ -16796,6 +16865,7 @@ class AgenticRAGApp:
             last_unique_incident_count = 0
             for iteration in range(1, max_iterations + 1):
                 self._job_cancel_checkpoint(cancel_event, "rag", f"iteration {iteration}")
+                self._run_on_ui(self._set_startup_status, f"Agentic retrieval: iteration {iteration}/{max_iterations}…")
                 iteration_started_at = time.perf_counter()
                 follow_up_queries = []
                 coverage_stats = {"triggered": False}
@@ -17277,6 +17347,7 @@ class AgenticRAGApp:
 
                 self._job_cancel_checkpoint(cancel_event, "rag", "pre-generation")
                 self.log("Generating Answer...")
+                self._run_on_ui(self._set_startup_status, f"Synthesizing answer from {len(final_docs)} sources (iter {iteration})…")
                 llm = self.get_llm(rag_ctx.get("llm_ctx"))
                 checklist_text = "\n".join(f"- {item}" for item in checklist)
                 coverage_note = ""
