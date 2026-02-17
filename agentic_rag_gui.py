@@ -94,6 +94,46 @@ class MockEmbeddings:
         return self._embed(text)
 
 
+class LocalSentenceTransformerEmbeddings:
+    """Optional local sentence-transformers embedding backend with batched encode."""
+
+    def __init__(self, model_name, cache_folder=None, batch_size=32):
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as err:
+            raise ImportError(
+                "sentence-transformers is not installed. Install it from Settings."
+            ) from err
+
+        self.model_name = (model_name or "sentence-transformers/all-MiniLM-L6-v2").strip()
+        self.cache_folder = (cache_folder or "").strip() or None
+        self.batch_size = max(1, int(batch_size))
+        self._model = SentenceTransformer(self.model_name, cache_folder=self.cache_folder)
+
+    def embed_documents(self, texts):
+        vectors = []
+        safe_texts = [text or "" for text in (texts or [])]
+        for i in range(0, len(safe_texts), self.batch_size):
+            batch = safe_texts[i : i + self.batch_size]
+            encoded = self._model.encode(
+                batch,
+                batch_size=self.batch_size,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+            )
+            vectors.extend(encoded.tolist())
+        return vectors
+
+    def embed_query(self, text):
+        encoded = self._model.encode(
+            [text or ""],
+            batch_size=1,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+        )
+        return encoded[0].tolist()
+
+
 class MockChatModel:
     """Deterministic local chat model for Test Mode demos."""
 
@@ -831,6 +871,11 @@ class AgenticRAGApp:
         self.llm_model_custom = tk.StringVar()
         self.embedding_model = tk.StringVar(value="voyage-4-large")
         self.embedding_model_custom = tk.StringVar()
+        self.local_st_model_name = tk.StringVar(value="sentence-transformers/all-MiniLM-L6-v2")
+        self.local_st_cache_dir = tk.StringVar(
+            value=os.path.join(os.path.expanduser("~"), ".cache", "sentence_transformers")
+        )
+        self.local_st_batch_size = tk.IntVar(value=32)
         self.llm_temperature = tk.DoubleVar(value=0.0)
         self.llm_max_tokens = tk.IntVar(value=1024)
         self.force_embedding_compat = tk.BooleanVar(value=False)
@@ -2470,6 +2515,9 @@ class AgenticRAGApp:
                 "embedding model": "Embedding model affects semantic matching quality and cost.",
                 "custom embedding model": "Override embedding model when you need custom or local variants.",
                 "browse local hf model": "Point to a local Hugging Face embedding model directory.",
+                "local sentence-transformers model name/path": "Model ID or local path used by sentence-transformers (defaults to all-MiniLM-L6-v2).",
+                "local sentence-transformers cache directory": "Folder used to cache downloaded sentence-transformers models.",
+                "install sentence-transformers": "Installs optional local embedding support so no external embedding API is required.",
                 "force embedding compatibility": "Bypass compatibility guardrails; useful only when you know dimensions match.",
                 "local llm url": "Endpoint for local LM Studio/OpenAI-compatible servers.",
                 "local gguf model": "Path to a local .gguf file used by llama-cpp-python when provider is local_gguf.",
@@ -2665,6 +2713,7 @@ class AgenticRAGApp:
             "openai": ["text-embedding-3-small", "text-embedding-3-large", "custom"],
             "google": ["models/embedding-001", "custom"],
             "local_huggingface": ["all-MiniLM-L6-v2", "custom"],
+            "local_sentence_transformers": ["sentence-transformers/all-MiniLM-L6-v2", "custom"],
             "voyage": [
                 "voyage-4-large",
                 "voyage-4-lite",
@@ -2697,11 +2746,13 @@ class AgenticRAGApp:
 
         self._toggle_custom_entries()
         self._update_local_gguf_ui_state()
+        self._update_local_sentence_transformers_ui_state()
 
     def _toggle_custom_entries(self):
         llm_custom_enabled = self.llm_model.get() == "custom"
         emb_custom_enabled = self.embedding_model.get() == "custom"
         hf_enabled = self.embedding_provider.get() == "local_huggingface"
+        local_st_enabled = self.embedding_provider.get() == "local_sentence_transformers"
 
         if hasattr(self, "llm_model_custom_entry") and self._safe_widget_exists(self.llm_model_custom_entry):
             self.llm_model_custom_entry.config(
@@ -2709,10 +2760,21 @@ class AgenticRAGApp:
             )
         if hasattr(self, "embedding_model_custom_entry") and self._safe_widget_exists(self.embedding_model_custom_entry):
             self.embedding_model_custom_entry.config(
-                state="normal" if emb_custom_enabled else "disabled"
+                state="normal" if emb_custom_enabled and not local_st_enabled else "disabled"
             )
         if hasattr(self, "btn_browse_hf_model") and self._safe_widget_exists(self.btn_browse_hf_model):
             self.btn_browse_hf_model.config(state="normal" if hf_enabled else "disabled")
+        if hasattr(self, "cb_emb_model") and self._safe_widget_exists(self.cb_emb_model):
+            self.cb_emb_model.config(state="disabled" if local_st_enabled else "readonly")
+
+        for widget_name in (
+            "local_st_model_entry",
+            "local_st_cache_entry",
+            "local_st_browse_cache_btn",
+        ):
+            widget = getattr(self, widget_name, None)
+            if widget is not None and self._safe_widget_exists(widget):
+                widget.config(state="normal" if local_st_enabled else "disabled")
 
         gguf_enabled = self.llm_provider.get() == "local_gguf"
         for widget_name in (
@@ -2732,6 +2794,7 @@ class AgenticRAGApp:
 
     def _on_embedding_provider_change(self, event=None):
         self._sync_model_options()
+        self._update_local_sentence_transformers_ui_state()
         self._refresh_compatibility_warning()
         self._update_current_state_strip()
 
@@ -3014,6 +3077,12 @@ class AgenticRAGApp:
             self._toggle_custom_entries()
             self._refresh_compatibility_warning()
 
+    def browse_local_st_cache_dir(self):
+        path = filedialog.askdirectory()
+        if path:
+            self.local_st_cache_dir.set(path)
+            self._update_local_sentence_transformers_ui_state()
+
     def browse_gguf_model(self):
         path = filedialog.askopenfilename(
             title="Select GGUF model",
@@ -3026,10 +3095,20 @@ class AgenticRAGApp:
     def _local_gguf_dependency_available(self):
         return importlib.util.find_spec("llama_cpp") is not None
 
+    def _local_sentence_transformers_available(self):
+        return importlib.util.find_spec("sentence_transformers") is not None
+
     def install_local_llama_cpp_dependency(self):
         threading.Thread(
             target=self.install_packages,
             args=(["llama-cpp-python"],),
+            daemon=True,
+        ).start()
+
+    def install_local_sentence_transformers_dependency(self):
+        threading.Thread(
+            target=self.install_packages,
+            args=(["sentence-transformers"],),
             daemon=True,
         ).start()
 
@@ -3059,6 +3138,37 @@ class AgenticRAGApp:
                 style="Success.TLabel",
             )
             self.local_gguf_install_btn.config(state="disabled")
+
+    def _update_local_sentence_transformers_ui_state(self):
+        if not hasattr(self, "local_st_dependency_status") or not self._safe_widget_exists(self.local_st_dependency_status):
+            return
+        provider_selected = self.embedding_provider.get() == "local_sentence_transformers"
+        dep_ok = self._local_sentence_transformers_available()
+        model_name = (self.local_st_model_name.get() or "").strip()
+
+        if not dep_ok:
+            self.local_st_dependency_status.config(
+                text="local_sentence_transformers unavailable: sentence-transformers is missing. Click install and restart the app.",
+                style="Danger.TLabel",
+            )
+            self.local_st_install_btn.config(state="normal" if provider_selected else "disabled")
+            return
+
+        if provider_selected and not model_name:
+            self.local_st_dependency_status.config(
+                text="Set a local sentence-transformers model name/path to continue.",
+                style="Danger.TLabel",
+            )
+            self.local_st_install_btn.config(state="disabled")
+            return
+
+        cache_dir = (self.local_st_cache_dir.get() or "").strip()
+        cache_note = f" Cache: {cache_dir}" if cache_dir else ""
+        self.local_st_dependency_status.config(
+            text=f"Local sentence-transformers runtime ready.{cache_note}",
+            style="Success.TLabel",
+        )
+        self.local_st_install_btn.config(state="disabled")
 
     def load_config(self):
         if not os.path.exists(self.config_path):
@@ -3118,6 +3228,15 @@ class AgenticRAGApp:
         self.embedding_model.set(data.get("embedding_model", self.embedding_model.get()))
         self.embedding_model_custom.set(
             data.get("embedding_model_custom", self.embedding_model_custom.get())
+        )
+        self.local_st_model_name.set(
+            data.get("local_st_model_name", self.local_st_model_name.get())
+        )
+        self.local_st_cache_dir.set(
+            data.get("local_st_cache_dir", self.local_st_cache_dir.get())
+        )
+        self.local_st_batch_size.set(
+            max(1, int(data.get("local_st_batch_size", self.local_st_batch_size.get()) or 32))
         )
         self.llm_temperature.set(data.get("llm_temperature", self.llm_temperature.get()))
         self.llm_max_tokens.set(data.get("llm_max_tokens", self.llm_max_tokens.get()))
@@ -3287,6 +3406,9 @@ class AgenticRAGApp:
             "llm_model_custom": self.llm_model_custom.get(),
             "embedding_model": self.embedding_model.get(),
             "embedding_model_custom": self.embedding_model_custom.get(),
+            "local_st_model_name": self.local_st_model_name.get(),
+            "local_st_cache_dir": self.local_st_cache_dir.get(),
+            "local_st_batch_size": max(1, int(self.local_st_batch_size.get())),
             "llm_temperature": self.llm_temperature.get(),
             "llm_max_tokens": self.llm_max_tokens.get(),
             "system_instructions": self.system_instructions.get(),
@@ -3683,7 +3805,7 @@ class AgenticRAGApp:
         cb_emb = ttk.Combobox(
             llm_frame,
             textvariable=self.embedding_provider,
-            values=["voyage", "openai", "google", "local_huggingface", "mock"],
+            values=["voyage", "openai", "google", "local_huggingface", "local_sentence_transformers", "mock"],
             state="readonly",
         )
         cb_emb.grid(row=3, column=1, sticky="ew", padx=5, pady=5)
@@ -3713,6 +3835,44 @@ class AgenticRAGApp:
         )
         self.btn_browse_hf_model.grid(row=6, column=1, sticky="w", padx=5, pady=(0, 5))
 
+        ttk.Label(llm_frame, text="Local sentence-transformers model name/path:").grid(
+            row=7, column=0, sticky="w"
+        )
+        self.local_st_model_entry = ttk.Entry(
+            llm_frame, textvariable=self.local_st_model_name
+        )
+        self.local_st_model_entry.grid(row=7, column=1, sticky="ew", padx=5, pady=5)
+
+        ttk.Label(llm_frame, text="Local sentence-transformers cache directory:").grid(
+            row=8, column=0, sticky="w"
+        )
+        local_st_cache_row = ttk.Frame(llm_frame)
+        local_st_cache_row.grid(row=8, column=1, sticky="ew", padx=5, pady=5)
+        local_st_cache_row.columnconfigure(0, weight=1)
+        self.local_st_cache_entry = ttk.Entry(local_st_cache_row, textvariable=self.local_st_cache_dir)
+        self.local_st_cache_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.local_st_browse_cache_btn = ttk.Button(
+            local_st_cache_row,
+            text="Browse...",
+            command=self.browse_local_st_cache_dir,
+        )
+        self.local_st_browse_cache_btn.grid(row=0, column=1, sticky="e")
+
+        self.local_st_dependency_status = ttk.Label(
+            llm_frame,
+            text="",
+            style="Muted.TLabel",
+            wraplength=500,
+            justify="left",
+        )
+        self.local_st_dependency_status.grid(row=9, column=1, sticky="w", padx=5, pady=(0, 4))
+        self.local_st_install_btn = ttk.Button(
+            llm_frame,
+            text="Install sentence-transformers",
+            command=self.install_local_sentence_transformers_dependency,
+        )
+        self.local_st_install_btn.grid(row=10, column=1, sticky="w", padx=5, pady=(0, 6))
+
         self.compat_warning = ttk.Label(
             llm_frame,
             text="",
@@ -3720,41 +3880,41 @@ class AgenticRAGApp:
             wraplength=360,
             justify="left",
         )
-        self.compat_warning.grid(row=7, column=1, sticky="w", padx=5, pady=(0, 5))
+        self.compat_warning.grid(row=11, column=1, sticky="w", padx=5, pady=(0, 5))
         self.force_compat_check = ttk.Checkbutton(
             llm_frame,
             text="Force embedding compatibility (skip warning)",
             variable=self.force_embedding_compat,
         )
-        self.force_compat_check.grid(row=8, column=1, sticky="w", padx=5, pady=(0, 5))
+        self.force_compat_check.grid(row=12, column=1, sticky="w", padx=5, pady=(0, 5))
 
         ttk.Label(llm_frame, text="Local LLM URL (if using LM Studio):").grid(
-            row=9, column=0, sticky="w"
+            row=13, column=0, sticky="w"
         )
         ttk.Entry(llm_frame, textvariable=self.local_llm_url).grid(
-            row=9, column=1, sticky="ew", padx=5, pady=5
+            row=13, column=1, sticky="ew", padx=5, pady=5
         )
 
-        ttk.Label(llm_frame, text="Local GGUF model (.gguf):").grid(row=10, column=0, sticky="w")
+        ttk.Label(llm_frame, text="Local GGUF model (.gguf):").grid(row=14, column=0, sticky="w")
         gguf_path_row = ttk.Frame(llm_frame)
-        gguf_path_row.grid(row=10, column=1, sticky="ew", padx=5, pady=5)
+        gguf_path_row.grid(row=14, column=1, sticky="ew", padx=5, pady=5)
         gguf_path_row.columnconfigure(0, weight=1)
         self.local_gguf_model_entry = ttk.Entry(gguf_path_row, textvariable=self.local_gguf_model_path)
         self.local_gguf_model_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.local_gguf_browse_btn = ttk.Button(gguf_path_row, text="Browse...", command=self.browse_gguf_model)
         self.local_gguf_browse_btn.grid(row=0, column=1, sticky="e")
 
-        ttk.Label(llm_frame, text="Local GGUF context length:").grid(row=11, column=0, sticky="w")
+        ttk.Label(llm_frame, text="Local GGUF context length:").grid(row=15, column=0, sticky="w")
         self.local_gguf_ctx_entry = ttk.Entry(llm_frame, textvariable=self.local_gguf_context_length)
-        self.local_gguf_ctx_entry.grid(row=11, column=1, sticky="ew", padx=5, pady=5)
+        self.local_gguf_ctx_entry.grid(row=15, column=1, sticky="ew", padx=5, pady=5)
 
-        ttk.Label(llm_frame, text="Local GGUF GPU layers (optional):").grid(row=12, column=0, sticky="w")
+        ttk.Label(llm_frame, text="Local GGUF GPU layers (optional):").grid(row=16, column=0, sticky="w")
         self.local_gguf_gpu_layers_entry = ttk.Entry(llm_frame, textvariable=self.local_gguf_gpu_layers)
-        self.local_gguf_gpu_layers_entry.grid(row=12, column=1, sticky="ew", padx=5, pady=5)
+        self.local_gguf_gpu_layers_entry.grid(row=16, column=1, sticky="ew", padx=5, pady=5)
 
-        ttk.Label(llm_frame, text="Local GGUF CPU threads (optional):").grid(row=13, column=0, sticky="w")
+        ttk.Label(llm_frame, text="Local GGUF CPU threads (optional):").grid(row=17, column=0, sticky="w")
         self.local_gguf_threads_entry = ttk.Entry(llm_frame, textvariable=self.local_gguf_threads)
-        self.local_gguf_threads_entry.grid(row=13, column=1, sticky="ew", padx=5, pady=5)
+        self.local_gguf_threads_entry.grid(row=17, column=1, sticky="ew", padx=5, pady=5)
 
         self.local_gguf_help = ttk.Label(
             llm_frame,
@@ -3766,34 +3926,34 @@ class AgenticRAGApp:
             wraplength=500,
             justify="left",
         )
-        self.local_gguf_help.grid(row=14, column=1, sticky="w", padx=5, pady=(0, 5))
+        self.local_gguf_help.grid(row=18, column=1, sticky="w", padx=5, pady=(0, 5))
 
         self.local_gguf_dependency_status = ttk.Label(llm_frame, text="", style="Muted.TLabel", wraplength=500, justify="left")
-        self.local_gguf_dependency_status.grid(row=15, column=1, sticky="w", padx=5, pady=(0, 4))
+        self.local_gguf_dependency_status.grid(row=19, column=1, sticky="w", padx=5, pady=(0, 4))
         self.local_gguf_install_btn = ttk.Button(
             llm_frame,
             text="Install llama-cpp-python",
             command=self.install_local_llama_cpp_dependency,
         )
-        self.local_gguf_install_btn.grid(row=16, column=1, sticky="w", padx=5, pady=(0, 6))
+        self.local_gguf_install_btn.grid(row=20, column=1, sticky="w", padx=5, pady=(0, 6))
 
-        ttk.Label(llm_frame, text="Temperature:").grid(row=17, column=0, sticky="w")
+        ttk.Label(llm_frame, text="Temperature:").grid(row=21, column=0, sticky="w")
         ttk.Entry(llm_frame, textvariable=self.llm_temperature).grid(
-            row=17, column=1, sticky="ew", padx=5, pady=5
+            row=21, column=1, sticky="ew", padx=5, pady=5
         )
 
-        ttk.Label(llm_frame, text="Max Tokens:").grid(row=18, column=0, sticky="w")
+        ttk.Label(llm_frame, text="Max Tokens:").grid(row=22, column=0, sticky="w")
         ttk.Entry(llm_frame, textvariable=self.llm_max_tokens).grid(
-            row=18, column=1, sticky="ew", padx=5, pady=5
+            row=22, column=1, sticky="ew", padx=5, pady=5
         )
 
         ttk.Label(llm_frame, text="System Instructions:").grid(
-            row=19, column=0, sticky="nw"
+            row=23, column=0, sticky="nw"
         )
         self.instructions_box = scrolledtext.ScrolledText(
             llm_frame, height=6, font=("Segoe UI", 9)
         )
-        self.instructions_box.grid(row=19, column=1, sticky="ew", padx=5, pady=5)
+        self.instructions_box.grid(row=23, column=1, sticky="ew", padx=5, pady=5)
         self.instructions_box.insert(tk.END, self.system_instructions.get())
         self.instructions_box.bind("<KeyRelease>", self._on_instructions_change)
         ttk.Checkbutton(
@@ -3801,9 +3961,10 @@ class AgenticRAGApp:
             text="Verbose/Analytical mode",
             variable=self.verbose_mode,
             command=self._on_verbose_mode_toggle,
-        ).grid(row=20, column=1, sticky="w", padx=5, pady=(0, 5))
+        ).grid(row=24, column=1, sticky="w", padx=5, pady=(0, 5))
 
         self._update_local_gguf_ui_state()
+        self._update_local_sentence_transformers_ui_state()
 
         # --- Vector DB Settings ---
         db_frame = ttk.LabelFrame(self.settings_model_section.content, text="Vector Database Strategy", padding=15)
@@ -4781,7 +4942,7 @@ class AgenticRAGApp:
     def _render_wizard_step_three(self):
         self._wizard_step_label.config(text="Step 3 of 6: Choose LLM and embedding providers/models")
         llm_values = ["openai", "anthropic", "google", "local_lm_studio", "local_gguf"]
-        emb_values = ["voyage", "openai", "google", "local_huggingface"]
+        emb_values = ["voyage", "openai", "google", "local_huggingface", "local_sentence_transformers"]
         self._wizard_llm_provider = tk.StringVar(value=self._wizard_state.get("llm_provider", self.llm_provider.get()))
         self._wizard_embedding_provider = tk.StringVar(value=self._wizard_state.get("embedding_provider", self.embedding_provider.get()))
         self._wizard_llm_model = tk.StringVar(value=self._wizard_state.get("llm_model", self.llm_model.get()))
@@ -8412,6 +8573,11 @@ class AgenticRAGApp:
                 "HuggingFaceEmbeddings",
                 ["langchain-community"],
             ),
+            "local_sentence_transformers": (
+                "sentence_transformers",
+                "SentenceTransformer",
+                ["sentence-transformers"],
+            ),
         }
         if embedding_provider in embedding_checks:
             module_name, symbol_name, packages = embedding_checks[embedding_provider]
@@ -11153,6 +11319,11 @@ class AgenticRAGApp:
         return selected or custom
 
     def _resolve_embedding_model(self):
+        if self.embedding_provider.get() == "local_sentence_transformers":
+            return (
+                self.local_st_model_name.get().strip()
+                or "sentence-transformers/all-MiniLM-L6-v2"
+            )
         selected = self.embedding_model.get().strip()
         custom = self.embedding_model_custom.get().strip()
         if selected == "custom":
@@ -11171,6 +11342,13 @@ class AgenticRAGApp:
             provider = str(embedding_ctx.get("provider") or "").strip()
             api_key = str(embedding_ctx.get("api_key") or "")
             model_name = str(embedding_ctx.get("model_name") or "").strip()
+        cache_dir = ""
+        batch_size = int(self.local_st_batch_size.get()) if hasattr(self, "local_st_batch_size") else 32
+        if embedding_ctx is None:
+            cache_dir = self.local_st_cache_dir.get().strip()
+        else:
+            cache_dir = str(embedding_ctx.get("cache_dir") or "").strip()
+            batch_size = int(embedding_ctx.get("batch_size") or batch_size)
 
         if provider == "openai":
             try:
@@ -11240,6 +11418,26 @@ class AgenticRAGApp:
             resolved_model = model_name or "all-MiniLM-L6-v2"
             self.log(f"Loading local HuggingFace embeddings ({resolved_model})...")
             return HuggingFaceEmbeddings(model_name=resolved_model)
+
+        if provider == "local_sentence_transformers":
+            resolved_model = model_name or "sentence-transformers/all-MiniLM-L6-v2"
+            try:
+                self.log(
+                    "Loading local sentence-transformers embeddings "
+                    f"({resolved_model}, batch_size={max(1, batch_size)})..."
+                )
+                return LocalSentenceTransformerEmbeddings(
+                    model_name=resolved_model,
+                    cache_folder=cache_dir,
+                    batch_size=max(1, batch_size),
+                )
+            except ImportError as err:
+                self._prompt_dependency_install(
+                    ["sentence-transformers"],
+                    "Local sentence-transformers embeddings",
+                    err,
+                )
+                raise
 
         if provider == "mock":
             return MockEmbeddings()
@@ -11414,6 +11612,8 @@ class AgenticRAGApp:
                 "provider": embedding_provider,
                 "api_key": self.api_keys[embedding_provider].get() if embedding_provider in self.api_keys else "",
                 "model_name": self._resolve_embedding_model(),
+                "cache_dir": self.local_st_cache_dir.get().strip(),
+                "batch_size": max(1, int(self.local_st_batch_size.get())),
             },
             "weaviate_url": self.api_keys["weaviate_url"].get(),
             "weaviate_key": self.api_keys["weaviate_key"].get(),
@@ -11928,7 +12128,8 @@ class AgenticRAGApp:
 
             # 4. Batch Embed & Upsert
             self.log("Step 4/4: Embedding & Storing (This takes time)...")
-            batch_size = 100  # Adjust based on API limits
+            embedding_provider = str((ingest_ctx.get("embedding_ctx") or {}).get("provider") or "")
+            batch_size = 32 if embedding_provider == "local_sentence_transformers" else 100
             total_docs = len(docs)
 
             self._run_on_ui(self.progress.config, maximum=total_docs, value=0)
@@ -12183,6 +12384,8 @@ class AgenticRAGApp:
                 "provider": embedding_provider,
                 "api_key": self.api_keys[embedding_provider].get() if embedding_provider in self.api_keys else "",
                 "model_name": self._resolve_embedding_model(),
+                "cache_dir": self.local_st_cache_dir.get().strip(),
+                "batch_size": max(1, int(self.local_st_batch_size.get())),
             },
         }
         rag_ctx["system_instructions"] = self._get_system_instructions(resolved_settings)
