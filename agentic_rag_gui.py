@@ -1067,7 +1067,7 @@ class AgenticRAGApp:
             title = (row["title"] or "Untitled").strip() or "Untitled"
             updated = (row["updated_at"] or "")[:19].replace("T", " ")
             iid = row["session_id"]
-            self.sessions_tree.insert("", tk.END, iid=iid, values=(title, updated, row.get("active_profile") or "-", "Resume"))
+            self.sessions_tree.insert("", tk.END, iid=iid, values=(title, updated, row.get("active_profile") or "-", "▶ Resume"))
         self._refresh_history_details()
 
     def _on_history_search_change(self, _event=None):
@@ -1427,31 +1427,63 @@ class AgenticRAGApp:
         return latest
 
     def _refresh_history_details(self, _event=None):
-        if not hasattr(self, "history_summary_text"):
+        if not hasattr(self, "history_summary_fields"):
             return
         session_id = self._selected_history_session_id()
         summary_text = ""
         config_text = ""
         telemetry_text = ""
+        telemetry = None
+        run_id = ""
+
+        summary_defaults = {
+            "Title": "-",
+            "Session ID": "-",
+            "Updated": "-",
+            "Message Count": "0",
+            "Profile": "-",
+            "Mode": "-",
+            "Index": "-",
+        }
+        for key, default_value in summary_defaults.items():
+            self.history_summary_fields[key].set(default_value)
+        self._history_summary_blob = ""
+        self._selected_session_folder = ""
 
         if session_id:
             session, messages = self._fetch_session_and_messages(session_id)
             if session:
                 title = (session["title"] or "Untitled").strip() or "Untitled"
                 summary = (session["summary"] or "").strip() or "(No summary saved.)"
-                summary_text = (
-                    f"Title: {title}\n"
-                    f"Session ID: {session_id}\n"
-                    f"Updated: {session['updated_at'] or ''}\n"
-                    f"Messages: {len(messages)}\n\n"
-                    f"Summary:\n{summary}"
-                )
 
                 extra = {}
                 try:
                     extra = json.loads(session["extra_json"] or "{}")
                 except json.JSONDecodeError:
                     extra = {}
+
+                index_path = (extra.get("selected_index_path") or "").strip()
+                index_label = (session["index_id"] or "-").strip() or "-"
+                if index_path:
+                    index_label = f"{index_label} ({index_path})" if index_label != "-" else index_path
+                self._selected_session_folder = index_path if os.path.isdir(index_path) else ""
+
+                summary_values = {
+                    "Title": title,
+                    "Session ID": session_id,
+                    "Updated": session["updated_at"] or "-",
+                    "Message Count": str(len(messages)),
+                    "Profile": session["active_profile"] or "-",
+                    "Mode": session["mode"] or "-",
+                    "Index": index_label,
+                }
+                for key, value in summary_values.items():
+                    self.history_summary_fields[key].set(value)
+                summary_text = summary
+                self._history_summary_blob = "\n".join(
+                    [f"{key}: {value}" for key, value in summary_values.items()] + ["", f"Summary:\n{summary}"]
+                )
+
                 snapshot = {
                     "profile": session["active_profile"],
                     "mode": session["mode"],
@@ -1467,7 +1499,6 @@ class AgenticRAGApp:
                 }
                 config_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
 
-                run_id = None
                 for msg in reversed(messages):
                     if msg["run_id"]:
                         run_id = msg["run_id"]
@@ -1483,6 +1514,104 @@ class AgenticRAGApp:
         self._set_readonly_text(self.history_summary_text, summary_text)
         self._set_readonly_text(self.history_config_text, config_text)
         self._set_readonly_text(self.history_telemetry_text, telemetry_text)
+        self._populate_telemetry_fields(telemetry, run_id)
+
+    def _populate_telemetry_fields(self, telemetry, run_id=""):
+        defaults = {
+            "Run ID": run_id or "-",
+            "Event": "-",
+            "Stage": "-",
+            "Status": "-",
+            "Duration (ms)": "-",
+            "Prompt Tokens": "-",
+            "Completion Tokens": "-",
+            "Total Tokens": "-",
+            "Cost": "-",
+        }
+        for key, default_value in defaults.items():
+            self.history_telemetry_fields[key].set(default_value)
+
+        if not isinstance(telemetry, dict):
+            return
+
+        def _first(*keys):
+            for key in keys:
+                if key in telemetry and telemetry.get(key) not in (None, ""):
+                    return telemetry.get(key)
+            return None
+
+        values = {
+            "Run ID": _first("run_id") or run_id or "-",
+            "Event": _first("event", "event_name") or "-",
+            "Stage": _first("stage", "phase") or "-",
+            "Status": _first("status", "result") or "-",
+            "Duration (ms)": _first("duration_ms", "latency_ms", "elapsed_ms") or "-",
+            "Prompt Tokens": _first("prompt_tokens", "input_tokens") or "-",
+            "Completion Tokens": _first("completion_tokens", "output_tokens") or "-",
+            "Total Tokens": _first("total_tokens") or "-",
+            "Cost": _first("cost_usd", "cost") or "-",
+        }
+        for key, value in values.items():
+            self.history_telemetry_fields[key].set(str(value))
+
+    def _copy_history_session_id(self):
+        session_id = self.history_summary_fields.get("Session ID").get() if hasattr(self, "history_summary_fields") else ""
+        if not session_id or session_id == "-":
+            messagebox.showinfo("Copy Session ID", "Select a session first.")
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(session_id)
+        self.log("Session ID copied to clipboard.")
+
+    def _copy_history_summary(self):
+        payload = (getattr(self, "_history_summary_blob", "") or "").strip()
+        if not payload:
+            messagebox.showinfo("Copy Summary", "Select a session first.")
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(payload)
+        self.log("Session summary copied to clipboard.")
+
+    def _open_selected_session_folder(self):
+        folder_path = (getattr(self, "_selected_session_folder", "") or "").strip()
+        if not folder_path:
+            messagebox.showinfo("Open Session Folder", "No session folder is associated with the selected session.")
+            return
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(folder_path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", folder_path])
+            else:
+                subprocess.Popen(["xdg-open", folder_path])
+        except OSError as exc:
+            messagebox.showerror("Open Session Folder", f"Could not open folder: {exc}")
+
+    def _export_selected_session_json(self):
+        session_id = self._selected_history_session_id()
+        if not session_id:
+            messagebox.showinfo("Export JSON", "Select a session first.")
+            return
+        payload = self._build_session_export_payload(session_id)
+        if not payload:
+            messagebox.showerror("Export JSON", "Could not build export payload.")
+            return
+        default_name = f"session_{session_id}.json"
+        save_path = filedialog.asksaveasfilename(
+            title="Export Session JSON",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile=default_name,
+        )
+        if not save_path:
+            return
+        try:
+            with open(save_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+            self.log(f"Session JSON exported to {save_path}")
+            messagebox.showinfo("Export JSON", f"Exported session JSON to:\n{save_path}")
+        except OSError as exc:
+            messagebox.showerror("Export JSON", f"Could not export JSON: {exc}")
 
     def _maybe_autotitle_session(self, first_user_text):
         text = (first_user_text or "").strip()
@@ -1970,6 +2099,8 @@ class AgenticRAGApp:
         style.map("TCombobox", fieldbackground=[("readonly", palette["surface_alt"])], selectbackground=[("readonly", palette["selection_bg"])], selectforeground=[("readonly", palette["selection_fg"])])
         style.configure("Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=24, relief="flat")
         style.map("Treeview", background=[("selected", palette["selection_bg"])], foreground=[("selected", palette["selection_fg"])])
+        style.configure("History.Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=30, relief="flat")
+        style.map("History.Treeview", background=[("selected", palette["selection_bg"])], foreground=[("selected", palette["selection_fg"])])
         style.configure("Treeview.Heading", background=palette["surface"], foreground=palette["muted_text"], borderwidth=0, relief="flat")
         style.map("Treeview.Heading", background=[("active", palette["surface_alt"])])
         style.configure("Vertical.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["muted_text"], relief="flat")
@@ -2965,18 +3096,18 @@ class AgenticRAGApp:
         split.add(left, weight=3)
         split.add(right, weight=2)
 
-        tree_wrap = ttk.LabelFrame(left, text="Saved Sessions", padding=8)
+        tree_wrap = ttk.LabelFrame(left, text="Saved Sessions", padding=10)
         tree_wrap.pack(fill=tk.BOTH, expand=True)
         columns = ("title", "updated", "profile", "resume")
-        self.sessions_tree = ttk.Treeview(tree_wrap, columns=columns, show="headings", selectmode="browse")
+        self.sessions_tree = ttk.Treeview(tree_wrap, columns=columns, show="headings", selectmode="browse", style="History.Treeview")
         self.sessions_tree.heading("title", text="Title")
         self.sessions_tree.heading("updated", text="Date")
         self.sessions_tree.heading("profile", text="Profile")
-        self.sessions_tree.heading("resume", text="Resume")
+        self.sessions_tree.heading("resume", text="Action")
         self.sessions_tree.column("title", width=280, anchor="w")
         self.sessions_tree.column("updated", width=160, anchor="w")
         self.sessions_tree.column("profile", width=170, anchor="w")
-        self.sessions_tree.column("resume", width=100, anchor="center")
+        self.sessions_tree.column("resume", width=110, anchor="center")
         yscroll = ttk.Scrollbar(tree_wrap, orient="vertical", command=self.sessions_tree.yview)
         self.sessions_tree.configure(yscrollcommand=yscroll.set)
         self.sessions_tree.pack(side="left", fill=tk.BOTH, expand=True)
@@ -2984,21 +3115,84 @@ class AgenticRAGApp:
         self.sessions_tree.bind("<Double-1>", lambda _e: self.load_selected_session())
         self.sessions_tree.bind("<ButtonRelease-1>", self._on_history_tree_click)
         self.sessions_tree.bind("<<TreeviewSelect>>", self._refresh_history_details)
+        self._tip(self.sessions_tree, "Double-click a row to resume. Click the ▶ Resume action column for quick load.")
 
-        details = ttk.LabelFrame(right, text="Session Details", padding=8)
+        details = ttk.LabelFrame(right, text="Session Details", padding=10)
         details.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(details, text="Summary", style="Bold.TLabel").pack(anchor="w")
-        self.history_summary_text = scrolledtext.ScrolledText(details, height=8, state="disabled", wrap=tk.WORD)
-        self.history_summary_text.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+        summary_card = ttk.LabelFrame(details, text="Summary", padding=10)
+        summary_card.pack(fill="x", pady=(0, 10))
+        summary_grid = ttk.Frame(summary_card, style="Card.TFrame")
+        summary_grid.pack(fill="x")
 
-        ttk.Label(details, text="Config Snapshot", style="Bold.TLabel").pack(anchor="w")
-        self.history_config_text = scrolledtext.ScrolledText(details, height=10, state="disabled", wrap=tk.WORD)
-        self.history_config_text.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+        summary_keys = ["Title", "Session ID", "Updated", "Message Count", "Profile", "Mode", "Index"]
+        self.history_summary_fields = {}
+        for row_index, key in enumerate(summary_keys):
+            var = tk.StringVar(value="-")
+            self.history_summary_fields[key] = var
+            ttk.Label(summary_grid, text=f"{key}:", style="Muted.TLabel").grid(row=row_index, column=0, sticky="nw", padx=(0, 10), pady=2)
+            ttk.Label(summary_grid, textvariable=var, style="TLabel", wraplength=500, justify="left").grid(row=row_index, column=1, sticky="w", pady=2)
+        summary_grid.grid_columnconfigure(1, weight=1)
 
-        ttk.Label(details, text="Last Run Telemetry", style="Bold.TLabel").pack(anchor="w")
-        self.history_telemetry_text = scrolledtext.ScrolledText(details, height=10, state="disabled", wrap=tk.WORD)
-        self.history_telemetry_text.pack(fill=tk.BOTH, expand=True)
+        actions_row = ttk.Frame(summary_card, style="Card.TFrame")
+        actions_row.pack(fill="x", pady=(8, 0))
+        copy_id_btn = ttk.Button(actions_row, text="Copy Session ID", command=self._copy_history_session_id, takefocus=True)
+        copy_id_btn.pack(side="left")
+        copy_summary_btn = ttk.Button(actions_row, text="Copy Summary", command=self._copy_history_summary, takefocus=True)
+        copy_summary_btn.pack(side="left", padx=(8, 0))
+        open_folder_btn = ttk.Button(actions_row, text="Open Session Folder", command=self._open_selected_session_folder, takefocus=True)
+        open_folder_btn.pack(side="left", padx=(8, 0))
+        export_json_btn = ttk.Button(actions_row, text="Export JSON", command=self._export_selected_session_json, takefocus=True)
+        export_json_btn.pack(side="left", padx=(8, 0))
+
+        self._tip(copy_id_btn, "Copy the selected session UUID to your clipboard.")
+        self._tip(copy_summary_btn, "Copy summary metadata and synopsis as plain text.")
+        self._tip(open_folder_btn, "Open the selected index/session folder when available.")
+        self._tip(export_json_btn, "Export this session as a standalone JSON file.")
+
+        summary_text_card = ttk.Frame(details, style="Card.TFrame")
+        summary_text_card.pack(fill="x", pady=(0, 10))
+        ttk.Label(summary_text_card, text="Synopsis", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
+        self.history_summary_text = tk.Text(summary_text_card, height=5, wrap=tk.WORD, state="disabled", relief="flat", borderwidth=1)
+        self.history_summary_text.pack(fill="x")
+
+        notebook = ttk.Notebook(details, style="App.TNotebook")
+        notebook.pack(fill=tk.BOTH, expand=True)
+
+        config_tab = ttk.Frame(notebook, style="Card.TFrame", padding=8)
+        telemetry_tab = ttk.Frame(notebook, style="Card.TFrame", padding=8)
+        notebook.add(config_tab, text="Config")
+        notebook.add(telemetry_tab, text="Telemetry")
+
+        self.history_config_text = tk.Text(config_tab, wrap=tk.NONE, state="disabled", height=12, relief="flat", borderwidth=1)
+        cfg_y = ttk.Scrollbar(config_tab, orient="vertical", command=self.history_config_text.yview)
+        cfg_x = ttk.Scrollbar(config_tab, orient="horizontal", command=self.history_config_text.xview)
+        self.history_config_text.configure(yscrollcommand=cfg_y.set, xscrollcommand=cfg_x.set)
+        self.history_config_text.pack(side="top", fill=tk.BOTH, expand=True)
+        cfg_y.pack(side="right", fill="y")
+        cfg_x.pack(side="bottom", fill="x")
+
+        telemetry_fields_wrap = ttk.Frame(telemetry_tab, style="Card.TFrame")
+        telemetry_fields_wrap.pack(fill="x", pady=(0, 8))
+        self.history_telemetry_fields = {}
+        telemetry_keys = ["Run ID", "Event", "Stage", "Status", "Duration (ms)", "Prompt Tokens", "Completion Tokens", "Total Tokens", "Cost"]
+        for row_index, key in enumerate(telemetry_keys):
+            var = tk.StringVar(value="-")
+            self.history_telemetry_fields[key] = var
+            ttk.Label(telemetry_fields_wrap, text=f"{key}:", style="Muted.TLabel").grid(row=row_index, column=0, sticky="w", padx=(0, 10), pady=2)
+            ttk.Label(telemetry_fields_wrap, textvariable=var, style="TLabel").grid(row=row_index, column=1, sticky="w", pady=2)
+
+        ttk.Label(telemetry_tab, text="Raw telemetry", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
+        self.history_telemetry_text = tk.Text(telemetry_tab, wrap=tk.NONE, state="disabled", height=8, relief="flat", borderwidth=1)
+        telem_y = ttk.Scrollbar(telemetry_tab, orient="vertical", command=self.history_telemetry_text.yview)
+        telem_x = ttk.Scrollbar(telemetry_tab, orient="horizontal", command=self.history_telemetry_text.xview)
+        self.history_telemetry_text.configure(yscrollcommand=telem_y.set, xscrollcommand=telem_x.set)
+        self.history_telemetry_text.pack(side="top", fill=tk.BOTH, expand=True)
+        telem_y.pack(side="right", fill="y")
+        telem_x.pack(side="bottom", fill="x")
+
+        self._history_summary_blob = ""
+        self._selected_session_folder = ""
         self._apply_tooltips_for_tab("history", frame)
 
     def _on_history_tree_click(self, event):
