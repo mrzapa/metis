@@ -4517,8 +4517,10 @@ class AgenticRAGApp:
 
         config_tab = self.create_frame(diagnostics_notebook, style="Card.TFrame", padding=UI_SPACING["m"])
         telemetry_tab = self.create_frame(diagnostics_notebook, style="Card.TFrame", padding=UI_SPACING["m"])
+        raw_json_tab = self.create_frame(diagnostics_notebook, style="Card.TFrame", padding=UI_SPACING["m"])
         diagnostics_notebook.add(config_tab, text="Config")
         diagnostics_notebook.add(telemetry_tab, text="Telemetry")
+        diagnostics_notebook.add(raw_json_tab, text="Raw JSON")
 
         self.history_config_rows_wrap = self.create_frame(config_tab, style="Card.TFrame")
         self.history_config_rows_wrap.pack(fill="x")
