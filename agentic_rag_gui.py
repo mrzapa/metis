@@ -927,6 +927,9 @@ class AgenticRAGApp:
         self.agentic_mode = tk.BooleanVar(value=False)
         self.agentic_max_iterations = tk.IntVar(value=2)
         self.deepread_mode = tk.BooleanVar(value=False)
+        self.secure_mode = tk.BooleanVar(value=False)
+        self.enable_summarizer = tk.BooleanVar(value=True)
+        self.experimental_override = tk.BooleanVar(value=False)
         self.show_retrieved_context = tk.BooleanVar(value=False)
         self.use_reranker = tk.BooleanVar(value=True)
         self.use_sub_queries = tk.BooleanVar(value=True)
@@ -996,6 +999,7 @@ class AgenticRAGApp:
             value="Index: Not selected | LLM: -- | Embeddings: -- | Mode: --"
         )
         self.current_warning_var = tk.StringVar(value="")
+        self._deepread_metadata_check_cache = {"key": None, "value": None}
 
         for _var in (self.chunk_size, self.retrieval_k, self.mmr_lambda):
             _var.trace_add("write", lambda *_: self._update_auto_recommendation_ui())
@@ -1086,6 +1090,9 @@ class AgenticRAGApp:
             "use_reranker": bool(self.use_reranker.get()),
             "use_sub_queries": bool(self.use_sub_queries.get()),
             "subquery_max_docs": int(self.subquery_max_docs.get()),
+            "secure_mode": bool(self.secure_mode.get()),
+            "enable_summarizer": bool(self.enable_summarizer.get()),
+            "experimental_override": bool(self.experimental_override.get()),
         }
         return json.dumps(payload, ensure_ascii=False)
 
@@ -2645,6 +2652,13 @@ class AgenticRAGApp:
             self.local_gguf_context_length,
             self.local_gguf_gpu_layers,
             self.local_gguf_threads,
+            self.structure_aware_ingestion,
+            self.semantic_layout_ingestion,
+            self.deepread_mode,
+            self.secure_mode,
+            self.enable_summarizer,
+            self.experimental_override,
+            self.vector_db_type,
         ]
         for var in watched_vars:
             var.trace_add("write", lambda *_: self._run_on_ui(self._update_current_state_strip))
@@ -2663,6 +2677,109 @@ class AgenticRAGApp:
         if len(display) <= max_len:
             return display
         return f"...{display[-(max_len - 3):]}"
+
+    def _active_index_has_deepread_metadata(self):
+        selected_path, selected_collection = self._get_selected_index_path()
+        cache_key = f"{selected_path or ''}|{selected_collection or ''}"
+        cached = self._deepread_metadata_check_cache
+        if cached.get("key") == cache_key:
+            return bool(cached.get("value"))
+
+        has_metadata = False
+        if self.vector_db_type.get() == "chroma" and self.vector_store is not None and hasattr(self.vector_store, "_collection"):
+            try:
+                probe = self.vector_store._collection.get(limit=30, include=["metadatas"])
+                for meta in (probe.get("metadatas") or []):
+                    meta = meta or {}
+                    if str(meta.get("header_path") or "").strip() or str(meta.get("node_id") or "").strip():
+                        has_metadata = True
+                        break
+            except Exception as exc:
+                self.log(f"DeepRead metadata probe skipped: {exc}")
+
+        self._deepread_metadata_check_cache = {"key": cache_key, "value": bool(has_metadata)}
+        return bool(has_metadata)
+
+    def validate_settings(self):
+        blockers = []
+        advisories = []
+        disabled_controls = set()
+
+        constraints = [
+            {
+                "id": "structure_vs_semantic_layout",
+                "when": lambda: bool(self.structure_aware_ingestion.get() and self.semantic_layout_ingestion.get()),
+                "severity": "blocker",
+                "message": "Structure-aware ingestion cannot be combined with Semantic Layout. Disable one option.",
+                "disable": ["structure_aware", "semantic_layout"],
+            },
+            {
+                "id": "secure_requires_summarizer",
+                "when": lambda: bool(self.secure_mode.get() and not self.enable_summarizer.get()),
+                "severity": "blocker",
+                "message": "Secure mode requires the summarizer safety pass. Enable summarizer or disable Secure mode.",
+                "disable": [],
+            },
+            {
+                "id": "deepread_requires_metadata",
+                "when": lambda: bool(self.deepread_mode.get() and not self._active_index_has_deepread_metadata()),
+                "severity": "blocker",
+                "message": "DeepRead requires SHT/SCAN metadata (header_path/node_id) in the active index.",
+                "disable": [],
+            },
+            {
+                "id": "semantic_layout_chroma_only",
+                "when": lambda: bool(self.semantic_layout_ingestion.get() and self.vector_db_type.get() != "chroma"),
+                "severity": "advisory",
+                "message": "Semantic Layout is tuned for Chroma indexes; non-Chroma backends are experimental.",
+                "disable": [],
+            },
+        ]
+
+        for constraint in constraints:
+            if not constraint["when"]():
+                continue
+            target = blockers if constraint["severity"] == "blocker" else advisories
+            target.append(constraint["message"])
+            for control_name in constraint.get("disable", []):
+                disabled_controls.add(control_name)
+
+        if self.structure_aware_ingestion.get():
+            disabled_controls.add("semantic_layout")
+        if self.semantic_layout_ingestion.get():
+            disabled_controls.add("structure_aware")
+
+        return {
+            "blockers": blockers,
+            "advisories": advisories,
+            "disabled_controls": disabled_controls,
+        }
+
+    def _set_widget_state(self, widget, enabled=True, readonly=False):
+        if not widget or not self._safe_widget_exists(widget):
+            return
+        state = "normal"
+        if not enabled:
+            state = "disabled"
+        elif readonly:
+            state = "readonly"
+        widget.config(state=state)
+
+    def _confirm_experimental_override(self, scope, blockers):
+        if not blockers:
+            return True
+        if not self.experimental_override.get():
+            return False
+        body = "\n".join(f"• {item}" for item in blockers)
+        approved = messagebox.askyesno(
+            "Experimental override",
+            f"{scope} has incompatible settings:\n\n{body}\n\nProceed anyway with Experimental override?",
+        )
+        if approved:
+            self.log(f"EXPERIMENTAL_OVERRIDE scope={scope} blockers={blockers}")
+            logger.warning("EXPERIMENTAL_OVERRIDE scope=%s blockers=%s", scope, blockers)
+        return approved
+
 
     def _get_current_state_warnings(self):
         warnings = []
@@ -2685,6 +2802,7 @@ class AgenticRAGApp:
             elif not os.path.isfile((self.local_gguf_model_path.get() or "").strip()):
                 warnings.append("local_gguf disabled: select a valid GGUF model file")
         return warnings
+
 
     def _is_active_index_loaded(self):
         if not self.vector_store or not self.selected_index_path:
@@ -2716,22 +2834,32 @@ class AgenticRAGApp:
         self.current_state_var.set(
             f"Index: {index_label} | LLM: {llm_label} | Embeddings: {emb_label} | Mode: {mode_label}"
         )
-        warnings = self._get_current_state_warnings()
-        self.current_warning_var.set("⚠ " + " • ".join(warnings) if warnings else "")
+        validation = self.validate_settings()
+        blockers = validation.get("blockers", [])
+        advisories = validation.get("advisories", [])
+        warnings = [*blockers, *advisories, *self._get_current_state_warnings()]
+        self.current_warning_var.set("⚠ " + " • ".join(dict.fromkeys(warnings)) if warnings else "")
 
+        override_checked = bool(self.experimental_override.get())
+        send_blocked = bool(getattr(self, "_active_run_id", None) or (blockers and not override_checked) or self._index_switch_in_progress or self._ingestion_in_progress)
         if hasattr(self, "btn_send") and self._safe_widget_exists(self.btn_send):
-            if warnings or getattr(self, "_active_run_id", None):
-                self.btn_send.config(state="disabled")
-            else:
-                self.btn_send.config(state="normal")
+            self.btn_send.config(state="disabled" if send_blocked else "normal")
 
         if hasattr(self, "cb_existing_index") and self._safe_widget_exists(self.cb_existing_index):
             selector_busy = bool(self._index_switch_in_progress or self._ingestion_in_progress or self._active_run_id)
             self.cb_existing_index.config(state="disabled" if selector_busy else "readonly")
 
         if hasattr(self, "btn_ingest") and self._safe_widget_exists(self.btn_ingest):
-            ingest_ready = bool(self.selected_file) and bool(self._resolve_embedding_model()) and not self._ingestion_in_progress
+            ingest_blocked = bool(blockers and not override_checked)
+            ingest_ready = bool(self.selected_file) and bool(self._resolve_embedding_model()) and not self._ingestion_in_progress and not ingest_blocked
             self.btn_ingest.config(state="normal" if ingest_ready else "disabled")
+
+        disabled_controls = validation.get("disabled_controls", set())
+        self._set_widget_state(getattr(self, "chk_structure_aware", None), enabled=("structure_aware" not in disabled_controls))
+        self._set_widget_state(getattr(self, "chk_semantic_layout", None), enabled=("semantic_layout" not in disabled_controls))
+        self._set_widget_state(getattr(self, "chk_deepread", None), enabled=("deepread_mode" not in disabled_controls))
+        self._set_widget_state(getattr(self, "chk_secure_mode", None), enabled=("secure_mode" not in disabled_controls))
+        self._set_widget_state(getattr(self, "chk_enable_summarizer", None), enabled=("summarizer" not in disabled_controls))
 
     def _set_progress_running(self, bar, running):
         if not bar or not self._safe_widget_exists(bar):
@@ -3541,6 +3669,9 @@ class AgenticRAGApp:
             data.get("show_retrieved_context", self.show_retrieved_context.get())
         )
         self.deepread_mode.set(bool(data.get("deepread_mode", self.deepread_mode.get())))
+        self.secure_mode.set(bool(data.get("secure_mode", self.secure_mode.get())))
+        self.enable_summarizer.set(bool(data.get("enable_summarizer", self.enable_summarizer.get())))
+        self.experimental_override.set(bool(data.get("experimental_override", self.experimental_override.get())))
         self.use_reranker.set(data.get("use_reranker", self.use_reranker.get()))
         self.use_sub_queries.set(
             bool(data.get("use_sub_queries", self.use_sub_queries.get()))
@@ -3702,6 +3833,9 @@ class AgenticRAGApp:
             "agentic_max_iterations": max_iterations,
             "show_retrieved_context": self.show_retrieved_context.get(),
             "deepread_mode": bool(self.deepread_mode.get()),
+            "secure_mode": bool(self.secure_mode.get()),
+            "enable_summarizer": bool(self.enable_summarizer.get()),
+            "experimental_override": bool(self.experimental_override.get()),
             "use_reranker": self.use_reranker.get(),
             "use_sub_queries": bool(self.use_sub_queries.get()),
             "subquery_max_docs": subquery_max_docs,
@@ -4710,17 +4844,19 @@ class AgenticRAGApp:
             variable=self.build_digest_index,
         ).pack(side="left", padx=(20, 0))
 
-        ttk.Checkbutton(
+        self.chk_structure_aware = ttk.Checkbutton(
             chunk_frame,
             text="Structure-aware",
             variable=self.structure_aware_ingestion,
-        ).pack(side="left", padx=(20, 0))
+        )
+        self.chk_structure_aware.pack(side="left", padx=(20, 0))
 
-        ttk.Checkbutton(
+        self.chk_semantic_layout = ttk.Checkbutton(
             chunk_frame,
             text="Semantic Layout (experimental)",
             variable=self.semantic_layout_ingestion,
-        ).pack(side="left", padx=(20, 0))
+        )
+        self.chk_semantic_layout.pack(side="left", padx=(20, 0))
 
         self.auto_recommendation_var = tk.StringVar(value="Auto recommendation: waiting for file/index metadata.")
         self.auto_warning_var = tk.StringVar(value="")
@@ -4747,6 +4883,12 @@ class AgenticRAGApp:
             width=12,
             state="readonly",
         ).pack(side="left")
+
+        ttk.Checkbutton(
+            comprehension_frame,
+            text="Experimental override (allow blocked combos with confirmation)",
+            variable=self.experimental_override,
+        ).pack(side="left", padx=(20, 0))
 
         self.btn_ingest = ttk.Button(
             frame,
@@ -5030,10 +5172,19 @@ class AgenticRAGApp:
         agentic_frame = ttk.LabelFrame(settings_content, text="Agentic Options", padding=8)
         agentic_frame.pack(fill="x", pady=(0, 6))
         ttk.Checkbutton(agentic_frame, text="Agentic mode (iterate)", variable=self.agentic_mode).pack(side="left")
-        ttk.Checkbutton(agentic_frame, text="DeepRead (locate → read)", variable=self.deepread_mode).pack(side="left", padx=(10, 0))
+        self.chk_deepread = ttk.Checkbutton(agentic_frame, text="DeepRead (locate → read)", variable=self.deepread_mode)
+        self.chk_deepread.pack(side="left", padx=(10, 0))
         ttk.Label(agentic_frame, text="Max iterations:").pack(side="left", padx=(12, 4))
         ttk.Spinbox(agentic_frame, from_=1, to=AGENTIC_MAX_ITERATIONS_HARD_CAP, textvariable=self.agentic_max_iterations, width=4).pack(side="left")
         ttk.Checkbutton(agentic_frame, text="Show retrieved context", variable=self.show_retrieved_context).pack(side="left", padx=(12, 0))
+
+        secure_frame = ttk.Frame(settings_content)
+        secure_frame.pack(fill="x", pady=(0, 6))
+        self.chk_secure_mode = ttk.Checkbutton(secure_frame, text="Secure mode", variable=self.secure_mode)
+        self.chk_secure_mode.pack(side="left")
+        self.chk_enable_summarizer = ttk.Checkbutton(secure_frame, text="Enable summarizer safety pass", variable=self.enable_summarizer)
+        self.chk_enable_summarizer.pack(side="left", padx=(10, 0))
+        ttk.Checkbutton(secure_frame, text="Experimental override", variable=self.experimental_override).pack(side="left", padx=(14, 0))
 
         frontier_wrap = ttk.LabelFrame(settings_content, text="Frontier", padding=8)
         frontier_wrap.pack(fill="x")
@@ -12892,6 +13043,14 @@ class AgenticRAGApp:
             messagebox.showerror("Error", "Please select a file first.")
             return
 
+        self._deepread_metadata_check_cache = {"key": None, "value": None}
+        validation = self.validate_settings()
+        blockers = validation.get("blockers", [])
+        if blockers and not self._confirm_experimental_override("Ingestion", blockers):
+            messagebox.showwarning("Incompatible settings", "\n".join(blockers))
+            self._update_current_state_strip()
+            return
+
         self._clear_error_state()
         self._latest_sht_tree = []
         self._latest_semantic_regions = []
@@ -13661,11 +13820,16 @@ class AgenticRAGApp:
             self.append_chat("system", "Initialisation not finished yet. Please retry in a moment.")
             return
         self._clear_error_state()
-        warnings = self._get_current_state_warnings()
-        if warnings:
-            self.append_chat("system", "Cannot start run: " + "; ".join(warnings))
+        validation = self.validate_settings()
+        blockers = validation.get("blockers", [])
+        advisories = validation.get("advisories", [])
+        if blockers and not self._confirm_experimental_override("Chat", blockers):
+            self.append_chat("system", "Cannot start run: " + "; ".join(blockers))
             self._update_current_state_strip()
             return
+        warnings = [*advisories, *self._get_current_state_warnings()]
+        if warnings:
+            self.append_chat("system", "Warnings: " + "; ".join(dict.fromkeys(warnings)))
 
         query = self.txt_input.get("1.0", tk.END).strip()
         if not query:
