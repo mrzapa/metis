@@ -49,6 +49,26 @@ STYLE_CONFIG = {
     "radius": 12,
     "padding": {"sm": 6, "md": 10, "lg": 16},
     "themes": {
+        "space_dust": {
+            "bg": "#11161E",
+            "surface": "#1A2230",
+            "surface_alt": "#212C3D",
+            "text": "#E8EEF8",
+            "muted_text": "#96A6BE",
+            "primary": "#5BD6F8",
+            "secondary": "#42BFD1",
+            "tertiary": "#6B87FF",
+            "border": "#2A3A4F",
+            "outline": "#33465F",
+            "status": "#AFC1D9",
+            "danger": "#FF7A8C",
+            "success": "#55D6A2",
+            "selection_bg": "#294B66",
+            "selection_fg": "#F2F8FF",
+            "link": "#79DEFF",
+            "source": "#7A89A0",
+            "supporting_bg": "#213E56",
+        },
         "light": {
             "bg": "#F5F6F8",
             "surface": "#FFFFFF",
@@ -56,8 +76,18 @@ STYLE_CONFIG = {
             "text": "#101114",
             "muted_text": "#495162",
             "primary": "#0A84FF",
+            "secondary": "#2D6DDA",
+            "tertiary": "#5A5EC7",
             "border": "#D5DAE2",
+            "outline": "#C7CED8",
             "status": "#2D3340",
+            "danger": "#B64343",
+            "success": "#257A4A",
+            "selection_bg": "#CFE3FF",
+            "selection_fg": "#101114",
+            "link": "#1254A3",
+            "source": "#626C7E",
+            "supporting_bg": "#FFF4CC",
         },
         "dark": {
             "bg": "#16181D",
@@ -66,8 +96,18 @@ STYLE_CONFIG = {
             "text": "#F7F8FA",
             "muted_text": "#C3CAD6",
             "primary": "#64D2FF",
+            "secondary": "#58B5D6",
+            "tertiary": "#8C95F2",
             "border": "#3A4352",
+            "outline": "#465163",
             "status": "#D7DCEA",
+            "danger": "#FF8A8A",
+            "success": "#70D39F",
+            "selection_bg": "#2E415C",
+            "selection_fg": "#F7F8FA",
+            "link": "#8EDFFF",
+            "source": "#A8B2C3",
+            "supporting_bg": "#334A63",
         },
     },
 }
@@ -596,7 +636,7 @@ class AgenticRAGApp:
         self.startup_mode_setting = tk.StringVar(value="advanced")
         self.basic_wizard_completed = False
         self._wizard_state = {}
-        self.ui_mode = tk.StringVar(value="light")
+        self.ui_mode = tk.StringVar(value="space_dust")
         self.history_profile_filter = tk.StringVar(value="All Profiles")
         self.current_state_var = tk.StringVar(
             value="Index: Not selected | LLM: -- | Embeddings: -- | Mode: --"
@@ -1776,26 +1816,90 @@ class AgenticRAGApp:
         self._bind_accessibility_shortcuts()
         self._install_ui_state_watchers()
         self._update_current_state_strip()
+        self._apply_theme()
 
     def _apply_theme(self):
         style = ttk.Style()
         if "clam" in style.theme_names():
             style.theme_use("clam")
-        palette = STYLE_CONFIG["themes"].get(self.ui_mode.get(), STYLE_CONFIG["themes"]["light"])
+        palette = STYLE_CONFIG["themes"].get(self.ui_mode.get(), STYLE_CONFIG["themes"]["space_dust"])
         font_family = STYLE_CONFIG["font_family"] if STYLE_CONFIG["font_family"] in tkfont.families() else STYLE_CONFIG["fallback_font"]
+        self._active_palette = palette
         self.root.configure(bg=palette["bg"])
-        style.configure("TFrame", background=palette["bg"])
-        style.configure("Card.TFrame", background=palette["surface"])
-        style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["border"], relief="flat")
+        style.configure(".", background=palette["bg"], foreground=palette["text"], fieldbackground=palette["surface_alt"])
+        style.configure("TFrame", background=palette["bg"], borderwidth=0, relief="flat")
+        style.configure("Card.TFrame", background=palette["surface"], borderwidth=0, relief="flat")
+        style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["outline"], borderwidth=1, relief="flat")
         style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
         style.configure("TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10))
         style.configure("Bold.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
         style.configure("Header.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 13, "bold"))
+        style.configure("Muted.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=(font_family, 10))
+        style.configure("Danger.TLabel", background=palette["surface"], foreground=palette["danger"], font=(font_family, 10, "bold"))
         style.configure("Status.TLabel", background=palette["bg"], foreground=palette["status"], font=(font_family, 9))
-        style.configure("TButton", padding=(12, 8), relief="flat")
+        style.configure("TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"], focuscolor=palette["surface_alt"])
+        style.map("TButton", background=[("active", palette["secondary"]), ("pressed", palette["primary"])], foreground=[("active", palette["selection_fg"])])
+        style.configure("TRadiobutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], indicatordiameter=14, relief="flat")
+        style.map("TRadiobutton", foreground=[("disabled", palette["muted_text"])], indicatorcolor=[("selected", palette["primary"]), ("!selected", palette["surface_alt"])])
+        style.configure("TCheckbutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], relief="flat")
+        style.map("TCheckbutton", foreground=[("disabled", palette["muted_text"])], indicatorcolor=[("selected", palette["primary"]), ("!selected", palette["surface_alt"])])
+        style.configure("TEntry", fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], insertcolor=palette["text"], borderwidth=1, relief="flat")
+        style.map("TEntry", bordercolor=[("focus", palette["primary"])], lightcolor=[("focus", palette["primary"])], darkcolor=[("focus", palette["primary"])])
+        style.configure("TCombobox", fieldbackground=palette["surface_alt"], background=palette["surface_alt"], foreground=palette["text"], arrowcolor=palette["muted_text"], bordercolor=palette["outline"], relief="flat")
+        style.map("TCombobox", fieldbackground=[("readonly", palette["surface_alt"])], selectbackground=[("readonly", palette["selection_bg"])], selectforeground=[("readonly", palette["selection_fg"])])
+        style.configure("Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=24, relief="flat")
+        style.map("Treeview", background=[("selected", palette["selection_bg"])], foreground=[("selected", palette["selection_fg"])])
+        style.configure("Treeview.Heading", background=palette["surface"], foreground=palette["muted_text"], borderwidth=0, relief="flat")
+        style.map("Treeview.Heading", background=[("active", palette["surface_alt"])])
+        style.configure("Vertical.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["muted_text"], relief="flat")
+        style.configure("Horizontal.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["muted_text"], relief="flat")
+        style.configure("TProgressbar", troughcolor=palette["surface_alt"], background=palette["primary"], bordercolor=palette["bg"], lightcolor=palette["primary"], darkcolor=palette["primary"], relief="flat")
+        style.configure("TSeparator", background=palette["outline"])
         style.configure("App.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(8, 6, 8, 0))
-        style.configure("App.TNotebook.Tab", padding=(16, 10), font=(font_family, 10, "bold"))
-        style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("!selected", palette["surface_alt"])], foreground=[("selected", palette["text"]), ("!selected", palette["muted_text"])])
+        style.configure("App.TNotebook.Tab", padding=(16, 10), font=(font_family, 10, "bold"), borderwidth=0)
+        style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("!selected", palette["bg"])], foreground=[("selected", palette["text"]), ("!selected", palette["muted_text"])])
+
+        self._theme_tk_widgets()
+        self._theme_text_tags()
+
+    def _theme_tk_widgets(self):
+        if not hasattr(self, "root"):
+            return
+        palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+
+        def apply_recursive(widget):
+            if isinstance(widget, tk.Text):
+                widget.configure(
+                    background=palette["surface_alt"],
+                    foreground=palette["text"],
+                    insertbackground=palette["text"],
+                    selectbackground=palette["selection_bg"],
+                    selectforeground=palette["selection_fg"],
+                    relief="flat",
+                    borderwidth=0,
+                    highlightthickness=1,
+                    highlightbackground=palette["outline"],
+                    highlightcolor=palette["primary"],
+                )
+            elif isinstance(widget, tk.Canvas):
+                widget.configure(background=palette["bg"], highlightthickness=0)
+            for child in widget.winfo_children():
+                apply_recursive(child)
+
+        apply_recursive(self.root)
+
+    def _theme_text_tags(self):
+        palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+        if hasattr(self, "chat_display"):
+            self.chat_display.tag_config("citation", foreground=palette["link"], underline=1)
+            self.chat_display.tag_config("user", foreground=palette["tertiary"])
+            self.chat_display.tag_config("agent", foreground=palette["success"])
+            self.chat_display.tag_config("system", foreground=palette["muted_text"])
+            self.chat_display.tag_config("source", foreground=palette["source"])
+        if hasattr(self, "answer_text"):
+            self.answer_text.tag_config("citation", foreground=palette["link"], underline=1)
+        if hasattr(self, "sources_tree"):
+            self.sources_tree.tag_configure("supporting", background=palette["supporting_bg"], foreground=palette["text"])
 
     def _bind_accessibility_shortcuts(self):
         self.root.bind_all("<Control-Return>", lambda _e: self.send_message())
@@ -2736,7 +2840,7 @@ class AgenticRAGApp:
         ttk.Label(
             header,
             text="Configure providers and defaults used by Library and Chat.",
-            foreground="#6b7280",
+            style="Muted.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
         search_row = ttk.Frame(frame)
@@ -2780,7 +2884,7 @@ class AgenticRAGApp:
         ttk.Combobox(
             appearance_section.content,
             textvariable=self.ui_mode,
-            values=["light", "dark"],
+            values=["space_dust", "dark", "light"],
             state="readonly",
             width=10,
         ).pack(side="left", padx=(8, 8))
@@ -2866,7 +2970,7 @@ class AgenticRAGApp:
         self.compat_warning = ttk.Label(
             llm_frame,
             text="",
-            foreground="#a33",
+            style="Danger.TLabel",
             wraplength=360,
             justify="left",
         )
@@ -3243,7 +3347,7 @@ class AgenticRAGApp:
         ttk.Label(
             header,
             text="Select or build an index here, then use it directly in Chat.",
-            foreground="#6b7280",
+            style="Muted.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
         sel_frame = ttk.LabelFrame(frame, text="1) Source file", padding=UI_SPACING["m"])
@@ -3254,9 +3358,9 @@ class AgenticRAGApp:
             text="Select HTML/Text File (2M+ tokens supported):",
             style="Header.TLabel",
         ).pack(anchor="w")
-        self.lbl_file = ttk.Label(sel_frame, text="No file selected", foreground="gray")
+        self.lbl_file = ttk.Label(sel_frame, text="No file selected", style="Muted.TLabel")
         self.lbl_file.pack(anchor="w", pady=5)
-        self.lbl_file_info = ttk.Label(sel_frame, text="", foreground="#666666")
+        self.lbl_file_info = ttk.Label(sel_frame, text="", style="Muted.TLabel")
         self.lbl_file_info.pack(anchor="w")
 
         file_btn_frame = ttk.Frame(sel_frame)
@@ -3317,7 +3421,7 @@ class AgenticRAGApp:
         ttk.Label(
             frame,
             text="Progress is shown while indexing runs. Detailed stage output appears in Logs.",
-            foreground="#6b7280",
+            style="Muted.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
         self._update_current_state_strip()
 
@@ -3340,14 +3444,14 @@ class AgenticRAGApp:
         ttk.Label(
             header,
             text="Flow: Library builds index → Chat uses current index → Settings configures providers.",
-            foreground="#6b7280",
+            style="Muted.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
         state_strip = ttk.Frame(frame, style="Card.TFrame")
         state_strip.pack(fill="x", pady=(0, UI_SPACING["s"]))
         ttk.Label(state_strip, text="Current State:", style="Bold.TLabel").pack(side="left", padx=(0, UI_SPACING["xs"]))
         ttk.Label(state_strip, textvariable=self.current_state_var).pack(side="left", fill="x", expand=True)
-        self.state_warning_label = ttk.Label(frame, textvariable=self.current_warning_var, foreground="#a33")
+        self.state_warning_label = ttk.Label(frame, textvariable=self.current_warning_var, style="Danger.TLabel")
         self.state_warning_label.pack(fill="x", pady=(0, UI_SPACING["s"]))
 
         rag_progress_row = ttk.Frame(frame)
@@ -3415,20 +3519,20 @@ class AgenticRAGApp:
             left_pane, state="disabled", font=("Segoe UI", 10), wrap=tk.WORD
         )
         self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        self.chat_display.tag_config("citation", foreground="#1254a3", underline=1)
+        self.chat_display.tag_config("citation", underline=1)
         self.chat_display.tag_bind("citation", "<Button-1>", self._on_citation_click)
         self.chat_display.tag_bind("citation", "<Enter>", lambda _e: self.chat_display.config(cursor="hand2"))
         self.chat_display.tag_bind("citation", "<Leave>", lambda _e: self.chat_display.config(cursor=""))
 
         # Tag configuration for coloring
         self.chat_display.tag_config(
-            "user", foreground="#1f4fb2", font=("Segoe UI", 10, "bold"), spacing1=8, spacing3=8
+            "user", font=("Segoe UI", 10, "bold"), spacing1=8, spacing3=8
         )
-        self.chat_display.tag_config("agent", foreground="#166534", spacing1=8, spacing3=12)
+        self.chat_display.tag_config("agent", spacing1=8, spacing3=12)
         self.chat_display.tag_config(
-            "system", foreground="#6b7280", font=("Segoe UI", 9, "italic"), spacing1=6, spacing3=6
+            "system", font=("Segoe UI", 9, "italic"), spacing1=6, spacing3=6
         )
-        self.chat_display.tag_config("source", foreground="#888888", font=("Consolas", 8))
+        self.chat_display.tag_config("source", font=("Consolas", 8))
 
         # Quick Actions
         action_frame = ttk.Frame(left_pane)
@@ -3524,7 +3628,7 @@ class AgenticRAGApp:
         self.answer_text = scrolledtext.ScrolledText(
             self.answer_tab, height=20, wrap=tk.WORD, state="disabled", font=("Segoe UI", 10)
         )
-        self.answer_text.tag_config("citation", foreground="#1254a3", underline=1)
+        self.answer_text.tag_config("citation", underline=1)
         self.answer_text.tag_bind("citation", "<Button-1>", self._on_answer_citation_click)
         self.answer_text.tag_bind("citation", "<Enter>", lambda _e: self.answer_text.config(cursor="hand2"))
         self.answer_text.tag_bind("citation", "<Leave>", lambda _e: self.answer_text.config(cursor=""))
@@ -3550,7 +3654,7 @@ class AgenticRAGApp:
         ]:
             self.sources_tree.heading(col, text=label)
             self.sources_tree.column(col, width=width, anchor="w")
-        self.sources_tree.tag_configure("supporting", background="#fff4cc")
+        self.sources_tree.tag_configure("supporting")
         self.sources_tree.pack(fill=tk.BOTH, expand=True)
         self.sources_tree.bind("<<TreeviewSelect>>", self._on_source_selected)
 
@@ -3639,7 +3743,7 @@ class AgenticRAGApp:
         ttk.Label(
             frame,
             text="Basic mode runs a guided setup wizard before chat.",
-            foreground="#6b7280",
+            style="Muted.TLabel",
         ).pack(anchor="w", pady=(10, 0))
 
         self.root.wait_window(dialog)
@@ -3844,7 +3948,7 @@ class AgenticRAGApp:
             self._wizard_api_key_vars[key_name] = value_var
             ttk.Entry(row, textvariable=value_var, show="*").pack(side="left", fill="x", expand=True, padx=(8, 8))
             status = "Saved key available" if has_saved else "Required"
-            ttk.Label(row, text=status, foreground="#6b7280").pack(side="left")
+            ttk.Label(row, text=status, style="Muted.TLabel").pack(side="left")
 
     def _render_wizard_step_five(self):
         self._wizard_step_label.config(text="Step 5 of 6: Choose a mode preset")
@@ -3859,7 +3963,7 @@ class AgenticRAGApp:
             card = ttk.Frame(self._wizard_content)
             card.pack(fill="x", pady=(0, 8))
             ttk.Radiobutton(card, text=name, value=name, variable=self._wizard_mode_preset).pack(anchor="w")
-            ttk.Label(card, text=desc, foreground="#6b7280").pack(anchor="w", padx=(24, 0))
+            ttk.Label(card, text=desc, style="Muted.TLabel").pack(anchor="w", padx=(24, 0))
 
     def _render_wizard_step_six(self):
         self._wizard_step_label.config(text="Step 6 of 6: Confirm and start")
@@ -3975,7 +4079,7 @@ class AgenticRAGApp:
             if file_path:
                 self.selected_file = file_path
                 if hasattr(self, "lbl_file") and self._safe_widget_exists(self.lbl_file):
-                    self.lbl_file.config(text=file_path, foreground="black")
+                    self.lbl_file.config(text=file_path, style="TLabel")
                     self._update_file_info()
                 self.vector_db_type.set("chroma")
                 self.start_ingestion()
@@ -7546,13 +7650,13 @@ class AgenticRAGApp:
         f = filedialog.askopenfilename(filetypes=[("HTML/Text", "*.html *.htm *.txt")])
         if f:
             self.selected_file = f
-            self.lbl_file.config(text=f, foreground="black")
+            self.lbl_file.config(text=f, style="TLabel")
             self._update_file_info()
             self._update_current_state_strip()
 
     def clear_selected_file(self):
         self.selected_file = None
-        self.lbl_file.config(text="No file selected", foreground="gray")
+        self.lbl_file.config(text="No file selected", style="Muted.TLabel")
         if hasattr(self, "lbl_file_info"):
             self.lbl_file_info.config(text="")
         self._update_current_state_strip()
@@ -13905,8 +14009,9 @@ class AgenticRAGApp:
                     self.chat_display.insert(tk.END, "👍", up_tag)
                     self.chat_display.insert(tk.END, "  ")
                     self.chat_display.insert(tk.END, "👎", down_tag)
-                    self.chat_display.tag_config(up_tag, foreground="#1b7f3a", underline=1)
-                    self.chat_display.tag_config(down_tag, foreground="#a12f2f", underline=1)
+                    palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+                    self.chat_display.tag_config(up_tag, foreground=palette["success"], underline=1)
+                    self.chat_display.tag_config(down_tag, foreground=palette["danger"], underline=1)
                     self.chat_display.tag_bind(up_tag, "<Button-1>", lambda _e, rid=run_id: self._submit_feedback(rid, 1))
                     self.chat_display.tag_bind(down_tag, "<Button-1>", lambda _e, rid=run_id: self._submit_feedback(rid, -1))
                 self.chat_display.insert(tk.END, "\n\n")
