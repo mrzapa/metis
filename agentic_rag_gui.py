@@ -373,6 +373,125 @@ class CitationManager:
 
 
 
+class TooltipManager:
+    def __init__(self, root, get_palette, *, delay_ms=350, wrap_px=340):
+        self.root = root
+        self.get_palette = get_palette
+        self.delay_ms = delay_ms
+        self.wrap_px = wrap_px
+        self._widget_text = {}
+        self._tooltip_window = None
+        self._tooltip_label = None
+        self._active_widget = None
+        self._after_id = None
+        self._last_pointer = (0, 0)
+
+    def register(self, widget, text):
+        if widget is None:
+            return
+        message = (text or "").strip()
+        if not message:
+            return
+        self._widget_text[widget] = message
+        widget.bind("<Enter>", lambda e, w=widget: self._on_enter(w, e), add="+")
+        widget.bind("<Leave>", lambda _e, w=widget: self._on_leave(w), add="+")
+        widget.bind("<Motion>", lambda e, w=widget: self._on_motion(w, e), add="+")
+        widget.bind("<Destroy>", lambda _e, w=widget: self._on_destroy(w), add="+")
+
+    def hide(self):
+        self._cancel_pending()
+        self._active_widget = None
+        if self._tooltip_window is not None and self._tooltip_window.winfo_exists():
+            self._tooltip_window.withdraw()
+
+    def _on_enter(self, widget, event):
+        self._active_widget = widget
+        self._last_pointer = (event.x_root, event.y_root)
+        self._schedule_show(widget)
+
+    def _on_leave(self, widget):
+        if widget == self._active_widget:
+            self.hide()
+
+    def _on_motion(self, widget, event):
+        self._last_pointer = (event.x_root, event.y_root)
+        if widget == self._active_widget and self._tooltip_window is not None and self._tooltip_window.winfo_viewable():
+            self._position_window(event.x_root, event.y_root)
+
+    def _on_destroy(self, widget):
+        self._widget_text.pop(widget, None)
+        if widget == self._active_widget:
+            self.hide()
+
+    def _schedule_show(self, widget):
+        self._cancel_pending()
+        self._after_id = self.root.after(self.delay_ms, lambda w=widget: self._show(w))
+
+    def _cancel_pending(self):
+        if self._after_id is not None:
+            try:
+                self.root.after_cancel(self._after_id)
+            except tk.TclError:
+                pass
+            self._after_id = None
+
+    def _show(self, widget):
+        self._after_id = None
+        if widget != self._active_widget or not widget.winfo_exists():
+            return
+        text = self._widget_text.get(widget, "").strip()
+        if not text:
+            return
+        if self._tooltip_window is None or not self._tooltip_window.winfo_exists():
+            self._create_tooltip_window()
+        palette = self.get_palette() or STYLE_CONFIG["themes"]["space_dust"]
+        self._tooltip_window.configure(bg=palette["border"])
+        self._tooltip_label.configure(
+            text=text,
+            bg=palette["surface_alt"],
+            fg=palette["text"],
+            wraplength=self.wrap_px,
+            padx=10,
+            pady=7,
+            relief="flat",
+            bd=0,
+            justify="left",
+        )
+        self._tooltip_window.deiconify()
+        self._tooltip_window.lift()
+        self._position_window(*self._last_pointer)
+
+    def _create_tooltip_window(self):
+        self._tooltip_window = tk.Toplevel(self.root)
+        self._tooltip_window.withdraw()
+        self._tooltip_window.overrideredirect(True)
+        self._tooltip_window.attributes("-topmost", True)
+        self._tooltip_window.attributes("-alpha", 0.97)
+        try:
+            self._tooltip_window.attributes("-type", "tooltip")
+        except tk.TclError:
+            pass
+        shell = tk.Frame(self._tooltip_window, borderwidth=1, relief="flat")
+        shell.pack(fill="both", expand=True)
+        self._tooltip_label = tk.Label(shell, font=("Segoe UI", 9))
+        self._tooltip_label.pack(fill="both", expand=True, padx=1, pady=1)
+
+    def _position_window(self, x_root, y_root):
+        if self._tooltip_window is None or not self._tooltip_window.winfo_exists():
+            return
+        self._tooltip_window.update_idletasks()
+        tip_w = self._tooltip_window.winfo_reqwidth()
+        tip_h = self._tooltip_window.winfo_reqheight()
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        x = min(max(x_root + 16, 4), max(4, screen_w - tip_w - 4))
+        y = y_root + 20
+        if y + tip_h > screen_h - 4:
+            y = y_root - tip_h - 14
+        y = min(max(y, 4), max(4, screen_h - tip_h - 4))
+        self._tooltip_window.geometry(f"+{x}+{y}")
+
+
 class CollapsibleFrame(ttk.Frame):
     def __init__(self, parent, title, expanded=False, **kwargs):
         super().__init__(parent, **kwargs)
@@ -637,6 +756,8 @@ class AgenticRAGApp:
         self.basic_wizard_completed = False
         self._wizard_state = {}
         self.ui_mode = tk.StringVar(value="space_dust")
+        self._active_palette = STYLE_CONFIG["themes"]["space_dust"]
+        self.tooltip_manager = TooltipManager(self.root, lambda: getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"]))
         self.history_profile_filter = tk.StringVar(value="All Profiles")
         self.current_state_var = tk.StringVar(
             value="Index: Not selected | LLM: -- | Embeddings: -- | Mode: --"
@@ -1901,6 +2022,163 @@ class AgenticRAGApp:
         if hasattr(self, "sources_tree"):
             self.sources_tree.tag_configure("supporting", background=palette["supporting_bg"], foreground=palette["text"])
 
+    def _tip(self, widget, text):
+        self.tooltip_manager.register(widget, text)
+
+    def _apply_tooltips_for_tab(self, tab_name, root_widget):
+        for widget in self._iter_interactive_widgets(root_widget):
+            tip = self._tooltip_text_for_widget(tab_name, widget)
+            if tip:
+                self._tip(widget, tip)
+
+    def _iter_interactive_widgets(self, root_widget):
+        stack = [root_widget]
+        interactive = (ttk.Button, ttk.Entry, ttk.Combobox, ttk.Checkbutton, ttk.Radiobutton, ttk.Spinbox, ttk.Treeview, ttk.Progressbar, ttk.Notebook, tk.Text)
+        while stack:
+            widget = stack.pop()
+            for child in widget.winfo_children():
+                stack.append(child)
+                if isinstance(child, interactive):
+                    yield child
+
+    def _tooltip_text_for_widget(self, tab_name, widget):
+        text = ""
+        if "text" in widget.keys():
+            text = (widget.cget("text") or "").strip()
+        label_hint = self._infer_widget_label(widget)
+        key = (text or label_hint).lower()
+        overrides = self._tooltip_overrides().get(tab_name, {})
+        for marker, tip in overrides.items():
+            if marker in key:
+                return tip
+        if isinstance(widget, ttk.Progressbar):
+            return "Shows background task progress so you know the app is still working."
+        if isinstance(widget, ttk.Treeview):
+            return "Browse and select rows to inspect details or run actions."
+        if isinstance(widget, ttk.Notebook):
+            return "Switch evidence views to inspect answers, sources, events, and traces."
+        if isinstance(widget, tk.Text):
+            if tab_name == "chat" and widget == getattr(self, "txt_input", None):
+                return "Type your question here. Clear prompts improve retrieval quality."
+            return "Scrollable text area for viewing or editing rich content."
+        if text:
+            return f"{text} control. Hover help explains what this option changes."
+        if label_hint:
+            return f"Adjust {label_hint} for this workflow."
+        return ""
+
+    def _infer_widget_label(self, widget):
+        parent = widget.master
+        if parent is None:
+            return ""
+        manager = widget.winfo_manager()
+        if manager == "grid":
+            info = widget.grid_info()
+            row = int(info.get("row", 0))
+            col = int(info.get("column", 0))
+            for sibling in parent.winfo_children():
+                if sibling == widget or sibling.winfo_manager() != "grid":
+                    continue
+                s_info = sibling.grid_info()
+                if int(s_info.get("row", -1)) != row:
+                    continue
+                if int(s_info.get("column", 99)) < col and "text" in sibling.keys():
+                    text = (sibling.cget("text") or "").strip()
+                    if text:
+                        return text
+        for sibling in parent.winfo_children():
+            if sibling == widget:
+                break
+            if "text" in sibling.keys():
+                label = (sibling.cget("text") or "").strip()
+                if label:
+                    return label
+        return ""
+
+    def _tooltip_overrides(self):
+        return {
+            "chat": {
+                "profile": "Choose a saved profile to instantly apply proven defaults for this session.",
+                "mode": "Select response behavior (Q&A, tutor, summary, research, evidence pack).",
+                "index": "Pick which index to search. The wrong index means missing evidence.",
+                "model": "Choose the generation model used for answers in this chat.",
+                "retrieve_k": "Initial recall depth. Higher values improve recall but increase latency.",
+                "final_k": "Number of chunks sent to the model. Higher values boost coverage but add tokens.",
+                "refresh indexes": "Reload available indexes after ingesting or switching storage folders.",
+                "cancel": "Stop the running RAG job if a query is taking too long.",
+                "agentic mode": "Allow multi-step retrieval/planning. Better depth, slower answers.",
+                "max iterations": "Caps agentic loops; higher can improve coverage but adds latency.",
+                "show retrieved context": "Displays raw retrieved text so you can audit grounding quality.",
+                "reranker": "Improves precision by reordering candidates; adds rerank cost/time.",
+                "sub-queries": "Expands one query into many for broader recall across complex topics.",
+                "send": "Submit your prompt. Use focused wording for better evidence retrieval.",
+                "evidence": "Inspect answer support, source snippets, incidents, and tracing output.",
+                "open selected source": "Open the highlighted source document to verify citations quickly.",
+            },
+            "history": {
+                "new chat": "Start a fresh session without deleting previous conversation history.",
+                "open/resume": "Load the selected session back into Chat to continue from where you left off.",
+                "rename": "Give the selected session a clearer title for easier retrieval later.",
+                "delete": "Remove the selected session and its saved transcript from local history.",
+                "export": "Save the selected session transcript to a file for sharing or review.",
+                "refresh": "Reload sessions from disk after external changes.",
+                "search": "Filter sessions by keywords in title, summary, or transcript.",
+                "profile filter": "Show only sessions created with a specific profile.",
+                "saved sessions": "Select a session to view summary, config, and telemetry details.",
+                "summary": "High-level overview of the selected session to refresh context quickly.",
+                "config snapshot": "Captured run settings so you can reproduce previous behavior.",
+                "telemetry": "Runtime diagnostics from the last run for troubleshooting and tuning.",
+            },
+            "library": {
+                "browse file": "Choose the source document for ingestion into the vector index.",
+                "clear selection": "Reset the selected source file before starting ingestion.",
+                "chunk size": "Chunk length affects recall vs latency: larger chunks add context but reduce precision.",
+                "overlap": "Overlap preserves context across chunk boundaries; too much increases index size.",
+                "build digest index": "Create summary-oriented nodes for faster high-level synthesis queries.",
+                "comprehension index": "Build a structured comprehension layer for teaching and deep summary tasks.",
+                "extraction depth": "Controls how deeply comprehension extraction analyzes the source.",
+                "start ingestion": "Run ingest pipeline (parse, chunk, embed, store) for the selected file.",
+                "cancel ingestion": "Stop ingestion safely when you need to adjust settings first.",
+                "progress": "Live ingestion progress indicator; stage details appear in Logs.",
+            },
+            "settings": {
+                "search settings": "Find a setting quickly by keyword.",
+                "view": "Recommended hides advanced knobs; Advanced exposes full tuning controls.",
+                "startup mode": "Choose whether the app opens in recommended or advanced workflow.",
+                "theme mode": "Switch UI theme for comfort and readability.",
+                "generation provider": "Provider for answer generation; determines available models and pricing.",
+                "generation model": "Main model for responses; quality and latency depend on this choice.",
+                "custom generation model": "Override preset model names when using private or newly released models.",
+                "embedding provider": "Provider used to create vectors for retrieval.",
+                "embedding model": "Embedding model affects semantic matching quality and cost.",
+                "custom embedding model": "Override embedding model when you need custom or local variants.",
+                "browse local hf model": "Point to a local Hugging Face embedding model directory.",
+                "force embedding compatibility": "Bypass compatibility guardrails; useful only when you know dimensions match.",
+                "local llm url": "Endpoint for local LM Studio/OpenAI-compatible servers.",
+                "temperature": "Higher temperature increases creativity; lower temperature improves consistency.",
+                "max tokens": "Caps response length to control cost and latency.",
+                "system instructions": "Global behavior prompt. Strong instructions improve consistency across sessions.",
+                "verbose/analytical mode": "Adds deeper analytical guidance for more thorough outputs.",
+                "chroma": "Store vectors locally for easy setup and single-user workflows.",
+                "weaviate": "Use remote/vector server backend for larger or shared deployments.",
+                "weaviate url": "Server endpoint used when Weaviate backend is selected.",
+                "api key": "Credential for the selected provider; required to call hosted APIs.",
+                "check dependencies": "Verify Python packages needed for your current provider and pipeline.",
+                "install / reinstall dependencies": "Install or repair required dependencies when setup is broken.",
+                "search type": "Similarity is faster; MMR improves diversity and reduces duplicate context.",
+                "search mode": "Flat is fast; hierarchical can improve long-document coverage.",
+                "mmr lambda": "Balances relevance vs diversity. Lower values improve coverage, higher values precision.",
+                "use cohere reranker": "Second-pass reranking can improve precision on ambiguous queries.",
+                "max merged docs": "Caps merged sub-query results; higher values broaden recall but slow synthesis.",
+                "fallback final k": "Safety cap when retrieval returns sparse results in advanced pipelines.",
+                "prefer comprehension index": "Prioritizes structured digest vectors for summary/teaching quality.",
+                "citation v2": "Improves citation labeling and source locator quality in evidence-heavy outputs.",
+                "claim-level grounding": "Runs lightweight claim-to-source grounding checks for factual robustness.",
+                "agent lightning": "Capture agent traces for debugging iterative retrieval behavior.",
+                "profile list": "Switch between saved profile presets for quick configuration changes.",
+            },
+        }
+
     def _bind_accessibility_shortcuts(self):
         self.root.bind_all("<Control-Return>", lambda _e: self.send_message())
         self.root.bind_all("<Control-l>", lambda _e: self._focus_chat_input())
@@ -2721,6 +2999,7 @@ class AgenticRAGApp:
         ttk.Label(details, text="Last Run Telemetry", style="Bold.TLabel").pack(anchor="w")
         self.history_telemetry_text = scrolledtext.ScrolledText(details, height=10, state="disabled", wrap=tk.WORD)
         self.history_telemetry_text.pack(fill=tk.BOTH, expand=True)
+        self._apply_tooltips_for_tab("history", frame)
 
     def _on_history_tree_click(self, event):
         if not hasattr(self, "sessions_tree"):
@@ -3183,6 +3462,7 @@ class AgenticRAGApp:
         self._refresh_profile_options()
         self._index_settings_search_rows()
         self._apply_basic_advanced_visibility()
+        self._apply_tooltips_for_tab("settings", frame)
 
     def _register_settings_section(self, section, title, advanced_only=False):
         if not hasattr(self, "_settings_section_meta"):
@@ -3423,6 +3703,7 @@ class AgenticRAGApp:
             text="Progress is shown while indexing runs. Detailed stage output appears in Logs.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+        self._apply_tooltips_for_tab("library", frame)
         self._update_current_state_strip()
 
     def build_chat_tab(self):
@@ -3715,6 +3996,7 @@ class AgenticRAGApp:
         self._grounding_tab_added = False
         self.enable_langextract.trace_add("write", self._toggle_grounding_tab)
         self._toggle_grounding_tab()
+        self._apply_tooltips_for_tab("chat", frame)
         self._update_current_state_strip()
 
     def _prompt_startup_mode_selection(self):
