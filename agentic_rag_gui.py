@@ -193,6 +193,11 @@ MAX_HIERARCHICAL_RECURSION_ITERATIONS = 3
 HIERARCHICAL_COVERAGE_MIN_SCORE = 0.55
 MAX_PACKED_CONTEXT_CHARS = 60000
 TOKENS_TO_CHARS_RATIO = 4
+SUPPORTED_INGEST_EXTENSIONS = (".txt", ".md", ".html", ".htm", ".pdf", ".epub")
+SUPPORTED_INGEST_FILETYPES = [
+    ("Supported", " ".join(f"*{ext}" for ext in SUPPORTED_INGEST_EXTENSIONS)),
+    ("All files", "*.*"),
+]
 CONTEXT_SAFETY_MARGIN_TOKENS = 512
 MAX_GROUP_DOCS = 2
 MIN_UNIQUE_INCIDENTS = 8
@@ -3829,9 +3834,22 @@ class AgenticRAGApp:
 
         ttk.Label(
             sel_frame,
-            text="Select HTML/Text File (2M+ tokens supported):",
+            text="Select file",
             style="Header.TLabel",
         ).pack(anchor="w")
+
+        supported_formats = ttk.Label(
+            sel_frame,
+            text=f"Supported: {' '.join(SUPPORTED_INGEST_EXTENSIONS)}",
+            style="Muted.TLabel",
+        )
+        supported_formats.pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+        self._tip(
+            supported_formats,
+            "Supported ingestion types: .txt/.md use plain text parsing, .html/.htm strip markup to text, "
+            ".pdf uses PDF extraction (layout may vary by document), and .epub parses ebook sections.",
+        )
+
         self.lbl_file = ttk.Label(sel_frame, text="No file selected", style="Muted.TLabel")
         self.lbl_file.pack(anchor="w", pady=5)
         self.lbl_file_info = ttk.Label(sel_frame, text="", style="Muted.TLabel")
@@ -4325,7 +4343,7 @@ class AgenticRAGApp:
         ttk.Combobox(self._wizard_content, textvariable=self._wizard_index_var, values=index_values, state="readonly").pack(fill="x", pady=(4, 0))
 
     def _wizard_browse_file(self):
-        chosen = filedialog.askopenfilename(filetypes=[("Supported", "*.txt *.md *.html *.htm *.pdf *.epub"), ("All files", "*.*")])
+        chosen = filedialog.askopenfilename(filetypes=SUPPORTED_INGEST_FILETYPES)
         if chosen:
             self._wizard_file_var.set(chosen)
 
@@ -8123,7 +8141,7 @@ class AgenticRAGApp:
             self.log(f"Installation Error: {e}")
 
     def browse_file(self):
-        f = filedialog.askopenfilename(filetypes=[("HTML/Text", "*.html *.htm *.txt")])
+        f = filedialog.askopenfilename(filetypes=SUPPORTED_INGEST_FILETYPES)
         if f:
             self.selected_file = f
             self.lbl_file.config(text=f, style="TLabel")
@@ -8143,7 +8161,15 @@ class AgenticRAGApp:
         try:
             size_bytes = os.path.getsize(self.selected_file)
             size_label = self._humanize_bytes(size_bytes)
-            self.lbl_file_info.config(text=f"File size: {size_label}")
+            extension = os.path.splitext(self.selected_file)[1].lower() or "(no extension)"
+            estimated_tokens = max(1, round(size_bytes / max(1, TOKENS_TO_CHARS_RATIO)))
+            modified_at = datetime.fromtimestamp(os.path.getmtime(self.selected_file)).strftime("%Y-%m-%d %H:%M")
+            self.lbl_file_info.config(
+                text=(
+                    f"{size_label} • {extension} • ~{estimated_tokens:,} tokens • "
+                    f"Modified {modified_at}"
+                )
+            )
         except OSError:
             self.lbl_file_info.config(text="")
 
