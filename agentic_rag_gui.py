@@ -876,6 +876,10 @@ class AgenticRAGApp:
             value=os.path.join(os.path.expanduser("~"), ".cache", "sentence_transformers")
         )
         self.local_st_batch_size = tk.IntVar(value=32)
+        self.local_model_registry = {"gguf": [], "sentence_transformers": []}
+        self.local_model_name_input = tk.StringVar()
+        self.local_model_path_input = tk.StringVar()
+        self.local_st_name_input = tk.StringVar()
         self.llm_temperature = tk.DoubleVar(value=0.0)
         self.llm_max_tokens = tk.IntVar(value=1024)
         self.force_embedding_compat = tk.BooleanVar(value=False)
@@ -3090,7 +3094,192 @@ class AgenticRAGApp:
         )
         if path:
             self.local_gguf_model_path.set(path)
+            self.local_model_path_input.set(path)
             self._update_local_gguf_ui_state()
+
+    def _normalize_local_model_registry(self, payload):
+        registry = {"gguf": [], "sentence_transformers": []}
+        if not isinstance(payload, dict):
+            return registry
+
+        for item in payload.get("gguf", []):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            path = str(item.get("path", "")).strip()
+            if not name or not path:
+                continue
+            registry["gguf"].append(
+                {
+                    "id": str(item.get("id") or uuid.uuid4()),
+                    "type": "gguf",
+                    "name": name,
+                    "value": path,
+                    "path": path,
+                }
+            )
+
+        for item in payload.get("sentence_transformers", []):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            registry["sentence_transformers"].append(
+                {
+                    "id": str(item.get("id") or uuid.uuid4()),
+                    "type": "sentence_transformers",
+                    "name": name,
+                    "value": name,
+                    "path": "",
+                }
+            )
+        return registry
+
+    def _serialize_local_model_registry(self):
+        return {
+            "gguf": [
+                {"id": item["id"], "name": item["name"], "path": item["path"]}
+                for item in self.local_model_registry.get("gguf", [])
+            ],
+            "sentence_transformers": [
+                {"id": item["id"], "name": item["name"]}
+                for item in self.local_model_registry.get("sentence_transformers", [])
+            ],
+        }
+
+    def _upsert_local_model_entry(self, model_type, name, value):
+        normalized_type = "gguf" if model_type == "gguf" else "sentence_transformers"
+        clean_name = (name or "").strip()
+        clean_value = (value or "").strip()
+        if not clean_name or not clean_value:
+            return False
+        if normalized_type == "gguf":
+            clean_value = os.path.abspath(clean_value)
+
+        bucket = self.local_model_registry.setdefault(normalized_type, [])
+        for item in bucket:
+            if item["name"].lower() == clean_name.lower() or item["value"] == clean_value:
+                item["name"] = clean_name
+                item["value"] = clean_value
+                item["path"] = clean_value if normalized_type == "gguf" else ""
+                self._refresh_local_model_registry_table()
+                self.save_config()
+                return True
+
+        bucket.append(
+            {
+                "id": str(uuid.uuid4()),
+                "type": normalized_type,
+                "name": clean_name,
+                "value": clean_value,
+                "path": clean_value if normalized_type == "gguf" else "",
+            }
+        )
+        self._refresh_local_model_registry_table()
+        self.save_config()
+        return True
+
+    def add_local_gguf_model(self):
+        name = self.local_model_name_input.get().strip()
+        path = self.local_model_path_input.get().strip()
+        if not name or not path:
+            messagebox.showwarning("Local Models", "Name and path are required for GGUF entries.")
+            return
+        self._upsert_local_model_entry("gguf", name, path)
+
+    def add_local_st_model(self):
+        name = self.local_st_name_input.get().strip()
+        if not name:
+            messagebox.showwarning("Local Models", "SentenceTransformers model name is required.")
+            return
+        self._upsert_local_model_entry("sentence_transformers", name, name)
+
+    def _get_selected_local_model_entry(self):
+        if not hasattr(self, "local_models_tree") or not self._safe_widget_exists(self.local_models_tree):
+            return None
+        selection = self.local_models_tree.selection()
+        if not selection:
+            return None
+        item_id = selection[0]
+        for bucket in ("gguf", "sentence_transformers"):
+            for item in self.local_model_registry.get(bucket, []):
+                if item["id"] == item_id:
+                    return item
+        return None
+
+    def _refresh_local_model_registry_table(self):
+        if not hasattr(self, "local_models_tree") or not self._safe_widget_exists(self.local_models_tree):
+            return
+        for iid in self.local_models_tree.get_children():
+            self.local_models_tree.delete(iid)
+        for bucket in ("gguf", "sentence_transformers"):
+            for item in self.local_model_registry.get(bucket, []):
+                model_type = "GGUF" if bucket == "gguf" else "SentenceTransformer"
+                self.local_models_tree.insert(
+                    "",
+                    tk.END,
+                    iid=item["id"],
+                    values=(model_type, item["name"], item["value"]),
+                )
+
+    def remove_selected_local_model(self):
+        selected = self._get_selected_local_model_entry()
+        if not selected:
+            return
+        bucket = selected["type"]
+        self.local_model_registry[bucket] = [
+            item for item in self.local_model_registry.get(bucket, []) if item["id"] != selected["id"]
+        ]
+        self._refresh_local_model_registry_table()
+        self.save_config()
+
+    def set_selected_local_model_active(self, target):
+        selected = self._get_selected_local_model_entry()
+        if not selected:
+            return
+        if target == "llm":
+            if selected["type"] != "gguf":
+                messagebox.showwarning("Local Models", "Only GGUF entries can be set as active LLM.")
+                return
+            self.llm_provider.set("local_gguf")
+            self.local_gguf_model_path.set(selected["path"])
+            self.llm_model.set("custom")
+            self.llm_model_custom.set(selected["name"])
+            self._update_local_gguf_ui_state()
+        elif target == "embedding":
+            if selected["type"] == "sentence_transformers":
+                self.embedding_provider.set("local_sentence_transformers")
+                self.local_st_model_name.set(selected["value"])
+            else:
+                self.embedding_provider.set("local_huggingface")
+                self.embedding_model.set("custom")
+                self.embedding_model_custom.set(selected["path"])
+            self._update_local_sentence_transformers_ui_state()
+        self._sync_model_options()
+        self.save_config()
+
+    def open_selected_local_model_folder(self):
+        selected = self._get_selected_local_model_entry()
+        if not selected:
+            return
+        if selected["type"] == "gguf":
+            open_path = selected["path"]
+        else:
+            cache_dir = (self.local_st_cache_dir.get() or "").strip()
+            open_path = cache_dir or os.path.expanduser("~")
+        folder = open_path if os.path.isdir(open_path) else os.path.dirname(open_path)
+        if not folder:
+            return
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(folder)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", folder])
+            else:
+                subprocess.Popen(["xdg-open", folder])
+        except Exception:
+            webbrowser.open(f"file://{folder}")
 
     def _local_gguf_dependency_available(self):
         return importlib.util.find_spec("llama_cpp") is not None
@@ -3237,6 +3426,9 @@ class AgenticRAGApp:
         )
         self.local_st_batch_size.set(
             max(1, int(data.get("local_st_batch_size", self.local_st_batch_size.get()) or 32))
+        )
+        self.local_model_registry = self._normalize_local_model_registry(
+            data.get("local_model_registry", self.local_model_registry)
         )
         self.llm_temperature.set(data.get("llm_temperature", self.llm_temperature.get()))
         self.llm_max_tokens.set(data.get("llm_max_tokens", self.llm_max_tokens.get()))
@@ -3409,6 +3601,7 @@ class AgenticRAGApp:
             "local_st_model_name": self.local_st_model_name.get(),
             "local_st_cache_dir": self.local_st_cache_dir.get(),
             "local_st_batch_size": max(1, int(self.local_st_batch_size.get())),
+            "local_model_registry": self._serialize_local_model_registry(),
             "llm_temperature": self.llm_temperature.get(),
             "llm_max_tokens": self.llm_max_tokens.get(),
             "system_instructions": self.system_instructions.get(),
@@ -3965,6 +4158,66 @@ class AgenticRAGApp:
 
         self._update_local_gguf_ui_state()
         self._update_local_sentence_transformers_ui_state()
+
+        local_models_frame = ttk.LabelFrame(
+            self.settings_model_section.content,
+            text="Local Models",
+            padding=15,
+        )
+        local_models_frame.pack(fill="x", padx=2, pady=(0, 8))
+        local_models_frame.columnconfigure(0, weight=1)
+
+        register_gguf = ttk.LabelFrame(local_models_frame, text="Register GGUF", padding=10)
+        register_gguf.grid(row=0, column=0, sticky="ew")
+        register_gguf.columnconfigure(1, weight=1)
+        ttk.Label(register_gguf, text="Name:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(register_gguf, textvariable=self.local_model_name_input).grid(
+            row=0, column=1, sticky="ew", padx=(6, 6), pady=4
+        )
+        ttk.Label(register_gguf, text="Path:").grid(row=1, column=0, sticky="w")
+        gguf_add_row = ttk.Frame(register_gguf)
+        gguf_add_row.grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=4)
+        gguf_add_row.columnconfigure(0, weight=1)
+        ttk.Entry(gguf_add_row, textvariable=self.local_model_path_input).grid(row=0, column=0, sticky="ew")
+        ttk.Button(gguf_add_row, text="Browse...", command=self.browse_gguf_model).grid(row=0, column=1, padx=(6, 0))
+        ttk.Button(register_gguf, text="Add GGUF", command=self.add_local_gguf_model).grid(
+            row=2, column=1, sticky="w", pady=(4, 0)
+        )
+
+        register_st = ttk.LabelFrame(local_models_frame, text="Register SentenceTransformers", padding=10)
+        register_st.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        register_st.columnconfigure(1, weight=1)
+        ttk.Label(register_st, text="Model name:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(register_st, textvariable=self.local_st_name_input).grid(
+            row=0, column=1, sticky="ew", padx=(6, 6), pady=4
+        )
+        ttk.Button(register_st, text="Add Model", command=self.add_local_st_model).grid(
+            row=1, column=1, sticky="w", pady=(4, 0)
+        )
+
+        table_frame = ttk.Frame(local_models_frame)
+        table_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        table_frame.columnconfigure(0, weight=1)
+        columns = ("type", "name", "value")
+        self.local_models_tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=6)
+        self.local_models_tree.heading("type", text="Type")
+        self.local_models_tree.heading("name", text="Name")
+        self.local_models_tree.heading("value", text="Path / Model")
+        self.local_models_tree.column("type", width=150, anchor="w")
+        self.local_models_tree.column("name", width=180, anchor="w")
+        self.local_models_tree.column("value", width=420, anchor="w")
+        self.local_models_tree.grid(row=0, column=0, sticky="ew")
+        yscroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.local_models_tree.yview)
+        self.local_models_tree.configure(yscrollcommand=yscroll.set)
+        yscroll.grid(row=0, column=1, sticky="ns")
+
+        actions_row = ttk.Frame(local_models_frame)
+        actions_row.grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Button(actions_row, text="Set as active LLM", command=lambda: self.set_selected_local_model_active("llm")).pack(side="left")
+        ttk.Button(actions_row, text="Set as active Embeddings", command=lambda: self.set_selected_local_model_active("embedding")).pack(side="left", padx=(6, 0))
+        ttk.Button(actions_row, text="Open containing folder", command=self.open_selected_local_model_folder).pack(side="left", padx=(6, 0))
+        ttk.Button(actions_row, text="Remove", command=self.remove_selected_local_model).pack(side="left", padx=(6, 0))
+        self._refresh_local_model_registry_table()
 
         # --- Vector DB Settings ---
         db_frame = ttk.LabelFrame(self.settings_model_section.content, text="Vector Database Strategy", padding=15)
