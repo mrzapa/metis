@@ -1744,13 +1744,22 @@ class AgenticRAGApp:
         if not hasattr(self, "history_summary_fields"):
             return
         session_id = self._selected_history_session_id()
-        summary_text = ""
-        config_text = ""
-        telemetry_text = ""
-        telemetry = None
-        run_id = ""
+        payload = self._build_history_details_payload(session_id)
 
-        summary_defaults = {
+        for key, value in payload["summary_values"].items():
+            self.history_summary_fields[key].set(value)
+
+        self._history_summary_blob = payload["summary_blob"]
+        self._selected_session_folder = payload["selected_session_folder"]
+        self._set_readonly_text(self.history_summary_text, payload["summary_text"])
+        self._set_readonly_text(self.history_config_text, payload["config_text"])
+        self._set_readonly_text(self.history_telemetry_text, payload["telemetry_text"])
+        if hasattr(self, "history_raw_json_text"):
+            self._set_readonly_text(self.history_raw_json_text, payload["raw_json_text"])
+        self._populate_telemetry_fields(payload["telemetry"], payload["run_id"])
+
+    def _build_history_details_payload(self, session_id):
+        summary_values = {
             "Title": "-",
             "Session ID": "-",
             "Updated": "-",
@@ -1759,76 +1768,92 @@ class AgenticRAGApp:
             "Mode": "-",
             "Index": "-",
         }
-        for key, default_value in summary_defaults.items():
-            self.history_summary_fields[key].set(default_value)
-        self._history_summary_blob = ""
-        self._selected_session_folder = ""
+        payload = {
+            "summary_values": summary_values,
+            "summary_blob": "",
+            "selected_session_folder": "",
+            "summary_text": "",
+            "config_text": "",
+            "telemetry_text": "",
+            "raw_json_text": "",
+            "telemetry": None,
+            "run_id": "",
+        }
+        if not session_id:
+            return payload
 
-        if session_id:
-            session, messages = self._fetch_session_and_messages(session_id)
-            if session:
-                title = (session["title"] or "Untitled").strip() or "Untitled"
-                summary = (session["summary"] or "").strip() or "(No summary saved.)"
+        session, messages = self._fetch_session_and_messages(session_id)
+        if not session:
+            return payload
 
-                extra = {}
-                try:
-                    extra = json.loads(session["extra_json"] or "{}")
-                except json.JSONDecodeError:
-                    extra = {}
+        title = (session["title"] or "Untitled").strip() or "Untitled"
+        summary = (session["summary"] or "").strip() or "(No summary saved.)"
+        extra = {}
+        try:
+            extra = json.loads(session["extra_json"] or "{}")
+        except json.JSONDecodeError:
+            extra = {}
 
-                index_path = (extra.get("selected_index_path") or "").strip()
-                index_label = (session["index_id"] or "-").strip() or "-"
-                if index_path:
-                    index_label = f"{index_label} ({index_path})" if index_label != "-" else index_path
-                self._selected_session_folder = index_path if os.path.isdir(index_path) else ""
+        index_path = (extra.get("selected_index_path") or "").strip()
+        index_label = (session["index_id"] or "-").strip() or "-"
+        if index_path:
+            index_label = f"{index_label} ({index_path})" if index_label != "-" else index_path
 
-                summary_values = {
-                    "Title": title,
-                    "Session ID": session_id,
-                    "Updated": session["updated_at"] or "-",
-                    "Message Count": str(len(messages)),
-                    "Profile": session["active_profile"] or "-",
-                    "Mode": session["mode"] or "-",
-                    "Index": index_label,
-                }
-                for key, value in summary_values.items():
-                    self.history_summary_fields[key].set(value)
-                summary_text = summary
-                self._history_summary_blob = "\n".join(
-                    [f"{key}: {value}" for key, value in summary_values.items()] + ["", f"Summary:\n{summary}"]
-                )
+        summary_values.update(
+            {
+                "Title": title,
+                "Session ID": session_id,
+                "Updated": session["updated_at"] or "-",
+                "Message Count": str(len(messages)),
+                "Profile": session["active_profile"] or "-",
+                "Mode": session["mode"] or "-",
+                "Index": index_label,
+            }
+        )
+        payload["summary_text"] = summary
+        payload["summary_blob"] = "\n".join([f"{key}: {value}" for key, value in summary_values.items()] + ["", f"Summary:\n{summary}"])
+        payload["selected_session_folder"] = index_path if os.path.isdir(index_path) else ""
 
-                snapshot = {
-                    "profile": session["active_profile"],
-                    "mode": session["mode"],
-                    "index": session["index_id"],
-                    "llm_provider": session["llm_provider"],
-                    "llm_model": session["llm_model"],
-                    "embed_model": session["embed_model"],
-                    "retrieve_k": session["retrieve_k"],
-                    "final_k": session["final_k"],
-                    "mmr_lambda": session["mmr_lambda"],
-                    "agentic_iterations": session["agentic_iterations"],
-                    "extra": extra,
-                }
-                config_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
+        snapshot = {
+            "profile": session["active_profile"],
+            "mode": session["mode"],
+            "index": session["index_id"],
+            "llm_provider": session["llm_provider"],
+            "llm_model": session["llm_model"],
+            "embed_model": session["embed_model"],
+            "retrieve_k": session["retrieve_k"],
+            "final_k": session["final_k"],
+            "mmr_lambda": session["mmr_lambda"],
+            "agentic_iterations": session["agentic_iterations"],
+            "extra": extra,
+        }
+        payload["config_text"] = json.dumps(snapshot, ensure_ascii=False, indent=2)
 
-                for msg in reversed(messages):
-                    if msg["run_id"]:
-                        run_id = msg["run_id"]
-                        break
-                telemetry = self._load_last_run_telemetry(run_id)
-                if telemetry:
-                    telemetry_text = json.dumps(telemetry, ensure_ascii=False, indent=2)
-                elif run_id:
-                    telemetry_text = f"No telemetry event found for run_id={run_id}."
-                else:
-                    telemetry_text = "No run telemetry available for this session."
+        for msg in reversed(messages):
+            if msg["run_id"]:
+                payload["run_id"] = msg["run_id"]
+                break
+        payload["telemetry"] = self._load_last_run_telemetry(payload["run_id"])
+        if payload["telemetry"]:
+            payload["telemetry_text"] = json.dumps(payload["telemetry"], ensure_ascii=False, indent=2)
+        elif payload["run_id"]:
+            payload["telemetry_text"] = f"No telemetry event found for run_id={payload['run_id']}."
+        else:
+            payload["telemetry_text"] = "No run telemetry available for this session."
 
-        self._set_readonly_text(self.history_summary_text, summary_text)
-        self._set_readonly_text(self.history_config_text, config_text)
-        self._set_readonly_text(self.history_telemetry_text, telemetry_text)
-        self._populate_telemetry_fields(telemetry, run_id)
+        payload["raw_json_text"] = json.dumps(
+            {
+                "session_id": session_id,
+                "summary": summary_values,
+                "synopsis": summary,
+                "config_snapshot": snapshot,
+                "run_id": payload["run_id"] or None,
+                "telemetry": payload["telemetry"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        return payload
 
     def _populate_telemetry_fields(self, telemetry, run_id=""):
         defaults = {
@@ -4199,7 +4224,15 @@ class AgenticRAGApp:
         details = self.create_frame(right, text="Session Details", padding=UI_SPACING["m"], kind="labelframe")
         details.pack(fill=tk.BOTH, expand=True)
 
-        summary_card = self.create_frame(details, text="Summary", padding=UI_SPACING["m"], kind="labelframe")
+        details_notebook = self.create_notebook(details, style="App.TNotebook")
+        details_notebook.pack(fill=tk.BOTH, expand=True)
+
+        overview_tab = self.create_frame(details_notebook, style="Card.TFrame", padding=UI_SPACING["xs"])
+        diagnostics_tab = self.create_frame(details_notebook, style="Card.TFrame", padding=UI_SPACING["xs"])
+        details_notebook.add(overview_tab, text="Overview")
+        details_notebook.add(diagnostics_tab, text="Diagnostics")
+
+        summary_card = self.create_frame(overview_tab, text="Summary", padding=UI_SPACING["m"], kind="labelframe")
         summary_card.pack(fill="x", pady=(0, UI_SPACING["m"]))
         summary_grid = self.create_frame(summary_card, style="Card.TFrame")
         summary_grid.pack(fill="x")
@@ -4229,19 +4262,21 @@ class AgenticRAGApp:
         self._tip(open_folder_btn, "Open the selected index/session folder when available.")
         self._tip(export_json_btn, "Export this session as a standalone JSON file.")
 
-        summary_text_card = self.create_frame(details, style="Card.TFrame")
+        summary_text_card = self.create_frame(overview_tab, style="Card.TFrame")
         summary_text_card.pack(fill="x", pady=(0, 10))
         self.create_label(summary_text_card, text="Synopsis", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
         self.history_summary_text = self.create_rich_text_surface(summary_text_card, surface_id="history_summary", height=5, wrap=tk.WORD, state="disabled", relief="flat", borderwidth=1)
         self.history_summary_text.pack(fill="x")
 
-        notebook = self.create_notebook(details, style="App.TNotebook")
-        notebook.pack(fill=tk.BOTH, expand=True)
+        diagnostics_notebook = self.create_notebook(diagnostics_tab, style="App.TNotebook")
+        diagnostics_notebook.pack(fill=tk.BOTH, expand=True)
 
-        config_tab = self.create_frame(notebook, style="Card.TFrame", padding=8)
-        telemetry_tab = self.create_frame(notebook, style="Card.TFrame", padding=8)
-        notebook.add(config_tab, text="Config")
-        notebook.add(telemetry_tab, text="Telemetry")
+        config_tab = self.create_frame(diagnostics_notebook, style="Card.TFrame", padding=8)
+        telemetry_tab = self.create_frame(diagnostics_notebook, style="Card.TFrame", padding=8)
+        raw_json_tab = self.create_frame(diagnostics_notebook, style="Card.TFrame", padding=8)
+        diagnostics_notebook.add(config_tab, text="Config Snapshot")
+        diagnostics_notebook.add(telemetry_tab, text="Telemetry")
+        diagnostics_notebook.add(raw_json_tab, text="Raw JSON")
 
         self.history_config_text = self.create_rich_text_surface(config_tab, surface_id="history_config", wrap=tk.NONE, state="disabled", height=12, relief="flat", borderwidth=1)
         cfg_y = ttk.Scrollbar(config_tab, orient="vertical", command=self.history_config_text.yview)
@@ -4269,6 +4304,15 @@ class AgenticRAGApp:
         self.history_telemetry_text.pack(side="top", fill=tk.BOTH, expand=True)
         telem_y.pack(side="right", fill="y")
         telem_x.pack(side="bottom", fill="x")
+
+        self.create_label(raw_json_tab, text="Parsed session payload", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
+        self.history_raw_json_text = self.create_rich_text_surface(raw_json_tab, surface_id="history_raw_json", wrap=tk.NONE, state="disabled", height=12, relief="flat", borderwidth=1)
+        raw_y = ttk.Scrollbar(raw_json_tab, orient="vertical", command=self.history_raw_json_text.yview)
+        raw_x = ttk.Scrollbar(raw_json_tab, orient="horizontal", command=self.history_raw_json_text.xview)
+        self.history_raw_json_text.configure(yscrollcommand=raw_y.set, xscrollcommand=raw_x.set)
+        self.history_raw_json_text.pack(side="top", fill=tk.BOTH, expand=True)
+        raw_y.pack(side="right", fill="y")
+        raw_x.pack(side="bottom", fill="x")
 
         self._history_summary_blob = ""
         self._selected_session_folder = ""
