@@ -23,6 +23,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
+from sht_builder import build_sht_tree
+
 if TYPE_CHECKING:
     from langchain_core.documents import Document
 
@@ -9894,9 +9896,9 @@ class AgenticRAGApp:
             normalized.append(line)
         return normalized
 
-    def _build_structured_text_from_pdf_candidates(self, candidates):
+    def _build_structured_text_from_pdf_candidates(self, candidates, structure_aware_enabled=True):
         if not candidates:
-            return "", False
+            return "", False, []
 
         font_sizes = [float(c.get("font_size") or 0.0) for c in candidates if float(c.get("font_size") or 0.0) > 0]
         body_font_size = sorted(font_sizes)[len(font_sizes) // 2] if font_sizes else 0.0
@@ -9909,19 +9911,48 @@ class AgenticRAGApp:
 
         header_confidences = [float(c.get("header_confidence") or 0.0) for c in normalized if c.get("header_level")]
         avg_conf = (sum(header_confidences) / len(header_confidences)) if header_confidences else 0.0
-        use_structured = bool(header_confidences) and avg_conf >= 0.62
+        use_structured = bool(structure_aware_enabled) and bool(header_confidences) and avg_conf >= 0.62
 
         lines = []
+        header_candidates = []
+        content_spans = []
         for candidate in normalized:
             line_text = str(candidate.get("text") or "").strip()
             if not line_text:
                 continue
+            line_start = int(candidate.get("char_start") or 0)
+            line_end = line_start + len(line_text)
             header_level = candidate.get("header_level") if use_structured else None
             if header_level:
+                header_candidates.append(
+                    {
+                        "text": line_text,
+                        "header_level": int(header_level),
+                        "char_start": line_start,
+                        "char_end": line_end,
+                        "page": candidate.get("page"),
+                    }
+                )
                 lines.append(f"{'#' * int(header_level)} {line_text}")
             else:
+                content_spans.append(
+                    {
+                        "text": line_text,
+                        "char_start": line_start,
+                        "char_end": line_end,
+                        "page": candidate.get("page"),
+                    }
+                )
                 lines.append(line_text)
-        return "\n".join(lines), use_structured
+        source_text = "\n".join(lines)
+        structure_tree = []
+        if use_structured and header_candidates:
+            structure_tree = build_sht_tree(
+                header_candidates=header_candidates,
+                content_spans=content_spans,
+                source_text=source_text,
+            )
+        return source_text, use_structured, structure_tree
 
     @staticmethod
     def _structure_at_offset(offset, markers):
@@ -12359,19 +12390,31 @@ class AgenticRAGApp:
             elif selected_file.lower().endswith(".pdf"):
                 try:
                     pdf_candidates = self._extract_pdf_line_candidates(selected_file)
-                    structured_text, used_structured_headers = self._build_structured_text_from_pdf_candidates(
-                        pdf_candidates
+                    structured_text, used_structured_headers, pdf_structure_tree = self._build_structured_text_from_pdf_candidates(
+                        pdf_candidates,
+                        structure_aware_enabled=ingest_ctx["structure_aware"],
                     )
-                    if used_structured_headers:
+                    if used_structured_headers and ingest_ctx["structure_aware"]:
+                        self._latest_sht_tree = pdf_structure_tree
                         self.log(
-                            f"PDF parser: extracted {len(pdf_candidates)} line candidates with header signals."
+                            "PDF parser: extracted "
+                            f"{len(pdf_candidates)} line candidates with header signals "
+                            f"and built {len(pdf_structure_tree)} structure-aware nodes."
+                        )
+                    elif used_structured_headers:
+                        self._latest_sht_tree = []
+                        self.log(
+                            "PDF parser: header signals detected, but structure-aware mode is OFF; "
+                            "continuing with flat chunk path."
                         )
                     else:
+                        self._latest_sht_tree = []
                         self.log(
                             "PDF parser: low header confidence, falling back to flat line ingestion."
                         )
                     text_content = structured_text
                 except Exception as pdf_err:
+                    self._latest_sht_tree = []
                     self.log(f"PDF structured parsing failed ({pdf_err}); falling back to flat extraction.")
                     try:
                         from pypdf import PdfReader
