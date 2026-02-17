@@ -2404,12 +2404,24 @@ class AgenticRAGApp:
             self.root.configure(bg=palette["bg"])
 
     def _apply_theme(self):
-        style = ttk.Style()
-        if self.ui_backend != "ttkbootstrap" and "clam" in style.theme_names():
-            style.theme_use("clam")
         palette = STYLE_CONFIG["themes"].get(self.ui_mode.get(), STYLE_CONFIG["themes"]["space_dust"])
-        font_family = STYLE_CONFIG["font_family"] if STYLE_CONFIG["font_family"] in tkfont.families() else STYLE_CONFIG["fallback_font"]
         self._active_palette = palette
+
+        if self.ui_backend == "ctk" and CTK_MODULE is not None:
+            self._apply_ctk_theme(palette)
+        elif self.ui_backend == "ttkbootstrap" and TTKBOOTSTRAP_MODULE is not None:
+            self._apply_ttkbootstrap_theme(palette)
+        else:
+            self._apply_ttk_theme(palette)
+
+        self._theme_tk_widgets()
+        self._theme_text_tags()
+
+    def _apply_ttk_theme(self, palette, *, use_clam=True):
+        style = ttk.Style()
+        if use_clam and "clam" in style.theme_names():
+            style.theme_use("clam")
+        font_family = STYLE_CONFIG["font_family"] if STYLE_CONFIG["font_family"] in tkfont.families() else STYLE_CONFIG["fallback_font"]
         self.root.configure(bg=palette["bg"])
         style.configure(".", background=palette["bg"], foreground=palette["text"], fieldbackground=palette["surface_alt"])
         style.configure("TFrame", background=palette["bg"], borderwidth=0, relief="flat")
@@ -2455,8 +2467,108 @@ class AgenticRAGApp:
         style.configure("App.TNotebook.Tab", padding=(16, 10), font=(font_family, 10, "bold"), borderwidth=0)
         style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("!selected", palette["bg"])], foreground=[("selected", palette["text"]), ("!selected", palette["muted_text"])])
 
-        self._theme_tk_widgets()
-        self._theme_text_tags()
+    def _apply_ttkbootstrap_theme(self, palette):
+        style = self._ttkbootstrap_style or ttk.Style()
+        self._ttkbootstrap_style = style
+        mode = (self.ui_mode.get() or "space_dust").lower()
+        bootstrap_theme = "flatly" if mode == "light" else "darkly"
+        try:
+            style.theme_use(bootstrap_theme)
+        except tk.TclError:
+            pass
+        self._apply_ttk_theme(palette, use_clam=False)
+
+    def _apply_ctk_theme(self, palette):
+        mode = (self.ui_mode.get() or "space_dust").lower()
+        CTK_MODULE.set_appearance_mode("light" if mode == "light" else "dark")
+        self.root.configure(bg=palette["bg"])
+        self._theme_ctk_widgets()
+
+    def _theme_ctk_widgets(self):
+        palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+
+        def configure_if_supported(widget, **kwargs):
+            try:
+                supported = widget.configure()
+            except Exception:
+                return
+            applied = {key: value for key, value in kwargs.items() if key in supported and value is not None}
+            if applied:
+                try:
+                    widget.configure(**applied)
+                except Exception:
+                    pass
+
+        def apply_recursive(widget):
+            class_name = widget.__class__.__name__
+            if class_name.startswith("CTk"):
+                base_kwargs = {
+                    "fg_color": palette["surface"],
+                    "text_color": palette["text"],
+                    "border_color": palette["outline"],
+                    "corner_radius": STYLE_CONFIG.get("radius", 12),
+                }
+                if class_name == "CTkFrame":
+                    base_kwargs["fg_color"] = palette["surface"]
+                elif class_name == "CTkLabel":
+                    base_kwargs["fg_color"] = "transparent"
+                    base_kwargs["text_color"] = palette["text"]
+                elif class_name == "CTkButton":
+                    base_kwargs.update(
+                        {
+                            "fg_color": palette["primary"],
+                            "text_color": palette["selection_fg"],
+                            "hover_color": palette["secondary"],
+                            "border_width": 0,
+                        }
+                    )
+                elif class_name == "CTkEntry":
+                    base_kwargs.update(
+                        {
+                            "fg_color": palette["surface_alt"],
+                            "text_color": palette["text"],
+                            "placeholder_text_color": palette["muted_text"],
+                            "border_width": 1,
+                        }
+                    )
+                elif class_name == "CTkComboBox":
+                    base_kwargs.update(
+                        {
+                            "fg_color": palette["surface_alt"],
+                            "text_color": palette["text"],
+                            "button_color": palette["surface"],
+                            "button_hover_color": palette["secondary"],
+                            "dropdown_fg_color": palette["surface_alt"],
+                            "dropdown_text_color": palette["text"],
+                            "dropdown_hover_color": palette["selection_bg"],
+                            "border_width": 1,
+                        }
+                    )
+                elif class_name in {"CTkCheckBox", "CTkRadioButton"}:
+                    base_kwargs.update(
+                        {
+                            "fg_color": palette["primary"],
+                            "hover_color": palette["secondary"],
+                            "text_color": palette["text"],
+                            "border_color": palette["outline"],
+                        }
+                    )
+                configure_if_supported(widget, **base_kwargs)
+
+            for child in widget.winfo_children():
+                apply_recursive(child)
+
+        apply_recursive(self.root)
+
+    def _ctk_colors_for_style(self, style_name):
+        palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+        if style_name and "Danger" in str(style_name):
+            return palette["danger"], "#8A2C2C", palette["selection_fg"]
+        if style_name and "Secondary" in str(style_name):
+            return palette["surface_alt"], palette["surface"], palette["text"]
+        if style_name and "Success" in str(style_name):
+            return palette["success"], palette["secondary"], "#061018"
+        return palette["primary"], palette["secondary"], palette["selection_fg"]
 
     def _theme_tk_widgets(self):
         if not hasattr(self, "root"):
@@ -3924,15 +4036,11 @@ class AgenticRAGApp:
         if not supports_style:
             return normalized
 
-        if style and "Danger" in str(style):
-            normalized.setdefault("fg_color", "#B53A3A")
-            normalized.setdefault("hover_color", "#8A2C2C")
-        elif style and "Secondary" in str(style):
-            normalized.setdefault("fg_color", "#3A4352")
-            normalized.setdefault("hover_color", "#2F3642")
-        elif style and "Success" in str(style):
-            normalized.setdefault("fg_color", "#2F7D46")
-            normalized.setdefault("hover_color", "#28693B")
+        fg_color, hover_color, text_color = self._ctk_colors_for_style(style)
+        normalized.setdefault("fg_color", fg_color)
+        normalized.setdefault("hover_color", hover_color)
+        normalized.setdefault("text_color", text_color)
+        normalized.setdefault("corner_radius", STYLE_CONFIG.get("radius", 12))
         return normalized
 
     def create_frame(self, parent, *, kind="frame", **kwargs):
