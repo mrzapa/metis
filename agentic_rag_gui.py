@@ -865,6 +865,7 @@ class AgenticRAGApp:
         self.local_gguf_threads = tk.IntVar(value=0)
         self.chunk_size = tk.IntVar(value=1000)
         self.chunk_overlap = tk.IntVar(value=200)
+        self.auto_settings_mode = tk.StringVar(value="auto")
         self.structure_aware_ingestion = tk.BooleanVar(value=False)
         self.semantic_layout_ingestion = tk.BooleanVar(value=False)
         self.build_digest_index = tk.BooleanVar(value=True)
@@ -986,6 +987,7 @@ class AgenticRAGApp:
         self._test_mode_auto_started = False
         self.test_mode_banner_var = tk.StringVar(value="")
         self._wizard_state = {}
+        self._latest_auto_recommendation = {}
         self.ui_mode = tk.StringVar(value="space_dust")
         self._active_palette = STYLE_CONFIG["themes"]["space_dust"]
         self.tooltip_manager = TooltipManager(self.root, lambda: getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"]))
@@ -994,6 +996,9 @@ class AgenticRAGApp:
             value="Index: Not selected | LLM: -- | Embeddings: -- | Mode: --"
         )
         self.current_warning_var = tk.StringVar(value="")
+
+        for _var in (self.chunk_size, self.retrieval_k, self.mmr_lambda):
+            _var.trace_add("write", lambda *_: self._update_auto_recommendation_ui())
 
         self._init_sessions_db()
 
@@ -3441,6 +3446,10 @@ class AgenticRAGApp:
         self.local_gguf_threads.set(data.get("local_gguf_threads", self.local_gguf_threads.get()))
         self.chunk_size.set(data.get("chunk_size", self.chunk_size.get()))
         self.chunk_overlap.set(data.get("chunk_overlap", self.chunk_overlap.get()))
+        auto_mode = str(data.get("auto_settings_mode", self.auto_settings_mode.get()) or "auto").strip().lower()
+        if auto_mode not in {"auto", "manual"}:
+            auto_mode = "auto"
+        self.auto_settings_mode.set(auto_mode)
         self.build_digest_index.set(
             bool(data.get("build_digest_index", self.build_digest_index.get()))
         )
@@ -3662,6 +3671,7 @@ class AgenticRAGApp:
             "local_gguf_threads": self.local_gguf_threads.get(),
             "chunk_size": self.chunk_size.get(),
             "chunk_overlap": self.chunk_overlap.get(),
+            "auto_settings_mode": self.auto_settings_mode.get(),
             "build_digest_index": self.build_digest_index.get(),
             "build_comprehension_index": bool(self.build_comprehension_index.get()),
             "structure_aware_ingestion": bool(self.structure_aware_ingestion.get()),
@@ -4407,6 +4417,12 @@ class AgenticRAGApp:
         ttk.Entry(retrieval_section.content, textvariable=self.subquery_max_docs, width=8).grid(row=3, column=1, sticky="w", padx=(5, 15), pady=2)
         ttk.Label(retrieval_section.content, text="Fallback Final K:").grid(row=3, column=2, sticky="w")
         ttk.Entry(retrieval_section.content, textvariable=self.fallback_final_k, width=8).grid(row=3, column=3, sticky="w", padx=(5, 0), pady=2)
+        ttk.Button(
+            retrieval_section.content,
+            text="Apply Auto recommendations",
+            command=lambda: self._apply_auto_recommendations(),
+            style="Secondary.TButton",
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         agentic_section = CollapsibleFrame(frame, "Agentic / Iterations", expanded=False)
         agentic_section.grid(row=8, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
@@ -4671,6 +4687,17 @@ class AgenticRAGApp:
         chunk_frame = ttk.LabelFrame(frame, text="2) Chunking strategy", padding=UI_SPACING["m"])
         chunk_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
 
+        ttk.Label(chunk_frame, text="Settings mode:").pack(side="left")
+        auto_mode_combo = ttk.Combobox(
+            chunk_frame,
+            textvariable=self.auto_settings_mode,
+            values=["auto", "manual"],
+            width=10,
+            state="readonly",
+        )
+        auto_mode_combo.pack(side="left", padx=(6, 14))
+        auto_mode_combo.bind("<<ComboboxSelected>>", lambda _e: self._maybe_autofill_recommendations())
+
         ttk.Label(chunk_frame, text="Chunk Size (chars):", width=FORM_WIDTHS["label"]).pack(side="left")
         ttk.Entry(chunk_frame, textvariable=self.chunk_size, width=10).pack(side="left", padx=5)
 
@@ -4694,6 +4721,14 @@ class AgenticRAGApp:
             text="Semantic Layout (experimental)",
             variable=self.semantic_layout_ingestion,
         ).pack(side="left", padx=(20, 0))
+
+        self.auto_recommendation_var = tk.StringVar(value="Auto recommendation: waiting for file/index metadata.")
+        self.auto_warning_var = tk.StringVar(value="")
+        auto_frame = ttk.Frame(frame)
+        auto_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        ttk.Label(auto_frame, textvariable=self.auto_recommendation_var, style="Muted.TLabel", wraplength=980, justify="left").pack(anchor="w")
+        ttk.Label(auto_frame, textvariable=self.auto_warning_var, style="Danger.TLabel", wraplength=980, justify="left").pack(anchor="w", pady=(2, 0))
+        ttk.Button(auto_frame, text="Apply recommendations", command=lambda: self._apply_auto_recommendations()).pack(anchor="w", pady=(6, 0))
 
         comprehension_frame = ttk.LabelFrame(frame, text="3) Optional comprehension index", padding=UI_SPACING["m"])
         comprehension_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
@@ -4813,6 +4848,7 @@ class AgenticRAGApp:
         )
         self._apply_tooltips_for_tab("library", frame)
         self._update_current_state_strip()
+        self._maybe_autofill_recommendations()
 
     def build_chat_tab(self):
         for child in self.tab_chat.winfo_children():
@@ -5336,19 +5372,24 @@ class AgenticRAGApp:
 
     def _render_wizard_step_two(self):
         self._wizard_step_label.config(text="Step 2 of 6: Recommended ingestion settings")
-        info = ttk.LabelFrame(self._wizard_content, text="Recommended defaults", padding=8)
-        info.pack(fill="x", pady=(0, 8))
-        ttk.Label(info, text="Chunk size: 1200").pack(anchor="w")
-        ttk.Label(info, text="Chunk overlap: 150").pack(anchor="w")
-        ttk.Label(info, text="Build digest index: On").pack(anchor="w")
-        ttk.Label(info, text="Comprehension index: Off (enable later for long-form coaching)").pack(anchor="w")
+        selected_file = self._wizard_state.get("file_path") or ""
+        selected_index = self._wizard_state.get("selected_index") or "(default)"
+        index_path = None
+        if selected_index and selected_index != "(default)":
+            index_path = (self.existing_index_paths.get(selected_index) or (None,))[0]
+        rec = self._recommend_auto_settings(file_path=selected_file, index_path=index_path)
 
-        self._wizard_chunk_size = tk.IntVar(value=int(self._wizard_state.get("chunk_size", 1200)))
-        self._wizard_chunk_overlap = tk.IntVar(value=int(self._wizard_state.get("chunk_overlap", 150)))
-        self._wizard_build_digest = tk.BooleanVar(value=bool(self._wizard_state.get("build_digest_index", True)))
-        self._wizard_build_comprehension = tk.BooleanVar(value=bool(self._wizard_state.get("build_comprehension_index", False)))
-        self._wizard_comp_depth = tk.StringVar(value=self._wizard_state.get("comprehension_extraction_depth", "Standard"))
-        self._wizard_prefer_comp = tk.BooleanVar(value=bool(self._wizard_state.get("prefer_comprehension_index", True)))
+        info = ttk.LabelFrame(self._wizard_content, text="Auto recommendations", padding=8)
+        info.pack(fill="x", pady=(0, 8))
+        ttk.Label(info, text=self._describe_auto_recommendation(rec), wraplength=900, justify="left").pack(anchor="w")
+
+        self._wizard_chunk_size = tk.IntVar(value=int(self._wizard_state.get("chunk_size", rec["chunk_size"])))
+        self._wizard_chunk_overlap = tk.IntVar(value=int(self._wizard_state.get("chunk_overlap", rec["chunk_overlap"])))
+        self._wizard_build_digest = tk.BooleanVar(value=bool(self._wizard_state.get("build_digest_index", rec["build_digest_index"])))
+        self._wizard_build_comprehension = tk.BooleanVar(value=bool(self._wizard_state.get("build_comprehension_index", rec["build_comprehension_index"])))
+        self._wizard_comp_depth = tk.StringVar(value=self._wizard_state.get("comprehension_extraction_depth", rec["comprehension_extraction_depth"]))
+        self._wizard_prefer_comp = tk.BooleanVar(value=bool(self._wizard_state.get("prefer_comprehension_index", rec["prefer_comprehension_index"])))
+        self._wizard_step_two_recommendation = rec
 
         form = ttk.Frame(self._wizard_content)
         form.pack(fill="x")
@@ -5364,12 +5405,16 @@ class AgenticRAGApp:
         ttk.Button(self._wizard_content, text="Apply recommended settings", command=self._wizard_apply_recommended_ingestion).pack(anchor="w", pady=(10, 0))
 
     def _wizard_apply_recommended_ingestion(self):
-        self._wizard_chunk_size.set(1200)
-        self._wizard_chunk_overlap.set(150)
-        self._wizard_build_digest.set(True)
-        self._wizard_build_comprehension.set(False)
-        self._wizard_comp_depth.set("Standard")
-        self._wizard_prefer_comp.set(True)
+        rec = getattr(self, "_wizard_step_two_recommendation", None) or self._recommend_auto_settings(
+            file_path=self._wizard_state.get("file_path"),
+            index_path=self.selected_index_path,
+        )
+        self._wizard_chunk_size.set(int(rec["chunk_size"]))
+        self._wizard_chunk_overlap.set(int(rec["chunk_overlap"]))
+        self._wizard_build_digest.set(bool(rec["build_digest_index"]))
+        self._wizard_build_comprehension.set(bool(rec["build_comprehension_index"]))
+        self._wizard_comp_depth.set(str(rec["comprehension_extraction_depth"]))
+        self._wizard_prefer_comp.set(bool(rec["prefer_comprehension_index"]))
 
     def _render_wizard_step_three(self):
         self._wizard_step_label.config(text="Step 3 of 6: Choose LLM and embedding providers/models")
@@ -5552,6 +5597,16 @@ class AgenticRAGApp:
                 self.output_style.set(output_style)
 
             selected_index = self._wizard_state.get("selected_index")
+            selected_index_path = None
+            if selected_index and selected_index != "(default)":
+                selected_index_path = (self.existing_index_paths.get(selected_index) or (None,))[0]
+            rec = self._recommend_auto_settings(
+                file_path=(self._wizard_state.get("file_path") or "").strip() or None,
+                index_path=selected_index_path,
+            )
+            self._apply_auto_recommendations(rec)
+
+            selected_index = self._wizard_state.get("selected_index")
             if selected_index and selected_index != "(default)":
                 self.existing_index_var.set(selected_index)
                 self._on_existing_index_change()
@@ -5566,6 +5621,7 @@ class AgenticRAGApp:
                 self.start_ingestion()
 
             self._update_current_state_strip()
+            self._maybe_autofill_recommendations()
             self.basic_wizard_completed = True
             self.save_config()
             self.build_chat_tab()
@@ -9036,6 +9092,7 @@ class AgenticRAGApp:
             source="chat_selector",
             lazy_load=True,
         )
+        self._maybe_autofill_recommendations()
 
 
     def check_dependencies(self):
@@ -9277,6 +9334,7 @@ class AgenticRAGApp:
             self.lbl_file.config(text=f, style="TLabel")
             self._update_file_info()
             self._update_current_state_strip()
+            self._maybe_autofill_recommendations()
 
     def clear_selected_file(self):
         self.selected_file = None
@@ -9284,6 +9342,7 @@ class AgenticRAGApp:
         if hasattr(self, "lbl_file_info"):
             self.lbl_file_info.config(text="")
         self._update_current_state_strip()
+        self._maybe_autofill_recommendations()
 
     def _update_file_info(self):
         if not self.selected_file:
@@ -9302,6 +9361,191 @@ class AgenticRAGApp:
             )
         except OSError:
             self.lbl_file_info.config(text="")
+
+    def _gather_auto_metadata(self, file_path=None, index_path=None):
+        metadata = {
+            "file_type": "unknown",
+            "size_bytes": 0,
+            "estimated_pages": 0,
+            "has_images": False,
+            "chunk_count": 0,
+            "estimated_tokens": 0,
+            "source": "file" if file_path else "index",
+        }
+        candidate = file_path if file_path and os.path.isfile(file_path) else None
+        if candidate:
+            ext = (os.path.splitext(candidate)[1] or "").lower()
+            metadata["file_type"] = ext or "(no extension)"
+            try:
+                metadata["size_bytes"] = int(os.path.getsize(candidate))
+                metadata["estimated_tokens"] = max(1, round(metadata["size_bytes"] / max(1, TOKENS_TO_CHARS_RATIO)))
+            except OSError:
+                pass
+            if ext == ".pdf":
+                try:
+                    from pypdf import PdfReader
+
+                    reader = PdfReader(candidate)
+                    metadata["estimated_pages"] = len(reader.pages)
+                    for page in reader.pages[: min(8, len(reader.pages))]:
+                        resources = page.get("/Resources") or {}
+                        xobj = resources.get("/XObject") if hasattr(resources, "get") else None
+                        if xobj:
+                            metadata["has_images"] = True
+                            break
+                except Exception:
+                    pass
+            elif ext in {".epub", ".pptx", ".docx"}:
+                metadata["has_images"] = True
+            return metadata
+
+        idx = index_path if index_path and os.path.isdir(index_path) else None
+        if not idx:
+            return metadata
+        metadata["source"] = "index"
+        total_size = 0
+        for root, _dirs, files in os.walk(idx):
+            for name in files:
+                fp = os.path.join(root, name)
+                try:
+                    total_size += os.path.getsize(fp)
+                except OSError:
+                    continue
+        metadata["size_bytes"] = total_size
+        metadata["estimated_tokens"] = max(1, round(total_size / max(1, TOKENS_TO_CHARS_RATIO)))
+
+        lexical_path = os.path.join(os.path.dirname(os.path.abspath(idx)), "rag_lexical.db")
+        if os.path.isfile(lexical_path):
+            try:
+                with sqlite3.connect(lexical_path) as conn:
+                    row = conn.execute(
+                        "SELECT COUNT(1), MAX(CAST(json_extract(meta_json, '$.page') AS INT)), MIN(json_extract(meta_json, '$.source_path')) FROM chunks"
+                    ).fetchone()
+                    if row:
+                        metadata["chunk_count"] = int(row[0] or 0)
+                        metadata["estimated_pages"] = int(row[1] or 0)
+                        source_path = (row[2] or "").strip()
+                        if source_path:
+                            metadata["file_type"] = (os.path.splitext(source_path)[1] or "").lower() or metadata["file_type"]
+            except Exception:
+                pass
+        return metadata
+
+    def _recommend_auto_settings(self, file_path=None, index_path=None):
+        md = self._gather_auto_metadata(file_path=file_path, index_path=index_path)
+        size_mb = float(md.get("size_bytes", 0)) / (1024 * 1024)
+        file_type = str(md.get("file_type") or "unknown").lower()
+        pages = int(md.get("estimated_pages") or 0)
+
+        if file_type in {".txt", ".md", ".html", ".htm"} and size_mb <= 1.5:
+            chunk_size, overlap = 400, 100
+            retrieve_k, final_k = 18, 4
+            mmr_lambda, use_reranker = 0.55, False
+            digest_on, comp_on, comp_depth = False, False, "Standard"
+        elif file_type == ".pdf" and (pages >= 120 or size_mb >= 8):
+            chunk_size, overlap = 800, 200
+            retrieve_k, final_k = 34, 9
+            mmr_lambda, use_reranker = 0.4, True
+            digest_on, comp_on, comp_depth = True, True, "Deep"
+        elif file_type == ".pdf":
+            chunk_size, overlap = 650, 170
+            retrieve_k, final_k = 26, 6
+            mmr_lambda, use_reranker = 0.45, True
+            digest_on, comp_on, comp_depth = True, False, "Standard"
+        else:
+            chunk_size, overlap = 550, 130
+            retrieve_k, final_k = 22, 5
+            mmr_lambda, use_reranker = 0.5, True
+            digest_on, comp_on, comp_depth = True, False, "Standard"
+
+        if md.get("has_images"):
+            retrieve_k = max(retrieve_k, 28)
+            final_k = max(final_k, 7)
+            mmr_lambda = min(mmr_lambda, 0.45)
+
+        recommendation = {
+            "metadata": md,
+            "chunk_size": chunk_size,
+            "chunk_overlap": overlap,
+            "retrieval_k": retrieve_k,
+            "final_k": final_k,
+            "fallback_final_k": final_k,
+            "mmr_lambda": mmr_lambda,
+            "use_reranker": use_reranker,
+            "build_digest_index": digest_on,
+            "build_comprehension_index": comp_on,
+            "comprehension_extraction_depth": comp_depth,
+            "prefer_comprehension_index": True,
+            "retrieval_mode": "hierarchical" if digest_on else "flat",
+            "agentic_mode": bool(comp_on or final_k >= 7),
+            "agentic_max_iterations": 3 if comp_on else 2,
+            "deepread_mode": bool(comp_on and (pages >= 100 or size_mb >= 6)),
+        }
+        self._latest_auto_recommendation = recommendation
+        return recommendation
+
+    def _apply_auto_recommendations(self, recommendation=None, update_warning=True):
+        rec = recommendation or self._recommend_auto_settings(
+            file_path=self.selected_file,
+            index_path=self.selected_index_path,
+        )
+        self.chunk_size.set(int(rec["chunk_size"]))
+        self.chunk_overlap.set(int(rec["chunk_overlap"]))
+        self.retrieval_k.set(int(rec["retrieval_k"]))
+        self.final_k.set(int(rec["final_k"]))
+        self.fallback_final_k.set(int(rec["fallback_final_k"]))
+        self.mmr_lambda.set(float(rec["mmr_lambda"]))
+        self.use_reranker.set(bool(rec["use_reranker"]))
+        self.build_digest_index.set(bool(rec["build_digest_index"]))
+        self.build_comprehension_index.set(bool(rec["build_comprehension_index"]))
+        self.comprehension_extraction_depth.set(str(rec["comprehension_extraction_depth"]))
+        self.prefer_comprehension_index.set(bool(rec["prefer_comprehension_index"]))
+        self.retrieval_mode.set(str(rec["retrieval_mode"]))
+        self.agentic_mode.set(bool(rec["agentic_mode"]))
+        self.agentic_max_iterations.set(int(rec["agentic_max_iterations"]))
+        self.deepread_mode.set(bool(rec["deepread_mode"]))
+        if update_warning:
+            self._update_auto_recommendation_ui(rec)
+
+    def _describe_auto_recommendation(self, rec):
+        md = rec.get("metadata") or {}
+        details = [
+            f"{self._humanize_bytes(int(md.get('size_bytes') or 0))}",
+            str(md.get("file_type") or "unknown"),
+        ]
+        if md.get("estimated_pages"):
+            details.append(f"{int(md['estimated_pages'])} pages")
+        if md.get("has_images"):
+            details.append("images detected")
+        return (
+            "Auto recommendation from "
+            f"{md.get('source', 'unknown')} metadata ({', '.join(details)}): "
+            f"chunk {rec.get('chunk_size')}/{rec.get('chunk_overlap')}, "
+            f"k={rec.get('retrieval_k')}→{rec.get('final_k')}, "
+            f"MMR {rec.get('mmr_lambda')}, reranker {'on' if rec.get('use_reranker') else 'off'}, "
+            f"digest {'on' if rec.get('build_digest_index') else 'off'}"
+        )
+
+    def _update_auto_recommendation_ui(self, rec=None):
+        rec = rec or self._recommend_auto_settings(file_path=self.selected_file, index_path=self.selected_index_path)
+        summary = self._describe_auto_recommendation(rec)
+        if hasattr(self, "auto_recommendation_var"):
+            self.auto_recommendation_var.set(summary)
+        warning = ""
+        if abs(int(self.chunk_size.get()) - int(rec["chunk_size"])) > max(180, int(rec["chunk_size"]) * 0.35):
+            warning = "Chunk size differs significantly from Auto recommendation."
+        elif abs(int(self.retrieval_k.get()) - int(rec["retrieval_k"])) > max(6, int(rec["retrieval_k"]) * 0.4):
+            warning = "Retrieval k differs significantly from Auto recommendation."
+        elif abs(float(self.mmr_lambda.get()) - float(rec["mmr_lambda"])) > 0.22:
+            warning = "MMR lambda differs significantly from Auto recommendation."
+        if hasattr(self, "auto_warning_var"):
+            self.auto_warning_var.set(warning)
+
+    def _maybe_autofill_recommendations(self):
+        rec = self._recommend_auto_settings(file_path=self.selected_file, index_path=self.selected_index_path)
+        if self.auto_settings_mode.get() == "auto":
+            self._apply_auto_recommendations(rec, update_warning=False)
+        self._update_auto_recommendation_ui(rec)
 
     def _validate_model_settings(self):
         try:
