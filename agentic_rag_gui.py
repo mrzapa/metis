@@ -101,21 +101,39 @@ class MockChatModel:
         self._make_ai_message = make_ai_message
 
     def invoke(self, messages):
+        system_text = ""
         user_text = ""
         for msg in reversed(messages or []):
+            if not system_text and getattr(msg, "type", "") == "system":
+                system_text = str(getattr(msg, "content", "") or "")
             if getattr(msg, "type", "") == "human":
                 user_text = str(getattr(msg, "content", "")).strip()
                 break
         if not user_text:
             user_text = "(no user prompt provided)"
+
+        if "Return strict JSON" in system_text:
+            return self._make_ai_message(
+                json.dumps(
+                    {
+                        "checklist_review": [],
+                        "retrieval_queries": [],
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+        context_match = re.search(r"CONTEXT:\s*(.+)", system_text, flags=re.DOTALL)
+        context_text = context_match.group(1).strip() if context_match else ""
+        preview = re.sub(r"\s+", " ", context_text)[:220] if context_text else "(no context block found)"
         response = (
             "[Mock/Test Backend]\n"
-            "Sample is ready and retrieval is local-only.\n"
-            f"Deterministic response to: {user_text}\n\n"
-            "Quick summary:\n"
-            "- Smart Digest pilot reduced setup friction.\n"
-            "- Time-to-first-answer improved from 11m to 3m.\n"
-            "- Adoption rose while support tickets fell."
+            "Short answer: Local mock backend executed successfully with deterministic output.\n\n"
+            "Citations:\n"
+            "- [S1] chunk_ids: [1]\n\n"
+            "Debug retrieved:\n"
+            f"- prompt: {user_text}\n"
+            f"- context_preview: {preview}"
         )
         return self._make_ai_message(response)
 
@@ -9189,6 +9207,54 @@ class AgenticRAGApp:
             )
         return source_map, "\n".join(lines)
 
+    def _generate_mock_answer(self, query, final_docs):
+        source_map, _ = self._build_source_cards(final_docs)
+
+        def _doc_sort_key(doc):
+            meta = getattr(doc, "metadata", {}) or {}
+            chunk_id = str(meta.get("chunk_id") or "")
+            numeric_chunk = int(chunk_id) if chunk_id.isdigit() else 10**9
+            source_hint = str(
+                meta.get("source")
+                or meta.get("file_path")
+                or meta.get("filename")
+                or ""
+            ).lower()
+            content = re.sub(r"\s+", " ", str(getattr(doc, "page_content", "") or "")).strip()
+            return (numeric_chunk, chunk_id, source_hint, content)
+
+        ordered_docs = sorted(list(final_docs or []), key=_doc_sort_key)
+        top_docs = ordered_docs[: min(4, len(ordered_docs))]
+        citation_lines = []
+        debug_lines = []
+        for idx, doc in enumerate(top_docs, start=1):
+            metadata = getattr(doc, "metadata", {}) or {}
+            content = getattr(doc, "page_content", "") or ""
+            normalized = re.sub(r"\s+", " ", content).strip()
+            preview = normalized[:180] or "(empty chunk)"
+            locator = self._build_source_locator(metadata, content)
+            source_entry = source_map.get(locator.source_id, {})
+            sid = source_entry.get("sid") or f"S{idx}"
+            chunk_id = str(metadata.get("chunk_id") or "?")
+            citation_lines.append(f"- [{sid}] chunk_id={chunk_id}")
+            debug_lines.append(f"- {sid} | chunk_id={chunk_id} | snippet: {preview}")
+
+        answer_line = "No retrieved evidence was available."
+        if top_docs:
+            answer_line = (
+                f"Used {len(top_docs)} retrieved snippet(s) to answer: "
+                f"{query.strip() or '(empty query)'}."
+            )
+
+        return (
+            "[Mock/Test Backend]\n"
+            f"Short answer: {answer_line}\n\n"
+            "Citations:\n"
+            f"{chr(10).join(citation_lines) if citation_lines else '- (none)'}\n\n"
+            "Debug retrieved:\n"
+            f"{chr(10).join(debug_lines) if debug_lines else '- (no chunks retrieved)'}"
+        )
+
     def _rewrite_evidence_pack_citations(self, answer_text, final_docs, source_map):
         if not answer_text:
             return answer_text
@@ -14398,7 +14464,9 @@ class AgenticRAGApp:
                 generation_ms = 0
                 is_blinkist_summary_style = rag_ctx["output_style"].strip() == "Blinkist-style summary"
                 is_tutor_mode = resolved_settings.get("mode") == "Tutor"
-                if is_evidence_pack:
+                if provider == "mock":
+                    latest_answer = self._generate_mock_answer(query, final_docs)
+                elif is_evidence_pack:
                     latest_answer = _run_evidence_pack_two_stage(
                         llm,
                         query,
