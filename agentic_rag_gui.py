@@ -452,135 +452,147 @@ STYLE_CONFIG = {
     "radius": 12,
     "radius_sm": 6,
     "radius_lg": 16,
-    "padding": {"sm": 10, "md": 14, "lg": 22},
+    "padding": {"sm": 12, "md": 16, "lg": 24},
     "type_scale": {
-        "h1": {"size": 22, "weight": "bold"},
-        "h2": {"size": 17, "weight": "bold"},
+        "h1": {"size": 24, "weight": "bold"},
+        "h2": {"size": 18, "weight": "bold"},
         "h3": {"size": 15, "weight": "bold"},
-        "body": {"size": 14, "weight": "normal"},
-        "body_bold": {"size": 14, "weight": "bold"},
-        "caption": {"size": 12, "weight": "normal"},
-        "code": {"size": 12, "weight": "normal"},
+        "body": {"size": 13, "weight": "normal"},
+        "body_bold": {"size": 13, "weight": "bold"},
+        "caption": {"size": 11, "weight": "normal"},
+        "code": {"size": 11, "weight": "normal"},
         "overline": {"size": 10, "weight": "bold"},
     },
     "animation": {
-        "collapse_duration_ms": 160,
-        "tooltip_fade_ms": 100,
-        "theme_fade_ms": 200,
-        "message_fade_ms": 60,
+        "collapse_duration_ms": 180,
+        "tooltip_fade_ms": 120,
+        "theme_fade_ms": 220,
+        "message_fade_ms": 80,
         "progress_pulse_ms": 40,
     },
     "themes": {
         "space_dust": {
-            "bg": "#0D1117",
-            "surface": "#161B22",
-            "surface_elevated": "#1F2630",
-            "surface_alt": "#212C3D",
-            "sidebar_bg": "#131923",
-            "content_bg": "#1A2230",
-            "text": "#E8EEF8",
-            "muted_text": "#96A6BE",
-            "primary": "#58A6FF",
-            "primary_hover": "#79B8FF",
-            "primary_pressed": "#3D8BDE",
-            "secondary": "#3B8ED9",
-            "tertiary": "#6B87FF",
-            "border": "#2A3A4F",
-            "outline": "#33465F",
-            "status": "#AFC1D9",
-            "danger": "#FF7A8C",
-            "danger_hover": "#FF95A3",
-            "success": "#55D6A2",
-            "success_hover": "#72E2B3",
-            "warning": "#E3B341",
-            "selection_bg": "#294B66",
-            "selection_fg": "#F2F8FF",
-            "chat_user_bg": "#1B3551",
-            "chat_agent_bg": "#1E2633",
-            "chat_system_bg": "#2A2D1D",
-            "input_bg": "#0F1621",
-            "badge_bg": "#273447",
-            "stripe_alt": "#131A24",
-            "focus_ring": "#79B8FF",
-            "tab_indicator": "#58A6FF",
-            "progress_pulse": "#8BC2FF",
-            "link": "#79DEFF",
-            "source": "#7A89A0",
-            "supporting_bg": "#213E56",
+            "bg": "#090E15",
+            "surface": "#111827",
+            "surface_elevated": "#1A2535",
+            "surface_alt": "#1E2D42",
+            "sidebar_bg": "#0D1520",
+            "content_bg": "#141E2D",
+            "text": "#EAF0FF",
+            "muted_text": "#8A9DC0",
+            "primary": "#4D9EFF",
+            "primary_hover": "#70B5FF",
+            "primary_pressed": "#2E80E8",
+            "secondary": "#2E7ED4",
+            "tertiary": "#7B8FFF",
+            "border": "#1D2E45",
+            "outline": "#2A3E58",
+            "status": "#A0B8D8",
+            "danger": "#FF6B7A",
+            "danger_hover": "#FF8A96",
+            "success": "#3ECFA0",
+            "success_hover": "#5EDBB5",
+            "warning": "#F0B84A",
+            "selection_bg": "#1F3F66",
+            "selection_fg": "#EAF0FF",
+            "chat_user_bg": "#13304F",
+            "chat_agent_bg": "#141E2D",
+            "chat_system_bg": "#252515",
+            "input_bg": "#07101A",
+            "badge_bg": "#162438",
+            "stripe_alt": "#0D1725",
+            "focus_ring": "#70B5FF",
+            "tab_indicator": "#4D9EFF",
+            "progress_pulse": "#7DC5FF",
+            "link": "#6BD4FF",
+            "source": "#6A7F9E",
+            "supporting_bg": "#18405E",
+            "nav_hover_bg": "#1A2B40",
+            "sidebar_border": "#142030",
+            "chat_user_border": "#1D4674",
+            "chat_agent_border": "#1D2E45",
         },
         "light": {
-            "bg": "#F6F8FA",
+            "bg": "#F3F6FB",
             "surface": "#FFFFFF",
-            "surface_elevated": "#F2F4F8",
-            "surface_alt": "#EEF1F6",
-            "sidebar_bg": "#EAEFF5",
-            "content_bg": "#FFFFFF",
-            "text": "#101114",
-            "muted_text": "#3E4655",
-            "primary": "#0969DA",
-            "primary_hover": "#1F7AE0",
-            "primary_pressed": "#0757B8",
-            "secondary": "#2D6DDA",
-            "tertiary": "#5A5EC7",
-            "border": "#D5DAE2",
-            "outline": "#C7CED8",
-            "status": "#2D3340",
-            "danger": "#B64343",
-            "danger_hover": "#C95959",
-            "success": "#257A4A",
-            "success_hover": "#2D9059",
-            "warning": "#9A6700",
-            "selection_bg": "#CFE3FF",
-            "selection_fg": "#101114",
-            "chat_user_bg": "#DDEBFF",
-            "chat_agent_bg": "#F1F4F8",
-            "chat_system_bg": "#FFF8D6",
+            "surface_elevated": "#EDF1F7",
+            "surface_alt": "#E6EBF4",
+            "sidebar_bg": "#E4EAF4",
+            "content_bg": "#FAFCFF",
+            "text": "#0D1117",
+            "muted_text": "#4A5568",
+            "primary": "#0868D5",
+            "primary_hover": "#1478E6",
+            "primary_pressed": "#0556B5",
+            "secondary": "#2563C8",
+            "tertiary": "#5457C2",
+            "border": "#D0D8E8",
+            "outline": "#BCC5D8",
+            "status": "#2A3248",
+            "danger": "#C0373B",
+            "danger_hover": "#D44A4E",
+            "success": "#1C7A45",
+            "success_hover": "#248D52",
+            "warning": "#8A5C00",
+            "selection_bg": "#C5DCFF",
+            "selection_fg": "#0D1117",
+            "chat_user_bg": "#D5E8FF",
+            "chat_agent_bg": "#EEF2FA",
+            "chat_system_bg": "#FFFAE6",
             "input_bg": "#FFFFFF",
-            "badge_bg": "#E6EBF2",
-            "stripe_alt": "#F9FBFD",
-            "focus_ring": "#2F81F7",
-            "tab_indicator": "#0969DA",
-            "progress_pulse": "#6FA8F3",
-            "link": "#1254A3",
-            "source": "#626C7E",
-            "supporting_bg": "#FFF4CC",
+            "badge_bg": "#DDE5F2",
+            "stripe_alt": "#F7FAFD",
+            "focus_ring": "#1F7AEA",
+            "tab_indicator": "#0868D5",
+            "progress_pulse": "#5CA0F0",
+            "link": "#0A52A0",
+            "source": "#58677E",
+            "supporting_bg": "#FFF1C8",
+            "nav_hover_bg": "#D8E3F2",
+            "sidebar_border": "#CBD5E8",
+            "chat_user_border": "#A8CCFF",
+            "chat_agent_border": "#D0D8E8",
         },
         "dark": {
-            "bg": "#0D1117",
-            "surface": "#161B22",
-            "surface_elevated": "#232A35",
-            "surface_alt": "#2A303B",
-            "sidebar_bg": "#1C2430",
-            "content_bg": "#222A35",
-            "text": "#F7F8FA",
-            "muted_text": "#B6C0CE",
-            "primary": "#58A6FF",
-            "primary_hover": "#79B8FF",
-            "primary_pressed": "#3D8BDE",
-            "secondary": "#58B5D6",
+            "bg": "#0A0F18",
+            "surface": "#131B27",
+            "surface_elevated": "#1C2638",
+            "surface_alt": "#222E42",
+            "sidebar_bg": "#0F1A2A",
+            "content_bg": "#161F30",
+            "text": "#F0F4FF",
+            "muted_text": "#8DA3C0",
+            "primary": "#4D9EFF",
+            "primary_hover": "#70B5FF",
+            "primary_pressed": "#2E80E8",
+            "secondary": "#3EA8D5",
             "tertiary": "#8C95F2",
-            "border": "#3A4352",
-            "outline": "#465163",
-            "status": "#D7DCEA",
-            "danger": "#FF8A8A",
-            "danger_hover": "#FFAAAA",
-            "success": "#70D39F",
-            "success_hover": "#85DEB0",
-            "warning": "#D29922",
-            "selection_bg": "#2E415C",
-            "selection_fg": "#F7F8FA",
-            "chat_user_bg": "#213A58",
-            "chat_agent_bg": "#232A35",
-            "chat_system_bg": "#31311E",
-            "input_bg": "#111823",
-            "badge_bg": "#2A3443",
-            "stripe_alt": "#121922",
-            "focus_ring": "#79B8FF",
-            "tab_indicator": "#58A6FF",
-            "progress_pulse": "#8BC2FF",
-            "link": "#8EDFFF",
-            "source": "#A8B2C3",
-            "supporting_bg": "#334A63",
+            "border": "#1E2E44",
+            "outline": "#28405C",
+            "status": "#BFC8DA",
+            "danger": "#FF7A7A",
+            "danger_hover": "#FF9A9A",
+            "success": "#55C990",
+            "success_hover": "#70D8A5",
+            "warning": "#D9A820",
+            "selection_bg": "#1E3B5E",
+            "selection_fg": "#F0F4FF",
+            "chat_user_bg": "#163556",
+            "chat_agent_bg": "#161F30",
+            "chat_system_bg": "#25250F",
+            "input_bg": "#070D18",
+            "badge_bg": "#1A2A3E",
+            "stripe_alt": "#0C1520",
+            "focus_ring": "#70B5FF",
+            "tab_indicator": "#4D9EFF",
+            "progress_pulse": "#7DC5FF",
+            "link": "#7ADAFF",
+            "source": "#8095B2",
+            "supporting_bg": "#1D3E5A",
+            "nav_hover_bg": "#1C2E44",
+            "sidebar_border": "#102030",
+            "chat_user_border": "#1D4270",
+            "chat_agent_border": "#1E2E44",
         },
     },
 }
@@ -1369,7 +1381,8 @@ class AgenticRAGApp:
             f"{APP_NAME} — {APP_SUBTITLE}" if APP_SUBTITLE else APP_NAME
         )
         self.load_icon()
-        self.root.geometry("1200x900")
+        self.root.geometry("1320x900")
+        self.root.minsize(900, 600)
         self._resolve_fonts()
         self.main_thread = threading.current_thread()
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
@@ -3069,15 +3082,15 @@ class AgenticRAGApp:
         outer_pad = STYLE_CONFIG["padding"]["md"]
         sidebar_bg = self._pal("sidebar_bg", self._pal("surface_alt", self._pal("surface", "#161B22")))
         content_bg = self._pal("content_bg", self._pal("surface", "#161B22"))
-        self.root.grid_columnconfigure(0, minsize=200, weight=0)
+        self.root.grid_columnconfigure(0, minsize=230, weight=0)
         self.root.grid_columnconfigure(1, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
 
         sidebar_style = "Sidebar.TFrame" if self.ui_backend != "ctk" else None
         self.sidebar_frame = self.create_frame(self.root, **({"style": sidebar_style} if sidebar_style else {"fg_color": sidebar_bg}))
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=(outer_pad, UI_SPACING["s"]), pady=(outer_pad, UI_SPACING["s"]))
-        # Sidebar layout: col 0 = accent bar (3 px), col 1 = nav button
-        self.sidebar_frame.grid_columnconfigure(0, minsize=3, weight=0)
+        # Sidebar layout: col 0 = accent bar (4 px), col 1 = nav button
+        self.sidebar_frame.grid_columnconfigure(0, minsize=4, weight=0)
         self.sidebar_frame.grid_columnconfigure(1, weight=1)
         self.sidebar_frame.grid_rowconfigure(50, weight=1)  # spacer row before bottom section
 
@@ -3093,6 +3106,7 @@ class AgenticRAGApp:
             self.sidebar_logo.grid(row=0, column=0, columnspan=2, sticky="n", padx=UI_SPACING["m"], pady=(UI_SPACING["m"], UI_SPACING["xs"]))
 
         title_style = "Sidebar.Title.TLabel" if self.ui_backend != "ctk" else None
+        caption_style = "Sidebar.Caption.TLabel" if self.ui_backend != "ctk" else None
         self.sidebar_title = self.create_label(
             self.sidebar_frame,
             text=APP_NAME,
@@ -3104,8 +3118,14 @@ class AgenticRAGApp:
             columnspan=2,
             sticky="w",
             padx=UI_SPACING["m"],
-            pady=((UI_SPACING["xs"] if self._sidebar_logo_photo is not None else UI_SPACING["m"]), UI_SPACING["l"]),
+            pady=((UI_SPACING["xs"] if self._sidebar_logo_photo is not None else UI_SPACING["l"]), 2),
         )
+        if APP_SUBTITLE:
+            self.create_label(
+                self.sidebar_frame,
+                text=APP_SUBTITLE,
+                **({"style": caption_style} if caption_style else {}),
+            ).grid(row=2, column=0, columnspan=2, sticky="w", padx=UI_SPACING["m"], pady=(0, UI_SPACING["m"]))
 
         self._sidebar_nav_buttons = {}
         self._sidebar_accents = {}
@@ -3115,11 +3135,11 @@ class AgenticRAGApp:
             ("history",  "🕘  History"),
             ("settings", "⚙️   Settings"),
         ]
-        for idx, (view_key, label) in enumerate(nav_items, start=2):
+        for idx, (view_key, label) in enumerate(nav_items, start=3):
             # Accent indicator bar (left-edge strip)
-            accent_bar = tk.Frame(self.sidebar_frame, width=3, bd=0, highlightthickness=0,
-                                  bg=self._pal("sidebar_bg", self._pal("surface_alt", "#131923")))
-            accent_bar.grid(row=idx, column=0, sticky="ns", pady=(0, 2))
+            accent_bar = tk.Frame(self.sidebar_frame, width=4, bd=0, highlightthickness=0,
+                                  bg=self._pal("sidebar_bg", self._pal("surface_alt", "#0D1520")))
+            accent_bar.grid(row=idx, column=0, sticky="ns", pady=(0, 3))
             self._sidebar_accents[view_key] = accent_bar
 
             if self.ui_backend == "ctk" and CTK_MODULE is not None:
@@ -3128,10 +3148,10 @@ class AgenticRAGApp:
                     text=label,
                     command=lambda key=view_key: self._switch_main_view(key),
                     fg_color="transparent",
-                    height=40,
+                    height=44,
                     anchor="w",
-                    hover_color=self._pal("surface_alt", self._pal("surface", "#161B22")),
-                    text_color=self._pal("text", "#E8EEF8"),
+                    hover_color=self._pal("nav_hover_bg", self._pal("surface_alt", "#1A2B40")),
+                    text_color=self._pal("text", "#EAF0FF"),
                 )
             else:
                 button = self.create_button(
@@ -3140,12 +3160,12 @@ class AgenticRAGApp:
                     command=lambda key=view_key: self._switch_main_view(key),
                     style="Sidebar.TButton",
                 )
-            button.grid(row=idx, column=1, sticky="ew", padx=(2, UI_SPACING["xs"]), pady=(0, 2))
+            button.grid(row=idx, column=1, sticky="ew", padx=(2, UI_SPACING["xs"]), pady=(0, 3))
             self._sidebar_nav_buttons[view_key] = button
 
         # Sidebar bottom: version badge + theme indicator
         bottom_sep = ttk.Separator(self.sidebar_frame, orient="horizontal")
-        bottom_sep.grid(row=51, column=0, columnspan=2, sticky="ew", padx=UI_SPACING["xs"], pady=(UI_SPACING["xs"], 4))
+        bottom_sep.grid(row=51, column=0, columnspan=2, sticky="ew", padx=UI_SPACING["s"], pady=(UI_SPACING["s"], 6))
         bottom_caption_style = "Sidebar.Caption.TLabel" if self.ui_backend != "ctk" else None
         version_label = self.create_label(
             self.sidebar_frame,
@@ -3158,7 +3178,7 @@ class AgenticRAGApp:
             text=f"Backend: {self.ui_backend.upper()}",
             **({"style": bottom_caption_style} if bottom_caption_style else {}),
         )
-        self._sidebar_mode_badge.grid(row=53, column=0, columnspan=2, sticky="w", padx=UI_SPACING["m"], pady=(0, UI_SPACING["m"]))
+        self._sidebar_mode_badge.grid(row=53, column=0, columnspan=2, sticky="w", padx=UI_SPACING["m"], pady=(0, UI_SPACING["l"]))
 
         self.status_var = tk.StringVar(value="Ready")
         self.backend_badge_var = tk.StringVar(value=f"Backend: {self.ui_backend.upper()}")
@@ -3346,7 +3366,7 @@ class AgenticRAGApp:
         style.configure("Card.Flat.TFrame", background=palette["surface_alt"], borderwidth=0, relief="flat")
         style.configure("StatusBar.TFrame", background=palette["surface"], borderwidth=0, relief="flat")
         style.configure("CollapsibleHeader.TFrame", background=palette["surface"], borderwidth=0, relief="flat")
-        style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["outline"], borderwidth=1, relief="flat", padding=(10, 8))
+        style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["outline"], borderwidth=1, relief="flat", padding=(12, 10))
         style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["primary"], font=self._fonts["body_bold"])
         style.configure("TLabel", background=get("content_bg", fallback="surface", default=palette["surface"]), foreground=palette["text"], font=self._fonts["body"])
         style.configure("Bold.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
@@ -3360,49 +3380,51 @@ class AgenticRAGApp:
         style.configure("Success.TLabel", background=palette["surface"], foreground=palette["success"], font=self._fonts["body_bold"])
         style.configure("Warning.TLabel", background=palette["surface"], foreground=palette["tertiary"], font=self._fonts["body_bold"])
         style.configure("Status.TLabel", background=palette["surface"], foreground=palette["status"], font=self._fonts["caption"])
-        style.configure("Badge.TLabel", background=get("badge_bg", fallback="surface_alt", default=palette["surface_alt"]), foreground=palette["primary"], font=self._fonts["caption"], padding=(10, 4), relief="flat")
+        style.configure("Badge.TLabel", background=get("badge_bg", fallback="surface_alt", default=palette["surface_alt"]), foreground=palette["primary"], font=self._fonts["caption"], padding=(12, 5), relief="flat")
         style.configure("CollapsibleArrow.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=self._fonts["body_bold"])
         style.configure("CollapsibleTitle.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
-        style.configure("TButton", padding=(14, 10), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"], focuscolor=palette["surface_alt"])
-        style.map("TButton", background=[("active", _pal(palette, "primary_hover", fallback_key="primary", default="#79B8FF")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE"))], foreground=[("active", palette["text"])])
-        style.configure("Primary.TButton", padding=(18, 12), relief="flat", borderwidth=0, background=palette["primary"], foreground="#FFFFFF")
-        style.map("Primary.TButton", background=[("active", _pal(palette, "primary_hover", fallback_key="primary", default="#79B8FF")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
-        style.configure("Secondary.TButton", padding=(14, 10), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"])
-        style.map("Secondary.TButton", background=[("active", palette["surface"]), ("pressed", palette["outline"]), ("disabled", palette["surface_alt"])], foreground=[("active", palette["text"]), ("disabled", palette["muted_text"])])
-        style.configure("Danger.TButton", padding=(14, 10), relief="flat", borderwidth=0, background=palette["danger"], foreground="#FFFFFF")
-        style.map("Danger.TButton", background=[("active", _pal(palette, "danger_hover", fallback_key="danger", default="#FF5555")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
-        style.configure("Success.TButton", padding=(14, 10), relief="flat", borderwidth=0, background=palette["success"], foreground="#FFFFFF")
-        style.map("Success.TButton", background=[("active", _pal(palette, "success_hover", fallback_key="success", default="#72E2B3")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
+        style.configure("TButton", padding=(14, 9), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"], focuscolor=palette["surface_alt"])
+        style.map("TButton", background=[("active", _pal(palette, "nav_hover_bg", fallback_key="surface_elevated", default=palette["surface_elevated"])), ("pressed", palette["outline"])], foreground=[("active", palette["text"])])
+        style.configure("Primary.TButton", padding=(16, 9), relief="flat", borderwidth=0, background=palette["primary"], foreground="#FFFFFF")
+        style.map("Primary.TButton", background=[("active", _pal(palette, "primary_hover", fallback_key="primary", default="#70B5FF")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#2E80E8")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
+        style.configure("Secondary.TButton", padding=(14, 9), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"])
+        style.map("Secondary.TButton", background=[("active", _pal(palette, "nav_hover_bg", fallback_key="surface_elevated", default=palette["surface_elevated"])), ("pressed", palette["outline"]), ("disabled", palette["surface_alt"])], foreground=[("active", palette["text"]), ("disabled", palette["muted_text"])])
+        style.configure("Danger.TButton", padding=(14, 9), relief="flat", borderwidth=0, background=palette["danger"], foreground="#FFFFFF")
+        style.map("Danger.TButton", background=[("active", _pal(palette, "danger_hover", fallback_key="danger", default="#FF5555")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#2E80E8")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
+        style.configure("Success.TButton", padding=(14, 9), relief="flat", borderwidth=0, background=palette["success"], foreground="#FFFFFF")
+        style.map("Success.TButton", background=[("active", _pal(palette, "success_hover", fallback_key="success", default="#5EDBB5")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#2E80E8")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
         _sidebar_bg = get("sidebar_bg", fallback="surface_alt", default=palette["surface_alt"])
-        style.configure("Sidebar.TButton", padding=(12, 10), relief="flat", borderwidth=0, background=_sidebar_bg, foreground=palette["muted_text"], anchor="w", font=self._fonts["body"])
-        style.map("Sidebar.TButton", background=[("active", palette["surface_alt"]), ("pressed", palette["surface_alt"])], foreground=[("active", palette["text"]), ("pressed", palette["text"])])
-        style.configure("Sidebar.Active.TButton", padding=(12, 10), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["primary"], anchor="w", font=self._fonts["body_bold"])
-        style.map("Sidebar.Active.TButton", background=[("active", palette["surface_alt"]), ("pressed", palette["surface_alt"])], foreground=[("active", palette["primary"]), ("pressed", palette["primary"])])
+        _sidebar_hover = _pal(palette, "nav_hover_bg", fallback_key="surface_elevated", default=palette["surface_elevated"])
+        style.configure("Sidebar.TButton", padding=(14, 11), relief="flat", borderwidth=0, background=_sidebar_bg, foreground=palette["muted_text"], anchor="w", font=self._fonts["body"])
+        style.map("Sidebar.TButton", background=[("active", _sidebar_hover), ("pressed", _sidebar_hover)], foreground=[("active", palette["text"]), ("pressed", palette["text"])])
+        style.configure("Sidebar.Active.TButton", padding=(14, 11), relief="flat", borderwidth=0, background=_sidebar_hover, foreground=palette["primary"], anchor="w", font=self._fonts["body_bold"])
+        style.map("Sidebar.Active.TButton", background=[("active", _sidebar_hover), ("pressed", _sidebar_hover)], foreground=[("active", palette["primary"]), ("pressed", palette["primary"])])
         style.configure("Sidebar.Title.TLabel", background=_sidebar_bg, foreground=palette["text"], font=self._fonts["h2"])
         style.configure("Sidebar.Caption.TLabel", background=_sidebar_bg, foreground=palette["muted_text"], font=self._fonts["caption"])
         style.configure("TRadiobutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], indicatordiameter=14, relief="flat")
         style.map("TRadiobutton", background=[("active", palette["surface"]), ("!active", palette["surface"])], foreground=[("active", palette["text"]), ("disabled", palette["muted_text"])], indicatorcolor=[("selected", palette["primary"]), ("!selected", palette["surface_alt"])])
         style.configure("TCheckbutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], relief="flat")
         style.map("TCheckbutton", background=[("active", palette["surface"]), ("!active", palette["surface"])], foreground=[("active", palette["text"]), ("disabled", palette["muted_text"])], indicatorcolor=[("selected", palette["primary"]), ("!selected", palette["surface_alt"])])
-        style.configure("TEntry", fieldbackground=_pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"]), foreground=palette["text"], bordercolor=palette["outline"], insertcolor=palette["primary"], borderwidth=1, relief="flat", padding=(12, 10))
+        _input_bg_val = _pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"])
+        style.configure("TEntry", fieldbackground=_input_bg_val, foreground=palette["text"], bordercolor=palette["outline"], insertcolor=palette["primary"], borderwidth=1, relief="flat", padding=(10, 8))
         style.map("TEntry", bordercolor=[("focus", palette["primary"])], lightcolor=[("focus", palette["primary"])], darkcolor=[("focus", palette["primary"])])
-        style.configure("TCombobox", fieldbackground=_pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"]), background=_pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"]), foreground=palette["text"], arrowcolor=palette["muted_text"], bordercolor=palette["outline"], relief="flat", insertcolor=palette["primary"], padding=(12, 10))
-        style.map("TCombobox", fieldbackground=[("readonly", _pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"]))], selectbackground=[("readonly", palette["selection_bg"])], selectforeground=[("readonly", palette["selection_fg"])], foreground=[("readonly", palette["text"])])
-        style.configure("Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=32, relief="flat")
+        style.configure("TCombobox", fieldbackground=_input_bg_val, background=_input_bg_val, foreground=palette["text"], arrowcolor=palette["muted_text"], bordercolor=palette["outline"], relief="flat", insertcolor=palette["primary"], padding=(10, 8))
+        style.map("TCombobox", fieldbackground=[("readonly", _input_bg_val)], selectbackground=[("readonly", palette["selection_bg"])], selectforeground=[("readonly", palette["selection_fg"])], foreground=[("readonly", palette["text"])])
+        style.configure("Treeview", background=palette["surface"], fieldbackground=palette["surface"], foreground=palette["text"], bordercolor=palette["border"], borderwidth=0, rowheight=34, relief="flat")
         style.map("Treeview", background=[("selected", palette["selection_bg"]), ("active", palette["surface_alt"])], foreground=[("selected", palette["selection_fg"]), ("active", palette["text"])])
-        style.configure("History.Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=38, relief="flat")
+        style.configure("History.Treeview", background=palette["surface"], fieldbackground=palette["surface"], foreground=palette["text"], bordercolor=palette["border"], borderwidth=0, rowheight=40, relief="flat")
         style.map("History.Treeview", background=[("selected", palette["selection_bg"]), ("active", palette["surface_alt"])], foreground=[("selected", palette["selection_fg"]), ("active", palette["text"])])
-        style.configure("Treeview.Heading", background=palette["surface"], foreground=palette["muted_text"], borderwidth=0, relief="flat")
+        style.configure("Treeview.Heading", background=palette["surface_elevated"], foreground=palette["muted_text"], borderwidth=0, relief="flat", font=self._fonts["caption"], padding=(8, 6))
         style.map("Treeview.Heading", background=[("active", palette["surface_alt"])], foreground=[("active", palette["text"])])
-        style.configure("Vertical.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["surface_alt"], relief="flat", width=8, arrowsize=0)
-        style.map("Vertical.TScrollbar", background=[("active", palette["outline"]), ("!active", palette["surface_alt"])])
-        style.configure("Horizontal.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["surface_alt"], relief="flat", width=8, arrowsize=0)
-        style.map("Horizontal.TScrollbar", background=[("active", palette["outline"]), ("!active", palette["surface_alt"])])
-        style.configure("TProgressbar", troughcolor=palette["surface_alt"], background=palette["primary"], bordercolor=palette["bg"], lightcolor=palette["primary"], darkcolor=palette["primary"], relief="flat")
-        style.configure("TSeparator", background=palette["outline"])
-        style.configure("App.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(6, 8, 6, 0))
-        style.configure("App.TNotebook.Tab", padding=(20, 12), font=self._fonts["body_bold"], borderwidth=0)
-        style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("active", palette["surface_alt"]), ("!selected", palette["bg"])], foreground=[("selected", palette["primary"]), ("active", _pal(palette, "tab_indicator", fallback_key="primary", default=_pal(palette, "primary_hover", fallback_key="primary", default="#79B8FF"))), ("!selected", palette["muted_text"])])
+        style.configure("Vertical.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["surface_alt"], relief="flat", width=6, arrowsize=0)
+        style.map("Vertical.TScrollbar", background=[("active", palette["outline"]), ("!active", _pal(palette, "border", fallback_key="surface_alt", default=palette["surface_alt"]))])
+        style.configure("Horizontal.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["surface_alt"], relief="flat", width=6, arrowsize=0)
+        style.map("Horizontal.TScrollbar", background=[("active", palette["outline"]), ("!active", _pal(palette, "border", fallback_key="surface_alt", default=palette["surface_alt"]))])
+        style.configure("TProgressbar", troughcolor=palette["surface_alt"], background=palette["primary"], bordercolor=palette["bg"], lightcolor=_pal(palette, "primary_hover", fallback_key="primary", default=palette["primary"]), darkcolor=palette["primary"], relief="flat")
+        style.configure("TSeparator", background=palette["border"])
+        style.configure("App.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(4, 6, 4, 0))
+        style.configure("App.TNotebook.Tab", padding=(22, 11), font=self._fonts["body_bold"], borderwidth=0)
+        style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("active", palette["surface_alt"]), ("!selected", palette["bg"])], foreground=[("selected", palette["primary"]), ("active", _pal(palette, "tab_indicator", fallback_key="primary", default=_pal(palette, "primary_hover", fallback_key="primary", default="#70B5FF"))), ("!selected", palette["muted_text"])])
         # TCombobox popup listbox is a plain tk.Listbox that bypasses ttk styling.
         # Without these option_add calls the listbox uses system colors, producing
         # white text on a white/system-highlight background (the reported bug).
@@ -3573,28 +3595,32 @@ class AgenticRAGApp:
                 "user",
                 foreground=palette["tertiary"],
                 font=self._fonts["body_bold"],
-                lmargin1=16,
-                lmargin2=16,
-                spacing1=10,
-                spacing3=8,
+                lmargin1=20,
+                lmargin2=20,
+                rmargin=16,
+                spacing1=14,
+                spacing3=12,
                 background=self._pal("chat_user_bg", self._pal("surface")),
             )
             self.chat_display.tag_config(
                 "agent",
                 foreground=palette["success"],
                 font=self._fonts["body"],
-                lmargin1=16,
-                lmargin2=16,
-                spacing1=6,
-                spacing3=12,
+                lmargin1=20,
+                lmargin2=20,
+                rmargin=16,
+                spacing1=10,
+                spacing3=16,
+                background=self._pal("chat_agent_bg", self._pal("surface")),
             )
             self.chat_display.tag_config(
                 "system",
                 foreground=palette["muted_text"],
                 font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
-                lmargin1=16,
-                spacing1=6,
-                spacing3=6,
+                lmargin1=20,
+                rmargin=20,
+                spacing1=8,
+                spacing3=8,
                 background=self._pal("chat_system_bg"),
             )
             self.chat_display.tag_config("source", foreground=palette["source"], font=self._fonts["code"])
@@ -6593,22 +6619,23 @@ class AgenticRAGApp:
         self.chat_display.tag_config(
             "user",
             font=self._fonts["body_bold"],
-            spacing1=10, spacing3=8, lmargin1=16, lmargin2=16,
+            spacing1=14, spacing3=12, lmargin1=20, lmargin2=20, rmargin=16,
             background=self._pal("chat_user_bg", self._pal("surface")),
         )
         self.chat_display.tag_config(
             "agent",
             font=self._fonts["body"],
-            spacing1=6, spacing3=12, lmargin1=16, lmargin2=16,
+            spacing1=10, spacing3=16, lmargin1=20, lmargin2=20, rmargin=16,
+            background=self._pal("chat_agent_bg", self._pal("surface")),
         )
         self.chat_display.tag_config(
             "system",
             font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
-            spacing1=6, spacing3=6, lmargin1=16,
+            spacing1=8, spacing3=8, lmargin1=20, rmargin=20,
             foreground=self._pal("muted_text"),
             background=self._pal("chat_system_bg"),
         )
-        self.chat_display.tag_config("source", font=self._fonts["code"])
+        self.chat_display.tag_config("source", font=self._fonts["code"], foreground=self._pal("source", self._pal("muted_text")))
 
         # Bottom input bar: logs/settings/actions/progress/input all grouped together
         input_bar = self.create_frame(chat_pane, style="Card.Flat.TFrame", padding=UI_SPACING["m"])
