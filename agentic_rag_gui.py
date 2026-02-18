@@ -450,25 +450,25 @@ STYLE_CONFIG = {
     "mono_font": "SF Mono",
     "fallback_mono_font": "Consolas",
     "radius": 12,
-    "radius_sm": 8,
+    "radius_sm": 6,
     "radius_lg": 16,
     "padding": {"sm": 6, "md": 10, "lg": 16},
     "type_scale": {
-        "h1": {"size": 20, "weight": "bold"},
-        "h2": {"size": 16, "weight": "bold"},
-        "h3": {"size": 13, "weight": "bold"},
+        "h1": {"size": 18, "weight": "bold"},
+        "h2": {"size": 14, "weight": "bold"},
+        "h3": {"size": 12, "weight": "bold"},
         "body": {"size": 10, "weight": "normal"},
         "body_bold": {"size": 10, "weight": "bold"},
         "caption": {"size": 9, "weight": "normal"},
-        "code": {"size": 10, "weight": "normal"},
+        "code": {"size": 9, "weight": "normal"},
         "overline": {"size": 8, "weight": "bold"},
     },
     "animation": {
-        "collapse": 180,
-        "tooltip": 120,
-        "theme": 220,
-        "message": 160,
-        "progress": 700,
+        "collapse_duration_ms": 200,
+        "tooltip_fade_ms": 150,
+        "theme_fade_ms": 300,
+        "message_fade_ms": 120,
+        "progress_pulse_ms": 50,
     },
     "themes": {
         "space_dust": {
@@ -868,11 +868,13 @@ class CitationManager:
 
 
 class TooltipManager:
-    def __init__(self, root, get_palette, *, delay_ms=350, wrap_px=340, fade_ms=140):
+    def __init__(self, root, get_palette, *, delay_ms=350, wrap_px=340, fade_ms=None):
         self.root = root
         self.get_palette = get_palette
         self.delay_ms = delay_ms
         self.wrap_px = wrap_px
+        if fade_ms is None:
+            fade_ms = STYLE_CONFIG.get("animation", {}).get("tooltip_fade_ms", 150)
         self.fade_ms = max(1, int(fade_ms))
         self._widget_text = {}
         self._tooltip_window = None
@@ -1102,7 +1104,8 @@ class CollapsibleFrame(ttk.Frame):
             self._expanded.set(True)
             self._animating = False
 
-        self._animate_height(0, target_height, 150, on_complete=_done)
+        collapse_duration = int(STYLE_CONFIG.get("animation", {}).get("collapse_duration_ms", 200))
+        self._animate_height(0, target_height, collapse_duration, on_complete=_done)
 
     def _collapse(self):
         if self._animating:
@@ -1117,7 +1120,8 @@ class CollapsibleFrame(ttk.Frame):
             self._expanded.set(False)
             self._animating = False
 
-        self._animate_height(start_height, 0, 130, on_complete=_done)
+        collapse_duration = int(STYLE_CONFIG.get("animation", {}).get("collapse_duration_ms", 200))
+        self._animate_height(start_height, 0, collapse_duration, on_complete=_done)
 
     def set_expanded(self, expanded):
         expanded = bool(expanded)
@@ -1384,7 +1388,7 @@ class AgenticRAGApp:
             "Blinkist-style summary",
         ]
         self.output_style = tk.StringVar(value="Default answer")
-        self.animation_settings = {"progress_pulse_ms": 10}
+        self.animation_settings = {"progress_pulse_ms": int(STYLE_CONFIG.get("animation", {}).get("progress_pulse_ms", 50))}
         self.mode_options = [
             "Q&A",
             "Summary",
@@ -2973,21 +2977,25 @@ class AgenticRAGApp:
         code_family = next((family for family in mono_candidates if family in families), base_family)
 
         type_scale = STYLE_CONFIG.get("type_scale", {})
-        style_tokens = ("h1", "h2", "h3", "body", "body_bold", "caption", "code", "overline")
 
-        self._fonts = {}
-        for token in style_tokens:
-            scale = type_scale.get(token, {})
-            family = code_family if token == "code" else base_family
-            size = scale.get("size")
-            if size is None:
-                continue
+        def _font_for(name, family):
+            spec = type_scale.get(name, {}) if isinstance(type_scale.get(name, {}), dict) else {}
+            size = int(spec.get("size", 10))
+            weight = str(spec.get("weight", "normal") or "normal").strip().lower()
+            if weight == "bold":
+                return (family, size, "bold")
+            return (family, size)
 
-            weight = scale.get("weight")
-            font_tuple = (family, size)
-            if weight:
-                font_tuple = (*font_tuple, weight)
-            self._fonts[token] = font_tuple
+        self._fonts = {
+            "h1": _font_for("h1", base_family),
+            "h2": _font_for("h2", base_family),
+            "h3": _font_for("h3", base_family),
+            "body": _font_for("body", base_family),
+            "body_bold": _font_for("body_bold", base_family),
+            "caption": _font_for("caption", base_family),
+            "code": _font_for("code", code_family),
+            "overline": _font_for("overline", base_family),
+        }
 
     def _apply_theme(self):
         base_palette = STYLE_CONFIG["themes"].get("space_dust", {})
@@ -3015,13 +3023,15 @@ class AgenticRAGApp:
             except tk.TclError:
                 pass
 
+        theme_fade_ms = max(1, int(STYLE_CONFIG.get("animation", {}).get("theme_fade_ms", 300)))
+
         def _apply_and_restore():
             _apply_styles()
             self._animator.animate_value(
                 "theme_alpha",
                 0.85,
                 1.0,
-                130,
+                max(1, theme_fade_ms // 2),
                 8,
                 _set_alpha,
             )
@@ -3036,7 +3046,7 @@ class AgenticRAGApp:
             "theme_alpha",
             current_alpha,
             0.85,
-            90,
+            max(1, theme_fade_ms // 2),
             6,
             _set_alpha,
             on_complete=_apply_and_restore,
@@ -3685,7 +3695,7 @@ class AgenticRAGApp:
     def _set_progress_running(self, bar, running):
         if not bar or not self._safe_widget_exists(bar):
             return
-        pulse_ms = max(5, int(self.animation_settings.get("progress_pulse_ms", 10) or 10))
+        pulse_ms = max(5, int(self.animation_settings.get("progress_pulse_ms", int(STYLE_CONFIG.get("animation", {}).get("progress_pulse_ms", 50))) or 10))
         if running:
             bar.configure(mode="indeterminate")
             bar.start(pulse_ms)
@@ -4578,9 +4588,9 @@ class AgenticRAGApp:
         self.output_style.set(output_style)
         animation = data.get("animation", {}) if isinstance(data.get("animation"), dict) else {}
         try:
-            pulse_ms = int(animation.get("progress_pulse_ms", self.animation_settings.get("progress_pulse_ms", 10)))
+            pulse_ms = int(animation.get("progress_pulse_ms", self.animation_settings.get("progress_pulse_ms", int(STYLE_CONFIG.get("animation", {}).get("progress_pulse_ms", 50)))))
         except (TypeError, ValueError):
-            pulse_ms = self.animation_settings.get("progress_pulse_ms", 10)
+            pulse_ms = self.animation_settings.get("progress_pulse_ms", int(STYLE_CONFIG.get("animation", {}).get("progress_pulse_ms", 50)))
         self.animation_settings["progress_pulse_ms"] = max(5, pulse_ms)
         selected_mode = self._normalize_mode_name(data.get("selected_mode", self.selected_mode.get()))
         self.selected_mode.set(selected_mode)
@@ -4691,7 +4701,7 @@ class AgenticRAGApp:
             "selected_profile": self.selected_profile.get(),
             "last_used_mode": self.last_used_mode,
             "animation": {
-                "progress_pulse_ms": int(self.animation_settings.get("progress_pulse_ms", 10)),
+                "progress_pulse_ms": int(self.animation_settings.get("progress_pulse_ms", int(STYLE_CONFIG.get("animation", {}).get("progress_pulse_ms", 50)))),
             },
         }
         try:
@@ -18190,7 +18200,7 @@ class AgenticRAGApp:
             self.chat_display.delete(line_start, f"{line_start} lineend")
             self.chat_display.insert(line_start, frames[phase % len(frames)], "thinking_indicator")
             self.chat_display.config(state="disabled")
-            delay = max(120, int(self.animation_settings.get("progress_pulse_ms", 10) or 10) * 18)
+            delay = max(120, int(self.animation_settings.get("progress_pulse_ms", int(STYLE_CONFIG.get("animation", {}).get("progress_pulse_ms", 50))) or 10) * 18)
             self._thinking_pulse_after_id = self.root.after(delay, self._pulse_thinking, phase + 1)
 
         self._run_on_ui(_tick)
@@ -18269,7 +18279,7 @@ class AgenticRAGApp:
             palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
             from_bg = palette.get("selection_bg", "#35557a")
             to_bg = self.chat_display.cget("bg")
-            self._fade_out_tag(transient_tag, from_bg, to_bg, duration_ms=120)
+            self._fade_out_tag(transient_tag, from_bg, to_bg, duration_ms=int(STYLE_CONFIG.get("animation", {}).get("message_fade_ms", 120)))
             self._tag_citations_in_chat(start, end)
             if tag == "agent":
                 if run_id:
