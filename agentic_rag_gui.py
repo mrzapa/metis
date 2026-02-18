@@ -2846,11 +2846,8 @@ class AgenticRAGApp:
         assets_dir = os.path.join(script_dir, "assets")
         logo_candidates = [
             os.path.join(assets_dir, "axiom_logo.png"),
-            os.path.join(assets_dir, "logo.png"),
             os.path.join(assets_dir, "axiom.png"),
             os.path.join(assets_dir, "app.png"),
-            os.path.join(script_dir, "logo.png"),
-            os.path.join(script_dir, "axiom_logo.png"),
         ]
 
         for logo_path in logo_candidates:
