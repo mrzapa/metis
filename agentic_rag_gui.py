@@ -3248,42 +3248,38 @@ class AgenticRAGApp:
     def _theme_text_tags(self):
         palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
         if hasattr(self, "chat_display"):
-            self.chat_display.tag_config("citation", foreground=palette["link"], underline=1)
+            self.chat_display.tag_config("citation", foreground=palette["link"], underline=1, font=self._fonts["code"])
             self.chat_display.tag_config(
                 "user",
                 foreground=palette["tertiary"],
                 font=self._fonts["body_bold"],
-                lmargin1=14,
-                lmargin2=14,
-                rmargin=10,
-                spacing1=8,
+                lmargin1=16,
+                lmargin2=16,
+                spacing1=10,
                 spacing3=8,
-                background=palette["surface"],
+                background=self._pal("chat_user_bg", self._pal("surface")),
             )
             self.chat_display.tag_config(
                 "agent",
                 foreground=palette["success"],
                 font=self._fonts["body"],
-                lmargin1=10,
-                lmargin2=10,
-                rmargin=10,
-                spacing1=8,
+                lmargin1=16,
+                lmargin2=16,
+                spacing1=6,
                 spacing3=12,
             )
             self.chat_display.tag_config(
                 "system",
                 foreground=palette["muted_text"],
                 font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
-                lmargin1=10,
-                lmargin2=10,
-                rmargin=10,
+                lmargin1=16,
                 spacing1=6,
                 spacing3=6,
-                background=palette["surface_alt"],
+                background=self._pal("chat_system_bg"),
             )
             self.chat_display.tag_config("source", foreground=palette["source"], font=self._fonts["code"])
         if hasattr(self, "answer_text"):
-            self.answer_text.tag_config("citation", foreground=palette["link"], underline=1, font=("Consolas", 9, "underline"))
+            self.answer_text.tag_config("citation", foreground=palette["link"], underline=1, font=self._fonts["code"])
         if hasattr(self, "sources_tree"):
             self.sources_tree.tag_configure("supporting", background=palette["supporting_bg"], foreground=palette["text"])
 
@@ -6116,7 +6112,7 @@ class AgenticRAGApp:
             left_pane, surface_id="chat_display", state="disabled", font=("Segoe UI", 10), wrap=tk.WORD, scrolled=True
         )
         self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, UI_SPACING["m"]))
-        self.chat_display.tag_config("citation", foreground=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["link"], underline=1, font=("Consolas", 9, "underline"))
+        self.chat_display.tag_config("citation", foreground=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["link"], underline=1, font=self._fonts["code"])
         self.chat_display.tag_bind("citation", "<Button-1>", self._on_citation_click)
         self.chat_display.tag_bind("citation", "<Enter>", self._on_citation_hover)
         self.chat_display.tag_bind("citation", "<Leave>", self._on_citation_leave)
@@ -6125,31 +6121,28 @@ class AgenticRAGApp:
         self.chat_display.tag_config(
             "user",
             font=self._fonts["body_bold"],
-            spacing1=8,
+            spacing1=10,
             spacing3=8,
-            lmargin1=14,
-            lmargin2=14,
-            rmargin=10,
-            background=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["surface"],
+            lmargin1=16,
+            lmargin2=16,
+            background=self._pal("chat_user_bg", self._pal("surface")),
         )
         self.chat_display.tag_config(
             "agent",
             font=self._fonts["body"],
-            spacing1=8,
+            spacing1=6,
             spacing3=12,
-            lmargin1=10,
-            lmargin2=10,
-            rmargin=10,
+            lmargin1=16,
+            lmargin2=16,
         )
         self.chat_display.tag_config(
             "system",
             font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
             spacing1=6,
             spacing3=6,
-            lmargin1=10,
-            lmargin2=10,
-            rmargin=10,
-            background=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["surface_alt"],
+            lmargin1=16,
+            foreground=self._pal("muted_text"),
+            background=self._pal("chat_system_bg"),
         )
         self.chat_display.tag_config("source", font=self._fonts["code"])
 
@@ -6277,7 +6270,7 @@ class AgenticRAGApp:
         self.answer_text = self.create_rich_text_surface(
             self.answer_tab, surface_id="answer_text", height=20, wrap=tk.WORD, state="disabled", font=("Segoe UI", 10)
         )
-        self.answer_text.tag_config("citation", foreground=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["link"], underline=1, font=("Consolas", 9, "underline"))
+        self.answer_text.tag_config("citation", foreground=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["link"], underline=1, font=self._fonts["code"])
         self.answer_text.tag_bind("citation", "<Button-1>", self._on_answer_citation_click)
         self.answer_text.tag_bind("citation", "<Enter>", self._on_citation_hover)
         self.answer_text.tag_bind("citation", "<Leave>", self._on_citation_leave)
