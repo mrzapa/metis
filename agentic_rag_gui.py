@@ -2915,6 +2915,16 @@ class AgenticRAGApp:
 
         return "\n\n".join(context_blocks), packed_count, truncated_flag
 
+    def _ensure_ui_badge_vars(self):
+        if not hasattr(self, "status_var"):
+            self.status_var = tk.StringVar(value="Ready")
+        if not hasattr(self, "backend_badge_var"):
+            self.backend_badge_var = tk.StringVar(value=f"Backend: {self.ui_backend.upper()}")
+        if not hasattr(self, "chat_llm_badge_var"):
+            self.chat_llm_badge_var = tk.StringVar(value="🤖 LLM: --")
+        if not hasattr(self, "library_embedding_badge_var"):
+            self.library_embedding_badge_var = tk.StringVar(value="🧬 Embeddings: --")
+
     def setup_ui(self):
         self._apply_theme()
 
@@ -2968,6 +2978,8 @@ class AgenticRAGApp:
             button.grid(row=idx, column=0, sticky="ew", padx=UI_SPACING["m"], pady=(0, UI_SPACING["xs"]))
             self._sidebar_nav_buttons[view_key] = button
 
+        self._ensure_ui_badge_vars()
+
         self.tab_chat = self.create_frame(self.main_content_frame, style="Card.TFrame")
         self.tab_chat.grid(row=0, column=0, sticky="nsew")
         self.build_chat_tab()
@@ -2992,11 +3004,6 @@ class AgenticRAGApp:
         self._active_view = None
         self._switch_main_view("chat")
         self._ensure_tab_aliases()
-
-        self.status_var = tk.StringVar(value="Ready")
-        self.backend_badge_var = tk.StringVar(value=f"Backend: {self.ui_backend.upper()}")
-        self.chat_llm_badge_var = tk.StringVar(value="🤖 LLM: --")
-        self.library_embedding_badge_var = tk.StringVar(value="🧬 Embeddings: --")
 
         self._bind_accessibility_shortcuts()
         self._install_ui_state_watchers()
@@ -6199,6 +6206,7 @@ class AgenticRAGApp:
         self._maybe_autofill_recommendations()
 
     def build_chat_tab(self):
+        self._ensure_ui_badge_vars()
         for child in self.tab_chat.winfo_children():
             child.destroy()
         if self.basic_mode and not self.basic_wizard_completed:
