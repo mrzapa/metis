@@ -2917,12 +2917,16 @@ class AgenticRAGApp:
         self._ensure_tab_aliases()
 
         self.status_var = tk.StringVar(value="Ready")
-        status_wrap = ttk.Frame(self.root, style="TFrame")
+        self.backend_badge_var = tk.StringVar(value=f"Backend: {self.ui_backend.upper()}")
+        status_wrap = ttk.Frame(self.root, style="StatusBar.TFrame")
         status_wrap.pack(fill="x", padx=STYLE_CONFIG["padding"]["md"], pady=(0, STYLE_CONFIG["padding"]["sm"]))
         status_bar = ttk.Label(status_wrap, textvariable=self.status_var, style="Status.TLabel", anchor="w")
         status_bar.pack(side="left", fill="x", expand=True)
+        ttk.Separator(status_wrap, orient="vertical").pack(side="left", fill="y", padx=(UI_SPACING["s"], UI_SPACING["s"]))
         self.status_state_bar = ttk.Label(status_wrap, textvariable=self.current_state_var, style="Status.TLabel", anchor="e")
-        self.status_state_bar.pack(side="right", padx=(UI_SPACING["s"], 0))
+        self.status_state_bar.pack(side="left")
+        self.backend_badge = ttk.Label(status_wrap, textvariable=self.backend_badge_var, style="Badge.TLabel", anchor="e")
+        self.backend_badge.pack(side="right", padx=(UI_SPACING["s"], 0))
 
         self._bind_accessibility_shortcuts()
         self._install_ui_state_watchers()
@@ -3021,6 +3025,12 @@ class AgenticRAGApp:
             on_complete=_apply_and_restore,
         )
 
+    def _pal(self, key, default=None):
+        palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+        if default is None:
+            default = STYLE_CONFIG["themes"]["space_dust"].get(key)
+        return palette.get(key, default)
+
     def _apply_ttk_theme(self, palette, *, use_clam=True):
         style = ttk.Style()
         if use_clam and "clam" in style.theme_names():
@@ -3031,6 +3041,8 @@ class AgenticRAGApp:
         style.configure("Card.TFrame", background=palette["surface"], borderwidth=0, relief="flat")
         style.configure("Card.Elevated.TFrame", background=palette["surface"], borderwidth=1, bordercolor=palette["outline"], relief="flat")
         style.configure("Card.Flat.TFrame", background=palette["surface_alt"], borderwidth=0, relief="flat")
+        style.configure("StatusBar.TFrame", background=palette["bg"], borderwidth=0, relief="flat")
+        style.configure("CollapsibleHeader.TFrame", background=palette["surface"], borderwidth=0, relief="flat")
         style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["outline"], borderwidth=0, relief="flat")
         style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
         style.configure("TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["body"])
@@ -3046,24 +3058,26 @@ class AgenticRAGApp:
         style.configure("Warning.TLabel", background=palette["surface"], foreground=palette["tertiary"], font=self._fonts["body_bold"])
         style.configure("Status.TLabel", background=palette["bg"], foreground=palette["status"], font=self._fonts["caption"])
         style.configure("TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"], focuscolor=palette["surface_alt"])
-        style.map("TButton", background=[("active", palette["secondary"]), ("pressed", palette["primary"])], foreground=[("active", palette["selection_fg"])])
-        style.configure("Primary.TButton", padding=(14, 9), relief="flat", borderwidth=0, background=palette["primary"], foreground="#061018")
-        style.map("Primary.TButton", background=[("active", palette["secondary"]), ("pressed", palette["tertiary"]), ("disabled", palette["outline"])], foreground=[("disabled", palette["muted_text"])])
+        style.map("TButton", background=[("active", get("primary_hover")), ("pressed", get("primary_pressed"))], foreground=[("active", palette["selection_fg"])])
+        style.configure("Primary.TButton", padding=(16, 10), relief="flat", borderwidth=0, background=palette["primary"], foreground="#FFFFFF")
+        style.map("Primary.TButton", background=[("active", get("primary_hover")), ("pressed", get("primary_pressed")), ("disabled", palette["outline"])], foreground=[("disabled", palette["muted_text"])])
         style.configure("Secondary.TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"])
         style.map("Secondary.TButton", background=[("active", palette["surface"]), ("pressed", palette["outline"]), ("disabled", palette["surface_alt"])], foreground=[("disabled", palette["muted_text"])])
-        style.configure("Danger.TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["danger"], foreground="#14080A")
-        style.map("Danger.TButton", background=[("active", "#ff92a1"), ("pressed", "#e7687a"), ("disabled", palette["outline"])], foreground=[("disabled", palette["muted_text"])])
+        style.configure("Danger.TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["danger"], foreground="#FFFFFF")
+        style.map("Danger.TButton", background=[("active", get("danger_hover")), ("pressed", get("primary_pressed")), ("disabled", palette["outline"])], foreground=[("disabled", palette["muted_text"])])
+        style.configure("Success.TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["success"], foreground="#FFFFFF")
+        style.map("Success.TButton", background=[("active", get("primary_hover")), ("pressed", get("primary_pressed")), ("disabled", palette["outline"])], foreground=[("disabled", palette["muted_text"])])
         style.configure("TRadiobutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], indicatordiameter=14, relief="flat")
         style.map("TRadiobutton", foreground=[("disabled", palette["muted_text"])], indicatorcolor=[("selected", palette["primary"]), ("!selected", palette["surface_alt"])])
         style.configure("TCheckbutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], relief="flat")
         style.map("TCheckbutton", foreground=[("disabled", palette["muted_text"])], indicatorcolor=[("selected", palette["primary"]), ("!selected", palette["surface_alt"])])
-        style.configure("TEntry", fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], insertcolor=palette["text"], borderwidth=1, relief="flat")
+        style.configure("TEntry", fieldbackground=get("input_bg", palette["surface_alt"]), foreground=palette["text"], bordercolor=palette["outline"], insertcolor=palette["primary"], borderwidth=1, relief="flat", padding=(10, 8))
         style.map("TEntry", bordercolor=[("focus", palette["primary"])], lightcolor=[("focus", palette["primary"])], darkcolor=[("focus", palette["primary"])])
-        style.configure("TCombobox", fieldbackground=palette["surface_alt"], background=palette["surface_alt"], foreground=palette["text"], arrowcolor=palette["muted_text"], bordercolor=palette["outline"], relief="flat")
-        style.map("TCombobox", fieldbackground=[("readonly", palette["surface_alt"])], selectbackground=[("readonly", palette["selection_bg"])], selectforeground=[("readonly", palette["selection_fg"])])
-        style.configure("Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=24, relief="flat")
+        style.configure("TCombobox", fieldbackground=get("input_bg", palette["surface_alt"]), background=get("input_bg", palette["surface_alt"]), foreground=palette["text"], arrowcolor=palette["muted_text"], bordercolor=palette["outline"], relief="flat", insertcolor=palette["primary"], padding=(10, 8))
+        style.map("TCombobox", fieldbackground=[("readonly", get("input_bg", palette["surface_alt"]))], selectbackground=[("readonly", palette["selection_bg"])], selectforeground=[("readonly", palette["selection_fg"])])
+        style.configure("Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=28, relief="flat")
         style.map("Treeview", background=[("selected", palette["selection_bg"]), ("active", palette["surface"])], foreground=[("selected", palette["selection_fg"]), ("active", palette["text"])])
-        style.configure("History.Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=30, relief="flat")
+        style.configure("History.Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=34, relief="flat")
         style.map("History.Treeview", background=[("selected", palette["selection_bg"]), ("active", palette["surface"])], foreground=[("selected", palette["selection_fg"]), ("active", palette["text"])])
         style.configure("Treeview.Heading", background=palette["surface"], foreground=palette["muted_text"], borderwidth=0, relief="flat")
         style.map("Treeview.Heading", background=[("active", palette["surface_alt"])])
@@ -3193,9 +3207,9 @@ class AgenticRAGApp:
                     selectforeground=palette["selection_fg"],
                     relief="flat",
                     borderwidth=0,
-                    highlightthickness=1,
+                    highlightthickness=2,
                     highlightbackground=palette["outline"],
-                    highlightcolor=palette["primary"],
+                    highlightcolor=palette.get("focus_ring", palette["primary"]),
                 )
             elif isinstance(widget, tk.Canvas):
                 widget.configure(background=palette["bg"], highlightthickness=0)
@@ -6859,10 +6873,15 @@ class AgenticRAGApp:
             tw = tk.Toplevel(self.root)
             tw.wm_overrideredirect(True)
             tw.wm_geometry(f"+{event.x_root + 14}+{event.y_root + 14}")
+            caption_font = tkfont.nametofont("TkCaptionFont")
             tk.Label(
-                tw, text=tip, justify="left", background="#ffffe0",
+                tw,
+                text=tip,
+                justify="left",
+                background=self._pal("surface_elevated", self._pal("surface_alt")),
+                foreground=self._pal("text"),
                 relief="solid", borderwidth=1, wraplength=280,
-                font=("Segoe UI", 9),
+                font=caption_font,
             ).pack()
             self._citation_tip = tw
         except Exception:
