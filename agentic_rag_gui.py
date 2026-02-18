@@ -2961,19 +2961,33 @@ class AgenticRAGApp:
     def _resolve_fonts(self):
         families = set(tkfont.families())
         base_family = STYLE_CONFIG["font_family"] if STYLE_CONFIG["font_family"] in families else STYLE_CONFIG["fallback_font"]
-        mono_candidates = ("SF Mono", "Consolas", "Cascadia Code", "Menlo", "Courier New", "TkFixedFont")
+
+        mono_candidates = (
+            STYLE_CONFIG.get("mono_font", "SF Mono"),
+            STYLE_CONFIG.get("fallback_mono_font", "Consolas"),
+            "Cascadia Code",
+            "Menlo",
+            "Courier New",
+            "TkFixedFont",
+        )
         code_family = next((family for family in mono_candidates if family in families), base_family)
 
-        self._fonts = {
-            "h1": (base_family, 16, "bold"),
-            "h2": (base_family, 13, "bold"),
-            "h3": (base_family, 11, "bold"),
-            "body": (base_family, 10),
-            "body_bold": (base_family, 10, "bold"),
-            "caption": (base_family, 9),
-            "code": (code_family, 9),
-            "overline": (base_family, 8, "bold"),
-        }
+        type_scale = STYLE_CONFIG.get("type_scale", {})
+        style_tokens = ("h1", "h2", "h3", "body", "body_bold", "caption", "code", "overline")
+
+        self._fonts = {}
+        for token in style_tokens:
+            scale = type_scale.get(token, {})
+            family = code_family if token == "code" else base_family
+            size = scale.get("size")
+            if size is None:
+                continue
+
+            weight = scale.get("weight")
+            font_tuple = (family, size)
+            if weight:
+                font_tuple = (*font_tuple, weight)
+            self._fonts[token] = font_tuple
 
     def _apply_theme(self):
         base_palette = STYLE_CONFIG["themes"].get("space_dust", {})
