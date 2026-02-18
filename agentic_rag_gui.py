@@ -2848,6 +2848,8 @@ class AgenticRAGApp:
             os.path.join(assets_dir, "axiom_logo.png"),
             os.path.join(assets_dir, "axiom.png"),
             os.path.join(assets_dir, "app.png"),
+            os.path.join(script_dir, "logo.png"),
+            os.path.join(assets_dir, "logo.png"),
         ]
 
         for logo_path in logo_candidates:
@@ -3212,16 +3214,19 @@ class AgenticRAGApp:
         style.configure("Success.TLabel", background=palette["surface"], foreground=palette["success"], font=self._fonts["body_bold"])
         style.configure("Warning.TLabel", background=palette["surface"], foreground=palette["tertiary"], font=self._fonts["body_bold"])
         style.configure("Status.TLabel", background=palette["surface"], foreground=palette["status"], font=self._fonts["caption"])
+        style.configure("Badge.TLabel", background=get("badge_bg", fallback="surface_alt", default=palette["surface_alt"]), foreground=palette["primary"], font=self._fonts["caption"], padding=(6, 2), relief="flat")
+        style.configure("CollapsibleArrow.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=self._fonts["body_bold"])
+        style.configure("CollapsibleTitle.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
         style.configure("TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"], focuscolor=palette["surface_alt"])
-        style.map("TButton", background=[("active", _pal(palette, "primary_hover", fallback_key="primary", default="#79B8FF")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE"))], foreground=[("active", palette["selection_fg"])])
+        style.map("TButton", background=[("active", _pal(palette, "primary_hover", fallback_key="primary", default="#79B8FF")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE"))], foreground=[("active", palette["text"])])
         style.configure("Primary.TButton", padding=(16, 10), relief="flat", borderwidth=0, background=palette["primary"], foreground="#FFFFFF")
-        style.map("Primary.TButton", background=[("active", _pal(palette, "primary_hover", fallback_key="primary", default="#79B8FF")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("disabled", palette["muted_text"])])
+        style.map("Primary.TButton", background=[("active", _pal(palette, "primary_hover", fallback_key="primary", default="#79B8FF")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
         style.configure("Secondary.TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"])
-        style.map("Secondary.TButton", background=[("active", palette["surface"]), ("pressed", palette["outline"]), ("disabled", palette["surface_alt"])], foreground=[("disabled", palette["muted_text"])])
+        style.map("Secondary.TButton", background=[("active", palette["surface"]), ("pressed", palette["outline"]), ("disabled", palette["surface_alt"])], foreground=[("active", palette["text"]), ("disabled", palette["muted_text"])])
         style.configure("Danger.TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["danger"], foreground="#FFFFFF")
-        style.map("Danger.TButton", background=[("active", _pal(palette, "danger_hover", fallback_key="danger", default="#FF5555")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("disabled", palette["muted_text"])])
+        style.map("Danger.TButton", background=[("active", _pal(palette, "danger_hover", fallback_key="danger", default="#FF5555")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
         style.configure("Success.TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["success"], foreground="#FFFFFF")
-        style.map("Success.TButton", background=[("active", _pal(palette, "primary_hover", fallback_key="primary", default="#79B8FF")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("disabled", palette["muted_text"])])
+        style.map("Success.TButton", background=[("active", _pal(palette, "success_hover", fallback_key="success", default="#72E2B3")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
         style.configure("TRadiobutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], indicatordiameter=14, relief="flat")
         style.map("TRadiobutton", foreground=[("disabled", palette["muted_text"])], indicatorcolor=[("selected", palette["primary"]), ("!selected", palette["surface_alt"])])
         style.configure("TCheckbutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], relief="flat")
@@ -6398,12 +6403,57 @@ class AgenticRAGApp:
         input_bar = self.create_frame(chat_pane, style="Card.Flat.TFrame", padding=UI_SPACING["m"])
         input_bar.pack(fill="x", side="bottom")
 
-        logs_section = CollapsibleFrame(input_bar, "Logs & telemetry", expanded=False, animator=self._animator)
+        # Scrollable area for collapsible sections (logs + advanced settings).
+        # This allows the user to expand sections without losing access to the composer.
+        _coll_pal_bg = self._pal("surface_alt", self._pal("surface", "#212C3D"))
+        _coll_container = ttk.Frame(input_bar)
+        _coll_container.pack(fill="x", pady=(0, UI_SPACING["xs"]))
+        _coll_vscroll = ttk.Scrollbar(_coll_container, orient="vertical")
+        _coll_canvas = tk.Canvas(
+            _coll_container,
+            highlightthickness=0,
+            borderwidth=0,
+            height=2,
+            bg=_coll_pal_bg,
+            yscrollcommand=_coll_vscroll.set,
+        )
+        _coll_vscroll.configure(command=_coll_canvas.yview)
+        _coll_vscroll.pack(side="right", fill="y")
+        _coll_canvas.pack(side="left", fill="x", expand=True)
+        _coll_inner = ttk.Frame(_coll_canvas)
+        _coll_win_id = _coll_canvas.create_window((0, 0), window=_coll_inner, anchor="nw")
+        _COLL_MAX_H = 280
+
+        def _sync_coll_scroll(_evt=None):
+            try:
+                _coll_canvas.update_idletasks()
+                req_h = max(2, _coll_inner.winfo_reqheight())
+                _coll_canvas.configure(
+                    height=min(req_h, _COLL_MAX_H),
+                    scrollregion=(0, 0, 1, req_h),
+                )
+            except tk.TclError:
+                pass
+
+        def _sync_coll_width(evt):
+            _coll_canvas.itemconfigure(_coll_win_id, width=evt.width)
+
+        _coll_inner.bind("<Configure>", _sync_coll_scroll)
+        _coll_canvas.bind("<Configure>", _sync_coll_width)
+
+        # Bind mousewheel scrolling when pointer is inside the collapsible area
+        def _coll_mousewheel(evt):
+            _coll_canvas.yview_scroll(-1 * (evt.delta // 120 or (-1 if evt.delta < 0 else 1)), "units")
+
+        _coll_canvas.bind("<Enter>", lambda _e: _coll_canvas.bind_all("<MouseWheel>", _coll_mousewheel))
+        _coll_canvas.bind("<Leave>", lambda _e: _coll_canvas.unbind_all("<MouseWheel>"))
+
+        logs_section = CollapsibleFrame(_coll_inner, "Logs & telemetry", expanded=False, animator=self._animator)
         logs_section.pack(fill="both", pady=(0, 6))
         self.log_area_surface, self.log_area = self.create_rich_text_surface(logs_section.content, surface_id="chat_logs", height=6, state="disabled", wrap=tk.WORD, scrolled=True)
         self.log_area_surface.pack(fill=tk.BOTH, expand=True)
 
-        self.chat_settings_section = CollapsibleFrame(input_bar, "Advanced chat settings", expanded=False, animator=self._animator)
+        self.chat_settings_section = CollapsibleFrame(_coll_inner, "Advanced chat settings", expanded=False, animator=self._animator)
         self.chat_settings_section.pack(fill="x", pady=(0, 6))
 
         settings_content = self.chat_settings_section.content
@@ -6457,12 +6507,6 @@ class AgenticRAGApp:
             style="Secondary.TButton",
         )
         self._more_btn.pack(side="left", padx=(UI_SPACING["s"], 0))
-        self.create_label(
-            action_row,
-            text="Ctrl+Enter to send",
-            style="Caption.TLabel",
-        ).pack(side="right")
-
         progress_row = self.create_frame(input_bar)
         progress_row.pack(fill="x", pady=(0, 6))
         self.rag_progress = ttk.Progressbar(progress_row, orient="horizontal", mode="indeterminate")
@@ -6475,7 +6519,8 @@ class AgenticRAGApp:
         )
         self.btn_cancel_rag.pack(side="left", padx=(UI_SPACING["s"], 0))
 
-        composer_row = self.create_frame(input_bar)
+        self.create_label(input_bar, text="Your message  (Ctrl+Enter to send):", style="Caption.TLabel").pack(anchor="w", pady=(UI_SPACING["xs"], UI_SPACING["xs"]))
+        composer_row = self.create_frame(input_bar, style="Card.Elevated.TFrame", padding=UI_SPACING["xs"])
         composer_row.pack(fill="x")
         self.txt_input_surface, self.txt_input = self.create_rich_text_surface(composer_row, surface_id="chat_input", height=3, font=("Segoe UI", 11), wrap=tk.WORD)
         self.txt_input_surface.pack(side="left", fill="both", expand=True, padx=(0, UI_SPACING["s"]))
