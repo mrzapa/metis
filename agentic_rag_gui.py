@@ -6102,17 +6102,6 @@ class AgenticRAGApp:
         self.state_warning_label = self.create_label(frame, textvariable=self.current_warning_var, style="Danger.TLabel")
         self.state_warning_label.pack(fill="x", pady=(0, UI_SPACING["s"]))
 
-        rag_progress_row = self.create_frame(frame)
-        rag_progress_row.pack(fill="x", pady=(0, UI_SPACING["s"]))
-        self.rag_progress = ttk.Progressbar(rag_progress_row, orient="horizontal", mode="indeterminate")
-        self.rag_progress.pack(side="left", fill="x", expand=True)
-        self.btn_cancel_rag = self.create_button(
-            rag_progress_row,
-            text="Cancel",
-            command=lambda: self.cancel_active_job("rag"),
-            state="disabled",
-        )
-        self.btn_cancel_rag.pack(side="left", padx=(UI_SPACING["s"], 0))
 
         top_bar = self.create_frame(frame, text="Conversation Setup", padding=UI_SPACING["m"], kind="labelframe")
         top_bar.pack(fill="x", pady=(0, UI_SPACING["m"]))
@@ -6133,7 +6122,8 @@ class AgenticRAGApp:
             width=18,
         ).grid(row=0, column=3, sticky="ew", padx=(6, 12))
 
-        self.create_label(top_bar, text="Index:").grid(row=0, column=4, sticky="w")
+        self._index_label = self.create_label(top_bar, text="Index:")
+        self._index_label.grid(row=0, column=4, sticky="w")
         self.cb_existing_index = self.create_combobox(top_bar, textvariable=self.existing_index_var, state="readonly")
         self.cb_existing_index.grid(row=0, column=5, sticky="ew", padx=(6, 12))
         self.cb_existing_index.bind("<<ComboboxSelected>>", self._on_existing_index_change)
@@ -6153,6 +6143,20 @@ class AgenticRAGApp:
             self.create_button(actions_row, text="Switch to Advanced", command=self.switch_to_advanced_mode, style="Secondary.TButton").pack(side="right")
         else:
             self.create_button(actions_row, text="Run Setup Wizard", command=self.run_setup_wizard, style="Secondary.TButton").pack(side="right")
+        self._rag_toggle_btn = self.create_button(
+            actions_row,
+            text="RAG ●",
+            command=self._toggle_rag_mode,
+            style="Primary.TButton",
+        )
+        self._rag_toggle_btn.pack(side="right", padx=(UI_SPACING["s"], 0))
+        self._evidence_toggle_btn = self.create_button(
+            actions_row,
+            text="⊞ Evidence",
+            command=self._toggle_evidence_panel,
+            style="Secondary.TButton",
+        )
+        self._evidence_toggle_btn.pack(side="right", padx=(UI_SPACING["s"], 0))
 
         setup_advanced = CollapsibleFrame(top_bar, "Advanced chat settings", expanded=False)
         setup_advanced.grid(row=2, column=0, columnspan=8, sticky="ew", pady=(UI_SPACING["s"], 0))
@@ -6162,17 +6166,20 @@ class AgenticRAGApp:
         self.create_label(advanced_grid, text="final_k:").grid(row=0, column=2, sticky="w")
         self.create_entry(advanced_grid, textvariable=self.final_k, width=8).grid(row=0, column=3, sticky="w", padx=(6, 0))
 
-        content_split = self.create_frame(frame, orient=tk.HORIZONTAL, kind="panedwindow")
-        content_split.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        # Main chat body: full-width chat pane + optional evidence pane (hidden by default)
+        body_frame = self.create_frame(frame)
+        body_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        left_pane = self.create_frame(content_split, style="Card.Elevated.TFrame", padding=UI_SPACING["m"])
-        right_pane = self.create_frame(content_split, width=380, style="Card.Elevated.TFrame", padding=UI_SPACING["m"])
-        content_split.add(left_pane, weight=4)
-        content_split.add(right_pane, weight=2)
+        chat_pane = self.create_frame(body_frame, style="Card.Elevated.TFrame", padding=UI_SPACING["m"])
+        chat_pane.pack(side="left", fill=tk.BOTH, expand=True)
+
+        self._evidence_sep = tk.Frame(body_frame, width=1, bg=pal["border"], bd=0, highlightthickness=0)
+        self._evidence_pane = self.create_frame(body_frame, width=420, style="Card.Elevated.TFrame", padding=UI_SPACING["m"])
+        self._evidence_pane.pack_propagate(False)
 
         # ── Chat Display ──────────────────────────────────────────────────────
         self.chat_display = self.create_rich_text_surface(
-            left_pane, surface_id="chat_display", state="disabled", font=("Segoe UI", 10), wrap=tk.WORD, scrolled=True
+            chat_pane, surface_id="chat_display", state="disabled", font=("Segoe UI", 10), wrap=tk.WORD, scrolled=True
         )
         self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, UI_SPACING["m"]))
         self.chat_display.tag_config("citation", foreground=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["link"], underline=1, font=self._fonts["code"])
@@ -6199,52 +6206,17 @@ class AgenticRAGApp:
         )
         self.chat_display.tag_config("source", font=self._fonts["code"])
 
-        # Quick Actions
-        action_frame = self.create_frame(left_pane, style="Card.TFrame")
-        action_frame.pack(fill="x", pady=(UI_SPACING["s"], UI_SPACING["xs"]))
-        self.create_button(
-            action_frame,
-            text="New Chat",
-            command=lambda: self.start_new_chat(load_in_ui=True),
-            style="Secondary.TButton",
-        ).pack(side="left")
-        self.create_button(
-            action_frame, text="Copy Last Answer", command=self.copy_last_answer,
-            style="Secondary.TButton",
-        ).pack(side="left", padx=(UI_SPACING["s"], 0))
-        self.create_button(
-            action_frame,
-            text="Export notes to Markdown",
-            command=self.export_notes_to_markdown,
-            style="Secondary.TButton",
-        ).pack(side="left", padx=UI_SPACING["s"])
-        if agent_lightning is not None:
-            self.create_button(
-                action_frame,
-                text="Export to Agent Lightning format",
-                command=self.export_run_as_agent_lightning_dataset,
-                style="Secondary.TButton",
-            ).pack(side="left")
-        self.create_button(
-            action_frame,
-            text="Export Eval Set",
-            command=self.export_eval_set,
-            style="Secondary.TButton",
-        ).pack(side="left", padx=UI_SPACING["s"])
+        # Bottom input bar: logs/settings/actions/progress/input all grouped together
+        input_bar = self.create_frame(chat_pane, style="Card.Flat.TFrame", padding=UI_SPACING["m"])
+        input_bar.pack(fill="x", side="bottom")
 
-        self.create_label(
-            left_pane,
-            text="Type your question, Ctrl+Enter to send",
-            style="Caption.TLabel",
-        ).pack(anchor="w", pady=(2, 4))
-
-        logs_section = CollapsibleFrame(left_pane, "Logs & telemetry", expanded=False, animator=self._animator)
-        logs_section.pack(fill="both", pady=(6, 0))
+        logs_section = CollapsibleFrame(input_bar, "Logs & telemetry", expanded=False, animator=self._animator)
+        logs_section.pack(fill="both", pady=(0, 6))
         self.log_area = self.create_rich_text_surface(logs_section.content, surface_id="chat_logs", height=6, state="disabled", wrap=tk.WORD, scrolled=True)
         self.log_area.pack(fill=tk.BOTH, expand=True)
 
-        self.chat_settings_section = CollapsibleFrame(left_pane, "Advanced chat settings", expanded=False, animator=self._animator)
-        self.chat_settings_section.pack(fill="x", pady=(4, 0))
+        self.chat_settings_section = CollapsibleFrame(input_bar, "Advanced chat settings", expanded=False, animator=self._animator)
+        self.chat_settings_section.pack(fill="x", pady=(0, 6))
 
         settings_content = self.chat_settings_section.content
         profile_frame = self.create_frame(settings_content, text="Mode & Agent Profile", padding=8, kind="labelframe")
@@ -6282,14 +6254,46 @@ class AgenticRAGApp:
         self.create_checkbox(frontier_wrap, text="Claim-level grounding (CiteFix-lite)", variable=self.enable_claim_level_grounding_citefix_lite).pack(anchor="w")
         self.create_checkbox(frontier_wrap, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
 
-        # Sticky input composer
-        input_frame = self.create_frame(left_pane, style="Card.Flat.TFrame", padding=UI_SPACING["m"])
-        input_frame.pack(fill="x", side="bottom", pady=(UI_SPACING["s"], 0))
-        self.txt_input = self.create_rich_text_surface(input_frame, surface_id="chat_input", height=3, font=("Segoe UI", 11), wrap=tk.WORD)
+        action_row = self.create_frame(input_bar)
+        action_row.pack(fill="x", pady=(0, 6))
+        self.create_button(
+            action_row,
+            text="＋ New Chat",
+            command=lambda: self.start_new_chat(load_in_ui=True),
+            style="Secondary.TButton",
+        ).pack(side="left")
+        self._more_btn = self.create_button(
+            action_row,
+            text="⋯ More",
+            command=self._open_more_menu,
+            style="Secondary.TButton",
+        )
+        self._more_btn.pack(side="left", padx=(UI_SPACING["s"], 0))
+        self.create_label(
+            action_row,
+            text="Ctrl+Enter to send",
+            style="Caption.TLabel",
+        ).pack(side="right")
+
+        progress_row = self.create_frame(input_bar)
+        progress_row.pack(fill="x", pady=(0, 6))
+        self.rag_progress = ttk.Progressbar(progress_row, orient="horizontal", mode="indeterminate")
+        self.rag_progress.pack(side="left", fill="x", expand=True)
+        self.btn_cancel_rag = self.create_button(
+            progress_row,
+            text="Cancel",
+            command=lambda: self.cancel_active_job("rag"),
+            state="disabled",
+        )
+        self.btn_cancel_rag.pack(side="left", padx=(UI_SPACING["s"], 0))
+
+        composer_row = self.create_frame(input_bar)
+        composer_row.pack(fill="x")
+        self.txt_input = self.create_rich_text_surface(composer_row, surface_id="chat_input", height=3, font=("Segoe UI", 11), wrap=tk.WORD)
         self.txt_input.pack(side="left", fill="both", expand=True, padx=(0, UI_SPACING["s"]))
         self.txt_input.bind("<Control-Return>", lambda _e: (self.send_message(), "break")[1])
 
-        send_row = self.create_frame(input_frame)
+        send_row = self.create_frame(composer_row)
         send_row.pack(side="right", fill="y")
         self.create_label(send_row, text="Output style:", style="Muted.TLabel").pack(anchor="e", pady=(0, UI_SPACING["xs"]))
         self.create_combobox(
@@ -6303,7 +6307,7 @@ class AgenticRAGApp:
         self.btn_send.pack(anchor="e")
 
         # Right evidence pane
-        evidence_wrap = self.create_frame(right_pane, text="Evidence Navigator", padding=UI_SPACING["m"], kind="labelframe")
+        evidence_wrap = self.create_frame(self._evidence_pane, text="Evidence Navigator", padding=UI_SPACING["m"], kind="labelframe")
         evidence_wrap.pack(fill=tk.BOTH, expand=True)
         self.evidence_notebook = self.create_notebook(evidence_wrap)
         self.evidence_notebook.pack(fill=tk.BOTH, expand=True)
@@ -6453,9 +6457,9 @@ class AgenticRAGApp:
         if not hasattr(self, "_evidence_toggle_btn") or not self._safe_widget_exists(self._evidence_toggle_btn):
             return
         if self.evidence_visible.get():
-            self._evidence_toggle_btn.config(text="\u22d9 Evidence")
+            self._evidence_toggle_btn.config(text="⊟ Evidence")
         else:
-            self._evidence_toggle_btn.config(text="\u22d8 Evidence")
+            self._evidence_toggle_btn.config(text="⊞ Evidence")
 
     def _toggle_rag_mode(self):
         """Switch between RAG mode (with retrieval) and Direct LLM mode."""
@@ -6476,7 +6480,7 @@ class AgenticRAGApp:
             if hasattr(self, "cb_existing_index") and self._safe_widget_exists(self.cb_existing_index):
                 self.cb_existing_index.grid()
         else:
-            self._rag_toggle_btn.config(text="LLM \u25cb", style="Secondary.TButton")
+            self._rag_toggle_btn.config(text="Direct ○", style="Secondary.TButton")
             # Hide index selector
             if hasattr(self, "_index_label") and self._safe_widget_exists(self._index_label):
                 self._index_label.grid_remove()
@@ -15379,7 +15383,6 @@ class AgenticRAGApp:
             messages = [
                 self._system_message(content=system_prompt),
                 *history_window,
-                self._human_message(content=query),
             ]
 
             self._job_cancel_checkpoint(cancel_event, "rag", "llm_invoke")
