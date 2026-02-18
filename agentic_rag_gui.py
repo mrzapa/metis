@@ -447,65 +447,131 @@ class LocalLlamaCppChatModel:
 STYLE_CONFIG = {
     "font_family": "SF Pro Text",
     "fallback_font": "Segoe UI",
+    "mono_font": "SF Mono",
+    "fallback_mono_font": "Consolas",
     "radius": 12,
+    "radius_sm": 8,
+    "radius_lg": 16,
     "padding": {"sm": 6, "md": 10, "lg": 16},
+    "type_scale": {
+        "h1": {"size": 20, "weight": "bold"},
+        "h2": {"size": 16, "weight": "bold"},
+        "h3": {"size": 13, "weight": "bold"},
+        "body": {"size": 10, "weight": "normal"},
+        "body_bold": {"size": 10, "weight": "bold"},
+        "caption": {"size": 9, "weight": "normal"},
+        "code": {"size": 10, "weight": "normal"},
+        "overline": {"size": 8, "weight": "bold"},
+    },
+    "animation": {
+        "collapse": 180,
+        "tooltip": 120,
+        "theme": 220,
+        "message": 160,
+        "progress": 700,
+    },
     "themes": {
         "space_dust": {
-            "bg": "#11161E",
-            "surface": "#1A2230",
+            "bg": "#0D1117",
+            "surface": "#161B22",
+            "surface_elevated": "#1F2630",
             "surface_alt": "#212C3D",
             "text": "#E8EEF8",
             "muted_text": "#96A6BE",
-            "primary": "#5BD6F8",
-            "secondary": "#42BFD1",
+            "primary": "#58A6FF",
+            "primary_hover": "#79B8FF",
+            "primary_pressed": "#3D8BDE",
+            "secondary": "#3B8ED9",
             "tertiary": "#6B87FF",
             "border": "#2A3A4F",
             "outline": "#33465F",
             "status": "#AFC1D9",
             "danger": "#FF7A8C",
+            "danger_hover": "#FF95A3",
             "success": "#55D6A2",
+            "success_hover": "#72E2B3",
+            "warning": "#E3B341",
             "selection_bg": "#294B66",
             "selection_fg": "#F2F8FF",
+            "chat_user_bg": "#1B3551",
+            "chat_agent_bg": "#1E2633",
+            "chat_system_bg": "#2A2D1D",
+            "input_bg": "#0F1621",
+            "badge_bg": "#273447",
+            "stripe_alt": "#131A24",
+            "focus_ring": "#79B8FF",
+            "tab_indicator": "#58A6FF",
+            "progress_pulse": "#8BC2FF",
             "link": "#79DEFF",
             "source": "#7A89A0",
             "supporting_bg": "#213E56",
         },
         "light": {
-            "bg": "#F5F6F8",
+            "bg": "#F6F8FA",
             "surface": "#FFFFFF",
+            "surface_elevated": "#F2F4F8",
             "surface_alt": "#EEF1F6",
             "text": "#101114",
-            "muted_text": "#495162",
-            "primary": "#0A84FF",
+            "muted_text": "#3E4655",
+            "primary": "#0969DA",
+            "primary_hover": "#1F7AE0",
+            "primary_pressed": "#0757B8",
             "secondary": "#2D6DDA",
             "tertiary": "#5A5EC7",
             "border": "#D5DAE2",
             "outline": "#C7CED8",
             "status": "#2D3340",
             "danger": "#B64343",
+            "danger_hover": "#C95959",
             "success": "#257A4A",
+            "success_hover": "#2D9059",
+            "warning": "#9A6700",
             "selection_bg": "#CFE3FF",
             "selection_fg": "#101114",
+            "chat_user_bg": "#DDEBFF",
+            "chat_agent_bg": "#F1F4F8",
+            "chat_system_bg": "#FFF8D6",
+            "input_bg": "#FFFFFF",
+            "badge_bg": "#E6EBF2",
+            "stripe_alt": "#F9FBFD",
+            "focus_ring": "#2F81F7",
+            "tab_indicator": "#0969DA",
+            "progress_pulse": "#6FA8F3",
             "link": "#1254A3",
             "source": "#626C7E",
             "supporting_bg": "#FFF4CC",
         },
         "dark": {
-            "bg": "#16181D",
-            "surface": "#1F232B",
+            "bg": "#0D1117",
+            "surface": "#161B22",
+            "surface_elevated": "#232A35",
             "surface_alt": "#2A303B",
             "text": "#F7F8FA",
-            "muted_text": "#C3CAD6",
-            "primary": "#64D2FF",
+            "muted_text": "#B6C0CE",
+            "primary": "#58A6FF",
+            "primary_hover": "#79B8FF",
+            "primary_pressed": "#3D8BDE",
             "secondary": "#58B5D6",
             "tertiary": "#8C95F2",
             "border": "#3A4352",
             "outline": "#465163",
             "status": "#D7DCEA",
             "danger": "#FF8A8A",
+            "danger_hover": "#FFAAAA",
             "success": "#70D39F",
+            "success_hover": "#85DEB0",
+            "warning": "#D29922",
             "selection_bg": "#2E415C",
             "selection_fg": "#F7F8FA",
+            "chat_user_bg": "#213A58",
+            "chat_agent_bg": "#232A35",
+            "chat_system_bg": "#31311E",
+            "input_bg": "#111823",
+            "badge_bg": "#2A3443",
+            "stripe_alt": "#121922",
+            "focus_ring": "#79B8FF",
+            "tab_indicator": "#58A6FF",
+            "progress_pulse": "#8BC2FF",
             "link": "#8EDFFF",
             "source": "#A8B2C3",
             "supporting_bg": "#334A63",
@@ -513,7 +579,18 @@ STYLE_CONFIG = {
     },
 }
 
-UI_SPACING = {"xs": 4, "s": 8, "m": 12, "l": 18, "xl": 24}
+
+def _pal(palette, key, fallback_key=None, default=None):
+    if not isinstance(palette, dict):
+        return default
+    if key in palette:
+        return palette.get(key)
+    if fallback_key is not None:
+        return palette.get(fallback_key, default)
+    return default
+
+
+UI_SPACING = {"xs": 4, "s": 8, "m": 12, "l": 18, "xl": 24, "xxl": 32}
 FORM_WIDTHS = {"label": 22, "input": 28}
 
 try:
@@ -864,12 +941,12 @@ class TooltipManager:
             return
         if self._tooltip_window is None or not self._tooltip_window.winfo_exists():
             self._create_tooltip_window()
-        palette = self.get_palette() or STYLE_CONFIG["themes"]["space_dust"]
-        self._tooltip_window.configure(bg=palette["border"])
+        palette = self.get_palette() or STYLE_CONFIG["themes"].get("space_dust", {})
+        self._tooltip_window.configure(bg=_pal(palette, "border", default="#2A3A4F"))
         self._tooltip_label.configure(
             text=text,
-            bg=palette["surface_alt"],
-            fg=palette["text"],
+            bg=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"),
+            fg=_pal(palette, "text", default="#E8EEF8"),
             wraplength=self.wrap_px,
             padx=10,
             pady=7,
@@ -1200,6 +1277,7 @@ class AgenticRAGApp:
         )
         self.load_icon()
         self.root.geometry("1200x900")
+        self._resolve_fonts()
         self.main_thread = threading.current_thread()
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
         self.telemetry_log_filename = "agentic_rag_runs.jsonl"
@@ -2862,19 +2940,38 @@ class AgenticRAGApp:
 
         if self.ui_backend == "ttkbootstrap" and TTKBOOTSTRAP_MODULE is not None:
             self._ttkbootstrap_style = TTKBOOTSTRAP_MODULE.Style(theme="darkly")
-            palette = STYLE_CONFIG["themes"]["space_dust"]
-            self._ttkbootstrap_style.configure(".", background=palette["bg"], foreground=palette["text"])
-            self._ttkbootstrap_style.configure("TFrame", background=palette["bg"])
-            self._ttkbootstrap_style.configure("TLabel", background=palette["surface"], foreground=palette["text"])
-            self._ttkbootstrap_style.configure("TNotebook", background=palette["bg"])
-            self._ttkbootstrap_style.configure("TNotebook.Tab", background=palette["surface_alt"], foreground=palette["text"])
-            self._ttkbootstrap_style.configure("TButton", background=palette["primary"], foreground=palette["selection_fg"])
-            self._ttkbootstrap_style.configure("TEntry", fieldbackground=palette["surface_alt"], foreground=palette["text"])
-            self._ttkbootstrap_style.configure("Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"])
-            self.root.configure(bg=palette["bg"])
+            palette = STYLE_CONFIG["themes"].get("space_dust", {})
+            self._ttkbootstrap_style.configure(".", background=_pal(palette, "bg", default="#0D1117"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self._ttkbootstrap_style.configure("TFrame", background=_pal(palette, "bg", default="#0D1117"))
+            self._ttkbootstrap_style.configure("TLabel", background=_pal(palette, "surface", default="#161B22"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self._ttkbootstrap_style.configure("TNotebook", background=_pal(palette, "bg", default="#0D1117"))
+            self._ttkbootstrap_style.configure("TNotebook.Tab", background=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self._ttkbootstrap_style.configure("TButton", background=_pal(palette, "primary", default="#58A6FF"), foreground=_pal(palette, "selection_fg", default="#F2F8FF"))
+            self._ttkbootstrap_style.configure("TEntry", fieldbackground=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self._ttkbootstrap_style.configure("Treeview", background=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), fieldbackground=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self.root.configure(bg=_pal(palette, "bg", default="#0D1117"))
+
+    def _resolve_fonts(self):
+        families = set(tkfont.families())
+        base_family = STYLE_CONFIG["font_family"] if STYLE_CONFIG["font_family"] in families else STYLE_CONFIG["fallback_font"]
+        mono_candidates = ("SF Mono", "Consolas", "Cascadia Code", "Menlo", "Courier New", "TkFixedFont")
+        code_family = next((family for family in mono_candidates if family in families), base_family)
+
+        self._fonts = {
+            "h1": (base_family, 16, "bold"),
+            "h2": (base_family, 13, "bold"),
+            "h3": (base_family, 11, "bold"),
+            "body": (base_family, 10),
+            "body_bold": (base_family, 10, "bold"),
+            "caption": (base_family, 9),
+            "code": (code_family, 9),
+            "overline": (base_family, 8, "bold"),
+        }
 
     def _apply_theme(self):
-        palette = STYLE_CONFIG["themes"].get(self.ui_mode.get(), STYLE_CONFIG["themes"]["space_dust"])
+        base_palette = STYLE_CONFIG["themes"].get("space_dust", {})
+        selected_palette = STYLE_CONFIG["themes"].get(self.ui_mode.get(), base_palette)
+        palette = {**base_palette, **selected_palette}
         self._active_palette = palette
 
         def _apply_styles():
@@ -2928,7 +3025,6 @@ class AgenticRAGApp:
         style = ttk.Style()
         if use_clam and "clam" in style.theme_names():
             style.theme_use("clam")
-        font_family = STYLE_CONFIG["font_family"] if STYLE_CONFIG["font_family"] in tkfont.families() else STYLE_CONFIG["fallback_font"]
         self.root.configure(bg=palette["bg"])
         style.configure(".", background=palette["bg"], foreground=palette["text"], fieldbackground=palette["surface_alt"])
         style.configure("TFrame", background=palette["bg"], borderwidth=0, relief="flat")
@@ -2936,17 +3032,19 @@ class AgenticRAGApp:
         style.configure("Card.Elevated.TFrame", background=palette["surface"], borderwidth=1, bordercolor=palette["outline"], relief="flat")
         style.configure("Card.Flat.TFrame", background=palette["surface_alt"], borderwidth=0, relief="flat")
         style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["outline"], borderwidth=0, relief="flat")
-        style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
-        style.configure("TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10))
-        style.configure("Bold.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
-        style.configure("CollapsibleHeader.TFrame", background=palette["surface"])
-        style.configure("CollapsibleArrow.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=(font_family, 10, "bold"))
-        style.configure("CollapsibleTitle.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
-        style.configure("Header.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 13, "bold"))
-        style.configure("Muted.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=(font_family, 10))
-        style.configure("Caption.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=(font_family, 9))
-        style.configure("Danger.TLabel", background=palette["surface"], foreground=palette["danger"], font=(font_family, 10, "bold"))
-        style.configure("Status.TLabel", background=palette["bg"], foreground=palette["status"], font=(font_family, 9))
+        style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
+        style.configure("TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["body"])
+        style.configure("Bold.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
+        style.configure("Header.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["h2"])
+        style.configure("Title.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["h1"])
+        style.configure("Muted.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=self._fonts["body"])
+        style.configure("Caption.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=self._fonts["caption"])
+        style.configure("Overline.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=self._fonts["overline"])
+        style.configure("Code.TLabel", background=palette["surface"], foreground=palette["source"], font=self._fonts["code"])
+        style.configure("Danger.TLabel", background=palette["surface"], foreground=palette["danger"], font=self._fonts["body_bold"])
+        style.configure("Success.TLabel", background=palette["surface"], foreground=palette["success"], font=self._fonts["body_bold"])
+        style.configure("Warning.TLabel", background=palette["surface"], foreground=palette["tertiary"], font=self._fonts["body_bold"])
+        style.configure("Status.TLabel", background=palette["bg"], foreground=palette["status"], font=self._fonts["caption"])
         style.configure("TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"], focuscolor=palette["surface_alt"])
         style.map("TButton", background=[("active", palette["secondary"]), ("pressed", palette["primary"])], foreground=[("active", palette["selection_fg"])])
         style.configure("Primary.TButton", padding=(14, 9), relief="flat", borderwidth=0, background=palette["primary"], foreground="#061018")
@@ -2974,7 +3072,7 @@ class AgenticRAGApp:
         style.configure("TProgressbar", troughcolor=palette["surface_alt"], background=palette["primary"], bordercolor=palette["bg"], lightcolor=palette["primary"], darkcolor=palette["primary"], relief="flat")
         style.configure("TSeparator", background=palette["outline"])
         style.configure("App.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(8, 6, 8, 0))
-        style.configure("App.TNotebook.Tab", padding=(16, 10), font=(font_family, 10, "bold"), borderwidth=0)
+        style.configure("App.TNotebook.Tab", padding=(16, 10), font=self._fonts["body_bold"], borderwidth=0)
         style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("!selected", palette["bg"])], foreground=[("selected", palette["text"]), ("!selected", palette["muted_text"])])
 
     def _apply_ttkbootstrap_theme(self, palette):
@@ -3110,10 +3208,39 @@ class AgenticRAGApp:
         palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
         if hasattr(self, "chat_display"):
             self.chat_display.tag_config("citation", foreground=palette["link"], underline=1)
-            self.chat_display.tag_config("user", foreground=palette["tertiary"])
-            self.chat_display.tag_config("agent", foreground=palette["success"])
-            self.chat_display.tag_config("system", foreground=palette["muted_text"])
-            self.chat_display.tag_config("source", foreground=palette["source"])
+            self.chat_display.tag_config(
+                "user",
+                foreground=palette["tertiary"],
+                font=self._fonts["body_bold"],
+                lmargin1=14,
+                lmargin2=14,
+                rmargin=10,
+                spacing1=8,
+                spacing3=8,
+                background=palette["surface"],
+            )
+            self.chat_display.tag_config(
+                "agent",
+                foreground=palette["success"],
+                font=self._fonts["body"],
+                lmargin1=10,
+                lmargin2=10,
+                rmargin=10,
+                spacing1=8,
+                spacing3=12,
+            )
+            self.chat_display.tag_config(
+                "system",
+                foreground=palette["muted_text"],
+                font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
+                lmargin1=10,
+                lmargin2=10,
+                rmargin=10,
+                spacing1=6,
+                spacing3=6,
+                background=palette["surface_alt"],
+            )
+            self.chat_display.tag_config("source", foreground=palette["source"], font=self._fonts["code"])
         if hasattr(self, "answer_text"):
             self.answer_text.tag_config("citation", foreground=palette["link"], underline=1)
         if hasattr(self, "sources_tree"):
@@ -5933,13 +6060,35 @@ class AgenticRAGApp:
 
         # Tag configuration for coloring
         self.chat_display.tag_config(
-            "user", font=("Segoe UI", 10, "bold"), spacing1=8, spacing3=8
+            "user",
+            font=self._fonts["body_bold"],
+            spacing1=8,
+            spacing3=8,
+            lmargin1=14,
+            lmargin2=14,
+            rmargin=10,
+            background=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["surface"],
         )
-        self.chat_display.tag_config("agent", spacing1=8, spacing3=12)
         self.chat_display.tag_config(
-            "system", font=("Segoe UI", 9, "italic"), spacing1=6, spacing3=6
+            "agent",
+            font=self._fonts["body"],
+            spacing1=8,
+            spacing3=12,
+            lmargin1=10,
+            lmargin2=10,
+            rmargin=10,
         )
-        self.chat_display.tag_config("source", font=("Consolas", 8))
+        self.chat_display.tag_config(
+            "system",
+            font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
+            spacing1=6,
+            spacing3=6,
+            lmargin1=10,
+            lmargin2=10,
+            rmargin=10,
+            background=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["surface_alt"],
+        )
+        self.chat_display.tag_config("source", font=self._fonts["code"])
 
         # Quick Actions
         action_frame = self.create_frame(left_pane, style="Card.TFrame")
