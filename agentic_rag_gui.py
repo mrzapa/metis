@@ -3016,44 +3016,11 @@ class AgenticRAGApp:
             self._theme_tk_widgets()
             self._theme_text_tags()
 
-        if not hasattr(self, "_animator"):
-            _apply_styles()
-            return
-
-        def _set_alpha(value):
-            try:
-                self.root.attributes("-alpha", max(0.0, min(1.0, float(value))))
-            except tk.TclError:
-                pass
-
-        theme_fade_ms = max(1, int(STYLE_CONFIG.get("animation", {}).get("theme_fade_ms", 300)))
-
-        def _apply_and_restore():
-            _apply_styles()
-            self._animator.animate_value(
-                "theme_alpha",
-                0.85,
-                1.0,
-                max(1, theme_fade_ms // 2),
-                8,
-                _set_alpha,
-            )
-
+        _apply_styles()
         try:
-            current_alpha = float(self.root.attributes("-alpha"))
-        except (tk.TclError, TypeError, ValueError):
-            _apply_styles()
-            return
-
-        self._animator.animate_value(
-            "theme_alpha",
-            current_alpha,
-            0.85,
-            max(1, theme_fade_ms // 2),
-            6,
-            _set_alpha,
-            on_complete=_apply_and_restore,
-        )
+            self.root.attributes("-alpha", 1.0)
+        except tk.TclError:
+            pass
 
     def _pal(self, key, default=None):
         palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
@@ -3104,7 +3071,15 @@ class AgenticRAGApp:
         style.configure("TEntry", fieldbackground=get("input_bg", palette["surface_alt"]), foreground=palette["text"], bordercolor=palette["outline"], insertcolor=palette["primary"], borderwidth=1, relief="flat", padding=(10, 8))
         style.map("TEntry", bordercolor=[("focus", palette["primary"])], lightcolor=[("focus", palette["primary"])], darkcolor=[("focus", palette["primary"])])
         style.configure("TCombobox", fieldbackground=get("input_bg", palette["surface_alt"]), background=get("input_bg", palette["surface_alt"]), foreground=palette["text"], arrowcolor=palette["muted_text"], bordercolor=palette["outline"], relief="flat", insertcolor=palette["primary"], padding=(10, 8))
-        style.map("TCombobox", fieldbackground=[("readonly", get("input_bg", palette["surface_alt"]))], selectbackground=[("readonly", palette["selection_bg"])], selectforeground=[("readonly", palette["selection_fg"])])
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", get("input_bg", palette["surface_alt"])), ("disabled", palette["surface_alt"])],
+            background=[("readonly", get("input_bg", palette["surface_alt"])), ("disabled", palette["surface_alt"])],
+            foreground=[("readonly", palette["text"]), ("disabled", palette["muted_text"])],
+            selectbackground=[("readonly", palette["selection_bg"])],
+            selectforeground=[("readonly", palette["selection_fg"])],
+            arrowcolor=[("readonly", palette["muted_text"]), ("disabled", palette["muted_text"])],
+        )
         style.configure("Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=28, relief="flat")
         style.map("Treeview", background=[("selected", palette["selection_bg"]), ("active", palette["surface"])], foreground=[("selected", palette["selection_fg"]), ("active", palette["text"])])
         style.configure("History.Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=34, relief="flat")
