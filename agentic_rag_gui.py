@@ -2915,6 +2915,16 @@ class AgenticRAGApp:
 
         return "\n\n".join(context_blocks), packed_count, truncated_flag
 
+    def _ensure_ui_badge_vars(self):
+        if not hasattr(self, "status_var"):
+            self.status_var = tk.StringVar(value="Ready")
+        if not hasattr(self, "backend_badge_var"):
+            self.backend_badge_var = tk.StringVar(value=f"Backend: {self.ui_backend.upper()}")
+        if not hasattr(self, "chat_llm_badge_var"):
+            self.chat_llm_badge_var = tk.StringVar(value="🤖 LLM: --")
+        if not hasattr(self, "library_embedding_badge_var"):
+            self.library_embedding_badge_var = tk.StringVar(value="🧬 Embeddings: --")
+
     def setup_ui(self):
         self._apply_theme()
 
@@ -6199,6 +6209,7 @@ class AgenticRAGApp:
         self._maybe_autofill_recommendations()
 
     def build_chat_tab(self):
+        self._ensure_ui_badge_vars()
         for child in self.tab_chat.winfo_children():
             child.destroy()
         if self.basic_mode and not self.basic_wizard_completed:
