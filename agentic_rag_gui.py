@@ -1437,6 +1437,8 @@ class AgenticRAGApp:
         self.secure_mode = tk.BooleanVar(value=False)
         self.enable_summarizer = tk.BooleanVar(value=True)
         self.experimental_override = tk.BooleanVar(value=False)
+        self.use_rag = tk.BooleanVar(value=True)   # False → Direct LLM mode (no retrieval)
+        self.evidence_visible = tk.BooleanVar(value=False)  # evidence panel collapsed by default
         self.show_retrieved_context = tk.BooleanVar(value=False)
         self.use_reranker = tk.BooleanVar(value=True)
         self.use_sub_queries = tk.BooleanVar(value=True)
@@ -3919,13 +3921,15 @@ class AgenticRAGApp:
             warnings.append("Ingestion is running")
         if not self._resolve_llm_model():
             warnings.append("Select a valid LLM model")
-        if not self._resolve_embedding_model():
+        _rag_on = not hasattr(self, "use_rag") or self.use_rag.get()
+        if _rag_on and not self._resolve_embedding_model():
             warnings.append("Select a valid embedding model")
-        selected_path, _ = self._get_selected_index_path()
-        if not selected_path:
-            warnings.append("No active index. Build or load one in Library")
-        elif not os.path.isdir(selected_path):
-            warnings.append("Selected index path is unavailable")
+        if _rag_on:
+            selected_path, _ = self._get_selected_index_path()
+            if not selected_path:
+                warnings.append("No active index. Build or load one in Library")
+            elif not os.path.isdir(selected_path):
+                warnings.append("Selected index path is unavailable")
         if self.llm_provider.get() == "local_gguf":
             if not self._local_gguf_dependency_available():
                 warnings.append("local_gguf disabled: install llama-cpp-python")
@@ -6333,126 +6337,118 @@ class AgenticRAGApp:
             self.use_sub_queries = tk.BooleanVar(value=True)
         if not hasattr(self, "subquery_max_docs"):
             self.subquery_max_docs = tk.IntVar(value=200)
-        frame = self.create_frame(self.tab_chat, padding=UI_SPACING["l"])
+        pal = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+        frame = self.create_frame(self.tab_chat, padding=0)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # ── Compact single-row configuration toolbar ──────────────────────────
-        config_bar = self.create_frame(frame, style="Card.Flat.TFrame", padding=(UI_SPACING["s"], UI_SPACING["xs"]))
-        config_bar.pack(fill="x", pady=(0, UI_SPACING["xs"]))
-        for col in range(9):
-            config_bar.columnconfigure(col, weight=1)
-
-        self.create_label(config_bar, text="Profile:", style="Muted.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 3))
-        self.cb_profile = self.create_combobox(config_bar, textvariable=self.selected_profile, state="readonly", width=18)
-        self.cb_profile.grid(row=0, column=1, sticky="ew", padx=(0, 10))
-        self._refresh_profile_options()
-
-        self.create_label(config_bar, text="Mode:", style="Muted.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 3))
-        self.create_combobox(config_bar, textvariable=self.selected_mode, values=self.mode_options, state="readonly", width=16).grid(row=0, column=3, sticky="ew", padx=(0, 10))
-
-        self.create_label(config_bar, text="Index:", style="Muted.TLabel").grid(row=0, column=4, sticky="w", padx=(0, 3))
-        self.cb_existing_index = self.create_combobox(config_bar, textvariable=self.existing_index_var, state="readonly", width=18)
-        self.cb_existing_index.grid(row=0, column=5, sticky="ew", padx=(0, 10))
-        self.cb_existing_index.bind("<<ComboboxSelected>>", self._on_existing_index_change)
-
-        self.create_label(config_bar, text="Model:", style="Muted.TLabel").grid(row=0, column=6, sticky="w", padx=(0, 3))
-        self.cb_chat_model = self.create_combobox(config_bar, textvariable=self.llm_model, state="readonly", width=20)
-        self.cb_chat_model.grid(row=0, column=7, sticky="ew", padx=(0, 10))
-        self.cb_chat_model.bind("<<ComboboxSelected>>", self._on_llm_model_change)
-
-        # Action buttons (right side of toolbar)
-        _btn_bar = self.create_frame(config_bar)
-        _btn_bar.grid(row=0, column=8, sticky="e", padx=(4, 0))
-        self.create_button(_btn_bar, text="\u21ba", command=self._refresh_existing_indexes_async, style="Secondary.TButton").pack(side="left", padx=(0, 3))
-        self.create_button(_btn_bar, text="Settings", command=lambda: self.notebook.select(self.tab_settings), style="Secondary.TButton").pack(side="left", padx=(0, 3))
-        if self.test_mode_active:
-            self.create_button(_btn_bar, text="Reset Test", command=self.reset_test_environment, style="Danger.TButton").pack(side="left", padx=(0, 3))
-        if self.basic_mode:
-            self.create_button(_btn_bar, text="Advanced Mode", command=self.switch_to_advanced_mode, style="Secondary.TButton").pack(side="left")
-        else:
-            self.create_button(_btn_bar, text="Wizard", command=self.run_setup_wizard, style="Secondary.TButton").pack(side="left")
-
-        # Test mode banner row (below toolbar when active)
-        if self.test_mode_active:
-            self.create_label(config_bar, textvariable=self.test_mode_banner_var, style="Success.TLabel").grid(
-                row=1, column=0, columnspan=9, sticky="w", pady=(2, 0)
-            )
-
-        # State warning label — kept for backward compat, not packed (warnings shown in status bar)
+        # State warning label — not packed; backward compat (warnings shown in status bar)
         self.state_warning_label = self.create_label(frame, textvariable=self.current_warning_var, style="Danger.TLabel")
 
-        # retrieve_k / final_k — collapsed by default
-        setup_advanced = CollapsibleFrame(frame, "Retrieval depth (retrieve_k / final_k)", expanded=False)
-        setup_advanced.pack(fill="x", pady=(0, UI_SPACING["xs"]))
-        advanced_grid = setup_advanced.content
-        self.create_label(advanced_grid, text="retrieve_k:").grid(row=0, column=0, sticky="w")
-        self.create_entry(advanced_grid, textvariable=self.retrieval_k, width=8).grid(row=0, column=1, sticky="w", padx=(6, 14))
-        self.create_label(advanced_grid, text="final_k:").grid(row=0, column=2, sticky="w")
-        self.create_entry(advanced_grid, textvariable=self.final_k, width=8).grid(row=0, column=3, sticky="w", padx=(6, 0))
+        # ── Toolbar (compact single row) ─────────────────────────────────────
+        toolbar = self.create_frame(frame, style="Card.Flat.TFrame", padding=(UI_SPACING["s"], 4))
+        toolbar.pack(fill="x", side="top")
+        tk.Frame(frame, bg=pal["border"], height=1).pack(fill="x", side="top")
 
-        content_split = self.create_frame(frame, orient=tk.HORIZONTAL, kind="panedwindow")
-        content_split.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+        for col in range(10):
+            toolbar.columnconfigure(col, weight=1)
 
-        left_pane = self.create_frame(content_split, style="Card.Elevated.TFrame", padding=UI_SPACING["s"])
-        right_pane = self.create_frame(content_split, width=360, style="Card.Elevated.TFrame", padding=UI_SPACING["xs"])
-        content_split.add(left_pane, weight=4)
-        content_split.add(right_pane, weight=2)
+        self.create_label(toolbar, text="Profile:", style="Muted.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 3))
+        self.cb_profile = self.create_combobox(toolbar, textvariable=self.selected_profile, state="readonly", width=15)
+        self.cb_profile.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+        self._refresh_profile_options()
 
-        # Chat Display
-        self.chat_display = self.create_rich_text_surface(
-            left_pane, surface_id="chat_display", state="disabled", font=("Segoe UI", 10), wrap=tk.WORD, scrolled=True
+        self.create_label(toolbar, text="Mode:", style="Muted.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 3))
+        self.create_combobox(toolbar, textvariable=self.selected_mode, values=self.mode_options, state="readonly", width=14).grid(row=0, column=3, sticky="ew", padx=(0, 8))
+
+        self._index_label = self.create_label(toolbar, text="Index:", style="Muted.TLabel")
+        self._index_label.grid(row=0, column=4, sticky="w", padx=(0, 3))
+        self.cb_existing_index = self.create_combobox(toolbar, textvariable=self.existing_index_var, state="readonly", width=16)
+        self.cb_existing_index.grid(row=0, column=5, sticky="ew", padx=(0, 8))
+        self.cb_existing_index.bind("<<ComboboxSelected>>", self._on_existing_index_change)
+
+        self.create_label(toolbar, text="Model:", style="Muted.TLabel").grid(row=0, column=6, sticky="w", padx=(0, 3))
+        self.cb_chat_model = self.create_combobox(toolbar, textvariable=self.llm_model, state="readonly", width=18)
+        self.cb_chat_model.grid(row=0, column=7, sticky="ew", padx=(0, 8))
+        self.cb_chat_model.bind("<<ComboboxSelected>>", self._on_llm_model_change)
+
+        # Right-side toolbar buttons
+        _tbtn = self.create_frame(toolbar)
+        _tbtn.grid(row=0, column=9, sticky="e", padx=(4, 0))
+        self._rag_toggle_btn = self.create_button(
+            _tbtn, text="RAG \u25cf", command=self._toggle_rag_mode, style="Primary.TButton"
         )
-        self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, UI_SPACING["xs"]))
-        self.chat_display.tag_config("citation", foreground=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["link"], underline=1, font=self._fonts["code"])
+        self._rag_toggle_btn.pack(side="left", padx=(0, 3))
+        self._evidence_toggle_btn = self.create_button(
+            _tbtn, text="\u22d8 Evidence", command=self._toggle_evidence_panel, style="Secondary.TButton"
+        )
+        self._evidence_toggle_btn.pack(side="left", padx=(0, 3))
+        self.create_button(_tbtn, text="\u21ba", command=self._refresh_existing_indexes_async, style="Secondary.TButton").pack(side="left", padx=(0, 3))
+        self.create_button(_tbtn, text="Settings", command=lambda: self.notebook.select(self.tab_settings), style="Secondary.TButton").pack(side="left", padx=(0, 3))
+        if self.test_mode_active:
+            self.create_button(_tbtn, text="Reset", command=self.reset_test_environment, style="Danger.TButton").pack(side="left", padx=(0, 3))
+        if self.basic_mode:
+            self.create_button(_tbtn, text="Advanced", command=self.switch_to_advanced_mode, style="Secondary.TButton").pack(side="left")
+        else:
+            self.create_button(_tbtn, text="Wizard", command=self.run_setup_wizard, style="Secondary.TButton").pack(side="left")
+
+        if self.test_mode_active:
+            self.create_label(toolbar, textvariable=self.test_mode_banner_var, style="Success.TLabel").grid(
+                row=1, column=0, columnspan=10, sticky="w", pady=(2, 0)
+            )
+
+        # ── Body: chat pane (left, expanding) + evidence pane (right, hidden) ─
+        body_frame = tk.Frame(frame, bg=pal.get("bg", "#0d0f12"))
+        body_frame.pack(fill=tk.BOTH, expand=True)
+
+        chat_pane = tk.Frame(body_frame, bg=pal.get("bg", "#0d0f12"))
+        chat_pane.pack(side="left", fill=tk.BOTH, expand=True)
+
+        # Evidence pane — pre-built, hidden by default; _toggle_evidence_panel packs it
+        self._evidence_sep = tk.Frame(body_frame, bg=pal.get("border", "#2a2d36"), width=1)
+        self._evidence_pane = tk.Frame(body_frame, bg=pal.get("surface", "#161820"), width=420)
+        self._evidence_pane.pack_propagate(False)
+
+        # ── Chat Display ──────────────────────────────────────────────────────
+        self.chat_display = self.create_rich_text_surface(
+            chat_pane, surface_id="chat_display", state="disabled", font=("Segoe UI", 10), wrap=tk.WORD, scrolled=True
+        )
+        self.chat_display.pack(fill=tk.BOTH, expand=True)
+        self.chat_display.tag_config("citation", foreground=pal.get("link", "#2563eb"), underline=1, font=self._fonts["code"])
         self.chat_display.tag_bind("citation", "<Button-1>", self._on_citation_click)
         self.chat_display.tag_bind("citation", "<Enter>", self._on_citation_hover)
         self.chat_display.tag_bind("citation", "<Leave>", self._on_citation_leave)
-
-        # Tag configuration for coloring
         self.chat_display.tag_config(
             "user",
             font=self._fonts["body_bold"],
-            spacing1=10,
-            spacing3=8,
-            lmargin1=16,
-            lmargin2=16,
+            spacing1=10, spacing3=8, lmargin1=16, lmargin2=16,
             background=self._pal("chat_user_bg", self._pal("surface")),
         )
         self.chat_display.tag_config(
             "agent",
             font=self._fonts["body"],
-            spacing1=6,
-            spacing3=12,
-            lmargin1=16,
-            lmargin2=16,
+            spacing1=6, spacing3=12, lmargin1=16, lmargin2=16,
         )
         self.chat_display.tag_config(
             "system",
             font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
-            spacing1=6,
-            spacing3=6,
-            lmargin1=16,
+            spacing1=6, spacing3=6, lmargin1=16,
             foreground=self._pal("muted_text"),
             background=self._pal("chat_system_bg"),
         )
         self.chat_display.tag_config("source", font=self._fonts["code"])
 
-        # Quick action bar
-        action_frame = self.create_frame(left_pane, style="Card.TFrame")
-        action_frame.pack(fill="x", pady=(UI_SPACING["xs"], UI_SPACING["xs"]))
-        self.create_button(action_frame, text="New Chat", command=lambda: self.start_new_chat(load_in_ui=True), style="Secondary.TButton").pack(side="left")
-        self.create_button(action_frame, text="Copy Answer", command=self.copy_last_answer, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["xs"], 0))
-        self.create_button(action_frame, text="Export MD", command=self.export_notes_to_markdown, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["xs"], 0))
-        if agent_lightning is not None:
-            self.create_button(action_frame, text="Agent Lightning", command=self.export_run_as_agent_lightning_dataset, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["xs"], 0))
-        self.create_button(action_frame, text="Eval Set", command=self.export_eval_set, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["xs"], 0))
+        # ── Input bar (bottom-anchored, stacks above body) ────────────────────
+        input_bar = self.create_frame(frame, style="Card.Flat.TFrame", padding=(UI_SPACING["s"], UI_SPACING["xs"]))
+        input_bar.pack(fill="x", side="bottom")
 
-        logs_section = CollapsibleFrame(left_pane, "Logs & telemetry", expanded=False, animator=self._animator)
+        # Collapsible logs
+        logs_section = CollapsibleFrame(input_bar, "Logs & telemetry", expanded=False, animator=self._animator)
         logs_section.pack(fill="both", pady=(0, UI_SPACING["xs"]))
         self.log_area = self.create_rich_text_surface(logs_section.content, surface_id="chat_logs", height=5, state="disabled", wrap=tk.WORD, scrolled=True)
         self.log_area.pack(fill=tk.BOTH, expand=True)
 
-        self.chat_settings_section = CollapsibleFrame(left_pane, "Advanced chat settings", expanded=False, animator=self._animator)
+        # Collapsible advanced settings
+        self.chat_settings_section = CollapsibleFrame(input_bar, "Advanced chat settings", expanded=False, animator=self._animator)
         self.chat_settings_section.pack(fill="x", pady=(0, UI_SPACING["xs"]))
 
         settings_content = self.chat_settings_section.content
@@ -6491,12 +6487,16 @@ class AgenticRAGApp:
         self.create_checkbox(frontier_wrap, text="Claim-level grounding (CiteFix-lite)", variable=self.enable_claim_level_grounding_citefix_lite).pack(anchor="w")
         self.create_checkbox(frontier_wrap, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
 
-        # ── Input composer (bottom-anchored) ─────────────────────────────────
-        input_outer = self.create_frame(left_pane, style="Card.Flat.TFrame", padding=(UI_SPACING["s"], UI_SPACING["xs"]))
-        input_outer.pack(fill="x", side="bottom")
+        tk.Frame(input_bar, bg=pal.get("border", "#2a2d36"), height=1).pack(fill="x", pady=(0, UI_SPACING["xs"]))
 
-        # Progress/cancel row (visible while RAG job is running)
-        rag_progress_row = self.create_frame(input_outer)
+        # Action row: New Chat + More (⋯)
+        action_row = self.create_frame(input_bar)
+        action_row.pack(fill="x", pady=(0, UI_SPACING["xs"]))
+        self.create_button(action_row, text="\uff0b New Chat", command=lambda: self.start_new_chat(load_in_ui=True), style="Secondary.TButton").pack(side="left")
+        self.create_button(action_row, text="\u22ef More", command=self._open_more_menu, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["xs"], 0))
+
+        # Progress/cancel row
+        rag_progress_row = self.create_frame(input_bar)
         rag_progress_row.pack(fill="x", pady=(0, UI_SPACING["xs"]))
         self.rag_progress = ttk.Progressbar(rag_progress_row, orient="horizontal", mode="indeterminate")
         self.rag_progress.pack(side="left", fill="x", expand=True)
@@ -6507,7 +6507,7 @@ class AgenticRAGApp:
         self.btn_cancel_rag.pack(side="left", padx=(UI_SPACING["xs"], 0))
 
         # Text input + send controls
-        input_frame = self.create_frame(input_outer)
+        input_frame = self.create_frame(input_bar)
         input_frame.pack(fill="x")
         self.txt_input = self.create_rich_text_surface(input_frame, surface_id="chat_input", height=3, font=("Segoe UI", 11), wrap=tk.WORD)
         self.txt_input.pack(side="left", fill="both", expand=True, padx=(0, UI_SPACING["s"]))
@@ -6523,8 +6523,8 @@ class AgenticRAGApp:
         self.btn_send = self.create_button(send_row, text="Send  \u2303\u21a9", command=self.send_message, style="Primary.TButton")
         self.btn_send.pack(anchor="e", fill="x")
 
-        # ── Right evidence panel ──────────────────────────────────────────────
-        evidence_wrap = self.create_frame(right_pane, text="Evidence", padding=UI_SPACING["xs"], kind="labelframe")
+        # ── Evidence panel content (pre-built inside _evidence_pane) ─────────
+        evidence_wrap = self.create_frame(self._evidence_pane, text="Evidence", padding=UI_SPACING["xs"], kind="labelframe")
         evidence_wrap.pack(fill=tk.BOTH, expand=True)
         self.evidence_notebook = self.create_notebook(evidence_wrap)
         self.evidence_notebook.pack(fill=tk.BOTH, expand=True)
@@ -6538,7 +6538,7 @@ class AgenticRAGApp:
         self.answer_text = self.create_rich_text_surface(
             self.answer_tab, surface_id="answer_text", height=20, wrap=tk.WORD, state="disabled", font=("Segoe UI", 10)
         )
-        self.answer_text.tag_config("citation", foreground=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["link"], underline=1, font=self._fonts["code"])
+        self.answer_text.tag_config("citation", foreground=pal.get("link", "#2563eb"), underline=1, font=self._fonts["code"])
         self.answer_text.tag_bind("citation", "<Button-1>", self._on_answer_citation_click)
         self.answer_text.tag_bind("citation", "<Enter>", self._on_citation_hover)
         self.answer_text.tag_bind("citation", "<Leave>", self._on_citation_leave)
@@ -6635,8 +6635,92 @@ class AgenticRAGApp:
         self._grounding_tab_added = False
         self.enable_langextract.trace_add("write", self._toggle_grounding_tab)
         self._toggle_grounding_tab()
+
+        # ── Initialise button states ──────────────────────────────────────────
+        self._update_rag_toggle_btn()
+        self._update_evidence_toggle_btn()
         self._apply_tooltips_for_tab("chat", frame)
         self._update_current_state_strip()
+
+    # ── Chat panel toggle helpers ──────────────────────────────────────────────
+
+    def _toggle_evidence_panel(self):
+        """Show or hide the right-side evidence panel."""
+        if not hasattr(self, "_evidence_pane") or not self._safe_widget_exists(self._evidence_pane):
+            return
+        if self.evidence_visible.get():
+            # Hide
+            self._evidence_pane.pack_forget()
+            if hasattr(self, "_evidence_sep") and self._safe_widget_exists(self._evidence_sep):
+                self._evidence_sep.pack_forget()
+            self.evidence_visible.set(False)
+        else:
+            # Show: right-pane then separator (pack side=right, so sep appears between chat and pane)
+            pal = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+            if hasattr(self, "_evidence_sep") and self._safe_widget_exists(self._evidence_sep):
+                self._evidence_sep.config(bg=pal["border"])
+                self._evidence_sep.pack(side="right", fill="y")
+            self._evidence_pane.pack(side="right", fill="both")
+            self.evidence_visible.set(True)
+        self._update_evidence_toggle_btn()
+
+    def _update_evidence_toggle_btn(self):
+        if not hasattr(self, "_evidence_toggle_btn") or not self._safe_widget_exists(self._evidence_toggle_btn):
+            return
+        if self.evidence_visible.get():
+            self._evidence_toggle_btn.config(text="\u22d9 Evidence")
+        else:
+            self._evidence_toggle_btn.config(text="\u22d8 Evidence")
+
+    def _toggle_rag_mode(self):
+        """Switch between RAG mode (with retrieval) and Direct LLM mode."""
+        new_val = not self.use_rag.get()
+        self.use_rag.set(new_val)
+        self._update_rag_toggle_btn()
+        self._update_current_state_strip()
+
+    def _update_rag_toggle_btn(self):
+        if not hasattr(self, "_rag_toggle_btn") or not self._safe_widget_exists(self._rag_toggle_btn):
+            return
+        pal = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+        if self.use_rag.get():
+            self._rag_toggle_btn.config(text="RAG \u25cf", style="Primary.TButton")
+            # Show index selector
+            if hasattr(self, "_index_label") and self._safe_widget_exists(self._index_label):
+                self._index_label.grid()
+            if hasattr(self, "cb_existing_index") and self._safe_widget_exists(self.cb_existing_index):
+                self.cb_existing_index.grid()
+        else:
+            self._rag_toggle_btn.config(text="LLM \u25cb", style="Secondary.TButton")
+            # Hide index selector
+            if hasattr(self, "_index_label") and self._safe_widget_exists(self._index_label):
+                self._index_label.grid_remove()
+            if hasattr(self, "cb_existing_index") and self._safe_widget_exists(self.cb_existing_index):
+                self.cb_existing_index.grid_remove()
+
+    def _open_more_menu(self, event=None):
+        """Pop up a small context menu with secondary chat actions."""
+        menu = tk.Menu(self.root, tearoff=0)
+        pal = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+        menu.config(bg=pal["surface_elevated"], fg=pal["text"], activebackground=pal["selection_bg"], activeforeground=pal["selection_fg"], relief="flat")
+        menu.add_command(label="Copy last answer",    command=self.copy_last_answer)
+        menu.add_command(label="Export to Markdown",  command=self.export_notes_to_markdown)
+        menu.add_command(label="Export eval set",     command=self.export_eval_set)
+        if hasattr(self, "export_run_as_agent_lightning_dataset") and agent_lightning is not None:
+            menu.add_command(label="Export Agent Lightning", command=self.export_run_as_agent_lightning_dataset)
+        menu.add_separator()
+        menu.add_command(label="Save profile",       command=self.save_profile)
+        menu.add_command(label="Load profile",       command=self.load_selected_profile)
+        menu.add_command(label="Duplicate profile",  command=self.duplicate_profile)
+        try:
+            btn = event.widget if event else self._more_btn
+            x = btn.winfo_rootx()
+            y = btn.winfo_rooty() - menu.winfo_reqheight() - 4
+            menu.tk_popup(x, y)
+        except Exception:
+            menu.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
+        finally:
+            menu.grab_release()
 
     def _prompt_startup_mode_selection(self):
         selected = {"mode": None}
@@ -15375,66 +15459,69 @@ class AgenticRAGApp:
             self._maybe_autotitle_session(query)
         self.refresh_sessions_list()
 
-        if self.index_embedding_signature:
-            current_signature = self._current_embedding_signature()
-            if (
-                current_signature
-                and current_signature != self.index_embedding_signature
-                and not self.force_embedding_compat.get()
-            ):
-                self._remove_thinking_indicator()
-                self.append_chat(
-                    "system",
-                    "Embedding mismatch detected. Re-embed documents or enable force "
-                    "compatibility to proceed.",
-                )
-                return
+        _rag_on = not hasattr(self, "use_rag") or self.use_rag.get()
 
-        if not self.vector_store:
-            # Try to load existing DB if available
-            try:
-                self.log("Attempting to load existing Vector DB...")
-                embeddings = self.get_embeddings()
-                if self.vector_db_type.get() == "chroma":
-                    selected_path, selected_collection = self._get_selected_index_path()
-                    if not selected_path and self.selected_index_path:
-                        if os.path.isdir(self.selected_index_path):
-                            selected_path = self.selected_index_path
-                    persist_dir = selected_path or self._get_chroma_persist_root()
-                    collection_name = (
-                        selected_collection or self.selected_collection_name or RAW_COLLECTION_NAME
-                    )
-                    Chroma = _lazy_import_chroma()
-
-                    self.vector_store = Chroma(
-                        collection_name=collection_name,
-                        embedding_function=embeddings,
-                        persist_directory=persist_dir,
-                    )
-                    if selected_path:
-                        self.selected_index_path = selected_path
-                        self.selected_collection_name = collection_name
-                        self.save_config()
-                        self.log(
-                            "Active index set to "
-                            f"{self._format_index_label(persist_dir, collection_name)}."
-                        )
-                else:
+        if _rag_on:
+            if self.index_embedding_signature:
+                current_signature = self._current_embedding_signature()
+                if (
+                    current_signature
+                    and current_signature != self.index_embedding_signature
+                    and not self.force_embedding_compat.get()
+                ):
                     self._remove_thinking_indicator()
                     self.append_chat(
-                        "system", "Error: No Weaviate connection. Please Ingest first."
+                        "system",
+                        "Embedding mismatch detected. Re-embed documents or enable force "
+                        "compatibility to proceed.",
                     )
                     return
-            except Exception as e:
-                self._report_transition_error(
-                    transition="rag::preflight_index_load",
-                    exc=e,
-                    user_message="Unable to start RAG run because no usable index is available.",
-                    show_messagebox=False,
-                )
-                self._remove_thinking_indicator()
-                self.append_chat("system", f"Error: Please ingest a file first. ({e})")
-                return
+
+            if not self.vector_store:
+                # Try to load existing DB if available
+                try:
+                    self.log("Attempting to load existing Vector DB...")
+                    embeddings = self.get_embeddings()
+                    if self.vector_db_type.get() == "chroma":
+                        selected_path, selected_collection = self._get_selected_index_path()
+                        if not selected_path and self.selected_index_path:
+                            if os.path.isdir(self.selected_index_path):
+                                selected_path = self.selected_index_path
+                        persist_dir = selected_path or self._get_chroma_persist_root()
+                        collection_name = (
+                            selected_collection or self.selected_collection_name or RAW_COLLECTION_NAME
+                        )
+                        Chroma = _lazy_import_chroma()
+
+                        self.vector_store = Chroma(
+                            collection_name=collection_name,
+                            embedding_function=embeddings,
+                            persist_directory=persist_dir,
+                        )
+                        if selected_path:
+                            self.selected_index_path = selected_path
+                            self.selected_collection_name = collection_name
+                            self.save_config()
+                            self.log(
+                                "Active index set to "
+                                f"{self._format_index_label(persist_dir, collection_name)}."
+                            )
+                    else:
+                        self._remove_thinking_indicator()
+                        self.append_chat(
+                            "system", "Error: No Weaviate connection. Please Ingest first."
+                        )
+                        return
+                except Exception as e:
+                    self._report_transition_error(
+                        transition="rag::preflight_index_load",
+                        exc=e,
+                        user_message="Unable to start RAG run because no usable index is available.",
+                        show_messagebox=False,
+                    )
+                    self._remove_thinking_indicator()
+                    self.append_chat("system", f"Error: Please ingest a file first. ({e})")
+                    return
 
         embedding_provider = self.embedding_provider.get()
         llm_provider = self.llm_provider.get()
@@ -15486,12 +15573,52 @@ class AgenticRAGApp:
         }
         rag_ctx["system_instructions"] = self._get_system_instructions(resolved_settings)
 
-        self.start_job(
-            "rag",
-            self._rag_pipeline,
-            args=(rag_ctx, query),
-            busy_status="RAG run in progress…",
-        )
+        if _rag_on:
+            self.start_job("rag", self._rag_pipeline, args=(rag_ctx, query), busy_status="RAG run in progress…")
+        else:
+            self.start_job("rag", self._direct_llm_pipeline, args=(rag_ctx, query), busy_status="LLM inference…")
+
+    def _direct_llm_pipeline(self, rag_ctx, query, cancel_event=None):
+        """Direct LLM chat — no retrieval, no index required."""
+        run_id = f"run-{uuid.uuid4().hex[:12]}"
+        self._active_run_id = run_id
+        try:
+            self._job_cancel_checkpoint(cancel_event, "rag", "startup")
+            self.log("Direct LLM mode: skipping retrieval.")
+            self._run_on_ui(self._set_startup_status, "LLM inference…")
+
+            llm = self.get_llm(rag_ctx.get("llm_ctx"))
+            system_prompt = rag_ctx.get("system_instructions") or "You are a helpful AI assistant."
+            history_window = list(self.chat_history[-(self.chat_history_max_turns * 2):])
+
+            messages = [
+                self._system_message(content=system_prompt),
+                *history_window,
+                self._human_message(content=query),
+            ]
+
+            self._job_cancel_checkpoint(cancel_event, "rag", "llm_invoke")
+            response = llm.invoke(messages)
+            answer = str(getattr(response, "content", "") or "").strip()
+
+            self._run_on_ui(self._remove_thinking_indicator)
+            self._run_on_ui(self.append_chat, "agent", f"AI: {answer}", run_id)
+            self._append_history(self._ai_message(content=answer))
+            self.last_answer = answer
+            self._insert_session_message(role="assistant", content=answer, run_id=run_id)
+            self._run_on_ui(self._set_startup_status, "Done")
+        except JobCancelledError:
+            self._run_on_ui(self._remove_thinking_indicator)
+            self._run_on_ui(self.append_chat, "system", "Run cancelled.")
+            self._run_on_ui(self._set_startup_status, "Cancelled")
+        except Exception as e:
+            self._run_on_ui(self._remove_thinking_indicator)
+            self._run_on_ui(self.append_chat, "system", f"Error: {e}")
+            self._run_on_ui(self._set_startup_status, "Error")
+            logger.exception("Direct LLM pipeline error")
+        finally:
+            self._active_run_id = None
+            self._run_on_ui(self._update_busy_state)
 
     def _rag_pipeline(self, rag_ctx, query, cancel_event=None):
         stage = "retrieval"
