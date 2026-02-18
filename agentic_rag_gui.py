@@ -2937,10 +2937,10 @@ class AgenticRAGApp:
 
         self._sidebar_nav_buttons = {}
         nav_items = [
-            ("chat", "Chat"),
-            ("library", "Library"),
-            ("history", "History"),
-            ("settings", "Settings"),
+            ("chat", "💬 Chat"),
+            ("library", "📚 Library"),
+            ("history", "🕘 History"),
+            ("settings", "⚙️ Settings"),
         ]
         for idx, (view_key, label) in enumerate(nav_items, start=1):
             if self.ui_backend == "ctk" and CTK_MODULE is not None:
@@ -2991,15 +2991,8 @@ class AgenticRAGApp:
 
         self.status_var = tk.StringVar(value="Ready")
         self.backend_badge_var = tk.StringVar(value=f"Backend: {self.ui_backend.upper()}")
-        status_wrap = ttk.Frame(self.root, style="StatusBar.TFrame")
-        status_wrap.grid(row=1, column=0, columnspan=2, sticky="ew", padx=STYLE_CONFIG["padding"]["md"], pady=(0, STYLE_CONFIG["padding"]["sm"]))
-        status_bar = ttk.Label(status_wrap, textvariable=self.status_var, style="Status.TLabel", anchor="w")
-        status_bar.pack(side="left", fill="x", expand=True)
-        ttk.Separator(status_wrap, orient="vertical").pack(side="left", fill="y", padx=(UI_SPACING["s"], UI_SPACING["s"]))
-        self.status_state_bar = ttk.Label(status_wrap, textvariable=self.current_state_var, style="Status.TLabel", anchor="e")
-        self.status_state_bar.pack(side="left")
-        self.backend_badge = ttk.Label(status_wrap, textvariable=self.backend_badge_var, style="Badge.TLabel", anchor="e")
-        self.backend_badge.pack(side="right", padx=(UI_SPACING["s"], 0))
+        self.chat_llm_badge_var = tk.StringVar(value="🤖 LLM: --")
+        self.library_embedding_badge_var = tk.StringVar(value="🧬 Embeddings: --")
 
         self._bind_accessibility_shortcuts()
         self._install_ui_state_watchers()
@@ -3802,6 +3795,10 @@ class AgenticRAGApp:
         self.current_state_var.set(
             f"Index: {index_label} | LLM: {llm_label} | Embeddings: {emb_label} | Mode: {mode_label}"
         )
+        if hasattr(self, "chat_llm_badge_var"):
+            self.chat_llm_badge_var.set(f"🤖 {llm_label}")
+        if hasattr(self, "library_embedding_badge_var"):
+            self.library_embedding_badge_var.set(f"🧬 {emb_label}")
         validation = self.validate_settings()
         blockers = validation.get("blockers", [])
         advisories = validation.get("advisories", [])
@@ -5961,12 +5958,19 @@ class AgenticRAGApp:
 
         header = self.create_frame(frame)
         header.pack(fill="x", pady=(0, UI_SPACING["m"]))
-        self.create_label(header, text="Library", style="Header.TLabel").pack(anchor="w")
+        header_left = self.create_frame(header)
+        header_left.pack(side="left", fill="x", expand=True)
+        self.create_label(header_left, text="Library", style="Header.TLabel").pack(anchor="w")
         self.create_label(
-            header,
+            header_left,
             text="Build and manage your retrieval index, then use it from Chat.",
             style="Caption.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+        self.create_label(
+            header,
+            textvariable=self.library_embedding_badge_var,
+            style="Badge.TLabel",
+        ).pack(side="right", anchor="ne")
 
         sel_frame = self.create_frame(frame, text="STEP 1 · Source file", padding=UI_SPACING["m"], kind="labelframe")
         sel_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
@@ -6205,15 +6209,22 @@ class AgenticRAGApp:
 
         header = self.create_frame(frame)
         header.pack(fill="x", pady=(0, UI_SPACING["s"]))
-        self.create_label(header, text="Chat", style="Header.TLabel").pack(anchor="w")
+        header_left = self.create_frame(header)
+        header_left.pack(side="left", fill="x", expand=True)
+        self.create_label(header_left, text="Chat", style="Header.TLabel").pack(anchor="w")
         self.create_label(
-            header,
+            header_left,
             text="Flow: Library builds index → Chat answers with evidence → Settings tunes behavior.",
             style="Caption.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+        self.create_label(
+            header,
+            textvariable=self.chat_llm_badge_var,
+            style="Badge.TLabel",
+        ).pack(side="right", anchor="ne")
         if self.test_mode_active:
             self.create_label(
-                header,
+                header_left,
                 textvariable=self.test_mode_banner_var,
                 style="Success.TLabel",
             ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
