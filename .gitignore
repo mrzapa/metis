@@ -1,0 +1,35 @@
+# Python bytecode cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+*.env
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# macOS
+.DS_Store
+
+# App runtime artifacts
+agentic_rag_config.json
+rag_sessions.db
+agentic_rag_runs.jsonl
+trace_store/
+profiles/
