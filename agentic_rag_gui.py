@@ -455,20 +455,20 @@ STYLE_CONFIG = {
     "padding": {"sm": 10, "md": 14, "lg": 22},
     "type_scale": {
         "h1": {"size": 22, "weight": "bold"},
-        "h2": {"size": 18, "weight": "bold"},
-        "h3": {"size": 16, "weight": "bold"},
-        "body": {"size": 13, "weight": "normal"},
-        "body_bold": {"size": 13, "weight": "bold"},
-        "caption": {"size": 11, "weight": "normal"},
-        "code": {"size": 11, "weight": "normal"},
+        "h2": {"size": 17, "weight": "bold"},
+        "h3": {"size": 15, "weight": "bold"},
+        "body": {"size": 14, "weight": "normal"},
+        "body_bold": {"size": 14, "weight": "bold"},
+        "caption": {"size": 12, "weight": "normal"},
+        "code": {"size": 12, "weight": "normal"},
         "overline": {"size": 10, "weight": "bold"},
     },
     "animation": {
-        "collapse_duration_ms": 200,
-        "tooltip_fade_ms": 150,
-        "theme_fade_ms": 300,
-        "message_fade_ms": 120,
-        "progress_pulse_ms": 50,
+        "collapse_duration_ms": 160,
+        "tooltip_fade_ms": 100,
+        "theme_fade_ms": 200,
+        "message_fade_ms": 60,
+        "progress_pulse_ms": 40,
     },
     "themes": {
         "space_dust": {
@@ -2850,6 +2850,12 @@ class AgenticRAGApp:
             self.start_new_chat(load_in_ui=False)
             self.refresh_sessions_list()
             self._ensure_tab_aliases()
+            # Reveal the window now that the chat tab is ready; deferred tabs load lazily.
+            try:
+                self.root.deiconify()
+                self.root.update_idletasks()
+            except tk.TclError:
+                pass
 
         self._run_startup_step("build_ui", _step, self._startup_step_post_load)
 
@@ -2865,27 +2871,47 @@ class AgenticRAGApp:
         self._run_startup_step("post_load", _step, self._startup_step_scan_indexes)
 
     def _startup_step_scan_indexes(self):
-        def _step():
-            self._set_startup_status("Loading indexes…")
-            indexes = self._list_existing_indexes()
-            self._apply_existing_indexes(indexes)
+        # Run the filesystem scan in a background thread; apply results on UI thread.
+        self._set_startup_status("Loading indexes…")
+        self._index_scan_in_progress = True
 
-        self._run_startup_step(
-            "apply_existing_indexes",
-            _step,
-            self._startup_step_check_dependencies,
-        )
+        def _bg_scan():
+            try:
+                indexes = self._list_existing_indexes()
+            except Exception as exc:
+                self.root.after(0, lambda: self._startup_error("apply_existing_indexes", exc))
+                return
+            self.root.after(0, lambda: self._apply_scan_and_continue(indexes))
+
+        threading.Thread(target=_bg_scan, daemon=True, name="startup-scan-indexes").start()
+
+    def _apply_scan_and_continue(self, indexes):
+        try:
+            self._apply_existing_indexes(indexes)
+        except Exception as exc:
+            self._startup_error("apply_existing_indexes", exc)
+            return
+        self._startup_step_check_dependencies()
 
     def _startup_step_check_dependencies(self):
-        def _step():
-            self._set_startup_status("Checking deps…")
-            self.check_dependencies()
-            self._startup_pipeline_finished = True
-            self._set_startup_status("Ready")
-            if self.last_used_mode == "test":
-                self._start_test_mode_flow_once()
+        # Run dependency checks in a background thread; post status back on UI thread.
+        self._set_startup_status("Checking deps…")
 
-        self._run_startup_step("check_dependencies", _step)
+        def _bg_check():
+            try:
+                self.check_dependencies()
+            except Exception as exc:
+                self.root.after(0, lambda: self._startup_error("check_dependencies", exc))
+                return
+            self.root.after(0, self._finish_startup_pipeline)
+
+        threading.Thread(target=_bg_check, daemon=True, name="startup-check-deps").start()
+
+    def _finish_startup_pipeline(self):
+        self._startup_pipeline_finished = True
+        self._set_startup_status("Ready")
+        if self.last_used_mode == "test":
+            self._start_test_mode_flow_once()
 
     def _ensure_tab_aliases(self):
         if hasattr(self, "tab_settings"):
@@ -3049,8 +3075,11 @@ class AgenticRAGApp:
 
         sidebar_style = "Sidebar.TFrame" if self.ui_backend != "ctk" else None
         self.sidebar_frame = self.create_frame(self.root, **({"style": sidebar_style} if sidebar_style else {"fg_color": sidebar_bg}))
-        self.sidebar_frame.grid(row=0, column=0, sticky="ns", padx=(outer_pad, UI_SPACING["s"]), pady=(outer_pad, UI_SPACING["s"]))
-        self.sidebar_frame.grid_columnconfigure(0, weight=1)
+        self.sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=(outer_pad, UI_SPACING["s"]), pady=(outer_pad, UI_SPACING["s"]))
+        # Sidebar layout: col 0 = accent bar (3 px), col 1 = nav button
+        self.sidebar_frame.grid_columnconfigure(0, minsize=3, weight=0)
+        self.sidebar_frame.grid_columnconfigure(1, weight=1)
+        self.sidebar_frame.grid_rowconfigure(50, weight=1)  # spacer row before bottom section
 
         main_style = "MainContent.TFrame" if self.ui_backend != "ctk" else None
         self.main_content_frame = self.create_frame(self.root, **({"style": main_style} if main_style else {"fg_color": content_bg}))
@@ -3061,32 +3090,45 @@ class AgenticRAGApp:
         self._sidebar_logo_photo = self.load_sidebar_logo()
         if self._sidebar_logo_photo is not None:
             self.sidebar_logo = self.create_label(self.sidebar_frame, image=self._sidebar_logo_photo)
-            self.sidebar_logo.grid(row=0, column=0, sticky="n", padx=UI_SPACING["m"], pady=(UI_SPACING["m"], UI_SPACING["xs"]))
+            self.sidebar_logo.grid(row=0, column=0, columnspan=2, sticky="n", padx=UI_SPACING["m"], pady=(UI_SPACING["m"], UI_SPACING["xs"]))
 
-        self.sidebar_title = self.create_label(self.sidebar_frame, text=APP_NAME, style="Header.TLabel")
+        title_style = "Sidebar.Title.TLabel" if self.ui_backend != "ctk" else None
+        self.sidebar_title = self.create_label(
+            self.sidebar_frame,
+            text=APP_NAME,
+            **({"style": title_style} if title_style else {}),
+        )
         self.sidebar_title.grid(
             row=1,
             column=0,
+            columnspan=2,
             sticky="w",
             padx=UI_SPACING["m"],
             pady=((UI_SPACING["xs"] if self._sidebar_logo_photo is not None else UI_SPACING["m"]), UI_SPACING["l"]),
         )
 
         self._sidebar_nav_buttons = {}
+        self._sidebar_accents = {}
         nav_items = [
-            ("chat", "💬 Chat"),
-            ("library", "📚 Library"),
-            ("history", "🕘 History"),
-            ("settings", "⚙️ Settings"),
+            ("chat",     "💬  Chat"),
+            ("library",  "📚  Library"),
+            ("history",  "🕘  History"),
+            ("settings", "⚙️   Settings"),
         ]
         for idx, (view_key, label) in enumerate(nav_items, start=2):
+            # Accent indicator bar (left-edge strip)
+            accent_bar = tk.Frame(self.sidebar_frame, width=3, bd=0, highlightthickness=0,
+                                  bg=self._pal("sidebar_bg", self._pal("surface_alt", "#131923")))
+            accent_bar.grid(row=idx, column=0, sticky="ns", pady=(0, 2))
+            self._sidebar_accents[view_key] = accent_bar
+
             if self.ui_backend == "ctk" and CTK_MODULE is not None:
                 button = CTK_MODULE.CTkButton(
                     self.sidebar_frame,
                     text=label,
                     command=lambda key=view_key: self._switch_main_view(key),
                     fg_color="transparent",
-                    height=38,
+                    height=40,
                     anchor="w",
                     hover_color=self._pal("surface_alt", self._pal("surface", "#161B22")),
                     text_color=self._pal("text", "#E8EEF8"),
@@ -3096,31 +3138,52 @@ class AgenticRAGApp:
                     self.sidebar_frame,
                     text=label,
                     command=lambda key=view_key: self._switch_main_view(key),
-                    style="Secondary.TButton",
+                    style="Sidebar.TButton",
                 )
-            button.grid(row=idx, column=0, sticky="ew", padx=UI_SPACING["m"], pady=(0, UI_SPACING["xs"]))
+            button.grid(row=idx, column=1, sticky="ew", padx=(2, UI_SPACING["xs"]), pady=(0, 2))
             self._sidebar_nav_buttons[view_key] = button
+
+        # Sidebar bottom: version badge + theme indicator
+        bottom_sep = ttk.Separator(self.sidebar_frame, orient="horizontal")
+        bottom_sep.grid(row=51, column=0, columnspan=2, sticky="ew", padx=UI_SPACING["xs"], pady=(UI_SPACING["xs"], 4))
+        bottom_caption_style = "Sidebar.Caption.TLabel" if self.ui_backend != "ctk" else None
+        version_label = self.create_label(
+            self.sidebar_frame,
+            text=f"{APP_NAME} {APP_VERSION}",
+            **({"style": bottom_caption_style} if bottom_caption_style else {}),
+        )
+        version_label.grid(row=52, column=0, columnspan=2, sticky="w", padx=UI_SPACING["m"], pady=(0, UI_SPACING["xs"]))
+        self._sidebar_mode_badge = self.create_label(
+            self.sidebar_frame,
+            text=f"Backend: {self.ui_backend.upper()}",
+            **({"style": bottom_caption_style} if bottom_caption_style else {}),
+        )
+        self._sidebar_mode_badge.grid(row=53, column=0, columnspan=2, sticky="w", padx=UI_SPACING["m"], pady=(0, UI_SPACING["m"]))
 
         self.status_var = tk.StringVar(value="Ready")
         self.backend_badge_var = tk.StringVar(value=f"Backend: {self.ui_backend.upper()}")
         self.chat_llm_badge_var = tk.StringVar(value="🤖 LLM: --")
         self.library_embedding_badge_var = tk.StringVar(value="🧬 Embeddings: --")
 
+        # Build only the chat tab immediately; all other tabs are built lazily on first access.
+        self._tab_built = {}
         self.tab_chat = self.create_frame(self.main_content_frame, style="Card.TFrame")
         self.tab_chat.grid(row=0, column=0, sticky="nsew")
         self.build_chat_tab()
+        self._tab_built["chat"] = True
 
         self.tab_history = self.create_frame(self.main_content_frame, style="Card.TFrame")
         self.tab_history.grid(row=0, column=0, sticky="nsew")
-        self.build_history_tab()
+        self._tab_built["history"] = False
 
         self.tab_library = self.create_frame(self.main_content_frame, style="Card.TFrame")
         self.tab_library.grid(row=0, column=0, sticky="nsew")
-        self.build_ingest_tab()
+        self._tab_built["library"] = False
 
         self.tab_settings = self.create_frame(self.main_content_frame, style="Card.TFrame")
         self.tab_settings.grid(row=0, column=0, sticky="nsew")
-        self.build_config_tab()
+        self._tab_built["settings"] = False
+
         self._views = {
             "chat": self.tab_chat,
             "history": self.tab_history,
@@ -3310,6 +3373,13 @@ class AgenticRAGApp:
         style.map("Danger.TButton", background=[("active", _pal(palette, "danger_hover", fallback_key="danger", default="#FF5555")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
         style.configure("Success.TButton", padding=(14, 10), relief="flat", borderwidth=0, background=palette["success"], foreground="#FFFFFF")
         style.map("Success.TButton", background=[("active", _pal(palette, "success_hover", fallback_key="success", default="#72E2B3")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
+        _sidebar_bg = get("sidebar_bg", fallback="surface_alt", default=palette["surface_alt"])
+        style.configure("Sidebar.TButton", padding=(12, 10), relief="flat", borderwidth=0, background=_sidebar_bg, foreground=palette["muted_text"], anchor="w", font=self._fonts["body"])
+        style.map("Sidebar.TButton", background=[("active", palette["surface_alt"]), ("pressed", palette["surface_alt"])], foreground=[("active", palette["text"]), ("pressed", palette["text"])])
+        style.configure("Sidebar.Active.TButton", padding=(12, 10), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["primary"], anchor="w", font=self._fonts["body_bold"])
+        style.map("Sidebar.Active.TButton", background=[("active", palette["surface_alt"]), ("pressed", palette["surface_alt"])], foreground=[("active", palette["primary"]), ("pressed", palette["primary"])])
+        style.configure("Sidebar.Title.TLabel", background=_sidebar_bg, foreground=palette["text"], font=self._fonts["h2"])
+        style.configure("Sidebar.Caption.TLabel", background=_sidebar_bg, foreground=palette["muted_text"], font=self._fonts["caption"])
         style.configure("TRadiobutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], indicatordiameter=14, relief="flat")
         style.map("TRadiobutton", background=[("active", palette["surface"]), ("!active", palette["surface"])], foreground=[("active", palette["text"]), ("disabled", palette["muted_text"])], indicatorcolor=[("selected", palette["primary"]), ("!selected", palette["surface_alt"])])
         style.configure("TCheckbutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], relief="flat")
@@ -3736,8 +3806,9 @@ class AgenticRAGApp:
 
     def _set_sidebar_active(self, view_key):
         for key, button in (getattr(self, "_sidebar_nav_buttons", {}) or {}).items():
+            is_active = key == view_key
             if self.ui_backend == "ctk" and CTK_MODULE is not None:
-                if key == view_key:
+                if is_active:
                     button.configure(
                         fg_color=self._pal("primary", "#58A6FF"),
                         text_color=self._pal("selection_fg", "#F2F8FF"),
@@ -3747,12 +3818,45 @@ class AgenticRAGApp:
                         fg_color="transparent",
                         text_color=self._pal("text", "#E8EEF8"),
                     )
+            else:
+                try:
+                    target_style = "Sidebar.Active.TButton" if is_active else "Sidebar.TButton"
+                    button.configure(style=target_style)
+                except Exception:
+                    pass
+            # Update the left-accent indicator bar if present
+            accent_bar = getattr(self, "_sidebar_accents", {}).get(key)
+            if accent_bar is not None:
+                active_color = self._pal("primary", "#58A6FF")
+                inactive_color = self._pal("sidebar_bg", self._pal("surface_alt", "#131923"))
+                try:
+                    accent_bar.configure(bg=active_color if is_active else inactive_color)
+                except Exception:
+                    pass
 
     def _switch_main_view(self, view_key):
         views = getattr(self, "_views", None) or {}
         target = views.get(view_key)
         if target is None:
             return
+        # Lazy-build tabs that haven't been constructed yet
+        tab_built = getattr(self, "_tab_built", {})
+        if not tab_built.get(view_key, True):
+            _builders = {
+                "history": self.build_history_tab,
+                "library": self.build_ingest_tab,
+                "settings": self.build_config_tab,
+            }
+            builder = _builders.get(view_key)
+            if builder is not None:
+                try:
+                    builder()
+                    tab_built[view_key] = True
+                    self._ensure_tab_aliases()
+                    if view_key == "history":
+                        self.refresh_sessions_list()
+                except Exception:
+                    logger.exception("Lazy tab build failed for %s", view_key)
         current_key = getattr(self, "_active_view", None)
         if current_key and current_key in views:
             views[current_key].grid_remove()
@@ -6853,33 +6957,84 @@ class AgenticRAGApp:
 
     def _prompt_startup_mode_selection(self):
         selected = {"mode": None}
+        pal = STYLE_CONFIG["themes"].get("space_dust", {})
+        bg = pal.get("bg", "#0D1117")
+        surface = pal.get("surface", "#161B22")
+        surface_alt = pal.get("surface_alt", "#212C3D")
+        text_col = pal.get("text", "#E8EEF8")
+        muted = pal.get("muted_text", "#96A6BE")
+        primary = pal.get("primary", "#58A6FF")
+        border = pal.get("outline", "#33465F")
 
         dialog = tk.Toplevel(self.root)
-        dialog.title("Choose startup mode")
-        dialog.transient(self.root)
+        dialog.title(f"{APP_NAME} — Choose Mode")
         dialog.grab_set()
         dialog.resizable(False, False)
+        dialog.configure(bg=bg)
 
-        frame = ttk.Frame(dialog, padding=16)
-        frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text="Choose how you want to start Axiom:").pack(anchor="w")
-        ttk.Label(
-            frame,
-            text=f"Last used mode: {self.last_used_mode.title()}",
-        ).pack(anchor="w", pady=(4, 12))
+        # Center on screen and bring to front
+        dialog.update_idletasks()
+        w, h = 420, 340
+        sw = dialog.winfo_screenwidth()
+        sh = dialog.winfo_screenheight()
+        dialog.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+        try:
+            dialog.lift()
+            dialog.focus_force()
+        except tk.TclError:
+            pass
 
-        def _choose(mode_value):
-            selected["mode"] = mode_value
-            dialog.destroy()
+        # Header strip
+        header = tk.Frame(dialog, bg=surface, pady=18, padx=24)
+        header.pack(fill="x")
+        tk.Label(header, text=f"Welcome to {APP_NAME}", bg=surface, fg=text_col,
+                 font=("Segoe UI", 16, "bold") if sys.platform == "win32" else ("SF Pro Text", 16, "bold")).pack(anchor="w")
+        tk.Label(header, text="Select a startup mode to continue.", bg=surface,
+                 fg=muted, font=("Segoe UI", 11) if sys.platform == "win32" else ("SF Pro Text", 11)).pack(anchor="w", pady=(4, 0))
 
-        ttk.Button(frame, text="Basic Mode", command=lambda: _choose("basic")).pack(fill="x")
-        ttk.Button(frame, text="Advanced Mode", command=lambda: _choose("advanced")).pack(fill="x", pady=(8, 0))
-        ttk.Button(frame, text="Test Mode", command=lambda: _choose("test")).pack(fill="x", pady=(8, 0))
-        ttk.Label(
-            frame,
-            text="Basic mode runs a guided setup wizard before chat. Test mode auto-builds a local mock demo.",
-            style="Muted.TLabel",
-        ).pack(anchor="w", pady=(10, 0))
+        # Separator
+        tk.Frame(dialog, bg=border, height=1).pack(fill="x")
+
+        body = tk.Frame(dialog, bg=bg, padx=20, pady=16)
+        body.pack(fill="both", expand=True)
+
+        last_mode_text = f"Last used: {self.last_used_mode.title()}"
+        tk.Label(body, text=last_mode_text, bg=bg, fg=muted,
+                 font=("Segoe UI", 10) if sys.platform == "win32" else ("SF Pro Text", 10)).pack(anchor="w", pady=(0, 12))
+
+        def _make_mode_card(parent, title, desc, mode_value, is_default=False):
+            card_bg = surface_alt if is_default else surface
+            card = tk.Frame(parent, bg=card_bg, relief="flat", bd=0,
+                            highlightthickness=1, highlightbackground=primary if is_default else border)
+            card.pack(fill="x", pady=(0, 8))
+            inner = tk.Frame(card, bg=card_bg, padx=16, pady=12)
+            inner.pack(fill="x")
+            title_col = primary if is_default else text_col
+            tk.Label(inner, text=title, bg=card_bg, fg=title_col,
+                     font=("Segoe UI", 13, "bold") if sys.platform == "win32" else ("SF Pro Text", 13, "bold"),
+                     anchor="w").pack(fill="x")
+            tk.Label(inner, text=desc, bg=card_bg, fg=muted,
+                     font=("Segoe UI", 10) if sys.platform == "win32" else ("SF Pro Text", 10),
+                     anchor="w", wraplength=360, justify="left").pack(fill="x", pady=(2, 0))
+            def _on_click(event=None, mv=mode_value):
+                selected["mode"] = mv
+                dialog.destroy()
+            for w in (card, inner) + tuple(inner.winfo_children()):
+                try:
+                    w.bind("<Button-1>", _on_click)
+                    w.configure(cursor="hand2")
+                except Exception:
+                    pass
+
+        _make_mode_card(body, "🚀  Advanced Mode",
+                        "Full feature set with all settings and controls.",
+                        "advanced", is_default=(self.last_used_mode == "advanced"))
+        _make_mode_card(body, "🧙  Basic Mode",
+                        "Guided setup wizard — recommended for first-time users.",
+                        "basic", is_default=(self.last_used_mode == "basic"))
+        _make_mode_card(body, "🧪  Test Mode",
+                        "Auto-builds a local mock demo — no API keys required.",
+                        "test", is_default=(self.last_used_mode == "test"))
 
         self.root.wait_window(dialog)
 
@@ -19076,6 +19231,9 @@ if __name__ == "__main__":
         sys.exit(run_smoke_test())
     try:
         root = tk.Tk()
+        # Hide the window while the UI is being built to avoid a blank flash.
+        # It is revealed in _startup_step_build_ui after the chat tab is ready.
+        root.withdraw()
         app = AgenticRAGApp(root)
         root.mainloop()
     except Exception as e:
