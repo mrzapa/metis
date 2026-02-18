@@ -2915,8 +2915,8 @@ class AgenticRAGApp:
         self._apply_theme()
 
         outer_pad = STYLE_CONFIG["padding"]["md"]
-        sidebar_bg = self.theme_palette.get("sidebar_bg", self.theme_palette.get("surface_alt", self.theme_palette.get("surface", "#161B22")))
-        content_bg = self.theme_palette.get("content_bg", self.theme_palette.get("surface", "#161B22"))
+        sidebar_bg = self._pal("sidebar_bg", self._pal("surface_alt", self._pal("surface", "#161B22")))
+        content_bg = self._pal("content_bg", self._pal("surface", "#161B22"))
         self.root.grid_columnconfigure(0, minsize=200, weight=0)
         self.root.grid_columnconfigure(1, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
@@ -2951,8 +2951,8 @@ class AgenticRAGApp:
                     fg_color="transparent",
                     height=38,
                     anchor="w",
-                    hover_color=self.theme_palette.get("surface_alt", self.theme_palette.get("surface", "#161B22")),
-                    text_color=self.theme_palette.get("text", "#E8EEF8"),
+                    hover_color=self._pal("surface_alt", self._pal("surface", "#161B22")),
+                    text_color=self._pal("text", "#E8EEF8"),
                 )
             else:
                 button = self.create_button(
@@ -3574,13 +3574,13 @@ class AgenticRAGApp:
             if self.ui_backend == "ctk" and CTK_MODULE is not None:
                 if key == view_key:
                     button.configure(
-                        fg_color=self.theme_palette.get("primary", "#58A6FF"),
-                        text_color=self.theme_palette.get("selection_fg", "#F2F8FF"),
+                        fg_color=self._pal("primary", "#58A6FF"),
+                        text_color=self._pal("selection_fg", "#F2F8FF"),
                     )
                 else:
                     button.configure(
                         fg_color="transparent",
-                        text_color=self.theme_palette.get("text", "#E8EEF8"),
+                        text_color=self._pal("text", "#E8EEF8"),
                     )
 
     def _switch_main_view(self, view_key):
