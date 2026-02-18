@@ -3062,6 +3062,20 @@ class AgenticRAGApp:
         return palette.get(key, default)
 
     def _apply_ttk_theme(self, palette, *, use_clam=True):
+        def get(key, fallback=None, default=None):
+            value = palette.get(key)
+            if value is not None:
+                return value
+            if isinstance(fallback, str) and fallback in palette:
+                fallback_value = palette.get(fallback)
+                if fallback_value is not None:
+                    return fallback_value
+            elif fallback is not None:
+                return fallback
+            if default is not None:
+                return default
+            return STYLE_CONFIG["themes"].get("space_dust", {}).get(key)
+
         style = ttk.Style()
         if use_clam and "clam" in style.theme_names():
             style.theme_use("clam")
