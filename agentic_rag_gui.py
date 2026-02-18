@@ -1492,6 +1492,10 @@ class AgenticRAGApp:
         self.ui_mode = tk.StringVar(value="space_dust")
         self._configure_ui_backend_defaults()
         self._active_palette = STYLE_CONFIG["themes"]["space_dust"]
+        # Backward compatibility: older UI code paths still expect `self.theme_palette`.
+        # Keep it synchronized with the active palette so startup cannot fail if
+        # a deferred callback references the legacy attribute name.
+        self.theme_palette = self._active_palette
         self._animator = AnimationEngine(self.root)
         self.tooltip_manager = TooltipManager(self.root, lambda: getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"]))
         self.history_profile_filter = tk.StringVar(value="All Profiles")
@@ -3061,6 +3065,7 @@ class AgenticRAGApp:
         selected_palette = STYLE_CONFIG["themes"].get(self.ui_mode.get(), base_palette)
         palette = {**base_palette, **selected_palette}
         self._active_palette = palette
+        self.theme_palette = palette
 
         def _apply_styles():
             if self.ui_backend == "ctk" and CTK_MODULE is not None:
