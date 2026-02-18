@@ -1211,26 +1211,6 @@ class AnimationEngine:
             return False
 
 
-class _NotebookShim:
-    """Compatibility shim that emulates the ttk.Notebook select/add API used
-    throughout the codebase, now backed by the sidebar navigation system."""
-
-    def __init__(self, app: "AgenticRAGApp"):
-        self._app = app
-        self._tabs: list[tuple] = []
-
-    def add(self, frame, text: str = "", **kwargs):
-        self._tabs.append((frame, text))
-
-    def select(self, tab_frame_or_id=None):
-        if tab_frame_or_id is None:
-            return
-        self._app._show_page(tab_frame_or_id)
-
-    def tab(self, tab_id, **kwargs):
-        pass  # no-op compatibility stub
-
-
 class AgenticRAGApp:
     MODE_PRESETS = {
         "Q&A": {
@@ -2925,277 +2905,43 @@ class AgenticRAGApp:
 
     def setup_ui(self):
         self._apply_theme()
-        pal = self._active_palette
 
-        # ── 1. Application header bar (top, full-width, 48 px) ─────────────────
-        self._header_bar = tk.Frame(self.root, bg=pal["surface"], height=48)
-        self._header_bar.pack(fill="x", side="top")
-        self._header_bar.pack_propagate(False)
-        # Hairline divider below header
-        tk.Frame(self.root, bg=pal["border"], height=1).pack(fill="x", side="top")
+        self.notebook = ttk.Notebook(self.root, style="App.TNotebook")
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=STYLE_CONFIG["padding"]["md"], pady=STYLE_CONFIG["padding"]["md"])
 
-        # App logo / name (left)
-        self._header_logo_label = tk.Label(
-            self._header_bar,
-            text=f"\u25c8  {APP_NAME}",
-            bg=pal["surface"],
-            fg=pal["primary"],
-            font=self._fonts["h2"],
-            anchor="w",
-            padx=18,
-        )
-        self._header_logo_label.pack(side="left", fill="y")
-
-        # Backend badge (right)
-        self.backend_badge_var = tk.StringVar(value=self.ui_backend.upper())
-        self.backend_badge = tk.Label(
-            self._header_bar,
-            textvariable=self.backend_badge_var,
-            bg=pal["badge_bg"],
-            fg=pal["muted_text"],
-            font=self._fonts["caption"],
-            padx=8,
-            pady=3,
-            relief="flat",
-        )
-        self.backend_badge.pack(side="right", anchor="center", padx=12, pady=11)
-
-        # Current state compact display (right, before badge)
-        self.status_state_bar = tk.Label(
-            self._header_bar,
-            textvariable=self.current_state_var,
-            bg=pal["surface"],
-            fg=pal["muted_text"],
-            font=self._fonts["caption"],
-            anchor="e",
-            padx=10,
-        )
-        self.status_state_bar.pack(side="right", fill="y")
-
-        # ── 2. Body: sidebar nav + content stack ───────────────────────────────
-        body = tk.Frame(self.root, bg=pal["bg"])
-        body.pack(fill=tk.BOTH, expand=True, side="top")
-
-        # Left sidebar navigation panel
-        self._nav_sidebar = tk.Frame(body, bg=pal["surface"], width=190)
-        self._nav_sidebar.pack(side="left", fill="y")
-        self._nav_sidebar.pack_propagate(False)
-
-        # Hairline divider between sidebar and content
-        tk.Frame(body, bg=pal["border"], width=1).pack(side="left", fill="y")
-
-        # Content area (pages swap here)
-        self._content_area = tk.Frame(body, bg=pal["bg"])
-        self._content_area.pack(side="left", fill=tk.BOTH, expand=True)
-
-        # ── 3. Status bar (bottom) ─────────────────────────────────────────────
-        tk.Frame(self.root, bg=pal["border"], height=1).pack(fill="x", side="bottom")
-        status_wrap = tk.Frame(self.root, bg=pal["surface"], height=28)
-        status_wrap.pack(fill="x", side="bottom")
-        status_wrap.pack_propagate(False)
-
-        self.status_var = tk.StringVar(value="Ready")
-        self._status_label = tk.Label(
-            status_wrap,
-            textvariable=self.status_var,
-            bg=pal["surface"],
-            fg=pal["status"],
-            font=self._fonts["caption"],
-            anchor="w",
-            padx=12,
-        )
-        self._status_label.pack(side="left", fill="y")
-
-        # Warning indicator in the status bar
-        self._status_warning_label = tk.Label(
-            status_wrap,
-            textvariable=self.current_warning_var,
-            bg=pal["surface"],
-            fg=pal["danger"],
-            font=self._fonts["caption"],
-            anchor="e",
-            padx=10,
-        )
-        self._status_warning_label.pack(side="right", fill="y")
-
-        # ── 4. Create page frames ──────────────────────────────────────────────
-        self.tab_chat = ttk.Frame(self._content_area, style="Card.TFrame")
-        self.tab_history = ttk.Frame(self._content_area, style="Card.TFrame")
-        self.tab_library = ttk.Frame(self._content_area, style="Card.TFrame")
-        self.tab_settings = ttk.Frame(self._content_area, style="Card.TFrame")
-
-        # Notebook shim keeps all existing notebook.select() calls working
-        self.notebook = _NotebookShim(self)
+        self.tab_chat = ttk.Frame(self.notebook, style="Card.TFrame")
         self.notebook.add(self.tab_chat, text="Chat")
-        self.notebook.add(self.tab_history, text="History")
-        self.notebook.add(self.tab_library, text="Library")
-        self.notebook.add(self.tab_settings, text="Settings")
-
-        # ── 5. Build sidebar nav ───────────────────────────────────────────────
-        self._nav_buttons: dict = {}
-        self._current_page = None
-        self._current_nav_key: Optional[str] = None
-        self._build_nav_sidebar()
-
-        # ── 6. Build page content ──────────────────────────────────────────────
         self.build_chat_tab()
+
+        self.tab_history = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.notebook.add(self.tab_history, text="History")
         self.build_history_tab()
+
+        self.tab_library = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.notebook.add(self.tab_library, text="Library")
         self.build_ingest_tab()
+
+        self.tab_settings = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.notebook.add(self.tab_settings, text="Settings")
         self.build_config_tab()
         self._ensure_tab_aliases()
 
-        # Show Chat page by default
-        self._show_page(self.tab_chat)
+        self.status_var = tk.StringVar(value="Ready")
+        self.backend_badge_var = tk.StringVar(value=f"Backend: {self.ui_backend.upper()}")
+        status_wrap = ttk.Frame(self.root, style="StatusBar.TFrame")
+        status_wrap.pack(fill="x", padx=STYLE_CONFIG["padding"]["md"], pady=(0, STYLE_CONFIG["padding"]["sm"]))
+        status_bar = ttk.Label(status_wrap, textvariable=self.status_var, style="Status.TLabel", anchor="w")
+        status_bar.pack(side="left", fill="x", expand=True)
+        ttk.Separator(status_wrap, orient="vertical").pack(side="left", fill="y", padx=(UI_SPACING["s"], UI_SPACING["s"]))
+        self.status_state_bar = ttk.Label(status_wrap, textvariable=self.current_state_var, style="Status.TLabel", anchor="e")
+        self.status_state_bar.pack(side="left")
+        self.backend_badge = ttk.Label(status_wrap, textvariable=self.backend_badge_var, style="Badge.TLabel", anchor="e")
+        self.backend_badge.pack(side="right", padx=(UI_SPACING["s"], 0))
 
         self._bind_accessibility_shortcuts()
         self._install_ui_state_watchers()
         self._update_current_state_strip()
         self._apply_theme()
-
-    # ── Sidebar navigation helpers ─────────────────────────────────────────────
-
-    def _build_nav_sidebar(self):
-        """Populate the left sidebar with navigation items."""
-        pal = self._active_palette
-
-        # App subtitle / version
-        tk.Frame(self._nav_sidebar, bg=pal["surface"], height=12).pack(fill="x")
-        tk.Label(
-            self._nav_sidebar,
-            text=APP_SUBTITLE.upper() if APP_SUBTITLE else "RAG ASSISTANT",
-            bg=pal["surface"],
-            fg=pal["muted_text"],
-            font=self._fonts["overline"],
-            anchor="w",
-            padx=20,
-        ).pack(fill="x", pady=(0, 8))
-        tk.Frame(self._nav_sidebar, bg=pal["border"], height=1).pack(fill="x", padx=12, pady=(0, 8))
-
-        nav_items = [
-            ("chat",     "\u25a3  Chat",     self.tab_chat),
-            ("history",  "\u25d7  History",  self.tab_history),
-            ("library",  "\u25a4  Library",  self.tab_library),
-            ("settings", "\u2699  Settings", self.tab_settings),
-        ]
-
-        for key, label, page in nav_items:
-            # Outer container — full-width clickable row
-            row = tk.Frame(self._nav_sidebar, bg=pal["surface"], cursor="hand2")
-            row.pack(fill="x", padx=8, pady=2)
-
-            # Left accent bar (3 px; becomes primary color when active)
-            indicator = tk.Frame(row, bg=pal["surface"], width=3)
-            indicator.pack(side="left", fill="y", padx=(0, 0))
-
-            lbl = tk.Label(
-                row,
-                text=label,
-                bg=pal["surface"],
-                fg=pal["muted_text"],
-                font=self._fonts["body"],
-                anchor="w",
-                padx=12,
-                pady=9,
-            )
-            lbl.pack(side="left", fill="both", expand=True)
-
-            self._nav_buttons[key] = {
-                "row": row,
-                "label": lbl,
-                "indicator": indicator,
-                "page": page,
-            }
-
-            # Bind click + hover for every child
-            for widget in (row, indicator, lbl):
-                widget.bind("<Button-1>", lambda _e, p=page: self._show_page(p))
-                widget.bind("<Enter>",    lambda _e, k=key: self._on_nav_hover(k, True))
-                widget.bind("<Leave>",    lambda _e, k=key: self._on_nav_hover(k, False))
-
-    def _show_page(self, page_frame):
-        """Switch the visible content page and update nav highlight."""
-        _page_keys = {
-            id(self.tab_chat):     "chat",
-            id(self.tab_history):  "history",
-            id(self.tab_library):  "library",
-            id(self.tab_settings): "settings",
-        }
-        new_key = _page_keys.get(id(page_frame))
-
-        for frame in (self.tab_chat, self.tab_history, self.tab_library, self.tab_settings):
-            try:
-                frame.pack_forget()
-            except Exception:
-                pass
-
-        try:
-            page_frame.pack(fill=tk.BOTH, expand=True)
-        except Exception:
-            pass
-
-        self._current_page = page_frame
-        self._current_nav_key = new_key
-        self._update_nav_active(new_key)
-
-    def _on_nav_hover(self, key: str, entering: bool):
-        if key == self._current_nav_key:
-            return  # active item — no hover override
-        pal = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
-        info = self._nav_buttons.get(key)
-        if not info:
-            return
-        bg = pal["surface_elevated"] if entering else pal["surface"]
-        info["row"].config(bg=bg)
-        info["label"].config(bg=bg)
-        info["indicator"].config(bg=bg)
-
-    def _update_nav_active(self, active_key: Optional[str]):
-        pal = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
-        for key, info in (getattr(self, "_nav_buttons", None) or {}).items():
-            if key == active_key:
-                bg = pal["surface_elevated"]
-                info["row"].config(bg=bg)
-                info["label"].config(bg=bg, fg=pal["primary"], font=self._fonts["body_bold"])
-                info["indicator"].config(bg=pal["primary"])
-            else:
-                bg = pal["surface"]
-                info["row"].config(bg=bg)
-                info["label"].config(bg=bg, fg=pal["muted_text"], font=self._fonts["body"])
-                info["indicator"].config(bg=bg)
-
-    def _theme_nav_widgets(self):
-        """Re-apply palette to native-tk nav bar and header widgets on theme change."""
-        pal = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
-
-        # Header bar
-        for attr in ("_header_bar", "_header_logo_label"):
-            w = getattr(self, attr, None)
-            if w and self._safe_widget_exists(w):
-                w.config(bg=pal["surface"])
-        if hasattr(self, "_header_logo_label") and self._safe_widget_exists(self._header_logo_label):
-            self._header_logo_label.config(fg=pal["primary"])
-        if hasattr(self, "status_state_bar") and self._safe_widget_exists(self.status_state_bar):
-            self.status_state_bar.config(bg=pal["surface"], fg=pal["muted_text"])
-        if hasattr(self, "backend_badge") and self._safe_widget_exists(self.backend_badge):
-            self.backend_badge.config(bg=pal["badge_bg"], fg=pal["muted_text"])
-
-        # Status bar
-        for attr in ("_status_label", "_status_warning_label"):
-            w = getattr(self, attr, None)
-            if w and self._safe_widget_exists(w):
-                w.config(bg=pal["surface"])
-        if hasattr(self, "_status_label") and self._safe_widget_exists(self._status_label):
-            self._status_label.config(fg=pal["status"])
-        if hasattr(self, "_status_warning_label") and self._safe_widget_exists(self._status_warning_label):
-            self._status_warning_label.config(fg=pal["danger"])
-
-        # Nav sidebar background
-        if hasattr(self, "_nav_sidebar") and self._safe_widget_exists(self._nav_sidebar):
-            self._nav_sidebar.config(bg=pal["surface"])
-
-        # Re-render active state after palette swap
-        if hasattr(self, "_nav_buttons"):
-            self._update_nav_active(getattr(self, "_current_nav_key", None))
 
     def _configure_ui_backend_defaults(self):
         if not isinstance(self.root, tk.Misc):
@@ -3269,7 +3015,6 @@ class AgenticRAGApp:
                 self._apply_ttk_theme(palette)
             self._theme_tk_widgets()
             self._theme_text_tags()
-            self._theme_nav_widgets()
 
         if not hasattr(self, "_animator"):
             _apply_styles()
@@ -3387,12 +3132,6 @@ class AgenticRAGApp:
         style.configure("App.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(4, 8, 4, 0))
         style.configure("App.TNotebook.Tab", padding=(16, 10), font=self._fonts["body_bold"], borderwidth=0)
         style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("!selected", palette["bg"])], foreground=[("selected", palette["primary"]), ("active", _pal(palette, "tab_indicator", fallback_key="primary", default=_pal(palette, "primary_hover", fallback_key="primary", default="#79B8FF"))), ("!selected", palette["muted_text"])])
-        # Badge label (used in header bar)
-        style.configure("Badge.TLabel", background=_pal(palette, "badge_bg", default="#273447"), foreground=palette["muted_text"], font=self._fonts["caption"], padding=(8, 3))
-        # Evidence sub-notebook (compact tabs)
-        style.configure("Evidence.TNotebook", background=palette["surface"], borderwidth=0, tabmargins=(2, 4, 2, 0))
-        style.configure("Evidence.TNotebook.Tab", padding=(10, 6), font=self._fonts["caption"], borderwidth=0)
-        style.map("Evidence.TNotebook.Tab", background=[("selected", palette["surface_elevated"]), ("!selected", palette["surface"])], foreground=[("selected", palette["primary"]), ("!selected", palette["muted_text"])])
 
     def _apply_ttkbootstrap_theme(self, palette):
         style = self._ttkbootstrap_style or ttk.Style()
@@ -6336,54 +6075,82 @@ class AgenticRAGApp:
         frame = self.create_frame(self.tab_chat, padding=UI_SPACING["l"])
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # ── Compact single-row configuration toolbar ──────────────────────────
-        config_bar = self.create_frame(frame, style="Card.Flat.TFrame", padding=(UI_SPACING["s"], UI_SPACING["xs"]))
-        config_bar.pack(fill="x", pady=(0, UI_SPACING["xs"]))
-        for col in range(9):
-            config_bar.columnconfigure(col, weight=1)
+        header = self.create_frame(frame)
+        header.pack(fill="x", pady=(0, UI_SPACING["s"]))
+        self.create_label(header, text="Chat", style="Header.TLabel").pack(anchor="w")
+        self.create_label(
+            header,
+            text="Flow: Library builds index → Chat answers with evidence → Settings tunes behavior.",
+            style="Caption.TLabel",
+        ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+        if self.test_mode_active:
+            self.create_label(
+                header,
+                textvariable=self.test_mode_banner_var,
+                style="Success.TLabel",
+            ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
-        self.create_label(config_bar, text="Profile:", style="Muted.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 3))
-        self.cb_profile = self.create_combobox(config_bar, textvariable=self.selected_profile, state="readonly", width=18)
-        self.cb_profile.grid(row=0, column=1, sticky="ew", padx=(0, 10))
+        state_strip = self.create_frame(frame, style="Card.Flat.TFrame", padding=UI_SPACING["s"])
+        state_strip.pack(fill="x", pady=(0, UI_SPACING["s"]))
+        self.create_label(state_strip, text="Current State:", style="Bold.TLabel").pack(side="left", padx=(0, UI_SPACING["xs"]))
+        self.create_label(state_strip, textvariable=self.current_state_var).pack(side="left", fill="x", expand=True)
+        self.state_warning_label = self.create_label(frame, textvariable=self.current_warning_var, style="Danger.TLabel")
+        self.state_warning_label.pack(fill="x", pady=(0, UI_SPACING["s"]))
+
+        rag_progress_row = self.create_frame(frame)
+        rag_progress_row.pack(fill="x", pady=(0, UI_SPACING["s"]))
+        self.rag_progress = ttk.Progressbar(rag_progress_row, orient="horizontal", mode="indeterminate")
+        self.rag_progress.pack(side="left", fill="x", expand=True)
+        self.btn_cancel_rag = self.create_button(
+            rag_progress_row,
+            text="Cancel",
+            command=lambda: self.cancel_active_job("rag"),
+            state="disabled",
+        )
+        self.btn_cancel_rag.pack(side="left", padx=(UI_SPACING["s"], 0))
+
+        top_bar = self.create_frame(frame, text="Conversation Setup", padding=UI_SPACING["m"], kind="labelframe")
+        top_bar.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        for col in range(8):
+            top_bar.columnconfigure(col, weight=1)
+
+        self.create_label(top_bar, text="Profile:").grid(row=0, column=0, sticky="w")
+        self.cb_profile = self.create_combobox(top_bar, textvariable=self.selected_profile, state="readonly", width=FORM_WIDTHS["input"])
+        self.cb_profile.grid(row=0, column=1, sticky="ew", padx=(6, 12))
         self._refresh_profile_options()
 
-        self.create_label(config_bar, text="Mode:", style="Muted.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 3))
-        self.create_combobox(config_bar, textvariable=self.selected_mode, values=self.mode_options, state="readonly", width=16).grid(row=0, column=3, sticky="ew", padx=(0, 10))
+        self.create_label(top_bar, text="Mode:").grid(row=0, column=2, sticky="w")
+        self.create_combobox(
+            top_bar,
+            textvariable=self.selected_mode,
+            values=self.mode_options,
+            state="readonly",
+            width=18,
+        ).grid(row=0, column=3, sticky="ew", padx=(6, 12))
 
-        self.create_label(config_bar, text="Index:", style="Muted.TLabel").grid(row=0, column=4, sticky="w", padx=(0, 3))
-        self.cb_existing_index = self.create_combobox(config_bar, textvariable=self.existing_index_var, state="readonly", width=18)
-        self.cb_existing_index.grid(row=0, column=5, sticky="ew", padx=(0, 10))
+        self.create_label(top_bar, text="Index:").grid(row=0, column=4, sticky="w")
+        self.cb_existing_index = self.create_combobox(top_bar, textvariable=self.existing_index_var, state="readonly")
+        self.cb_existing_index.grid(row=0, column=5, sticky="ew", padx=(6, 12))
         self.cb_existing_index.bind("<<ComboboxSelected>>", self._on_existing_index_change)
 
-        self.create_label(config_bar, text="Model:", style="Muted.TLabel").grid(row=0, column=6, sticky="w", padx=(0, 3))
-        self.cb_chat_model = self.create_combobox(config_bar, textvariable=self.llm_model, state="readonly", width=20)
-        self.cb_chat_model.grid(row=0, column=7, sticky="ew", padx=(0, 10))
+        self.create_label(top_bar, text="Model:").grid(row=0, column=6, sticky="w")
+        self.cb_chat_model = self.create_combobox(top_bar, textvariable=self.llm_model, state="readonly", width=22)
+        self.cb_chat_model.grid(row=0, column=7, sticky="ew", padx=(6, 12))
         self.cb_chat_model.bind("<<ComboboxSelected>>", self._on_llm_model_change)
 
-        # Action buttons (right side of toolbar)
-        _btn_bar = self.create_frame(config_bar)
-        _btn_bar.grid(row=0, column=8, sticky="e", padx=(4, 0))
-        self.create_button(_btn_bar, text="\u21ba", command=self._refresh_existing_indexes_async, style="Secondary.TButton").pack(side="left", padx=(0, 3))
-        self.create_button(_btn_bar, text="Settings", command=lambda: self.notebook.select(self.tab_settings), style="Secondary.TButton").pack(side="left", padx=(0, 3))
+        actions_row = self.create_frame(top_bar)
+        actions_row.grid(row=1, column=0, columnspan=8, sticky="ew", pady=(UI_SPACING["s"], 0))
+        self.create_button(actions_row, text="Refresh Indexes", command=self._refresh_existing_indexes_async, style="Secondary.TButton").pack(side="left")
+        self.create_button(actions_row, text="Settings", command=lambda: self.notebook.select(self.tab_settings), style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
         if self.test_mode_active:
-            self.create_button(_btn_bar, text="Reset Test", command=self.reset_test_environment, style="Danger.TButton").pack(side="left", padx=(0, 3))
+            self.create_button(actions_row, text="Reset test environment", command=self.reset_test_environment, style="Danger.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
         if self.basic_mode:
-            self.create_button(_btn_bar, text="Advanced Mode", command=self.switch_to_advanced_mode, style="Secondary.TButton").pack(side="left")
+            self.create_button(actions_row, text="Switch to Advanced", command=self.switch_to_advanced_mode, style="Secondary.TButton").pack(side="right")
         else:
-            self.create_button(_btn_bar, text="Wizard", command=self.run_setup_wizard, style="Secondary.TButton").pack(side="left")
+            self.create_button(actions_row, text="Run Setup Wizard", command=self.run_setup_wizard, style="Secondary.TButton").pack(side="right")
 
-        # Test mode banner row (below toolbar when active)
-        if self.test_mode_active:
-            self.create_label(config_bar, textvariable=self.test_mode_banner_var, style="Success.TLabel").grid(
-                row=1, column=0, columnspan=9, sticky="w", pady=(2, 0)
-            )
-
-        # State warning label — kept for backward compat, not packed (warnings shown in status bar)
-        self.state_warning_label = self.create_label(frame, textvariable=self.current_warning_var, style="Danger.TLabel")
-
-        # retrieve_k / final_k — collapsed by default
-        setup_advanced = CollapsibleFrame(frame, "Retrieval depth (retrieve_k / final_k)", expanded=False)
-        setup_advanced.pack(fill="x", pady=(0, UI_SPACING["xs"]))
+        setup_advanced = CollapsibleFrame(top_bar, "Advanced chat settings", expanded=False)
+        setup_advanced.grid(row=2, column=0, columnspan=8, sticky="ew", pady=(UI_SPACING["s"], 0))
         advanced_grid = setup_advanced.content
         self.create_label(advanced_grid, text="retrieve_k:").grid(row=0, column=0, sticky="w")
         self.create_entry(advanced_grid, textvariable=self.retrieval_k, width=8).grid(row=0, column=1, sticky="w", padx=(6, 14))
@@ -6391,10 +6158,10 @@ class AgenticRAGApp:
         self.create_entry(advanced_grid, textvariable=self.final_k, width=8).grid(row=0, column=3, sticky="w", padx=(6, 0))
 
         content_split = self.create_frame(frame, orient=tk.HORIZONTAL, kind="panedwindow")
-        content_split.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+        content_split.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        left_pane = self.create_frame(content_split, style="Card.Elevated.TFrame", padding=UI_SPACING["s"])
-        right_pane = self.create_frame(content_split, width=360, style="Card.Elevated.TFrame", padding=UI_SPACING["xs"])
+        left_pane = self.create_frame(content_split, style="Card.Elevated.TFrame", padding=UI_SPACING["m"])
+        right_pane = self.create_frame(content_split, width=380, style="Card.Elevated.TFrame", padding=UI_SPACING["m"])
         content_split.add(left_pane, weight=4)
         content_split.add(right_pane, weight=2)
 
@@ -6402,7 +6169,7 @@ class AgenticRAGApp:
         self.chat_display = self.create_rich_text_surface(
             left_pane, surface_id="chat_display", state="disabled", font=("Segoe UI", 10), wrap=tk.WORD, scrolled=True
         )
-        self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, UI_SPACING["xs"]))
+        self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, UI_SPACING["m"]))
         self.chat_display.tag_config("citation", foreground=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["link"], underline=1, font=self._fonts["code"])
         self.chat_display.tag_bind("citation", "<Button-1>", self._on_citation_click)
         self.chat_display.tag_bind("citation", "<Enter>", self._on_citation_hover)
@@ -6437,23 +6204,52 @@ class AgenticRAGApp:
         )
         self.chat_display.tag_config("source", font=self._fonts["code"])
 
-        # Quick action bar
+        # Quick Actions
         action_frame = self.create_frame(left_pane, style="Card.TFrame")
-        action_frame.pack(fill="x", pady=(UI_SPACING["xs"], UI_SPACING["xs"]))
-        self.create_button(action_frame, text="New Chat", command=lambda: self.start_new_chat(load_in_ui=True), style="Secondary.TButton").pack(side="left")
-        self.create_button(action_frame, text="Copy Answer", command=self.copy_last_answer, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["xs"], 0))
-        self.create_button(action_frame, text="Export MD", command=self.export_notes_to_markdown, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["xs"], 0))
+        action_frame.pack(fill="x", pady=(UI_SPACING["s"], UI_SPACING["xs"]))
+        self.create_button(
+            action_frame,
+            text="New Chat",
+            command=lambda: self.start_new_chat(load_in_ui=True),
+            style="Secondary.TButton",
+        ).pack(side="left")
+        self.create_button(
+            action_frame, text="Copy Last Answer", command=self.copy_last_answer,
+            style="Secondary.TButton",
+        ).pack(side="left", padx=(UI_SPACING["s"], 0))
+        self.create_button(
+            action_frame,
+            text="Export notes to Markdown",
+            command=self.export_notes_to_markdown,
+            style="Secondary.TButton",
+        ).pack(side="left", padx=UI_SPACING["s"])
         if agent_lightning is not None:
-            self.create_button(action_frame, text="Agent Lightning", command=self.export_run_as_agent_lightning_dataset, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["xs"], 0))
-        self.create_button(action_frame, text="Eval Set", command=self.export_eval_set, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["xs"], 0))
+            self.create_button(
+                action_frame,
+                text="Export to Agent Lightning format",
+                command=self.export_run_as_agent_lightning_dataset,
+                style="Secondary.TButton",
+            ).pack(side="left")
+        self.create_button(
+            action_frame,
+            text="Export Eval Set",
+            command=self.export_eval_set,
+            style="Secondary.TButton",
+        ).pack(side="left", padx=UI_SPACING["s"])
+
+        self.create_label(
+            left_pane,
+            text="Type your question, Ctrl+Enter to send",
+            style="Caption.TLabel",
+        ).pack(anchor="w", pady=(2, 4))
 
         logs_section = CollapsibleFrame(left_pane, "Logs & telemetry", expanded=False, animator=self._animator)
-        logs_section.pack(fill="both", pady=(0, UI_SPACING["xs"]))
-        self.log_area = self.create_rich_text_surface(logs_section.content, surface_id="chat_logs", height=5, state="disabled", wrap=tk.WORD, scrolled=True)
+        logs_section.pack(fill="both", pady=(6, 0))
+        self.log_area = self.create_rich_text_surface(logs_section.content, surface_id="chat_logs", height=6, state="disabled", wrap=tk.WORD, scrolled=True)
         self.log_area.pack(fill=tk.BOTH, expand=True)
 
         self.chat_settings_section = CollapsibleFrame(left_pane, "Advanced chat settings", expanded=False, animator=self._animator)
-        self.chat_settings_section.pack(fill="x", pady=(0, UI_SPACING["xs"]))
+        self.chat_settings_section.pack(fill="x", pady=(4, 0))
 
         settings_content = self.chat_settings_section.content
         profile_frame = self.create_frame(settings_content, text="Mode & Agent Profile", padding=8, kind="labelframe")
@@ -6491,40 +6287,28 @@ class AgenticRAGApp:
         self.create_checkbox(frontier_wrap, text="Claim-level grounding (CiteFix-lite)", variable=self.enable_claim_level_grounding_citefix_lite).pack(anchor="w")
         self.create_checkbox(frontier_wrap, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
 
-        # ── Input composer (bottom-anchored) ─────────────────────────────────
-        input_outer = self.create_frame(left_pane, style="Card.Flat.TFrame", padding=(UI_SPACING["s"], UI_SPACING["xs"]))
-        input_outer.pack(fill="x", side="bottom")
-
-        # Progress/cancel row (visible while RAG job is running)
-        rag_progress_row = self.create_frame(input_outer)
-        rag_progress_row.pack(fill="x", pady=(0, UI_SPACING["xs"]))
-        self.rag_progress = ttk.Progressbar(rag_progress_row, orient="horizontal", mode="indeterminate")
-        self.rag_progress.pack(side="left", fill="x", expand=True)
-        self.btn_cancel_rag = self.create_button(
-            rag_progress_row, text="Cancel", command=lambda: self.cancel_active_job("rag"),
-            state="disabled", style="Danger.TButton",
-        )
-        self.btn_cancel_rag.pack(side="left", padx=(UI_SPACING["xs"], 0))
-
-        # Text input + send controls
-        input_frame = self.create_frame(input_outer)
-        input_frame.pack(fill="x")
+        # Sticky input composer
+        input_frame = self.create_frame(left_pane, style="Card.Flat.TFrame", padding=UI_SPACING["m"])
+        input_frame.pack(fill="x", side="bottom", pady=(UI_SPACING["s"], 0))
         self.txt_input = self.create_rich_text_surface(input_frame, surface_id="chat_input", height=3, font=("Segoe UI", 11), wrap=tk.WORD)
         self.txt_input.pack(side="left", fill="both", expand=True, padx=(0, UI_SPACING["s"]))
         self.txt_input.bind("<Control-Return>", lambda _e: (self.send_message(), "break")[1])
 
         send_row = self.create_frame(input_frame)
         send_row.pack(side="right", fill="y")
-        self.create_label(send_row, text="Style:", style="Muted.TLabel").pack(anchor="e")
+        self.create_label(send_row, text="Output style:", style="Muted.TLabel").pack(anchor="e", pady=(0, UI_SPACING["xs"]))
         self.create_combobox(
-            send_row, textvariable=self.output_style, values=self.output_style_options,
-            state="readonly", width=20,
+            send_row,
+            textvariable=self.output_style,
+            values=self.output_style_options,
+            state="readonly",
+            width=22,
         ).pack(anchor="e", pady=(0, UI_SPACING["xs"]))
-        self.btn_send = self.create_button(send_row, text="Send  \u2303\u21a9", command=self.send_message, style="Primary.TButton")
-        self.btn_send.pack(anchor="e", fill="x")
+        self.btn_send = self.create_button(send_row, text="Send", command=self.send_message, style="Primary.TButton")
+        self.btn_send.pack(anchor="e")
 
-        # ── Right evidence panel ──────────────────────────────────────────────
-        evidence_wrap = self.create_frame(right_pane, text="Evidence", padding=UI_SPACING["xs"], kind="labelframe")
+        # Right evidence pane
+        evidence_wrap = self.create_frame(right_pane, text="Evidence Navigator", padding=UI_SPACING["m"], kind="labelframe")
         evidence_wrap.pack(fill=tk.BOTH, expand=True)
         self.evidence_notebook = self.create_notebook(evidence_wrap)
         self.evidence_notebook.pack(fill=tk.BOTH, expand=True)
@@ -6533,8 +6317,14 @@ class AgenticRAGApp:
         self.evidence_notebook.add(self.answer_tab, text="Answer")
         answer_action_bar = self.create_frame(self.answer_tab)
         answer_action_bar.pack(fill="x", pady=(0, UI_SPACING["xs"]))
-        self.create_button(answer_action_bar, text="Copy", command=self.copy_last_answer, style="Secondary.TButton").pack(side="left", padx=(0, UI_SPACING["xs"]))
-        self.create_button(answer_action_bar, text="Export…", command=self.export_notes_to_markdown, style="Secondary.TButton").pack(side="left")
+        self.create_button(
+            answer_action_bar, text="Copy Answer", command=self.copy_last_answer,
+            style="Secondary.TButton",
+        ).pack(side="left", padx=(0, UI_SPACING["xs"]))
+        self.create_button(
+            answer_action_bar, text="Export Answer…", command=self.export_notes_to_markdown,
+            style="Secondary.TButton",
+        ).pack(side="left")
         self.answer_text = self.create_rich_text_surface(
             self.answer_tab, surface_id="answer_text", height=20, wrap=tk.WORD, state="disabled", font=("Segoe UI", 10)
         )
@@ -6572,10 +6362,10 @@ class AgenticRAGApp:
         self.sources_tree.bind("<<TreeviewSelect>>", self._on_source_selected)
 
         source_actions = self.create_frame(self.sources_tab)
-        source_actions.pack(fill="x", pady=(4, 2))
-        self.create_button(source_actions, text="Open source", command=self._open_selected_source, style="Secondary.TButton").pack(side="left")
-        self.create_button(source_actions, text="Copy breadcrumb", command=self._copy_selected_source_breadcrumb, style="Secondary.TButton").pack(side="left", padx=(4, 0))
-        self.create_button(source_actions, text="Open section", command=self._open_selected_source_section, style="Secondary.TButton").pack(side="left", padx=(4, 0))
+        source_actions.pack(fill="x", pady=(6, 4))
+        self.create_button(source_actions, text="Open selected source", command=self._open_selected_source, style="Secondary.TButton").pack(side="left")
+        self.create_button(source_actions, text="Copy breadcrumb", command=self._copy_selected_source_breadcrumb, style="Secondary.TButton").pack(side="left", padx=(6, 0))
+        self.create_button(source_actions, text="Open section", command=self._open_selected_source_section, style="Secondary.TButton").pack(side="left", padx=(6, 0))
 
         self.source_detail_text = self.create_rich_text_surface(
             self.sources_tab, surface_id="source_detail", height=8, wrap=tk.WORD, state="disabled", font=("Consolas", 9)
@@ -6587,7 +6377,7 @@ class AgenticRAGApp:
         self.source_detail_text.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
         self.incidents_json_tab = self.create_frame(self.evidence_notebook)
-        self.evidence_notebook.add(self.incidents_json_tab, text="Incidents")
+        self.evidence_notebook.add(self.incidents_json_tab, text="Incidents JSON")
         self.incidents_json_text = self.create_rich_text_surface(
             self.incidents_json_tab, surface_id="incidents_json", height=14, wrap=tk.NONE, state="disabled", font=("Consolas", 9)
         )
