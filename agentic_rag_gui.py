@@ -2968,6 +2968,11 @@ class AgenticRAGApp:
             button.grid(row=idx, column=0, sticky="ew", padx=UI_SPACING["m"], pady=(0, UI_SPACING["xs"]))
             self._sidebar_nav_buttons[view_key] = button
 
+        self.status_var = tk.StringVar(value="Ready")
+        self.backend_badge_var = tk.StringVar(value=f"Backend: {self.ui_backend.upper()}")
+        self.chat_llm_badge_var = tk.StringVar(value="🤖 LLM: --")
+        self.library_embedding_badge_var = tk.StringVar(value="🧬 Embeddings: --")
+
         self.tab_chat = self.create_frame(self.main_content_frame, style="Card.TFrame")
         self.tab_chat.grid(row=0, column=0, sticky="nsew")
         self.build_chat_tab()
@@ -2992,11 +2997,6 @@ class AgenticRAGApp:
         self._active_view = None
         self._switch_main_view("chat")
         self._ensure_tab_aliases()
-
-        self.status_var = tk.StringVar(value="Ready")
-        self.backend_badge_var = tk.StringVar(value=f"Backend: {self.ui_backend.upper()}")
-        self.chat_llm_badge_var = tk.StringVar(value="🤖 LLM: --")
-        self.library_embedding_badge_var = tk.StringVar(value="🧬 Embeddings: --")
 
         self._bind_accessibility_shortcuts()
         self._install_ui_state_watchers()
