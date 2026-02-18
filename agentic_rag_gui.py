@@ -1803,6 +1803,7 @@ class AgenticRAGApp:
             updated = (row["updated_at"] or "")[:19].replace("T", " ")
             iid = row["session_id"]
             self.sessions_tree.insert("", tk.END, iid=iid, values=(title, updated, row.get("active_profile") or "-", "▶ Resume"))
+        self._apply_tree_row_stripes(self.sessions_tree)
         self._refresh_history_details()
 
     def _on_history_search_change(self, _event=None):
@@ -3262,6 +3263,27 @@ class AgenticRAGApp:
             self.answer_text.tag_config("citation", foreground=palette["link"], underline=1, font=("Consolas", 9, "underline"))
         if hasattr(self, "sources_tree"):
             self.sources_tree.tag_configure("supporting", background=palette["supporting_bg"], foreground=palette["text"])
+        for tree_name in (
+            "sessions_tree",
+            "sources_tree",
+            "document_outline_tree",
+            "semantic_region_tree",
+            "events_tree",
+            "local_models_tree",
+        ):
+            tree = getattr(self, tree_name, None)
+            if tree is not None:
+                self._apply_tree_row_stripes(tree)
+
+    def _apply_tree_row_stripes(self, tree):
+        if not tree or not self._safe_widget_exists(tree):
+            return
+        tree.tag_configure("stripe", background=self._pal("stripe_alt", self._pal("surface_alt")))
+        for row_index, iid in enumerate(tree.get_children("")):
+            tags = [tag for tag in (tree.item(iid, "tags") or ()) if tag != "stripe"]
+            if row_index % 2 == 0:
+                tags.append("stripe")
+            tree.item(iid, tags=tuple(tags))
 
     def _tip(self, widget, text):
         self.tooltip_manager.register(widget, text)
@@ -4220,6 +4242,7 @@ class AgenticRAGApp:
                     iid=item["id"],
                     values=(model_type, item["name"], item["value"]),
                 )
+        self._apply_tree_row_stripes(self.local_models_tree)
 
     def remove_selected_local_model(self):
         selected = self._get_selected_local_model_entry()
@@ -7005,6 +7028,8 @@ class AgenticRAGApp:
             )
             self.semantic_region_tree.insert("", tk.END, values=(label, page_label, region_type, bbox_label))
 
+        self._apply_tree_row_stripes(self.semantic_region_tree)
+
         self._set_readonly_text(
             self.semantic_region_text,
             f"Loaded semantic layout regions: {len(regions)}",
@@ -7058,6 +7083,7 @@ class AgenticRAGApp:
                 _add_children(node_id, iid)
 
         _add_children(None, "")
+        self._apply_tree_row_stripes(self.document_outline_tree)
         doc_title = str(getattr(self, "_latest_sht_doc_title", "") or "").strip() or "current document"
         self._set_readonly_text(
             self.document_outline_text,
@@ -7133,6 +7159,7 @@ class AgenticRAGApp:
                     str(event.get("source_citation") or ""),
                 ),
             )
+        self._apply_tree_row_stripes(self.events_tree)
 
     def _open_selected_source(self):
         source_id, entry = self._selected_source_entry()
@@ -7317,6 +7344,8 @@ class AgenticRAGApp:
                 ),
             )
             self._source_id_by_tree_iid[sid] = source_id
+
+        self._apply_tree_row_stripes(self.sources_tree)
 
         normalized_incidents = []
         for incident in incidents or []:
