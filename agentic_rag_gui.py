@@ -3112,6 +3112,9 @@ class AgenticRAGApp:
     def _theme_ctk_widgets(self):
         palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
 
+        def pal(key, fallback_key=None, default=None):
+            return _pal(palette, key, fallback_key=fallback_key, default=default)
+
         def configure_if_supported(widget, **kwargs):
             try:
                 supported = widget.configure()
@@ -3128,54 +3131,55 @@ class AgenticRAGApp:
             class_name = widget.__class__.__name__
             if class_name.startswith("CTk"):
                 base_kwargs = {
-                    "fg_color": palette["surface"],
-                    "text_color": palette["text"],
-                    "border_color": palette["outline"],
+                    "fg_color": pal("surface", default="#161B22"),
+                    "text_color": pal("text", default="#E8EEF8"),
+                    "border_color": pal("outline", default="#2A3A4F"),
                     "corner_radius": STYLE_CONFIG.get("radius", 12),
                 }
                 if class_name == "CTkFrame":
-                    base_kwargs["fg_color"] = palette["surface"]
+                    base_kwargs["fg_color"] = pal("surface", default="#161B22")
                 elif class_name == "CTkLabel":
                     base_kwargs["fg_color"] = "transparent"
-                    base_kwargs["text_color"] = palette["text"]
+                    base_kwargs["text_color"] = pal("text", default="#E8EEF8")
                 elif class_name == "CTkButton":
                     base_kwargs.update(
                         {
-                            "fg_color": palette["primary"],
-                            "text_color": palette["selection_fg"],
-                            "hover_color": palette["secondary"],
+                            "fg_color": pal("primary", default="#58A6FF"),
+                            "text_color": pal("selection_fg", default="#F2F8FF"),
+                            "hover_color": pal("primary_hover", fallback_key="secondary", default="#79B8FF"),
+                            "border_color": pal("primary_pressed", fallback_key="primary", default="#3D8BDE"),
                             "border_width": 0,
                         }
                     )
                 elif class_name == "CTkEntry":
                     base_kwargs.update(
                         {
-                            "fg_color": palette["surface_alt"],
-                            "text_color": palette["text"],
-                            "placeholder_text_color": palette["muted_text"],
+                            "fg_color": pal("surface_alt", fallback_key="surface", default="#111823"),
+                            "text_color": pal("text", default="#E8EEF8"),
+                            "placeholder_text_color": pal("muted_text", default="#9FB2C8"),
                             "border_width": 1,
                         }
                     )
                 elif class_name == "CTkComboBox":
                     base_kwargs.update(
                         {
-                            "fg_color": palette["surface_alt"],
-                            "text_color": palette["text"],
-                            "button_color": palette["surface"],
-                            "button_hover_color": palette["secondary"],
-                            "dropdown_fg_color": palette["surface_alt"],
-                            "dropdown_text_color": palette["text"],
-                            "dropdown_hover_color": palette["selection_bg"],
+                            "fg_color": pal("surface_alt", fallback_key="surface", default="#111823"),
+                            "text_color": pal("text", default="#E8EEF8"),
+                            "button_color": pal("primary", default="#58A6FF"),
+                            "button_hover_color": pal("primary_hover", fallback_key="secondary", default="#79B8FF"),
+                            "dropdown_fg_color": pal("surface_alt", fallback_key="surface", default="#111823"),
+                            "dropdown_text_color": pal("text", default="#E8EEF8"),
+                            "dropdown_hover_color": pal("primary_pressed", fallback_key="selection_bg", default="#3D8BDE"),
                             "border_width": 1,
                         }
                     )
                 elif class_name in {"CTkCheckBox", "CTkRadioButton"}:
                     base_kwargs.update(
                         {
-                            "fg_color": palette["primary"],
-                            "hover_color": palette["secondary"],
-                            "text_color": palette["text"],
-                            "border_color": palette["outline"],
+                            "fg_color": pal("primary", default="#58A6FF"),
+                            "hover_color": pal("primary_hover", fallback_key="secondary", default="#79B8FF"),
+                            "text_color": pal("text", default="#E8EEF8"),
+                            "border_color": pal("outline", default="#2A3A4F"),
                         }
                     )
                 configure_if_supported(widget, **base_kwargs)
@@ -5146,9 +5150,9 @@ class AgenticRAGApp:
         ).pack(side="left", padx=(8, 8))
         self.create_button(toggle_row, text="Apply", command=self._apply_startup_mode_setting, style="Secondary.TButton").pack(side="left")
 
-        appearance_section = CollapsibleFrame(frame, "Appearance", expanded=False, animator=self._animator)
-        appearance_section.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
-        self._register_settings_section(appearance_section, "Appearance")
+        appearance_section = CollapsibleFrame(frame, "◆ Appearance", expanded=False, animator=self._animator)
+        appearance_section.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, UI_SPACING["m"]))
+        self._register_settings_section(appearance_section, "◆ Appearance")
         self.create_label(appearance_section.content, text="Controls the visual theme applied to the entire interface.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
         self.create_label(appearance_section.content, text="Theme mode:").pack(side="left")
         self.create_combobox(
@@ -5160,9 +5164,9 @@ class AgenticRAGApp:
         ).pack(side="left", padx=(8, 8))
         self.create_button(appearance_section.content, text="Apply Theme", command=self._apply_theme, style="Primary.TButton").pack(side="left")
 
-        self.settings_model_section = CollapsibleFrame(frame, "Model & Provider", expanded=False, animator=self._animator)
-        self.settings_model_section.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
-        self._register_settings_section(self.settings_model_section, "Model & Provider")
+        self.settings_model_section = CollapsibleFrame(frame, "⚙ Model & Provider", expanded=False, animator=self._animator)
+        self.settings_model_section.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, UI_SPACING["m"]))
+        self._register_settings_section(self.settings_model_section, "⚙ Model & Provider")
         self.create_label(self.settings_model_section.content, text="Set the LLM provider, generation model, embedding model, vector DB, API keys, and local model registry.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
 
         # --- LLM Provider Settings ---
@@ -5340,23 +5344,27 @@ class AgenticRAGApp:
         )
         self.local_gguf_install_btn.grid(row=20, column=1, sticky="w", padx=5, pady=(0, 6))
 
-        self.create_label(llm_frame, text="Temperature:").grid(row=21, column=0, sticky="w")
-        self.create_entry(llm_frame, textvariable=self.llm_temperature).grid(
-            row=21, column=1, sticky="ew", padx=5, pady=5
+        self.create_label(llm_frame, text="Sampling & limits:").grid(row=21, column=0, sticky="w")
+        sampling_row = self.create_frame(llm_frame)
+        sampling_row.grid(row=21, column=1, sticky="ew", padx=5, pady=5)
+        sampling_row.columnconfigure(1, weight=1)
+        sampling_row.columnconfigure(3, weight=1)
+        self.create_label(sampling_row, text="Temperature:").grid(row=0, column=0, sticky="w")
+        self.create_entry(sampling_row, textvariable=self.llm_temperature, width=10).grid(
+            row=0, column=1, sticky="ew", padx=(6, UI_SPACING["m"])
         )
-
-        self.create_label(llm_frame, text="Max Tokens:").grid(row=22, column=0, sticky="w")
-        self.create_entry(llm_frame, textvariable=self.llm_max_tokens).grid(
-            row=22, column=1, sticky="ew", padx=5, pady=5
+        self.create_label(sampling_row, text="Max Tokens:").grid(row=0, column=2, sticky="w")
+        self.create_entry(sampling_row, textvariable=self.llm_max_tokens, width=10).grid(
+            row=0, column=3, sticky="ew", padx=(6, 0)
         )
 
         self.create_label(llm_frame, text="System Instructions:").grid(
-            row=23, column=0, sticky="nw"
+            row=22, column=0, sticky="nw"
         )
         self.instructions_box = self.create_textbox(
             llm_frame, height=6, font=("Segoe UI", 9)
         )
-        self.instructions_box.grid(row=23, column=1, sticky="ew", padx=5, pady=5)
+        self.instructions_box.grid(row=22, column=1, sticky="ew", padx=5, pady=5)
         self.instructions_box.insert(tk.END, self.system_instructions.get())
         self.instructions_box.bind("<KeyRelease>", self._on_instructions_change)
         self.create_checkbox(
@@ -5364,7 +5372,7 @@ class AgenticRAGApp:
             text="Verbose/Analytical mode",
             variable=self.verbose_mode,
             command=self._on_verbose_mode_toggle,
-        ).grid(row=24, column=1, sticky="w", padx=5, pady=(0, 5))
+        ).grid(row=23, column=1, sticky="w", padx=5, pady=(0, 5))
 
         self._update_local_gguf_ui_state()
         self._update_local_sentence_transformers_ui_state()
@@ -5500,10 +5508,10 @@ class AgenticRAGApp:
         ).grid(row=1, column=1, sticky="w", pady=(8, 0))
 
 
-        retrieval_section = CollapsibleFrame(frame, "Retrieval", expanded=False, animator=self._animator)
-        retrieval_section.grid(row=7, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        retrieval_section = CollapsibleFrame(frame, "🔎 Retrieval", expanded=False, animator=self._animator)
+        retrieval_section.grid(row=7, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, UI_SPACING["m"]))
         self.settings_retrieval_section = retrieval_section
-        self._register_settings_section(self.settings_retrieval_section, "Retrieval")
+        self._register_settings_section(self.settings_retrieval_section, "🔎 Retrieval")
         self.create_label(retrieval_section.content, text="Controls search type, retrieval mode, MMR parameters, reranking, and sub-query expansion.", style="Muted.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
         self.create_label(retrieval_section.content, text="Search Type:").grid(row=1, column=0, sticky="w")
         self.create_combobox(
@@ -5544,10 +5552,10 @@ class AgenticRAGApp:
             style="Secondary.TButton",
         ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
-        agentic_section = CollapsibleFrame(frame, "Agentic / Iterations", expanded=False, animator=self._animator)
-        agentic_section.grid(row=8, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        agentic_section = CollapsibleFrame(frame, "🧠 Agentic / Iterations", expanded=False, animator=self._animator)
+        agentic_section.grid(row=8, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, UI_SPACING["m"]))
         self.settings_agentic_section = agentic_section
-        self._register_settings_section(self.settings_agentic_section, "Agentic / Iterations", advanced_only=True)
+        self._register_settings_section(self.settings_agentic_section, "🧠 Agentic / Iterations", advanced_only=True)
         self.create_label(agentic_section.content, text="Enables multi-iteration retrieval where a critic refines queries between passes to improve coverage.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
         self.create_checkbox(
             agentic_section.content,
@@ -5570,10 +5578,10 @@ class AgenticRAGApp:
             variable=self.show_retrieved_context,
         ).pack(side="left")
 
-        frontier_section = CollapsibleFrame(frame, "Frontier", expanded=False, animator=self._animator)
-        frontier_section.grid(row=9, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        frontier_section = CollapsibleFrame(frame, "🧪 Frontier", expanded=False, animator=self._animator)
+        frontier_section.grid(row=9, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, UI_SPACING["m"]))
         self.settings_frontier_section = frontier_section
-        self._register_settings_section(self.settings_frontier_section, "Frontier", advanced_only=True)
+        self._register_settings_section(self.settings_frontier_section, "🧪 Frontier", advanced_only=True)
         self.create_label(frontier_section.content, text="Experimental features: citation v2, structured extraction, recursive memory, and agent tracing. May be unstable.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
         self.create_checkbox(frontier_section.content, text="Enable langextract", variable=self.enable_langextract).pack(anchor="w")
         self.create_checkbox(frontier_section.content, text="Structured Extraction", variable=self.enable_structured_extraction).pack(anchor="w")
@@ -5585,9 +5593,9 @@ class AgenticRAGApp:
         self.create_checkbox(frontier_section.content, text="Claim-level grounding (CiteFix-lite)", variable=self.enable_claim_level_grounding_citefix_lite).pack(anchor="w")
         self.create_checkbox(frontier_section.content, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
 
-        profile_section = CollapsibleFrame(frame, "Profiles", expanded=True, animator=self._animator)
-        profile_section.grid(row=10, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
-        self._register_settings_section(profile_section, "Profiles")
+        profile_section = CollapsibleFrame(frame, "🗂 Profiles", expanded=True, animator=self._animator)
+        profile_section.grid(row=10, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, UI_SPACING["m"]))
+        self._register_settings_section(profile_section, "🗂 Profiles")
         self.create_label(profile_section.content, text="Save and restore named configuration snapshots to switch between different use-case setups quickly.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
         profile_row = self.create_frame(profile_section.content)
         profile_row.pack(fill="x")
