@@ -447,65 +447,131 @@ class LocalLlamaCppChatModel:
 STYLE_CONFIG = {
     "font_family": "SF Pro Text",
     "fallback_font": "Segoe UI",
+    "mono_font": "SF Mono",
+    "fallback_mono_font": "Consolas",
     "radius": 12,
+    "radius_sm": 8,
+    "radius_lg": 16,
     "padding": {"sm": 6, "md": 10, "lg": 16},
+    "type_scale": {
+        "h1": {"size": 20, "weight": "bold"},
+        "h2": {"size": 16, "weight": "bold"},
+        "h3": {"size": 13, "weight": "bold"},
+        "body": {"size": 10, "weight": "normal"},
+        "body_bold": {"size": 10, "weight": "bold"},
+        "caption": {"size": 9, "weight": "normal"},
+        "code": {"size": 10, "weight": "normal"},
+        "overline": {"size": 8, "weight": "bold"},
+    },
+    "animation": {
+        "collapse": 180,
+        "tooltip": 120,
+        "theme": 220,
+        "message": 160,
+        "progress": 700,
+    },
     "themes": {
         "space_dust": {
-            "bg": "#11161E",
-            "surface": "#1A2230",
+            "bg": "#0D1117",
+            "surface": "#161B22",
+            "surface_elevated": "#1F2630",
             "surface_alt": "#212C3D",
             "text": "#E8EEF8",
             "muted_text": "#96A6BE",
-            "primary": "#5BD6F8",
-            "secondary": "#42BFD1",
+            "primary": "#58A6FF",
+            "primary_hover": "#79B8FF",
+            "primary_pressed": "#3D8BDE",
+            "secondary": "#3B8ED9",
             "tertiary": "#6B87FF",
             "border": "#2A3A4F",
             "outline": "#33465F",
             "status": "#AFC1D9",
             "danger": "#FF7A8C",
+            "danger_hover": "#FF95A3",
             "success": "#55D6A2",
+            "success_hover": "#72E2B3",
+            "warning": "#E3B341",
             "selection_bg": "#294B66",
             "selection_fg": "#F2F8FF",
+            "chat_user_bg": "#1B3551",
+            "chat_agent_bg": "#1E2633",
+            "chat_system_bg": "#2A2D1D",
+            "input_bg": "#0F1621",
+            "badge_bg": "#273447",
+            "stripe_alt": "#131A24",
+            "focus_ring": "#79B8FF",
+            "tab_indicator": "#58A6FF",
+            "progress_pulse": "#8BC2FF",
             "link": "#79DEFF",
             "source": "#7A89A0",
             "supporting_bg": "#213E56",
         },
         "light": {
-            "bg": "#F5F6F8",
+            "bg": "#F6F8FA",
             "surface": "#FFFFFF",
+            "surface_elevated": "#F2F4F8",
             "surface_alt": "#EEF1F6",
             "text": "#101114",
-            "muted_text": "#495162",
-            "primary": "#0A84FF",
+            "muted_text": "#3E4655",
+            "primary": "#0969DA",
+            "primary_hover": "#1F7AE0",
+            "primary_pressed": "#0757B8",
             "secondary": "#2D6DDA",
             "tertiary": "#5A5EC7",
             "border": "#D5DAE2",
             "outline": "#C7CED8",
             "status": "#2D3340",
             "danger": "#B64343",
+            "danger_hover": "#C95959",
             "success": "#257A4A",
+            "success_hover": "#2D9059",
+            "warning": "#9A6700",
             "selection_bg": "#CFE3FF",
             "selection_fg": "#101114",
+            "chat_user_bg": "#DDEBFF",
+            "chat_agent_bg": "#F1F4F8",
+            "chat_system_bg": "#FFF8D6",
+            "input_bg": "#FFFFFF",
+            "badge_bg": "#E6EBF2",
+            "stripe_alt": "#F9FBFD",
+            "focus_ring": "#2F81F7",
+            "tab_indicator": "#0969DA",
+            "progress_pulse": "#6FA8F3",
             "link": "#1254A3",
             "source": "#626C7E",
             "supporting_bg": "#FFF4CC",
         },
         "dark": {
-            "bg": "#16181D",
-            "surface": "#1F232B",
+            "bg": "#0D1117",
+            "surface": "#161B22",
+            "surface_elevated": "#232A35",
             "surface_alt": "#2A303B",
             "text": "#F7F8FA",
-            "muted_text": "#C3CAD6",
-            "primary": "#64D2FF",
+            "muted_text": "#B6C0CE",
+            "primary": "#58A6FF",
+            "primary_hover": "#79B8FF",
+            "primary_pressed": "#3D8BDE",
             "secondary": "#58B5D6",
             "tertiary": "#8C95F2",
             "border": "#3A4352",
             "outline": "#465163",
             "status": "#D7DCEA",
             "danger": "#FF8A8A",
+            "danger_hover": "#FFAAAA",
             "success": "#70D39F",
+            "success_hover": "#85DEB0",
+            "warning": "#D29922",
             "selection_bg": "#2E415C",
             "selection_fg": "#F7F8FA",
+            "chat_user_bg": "#213A58",
+            "chat_agent_bg": "#232A35",
+            "chat_system_bg": "#31311E",
+            "input_bg": "#111823",
+            "badge_bg": "#2A3443",
+            "stripe_alt": "#121922",
+            "focus_ring": "#79B8FF",
+            "tab_indicator": "#58A6FF",
+            "progress_pulse": "#8BC2FF",
             "link": "#8EDFFF",
             "source": "#A8B2C3",
             "supporting_bg": "#334A63",
@@ -513,7 +579,18 @@ STYLE_CONFIG = {
     },
 }
 
-UI_SPACING = {"xs": 4, "s": 8, "m": 12, "l": 18, "xl": 24}
+
+def _pal(palette, key, fallback_key=None, default=None):
+    if not isinstance(palette, dict):
+        return default
+    if key in palette:
+        return palette.get(key)
+    if fallback_key is not None:
+        return palette.get(fallback_key, default)
+    return default
+
+
+UI_SPACING = {"xs": 4, "s": 8, "m": 12, "l": 18, "xl": 24, "xxl": 32}
 FORM_WIDTHS = {"label": 22, "input": 28}
 
 try:
@@ -861,12 +938,12 @@ class TooltipManager:
             return
         if self._tooltip_window is None or not self._tooltip_window.winfo_exists():
             self._create_tooltip_window()
-        palette = self.get_palette() or STYLE_CONFIG["themes"]["space_dust"]
-        self._tooltip_window.configure(bg=palette["border"])
+        palette = self.get_palette() or STYLE_CONFIG["themes"].get("space_dust", {})
+        self._tooltip_window.configure(bg=_pal(palette, "border", default="#2A3A4F"))
         self._tooltip_label.configure(
             text=text,
-            bg=palette["surface_alt"],
-            fg=palette["text"],
+            bg=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"),
+            fg=_pal(palette, "text", default="#E8EEF8"),
             wraplength=self.wrap_px,
             padx=10,
             pady=7,
@@ -2670,19 +2747,21 @@ class AgenticRAGApp:
 
         if self.ui_backend == "ttkbootstrap" and TTKBOOTSTRAP_MODULE is not None:
             self._ttkbootstrap_style = TTKBOOTSTRAP_MODULE.Style(theme="darkly")
-            palette = STYLE_CONFIG["themes"]["space_dust"]
-            self._ttkbootstrap_style.configure(".", background=palette["bg"], foreground=palette["text"])
-            self._ttkbootstrap_style.configure("TFrame", background=palette["bg"])
-            self._ttkbootstrap_style.configure("TLabel", background=palette["surface"], foreground=palette["text"])
-            self._ttkbootstrap_style.configure("TNotebook", background=palette["bg"])
-            self._ttkbootstrap_style.configure("TNotebook.Tab", background=palette["surface_alt"], foreground=palette["text"])
-            self._ttkbootstrap_style.configure("TButton", background=palette["primary"], foreground=palette["selection_fg"])
-            self._ttkbootstrap_style.configure("TEntry", fieldbackground=palette["surface_alt"], foreground=palette["text"])
-            self._ttkbootstrap_style.configure("Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"])
-            self.root.configure(bg=palette["bg"])
+            palette = STYLE_CONFIG["themes"].get("space_dust", {})
+            self._ttkbootstrap_style.configure(".", background=_pal(palette, "bg", default="#0D1117"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self._ttkbootstrap_style.configure("TFrame", background=_pal(palette, "bg", default="#0D1117"))
+            self._ttkbootstrap_style.configure("TLabel", background=_pal(palette, "surface", default="#161B22"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self._ttkbootstrap_style.configure("TNotebook", background=_pal(palette, "bg", default="#0D1117"))
+            self._ttkbootstrap_style.configure("TNotebook.Tab", background=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self._ttkbootstrap_style.configure("TButton", background=_pal(palette, "primary", default="#58A6FF"), foreground=_pal(palette, "selection_fg", default="#F2F8FF"))
+            self._ttkbootstrap_style.configure("TEntry", fieldbackground=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self._ttkbootstrap_style.configure("Treeview", background=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), fieldbackground=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self.root.configure(bg=_pal(palette, "bg", default="#0D1117"))
 
     def _apply_theme(self):
-        palette = STYLE_CONFIG["themes"].get(self.ui_mode.get(), STYLE_CONFIG["themes"]["space_dust"])
+        base_palette = STYLE_CONFIG["themes"].get("space_dust", {})
+        selected_palette = STYLE_CONFIG["themes"].get(self.ui_mode.get(), base_palette)
+        palette = {**base_palette, **selected_palette}
         self._active_palette = palette
 
         if self.ui_backend == "ctk" and CTK_MODULE is not None:
