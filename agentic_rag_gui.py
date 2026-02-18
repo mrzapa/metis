@@ -6267,8 +6267,14 @@ class AgenticRAGApp:
             style="Badge.TLabel",
         ).pack(side="right", anchor="ne")
 
-        sel_frame = self.create_frame(frame, text="STEP 1 · Source file", padding=UI_SPACING["m"], kind="labelframe")
+        # Track which steps have been revealed so progress persists when the tab is revisited.
+        if not hasattr(self, "_lib_steps_revealed"):
+            self._lib_steps_revealed = 1
+
+        # ── STEP 1 · Source file (always visible) ──────────────────────────
+        sel_frame = self.create_frame(frame, text="Step 1 · Source file", padding=UI_SPACING["m"], kind="labelframe")
         sel_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        self._lib_step1_frame = sel_frame
 
         self.create_label(
             sel_frame,
@@ -6298,8 +6304,38 @@ class AgenticRAGApp:
         self.create_button(file_btn_frame, text="Browse File...", command=self.browse_file, style="Primary.TButton").pack(side="left")
         self.create_button(file_btn_frame, text="Clear Selection", command=self.clear_selected_file, style="Secondary.TButton").pack(side="left", padx=UI_SPACING["s"])
 
-        chunk_frame = self.create_frame(frame, text="STEP 2 · Chunking strategy", padding=UI_SPACING["m"], kind="labelframe")
-        chunk_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        # Recommendation preview shown once a file is selected
+        self._lib_step1_rec_var = tk.StringVar(value="")
+        self.create_label(
+            sel_frame,
+            textvariable=self._lib_step1_rec_var,
+            style="Muted.TLabel",
+            wraplength=920,
+            justify="left",
+        ).pack(anchor="w", pady=(UI_SPACING["s"], 0))
+
+        step1_nav = self.create_frame(sel_frame)
+        step1_nav.pack(fill="x", pady=(UI_SPACING["m"], 0))
+        has_file = bool(self.selected_file)
+        self._lib_step1_continue = self.create_button(
+            step1_nav,
+            text="Confirm & Continue to Step 2 →",
+            command=self._lib_advance_to_step2,
+            style="Primary.TButton",
+            state="normal" if has_file else "disabled",
+        )
+        self._lib_step1_continue.pack(side="right")
+
+        if has_file:
+            self.lbl_file.config(text=self.selected_file, style="TLabel")
+            self._update_file_info()
+            rec = self._recommend_auto_settings(file_path=self.selected_file)
+            self._lib_step1_rec_var.set("Recommendation: " + self._describe_auto_recommendation(rec))
+
+        # ── STEP 2 · Chunking strategy (revealed after Step 1) ─────────────
+        chunk_frame = self.create_frame(frame, text="Step 2 · Chunking strategy", padding=UI_SPACING["m"], kind="labelframe")
+        self._lib_step2_frame = chunk_frame
+        # Packed by _lib_advance_to_step2 / _lib_reveal_steps
 
         chunk_frame.columnconfigure(1, weight=1)
         chunk_frame.columnconfigure(3, weight=1)
@@ -6341,16 +6377,32 @@ class AgenticRAGApp:
         )
         self.chk_semantic_layout.grid(row=2, column=2, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
 
+        # Auto-recommendation display (part of Step 2)
         self.auto_recommendation_var = tk.StringVar(value="Auto recommendation: waiting for file/index metadata.")
         self.auto_warning_var = tk.StringVar(value="")
         auto_frame = self.create_frame(frame)
-        auto_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        self._lib_auto_frame = auto_frame
+        # Packed with Step 2
         self.create_label(auto_frame, textvariable=self.auto_recommendation_var, style="Muted.TLabel", wraplength=980, justify="left").pack(anchor="w")
         self.create_label(auto_frame, textvariable=self.auto_warning_var, style="Danger.TLabel", wraplength=980, justify="left").pack(anchor="w", pady=(2, 0))
         self.create_button(auto_frame, text="Apply recommendations", command=lambda: self._apply_auto_recommendations()).pack(anchor="w", pady=(6, 0))
 
-        comprehension_frame = self.create_frame(frame, text="STEP 3 · Optional comprehension index", padding=UI_SPACING["m"], kind="labelframe")
-        comprehension_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        # Step 2 → continue nav bar
+        self._lib_step2_nav_frame = self.create_frame(frame)
+        step2_nav = self._lib_step2_nav_frame
+        # Packed with Step 2
+        self._lib_step2_continue = self.create_button(
+            step2_nav,
+            text="Confirm Settings & Continue to Step 3 →",
+            command=self._lib_advance_to_step3,
+            style="Primary.TButton",
+        )
+        self._lib_step2_continue.pack(side="right")
+
+        # ── STEP 3 · Optional comprehension index (revealed after Step 2) ───
+        comprehension_frame = self.create_frame(frame, text="Step 3 · Optional comprehension index", padding=UI_SPACING["m"], kind="labelframe")
+        self._lib_step3_frame = comprehension_frame
+        # Packed by _lib_advance_to_step3
 
         self.create_checkbox(
             comprehension_frame,
@@ -6373,8 +6425,13 @@ class AgenticRAGApp:
             variable=self.experimental_override,
         ).pack(side="left", padx=(20, 0))
 
+        # ── Build Index action area (revealed with Step 3) ─────────────────
+        self._lib_build_frame = self.create_frame(frame)
+        build_frame = self._lib_build_frame
+        # Packed by _lib_advance_to_step3
+
         self.btn_ingest = self.create_button(
-            frame,
+            build_frame,
             text="Build Index (Process → Chunk → Embed → Store)",
             command=self.start_ingestion,
             style="Primary.TButton",
@@ -6382,15 +6439,15 @@ class AgenticRAGApp:
         self.btn_ingest.pack(fill="x", pady=(0, UI_SPACING["s"]))
 
         self.btn_cancel_ingest = self.create_button(
-            frame,
+            build_frame,
             text="Cancel Ingestion",
             command=lambda: self.cancel_active_job("ingestion"),
             state="disabled",
             style="Danger.TButton",
         )
-        self.btn_cancel_ingest.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        self.btn_cancel_ingest.pack(fill="x", pady=(0, UI_SPACING["s"]))
 
-        progress_row = self.create_frame(frame, style="Card.TFrame")
+        progress_row = self.create_frame(build_frame, style="Card.TFrame")
         progress_row.pack(fill="x")
         progress_row.columnconfigure(0, weight=1)
 
@@ -6404,13 +6461,16 @@ class AgenticRAGApp:
         )
         self.ingest_stage_label.grid(row=0, column=1, sticky="e", padx=(UI_SPACING["s"], 0))
         self.create_label(
-            frame,
+            build_frame,
             text="Progress is shown while indexing runs. Detailed stage output appears in Logs.",
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
-        outline_frame = self.create_frame(frame, text="STEP 4 · Document Outline", padding=UI_SPACING["m"], kind="labelframe")
-        outline_frame.pack(fill="both", expand=True, pady=(UI_SPACING["m"], 0))
+        # ── Document Outline (revealed after successful ingestion) ──────────
+        outline_frame = self.create_frame(frame, text="Document Outline", padding=UI_SPACING["m"], kind="labelframe")
+        self._lib_outline_frame = outline_frame
+        # Packed by _lib_reveal_post_ingestion
+
         self.create_label(
             outline_frame,
             text="Populated after successful structure-aware ingestion when an SHT is generated.",
@@ -6447,8 +6507,11 @@ class AgenticRAGApp:
             "No SHT outline available yet. Enable Structure-aware and ingest a document with confident headers.",
         )
 
-        semantic_frame = self.create_frame(frame, text="STEP 5 · Semantic Regions", padding=UI_SPACING["m"], kind="labelframe")
-        semantic_frame.pack(fill="both", expand=True, pady=(UI_SPACING["m"], 0))
+        # ── Semantic Regions (revealed after successful ingestion) ──────────
+        semantic_frame = self.create_frame(frame, text="Semantic Regions", padding=UI_SPACING["m"], kind="labelframe")
+        self._lib_semantic_frame = semantic_frame
+        # Packed by _lib_reveal_post_ingestion
+
         self.create_label(
             semantic_frame,
             text="Populated when Semantic Layout segmentation succeeds.",
@@ -6484,9 +6547,60 @@ class AgenticRAGApp:
             self.semantic_region_text,
             "No semantic regions available yet. Enable Semantic Layout (experimental) and ingest a PDF.",
         )
+
+        # Restore revealed steps from a previous visit to this tab
+        self._lib_reveal_steps()
+
         self._apply_tooltips_for_tab("library", frame)
         self._update_current_state_strip()
         self._maybe_autofill_recommendations()
+
+    # ── Library sequential-step helpers ────────────────────────────────────
+
+    def _lib_reveal_steps(self):
+        """Pack step frames up to the level the user has already reached."""
+        steps = getattr(self, "_lib_steps_revealed", 1)
+        if steps >= 2:
+            for w in (self._lib_step2_frame, self._lib_auto_frame, self._lib_step2_nav_frame):
+                if self._safe_widget_exists(w) and not w.winfo_ismapped():
+                    w.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        if steps >= 3:
+            for w in (self._lib_step3_frame, self._lib_build_frame):
+                if self._safe_widget_exists(w) and not w.winfo_ismapped():
+                    w.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        if steps >= 4:
+            for w in (self._lib_outline_frame, self._lib_semantic_frame):
+                if self._safe_widget_exists(w) and not w.winfo_ismapped():
+                    w.pack(fill="both", expand=True, pady=(UI_SPACING["m"], 0))
+
+    def _lib_advance_to_step2(self):
+        """Validate Step 1, apply smart recommendations, then reveal Step 2."""
+        if not self.selected_file:
+            messagebox.showerror("Library", "Please select a file to continue.")
+            return
+        # Apply recommendations tuned to the chosen file before showing Step 2
+        rec = self._recommend_auto_settings(file_path=self.selected_file)
+        self._apply_auto_recommendations(rec)
+        self._lib_steps_revealed = max(getattr(self, "_lib_steps_revealed", 1), 2)
+        for w in (self._lib_step2_frame, self._lib_auto_frame, self._lib_step2_nav_frame):
+            if self._safe_widget_exists(w) and not w.winfo_ismapped():
+                w.pack(fill="x", pady=(0, UI_SPACING["m"]))
+
+    def _lib_advance_to_step3(self):
+        """Reveal Step 3 (comprehension index options) and the Build Index area."""
+        self._lib_steps_revealed = max(getattr(self, "_lib_steps_revealed", 2), 3)
+        for w in (self._lib_step3_frame, self._lib_build_frame):
+            if self._safe_widget_exists(w) and not w.winfo_ismapped():
+                w.pack(fill="x", pady=(0, UI_SPACING["m"]))
+
+    def _lib_reveal_post_ingestion(self):
+        """Reveal the Document Outline and Semantic Regions panels after ingestion succeeds."""
+        self._lib_steps_revealed = max(getattr(self, "_lib_steps_revealed", 3), 4)
+        # Widgets only exist if the Library tab has been opened; skip silently if not.
+        for attr in ("_lib_outline_frame", "_lib_semantic_frame"):
+            w = getattr(self, attr, None)
+            if w is not None and self._safe_widget_exists(w) and not w.winfo_ismapped():
+                w.pack(fill="both", expand=True, pady=(UI_SPACING["m"], 0))
 
     def build_chat_tab(self):
         self._ensure_ui_badge_vars()
@@ -11361,6 +11475,18 @@ class AgenticRAGApp:
             self._update_file_info()
             self._update_current_state_strip()
             self._maybe_autofill_recommendations()
+            # Enable the Step 1 continue button and show a recommendation preview
+            if hasattr(self, "_lib_step1_continue") and self._safe_widget_exists(self._lib_step1_continue):
+                try:
+                    self._lib_step1_continue.config(state="normal")
+                except tk.TclError:
+                    pass
+            if hasattr(self, "_lib_step1_rec_var"):
+                try:
+                    rec = self._recommend_auto_settings(file_path=f)
+                    self._lib_step1_rec_var.set("Recommendation: " + self._describe_auto_recommendation(rec))
+                except Exception:
+                    pass
 
     def clear_selected_file(self):
         self.selected_file = None
@@ -11369,6 +11495,14 @@ class AgenticRAGApp:
             self.lbl_file_info.config(text="")
         self._update_current_state_strip()
         self._maybe_autofill_recommendations()
+        # Disable Step 1 continue button and clear the recommendation preview
+        if hasattr(self, "_lib_step1_continue") and self._safe_widget_exists(self._lib_step1_continue):
+            try:
+                self._lib_step1_continue.config(state="disabled")
+            except tk.TclError:
+                pass
+        if hasattr(self, "_lib_step1_rec_var"):
+            self._lib_step1_rec_var.set("")
 
     def _update_file_info(self):
         if not self.selected_file:
@@ -15681,6 +15815,7 @@ class AgenticRAGApp:
             self.log("Ingestion Complete! You can now chat.")
             self._run_on_ui(self._refresh_document_outline_panel)
             self._run_on_ui(self._refresh_semantic_region_panel)
+            self._run_on_ui(self._lib_reveal_post_ingestion)
             self._clear_error_state()
             self._run_on_ui(self._set_startup_status, "Ingestion complete")
             if new_index_path:
