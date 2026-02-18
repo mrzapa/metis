@@ -2840,6 +2840,33 @@ class AgenticRAGApp:
             except Exception as exc:
                 logger.debug("unable to set .png window icon: %s", exc)
 
+    def load_sidebar_logo(self):
+        """Best-effort sidebar logo loading; returns a Tk image or None."""
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        assets_dir = os.path.join(script_dir, "assets")
+        logo_candidates = [
+            os.path.join(assets_dir, "axiom_logo.png"),
+            os.path.join(assets_dir, "axiom.png"),
+            os.path.join(assets_dir, "app.png"),
+        ]
+
+        for logo_path in logo_candidates:
+            if not os.path.exists(logo_path):
+                continue
+            try:
+                logo = tk.PhotoImage(file=logo_path)
+                max_dim = 120
+                width = max(1, int(logo.width()))
+                height = max(1, int(logo.height()))
+                downsample = max(1, (max(width, height) + max_dim - 1) // max_dim)
+                if downsample > 1:
+                    logo = logo.subsample(downsample, downsample)
+                return logo
+            except Exception as exc:
+                logger.debug("unable to load sidebar logo %s: %s", logo_path, exc)
+
+        return None
+
     def _get_required_packages(self):
         return [
             "langchain",
@@ -2946,8 +2973,19 @@ class AgenticRAGApp:
         self.main_content_frame.grid_rowconfigure(0, weight=1)
         self.main_content_frame.grid_columnconfigure(0, weight=1)
 
-        self.sidebar_title = self.create_label(self.sidebar_frame, text="App Title", style="Header.TLabel")
-        self.sidebar_title.grid(row=0, column=0, sticky="w", padx=UI_SPACING["m"], pady=(UI_SPACING["m"], UI_SPACING["l"]))
+        self._sidebar_logo_photo = self.load_sidebar_logo()
+        if self._sidebar_logo_photo is not None:
+            self.sidebar_logo = self.create_label(self.sidebar_frame, image=self._sidebar_logo_photo)
+            self.sidebar_logo.grid(row=0, column=0, sticky="n", padx=UI_SPACING["m"], pady=(UI_SPACING["m"], UI_SPACING["xs"]))
+
+        self.sidebar_title = self.create_label(self.sidebar_frame, text=APP_NAME, style="Header.TLabel")
+        self.sidebar_title.grid(
+            row=1,
+            column=0,
+            sticky="w",
+            padx=UI_SPACING["m"],
+            pady=((UI_SPACING["xs"] if self._sidebar_logo_photo is not None else UI_SPACING["m"]), UI_SPACING["l"]),
+        )
 
         self._sidebar_nav_buttons = {}
         nav_items = [
@@ -2956,7 +2994,7 @@ class AgenticRAGApp:
             ("history", "🕘 History"),
             ("settings", "⚙️ Settings"),
         ]
-        for idx, (view_key, label) in enumerate(nav_items, start=1):
+        for idx, (view_key, label) in enumerate(nav_items, start=2):
             if self.ui_backend == "ctk" and CTK_MODULE is not None:
                 button = CTK_MODULE.CTkButton(
                     self.sidebar_frame,
