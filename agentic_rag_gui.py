@@ -2965,7 +2965,15 @@ class AgenticRAGApp:
     def _resolve_fonts(self):
         families = set(tkfont.families())
         base_family = STYLE_CONFIG["font_family"] if STYLE_CONFIG["font_family"] in families else STYLE_CONFIG["fallback_font"]
-        mono_candidates = ("SF Mono", "Consolas", "Cascadia Code", "Menlo", "Courier New", "TkFixedFont")
+
+        mono_candidates = (
+            STYLE_CONFIG.get("mono_font", "SF Mono"),
+            STYLE_CONFIG.get("fallback_mono_font", "Consolas"),
+            "Cascadia Code",
+            "Menlo",
+            "Courier New",
+            "TkFixedFont",
+        )
         code_family = next((family for family in mono_candidates if family in families), base_family)
 
         type_scale = STYLE_CONFIG.get("type_scale", {})
