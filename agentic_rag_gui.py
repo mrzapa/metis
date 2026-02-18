@@ -1143,6 +1143,89 @@ class CollapsibleFrame(ttk.Frame):
             self._expand()
 
 
+class RoundedCard(tk.Canvas):
+    """Canvas-backed card widget with rounded corners for a Material U aesthetic.
+
+    Children should be placed inside `card.inner` (a plain tk.Frame).
+
+    Example::
+
+        card = RoundedCard(parent, radius=16, bg=palette["surface"],
+                           border_color=palette["outline"], border_width=1)
+        ttk.Label(card.inner, text="Title", style="Bold.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
+        card.pack(fill="x", padx=8, pady=4)
+    """
+
+    def __init__(self, parent, radius=12, bg="#161B22", outer_bg=None,
+                 border_color="#33465F", border_width=1, **kwargs):
+        kwargs.setdefault("highlightthickness", 0)
+        kwargs.setdefault("bd", 0)
+        kwargs.setdefault("relief", "flat")
+        if outer_bg is None:
+            try:
+                outer_bg = parent.cget("background")
+            except Exception:
+                outer_bg = "#0D1117"
+        super().__init__(parent, bg=outer_bg, **kwargs)
+        self._radius = max(2, int(radius))
+        self._card_bg = bg
+        self._border_color = border_color
+        self._border_width = border_width
+        self._rect_tag = "card_bg"
+        self.inner = tk.Frame(self, bg=bg, bd=0, highlightthickness=0)
+        self._win_id = self.create_window(self._radius, self._radius, anchor="nw", window=self.inner)
+        self.bind("<Configure>", self._redraw)
+
+    def _smooth_pts(self, x0, y0, x1, y1):
+        """Return polygon points that approximate a rounded rectangle."""
+        r = self._radius
+        return [
+            x0 + r, y0,   x1 - r, y0,
+            x1,     y0,   x1,     y0 + r,
+            x1,     y1 - r, x1,   y1,
+            x1 - r, y1,   x0 + r, y1,
+            x0,     y1,   x0,     y1 - r,
+            x0,     y0 + r, x0,   y0,
+        ]
+
+    def _redraw(self, _event=None):
+        self.update_idletasks()
+        w = self.winfo_width()
+        h = self.winfo_height()
+        if w < 4 or h < 4:
+            return
+        bw = self._border_width
+        r = self._radius
+        self.delete(self._rect_tag)
+        self.create_polygon(
+            self._smooth_pts(bw, bw, w - bw, h - bw),
+            smooth=True,
+            fill=self._card_bg,
+            outline=self._border_color if bw else "",
+            width=bw,
+            tags=self._rect_tag,
+        )
+        self.tag_lower(self._rect_tag)
+        inner_pad = r
+        self.coords(self._win_id, inner_pad, inner_pad)
+        self.itemconfig(
+            self._win_id,
+            width=max(1, w - 2 * inner_pad),
+            height=max(1, h - 2 * inner_pad),
+        )
+
+    def configure_colors(self, bg=None, border_color=None, outer_bg=None):
+        """Update colors and redraw; safe to call after theme changes."""
+        if bg is not None:
+            self._card_bg = bg
+            self.inner.configure(bg=bg)
+        if border_color is not None:
+            self._border_color = border_color
+        if outer_bg is not None:
+            self.configure(bg=outer_bg)
+        self._redraw()
+
+
 class AnimationEngine:
     def __init__(self, root):
         self.root = root
@@ -3200,8 +3283,8 @@ class AgenticRAGApp:
         style.configure("Card.Flat.TFrame", background=palette["surface_alt"], borderwidth=0, relief="flat")
         style.configure("StatusBar.TFrame", background=palette["surface"], borderwidth=0, relief="flat")
         style.configure("CollapsibleHeader.TFrame", background=palette["surface"], borderwidth=0, relief="flat")
-        style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["outline"], borderwidth=0, relief="flat")
-        style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
+        style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["outline"], borderwidth=1, relief="flat", padding=(10, 8))
+        style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["primary"], font=self._fonts["body_bold"])
         style.configure("TLabel", background=get("content_bg", fallback="surface", default=palette["surface"]), foreground=palette["text"], font=self._fonts["body"])
         style.configure("Bold.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
         style.configure("Header.TLabel", background=get("sidebar_bg", fallback="surface_alt", default=palette["surface_alt"]), foreground=palette["text"], font=self._fonts["h2"])
@@ -3214,40 +3297,52 @@ class AgenticRAGApp:
         style.configure("Success.TLabel", background=palette["surface"], foreground=palette["success"], font=self._fonts["body_bold"])
         style.configure("Warning.TLabel", background=palette["surface"], foreground=palette["tertiary"], font=self._fonts["body_bold"])
         style.configure("Status.TLabel", background=palette["surface"], foreground=palette["status"], font=self._fonts["caption"])
-        style.configure("Badge.TLabel", background=get("badge_bg", fallback="surface_alt", default=palette["surface_alt"]), foreground=palette["primary"], font=self._fonts["caption"], padding=(6, 2), relief="flat")
+        style.configure("Badge.TLabel", background=get("badge_bg", fallback="surface_alt", default=palette["surface_alt"]), foreground=palette["primary"], font=self._fonts["caption"], padding=(10, 4), relief="flat")
         style.configure("CollapsibleArrow.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=self._fonts["body_bold"])
         style.configure("CollapsibleTitle.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
-        style.configure("TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"], focuscolor=palette["surface_alt"])
+        style.configure("TButton", padding=(14, 10), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"], focuscolor=palette["surface_alt"])
         style.map("TButton", background=[("active", _pal(palette, "primary_hover", fallback_key="primary", default="#79B8FF")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE"))], foreground=[("active", palette["text"])])
-        style.configure("Primary.TButton", padding=(16, 10), relief="flat", borderwidth=0, background=palette["primary"], foreground="#FFFFFF")
+        style.configure("Primary.TButton", padding=(18, 12), relief="flat", borderwidth=0, background=palette["primary"], foreground="#FFFFFF")
         style.map("Primary.TButton", background=[("active", _pal(palette, "primary_hover", fallback_key="primary", default="#79B8FF")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
-        style.configure("Secondary.TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"])
+        style.configure("Secondary.TButton", padding=(14, 10), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"])
         style.map("Secondary.TButton", background=[("active", palette["surface"]), ("pressed", palette["outline"]), ("disabled", palette["surface_alt"])], foreground=[("active", palette["text"]), ("disabled", palette["muted_text"])])
-        style.configure("Danger.TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["danger"], foreground="#FFFFFF")
+        style.configure("Danger.TButton", padding=(14, 10), relief="flat", borderwidth=0, background=palette["danger"], foreground="#FFFFFF")
         style.map("Danger.TButton", background=[("active", _pal(palette, "danger_hover", fallback_key="danger", default="#FF5555")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
-        style.configure("Success.TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["success"], foreground="#FFFFFF")
+        style.configure("Success.TButton", padding=(14, 10), relief="flat", borderwidth=0, background=palette["success"], foreground="#FFFFFF")
         style.map("Success.TButton", background=[("active", _pal(palette, "success_hover", fallback_key="success", default="#72E2B3")), ("pressed", _pal(palette, "primary_pressed", fallback_key="primary", default="#3D8BDE")), ("disabled", palette["outline"])], foreground=[("active", "#FFFFFF"), ("disabled", palette["muted_text"])])
         style.configure("TRadiobutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], indicatordiameter=14, relief="flat")
-        style.map("TRadiobutton", foreground=[("disabled", palette["muted_text"])], indicatorcolor=[("selected", palette["primary"]), ("!selected", palette["surface_alt"])])
+        style.map("TRadiobutton", background=[("active", palette["surface"]), ("!active", palette["surface"])], foreground=[("active", palette["text"]), ("disabled", palette["muted_text"])], indicatorcolor=[("selected", palette["primary"]), ("!selected", palette["surface_alt"])])
         style.configure("TCheckbutton", background=palette["surface"], foreground=palette["text"], indicatorcolor=palette["surface_alt"], relief="flat")
-        style.map("TCheckbutton", foreground=[("disabled", palette["muted_text"])], indicatorcolor=[("selected", palette["primary"]), ("!selected", palette["surface_alt"])])
-        style.configure("TEntry", fieldbackground=_pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"]), foreground=palette["text"], bordercolor=palette["outline"], insertcolor=palette["primary"], borderwidth=1, relief="flat", padding=(10, 8))
+        style.map("TCheckbutton", background=[("active", palette["surface"]), ("!active", palette["surface"])], foreground=[("active", palette["text"]), ("disabled", palette["muted_text"])], indicatorcolor=[("selected", palette["primary"]), ("!selected", palette["surface_alt"])])
+        style.configure("TEntry", fieldbackground=_pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"]), foreground=palette["text"], bordercolor=palette["outline"], insertcolor=palette["primary"], borderwidth=1, relief="flat", padding=(12, 10))
         style.map("TEntry", bordercolor=[("focus", palette["primary"])], lightcolor=[("focus", palette["primary"])], darkcolor=[("focus", palette["primary"])])
-        style.configure("TCombobox", fieldbackground=_pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"]), background=_pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"]), foreground=palette["text"], arrowcolor=palette["muted_text"], bordercolor=palette["outline"], relief="flat", insertcolor=palette["primary"], padding=(10, 8))
-        style.map("TCombobox", fieldbackground=[("readonly", _pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"]))], selectbackground=[("readonly", palette["selection_bg"])], selectforeground=[("readonly", palette["selection_fg"])])
-        style.configure("Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=28, relief="flat")
-        style.map("Treeview", background=[("selected", palette["selection_bg"]), ("active", palette["surface"])], foreground=[("selected", palette["selection_fg"]), ("active", palette["text"])])
-        style.configure("History.Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=34, relief="flat")
-        style.map("History.Treeview", background=[("selected", palette["selection_bg"]), ("active", palette["surface"])], foreground=[("selected", palette["selection_fg"]), ("active", palette["text"])])
+        style.configure("TCombobox", fieldbackground=_pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"]), background=_pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"]), foreground=palette["text"], arrowcolor=palette["muted_text"], bordercolor=palette["outline"], relief="flat", insertcolor=palette["primary"], padding=(12, 10))
+        style.map("TCombobox", fieldbackground=[("readonly", _pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"]))], selectbackground=[("readonly", palette["selection_bg"])], selectforeground=[("readonly", palette["selection_fg"])], foreground=[("readonly", palette["text"])])
+        style.configure("Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=32, relief="flat")
+        style.map("Treeview", background=[("selected", palette["selection_bg"]), ("active", palette["surface_alt"])], foreground=[("selected", palette["selection_fg"]), ("active", palette["text"])])
+        style.configure("History.Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"], bordercolor=palette["outline"], borderwidth=0, rowheight=38, relief="flat")
+        style.map("History.Treeview", background=[("selected", palette["selection_bg"]), ("active", palette["surface_alt"])], foreground=[("selected", palette["selection_fg"]), ("active", palette["text"])])
         style.configure("Treeview.Heading", background=palette["surface"], foreground=palette["muted_text"], borderwidth=0, relief="flat")
-        style.map("Treeview.Heading", background=[("active", palette["surface_alt"])])
-        style.configure("Vertical.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["muted_text"], relief="flat")
-        style.configure("Horizontal.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["muted_text"], relief="flat")
+        style.map("Treeview.Heading", background=[("active", palette["surface_alt"])], foreground=[("active", palette["text"])])
+        style.configure("Vertical.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["surface_alt"], relief="flat", width=8, arrowsize=0)
+        style.map("Vertical.TScrollbar", background=[("active", palette["outline"]), ("!active", palette["surface_alt"])])
+        style.configure("Horizontal.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["surface_alt"], relief="flat", width=8, arrowsize=0)
+        style.map("Horizontal.TScrollbar", background=[("active", palette["outline"]), ("!active", palette["surface_alt"])])
         style.configure("TProgressbar", troughcolor=palette["surface_alt"], background=palette["primary"], bordercolor=palette["bg"], lightcolor=palette["primary"], darkcolor=palette["primary"], relief="flat")
         style.configure("TSeparator", background=palette["outline"])
-        style.configure("App.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(4, 8, 4, 0))
-        style.configure("App.TNotebook.Tab", padding=(16, 10), font=self._fonts["body_bold"], borderwidth=0)
-        style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("!selected", palette["bg"])], foreground=[("selected", palette["primary"]), ("active", _pal(palette, "tab_indicator", fallback_key="primary", default=_pal(palette, "primary_hover", fallback_key="primary", default="#79B8FF"))), ("!selected", palette["muted_text"])])
+        style.configure("App.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(6, 8, 6, 0))
+        style.configure("App.TNotebook.Tab", padding=(20, 12), font=self._fonts["body_bold"], borderwidth=0)
+        style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("active", palette["surface_alt"]), ("!selected", palette["bg"])], foreground=[("selected", palette["primary"]), ("active", _pal(palette, "tab_indicator", fallback_key="primary", default=_pal(palette, "primary_hover", fallback_key="primary", default="#79B8FF"))), ("!selected", palette["muted_text"])])
+        # TCombobox popup listbox is a plain tk.Listbox that bypasses ttk styling.
+        # Without these option_add calls the listbox uses system colors, producing
+        # white text on a white/system-highlight background (the reported bug).
+        _input_bg = _pal(palette, "input_bg", fallback_key="surface_alt", default=palette["surface_alt"])
+        self.root.option_add("*TCombobox*Listbox.background", _input_bg)
+        self.root.option_add("*TCombobox*Listbox.foreground", palette["text"])
+        self.root.option_add("*TCombobox*Listbox.selectBackground", palette["selection_bg"])
+        self.root.option_add("*TCombobox*Listbox.selectForeground", palette["selection_fg"])
+        self.root.option_add("*TCombobox*Listbox.relief", "flat")
+        self.root.option_add("*TCombobox*Listbox.borderWidth", "0")
 
     def _apply_ttkbootstrap_theme(self, palette):
         style = self._ttkbootstrap_style or ttk.Style()
@@ -3380,6 +3475,18 @@ class AgenticRAGApp:
                     highlightthickness=2,
                     highlightbackground=palette["outline"],
                     highlightcolor=palette.get("focus_ring", palette["primary"]),
+                )
+            elif isinstance(widget, RoundedCard):
+                # Determine the outer background from the widget's parent.
+                try:
+                    outer_bg = widget.winfo_parent()
+                    outer_bg = widget.nametowidget(outer_bg).cget("background")
+                except Exception:
+                    outer_bg = palette["bg"]
+                widget.configure_colors(
+                    bg=palette["surface"],
+                    border_color=palette["outline"],
+                    outer_bg=outer_bg,
                 )
             elif isinstance(widget, tk.Canvas):
                 widget.configure(background=palette["bg"], highlightthickness=0)
