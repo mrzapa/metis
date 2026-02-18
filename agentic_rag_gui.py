@@ -2723,6 +2723,8 @@ class AgenticRAGApp:
         elapsed_ms = int((time.perf_counter() - self._startup_started_at) * 1000)
         if hasattr(self, "status_var"):
             self.status_var.set(text)
+        if hasattr(self, "ingest_stage_var"):
+            self.ingest_stage_var.set(str(text or "Ready"))
         if hasattr(self, "startup_elapsed_var"):
             self.startup_elapsed_var.set(f"{elapsed_ms} ms")
 
@@ -3084,7 +3086,7 @@ class AgenticRAGApp:
         style.configure("Danger.TLabel", background=palette["surface"], foreground=palette["danger"], font=self._fonts["body_bold"])
         style.configure("Success.TLabel", background=palette["surface"], foreground=palette["success"], font=self._fonts["body_bold"])
         style.configure("Warning.TLabel", background=palette["surface"], foreground=palette["tertiary"], font=self._fonts["body_bold"])
-        style.configure("Status.TLabel", background=palette["bg"], foreground=palette["status"], font=self._fonts["caption"])
+        style.configure("Status.TLabel", background=palette["surface"], foreground=palette["status"], font=self._fonts["caption"])
         style.configure("TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"], focuscolor=palette["surface_alt"])
         style.map("TButton", background=[("active", get("primary_hover")), ("pressed", get("primary_pressed"))], foreground=[("active", palette["selection_fg"])])
         style.configure("Primary.TButton", padding=(16, 10), relief="flat", borderwidth=0, background=palette["primary"], foreground="#FFFFFF")
@@ -5950,8 +5952,19 @@ class AgenticRAGApp:
         )
         self.btn_cancel_ingest.pack(fill="x", pady=(0, UI_SPACING["m"]))
 
-        self.progress = ttk.Progressbar(frame, orient="horizontal", mode="indeterminate")
-        self.progress.pack(fill="x")
+        progress_row = self.create_frame(frame, style="Card.TFrame")
+        progress_row.pack(fill="x")
+        progress_row.columnconfigure(0, weight=1)
+
+        self.progress = ttk.Progressbar(progress_row, orient="horizontal", mode="indeterminate")
+        self.progress.grid(row=0, column=0, sticky="ew")
+        self.ingest_stage_var = tk.StringVar(value="Ready")
+        self.ingest_stage_label = self.create_label(
+            progress_row,
+            textvariable=self.ingest_stage_var,
+            style="Caption.TLabel",
+        )
+        self.ingest_stage_label.grid(row=0, column=1, sticky="e", padx=(UI_SPACING["s"], 0))
         self.create_label(
             frame,
             text="Progress is shown while indexing runs. Detailed stage output appears in Logs.",
