@@ -447,83 +447,131 @@ class LocalLlamaCppChatModel:
 STYLE_CONFIG = {
     "font_family": "SF Pro Text",
     "fallback_font": "Segoe UI",
+    "mono_font": "SF Mono",
+    "fallback_mono_font": "Consolas",
     "radius": 12,
+    "radius_sm": 8,
+    "radius_lg": 16,
     "padding": {"sm": 6, "md": 10, "lg": 16},
+    "type_scale": {
+        "h1": {"size": 20, "weight": "bold"},
+        "h2": {"size": 16, "weight": "bold"},
+        "h3": {"size": 13, "weight": "bold"},
+        "body": {"size": 10, "weight": "normal"},
+        "body_bold": {"size": 10, "weight": "bold"},
+        "caption": {"size": 9, "weight": "normal"},
+        "code": {"size": 10, "weight": "normal"},
+        "overline": {"size": 8, "weight": "bold"},
+    },
+    "animation": {
+        "collapse": 180,
+        "tooltip": 120,
+        "theme": 220,
+        "message": 160,
+        "progress": 700,
+    },
     "themes": {
         "space_dust": {
-            "bg": "#11161E",
-            "surface": "#1A2230",
+            "bg": "#0D1117",
+            "surface": "#161B22",
+            "surface_elevated": "#1F2630",
             "surface_alt": "#212C3D",
             "text": "#E8EEF8",
             "muted_text": "#96A6BE",
-            "primary": "#5BD6F8",
-            "primary_hover": "#42BFD1",
-            "primary_pressed": "#6B87FF",
-            "secondary": "#42BFD1",
+            "primary": "#58A6FF",
+            "primary_hover": "#79B8FF",
+            "primary_pressed": "#3D8BDE",
+            "secondary": "#3B8ED9",
             "tertiary": "#6B87FF",
             "border": "#2A3A4F",
             "outline": "#33465F",
             "status": "#AFC1D9",
             "danger": "#FF7A8C",
-            "danger_hover": "#ff92a1",
+            "danger_hover": "#FF95A3",
             "success": "#55D6A2",
-            "input_bg": "#212C3D",
-            "surface_elevated": "#1A2230",
-            "focus_ring": "#5BD6F8",
+            "success_hover": "#72E2B3",
+            "warning": "#E3B341",
             "selection_bg": "#294B66",
             "selection_fg": "#F2F8FF",
+            "chat_user_bg": "#1B3551",
+            "chat_agent_bg": "#1E2633",
+            "chat_system_bg": "#2A2D1D",
+            "input_bg": "#0F1621",
+            "badge_bg": "#273447",
+            "stripe_alt": "#131A24",
+            "focus_ring": "#79B8FF",
+            "tab_indicator": "#58A6FF",
+            "progress_pulse": "#8BC2FF",
             "link": "#79DEFF",
             "source": "#7A89A0",
             "supporting_bg": "#213E56",
         },
         "light": {
-            "bg": "#F5F6F8",
+            "bg": "#F6F8FA",
             "surface": "#FFFFFF",
+            "surface_elevated": "#F2F4F8",
             "surface_alt": "#EEF1F6",
             "text": "#101114",
-            "muted_text": "#495162",
-            "primary": "#0A84FF",
-            "primary_hover": "#2D6DDA",
-            "primary_pressed": "#5A5EC7",
+            "muted_text": "#3E4655",
+            "primary": "#0969DA",
+            "primary_hover": "#1F7AE0",
+            "primary_pressed": "#0757B8",
             "secondary": "#2D6DDA",
             "tertiary": "#5A5EC7",
             "border": "#D5DAE2",
             "outline": "#C7CED8",
             "status": "#2D3340",
             "danger": "#B64343",
-            "danger_hover": "#C95A5A",
+            "danger_hover": "#C95959",
             "success": "#257A4A",
-            "input_bg": "#EEF1F6",
-            "surface_elevated": "#FFFFFF",
-            "focus_ring": "#0A84FF",
+            "success_hover": "#2D9059",
+            "warning": "#9A6700",
             "selection_bg": "#CFE3FF",
             "selection_fg": "#101114",
+            "chat_user_bg": "#DDEBFF",
+            "chat_agent_bg": "#F1F4F8",
+            "chat_system_bg": "#FFF8D6",
+            "input_bg": "#FFFFFF",
+            "badge_bg": "#E6EBF2",
+            "stripe_alt": "#F9FBFD",
+            "focus_ring": "#2F81F7",
+            "tab_indicator": "#0969DA",
+            "progress_pulse": "#6FA8F3",
             "link": "#1254A3",
             "source": "#626C7E",
             "supporting_bg": "#FFF4CC",
         },
         "dark": {
-            "bg": "#16181D",
-            "surface": "#1F232B",
+            "bg": "#0D1117",
+            "surface": "#161B22",
+            "surface_elevated": "#232A35",
             "surface_alt": "#2A303B",
             "text": "#F7F8FA",
-            "muted_text": "#C3CAD6",
-            "primary": "#64D2FF",
-            "primary_hover": "#58B5D6",
-            "primary_pressed": "#8C95F2",
+            "muted_text": "#B6C0CE",
+            "primary": "#58A6FF",
+            "primary_hover": "#79B8FF",
+            "primary_pressed": "#3D8BDE",
             "secondary": "#58B5D6",
             "tertiary": "#8C95F2",
             "border": "#3A4352",
             "outline": "#465163",
             "status": "#D7DCEA",
             "danger": "#FF8A8A",
-            "danger_hover": "#ff9da0",
+            "danger_hover": "#FFAAAA",
             "success": "#70D39F",
-            "input_bg": "#2A303B",
-            "surface_elevated": "#1F232B",
-            "focus_ring": "#64D2FF",
+            "success_hover": "#85DEB0",
+            "warning": "#D29922",
             "selection_bg": "#2E415C",
             "selection_fg": "#F7F8FA",
+            "chat_user_bg": "#213A58",
+            "chat_agent_bg": "#232A35",
+            "chat_system_bg": "#31311E",
+            "input_bg": "#111823",
+            "badge_bg": "#2A3443",
+            "stripe_alt": "#121922",
+            "focus_ring": "#79B8FF",
+            "tab_indicator": "#58A6FF",
+            "progress_pulse": "#8BC2FF",
             "link": "#8EDFFF",
             "source": "#A8B2C3",
             "supporting_bg": "#334A63",
@@ -531,7 +579,18 @@ STYLE_CONFIG = {
     },
 }
 
-UI_SPACING = {"xs": 4, "s": 8, "m": 12, "l": 18, "xl": 24}
+
+def _pal(palette, key, fallback_key=None, default=None):
+    if not isinstance(palette, dict):
+        return default
+    if key in palette:
+        return palette.get(key)
+    if fallback_key is not None:
+        return palette.get(fallback_key, default)
+    return default
+
+
+UI_SPACING = {"xs": 4, "s": 8, "m": 12, "l": 18, "xl": 24, "xxl": 32}
 FORM_WIDTHS = {"label": 22, "input": 28}
 
 try:
@@ -809,16 +868,18 @@ class CitationManager:
 
 
 class TooltipManager:
-    def __init__(self, root, get_palette, *, delay_ms=350, wrap_px=340):
+    def __init__(self, root, get_palette, *, delay_ms=350, wrap_px=340, fade_ms=140):
         self.root = root
         self.get_palette = get_palette
         self.delay_ms = delay_ms
         self.wrap_px = wrap_px
+        self.fade_ms = max(1, int(fade_ms))
         self._widget_text = {}
         self._tooltip_window = None
         self._tooltip_label = None
         self._active_widget = None
         self._after_id = None
+        self._fade_after_id = None
         self._last_pointer = (0, 0)
 
     def register(self, widget, text):
@@ -835,6 +896,7 @@ class TooltipManager:
 
     def hide(self):
         self._cancel_pending()
+        self._cancel_fade()
         self._active_widget = None
         if self._tooltip_window is not None and self._tooltip_window.winfo_exists():
             self._tooltip_window.withdraw()
@@ -879,12 +941,12 @@ class TooltipManager:
             return
         if self._tooltip_window is None or not self._tooltip_window.winfo_exists():
             self._create_tooltip_window()
-        palette = self.get_palette() or STYLE_CONFIG["themes"]["space_dust"]
-        self._tooltip_window.configure(bg=palette["border"])
+        palette = self.get_palette() or STYLE_CONFIG["themes"].get("space_dust", {})
+        self._tooltip_window.configure(bg=_pal(palette, "border", default="#2A3A4F"))
         self._tooltip_label.configure(
             text=text,
-            bg=palette["surface_alt"],
-            fg=palette["text"],
+            bg=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"),
+            fg=_pal(palette, "text", default="#E8EEF8"),
             wraplength=self.wrap_px,
             padx=10,
             pady=7,
@@ -895,13 +957,14 @@ class TooltipManager:
         self._tooltip_window.deiconify()
         self._tooltip_window.lift()
         self._position_window(*self._last_pointer)
+        self._fade_in_tooltip()
 
     def _create_tooltip_window(self):
         self._tooltip_window = tk.Toplevel(self.root)
         self._tooltip_window.withdraw()
         self._tooltip_window.overrideredirect(True)
         self._tooltip_window.attributes("-topmost", True)
-        self._tooltip_window.attributes("-alpha", 0.97)
+        self._tooltip_window.attributes("-alpha", 0.0)
         try:
             self._tooltip_window.attributes("-type", "tooltip")
         except tk.TclError:
@@ -926,20 +989,135 @@ class TooltipManager:
         y = min(max(y, 4), max(4, screen_h - tip_h - 4))
         self._tooltip_window.geometry(f"+{x}+{y}")
 
+    def _cancel_fade(self):
+        if self._fade_after_id is not None:
+            try:
+                self.root.after_cancel(self._fade_after_id)
+            except tk.TclError:
+                pass
+            self._fade_after_id = None
+
+    def _fade_in_tooltip(self):
+        if self._tooltip_window is None or not self._tooltip_window.winfo_exists():
+            return
+        self._cancel_fade()
+        steps = 8
+        interval = max(1, int(self.fade_ms / steps))
+
+        def _tick(step=0):
+            if self._tooltip_window is None or not self._tooltip_window.winfo_exists():
+                self._fade_after_id = None
+                return
+            t = min(1.0, step / steps)
+            eased = 1.0 - ((1.0 - t) ** 3)
+            try:
+                self._tooltip_window.attributes("-alpha", 0.97 * eased)
+            except tk.TclError:
+                self._fade_after_id = None
+                return
+            if step >= steps:
+                self._fade_after_id = None
+                return
+            self._fade_after_id = self.root.after(interval, lambda: _tick(step + 1))
+
+        _tick(0)
+
 
 class CollapsibleFrame(ttk.Frame):
-    def __init__(self, parent, title, expanded=False, **kwargs):
+    def __init__(self, parent, title, expanded=False, animator=None, **kwargs):
         kwargs.setdefault("style", "Card.Elevated.TFrame")
         super().__init__(parent, **kwargs)
+        self._animator = animator
         self._expanded = tk.BooleanVar(value=expanded)
-        header = ttk.Frame(self, style="Card.Elevated.TFrame")
-        header.pack(fill="x", padx=UI_SPACING["s"], pady=(UI_SPACING["s"], 0))
-        self.btn = ttk.Button(header, text="▾" if expanded else "▸", width=2, command=self.toggle, style="Secondary.TButton")
-        self.btn.pack(side="left")
-        ttk.Label(header, text=title, style="Bold.TLabel").pack(side="left", padx=(UI_SPACING["xs"], 0))
-        self.content = ttk.Frame(self, style="Card.Elevated.TFrame")
+        self._animating = False
+        self._animation_id = f"collapsible_{id(self)}"
+        self._content_pad = (UI_SPACING["s"], UI_SPACING["s"])
+
+        self.header = ttk.Frame(self, style="CollapsibleHeader.TFrame")
+        self.header.pack(fill="x", padx=UI_SPACING["s"], pady=(UI_SPACING["s"], 0))
+        self.arrow_label = ttk.Label(
+            self.header,
+            text="▾" if expanded else "▸",
+            style="CollapsibleArrow.TLabel",
+            width=2,
+            anchor="center",
+        )
+        self.arrow_label.pack(side="left")
+        self.title_label = ttk.Label(self.header, text=title, style="CollapsibleTitle.TLabel")
+        self.title_label.pack(side="left", padx=(UI_SPACING["xs"], 0), fill="x", expand=True)
+
+        for widget in (self.header, self.arrow_label, self.title_label):
+            widget.bind("<Button-1>", lambda _e: self.toggle(), add="+")
+
+        self._content_clip = ttk.Frame(self, style="Card.Elevated.TFrame", height=0)
+        self._content_clip.pack_propagate(False)
+        self.content = ttk.Frame(self._content_clip, style="Card.Elevated.TFrame")
+        self.content.pack(fill="x")
+        self.content.bind("<Configure>", self._on_content_configure, add="+")
         if expanded:
-            self.content.pack(fill="x", padx=UI_SPACING["s"], pady=(UI_SPACING["s"], UI_SPACING["s"]))
+            self._content_clip.pack(fill="x", padx=UI_SPACING["s"], pady=self._content_pad)
+            self.after_idle(lambda: self._set_clip_height(self._measure_content_height()))
+
+    def _on_content_configure(self, _event=None):
+        if self._expanded.get() and not self._animating:
+            self._set_clip_height(self._measure_content_height())
+
+    def _measure_content_height(self):
+        self.update_idletasks()
+        return max(1, int(self.content.winfo_reqheight()))
+
+    def _set_clip_height(self, value):
+        try:
+            self._content_clip.configure(height=max(0, int(value)))
+        except tk.TclError:
+            return
+
+    def _animate_height(self, start, end, duration_ms, on_complete=None):
+        if self._animator is None:
+            self._set_clip_height(end)
+            if callable(on_complete):
+                on_complete()
+            return
+        self._animator.animate_value(
+            self._animation_id,
+            start,
+            end,
+            duration_ms,
+            10,
+            lambda value: self._set_clip_height(value),
+            on_complete=on_complete,
+        )
+
+    def _expand(self):
+        if self._animating:
+            return
+        self._animating = True
+        self._content_clip.pack(fill="x", padx=UI_SPACING["s"], pady=self._content_pad)
+        self._set_clip_height(0)
+        target_height = self._measure_content_height()
+
+        def _done():
+            self._set_clip_height(target_height)
+            self.arrow_label.config(text="▾")
+            self._expanded.set(True)
+            self._animating = False
+
+        self._animate_height(0, target_height, 150, on_complete=_done)
+
+    def _collapse(self):
+        if self._animating:
+            return
+        self._animating = True
+        start_height = max(1, self._content_clip.winfo_height(), self._measure_content_height())
+
+        def _done():
+            self._set_clip_height(0)
+            self._content_clip.pack_forget()
+            self.arrow_label.config(text="▸")
+            self._expanded.set(False)
+            self._animating = False
+
+        self._animate_height(start_height, 0, 130, on_complete=_done)
 
     def set_expanded(self, expanded):
         expanded = bool(expanded)
@@ -947,14 +1125,86 @@ class CollapsibleFrame(ttk.Frame):
             self.toggle()
 
     def toggle(self):
+        if self._animating:
+            return
         if self._expanded.get():
-            self.content.pack_forget()
-            self.btn.config(text="▸")
-            self._expanded.set(False)
+            self._collapse()
         else:
-            self.content.pack(fill="x", padx=UI_SPACING["s"], pady=(UI_SPACING["s"], UI_SPACING["s"]))
-            self.btn.config(text="▾")
-            self._expanded.set(True)
+            self._expand()
+
+
+class AnimationEngine:
+    def __init__(self, root):
+        self.root = root
+        self._animations = {}
+        self._token_counter = 0
+
+    def cancel(self, anim_id):
+        state = self._animations.pop(anim_id, None)
+        if not state:
+            return
+        after_id = state.get("after_id")
+        if after_id is not None and self._root_alive():
+            try:
+                self.root.after_cancel(after_id)
+            except tk.TclError:
+                pass
+
+    def animate_value(self, anim_id, start, end, duration_ms, steps, callback, on_complete=None):
+        self.cancel(anim_id)
+        if not self._root_alive():
+            return
+        try:
+            duration = max(1, int(duration_ms))
+            total_steps = max(1, int(steps))
+        except (TypeError, ValueError):
+            duration = 1
+            total_steps = 1
+
+        self._token_counter += 1
+        token = self._token_counter
+        self._animations[anim_id] = {"token": token, "after_id": None}
+        step_delay = max(1, int(round(duration / total_steps)))
+
+        def _run(step_index):
+            state = self._animations.get(anim_id)
+            if state is None or state.get("token") != token:
+                return
+            if not self._root_alive():
+                self._animations.pop(anim_id, None)
+                return
+            t = min(1.0, max(0.0, step_index / total_steps))
+            eased = 1.0 - ((1.0 - t) ** 3)
+            value = float(start) + (float(end) - float(start)) * eased
+            try:
+                callback(value)
+            except Exception:
+                self._animations.pop(anim_id, None)
+                raise
+            if step_index >= total_steps:
+                self._animations.pop(anim_id, None)
+                if callable(on_complete):
+                    try:
+                        on_complete()
+                    except Exception:
+                        logger.exception("Animation completion callback failed for %s", anim_id)
+                return
+            try:
+                after_id = self.root.after(step_delay, lambda: _run(step_index + 1))
+            except tk.TclError:
+                self._animations.pop(anim_id, None)
+                return
+            state = self._animations.get(anim_id)
+            if state is not None and state.get("token") == token:
+                state["after_id"] = after_id
+
+        _run(0)
+
+    def _root_alive(self):
+        try:
+            return bool(self.root) and bool(self.root.winfo_exists())
+        except tk.TclError:
+            return False
 
 
 class AgenticRAGApp:
@@ -1027,6 +1277,7 @@ class AgenticRAGApp:
         )
         self.load_icon()
         self.root.geometry("1200x900")
+        self._resolve_fonts()
         self.main_thread = threading.current_thread()
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
         self.telemetry_log_filename = "agentic_rag_runs.jsonl"
@@ -1226,6 +1477,7 @@ class AgenticRAGApp:
         self.ui_mode = tk.StringVar(value="space_dust")
         self._configure_ui_backend_defaults()
         self._active_palette = STYLE_CONFIG["themes"]["space_dust"]
+        self._animator = AnimationEngine(self.root)
         self.tooltip_manager = TooltipManager(self.root, lambda: getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"]))
         self.history_profile_filter = tk.StringVar(value="All Profiles")
         self.current_state_var = tk.StringVar(
@@ -2692,30 +2944,86 @@ class AgenticRAGApp:
 
         if self.ui_backend == "ttkbootstrap" and TTKBOOTSTRAP_MODULE is not None:
             self._ttkbootstrap_style = TTKBOOTSTRAP_MODULE.Style(theme="darkly")
-            palette = STYLE_CONFIG["themes"]["space_dust"]
-            self._ttkbootstrap_style.configure(".", background=palette["bg"], foreground=palette["text"])
-            self._ttkbootstrap_style.configure("TFrame", background=palette["bg"])
-            self._ttkbootstrap_style.configure("TLabel", background=palette["surface"], foreground=palette["text"])
-            self._ttkbootstrap_style.configure("TNotebook", background=palette["bg"])
-            self._ttkbootstrap_style.configure("TNotebook.Tab", background=palette["surface_alt"], foreground=palette["text"])
-            self._ttkbootstrap_style.configure("TButton", background=palette["primary"], foreground=palette["selection_fg"])
-            self._ttkbootstrap_style.configure("TEntry", fieldbackground=palette["surface_alt"], foreground=palette["text"])
-            self._ttkbootstrap_style.configure("Treeview", background=palette["surface_alt"], fieldbackground=palette["surface_alt"], foreground=palette["text"])
-            self.root.configure(bg=palette["bg"])
+            palette = STYLE_CONFIG["themes"].get("space_dust", {})
+            self._ttkbootstrap_style.configure(".", background=_pal(palette, "bg", default="#0D1117"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self._ttkbootstrap_style.configure("TFrame", background=_pal(palette, "bg", default="#0D1117"))
+            self._ttkbootstrap_style.configure("TLabel", background=_pal(palette, "surface", default="#161B22"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self._ttkbootstrap_style.configure("TNotebook", background=_pal(palette, "bg", default="#0D1117"))
+            self._ttkbootstrap_style.configure("TNotebook.Tab", background=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self._ttkbootstrap_style.configure("TButton", background=_pal(palette, "primary", default="#58A6FF"), foreground=_pal(palette, "selection_fg", default="#F2F8FF"))
+            self._ttkbootstrap_style.configure("TEntry", fieldbackground=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self._ttkbootstrap_style.configure("Treeview", background=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), fieldbackground=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), foreground=_pal(palette, "text", default="#E8EEF8"))
+            self.root.configure(bg=_pal(palette, "bg", default="#0D1117"))
+
+    def _resolve_fonts(self):
+        families = set(tkfont.families())
+        base_family = STYLE_CONFIG["font_family"] if STYLE_CONFIG["font_family"] in families else STYLE_CONFIG["fallback_font"]
+        mono_candidates = ("SF Mono", "Consolas", "Cascadia Code", "Menlo", "Courier New", "TkFixedFont")
+        code_family = next((family for family in mono_candidates if family in families), base_family)
+
+        self._fonts = {
+            "h1": (base_family, 16, "bold"),
+            "h2": (base_family, 13, "bold"),
+            "h3": (base_family, 11, "bold"),
+            "body": (base_family, 10),
+            "body_bold": (base_family, 10, "bold"),
+            "caption": (base_family, 9),
+            "code": (code_family, 9),
+            "overline": (base_family, 8, "bold"),
+        }
 
     def _apply_theme(self):
-        palette = STYLE_CONFIG["themes"].get(self.ui_mode.get(), STYLE_CONFIG["themes"]["space_dust"])
+        base_palette = STYLE_CONFIG["themes"].get("space_dust", {})
+        selected_palette = STYLE_CONFIG["themes"].get(self.ui_mode.get(), base_palette)
+        palette = {**base_palette, **selected_palette}
         self._active_palette = palette
 
-        if self.ui_backend == "ctk" and CTK_MODULE is not None:
-            self._apply_ctk_theme(palette)
-        elif self.ui_backend == "ttkbootstrap" and TTKBOOTSTRAP_MODULE is not None:
-            self._apply_ttkbootstrap_theme(palette)
-        else:
-            self._apply_ttk_theme(palette)
+        def _apply_styles():
+            if self.ui_backend == "ctk" and CTK_MODULE is not None:
+                self._apply_ctk_theme(palette)
+            elif self.ui_backend == "ttkbootstrap" and TTKBOOTSTRAP_MODULE is not None:
+                self._apply_ttkbootstrap_theme(palette)
+            else:
+                self._apply_ttk_theme(palette)
+            self._theme_tk_widgets()
+            self._theme_text_tags()
 
-        self._theme_tk_widgets()
-        self._theme_text_tags()
+        if not hasattr(self, "_animator"):
+            _apply_styles()
+            return
+
+        def _set_alpha(value):
+            try:
+                self.root.attributes("-alpha", max(0.0, min(1.0, float(value))))
+            except tk.TclError:
+                pass
+
+        def _apply_and_restore():
+            _apply_styles()
+            self._animator.animate_value(
+                "theme_alpha",
+                0.85,
+                1.0,
+                130,
+                8,
+                _set_alpha,
+            )
+
+        try:
+            current_alpha = float(self.root.attributes("-alpha"))
+        except (tk.TclError, TypeError, ValueError):
+            _apply_styles()
+            return
+
+        self._animator.animate_value(
+            "theme_alpha",
+            current_alpha,
+            0.85,
+            90,
+            6,
+            _set_alpha,
+            on_complete=_apply_and_restore,
+        )
 
     def _pal(self, key, default=None):
         palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
@@ -2727,8 +3035,6 @@ class AgenticRAGApp:
         style = ttk.Style()
         if use_clam and "clam" in style.theme_names():
             style.theme_use("clam")
-        font_family = STYLE_CONFIG["font_family"] if STYLE_CONFIG["font_family"] in tkfont.families() else STYLE_CONFIG["fallback_font"]
-        get = lambda key, default=None: palette.get(key, STYLE_CONFIG["themes"]["space_dust"].get(key, default))
         self.root.configure(bg=palette["bg"])
         style.configure(".", background=palette["bg"], foreground=palette["text"], fieldbackground=palette["surface_alt"])
         style.configure("TFrame", background=palette["bg"], borderwidth=0, relief="flat")
@@ -2738,17 +3044,19 @@ class AgenticRAGApp:
         style.configure("StatusBar.TFrame", background=palette["bg"], borderwidth=0, relief="flat")
         style.configure("CollapsibleHeader.TFrame", background=palette["surface"], borderwidth=0, relief="flat")
         style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["outline"], borderwidth=0, relief="flat")
-        style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
-        style.configure("TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10))
-        style.configure("Bold.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
-        style.configure("Header.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 13, "bold"))
-        style.configure("Muted.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=(font_family, 10))
-        style.configure("Caption.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=(font_family, 9))
-        style.configure("Danger.TLabel", background=palette["surface"], foreground=palette["danger"], font=(font_family, 10, "bold"))
-        style.configure("Status.TLabel", background=palette["bg"], foreground=palette["status"], font=(font_family, 9))
-        style.configure("Badge.TLabel", background=palette["surface_alt"], foreground=palette["muted_text"], font=(font_family, 9, "bold"), padding=(10, 4))
-        style.configure("CollapsibleArrow.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=(font_family, 10, "bold"))
-        style.configure("CollapsibleTitle.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
+        style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
+        style.configure("TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["body"])
+        style.configure("Bold.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
+        style.configure("Header.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["h2"])
+        style.configure("Title.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["h1"])
+        style.configure("Muted.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=self._fonts["body"])
+        style.configure("Caption.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=self._fonts["caption"])
+        style.configure("Overline.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=self._fonts["overline"])
+        style.configure("Code.TLabel", background=palette["surface"], foreground=palette["source"], font=self._fonts["code"])
+        style.configure("Danger.TLabel", background=palette["surface"], foreground=palette["danger"], font=self._fonts["body_bold"])
+        style.configure("Success.TLabel", background=palette["surface"], foreground=palette["success"], font=self._fonts["body_bold"])
+        style.configure("Warning.TLabel", background=palette["surface"], foreground=palette["tertiary"], font=self._fonts["body_bold"])
+        style.configure("Status.TLabel", background=palette["bg"], foreground=palette["status"], font=self._fonts["caption"])
         style.configure("TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"], focuscolor=palette["surface_alt"])
         style.map("TButton", background=[("active", get("primary_hover")), ("pressed", get("primary_pressed"))], foreground=[("active", palette["selection_fg"])])
         style.configure("Primary.TButton", padding=(16, 10), relief="flat", borderwidth=0, background=palette["primary"], foreground="#FFFFFF")
@@ -2777,9 +3085,9 @@ class AgenticRAGApp:
         style.configure("Horizontal.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["muted_text"], relief="flat")
         style.configure("TProgressbar", troughcolor=palette["surface_alt"], background=palette["primary"], bordercolor=palette["bg"], lightcolor=palette["primary"], darkcolor=palette["primary"], relief="flat")
         style.configure("TSeparator", background=palette["outline"])
-        style.configure("App.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(4, 8, 4, 0))
-        style.configure("App.TNotebook.Tab", padding=(16, 10), font=(font_family, 10, "bold"), borderwidth=0)
-        style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("!selected", palette["bg"])], foreground=[("selected", palette["primary"]), ("!selected", palette["muted_text"])])
+        style.configure("App.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(8, 6, 8, 0))
+        style.configure("App.TNotebook.Tab", padding=(16, 10), font=self._fonts["body_bold"], borderwidth=0)
+        style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("!selected", palette["bg"])], foreground=[("selected", palette["text"]), ("!selected", palette["muted_text"])])
 
     def _apply_ttkbootstrap_theme(self, palette):
         style = self._ttkbootstrap_style or ttk.Style()
@@ -2914,10 +3222,39 @@ class AgenticRAGApp:
         palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
         if hasattr(self, "chat_display"):
             self.chat_display.tag_config("citation", foreground=palette["link"], underline=1)
-            self.chat_display.tag_config("user", foreground=palette["tertiary"])
-            self.chat_display.tag_config("agent", foreground=palette["success"])
-            self.chat_display.tag_config("system", foreground=palette["muted_text"])
-            self.chat_display.tag_config("source", foreground=palette["source"])
+            self.chat_display.tag_config(
+                "user",
+                foreground=palette["tertiary"],
+                font=self._fonts["body_bold"],
+                lmargin1=14,
+                lmargin2=14,
+                rmargin=10,
+                spacing1=8,
+                spacing3=8,
+                background=palette["surface"],
+            )
+            self.chat_display.tag_config(
+                "agent",
+                foreground=palette["success"],
+                font=self._fonts["body"],
+                lmargin1=10,
+                lmargin2=10,
+                rmargin=10,
+                spacing1=8,
+                spacing3=12,
+            )
+            self.chat_display.tag_config(
+                "system",
+                foreground=palette["muted_text"],
+                font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
+                lmargin1=10,
+                lmargin2=10,
+                rmargin=10,
+                spacing1=6,
+                spacing3=6,
+                background=palette["surface_alt"],
+            )
+            self.chat_display.tag_config("source", foreground=palette["source"], font=self._fonts["code"])
         if hasattr(self, "answer_text"):
             self.answer_text.tag_config("citation", foreground=palette["link"], underline=1)
         if hasattr(self, "sources_tree"):
@@ -4793,7 +5130,7 @@ class AgenticRAGApp:
         ).pack(side="left", padx=(8, 8))
         self.create_button(toggle_row, text="Apply", command=self._apply_startup_mode_setting, style="Secondary.TButton").pack(side="left")
 
-        appearance_section = CollapsibleFrame(frame, "Appearance", expanded=False)
+        appearance_section = CollapsibleFrame(frame, "Appearance", expanded=False, animator=self._animator)
         appearance_section.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
         self._register_settings_section(appearance_section, "Appearance")
         self.create_label(appearance_section.content, text="Controls the visual theme applied to the entire interface.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
@@ -4807,7 +5144,7 @@ class AgenticRAGApp:
         ).pack(side="left", padx=(8, 8))
         self.create_button(appearance_section.content, text="Apply Theme", command=self._apply_theme, style="Primary.TButton").pack(side="left")
 
-        self.settings_model_section = CollapsibleFrame(frame, "Model & Provider", expanded=False)
+        self.settings_model_section = CollapsibleFrame(frame, "Model & Provider", expanded=False, animator=self._animator)
         self.settings_model_section.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
         self._register_settings_section(self.settings_model_section, "Model & Provider")
         self.create_label(self.settings_model_section.content, text="Set the LLM provider, generation model, embedding model, vector DB, API keys, and local model registry.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
@@ -5147,7 +5484,7 @@ class AgenticRAGApp:
         ).grid(row=1, column=1, sticky="w", pady=(8, 0))
 
 
-        retrieval_section = CollapsibleFrame(frame, "Retrieval", expanded=False)
+        retrieval_section = CollapsibleFrame(frame, "Retrieval", expanded=False, animator=self._animator)
         retrieval_section.grid(row=7, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_retrieval_section = retrieval_section
         self._register_settings_section(self.settings_retrieval_section, "Retrieval")
@@ -5191,7 +5528,7 @@ class AgenticRAGApp:
             style="Secondary.TButton",
         ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
-        agentic_section = CollapsibleFrame(frame, "Agentic / Iterations", expanded=False)
+        agentic_section = CollapsibleFrame(frame, "Agentic / Iterations", expanded=False, animator=self._animator)
         agentic_section.grid(row=8, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_agentic_section = agentic_section
         self._register_settings_section(self.settings_agentic_section, "Agentic / Iterations", advanced_only=True)
@@ -5217,7 +5554,7 @@ class AgenticRAGApp:
             variable=self.show_retrieved_context,
         ).pack(side="left")
 
-        frontier_section = CollapsibleFrame(frame, "Frontier", expanded=False)
+        frontier_section = CollapsibleFrame(frame, "Frontier", expanded=False, animator=self._animator)
         frontier_section.grid(row=9, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self.settings_frontier_section = frontier_section
         self._register_settings_section(self.settings_frontier_section, "Frontier", advanced_only=True)
@@ -5232,7 +5569,7 @@ class AgenticRAGApp:
         self.create_checkbox(frontier_section.content, text="Claim-level grounding (CiteFix-lite)", variable=self.enable_claim_level_grounding_citefix_lite).pack(anchor="w")
         self.create_checkbox(frontier_section.content, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
 
-        profile_section = CollapsibleFrame(frame, "Profiles", expanded=True)
+        profile_section = CollapsibleFrame(frame, "Profiles", expanded=True, animator=self._animator)
         profile_section.grid(row=10, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
         self._register_settings_section(profile_section, "Profiles")
         self.create_label(profile_section.content, text="Save and restore named configuration snapshots to switch between different use-case setups quickly.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
@@ -5737,13 +6074,35 @@ class AgenticRAGApp:
 
         # Tag configuration for coloring
         self.chat_display.tag_config(
-            "user", font=("Segoe UI", 10, "bold"), spacing1=8, spacing3=8
+            "user",
+            font=self._fonts["body_bold"],
+            spacing1=8,
+            spacing3=8,
+            lmargin1=14,
+            lmargin2=14,
+            rmargin=10,
+            background=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["surface"],
         )
-        self.chat_display.tag_config("agent", spacing1=8, spacing3=12)
         self.chat_display.tag_config(
-            "system", font=("Segoe UI", 9, "italic"), spacing1=6, spacing3=6
+            "agent",
+            font=self._fonts["body"],
+            spacing1=8,
+            spacing3=12,
+            lmargin1=10,
+            lmargin2=10,
+            rmargin=10,
         )
-        self.chat_display.tag_config("source", font=("Consolas", 8))
+        self.chat_display.tag_config(
+            "system",
+            font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
+            spacing1=6,
+            spacing3=6,
+            lmargin1=10,
+            lmargin2=10,
+            rmargin=10,
+            background=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["surface_alt"],
+        )
+        self.chat_display.tag_config("source", font=self._fonts["code"])
 
         # Quick Actions
         action_frame = self.create_frame(left_pane, style="Card.TFrame")
@@ -5789,12 +6148,12 @@ class AgenticRAGApp:
             width=22,
         ).pack(side="left", padx=(6, 0))
 
-        logs_section = CollapsibleFrame(left_pane, "Logs & telemetry", expanded=False)
+        logs_section = CollapsibleFrame(left_pane, "Logs & telemetry", expanded=False, animator=self._animator)
         logs_section.pack(fill="both", pady=(6, 0))
         self.log_area = self.create_rich_text_surface(logs_section.content, surface_id="chat_logs", height=6, state="disabled", wrap=tk.WORD, scrolled=True)
         self.log_area.pack(fill=tk.BOTH, expand=True)
 
-        self.chat_settings_section = CollapsibleFrame(left_pane, "Advanced chat settings", expanded=False)
+        self.chat_settings_section = CollapsibleFrame(left_pane, "Advanced chat settings", expanded=False, animator=self._animator)
         self.chat_settings_section.pack(fill="x", pady=(4, 0))
 
         settings_content = self.chat_settings_section.content
@@ -17738,12 +18097,54 @@ class AgenticRAGApp:
             start = self.chat_display.index(f"{start_index}+{match.start()}c")
             end = self.chat_display.index(f"{start_index}+{match.end()}c")
             self.chat_display.tag_add("citation", start, end)
+    def _fade_out_tag(self, tag, from_bg, to_bg, duration_ms=120):
+        if not hasattr(self, "_animator"):
+            return
+
+        def _to_rgb(color):
+            try:
+                r, g, b = self.root.winfo_rgb(color)
+                return (r // 256, g // 256, b // 256)
+            except tk.TclError:
+                return None
+
+        start_rgb = _to_rgb(from_bg)
+        end_rgb = _to_rgb(to_bg)
+        if start_rgb is None or end_rgb is None:
+            return
+
+        anim_id = f"chat_fade_{tag}"
+
+        def _set_bg(value):
+            t = max(0.0, min(1.0, float(value)))
+            rgb = tuple(int(start_rgb[i] + (end_rgb[i] - start_rgb[i]) * t) for i in range(3))
+            color = f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+            try:
+                self.chat_display.tag_config(tag, background=color)
+            except tk.TclError:
+                pass
+
+        def _done():
+            try:
+                self.chat_display.tag_config(tag, background="")
+                self.chat_display.tag_delete(tag)
+            except tk.TclError:
+                pass
+
+        self._animator.animate_value(anim_id, 0.0, 1.0, duration_ms, 8, _set_bg, on_complete=_done)
+
     def append_chat(self, tag, message, run_id=None):
         def _append():
             self.chat_display.config(state="normal")
             start = self.chat_display.index(tk.END)
             self.chat_display.insert(tk.END, message + "\n", tag)
             end = self.chat_display.index(tk.END)
+            transient_tag = f"flash_{int(time.time() * 1000)}_{self._assistant_message_counter}"
+            self.chat_display.tag_add(transient_tag, start, end)
+            palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+            from_bg = palette.get("selection_bg", "#35557a")
+            to_bg = self.chat_display.cget("bg")
+            self._fade_out_tag(transient_tag, from_bg, to_bg, duration_ms=120)
             self._tag_citations_in_chat(start, end)
             if tag == "agent":
                 if run_id:
