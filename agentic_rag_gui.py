@@ -3044,7 +3044,7 @@ class AgenticRAGApp:
         style.configure("Card.TFrame", background=palette["surface"], borderwidth=0, relief="flat")
         style.configure("Card.Elevated.TFrame", background=palette["surface"], borderwidth=1, bordercolor=palette["outline"], relief="flat")
         style.configure("Card.Flat.TFrame", background=palette["surface_alt"], borderwidth=0, relief="flat")
-        style.configure("StatusBar.TFrame", background=palette["bg"], borderwidth=0, relief="flat")
+        style.configure("StatusBar.TFrame", background=palette["surface"], borderwidth=0, relief="flat")
         style.configure("CollapsibleHeader.TFrame", background=palette["surface"], borderwidth=0, relief="flat")
         style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["outline"], borderwidth=0, relief="flat")
         style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
@@ -3088,9 +3088,9 @@ class AgenticRAGApp:
         style.configure("Horizontal.TScrollbar", background=palette["surface_alt"], troughcolor=palette["bg"], bordercolor=palette["bg"], arrowcolor=palette["muted_text"], relief="flat")
         style.configure("TProgressbar", troughcolor=palette["surface_alt"], background=palette["primary"], bordercolor=palette["bg"], lightcolor=palette["primary"], darkcolor=palette["primary"], relief="flat")
         style.configure("TSeparator", background=palette["outline"])
-        style.configure("App.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(8, 6, 8, 0))
+        style.configure("App.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(4, 8, 4, 0))
         style.configure("App.TNotebook.Tab", padding=(16, 10), font=self._fonts["body_bold"], borderwidth=0)
-        style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("!selected", palette["bg"])], foreground=[("selected", palette["text"]), ("!selected", palette["muted_text"])])
+        style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("!selected", palette["bg"])], foreground=[("selected", palette["primary"]), ("active", get("tab_indicator", "primary", default=palette["primary_hover"])), ("!selected", palette["muted_text"])])
 
     def _apply_ttkbootstrap_theme(self, palette):
         style = self._ttkbootstrap_style or ttk.Style()
