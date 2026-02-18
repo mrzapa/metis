@@ -1086,6 +1086,7 @@ class AgenticRAGApp:
         )
         self.load_icon()
         self.root.geometry("1200x900")
+        self._resolve_fonts()
         self.main_thread = threading.current_thread()
         self.config_path = os.path.join(os.getcwd(), "agentic_rag_config.json")
         self.telemetry_log_filename = "agentic_rag_runs.jsonl"
@@ -2758,6 +2759,23 @@ class AgenticRAGApp:
             self._ttkbootstrap_style.configure("Treeview", background=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), fieldbackground=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"), foreground=_pal(palette, "text", default="#E8EEF8"))
             self.root.configure(bg=_pal(palette, "bg", default="#0D1117"))
 
+    def _resolve_fonts(self):
+        families = set(tkfont.families())
+        base_family = STYLE_CONFIG["font_family"] if STYLE_CONFIG["font_family"] in families else STYLE_CONFIG["fallback_font"]
+        mono_candidates = ("SF Mono", "Consolas", "Cascadia Code", "Menlo", "Courier New", "TkFixedFont")
+        code_family = next((family for family in mono_candidates if family in families), base_family)
+
+        self._fonts = {
+            "h1": (base_family, 16, "bold"),
+            "h2": (base_family, 13, "bold"),
+            "h3": (base_family, 11, "bold"),
+            "body": (base_family, 10),
+            "body_bold": (base_family, 10, "bold"),
+            "caption": (base_family, 9),
+            "code": (code_family, 9),
+            "overline": (base_family, 8, "bold"),
+        }
+
     def _apply_theme(self):
         base_palette = STYLE_CONFIG["themes"].get("space_dust", {})
         selected_palette = STYLE_CONFIG["themes"].get(self.ui_mode.get(), base_palette)
@@ -2778,7 +2796,6 @@ class AgenticRAGApp:
         style = ttk.Style()
         if use_clam and "clam" in style.theme_names():
             style.theme_use("clam")
-        font_family = STYLE_CONFIG["font_family"] if STYLE_CONFIG["font_family"] in tkfont.families() else STYLE_CONFIG["fallback_font"]
         self.root.configure(bg=palette["bg"])
         style.configure(".", background=palette["bg"], foreground=palette["text"], fieldbackground=palette["surface_alt"])
         style.configure("TFrame", background=palette["bg"], borderwidth=0, relief="flat")
@@ -2786,14 +2803,19 @@ class AgenticRAGApp:
         style.configure("Card.Elevated.TFrame", background=palette["surface"], borderwidth=1, bordercolor=palette["outline"], relief="flat")
         style.configure("Card.Flat.TFrame", background=palette["surface_alt"], borderwidth=0, relief="flat")
         style.configure("TLabelframe", background=palette["surface"], bordercolor=palette["outline"], borderwidth=0, relief="flat")
-        style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
-        style.configure("TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10))
-        style.configure("Bold.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 10, "bold"))
-        style.configure("Header.TLabel", background=palette["surface"], foreground=palette["text"], font=(font_family, 13, "bold"))
-        style.configure("Muted.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=(font_family, 10))
-        style.configure("Caption.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=(font_family, 9))
-        style.configure("Danger.TLabel", background=palette["surface"], foreground=palette["danger"], font=(font_family, 10, "bold"))
-        style.configure("Status.TLabel", background=palette["bg"], foreground=palette["status"], font=(font_family, 9))
+        style.configure("TLabelframe.Label", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
+        style.configure("TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["body"])
+        style.configure("Bold.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["body_bold"])
+        style.configure("Header.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["h2"])
+        style.configure("Title.TLabel", background=palette["surface"], foreground=palette["text"], font=self._fonts["h1"])
+        style.configure("Muted.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=self._fonts["body"])
+        style.configure("Caption.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=self._fonts["caption"])
+        style.configure("Overline.TLabel", background=palette["surface"], foreground=palette["muted_text"], font=self._fonts["overline"])
+        style.configure("Code.TLabel", background=palette["surface"], foreground=palette["source"], font=self._fonts["code"])
+        style.configure("Danger.TLabel", background=palette["surface"], foreground=palette["danger"], font=self._fonts["body_bold"])
+        style.configure("Success.TLabel", background=palette["surface"], foreground=palette["success"], font=self._fonts["body_bold"])
+        style.configure("Warning.TLabel", background=palette["surface"], foreground=palette["tertiary"], font=self._fonts["body_bold"])
+        style.configure("Status.TLabel", background=palette["bg"], foreground=palette["status"], font=self._fonts["caption"])
         style.configure("TButton", padding=(12, 8), relief="flat", borderwidth=0, background=palette["surface_alt"], foreground=palette["text"], focuscolor=palette["surface_alt"])
         style.map("TButton", background=[("active", palette["secondary"]), ("pressed", palette["primary"])], foreground=[("active", palette["selection_fg"])])
         style.configure("Primary.TButton", padding=(14, 9), relief="flat", borderwidth=0, background=palette["primary"], foreground="#061018")
@@ -2821,7 +2843,7 @@ class AgenticRAGApp:
         style.configure("TProgressbar", troughcolor=palette["surface_alt"], background=palette["primary"], bordercolor=palette["bg"], lightcolor=palette["primary"], darkcolor=palette["primary"], relief="flat")
         style.configure("TSeparator", background=palette["outline"])
         style.configure("App.TNotebook", background=palette["bg"], borderwidth=0, tabmargins=(8, 6, 8, 0))
-        style.configure("App.TNotebook.Tab", padding=(16, 10), font=(font_family, 10, "bold"), borderwidth=0)
+        style.configure("App.TNotebook.Tab", padding=(16, 10), font=self._fonts["body_bold"], borderwidth=0)
         style.map("App.TNotebook.Tab", background=[("selected", palette["surface"]), ("!selected", palette["bg"])], foreground=[("selected", palette["text"]), ("!selected", palette["muted_text"])])
 
     def _apply_ttkbootstrap_theme(self, palette):
@@ -2957,10 +2979,39 @@ class AgenticRAGApp:
         palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
         if hasattr(self, "chat_display"):
             self.chat_display.tag_config("citation", foreground=palette["link"], underline=1)
-            self.chat_display.tag_config("user", foreground=palette["tertiary"])
-            self.chat_display.tag_config("agent", foreground=palette["success"])
-            self.chat_display.tag_config("system", foreground=palette["muted_text"])
-            self.chat_display.tag_config("source", foreground=palette["source"])
+            self.chat_display.tag_config(
+                "user",
+                foreground=palette["tertiary"],
+                font=self._fonts["body_bold"],
+                lmargin1=14,
+                lmargin2=14,
+                rmargin=10,
+                spacing1=8,
+                spacing3=8,
+                background=palette["surface"],
+            )
+            self.chat_display.tag_config(
+                "agent",
+                foreground=palette["success"],
+                font=self._fonts["body"],
+                lmargin1=10,
+                lmargin2=10,
+                rmargin=10,
+                spacing1=8,
+                spacing3=12,
+            )
+            self.chat_display.tag_config(
+                "system",
+                foreground=palette["muted_text"],
+                font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
+                lmargin1=10,
+                lmargin2=10,
+                rmargin=10,
+                spacing1=6,
+                spacing3=6,
+                background=palette["surface_alt"],
+            )
+            self.chat_display.tag_config("source", foreground=palette["source"], font=self._fonts["code"])
         if hasattr(self, "answer_text"):
             self.answer_text.tag_config("citation", foreground=palette["link"], underline=1)
         if hasattr(self, "sources_tree"):
@@ -5780,13 +5831,35 @@ class AgenticRAGApp:
 
         # Tag configuration for coloring
         self.chat_display.tag_config(
-            "user", font=("Segoe UI", 10, "bold"), spacing1=8, spacing3=8
+            "user",
+            font=self._fonts["body_bold"],
+            spacing1=8,
+            spacing3=8,
+            lmargin1=14,
+            lmargin2=14,
+            rmargin=10,
+            background=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["surface"],
         )
-        self.chat_display.tag_config("agent", spacing1=8, spacing3=12)
         self.chat_display.tag_config(
-            "system", font=("Segoe UI", 9, "italic"), spacing1=6, spacing3=6
+            "agent",
+            font=self._fonts["body"],
+            spacing1=8,
+            spacing3=12,
+            lmargin1=10,
+            lmargin2=10,
+            rmargin=10,
         )
-        self.chat_display.tag_config("source", font=("Consolas", 8))
+        self.chat_display.tag_config(
+            "system",
+            font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
+            spacing1=6,
+            spacing3=6,
+            lmargin1=10,
+            lmargin2=10,
+            rmargin=10,
+            background=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["surface_alt"],
+        )
+        self.chat_display.tag_config("source", font=self._fonts["code"])
 
         # Quick Actions
         action_frame = self.create_frame(left_pane, style="Card.TFrame")
