@@ -1115,6 +1115,7 @@ class AgenticRAGApp:
             "Blinkist-style summary",
         ]
         self.output_style = tk.StringVar(value="Default answer")
+        self.animation_settings = {"progress_pulse_ms": 10}
         self.mode_options = [
             "Q&A",
             "Summary",
@@ -1187,6 +1188,8 @@ class AgenticRAGApp:
         self.lexical_db_path = None
         self.lexical_db_available = False
         self._citation_tip = None
+        self._thinking_indicator_line = None
+        self._thinking_pulse_after_id = None
         self.session_db_path = os.path.join(os.getcwd(), "rag_sessions.db")
         self.trace_store = TraceStore(os.path.join(os.getcwd(), "trace_store"))
         self.current_session_id = None
@@ -2877,13 +2880,14 @@ class AgenticRAGApp:
     def _theme_text_tags(self):
         palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
         if hasattr(self, "chat_display"):
-            self.chat_display.tag_config("citation", foreground=palette["link"], underline=1)
+            self.chat_display.tag_config("citation", foreground=palette["link"], underline=1, font=("Consolas", 9, "underline"))
             self.chat_display.tag_config("user", foreground=palette["tertiary"])
             self.chat_display.tag_config("agent", foreground=palette["success"])
             self.chat_display.tag_config("system", foreground=palette["muted_text"])
             self.chat_display.tag_config("source", foreground=palette["source"])
+            self.chat_display.tag_config("thinking_indicator", foreground=palette["muted_text"], font=("Segoe UI", 9, "italic"))
         if hasattr(self, "answer_text"):
-            self.answer_text.tag_config("citation", foreground=palette["link"], underline=1)
+            self.answer_text.tag_config("citation", foreground=palette["link"], underline=1, font=("Consolas", 9, "underline"))
         if hasattr(self, "sources_tree"):
             self.sources_tree.tag_configure("supporting", background=palette["supporting_bg"], foreground=palette["text"])
 
@@ -3295,12 +3299,13 @@ class AgenticRAGApp:
     def _set_progress_running(self, bar, running):
         if not bar or not self._safe_widget_exists(bar):
             return
+        pulse_ms = max(5, int(self.animation_settings.get("progress_pulse_ms", 10) or 10))
         if running:
             bar.configure(mode="indeterminate")
-            bar.start(10)
+            bar.start(pulse_ms)
         else:
             bar.stop()
-            bar.configure(mode="indeterminate")
+            bar.configure(mode="determinate", value=0)
 
     def _run_on_ui(self, func, *args, **kwargs):
         if threading.current_thread() == self.main_thread:
@@ -4185,6 +4190,12 @@ class AgenticRAGApp:
         if output_style not in self.output_style_options:
             output_style = "Default answer"
         self.output_style.set(output_style)
+        animation = data.get("animation", {}) if isinstance(data.get("animation"), dict) else {}
+        try:
+            pulse_ms = int(animation.get("progress_pulse_ms", self.animation_settings.get("progress_pulse_ms", 10)))
+        except (TypeError, ValueError):
+            pulse_ms = self.animation_settings.get("progress_pulse_ms", 10)
+        self.animation_settings["progress_pulse_ms"] = max(5, pulse_ms)
         selected_mode = self._normalize_mode_name(data.get("selected_mode", self.selected_mode.get()))
         self.selected_mode.set(selected_mode)
         self.selected_profile.set(data.get("selected_profile", self.selected_profile.get()))
@@ -4293,6 +4304,9 @@ class AgenticRAGApp:
             "selected_mode": self.selected_mode.get(),
             "selected_profile": self.selected_profile.get(),
             "last_used_mode": self.last_used_mode,
+            "animation": {
+                "progress_pulse_ms": int(self.animation_settings.get("progress_pulse_ms", 10)),
+            },
         }
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
@@ -4416,10 +4430,13 @@ class AgenticRAGApp:
         actions = self.create_frame(frame, style="Card.TFrame")
         actions.pack(fill="x", pady=(0, UI_SPACING["s"]))
         self.create_button(actions, text="New Chat", command=lambda: self.start_new_chat(load_in_ui=True), takefocus=True, style="Primary.TButton").pack(side="left")
-        self.create_button(actions, text="Open/Resume", command=self.load_selected_session, takefocus=True, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
+        self.create_label(actions, text="│", style="Muted.TLabel").pack(side="left", padx=(UI_SPACING["s"], UI_SPACING["s"]))
+        self.create_button(actions, text="Open/Resume", command=self.load_selected_session, takefocus=True, style="Secondary.TButton").pack(side="left")
         self.create_button(actions, text="Rename", command=self.rename_selected_session, takefocus=True, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
-        self.create_button(actions, text="Delete", command=self.delete_selected_session, takefocus=True, style="Danger.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
-        self.create_button(actions, text="Export", command=self.export_selected_session, takefocus=True, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
+        self.create_label(actions, text="│", style="Muted.TLabel").pack(side="left", padx=(UI_SPACING["s"], UI_SPACING["s"]))
+        self.create_button(actions, text="Delete", command=self.delete_selected_session, takefocus=True, style="Danger.TButton").pack(side="left")
+        self.create_label(actions, text="│", style="Muted.TLabel").pack(side="left", padx=(UI_SPACING["s"], UI_SPACING["s"]))
+        self.create_button(actions, text="Export", command=self.export_selected_session, takefocus=True, style="Secondary.TButton").pack(side="left")
         self.create_button(actions, text="Refresh", command=self.refresh_sessions_list, takefocus=True, style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
 
         search_row = self.create_frame(frame, style="Card.TFrame")
@@ -4757,8 +4774,8 @@ class AgenticRAGApp:
         ).pack(side="left", padx=(8, 8))
         self.create_button(toggle_row, text="Apply", command=self._apply_startup_mode_setting, style="Secondary.TButton").pack(side="left")
 
-        appearance_section = CollapsibleFrame(frame, "Appearance", expanded=False)
-        appearance_section.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        appearance_section = CollapsibleFrame(frame, "◉ Appearance", expanded=False)
+        appearance_section.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, UI_SPACING["m"]))
         self._register_settings_section(appearance_section, "Appearance")
         self.create_label(appearance_section.content, text="Controls the visual theme applied to the entire interface.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
         self.create_label(appearance_section.content, text="Theme mode:").pack(side="left")
@@ -4771,8 +4788,8 @@ class AgenticRAGApp:
         ).pack(side="left", padx=(8, 8))
         self.create_button(appearance_section.content, text="Apply Theme", command=self._apply_theme, style="Primary.TButton").pack(side="left")
 
-        self.settings_model_section = CollapsibleFrame(frame, "Model & Provider", expanded=False)
-        self.settings_model_section.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        self.settings_model_section = CollapsibleFrame(frame, "⚙ Model & Provider", expanded=False)
+        self.settings_model_section.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, UI_SPACING["m"]))
         self._register_settings_section(self.settings_model_section, "Model & Provider")
         self.create_label(self.settings_model_section.content, text="Set the LLM provider, generation model, embedding model, vector DB, API keys, and local model registry.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
 
@@ -5111,8 +5128,8 @@ class AgenticRAGApp:
         ).grid(row=1, column=1, sticky="w", pady=(8, 0))
 
 
-        retrieval_section = CollapsibleFrame(frame, "Retrieval", expanded=False)
-        retrieval_section.grid(row=7, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        retrieval_section = CollapsibleFrame(frame, "🔎 Retrieval", expanded=False)
+        retrieval_section.grid(row=7, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, UI_SPACING["m"]))
         self.settings_retrieval_section = retrieval_section
         self._register_settings_section(self.settings_retrieval_section, "Retrieval")
         self.create_label(retrieval_section.content, text="Controls search type, retrieval mode, MMR parameters, reranking, and sub-query expansion.", style="Muted.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
@@ -5155,8 +5172,8 @@ class AgenticRAGApp:
             style="Secondary.TButton",
         ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
-        agentic_section = CollapsibleFrame(frame, "Agentic / Iterations", expanded=False)
-        agentic_section.grid(row=8, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        agentic_section = CollapsibleFrame(frame, "🧠 Agentic / Iterations", expanded=False)
+        agentic_section.grid(row=8, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, UI_SPACING["m"]))
         self.settings_agentic_section = agentic_section
         self._register_settings_section(self.settings_agentic_section, "Agentic / Iterations", advanced_only=True)
         self.create_label(agentic_section.content, text="Enables multi-iteration retrieval where a critic refines queries between passes to improve coverage.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
@@ -5181,8 +5198,8 @@ class AgenticRAGApp:
             variable=self.show_retrieved_context,
         ).pack(side="left")
 
-        frontier_section = CollapsibleFrame(frame, "Frontier", expanded=False)
-        frontier_section.grid(row=9, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        frontier_section = CollapsibleFrame(frame, "🧪 Frontier", expanded=False)
+        frontier_section.grid(row=9, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, UI_SPACING["m"]))
         self.settings_frontier_section = frontier_section
         self._register_settings_section(self.settings_frontier_section, "Frontier", advanced_only=True)
         self.create_label(frontier_section.content, text="Experimental features: citation v2, structured extraction, recursive memory, and agent tracing. May be unstable.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
@@ -5196,8 +5213,8 @@ class AgenticRAGApp:
         self.create_checkbox(frontier_section.content, text="Claim-level grounding (CiteFix-lite)", variable=self.enable_claim_level_grounding_citefix_lite).pack(anchor="w")
         self.create_checkbox(frontier_section.content, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
 
-        profile_section = CollapsibleFrame(frame, "Profiles", expanded=True)
-        profile_section.grid(row=10, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 8))
+        profile_section = CollapsibleFrame(frame, "📁 Profiles", expanded=True)
+        profile_section.grid(row=10, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, UI_SPACING["m"]))
         self._register_settings_section(profile_section, "Profiles")
         self.create_label(profile_section.content, text="Save and restore named configuration snapshots to switch between different use-case setups quickly.", style="Muted.TLabel").pack(anchor="w", pady=(0, 4))
         profile_row = self.create_frame(profile_section.content)
@@ -5387,7 +5404,7 @@ class AgenticRAGApp:
             style="Caption.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
-        sel_frame = self.create_frame(frame, text="1) Source file", padding=UI_SPACING["m"], kind="labelframe")
+        sel_frame = self.create_frame(frame, text="STEP 1 · Source file", padding=UI_SPACING["m"], kind="labelframe")
         sel_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
 
         self.create_label(
@@ -5418,10 +5435,13 @@ class AgenticRAGApp:
         self.create_button(file_btn_frame, text="Browse File...", command=self.browse_file, style="Primary.TButton").pack(side="left")
         self.create_button(file_btn_frame, text="Clear Selection", command=self.clear_selected_file, style="Secondary.TButton").pack(side="left", padx=UI_SPACING["s"])
 
-        chunk_frame = self.create_frame(frame, text="2) Chunking strategy", padding=UI_SPACING["m"], kind="labelframe")
+        chunk_frame = self.create_frame(frame, text="STEP 2 · Chunking strategy", padding=UI_SPACING["m"], kind="labelframe")
         chunk_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
 
-        self.create_label(chunk_frame, text="Settings mode:").pack(side="left")
+        chunk_frame.columnconfigure(1, weight=1)
+        chunk_frame.columnconfigure(3, weight=1)
+
+        self.create_label(chunk_frame, text="Settings mode:").grid(row=0, column=0, sticky="w")
         auto_mode_combo = self.create_combobox(
             chunk_frame,
             textvariable=self.auto_settings_mode,
@@ -5429,34 +5449,34 @@ class AgenticRAGApp:
             width=10,
             state="readonly",
         )
-        auto_mode_combo.pack(side="left", padx=(6, 14))
+        auto_mode_combo.grid(row=0, column=1, sticky="w", padx=(6, 18), pady=(0, UI_SPACING["xs"]))
         auto_mode_combo.bind("<<ComboboxSelected>>", lambda _e: self._maybe_autofill_recommendations())
 
-        self.create_label(chunk_frame, text="Chunk Size (chars):", width=FORM_WIDTHS["label"]).pack(side="left")
-        self.create_entry(chunk_frame, textvariable=self.chunk_size, width=10).pack(side="left", padx=5)
+        self.create_label(chunk_frame, text="Chunk Size (chars):").grid(row=0, column=2, sticky="w")
+        self.create_entry(chunk_frame, textvariable=self.chunk_size, width=10).grid(row=0, column=3, sticky="w", padx=(6, 0), pady=(0, UI_SPACING["xs"]))
 
-        self.create_label(chunk_frame, text="Overlap (chars):", width=FORM_WIDTHS["label"]).pack(side="left", padx=(20, 0))
-        self.create_entry(chunk_frame, textvariable=self.chunk_overlap, width=10).pack(side="left", padx=5)
+        self.create_label(chunk_frame, text="Overlap (chars):").grid(row=1, column=0, sticky="w", pady=(UI_SPACING["xs"], 0))
+        self.create_entry(chunk_frame, textvariable=self.chunk_overlap, width=10).grid(row=1, column=1, sticky="w", padx=(6, 18), pady=(UI_SPACING["xs"], 0))
 
         self.create_checkbox(
             chunk_frame,
             text="Build digest index",
             variable=self.build_digest_index,
-        ).pack(side="left", padx=(20, 0))
+        ).grid(row=1, column=2, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
 
         self.chk_structure_aware = self.create_checkbox(
             chunk_frame,
             text="Structure-aware",
             variable=self.structure_aware_ingestion,
         )
-        self.chk_structure_aware.pack(side="left", padx=(20, 0))
+        self.chk_structure_aware.grid(row=2, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
 
         self.chk_semantic_layout = self.create_checkbox(
             chunk_frame,
             text="Semantic Layout (experimental)",
             variable=self.semantic_layout_ingestion,
         )
-        self.chk_semantic_layout.pack(side="left", padx=(20, 0))
+        self.chk_semantic_layout.grid(row=2, column=2, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
 
         self.auto_recommendation_var = tk.StringVar(value="Auto recommendation: waiting for file/index metadata.")
         self.auto_warning_var = tk.StringVar(value="")
@@ -5466,7 +5486,7 @@ class AgenticRAGApp:
         self.create_label(auto_frame, textvariable=self.auto_warning_var, style="Danger.TLabel", wraplength=980, justify="left").pack(anchor="w", pady=(2, 0))
         self.create_button(auto_frame, text="Apply recommendations", command=lambda: self._apply_auto_recommendations()).pack(anchor="w", pady=(6, 0))
 
-        comprehension_frame = self.create_frame(frame, text="3) Optional comprehension index", padding=UI_SPACING["m"], kind="labelframe")
+        comprehension_frame = self.create_frame(frame, text="STEP 3 · Optional comprehension index", padding=UI_SPACING["m"], kind="labelframe")
         comprehension_frame.pack(fill="x", pady=(0, UI_SPACING["m"]))
 
         self.create_checkbox(
@@ -5515,7 +5535,7 @@ class AgenticRAGApp:
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
-        outline_frame = self.create_frame(frame, text="4) Document Outline", padding=UI_SPACING["m"], kind="labelframe")
+        outline_frame = self.create_frame(frame, text="STEP 4 · Document Outline", padding=UI_SPACING["m"], kind="labelframe")
         outline_frame.pack(fill="both", expand=True, pady=(UI_SPACING["m"], 0))
         self.create_label(
             outline_frame,
@@ -5552,7 +5572,7 @@ class AgenticRAGApp:
             "No SHT outline available yet. Enable Structure-aware and ingest a document with confident headers.",
         )
 
-        semantic_frame = self.create_frame(frame, text="5) Semantic Regions", padding=UI_SPACING["m"], kind="labelframe")
+        semantic_frame = self.create_frame(frame, text="STEP 5 · Semantic Regions", padding=UI_SPACING["m"], kind="labelframe")
         semantic_frame.pack(fill="both", expand=True, pady=(UI_SPACING["m"], 0))
         self.create_label(
             semantic_frame,
@@ -5641,7 +5661,7 @@ class AgenticRAGApp:
 
         top_bar = self.create_frame(frame, text="Conversation Setup", padding=UI_SPACING["m"], kind="labelframe")
         top_bar.pack(fill="x", pady=(0, UI_SPACING["m"]))
-        for col in (1, 3, 5, 7):
+        for col in range(8):
             top_bar.columnconfigure(col, weight=1)
 
         self.create_label(top_bar, text="Profile:").grid(row=0, column=0, sticky="w")
@@ -5668,18 +5688,24 @@ class AgenticRAGApp:
         self.cb_chat_model.grid(row=0, column=7, sticky="ew", padx=(6, 12))
         self.cb_chat_model.bind("<<ComboboxSelected>>", self._on_llm_model_change)
 
-        self.create_label(top_bar, text="retrieve_k:").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        self.create_entry(top_bar, textvariable=self.retrieval_k, width=8).grid(row=1, column=1, sticky="w", padx=(6, 12), pady=(8, 0))
-        self.create_label(top_bar, text="final_k:").grid(row=1, column=2, sticky="w", pady=(8, 0))
-        self.create_entry(top_bar, textvariable=self.final_k, width=8).grid(row=1, column=3, sticky="w", padx=(6, 12), pady=(8, 0))
-        self.create_button(top_bar, text="Refresh Indexes", command=self._refresh_existing_indexes_async, style="Secondary.TButton").grid(row=1, column=6, sticky="w", pady=(8, 0))
-        self.create_button(top_bar, text="Settings", command=lambda: self.notebook.select(self.tab_settings), style="Secondary.TButton").grid(row=1, column=7, sticky="e", pady=(8, 0))
-        if self.basic_mode:
-            self.create_button(top_bar, text="Switch to Advanced", command=self.switch_to_advanced_mode, style="Secondary.TButton").grid(row=2, column=7, sticky="e", pady=(8, 0))
-        else:
-            self.create_button(top_bar, text="Run Setup Wizard", command=self.run_setup_wizard, style="Secondary.TButton").grid(row=2, column=7, sticky="e", pady=(8, 0))
+        actions_row = self.create_frame(top_bar)
+        actions_row.grid(row=1, column=0, columnspan=8, sticky="ew", pady=(UI_SPACING["s"], 0))
+        self.create_button(actions_row, text="Refresh Indexes", command=self._refresh_existing_indexes_async, style="Secondary.TButton").pack(side="left")
+        self.create_button(actions_row, text="Settings", command=lambda: self.notebook.select(self.tab_settings), style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
         if self.test_mode_active:
-            self.create_button(top_bar, text="Reset test environment", command=self.reset_test_environment, style="Danger.TButton").grid(row=2, column=6, sticky="w", pady=(8, 0))
+            self.create_button(actions_row, text="Reset test environment", command=self.reset_test_environment, style="Danger.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
+        if self.basic_mode:
+            self.create_button(actions_row, text="Switch to Advanced", command=self.switch_to_advanced_mode, style="Secondary.TButton").pack(side="right")
+        else:
+            self.create_button(actions_row, text="Run Setup Wizard", command=self.run_setup_wizard, style="Secondary.TButton").pack(side="right")
+
+        setup_advanced = CollapsibleFrame(top_bar, "Advanced chat settings", expanded=False)
+        setup_advanced.grid(row=2, column=0, columnspan=8, sticky="ew", pady=(UI_SPACING["s"], 0))
+        advanced_grid = setup_advanced.content
+        self.create_label(advanced_grid, text="retrieve_k:").grid(row=0, column=0, sticky="w")
+        self.create_entry(advanced_grid, textvariable=self.retrieval_k, width=8).grid(row=0, column=1, sticky="w", padx=(6, 14))
+        self.create_label(advanced_grid, text="final_k:").grid(row=0, column=2, sticky="w")
+        self.create_entry(advanced_grid, textvariable=self.final_k, width=8).grid(row=0, column=3, sticky="w", padx=(6, 0))
 
         content_split = self.create_frame(frame, orient=tk.HORIZONTAL, kind="panedwindow")
         content_split.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
@@ -5694,7 +5720,7 @@ class AgenticRAGApp:
             left_pane, surface_id="chat_display", state="disabled", font=("Segoe UI", 10), wrap=tk.WORD, scrolled=True
         )
         self.chat_display.pack(fill=tk.BOTH, expand=True, pady=(0, UI_SPACING["m"]))
-        self.chat_display.tag_config("citation", underline=1)
+        self.chat_display.tag_config("citation", foreground=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["link"], underline=1, font=("Consolas", 9, "underline"))
         self.chat_display.tag_bind("citation", "<Button-1>", self._on_citation_click)
         self.chat_display.tag_bind("citation", "<Enter>", self._on_citation_hover)
         self.chat_display.tag_bind("citation", "<Leave>", self._on_citation_leave)
@@ -5708,6 +5734,7 @@ class AgenticRAGApp:
             "system", font=("Segoe UI", 9, "italic"), spacing1=6, spacing3=6
         )
         self.chat_display.tag_config("source", font=("Consolas", 8))
+        self.chat_display.tag_config("thinking_indicator", font=("Segoe UI", 9, "italic"), spacing1=4, spacing3=8)
 
         # Quick Actions
         action_frame = self.create_frame(left_pane, style="Card.TFrame")
@@ -5742,23 +5769,18 @@ class AgenticRAGApp:
             style="Secondary.TButton",
         ).pack(side="left", padx=UI_SPACING["s"])
 
-        output_frame = self.create_frame(left_pane)
-        output_frame.pack(fill="x", pady=(2, 4))
-        self.create_label(output_frame, text="Output style:").pack(side="left")
-        self.create_combobox(
-            output_frame,
-            textvariable=self.output_style,
-            values=self.output_style_options,
-            state="readonly",
-            width=22,
-        ).pack(side="left", padx=(6, 0))
+        self.create_label(
+            left_pane,
+            text="Type your question, Ctrl+Enter to send",
+            style="Caption.TLabel",
+        ).pack(anchor="w", pady=(2, 4))
 
         logs_section = CollapsibleFrame(left_pane, "Logs & telemetry", expanded=False)
         logs_section.pack(fill="both", pady=(6, 0))
         self.log_area = self.create_rich_text_surface(logs_section.content, surface_id="chat_logs", height=6, state="disabled", wrap=tk.WORD, scrolled=True)
         self.log_area.pack(fill=tk.BOTH, expand=True)
 
-        self.chat_settings_section = CollapsibleFrame(left_pane, "Advanced chat settings", expanded=False)
+        self.chat_settings_section = CollapsibleFrame(left_pane, "Runtime options", expanded=False)
         self.chat_settings_section.pack(fill="x", pady=(4, 0))
 
         settings_content = self.chat_settings_section.content
@@ -5798,14 +5820,24 @@ class AgenticRAGApp:
         self.create_checkbox(frontier_wrap, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
 
         # Sticky input composer
-        input_frame = self.create_frame(left_pane, style="Card.Flat.TFrame", padding=UI_SPACING["s"])
+        input_frame = self.create_frame(left_pane, style="Card.Flat.TFrame", padding=UI_SPACING["m"])
         input_frame.pack(fill="x", side="bottom", pady=(UI_SPACING["s"], 0))
         self.txt_input = self.create_rich_text_surface(input_frame, surface_id="chat_input", height=3, font=("Segoe UI", 11), wrap=tk.WORD)
         self.txt_input.pack(side="left", fill="both", expand=True, padx=(0, UI_SPACING["s"]))
         self.txt_input.bind("<Control-Return>", lambda _e: (self.send_message(), "break")[1])
 
-        self.btn_send = self.create_button(input_frame, text="Send", command=self.send_message, style="Primary.TButton")
-        self.btn_send.pack(side="right")
+        send_row = self.create_frame(input_frame)
+        send_row.pack(side="right", fill="y")
+        self.create_label(send_row, text="Output style:", style="Muted.TLabel").pack(anchor="e", pady=(0, UI_SPACING["xs"]))
+        self.create_combobox(
+            send_row,
+            textvariable=self.output_style,
+            values=self.output_style_options,
+            state="readonly",
+            width=22,
+        ).pack(anchor="e", pady=(0, UI_SPACING["xs"]))
+        self.btn_send = self.create_button(send_row, text="Send", command=self.send_message, style="Primary.TButton")
+        self.btn_send.pack(anchor="e")
 
         # Right evidence pane
         evidence_wrap = self.create_frame(right_pane, text="Evidence Navigator", padding=UI_SPACING["m"], kind="labelframe")
@@ -5828,7 +5860,7 @@ class AgenticRAGApp:
         self.answer_text = self.create_rich_text_surface(
             self.answer_tab, surface_id="answer_text", height=20, wrap=tk.WORD, state="disabled", font=("Segoe UI", 10)
         )
-        self.answer_text.tag_config("citation", underline=1)
+        self.answer_text.tag_config("citation", foreground=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["link"], underline=1, font=("Consolas", 9, "underline"))
         self.answer_text.tag_bind("citation", "<Button-1>", self._on_answer_citation_click)
         self.answer_text.tag_bind("citation", "<Enter>", self._on_citation_hover)
         self.answer_text.tag_bind("citation", "<Leave>", self._on_citation_leave)
@@ -6495,6 +6527,20 @@ class AgenticRAGApp:
             except Exception:
                 pass
             self._citation_tip = None
+
+    def _on_feedback_hover(self, tag_name, positive=True):
+        if not hasattr(self, "chat_display") or not self._safe_widget_exists(self.chat_display):
+            return
+        palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+        color = palette["success"] if positive else palette["danger"]
+        self.chat_display.tag_config(tag_name, foreground=color, underline=1, font=("Segoe UI Emoji", 13, "bold"))
+
+    def _on_feedback_leave(self, tag_name, positive=True):
+        if not hasattr(self, "chat_display") or not self._safe_widget_exists(self.chat_display):
+            return
+        palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+        color = palette["success"] if positive else palette["danger"]
+        self.chat_display.tag_config(tag_name, foreground=color, underline=1, font=("Segoe UI Emoji", 11))
 
     def _on_citation_click(self, event=None):
         try:
@@ -14628,6 +14674,7 @@ class AgenticRAGApp:
 
         self.txt_input.delete("1.0", tk.END)
         self.append_chat("user", f"You: {query}")
+        self._show_thinking_indicator()
         self._append_history(self._human_message(content=query))
         self._insert_session_message(role="user", content=query)
         with sqlite3.connect(self.session_db_path) as conn:
@@ -14646,6 +14693,7 @@ class AgenticRAGApp:
                 and current_signature != self.index_embedding_signature
                 and not self.force_embedding_compat.get()
             ):
+                self._remove_thinking_indicator()
                 self.append_chat(
                     "system",
                     "Embedding mismatch detected. Re-embed documents or enable force "
@@ -14683,6 +14731,7 @@ class AgenticRAGApp:
                             f"{self._format_index_label(persist_dir, collection_name)}."
                         )
                 else:
+                    self._remove_thinking_indicator()
                     self.append_chat(
                         "system", "Error: No Weaviate connection. Please Ingest first."
                     )
@@ -14694,6 +14743,7 @@ class AgenticRAGApp:
                     user_message="Unable to start RAG run because no usable index is available.",
                     show_messagebox=False,
                 )
+                self._remove_thinking_indicator()
                 self.append_chat("system", f"Error: Please ingest a file first. ({e})")
                 return
 
@@ -16786,6 +16836,7 @@ class AgenticRAGApp:
                         "citation_count": self._count_citations(validated_answer),
                     },
                 )
+                self._remove_thinking_indicator()
                 self.append_chat("agent", f"AI: {validated_answer}", run_id=run_id)
                 self._append_history(self._ai_message(content=validated_answer))
                 self._insert_session_message(
@@ -17603,6 +17654,7 @@ class AgenticRAGApp:
                         "citation_count": self._count_citations(validated_answer),
                     },
                 )
+                self._remove_thinking_indicator()
                 self.append_chat("agent", f"AI: {validated_answer}", run_id=run_id)
                 self._append_history(self._ai_message(content=validated_answer))
                 self._insert_session_message(
@@ -17677,6 +17729,7 @@ class AgenticRAGApp:
                 user_message=f"RAG run failed during {stage}.",
                 show_messagebox=True,
             )
+            self._remove_thinking_indicator()
             self.append_chat("system", f"Error ({stage} failure): {e}")
             self._append_jsonl_telemetry(
                 {
@@ -17688,8 +17741,68 @@ class AgenticRAGApp:
                 }
             )
         finally:
+            self._remove_thinking_indicator()
             if self._active_run_id == run_id:
                 self._active_run_id = None
+
+    def _show_thinking_indicator(self):
+        if not hasattr(self, "chat_display") or not self._safe_widget_exists(self.chat_display):
+            return
+
+        def _show():
+            if not self._safe_widget_exists(self.chat_display):
+                return
+            self._remove_thinking_indicator()
+            self.chat_display.config(state="normal")
+            self._thinking_indicator_line = self.chat_display.index(tk.END)
+            self.chat_display.insert(tk.END, "Axiom is thinking...\n", "thinking_indicator")
+            self.chat_display.see(tk.END)
+            self.chat_display.config(state="disabled")
+            self._pulse_thinking(0)
+
+        self._run_on_ui(_show)
+
+    def _pulse_thinking(self, phase=0):
+        if not hasattr(self, "chat_display") or not self._safe_widget_exists(self.chat_display):
+            return
+        if self._thinking_indicator_line is None:
+            return
+
+        frames = ["Axiom is thinking.", "Axiom is thinking..", "Axiom is thinking...", "Axiom is thinking…"]
+        line_start = self._thinking_indicator_line
+
+        def _tick():
+            if self._thinking_indicator_line is None or not self._safe_widget_exists(self.chat_display):
+                return
+            self.chat_display.config(state="normal")
+            self.chat_display.delete(line_start, f"{line_start} lineend")
+            self.chat_display.insert(line_start, frames[phase % len(frames)], "thinking_indicator")
+            self.chat_display.config(state="disabled")
+            delay = max(120, int(self.animation_settings.get("progress_pulse_ms", 10) or 10) * 18)
+            self._thinking_pulse_after_id = self.root.after(delay, self._pulse_thinking, phase + 1)
+
+        self._run_on_ui(_tick)
+
+    def _remove_thinking_indicator(self):
+        if self._thinking_pulse_after_id is not None:
+            try:
+                self.root.after_cancel(self._thinking_pulse_after_id)
+            except Exception:
+                pass
+            self._thinking_pulse_after_id = None
+        if self._thinking_indicator_line is None:
+            return
+        if not hasattr(self, "chat_display") or not self._safe_widget_exists(self.chat_display):
+            self._thinking_indicator_line = None
+            return
+
+        self.chat_display.config(state="normal")
+        try:
+            self.chat_display.delete(self._thinking_indicator_line, f"{self._thinking_indicator_line}+1line")
+        except tk.TclError:
+            pass
+        self.chat_display.config(state="disabled")
+        self._thinking_indicator_line = None
 
     def _tag_citations_in_chat(self, start_index, end_index):
         text = self.chat_display.get(start_index, end_index)
@@ -17714,10 +17827,14 @@ class AgenticRAGApp:
                     self.chat_display.insert(tk.END, "  ")
                     self.chat_display.insert(tk.END, "👎", down_tag)
                     palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
-                    self.chat_display.tag_config(up_tag, foreground=palette["success"], underline=1)
-                    self.chat_display.tag_config(down_tag, foreground=palette["danger"], underline=1)
+                    self.chat_display.tag_config(up_tag, foreground=palette["success"], underline=1, font=("Segoe UI Emoji", 11))
+                    self.chat_display.tag_config(down_tag, foreground=palette["danger"], underline=1, font=("Segoe UI Emoji", 11))
                     self.chat_display.tag_bind(up_tag, "<Button-1>", lambda _e, rid=run_id: self._submit_feedback(rid, 1))
                     self.chat_display.tag_bind(down_tag, "<Button-1>", lambda _e, rid=run_id: self._submit_feedback(rid, -1))
+                    self.chat_display.tag_bind(up_tag, "<Enter>", lambda _e, tag_name=up_tag: self._on_feedback_hover(tag_name, positive=True))
+                    self.chat_display.tag_bind(down_tag, "<Enter>", lambda _e, tag_name=down_tag: self._on_feedback_hover(tag_name, positive=False))
+                    self.chat_display.tag_bind(up_tag, "<Leave>", lambda _e, tag_name=up_tag: self._on_feedback_leave(tag_name, positive=True))
+                    self.chat_display.tag_bind(down_tag, "<Leave>", lambda _e, tag_name=down_tag: self._on_feedback_leave(tag_name, positive=False))
                 self.chat_display.insert(tk.END, "\n\n")
                 if hasattr(self, "answer_text"):
                     answer_body = str(message).replace("AI:", "", 1).strip()
