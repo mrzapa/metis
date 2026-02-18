@@ -1959,7 +1959,7 @@ class AgenticRAGApp:
                 self.append_chat("source", content)
         self._restore_session_state(session)
         self.append_chat("system", f"Loaded session: {session['title'] or session_id}")
-        self.notebook.select(self.tab_chat)
+        self._switch_main_view("chat")
 
     def rename_selected_session(self):
         session_id = self._selected_history_session_id()
@@ -2041,7 +2041,7 @@ class AgenticRAGApp:
             self.sessions_tree.selection_set(new_session_id)
             self.sessions_tree.focus(new_session_id)
             self.sessions_tree.see(new_session_id)
-        self.notebook.select(self.tab_chat)
+        self._switch_main_view("chat")
 
     @staticmethod
     def _normalize_export_source_item(source):
@@ -2908,30 +2908,81 @@ class AgenticRAGApp:
     def setup_ui(self):
         self._apply_theme()
 
-        self.notebook = ttk.Notebook(self.root, style="App.TNotebook")
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=STYLE_CONFIG["padding"]["md"], pady=STYLE_CONFIG["padding"]["md"])
+        outer_pad = STYLE_CONFIG["padding"]["md"]
+        self.root.grid_columnconfigure(0, minsize=200, weight=0)
+        self.root.grid_columnconfigure(1, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
 
-        self.tab_chat = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.notebook.add(self.tab_chat, text="Chat")
+        sidebar_style = "Card.TFrame" if self.ui_backend != "ctk" else None
+        self.sidebar_frame = self.create_frame(self.root, **({"style": sidebar_style} if sidebar_style else {}))
+        self.sidebar_frame.grid(row=0, column=0, sticky="ns", padx=(outer_pad, UI_SPACING["s"]), pady=(outer_pad, UI_SPACING["s"]))
+        self.sidebar_frame.grid_columnconfigure(0, weight=1)
+
+        self.main_content_frame = self.create_frame(self.root)
+        self.main_content_frame.grid(row=0, column=1, sticky="nsew", padx=(0, outer_pad), pady=(outer_pad, UI_SPACING["s"]))
+        self.main_content_frame.grid_rowconfigure(0, weight=1)
+        self.main_content_frame.grid_columnconfigure(0, weight=1)
+
+        self.sidebar_title = self.create_label(self.sidebar_frame, text="App Title", style="Header.TLabel")
+        self.sidebar_title.grid(row=0, column=0, sticky="w", padx=UI_SPACING["m"], pady=(UI_SPACING["m"], UI_SPACING["l"]))
+
+        self._sidebar_nav_buttons = {}
+        nav_items = [
+            ("chat", "Chat"),
+            ("library", "Library"),
+            ("history", "History"),
+            ("settings", "Settings"),
+        ]
+        for idx, (view_key, label) in enumerate(nav_items, start=1):
+            if self.ui_backend == "ctk" and CTK_MODULE is not None:
+                button = CTK_MODULE.CTkButton(
+                    self.sidebar_frame,
+                    text=label,
+                    command=lambda key=view_key: self._switch_main_view(key),
+                    fg_color="transparent",
+                    anchor="w",
+                    hover_color=self.theme_palette.get("surface_alt", self.theme_palette.get("surface", "#161B22")),
+                    text_color=self.theme_palette.get("text", "#E8EEF8"),
+                )
+            else:
+                button = self.create_button(
+                    self.sidebar_frame,
+                    text=label,
+                    command=lambda key=view_key: self._switch_main_view(key),
+                    style="Secondary.TButton",
+                )
+            button.grid(row=idx, column=0, sticky="ew", padx=UI_SPACING["m"], pady=(0, UI_SPACING["xs"]))
+            self._sidebar_nav_buttons[view_key] = button
+
+        self.tab_chat = self.create_frame(self.main_content_frame, style="Card.TFrame")
+        self.tab_chat.grid(row=0, column=0, sticky="nsew")
         self.build_chat_tab()
 
-        self.tab_history = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.notebook.add(self.tab_history, text="History")
+        self.tab_history = self.create_frame(self.main_content_frame, style="Card.TFrame")
+        self.tab_history.grid(row=0, column=0, sticky="nsew")
         self.build_history_tab()
 
-        self.tab_library = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.notebook.add(self.tab_library, text="Library")
+        self.tab_library = self.create_frame(self.main_content_frame, style="Card.TFrame")
+        self.tab_library.grid(row=0, column=0, sticky="nsew")
         self.build_ingest_tab()
 
-        self.tab_settings = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.notebook.add(self.tab_settings, text="Settings")
+        self.tab_settings = self.create_frame(self.main_content_frame, style="Card.TFrame")
+        self.tab_settings.grid(row=0, column=0, sticky="nsew")
         self.build_config_tab()
+        self._views = {
+            "chat": self.tab_chat,
+            "history": self.tab_history,
+            "library": self.tab_library,
+            "settings": self.tab_settings,
+        }
+        self._active_view = None
+        self._switch_main_view("chat")
         self._ensure_tab_aliases()
 
         self.status_var = tk.StringVar(value="Ready")
         self.backend_badge_var = tk.StringVar(value=f"Backend: {self.ui_backend.upper()}")
         status_wrap = ttk.Frame(self.root, style="StatusBar.TFrame")
-        status_wrap.pack(fill="x", padx=STYLE_CONFIG["padding"]["md"], pady=(0, STYLE_CONFIG["padding"]["sm"]))
+        status_wrap.grid(row=1, column=0, columnspan=2, sticky="ew", padx=STYLE_CONFIG["padding"]["md"], pady=(0, STYLE_CONFIG["padding"]["sm"]))
         status_bar = ttk.Label(status_wrap, textvariable=self.status_var, style="Status.TLabel", anchor="w")
         status_bar.pack(side="left", fill="x", expand=True)
         ttk.Separator(status_wrap, orient="vertical").pack(side="left", fill="y", padx=(UI_SPACING["s"], UI_SPACING["s"]))
@@ -3497,15 +3548,41 @@ class AgenticRAGApp:
         self.root.bind_all("<Control-Return>", lambda _e: self.send_message())
         self.root.bind_all("<Control-l>", lambda _e: self._focus_chat_input())
         self.root.bind_all("<Escape>", lambda _e: self._focus_chat_input())
-        self.root.bind_all("<Alt-1>", lambda _e: self.notebook.select(self.tab_chat))
-        self.root.bind_all("<Alt-2>", lambda _e: self.notebook.select(self.tab_history))
-        self.root.bind_all("<Alt-3>", lambda _e: self.notebook.select(self.tab_library))
-        self.root.bind_all("<Alt-4>", lambda _e: self.notebook.select(self.tab_settings))
+        self.root.bind_all("<Alt-1>", lambda _e: self._switch_main_view("chat"))
+        self.root.bind_all("<Alt-2>", lambda _e: self._switch_main_view("history"))
+        self.root.bind_all("<Alt-3>", lambda _e: self._switch_main_view("library"))
+        self.root.bind_all("<Alt-4>", lambda _e: self._switch_main_view("settings"))
 
     def _focus_chat_input(self):
         if hasattr(self, "txt_input"):
-            self.notebook.select(self.tab_chat)
+            self._switch_main_view("chat")
             self.txt_input.focus_set()
+
+    def _set_sidebar_active(self, view_key):
+        for key, button in (getattr(self, "_sidebar_nav_buttons", {}) or {}).items():
+            if self.ui_backend == "ctk" and CTK_MODULE is not None:
+                if key == view_key:
+                    button.configure(
+                        fg_color=self.theme_palette.get("primary", "#58A6FF"),
+                        text_color=self.theme_palette.get("selection_fg", "#F2F8FF"),
+                    )
+                else:
+                    button.configure(
+                        fg_color="transparent",
+                        text_color=self.theme_palette.get("text", "#E8EEF8"),
+                    )
+
+    def _switch_main_view(self, view_key):
+        views = getattr(self, "_views", None) or {}
+        target = views.get(view_key)
+        if target is None:
+            return
+        current_key = getattr(self, "_active_view", None)
+        if current_key and current_key in views:
+            views[current_key].grid_remove()
+        target.grid()
+        self._active_view = view_key
+        self._set_sidebar_active(view_key)
 
 
     def _install_ui_state_watchers(self):
@@ -6136,7 +6213,7 @@ class AgenticRAGApp:
         actions_row = self.create_frame(top_bar)
         actions_row.grid(row=1, column=0, columnspan=8, sticky="ew", pady=(UI_SPACING["s"], 0))
         self.create_button(actions_row, text="Refresh Indexes", command=self._refresh_existing_indexes_async, style="Secondary.TButton").pack(side="left")
-        self.create_button(actions_row, text="Settings", command=lambda: self.notebook.select(self.tab_settings), style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
+        self.create_button(actions_row, text="Settings", command=lambda: self._switch_main_view("settings"), style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
         if self.test_mode_active:
             self.create_button(actions_row, text="Reset test environment", command=self.reset_test_environment, style="Danger.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
         if self.basic_mode:
@@ -6600,7 +6677,7 @@ class AgenticRAGApp:
         self.test_mode_banner_var.set("Preparing sample index for Test Mode…")
         self._sync_model_options()
         self.build_chat_tab()
-        self.notebook.select(self.tab_chat)
+        self._switch_main_view("chat")
         if hasattr(self, "lbl_file") and self._safe_widget_exists(self.lbl_file):
             self.lbl_file.config(text=sample_file, style="TLabel")
             self._update_file_info()
@@ -6608,7 +6685,7 @@ class AgenticRAGApp:
 
     def _post_test_mode_ingestion_ui(self):
         self.test_mode_banner_var.set("Sample is ready (mock backend).")
-        self.notebook.select(self.tab_chat)
+        self._switch_main_view("chat")
         if hasattr(self, "txt_input") and self._safe_widget_exists(self.txt_input):
             self.txt_input.delete("1.0", tk.END)
             self.txt_input.insert(tk.END, TEST_MODE_SAMPLE_PROMPT)
@@ -6976,7 +7053,7 @@ class AgenticRAGApp:
             self.basic_wizard_completed = True
             self.save_config()
             self.build_chat_tab()
-            self.notebook.select(self.tab_chat)
+            self._switch_main_view("chat")
             return True
         except Exception as exc:
             messagebox.showerror("Setup Wizard", f"Could not apply setup: {exc}")
