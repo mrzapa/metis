@@ -4323,6 +4323,15 @@ class AgenticRAGApp:
     def _get_llm_model_options(self, provider):
         options = {
             "openai": [
+                "gpt-5.2",
+                "gpt-5.2-pro",
+                "gpt-5.2-codex",
+                "gpt-5.1",
+                "gpt-5.1-codex",
+                "gpt-5.1-codex-mini",
+                "gpt-5",
+                "gpt-5-mini",
+                "gpt-5-nano",
                 "gpt-4.1",
                 "gpt-4.1-mini",
                 "gpt-4.1-nano",
@@ -7951,7 +7960,19 @@ class AgenticRAGApp:
 
         # LLM pricing: (input USD/M, output USD/M)
         LLM_PRICE = {
-            # OpenAI
+            # OpenAI — GPT-5.2 series
+            ("openai", "gpt-5.2"): (1.75, 14.0),
+            ("openai", "gpt-5.2-pro"): (21.0, 168.0),
+            ("openai", "gpt-5.2-codex"): (1.75, 14.0),
+            # OpenAI — GPT-5.1 series
+            ("openai", "gpt-5.1"): (1.25, 10.0),
+            ("openai", "gpt-5.1-codex"): (1.25, 10.0),
+            ("openai", "gpt-5.1-codex-mini"): (0.25, 2.0),
+            # OpenAI — GPT-5 series
+            ("openai", "gpt-5"): (1.25, 10.0),
+            ("openai", "gpt-5-mini"): (0.25, 2.0),
+            ("openai", "gpt-5-nano"): (0.05, 0.40),
+            # OpenAI — GPT-4.x series
             ("openai", "gpt-4.1"): (2.0, 8.0),
             ("openai", "gpt-4.1-mini"): (0.40, 1.60),
             ("openai", "gpt-4.1-nano"): (0.10, 0.40),
@@ -12331,6 +12352,12 @@ class AgenticRAGApp:
 
         model_overrides = {
             "openai": [
+                (r"gpt-5\.2-pro", 400000, 32768),
+                (r"gpt-5\.2", 400000, 32768),
+                (r"gpt-5\.1-codex", 400000, 32768),
+                (r"gpt-5\.1", 400000, 32768),
+                (r"gpt-5-mini|gpt-5-nano", 400000, 32768),
+                (r"gpt-5$|gpt-5-", 400000, 32768),
                 (r"gpt-4\.1$|gpt-4\.1-mini|gpt-4\.1-nano", 1000000, 32768),
                 (r"gpt-4o|o4-mini", 128000, 16384),
                 (r"o3-pro|o3$", 200000, 100000),
