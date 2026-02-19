@@ -4036,6 +4036,7 @@ class AgenticRAGApp:
         if current_key and current_key in views:
             views[current_key].grid_remove()
         target.grid()
+        target.lift()  # Raise to front of z-order; fixes chat pane invisible on first launch
         self._active_view = view_key
         self._set_sidebar_active(view_key)
 
