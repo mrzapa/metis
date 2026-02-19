@@ -2822,7 +2822,10 @@ class AgenticRAGApp:
                 self.btn_send.config(state="normal" if not self._get_current_state_warnings() else "disabled")
 
         if hasattr(self, "txt_input") and self._safe_widget_exists(self.txt_input):
-            self.txt_input.config(state="disabled" if busy and is_rag else "normal")
+            new_txt_state = "disabled" if busy and is_rag else "normal"
+            self.txt_input.config(state=new_txt_state)
+            if new_txt_state == "normal" and hasattr(self, "_chat_input_show_placeholder"):
+                self.root.after(50, self._chat_input_show_placeholder)
 
         if hasattr(self, "cb_existing_index") and self._safe_widget_exists(self.cb_existing_index):
             selector_busy = bool(
@@ -3937,6 +3940,45 @@ class AgenticRAGApp:
             self._switch_main_view("chat")
             self.txt_input.focus_set()
 
+    _INPUT_PLACEHOLDER = "Type your message here\u2026"
+
+    def _setup_input_placeholder(self):
+        """Attach placeholder text to txt_input — shown when empty and unfocused."""
+        if not hasattr(self, "txt_input") or not self._safe_widget_exists(self.txt_input):
+            return
+        placeholder = self._INPUT_PLACEHOLDER
+        placeholder_fg = self._pal("muted_text", "#888888")
+        self._input_placeholder_active = False
+
+        def _show():
+            try:
+                if self.txt_input.cget("state") == "disabled":
+                    return
+                content = self.txt_input.get("1.0", tk.END).strip()
+                if content in ("", placeholder):
+                    self.txt_input.delete("1.0", tk.END)
+                    self.txt_input.insert("1.0", placeholder)
+                    self.txt_input.tag_add("placeholder", "1.0", "end-1c")
+                    self.txt_input.tag_config("placeholder", foreground=placeholder_fg)
+                    self._input_placeholder_active = True
+            except tk.TclError:
+                pass
+
+        def _hide():
+            try:
+                if getattr(self, "_input_placeholder_active", False):
+                    self.txt_input.delete("1.0", tk.END)
+                    self._input_placeholder_active = False
+            except tk.TclError:
+                pass
+
+        self.txt_input.bind("<FocusIn>", lambda _e: _hide(), add=True)
+        self.txt_input.bind("<FocusOut>", lambda _e: _show(), add=True)
+        # Store callables so other methods (e.g. _set_job_ui_busy) can invoke them.
+        self._chat_input_show_placeholder = _show
+        self._chat_input_hide_placeholder = _hide
+        _show()
+
     def _set_sidebar_active(self, view_key):
         for key, button in (getattr(self, "_sidebar_nav_buttons", {}) or {}).items():
             is_active = key == view_key
@@ -4164,6 +4206,11 @@ class AgenticRAGApp:
                 warnings.append("local_gguf disabled: install llama-cpp-python")
             elif not os.path.isfile((self.local_gguf_model_path.get() or "").strip()):
                 warnings.append("local_gguf disabled: select a valid GGUF model file")
+        _LOCAL_PROVIDERS = {"local_lm_studio", "local_gguf", "local_openai_compat", "mock"}
+        provider = self.llm_provider.get()
+        if provider not in _LOCAL_PROVIDERS and provider in self.api_keys:
+            if not self.api_keys[provider].get().strip():
+                warnings.append(f"API key missing for '{provider}' — add it in Settings")
         return warnings
 
 
@@ -4208,7 +4255,14 @@ class AgenticRAGApp:
         self.current_warning_var.set("⚠ " + " • ".join(dict.fromkeys(warnings)) if warnings else "")
 
         override_checked = bool(self.experimental_override.get())
-        send_blocked = bool(getattr(self, "_active_run_id", None) or (blockers and not override_checked) or self._index_switch_in_progress or self._ingestion_in_progress)
+        state_warnings = self._get_current_state_warnings()
+        send_blocked = bool(
+            getattr(self, "_active_run_id", None)
+            or (blockers and not override_checked)
+            or self._index_switch_in_progress
+            or self._ingestion_in_progress
+            or state_warnings
+        )
         if hasattr(self, "btn_send") and self._safe_widget_exists(self.btn_send):
             self.btn_send.config(state="disabled" if send_blocked else "normal")
 
@@ -6980,12 +7034,19 @@ class AgenticRAGApp:
         )
         self.btn_cancel_rag.pack(side="left", padx=(UI_SPACING["s"], 0))
 
-        self.create_label(input_bar, text="Your message  (Ctrl+Enter to send):", style="Caption.TLabel").pack(anchor="w", pady=(UI_SPACING["xs"], UI_SPACING["xs"]))
-        composer_row = self.create_frame(input_bar, style="Card.Elevated.TFrame", padding=UI_SPACING["xs"])
+        # ── Composer header ───────────────────────────────────────────────────
+        _composer_lbl_row = self.create_frame(input_bar)
+        _composer_lbl_row.pack(fill="x", pady=(UI_SPACING["s"], UI_SPACING["xs"]))
+        self.create_label(_composer_lbl_row, text="Your message", style="Bold.TLabel").pack(side="left")
+        self.create_label(_composer_lbl_row, text="   Ctrl+Enter to send", style="Caption.TLabel").pack(side="left", pady=(2, 0))
+
+        # ── Composer input + send button ──────────────────────────────────────
+        composer_row = self.create_frame(input_bar, style="Card.Elevated.TFrame", padding=UI_SPACING["s"])
         composer_row.pack(fill="x")
-        self.txt_input_surface, self.txt_input = self.create_rich_text_surface(composer_row, surface_id="chat_input", height=3, font=("Segoe UI", 11), wrap=tk.WORD)
+        self.txt_input_surface, self.txt_input = self.create_rich_text_surface(composer_row, surface_id="chat_input", height=4, font=("Segoe UI", 11), wrap=tk.WORD)
         self.txt_input_surface.pack(side="left", fill="both", expand=True, padx=(0, UI_SPACING["s"]))
         self.txt_input.bind("<Control-Return>", lambda _e: (self.send_message(), "break")[1])
+        self._setup_input_placeholder()
 
         send_row = self.create_frame(composer_row)
         send_row.pack(side="right", fill="y")
@@ -6997,8 +7058,8 @@ class AgenticRAGApp:
             state="readonly",
             width=22,
         ).pack(anchor="e", pady=(0, UI_SPACING["xs"]))
-        self.btn_send = self.create_button(send_row, text="Send", command=self.send_message, style="Primary.TButton")
-        self.btn_send.pack(anchor="e")
+        self.btn_send = self.create_button(send_row, text="Send \u23ce", command=self.send_message, style="Primary.TButton")
+        self.btn_send.pack(anchor="e", fill="x")
 
         # Right evidence pane
         evidence_wrap = self.create_frame(self._evidence_pane, text="Evidence Navigator", padding=UI_SPACING["m"], kind="labelframe")
@@ -15996,11 +16057,14 @@ class AgenticRAGApp:
         if warnings:
             self.append_chat("system", "Warnings: " + "; ".join(dict.fromkeys(warnings)))
 
+        if getattr(self, "_input_placeholder_active", False):
+            return
         query = self.txt_input.get("1.0", tk.END).strip()
-        if not query:
+        if not query or query == self._INPUT_PLACEHOLDER:
             return
 
         self.txt_input.delete("1.0", tk.END)
+        self._input_placeholder_active = False
         self.append_chat("user", f"You: {query}")
         self._show_thinking_indicator()
         self._append_history(self._human_message(content=query))
