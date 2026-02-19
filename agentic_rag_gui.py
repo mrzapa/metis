@@ -4137,7 +4137,15 @@ class AgenticRAGApp:
             },
             {
                 "id": "deepread_requires_metadata",
-                "when": lambda: bool(self.deepread_mode.get() and not self._active_index_has_deepread_metadata()),
+                # Suppress this blocker while ingestion is running — the index is still being
+                # built, so probing for metadata would always return False even when
+                # structure-aware ingestion is active.  Re-evaluated automatically once the
+                # ingestion job finishes and _ingestion_in_progress is cleared.
+                "when": lambda: bool(
+                    self.deepread_mode.get()
+                    and not self._ingestion_in_progress
+                    and not self._active_index_has_deepread_metadata()
+                ),
                 "severity": "blocker",
                 "message": "DeepRead requires SHT/SCAN metadata (header_path/node_id) in the active index.",
                 "disable": [],
