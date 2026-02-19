@@ -8193,24 +8193,61 @@ class AgenticRAGApp:
                     self.lbl_file.config(text=file_path, style="TLabel")
                     self._update_file_info()
                 self.vector_db_type.set("chroma")
+
+                # DeepRead needs SHT/SCAN metadata that only structure-aware ingestion
+                # produces.  If DeepRead is on but structure-aware is off, ask the user
+                # before the index is built — far easier than re-ingesting afterward.
+                if self.deepread_mode.get() and not self.structure_aware_ingestion.get():
+                    if messagebox.askyesno(
+                        "Enable Structure-aware Ingestion?",
+                        "DeepRead requires Structure-aware ingestion to generate the metadata it "
+                        "needs to navigate your document.\n\n"
+                        "Enable Structure-aware ingestion now so DeepRead works straight away?\n\n"
+                        "(You can change this any time in Settings → Ingestion.)",
+                        icon="question",
+                    ):
+                        self.structure_aware_ingestion.set(True)
+                    else:
+                        # User declined — disable DeepRead so there is no blocker warning.
+                        self.deepread_mode.set(False)
+
                 self.start_ingestion()
 
-            # DeepRead requires SHT/SCAN metadata produced by structure-aware ingestion.
-            # After a fresh wizard setup the index won't have that metadata yet (ingestion
-            # is still running).  Auto-disable DeepRead silently so the user reaches the
-            # chat pane without a blocker warning.  A dismissible note is appended to the
-            # log so they know how to re-enable it later.
-            if self.deepread_mode.get():
-                # Invalidate the cache so the probe reflects the current state.
-                self._deepread_metadata_check_cache = {"key": None, "value": None}
-                if not self._active_index_has_deepread_metadata():
-                    self.deepread_mode.set(False)
-                    self.log(
-                        "DeepRead was automatically disabled because the active index does not "
-                        "yet contain SHT/SCAN metadata (header_path / node_id).  To use DeepRead, "
-                        "enable 'Structure-aware ingestion' in Settings and re-ingest your document, "
-                        "then turn DeepRead back on from the Chat panel."
-                    )
+            else:
+                # No new file — user picked an existing index.  Check whether DeepRead
+                # can work with it; if not, offer to re-ingest using any known source file.
+                if self.deepread_mode.get():
+                    self._deepread_metadata_check_cache = {"key": None, "value": None}
+                    if not self._active_index_has_deepread_metadata():
+                        source_file = (getattr(self, "selected_file", "") or "").strip()
+                        if source_file and os.path.isfile(source_file):
+                            if messagebox.askyesno(
+                                "Re-ingest for DeepRead?",
+                                "The selected index doesn't have the Structure-aware metadata "
+                                "that DeepRead needs.\n\n"
+                                f"Re-ingest  '{os.path.basename(source_file)}'  with "
+                                "Structure-aware ingestion enabled now?",
+                                icon="question",
+                            ):
+                                self.structure_aware_ingestion.set(True)
+                                self.vector_db_type.set("chroma")
+                                self.start_ingestion()
+                            else:
+                                self.deepread_mode.set(False)
+                                self.log(
+                                    "DeepRead disabled: the active index does not have "
+                                    "SHT/SCAN metadata.  Re-ingest with Structure-aware "
+                                    "ingestion enabled to use DeepRead."
+                                )
+                        else:
+                            # No source file on disk — can't re-ingest automatically.
+                            self.deepread_mode.set(False)
+                            self.log(
+                                "DeepRead disabled: the active index does not have "
+                                "SHT/SCAN metadata and no source file is available to "
+                                "re-ingest.  Select the original document and re-ingest "
+                                "with Structure-aware ingestion enabled to use DeepRead."
+                            )
 
             self._update_current_state_strip()
             self._maybe_autofill_recommendations()
