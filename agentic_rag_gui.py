@@ -7628,11 +7628,18 @@ class AgenticRAGApp:
     def _wizard_move(self, delta):
         if delta > 0 and not self._wizard_validate_current_step():
             return
+        # If wizard was completed (Finish clicked successfully), build_chat_tab() has already
+        # rebuilt the tab and destroyed _wizard_content.  Don't attempt to re-render it.
+        if getattr(self, "basic_wizard_completed", False):
+            return
         step = max(1, min(6, int(self._wizard_state.get("step", 1)) + delta))
         self._wizard_state["step"] = step
         self._render_wizard_step()
 
     def _render_wizard_step(self):
+        # Guard: the wizard UI may have been torn down (e.g. by build_chat_tab); bail safely.
+        if not self._safe_widget_exists(getattr(self, "_wizard_content", None)):
+            return
         step = int(self._wizard_state.get("step", 1))
         for child in self._wizard_content.winfo_children():
             child.destroy()
@@ -8187,6 +8194,23 @@ class AgenticRAGApp:
                     self._update_file_info()
                 self.vector_db_type.set("chroma")
                 self.start_ingestion()
+
+            # DeepRead requires SHT/SCAN metadata produced by structure-aware ingestion.
+            # After a fresh wizard setup the index won't have that metadata yet (ingestion
+            # is still running).  Auto-disable DeepRead silently so the user reaches the
+            # chat pane without a blocker warning.  A dismissible note is appended to the
+            # log so they know how to re-enable it later.
+            if self.deepread_mode.get():
+                # Invalidate the cache so the probe reflects the current state.
+                self._deepread_metadata_check_cache = {"key": None, "value": None}
+                if not self._active_index_has_deepread_metadata():
+                    self.deepread_mode.set(False)
+                    self.log(
+                        "DeepRead was automatically disabled because the active index does not "
+                        "yet contain SHT/SCAN metadata (header_path / node_id).  To use DeepRead, "
+                        "enable 'Structure-aware ingestion' in Settings and re-ingest your document, "
+                        "then turn DeepRead back on from the Chat panel."
+                    )
 
             self._update_current_state_strip()
             self._maybe_autofill_recommendations()
