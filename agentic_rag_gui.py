@@ -15791,6 +15791,11 @@ class AgenticRAGApp:
         self._deepread_metadata_check_cache = {"key": None, "value": None}
         validation = self.validate_settings()
         blockers = validation.get("blockers", [])
+        # If structure-aware ingestion is enabled, the metadata DeepRead needs will be
+        # produced by THIS ingestion run — suppress that specific pre-check blocker so
+        # ingestion is not aborted before it even starts.
+        if self.structure_aware_ingestion.get():
+            blockers = [b for b in blockers if "SHT/SCAN metadata" not in b]
         if blockers and not self._confirm_experimental_override("Ingestion", blockers):
             messagebox.showwarning("Incompatible settings", "\n".join(blockers))
             self._update_current_state_strip()
