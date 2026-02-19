@@ -6809,8 +6809,10 @@ class AgenticRAGApp:
         self.state_warning_label.pack(fill="x", pady=(0, UI_SPACING["s"]))
 
 
-        top_bar = self.create_frame(frame, text="Conversation Setup", padding=UI_SPACING["m"], kind="labelframe")
-        top_bar.pack(fill="x", pady=(0, UI_SPACING["m"]))
+        _conv_setup_cf = CollapsibleFrame(frame, "Conversation Setup", expanded=True, animator=self._animator)
+        _conv_setup_cf.pack(fill="x", pady=(0, UI_SPACING["xs"]))
+        top_bar = ttk.Frame(_conv_setup_cf.content, padding=UI_SPACING["m"])
+        top_bar.pack(fill="both", expand=True)
         for col in range(8):
             top_bar.columnconfigure(col, weight=1)
 
@@ -6865,13 +6867,6 @@ class AgenticRAGApp:
         )
         self._evidence_toggle_btn.pack(side="right", padx=(UI_SPACING["s"], 0))
 
-        setup_advanced = CollapsibleFrame(top_bar, "Advanced chat settings", expanded=False)
-        setup_advanced.grid(row=2, column=0, columnspan=8, sticky="ew", pady=(UI_SPACING["s"], 0))
-        advanced_grid = setup_advanced.content
-        self.create_label(advanced_grid, text="retrieve_k:").grid(row=0, column=0, sticky="w")
-        self.create_entry(advanced_grid, textvariable=self.retrieval_k, width=8).grid(row=0, column=1, sticky="w", padx=(6, 14))
-        self.create_label(advanced_grid, text="final_k:").grid(row=0, column=2, sticky="w")
-        self.create_entry(advanced_grid, textvariable=self.final_k, width=8).grid(row=0, column=3, sticky="w", padx=(6, 0))
 
         # Main chat body: full-width chat pane + optional evidence pane (hidden by default)
         body_frame = self.create_frame(frame)
@@ -6939,7 +6934,7 @@ class AgenticRAGApp:
         _coll_canvas.pack(side="left", fill="x", expand=True)
         _coll_inner = ttk.Frame(_coll_canvas)
         _coll_win_id = _coll_canvas.create_window((0, 0), window=_coll_inner, anchor="nw")
-        _COLL_MAX_H = 280
+        _COLL_MAX_H = 220
 
         def _sync_coll_scroll(_evt=None):
             try:
@@ -6967,13 +6962,20 @@ class AgenticRAGApp:
 
         logs_section = CollapsibleFrame(_coll_inner, "Logs & telemetry", expanded=False, animator=self._animator)
         logs_section.pack(fill="both", pady=(0, 6))
-        self.log_area_surface, self.log_area = self.create_rich_text_surface(logs_section.content, surface_id="chat_logs", height=6, state="disabled", wrap=tk.WORD, scrolled=True)
+        self.log_area_surface, self.log_area = self.create_rich_text_surface(logs_section.content, surface_id="chat_logs", height=4, state="disabled", wrap=tk.WORD, scrolled=True)
         self.log_area_surface.pack(fill=tk.BOTH, expand=True)
 
         self.chat_settings_section = CollapsibleFrame(_coll_inner, "Advanced chat settings", expanded=False, animator=self._animator)
         self.chat_settings_section.pack(fill="x", pady=(0, 6))
 
         settings_content = self.chat_settings_section.content
+        retrieval_frame = self.create_frame(settings_content, text="Retrieval Parameters", padding=8, kind="labelframe")
+        retrieval_frame.pack(fill="x", pady=(0, 6))
+        self.create_label(retrieval_frame, text="retrieve_k:").grid(row=0, column=0, sticky="w")
+        self.create_entry(retrieval_frame, textvariable=self.retrieval_k, width=8).grid(row=0, column=1, sticky="w", padx=(6, 14))
+        self.create_label(retrieval_frame, text="final_k:").grid(row=0, column=2, sticky="w")
+        self.create_entry(retrieval_frame, textvariable=self.final_k, width=8).grid(row=0, column=3, sticky="w", padx=(6, 0))
+
         profile_frame = self.create_frame(settings_content, text="Mode & Agent Profile", padding=8, kind="labelframe")
         profile_frame.pack(fill="x", pady=(0, 6))
         self.create_label(profile_frame, text="Profile actions:").grid(row=0, column=0, sticky="w")
