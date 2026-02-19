@@ -7637,15 +7637,76 @@ class AgenticRAGApp:
 
         form = ttk.Frame(self._wizard_content)
         form.pack(fill="x")
-        ttk.Label(form, text="Chunk size").grid(row=0, column=0, sticky="w")
+
+        # Row 0 left: Chunk size label + help icon
+        _cs_lf = self.create_frame(form)
+        _cs_lf.grid(row=0, column=0, sticky="w")
+        self.create_label(_cs_lf, text="Chunk size").pack(side="left")
+        self._make_help_icon(
+            _cs_lf,
+            "Number of characters per text chunk.\n"
+            "Larger chunks provide more context per retrieval; smaller chunks improve precision.\n"
+            "Typical range: 500–2000. Auto mode sets this based on file size.",
+        ).pack(side="left")
         ttk.Entry(form, textvariable=self._wizard_chunk_size, width=10).grid(row=0, column=1, sticky="w", padx=(8, 16))
-        ttk.Label(form, text="Chunk overlap").grid(row=0, column=2, sticky="w")
+
+        # Row 0 right: Chunk overlap label + help icon
+        _co_lf = self.create_frame(form)
+        _co_lf.grid(row=0, column=2, sticky="w")
+        self.create_label(_co_lf, text="Chunk overlap").pack(side="left")
+        self._make_help_icon(
+            _co_lf,
+            "Characters shared between adjacent chunks to preserve context at boundaries.\n"
+            "Prevents information loss at the edge of each chunk.\n"
+            "Typical range: 50–300. Too much overlap increases index size.",
+        ).pack(side="left")
         ttk.Entry(form, textvariable=self._wizard_chunk_overlap, width=10).grid(row=0, column=3, sticky="w", padx=(8, 0))
-        ttk.Checkbutton(form, text="Build digest index", variable=self._wizard_build_digest).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Checkbutton(form, text="Build comprehension index", variable=self._wizard_build_comprehension).grid(row=1, column=2, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Label(form, text="Extraction depth").grid(row=2, column=0, sticky="w", pady=(8, 0))
+
+        # Row 1 left: Build digest index checkbox + help icon
+        _bd_frame = self.create_frame(form)
+        _bd_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(_bd_frame, text="Build digest index", variable=self._wizard_build_digest).pack(side="left")
+        self._make_help_icon(
+            _bd_frame,
+            "Creates a summary-oriented index alongside the main index.\n"
+            "Enables faster high-level synthesis queries.\n"
+            "Recommended for book-length documents and when using Summary or Research modes.",
+        ).pack(side="left", padx=(4, 0))
+
+        # Row 1 right: Build comprehension index checkbox + help icon
+        _bc_frame = self.create_frame(form)
+        _bc_frame.grid(row=1, column=2, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(_bc_frame, text="Build comprehension index", variable=self._wizard_build_comprehension).pack(side="left")
+        self._make_help_icon(
+            _bc_frame,
+            "Pre-processes documents with an LLM to extract structured knowledge before indexing.\n"
+            "Significantly improves answer quality for complex questions.\n"
+            "Requires more time and LLM tokens during ingestion.",
+        ).pack(side="left", padx=(4, 0))
+
+        # Row 2 left: Extraction depth label + help icon
+        _ed_lf = self.create_frame(form)
+        _ed_lf.grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.create_label(_ed_lf, text="Extraction depth").pack(side="left")
+        self._make_help_icon(
+            _ed_lf,
+            "Controls how thoroughly the LLM analyses each chunk when building the comprehension index.\n"
+            "Light: quick pass, lower token cost.\n"
+            "Standard: balanced depth (recommended).\n"
+            "Deep: exhaustive extraction, higher token cost.",
+        ).pack(side="left")
         ttk.Combobox(form, textvariable=self._wizard_comp_depth, values=["Light", "Standard", "Deep"], state="readonly", width=12).grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
-        ttk.Checkbutton(form, text="Prefer comprehension index when available", variable=self._wizard_prefer_comp).grid(row=2, column=2, columnspan=2, sticky="w", pady=(8, 0))
+
+        # Row 2 right: Prefer comprehension index checkbox + help icon
+        _pc_frame = self.create_frame(form)
+        _pc_frame.grid(row=2, column=2, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Checkbutton(_pc_frame, text="Prefer comprehension index when available", variable=self._wizard_prefer_comp).pack(side="left")
+        self._make_help_icon(
+            _pc_frame,
+            "When enabled, queries will use the comprehension index instead of the standard index.\n"
+            "Produces more accurate, context-rich answers for analytical questions.\n"
+            "Only takes effect if the comprehension index has been built.",
+        ).pack(side="left", padx=(4, 0))
         ttk.Button(self._wizard_content, text="Apply recommended settings", command=self._wizard_apply_recommended_ingestion).pack(anchor="w", pady=(10, 0))
 
     def _wizard_apply_recommended_ingestion(self):
