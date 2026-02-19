@@ -1043,6 +1043,111 @@ class TooltipManager:
         _tick(0)
 
 
+class IOSSegmentedToggle(tk.Canvas):
+    """iOS-style segmented two-option toggle rendered on a tk.Canvas.
+
+    Shows both option labels side-by-side inside a rounded pill.  The active
+    segment is filled with the primary colour so both options are always
+    visible and new users can immediately see which mode is selected.
+
+    Parameters
+    ----------
+    parent   : tk parent widget
+    options  : sequence of exactly 2 label strings, e.g. ["RAG", "Direct"]
+    variable : tk.BooleanVar – True selects options[0], False selects options[1]
+    palette  : colour-dict (same shape as STYLE_CONFIG theme palettes)
+    command  : optional callable invoked after each toggle
+    height   : pixel height of the pill (default 28)
+    font     : tkinter font tuple (default Segoe UI 9 bold)
+    """
+
+    def __init__(self, parent, options, variable, palette, *,
+                 command=None, height=28, font=None, **kwargs):
+        self._opts = list(options)
+        self._var = variable
+        self._palette = dict(palette)
+        self._command = command
+        self._h = height
+        self._font = font or ("Segoe UI", 9, "bold")
+        # Each segment width is generous enough for the longer label.
+        self._seg_w = max(68, max(len(o) for o in options) * 9 + 28)
+        total_w = self._seg_w * 2 + 2
+        kwargs.setdefault("highlightthickness", 0)
+        kwargs.setdefault("borderwidth", 0)
+        bg = palette.get("bg", "#141E2D")
+        super().__init__(parent, width=total_w, height=height, bg=bg, **kwargs)
+        self.configure(cursor="hand2")
+        self.bind("<Button-1>", self._on_click)
+        self._draw()
+
+    def update_palette(self, palette):
+        """Re-colour the widget when the application theme changes."""
+        self._palette = dict(palette)
+        self._draw()
+
+    def _on_click(self, _event):
+        if self._command:
+            # Let the command own the state change; it will redraw via update_palette.
+            self._command()
+        else:
+            self._var.set(not self._var.get())
+            self._draw()
+
+    def _rounded_rect(self, x1, y1, x2, y2, r, **kw):
+        """Draw a filled/outlined rounded rectangle using a smooth polygon."""
+        r = min(r, (x2 - x1) // 2, (y2 - y1) // 2)
+        pts = [
+            x1 + r, y1,    x2 - r, y1,
+            x2,     y1,    x2,     y1 + r,
+            x2,     y2 - r, x2,    y2,
+            x2 - r, y2,    x1 + r, y2,
+            x1,     y2,    x1,     y2 - r,
+            x1,     y1 + r, x1,    y1,
+        ]
+        self.create_polygon(pts, smooth=True, **kw)
+
+    def _draw(self):
+        pal        = self._palette
+        bg         = pal.get("bg",          "#141E2D")
+        track      = pal.get("surface_alt", "#1A2B40")
+        border_col = pal.get("outline",     "#2A3E58")
+        primary    = pal.get("primary",     "#4D9EFF")
+        text_on    = pal.get("text",        "#EAF0FF")   # active segment
+        text_off   = pal.get("muted_text",  "#8A9DC0")   # inactive segment
+
+        self.delete("all")
+        self.configure(bg=bg)
+
+        w   = self._seg_w * 2 + 2
+        h   = self._h
+        r   = h // 2
+        sw  = self._seg_w
+        pad = 3
+        left_active = self._var.get()   # True → opts[0] is highlighted
+
+        # Outer track pill
+        self._rounded_rect(0, 0, w, h, r, fill=track, outline=border_col)
+
+        # Sliding active-segment highlight
+        if left_active:
+            self._rounded_rect(pad, pad, sw - pad + 1, h - pad, r - pad,
+                               fill=primary, outline="")
+        else:
+            self._rounded_rect(sw + pad - 1, pad, w - pad, h - pad, r - pad,
+                               fill=primary, outline="")
+
+        # Option labels
+        mid_y = h // 2
+        self.create_text(sw // 2, mid_y,
+                         text=self._opts[0],
+                         fill=text_on if left_active else text_off,
+                         font=self._font, anchor="center")
+        self.create_text(sw + sw // 2, mid_y,
+                         text=self._opts[1],
+                         fill=text_off if left_active else text_on,
+                         font=self._font, anchor="center")
+
+
 class CollapsibleFrame(ttk.Frame):
     def __init__(self, parent, title, expanded=False, animator=None, **kwargs):
         kwargs.setdefault("style", "Card.Elevated.TFrame")
@@ -3580,6 +3685,8 @@ class AgenticRAGApp:
                     border_color=palette["outline"],
                     outer_bg=outer_bg,
                 )
+            elif isinstance(widget, IOSSegmentedToggle):
+                widget.update_palette(palette)
             elif isinstance(widget, tk.Canvas):
                 widget.configure(background=palette["bg"], highlightthickness=0)
             for child in widget.winfo_children():
@@ -5483,7 +5590,8 @@ class AgenticRAGApp:
         container = ttk.Frame(tab)
         container.pack(fill=tk.BOTH, expand=True)
 
-        canvas = tk.Canvas(container, highlightthickness=0, borderwidth=0)
+        canvas = tk.Canvas(container, highlightthickness=0, borderwidth=0,
+                           bg=self._pal("bg", "#141E2D"))
         scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=scrollbar.set)
 
@@ -6687,11 +6795,12 @@ class AgenticRAGApp:
             self.create_button(actions_row, text="Switch to Advanced", command=self.switch_to_advanced_mode, style="Secondary.TButton").pack(side="right")
         else:
             self.create_button(actions_row, text="Run Setup Wizard", command=self.run_setup_wizard, style="Secondary.TButton").pack(side="right")
-        self._rag_toggle_btn = self.create_button(
+        self._rag_toggle_btn = IOSSegmentedToggle(
             actions_row,
-            text="RAG ●",
+            options=["RAG", "Direct"],
+            variable=self.use_rag,
+            palette=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"]),
             command=self._toggle_rag_mode,
-            style="Primary.TButton",
         )
         self._rag_toggle_btn.pack(side="right", padx=(UI_SPACING["s"], 0))
         self._evidence_toggle_btn = self.create_button(
@@ -7057,15 +7166,15 @@ class AgenticRAGApp:
         if not hasattr(self, "_rag_toggle_btn") or not self._safe_widget_exists(self._rag_toggle_btn):
             return
         pal = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+        # The IOSSegmentedToggle reads use_rag directly; just refresh colours/state.
+        self._rag_toggle_btn.update_palette(pal)
         if self.use_rag.get():
-            self._rag_toggle_btn.config(text="RAG \u25cf", style="Primary.TButton")
             # Show index selector
             if hasattr(self, "_index_label") and self._safe_widget_exists(self._index_label):
                 self._index_label.grid()
             if hasattr(self, "cb_existing_index") and self._safe_widget_exists(self.cb_existing_index):
                 self.cb_existing_index.grid()
         else:
-            self._rag_toggle_btn.config(text="Direct ○", style="Secondary.TButton")
             # Hide index selector
             if hasattr(self, "_index_label") and self._safe_widget_exists(self._index_label):
                 self._index_label.grid_remove()
