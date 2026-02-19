@@ -6884,11 +6884,17 @@ class AgenticRAGApp:
         self._evidence_pane = self.create_frame(body_frame, width=420, style="Card.Elevated.TFrame", padding=UI_SPACING["m"])
         self._evidence_pane.pack_propagate(False)
 
+        # Bottom input bar — packed FIRST with side="bottom" so Tkinter reserves
+        # its space before distributing the remaining height to chat_display_surface.
+        # This keeps the composer visible at all window sizes, including fullscreen.
+        input_bar = self.create_frame(chat_pane, style="Card.Flat.TFrame", padding=UI_SPACING["m"])
+        input_bar.pack(fill="x", side="bottom")
+
         # ── Chat Display ──────────────────────────────────────────────────────
         self.chat_display_surface, self.chat_display = self.create_rich_text_surface(
             chat_pane, surface_id="chat_display", state="disabled", font=("Segoe UI", 10), wrap=tk.WORD, scrolled=True
         )
-        self.chat_display_surface.pack(fill=tk.BOTH, expand=True, pady=(0, UI_SPACING["m"]))
+        self.chat_display_surface.pack(fill=tk.BOTH, expand=True)
         self.chat_display.tag_config("citation", foreground=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])["link"], underline=1, font=self._fonts["code"])
         self.chat_display.tag_bind("citation", "<Button-1>", self._on_citation_click)
         self.chat_display.tag_bind("citation", "<Enter>", self._on_citation_hover)
@@ -6913,10 +6919,6 @@ class AgenticRAGApp:
             background=self._pal("chat_system_bg"),
         )
         self.chat_display.tag_config("source", font=self._fonts["code"], foreground=self._pal("source", self._pal("muted_text")))
-
-        # Bottom input bar: logs/settings/actions/progress/input all grouped together
-        input_bar = self.create_frame(chat_pane, style="Card.Flat.TFrame", padding=UI_SPACING["m"])
-        input_bar.pack(fill="x", side="bottom")
 
         # Scrollable area for collapsible sections (logs + advanced settings).
         # This allows the user to expand sections without losing access to the composer.
