@@ -3763,6 +3763,16 @@ class AgenticRAGApp:
     def _tip(self, widget, text):
         self.tooltip_manager.register(widget, text)
 
+    def _make_help_icon(self, parent, tip_text):
+        """Return a small ⓘ label with a hover tooltip for inline wizard help."""
+        icon = self.create_label(parent, text=" ⓘ", style="Muted.TLabel")
+        try:
+            icon.configure(cursor="hand2")
+        except tk.TclError:
+            pass
+        self._tip(icon, tip_text)
+        return icon
+
     def _apply_tooltips_for_tab(self, tab_name, root_widget):
         for widget in self._iter_interactive_widgets(root_widget):
             tip = self._tooltip_text_for_widget(tab_name, widget)
@@ -6503,7 +6513,16 @@ class AgenticRAGApp:
         chunk_frame.columnconfigure(1, weight=1)
         chunk_frame.columnconfigure(3, weight=1)
 
-        self.create_label(chunk_frame, text="Settings mode:").grid(row=0, column=0, sticky="w")
+        # Row 0 left: Settings mode label + help icon in a wrapper frame
+        _sm_lf = self.create_frame(chunk_frame)
+        _sm_lf.grid(row=0, column=0, sticky="w")
+        self.create_label(_sm_lf, text="Settings mode:").pack(side="left")
+        self._make_help_icon(
+            _sm_lf,
+            "Auto automatically selects the best chunking settings based on file type and size.\n"
+            "Switch to Manual to tune all parameters yourself.",
+        ).pack(side="left")
+
         auto_mode_combo = self.create_combobox(
             chunk_frame,
             textvariable=self.auto_settings_mode,
@@ -6514,31 +6533,76 @@ class AgenticRAGApp:
         auto_mode_combo.grid(row=0, column=1, sticky="w", padx=(6, 18), pady=(0, UI_SPACING["xs"]))
         auto_mode_combo.bind("<<ComboboxSelected>>", lambda _e: self._maybe_autofill_recommendations())
 
-        self.create_label(chunk_frame, text="Chunk Size (chars):").grid(row=0, column=2, sticky="w")
+        # Row 0 right: Chunk Size label + help icon in a wrapper frame
+        _cs_lf = self.create_frame(chunk_frame)
+        _cs_lf.grid(row=0, column=2, sticky="w")
+        self.create_label(_cs_lf, text="Chunk Size (chars):").pack(side="left")
+        self._make_help_icon(
+            _cs_lf,
+            "Number of characters per text chunk.\n"
+            "Larger chunks provide more context per retrieval; smaller chunks improve precision.\n"
+            "Typical range: 500–2000. Auto mode sets this for you based on file size.",
+        ).pack(side="left")
         self.create_entry(chunk_frame, textvariable=self.chunk_size, width=10).grid(row=0, column=3, sticky="w", padx=(6, 0), pady=(0, UI_SPACING["xs"]))
 
-        self.create_label(chunk_frame, text="Overlap (chars):").grid(row=1, column=0, sticky="w", pady=(UI_SPACING["xs"], 0))
+        # Row 1 left: Overlap label + help icon
+        _ov_lf = self.create_frame(chunk_frame)
+        _ov_lf.grid(row=1, column=0, sticky="w", pady=(UI_SPACING["xs"], 0))
+        self.create_label(_ov_lf, text="Overlap (chars):").pack(side="left")
+        self._make_help_icon(
+            _ov_lf,
+            "Characters shared between adjacent chunks to preserve context at boundaries.\n"
+            "Prevents information loss at the edge of each chunk.\n"
+            "Typical range: 50–300. Too much overlap increases index size.",
+        ).pack(side="left")
         self.create_entry(chunk_frame, textvariable=self.chunk_overlap, width=10).grid(row=1, column=1, sticky="w", padx=(6, 18), pady=(UI_SPACING["xs"], 0))
 
+        # Row 1 right: Build digest index checkbox + help icon in a wrapper frame
+        _bdi_frame = self.create_frame(chunk_frame)
+        _bdi_frame.grid(row=1, column=2, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
         self.create_checkbox(
-            chunk_frame,
+            _bdi_frame,
             text="Build digest index",
             variable=self.build_digest_index,
-        ).grid(row=1, column=2, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
+        ).pack(side="left")
+        self._make_help_icon(
+            _bdi_frame,
+            "Creates a summary-oriented index alongside the main index.\n"
+            "Enables faster high-level synthesis queries.\n"
+            "Recommended for book-length documents and when using Summary or Research modes.",
+        ).pack(side="left", padx=(4, 0))
 
+        # Row 2 left: Structure-aware checkbox + help icon in a wrapper frame
+        _sa_frame = self.create_frame(chunk_frame)
+        _sa_frame.grid(row=2, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
         self.chk_structure_aware = self.create_checkbox(
-            chunk_frame,
+            _sa_frame,
             text="Structure-aware",
             variable=self.structure_aware_ingestion,
         )
-        self.chk_structure_aware.grid(row=2, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
+        self.chk_structure_aware.pack(side="left")
+        self._make_help_icon(
+            _sa_frame,
+            "Splits text at detected headings and section boundaries instead of fixed character counts.\n"
+            "Best for well-structured documents such as reports, textbooks, and manuals.\n"
+            "Cannot be combined with Semantic Layout.",
+        ).pack(side="left", padx=(4, 0))
 
+        # Row 2 right: Semantic Layout checkbox + help icon in a wrapper frame
+        _sl_frame = self.create_frame(chunk_frame)
+        _sl_frame.grid(row=2, column=2, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
         self.chk_semantic_layout = self.create_checkbox(
-            chunk_frame,
+            _sl_frame,
             text="Semantic Layout (experimental)",
             variable=self.semantic_layout_ingestion,
         )
-        self.chk_semantic_layout.grid(row=2, column=2, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
+        self.chk_semantic_layout.pack(side="left")
+        self._make_help_icon(
+            _sl_frame,
+            "Experimental: groups PDF text into semantic regions using layout coordinates.\n"
+            "May improve recall on complex multi-column PDFs.\n"
+            "Cannot be combined with Structure-aware.",
+        ).pack(side="left", padx=(4, 0))
 
         # Auto-recommendation display (part of Step 2)
         self.auto_recommendation_var = tk.StringVar(value="Auto recommendation: waiting for file/index metadata.")
@@ -6572,8 +6636,21 @@ class AgenticRAGApp:
             text="Build Comprehension Index (langextract)",
             variable=self.build_comprehension_index,
         ).pack(side="left")
+        self._make_help_icon(
+            comprehension_frame,
+            "Uses langextract to build a structured comprehension layer on top of the vector index.\n"
+            "Enables teaching, deep Q&A, and Socratic tutoring modes.\n"
+            "Takes extra time to build and is best for long documents such as textbooks or reports.",
+        ).pack(side="left", padx=(2, 0))
 
         self.create_label(comprehension_frame, text="Extraction depth:").pack(side="left", padx=(20, 5))
+        self._make_help_icon(
+            comprehension_frame,
+            "Controls how deeply comprehension extraction analyzes the source document.\n"
+            "Light: fast extraction of top-level concepts only.\n"
+            "Standard: balanced depth suitable for most documents.\n"
+            "Deep: thorough extraction for research or textbooks — significantly slower but more comprehensive.",
+        ).pack(side="left", padx=(0, 5))
         self.create_combobox(
             comprehension_frame,
             textvariable=self.comprehension_extraction_depth,
@@ -6587,6 +6664,11 @@ class AgenticRAGApp:
             text="Experimental override (allow blocked combos with confirmation)",
             variable=self.experimental_override,
         ).pack(side="left", padx=(20, 0))
+        self._make_help_icon(
+            comprehension_frame,
+            "Bypasses safety guardrails for option combinations that are normally blocked.\n"
+            "Only enable if you understand the implications of the combination you are forcing.",
+        ).pack(side="left", padx=(2, 0))
 
         # ── Build Index action area (revealed with Step 3) ─────────────────
         self._lib_build_frame = self.create_frame(frame)
