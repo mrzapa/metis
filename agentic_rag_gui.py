@@ -7798,18 +7798,144 @@ class AgenticRAGApp:
 
     def _render_wizard_step_six(self):
         self._wizard_step_label.config(text="Step 6 of 6: Confirm and start")
-        summary = [
-            f"File: {self._wizard_state.get('file_path') or 'None'}",
-            f"Index: {self._wizard_state.get('selected_index') or '(default)'}",
-            f"Chunking: {self._wizard_state.get('chunk_size')} / overlap {self._wizard_state.get('chunk_overlap')}",
-            f"LLM: {self._wizard_state.get('llm_provider')} / {self._wizard_state.get('llm_model')}",
-            f"Embedding: {self._wizard_state.get('embedding_provider')} / {self._wizard_state.get('embedding_model')}",
-            f"Mode preset: {self._wizard_state.get('mode_preset')}",
-        ]
-        text = scrolledtext.ScrolledText(self._wizard_content, height=10, state="normal", wrap=tk.WORD)
-        text.pack(fill="both", expand=True)
-        text.insert(tk.END, "\n".join(summary))
-        text.config(state="disabled")
+
+        # ── Helper closures ───────────────────────────────────────────────────
+        def _section(title):
+            ttk.Label(self._wizard_content, text=title, style="Bold.TLabel").pack(
+                anchor="w", pady=(10, 2)
+            )
+            ttk.Separator(self._wizard_content, orient="horizontal").pack(fill="x", pady=(0, 4))
+
+        def _row(label, value, val_style="TLabel"):
+            row = ttk.Frame(self._wizard_content)
+            row.pack(fill="x", pady=1)
+            ttk.Label(row, text=f"{label}:", style="Muted.TLabel", width=22, anchor="w").pack(side="left")
+            ttk.Label(row, text=value, style=val_style, anchor="w", wraplength=360).pack(
+                side="left", fill="x", expand=True
+            )
+
+        # ── Summary sections ──────────────────────────────────────────────────
+        file_path = (self._wizard_state.get("file_path") or "").strip()
+        selected_index = self._wizard_state.get("selected_index") or "(default)"
+
+        _section("Source")
+        _row("File", file_path or "None", val_style="Code.TLabel" if file_path else "Muted.TLabel")
+        _row("Index", selected_index)
+
+        _section("Ingestion")
+        _row("Chunk size", str(self._wizard_state.get("chunk_size", "")))
+        _row("Chunk overlap", str(self._wizard_state.get("chunk_overlap", "")))
+        comp_on = bool(self._wizard_state.get("build_comprehension_index"))
+        digest_on = bool(self._wizard_state.get("build_digest_index"))
+        _row("Digest index", "Yes" if digest_on else "No")
+        _row("Comprehension index", "Yes" if comp_on else "No")
+
+        _section("Models")
+        llm_provider = self._wizard_state.get("llm_provider", "")
+        llm_model = self._wizard_state.get("llm_model", "")
+        emb_provider = self._wizard_state.get("embedding_provider", "")
+        emb_model = self._wizard_state.get("embedding_model", "")
+        _row("LLM", f"{llm_provider} / {llm_model}")
+        _row("Embedding", f"{emb_provider} / {emb_model}")
+
+        _section("Mode")
+        _row("Preset", self._wizard_state.get("mode_preset", "Q&A"))
+
+        # ── Cost estimation ───────────────────────────────────────────────────
+        _section("Estimated Cost")
+
+        # Gather document size metadata for estimate
+        selected_index_path = None
+        if selected_index and selected_index != "(default)":
+            selected_index_path = (self.existing_index_paths.get(selected_index) or (None,))[0]
+        md = self._gather_auto_metadata(
+            file_path=file_path or None,
+            index_path=selected_index_path,
+        )
+        est_tokens = int(md.get("estimated_tokens") or 0)
+        size_bytes = int(md.get("size_bytes") or 0)
+
+        # Embedding pricing: USD per million tokens
+        EMBED_PRICE = {
+            ("openai", "text-embedding-3-small"): 0.02,
+            ("openai", "text-embedding-3-large"): 0.13,
+            ("google", "models/embedding-001"): 0.025,
+            ("voyage", "voyage-4-large"): 0.18,
+            ("voyage", "voyage-4-lite"): 0.02,
+            ("voyage", "voyage-4-nano"): 0.01,
+            ("voyage", "voyage-4"): 0.06,
+        }
+        emb_price_per_m = EMBED_PRICE.get((emb_provider, emb_model), 0.0)
+        emb_cost = (est_tokens / 1_000_000) * emb_price_per_m
+
+        # LLM pricing: (input USD/M, output USD/M)
+        LLM_PRICE = {
+            ("openai", "gpt-4o"): (5.0, 15.0),
+            ("openai", "gpt-4o-mini"): (0.15, 0.60),
+            ("openai", "gpt-4.1"): (2.0, 8.0),
+            ("openai", "gpt-4.1-mini"): (0.40, 1.60),
+            ("anthropic", "claude-opus-4-6"): (15.0, 75.0),
+            ("anthropic", "claude-3-5-sonnet-20240620"): (3.0, 15.0),
+            ("anthropic", "claude-3-5-haiku-20241022"): (0.80, 4.0),
+            ("google", "gemini-1.5-flash"): (0.075, 0.30),
+            ("google", "gemini-1.5-pro"): (1.25, 5.0),
+        }
+        llm_in_price, llm_out_price = LLM_PRICE.get((llm_provider, llm_model), (0.0, 0.0))
+
+        # Ingestion LLM cost estimate:
+        #   Comprehension index: LLM reads every chunk (~25% output ratio).
+        #   Digest index only: lighter pass — ~30% of content, 10% output ratio.
+        llm_ingest_cost = 0.0
+        if comp_on and est_tokens > 0:
+            llm_ingest_cost = (est_tokens / 1_000_000) * (llm_in_price + llm_out_price * 0.25)
+        elif digest_on and est_tokens > 0:
+            llm_ingest_cost = (est_tokens / 1_000_000) * (llm_in_price + llm_out_price * 0.10) * 0.30
+
+        total_ingest = emb_cost + llm_ingest_cost
+
+        # Per-query LLM estimate: assume ~2 K input tokens, ~500 output tokens
+        per_query = (2000 / 1_000_000) * llm_in_price + (500 / 1_000_000) * llm_out_price
+
+        if est_tokens > 0:
+            size_kb = size_bytes / 1024
+            size_str = f"{size_kb:.0f} KB" if size_kb < 1024 else f"{size_kb / 1024:.1f} MB"
+            _row("Document", f"{size_str}  (~{est_tokens:,} tokens)")
+
+            if emb_price_per_m > 0:
+                _row("Embedding ingestion", f"~${emb_cost:.4f}")
+            else:
+                _row("Embedding ingestion", "Free (local / no-cost provider)")
+
+            if llm_ingest_cost > 0:
+                tag = "comprehension" if comp_on else "digest"
+                _row("LLM ingestion", f"~${llm_ingest_cost:.4f}  ({tag} pass)")
+            elif comp_on or digest_on:
+                _row("LLM ingestion", "Free (local / no-cost provider)")
+
+            if total_ingest > 0:
+                _row("Total ingestion", f"~${total_ingest:.4f}", val_style="Bold.TLabel")
+            elif emb_price_per_m == 0 and llm_in_price == 0:
+                ttk.Label(
+                    self._wizard_content,
+                    text="Local / free providers — no API ingestion cost.",
+                    style="Success.TLabel",
+                ).pack(anchor="w", pady=(2, 0))
+
+            if per_query > 0:
+                _row("Per query (LLM only)", f"~${per_query:.5f}")
+        else:
+            ttk.Label(
+                self._wizard_content,
+                text="No document selected — cost estimate unavailable.",
+                style="Muted.TLabel",
+            ).pack(anchor="w", pady=(2, 0))
+
+        ttk.Label(
+            self._wizard_content,
+            text="Estimates are approximate and based on file size / provider list prices.",
+            style="Caption.TLabel",
+            wraplength=480,
+        ).pack(anchor="w", pady=(10, 0))
 
     def _wizard_validate_current_step(self):
         step = int(self._wizard_state.get("step", 1))
