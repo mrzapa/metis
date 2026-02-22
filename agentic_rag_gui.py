@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox, simpledialog
 import tkinter.font as tkfont
 import threading
+import concurrent.futures
 import logging
 import os
 import sys
@@ -11037,13 +11038,15 @@ class AgenticRAGApp:
         if not chapter_groups:
             return []
         llm = self._get_llm_with_temperature(0.2)
-        digest_docs = []
         system_prompt = (
             "Summarize this chapter into concise bullet points for routing. "
             "Highlight topics, events, key actors, and chapter-specific decisions. "
             "Use bullets only with no introductory text."
         )
-        for chapter_ordinal, ((chapter_idx, chapter_title), chunk_docs) in enumerate(chapter_groups, start=1):
+        digest_docs = [None] * len(chapter_groups)
+
+        def _process_chapter(args):
+            chapter_ordinal, ((chapter_idx, chapter_title), chunk_docs) = args
             chunk_ids = [
                 (doc.metadata or {}).get("chunk_id")
                 for doc in chunk_docs
@@ -11058,8 +11061,6 @@ class AgenticRAGApp:
                     self._human_message(content=f"Chapter title: {chapter_title}\n\nContent:\n{group_text}"),
                 ]
             )
-            if on_step:
-                on_step(chapter_ordinal, chapter_title)
             metadata = {
                 "doc_type": "chapter_digest",
                 "digest_scope": "chapter",
@@ -11076,7 +11077,19 @@ class AgenticRAGApp:
                 metadata["chapter_idx"] = int(chapter_idx)
             if doc_title:
                 metadata["doc_title"] = doc_title
-            digest_docs.append(self._document(page_content=response.content.strip(), metadata=metadata))
+            return chapter_ordinal - 1, self._document(page_content=response.content.strip(), metadata=metadata)
+
+        n_workers = self._ingest_parallel_workers()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(n_workers, len(chapter_groups))) as executor:
+            futures = {
+                executor.submit(_process_chapter, (ordinal, item)): ordinal
+                for ordinal, item in enumerate(chapter_groups, start=1)
+            }
+            for future in concurrent.futures.as_completed(futures):
+                slot, doc = future.result()
+                digest_docs[slot] = doc
+                if on_step:
+                    on_step(slot + 1, chapter_groups[slot][0][1])
         return digest_docs
 
     def _build_chunk_summary_nodes(self, docs, ingest_id, source_basename, doc_title):
@@ -11108,6 +11121,15 @@ class AgenticRAGApp:
                 node_meta["doc_title"] = doc_title
             chunk_nodes.append(self._document(page_content=short_summary, metadata=node_meta))
         return chunk_nodes
+
+    def _ingest_parallel_workers(self):
+        """Return the number of parallel LLM workers appropriate for the active provider."""
+        provider = self.llm_provider.get()
+        if provider == "local_gguf":
+            return 1  # llama.cpp native lib is not safe for concurrent inference
+        if provider == "local_lm_studio":
+            return 2  # local REST server; keep concurrency low
+        return 8  # cloud API providers support concurrent requests
 
     def _build_part_digest_documents(self, chapter_digest_docs, ingest_id, source_basename, doc_title, on_step=None):
         if not chapter_digest_docs:
@@ -11334,13 +11356,15 @@ class AgenticRAGApp:
         if not groups:
             return []
         llm = self._get_llm_with_temperature(0.2)
-        digest_docs = []
         system_prompt = (
             "Summarize the provided content into concise bullet points. "
             "Focus on entities, dates, decisions, and key statements. "
             "Use bullets only with no introductory text."
         )
-        for digest_index, (group_docs, section_title) in enumerate(groups, start=1):
+        digest_docs = [None] * len(groups)
+
+        def _process_section(args):
+            digest_index, (group_docs, section_title) = args
             chunk_ids = [
                 (doc.metadata or {}).get("chunk_id")
                 for doc in group_docs
@@ -11350,9 +11374,7 @@ class AgenticRAGApp:
             group_text = "\n\n".join(doc.page_content for doc in group_docs)
             group_text = self.recursive_summarise(group_text, max_tokens=8000)
             if section_title:
-                human_content = (
-                    f"Section title: {section_title}\n\nContent:\n{group_text}"
-                )
+                human_content = f"Section title: {section_title}\n\nContent:\n{group_text}"
             else:
                 human_content = f"Content:\n{group_text}"
             response = llm.invoke(
@@ -11361,8 +11383,6 @@ class AgenticRAGApp:
                     self._human_message(content=human_content),
                 ]
             )
-            if on_step:
-                on_step(digest_index, section_title)
             metadata = {
                 "doc_type": "digest",
                 "digest_scope": "section",
@@ -11379,9 +11399,19 @@ class AgenticRAGApp:
                 metadata["section_title"] = section_title
             if doc_title:
                 metadata["doc_title"] = doc_title
-            digest_docs.append(
-                self._document(page_content=response.content.strip(), metadata=metadata)
-            )
+            return digest_index - 1, self._document(page_content=response.content.strip(), metadata=metadata)
+
+        n_workers = self._ingest_parallel_workers()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(n_workers, len(groups))) as executor:
+            futures = {
+                executor.submit(_process_section, (i, g)): i
+                for i, g in enumerate(groups, start=1)
+            }
+            for future in concurrent.futures.as_completed(futures):
+                slot, doc = future.result()
+                digest_docs[slot] = doc
+                if on_step:
+                    on_step(slot + 1, groups[slot][1])
         return digest_docs
 
     def _build_document_summary_node(
@@ -16357,6 +16387,8 @@ class AgenticRAGApp:
                     _s3_n_book = 1 if (_s3_n_sections or _s3_n_chapters) else 0
                     _s3_total = _s3_n_sections + _s3_n_chapters + _s3_n_parts + _s3_n_book
                     _s3_done = [0]
+                    _s3_lock = threading.Lock()
+                    _s3_start_time = time.monotonic()
 
                     def _s3_progress_ui(done, total, status_text):
                         if not (hasattr(self, "progress") and self._safe_widget_exists(self.progress)):
@@ -16366,12 +16398,20 @@ class AgenticRAGApp:
                         self._set_startup_status(status_text)
 
                     def _s3_on_step(phase, item_label):
-                        _s3_done[0] += 1
-                        pct = int(100 * _s3_done[0] / _s3_total) if _s3_total else 100
-                        self.log(f"  [{phase}] {item_label} ({_s3_done[0]}/{_s3_total}, {pct}%)")
+                        with _s3_lock:
+                            _s3_done[0] += 1
+                            done = _s3_done[0]
+                        pct = int(100 * done / _s3_total) if _s3_total else 100
+                        elapsed = time.monotonic() - _s3_start_time
+                        elapsed_str = (
+                            f"{int(elapsed // 60)}m{int(elapsed % 60):02d}s"
+                            if elapsed >= 60
+                            else f"{elapsed:.1f}s"
+                        )
+                        self.log(f"  [{phase}] {item_label} ({done}/{_s3_total}, {pct}%, {elapsed_str} elapsed)")
                         self._run_on_ui(
-                            _s3_progress_ui, _s3_done[0], _s3_total,
-                            f"Step 3/4: {phase} {_s3_done[0]}/{_s3_total} ({pct}%)"
+                            _s3_progress_ui, done, _s3_total,
+                            f"Step 3/4: {phase} {done}/{_s3_total} ({pct}%, {elapsed_str})"
                         )
 
                     self.log(
@@ -16383,14 +16423,20 @@ class AgenticRAGApp:
                     chunk_summary_docs = self._build_chunk_summary_nodes(
                         docs, chunk_ingest_id, source_basename, doc_title
                     )
-                    section_digest_docs = self._build_digest_documents(
-                        docs, chunk_ingest_id, source_basename, doc_title,
-                        on_step=lambda i, t: _s3_on_step("Section", f"{i}/{_s3_n_sections}: {str(t or '')[:40]}"),
-                    )
-                    chapter_digest_docs = self._build_chapter_digest_documents(
-                        docs, chunk_ingest_id, source_basename, doc_title,
-                        on_step=lambda i, t: _s3_on_step("Chapter", f"{i}/{_s3_n_chapters}: {str(t or '')[:40]}"),
-                    )
+                    _l1_workers = self._ingest_parallel_workers()
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=min(2, _l1_workers)) as _l1_outer:
+                        _f_sec = _l1_outer.submit(
+                            self._build_digest_documents,
+                            docs, chunk_ingest_id, source_basename, doc_title,
+                            lambda i, t: _s3_on_step("Section", f"{i}/{_s3_n_sections}: {str(t or '')[:40]}"),
+                        )
+                        _f_ch = _l1_outer.submit(
+                            self._build_chapter_digest_documents,
+                            docs, chunk_ingest_id, source_basename, doc_title,
+                            lambda i, t: _s3_on_step("Chapter", f"{i}/{_s3_n_chapters}: {str(t or '')[:40]}"),
+                        )
+                        section_digest_docs = _f_sec.result()
+                        chapter_digest_docs = _f_ch.result()
                     part_digest_docs = self._build_part_digest_documents(
                         chapter_digest_docs,
                         chunk_ingest_id,
