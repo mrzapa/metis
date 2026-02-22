@@ -16297,6 +16297,7 @@ class AgenticRAGApp:
             if chatgpt_docs is None:
                 last_section_title = None
                 search_cursor = 0
+                _cch_applied = 0
                 for chunk_id, doc in enumerate(docs, start=1):
                     if str((doc.metadata or {}).get("content_type") or "").strip().lower() == "sht_node":
                         metadata = (doc.metadata or {}).copy()
@@ -16348,11 +16349,31 @@ class AgenticRAGApp:
                     metadata["source_section"] = str(
                         metadata.get("section_title") or metadata.get("chapter_title") or ""
                     ).strip()
+                    # _ensure_source_metadata fingerprints the raw chunk_body so the
+                    # hash is stable regardless of whether CCH is applied.
                     metadata = self._ensure_source_metadata(
                         metadata, selected_file, doc.page_content
                     )
                     doc.metadata = metadata
+                    # --- Contextual Chunk Headers (CCH) ---
+                    # Build a breadcrumb from the location context now stored in
+                    # metadata and prepend it to page_content so the embedding
+                    # model encodes WHERE the chunk came from, not just WHAT it says.
+                    # SHT node documents already receive this treatment in
+                    # _build_sht_node_documents; this covers the flat-chunk path.
+                    _cch_parts = [
+                        p for p in [
+                            metadata.get("doc_title"),
+                            metadata.get("chapter_title"),
+                            metadata.get("section_title"),
+                        ] if p
+                    ]
+                    if _cch_parts:
+                        doc.page_content = f"[{' | '.join(_cch_parts)}]\n{chunk_body}"
+                        _cch_applied += 1
             self.log(f"Created {len(docs)} text chunks.")
+            if _cch_applied:
+                self.log(f"Contextual chunk headers applied to {_cch_applied} flat chunk(s).")
 
             db_type = ingest_ctx["vector_db_type"]
             if db_type == "chroma":
