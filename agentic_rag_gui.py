@@ -4353,7 +4353,7 @@ class AgenticRAGApp:
             "anthropic": [
                 "claude-opus-4-6",
                 "claude-sonnet-4-6",
-                "claude-haiku-4-6",
+                "claude-haiku-4-5",
                 "claude-3-7-sonnet-20250219",
                 "claude-3-5-sonnet-20240620",
                 "claude-3-5-haiku-20241022",
@@ -7999,7 +7999,7 @@ class AgenticRAGApp:
             # Anthropic
             ("anthropic", "claude-opus-4-6"): (15.0, 75.0),
             ("anthropic", "claude-sonnet-4-6"): (3.0, 15.0),
-            ("anthropic", "claude-haiku-4-6"): (0.80, 4.0),
+            ("anthropic", "claude-haiku-4-5"): (0.80, 4.0),
             ("anthropic", "claude-3-7-sonnet-20250219"): (3.0, 15.0),
             ("anthropic", "claude-3-5-sonnet-20240620"): (3.0, 15.0),
             ("anthropic", "claude-3-5-haiku-20241022"): (0.80, 4.0),
