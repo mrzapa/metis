@@ -15814,7 +15814,7 @@ class AgenticRAGApp:
             "chunk_overlap": int(self.chunk_overlap.get()),
             "vector_db_type": self.vector_db_type.get(),
             "build_comprehension_index": bool(self.build_comprehension_index.get()),
-            "comprehension_extraction_depth": int(self.comprehension_extraction_depth.get()),
+            "comprehension_extraction_depth": str(self.comprehension_extraction_depth.get()),
             "build_digest_index": bool(self.build_digest_index.get()),
             "structure_aware": bool(self.structure_aware_ingestion.get()),
             "semantic_layout": bool(self.semantic_layout_ingestion.get()),
