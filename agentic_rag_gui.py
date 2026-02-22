@@ -11032,7 +11032,7 @@ class AgenticRAGApp:
         ordered_items = sorted(chapter_groups.items(), key=lambda item: item[0][0])
         return [((chapter_idx, chapter_title), chunk_docs) for (chapter_idx, chapter_title), chunk_docs in ordered_items]
 
-    def _build_chapter_digest_documents(self, docs, ingest_id, source_basename, doc_title):
+    def _build_chapter_digest_documents(self, docs, ingest_id, source_basename, doc_title, on_step=None):
         chapter_groups = self._group_chunks_for_chapter_digest(docs)
         if not chapter_groups:
             return []
@@ -11058,6 +11058,8 @@ class AgenticRAGApp:
                     self._human_message(content=f"Chapter title: {chapter_title}\n\nContent:\n{group_text}"),
                 ]
             )
+            if on_step:
+                on_step(chapter_ordinal, chapter_title)
             metadata = {
                 "doc_type": "chapter_digest",
                 "digest_scope": "chapter",
@@ -11107,7 +11109,7 @@ class AgenticRAGApp:
             chunk_nodes.append(self._document(page_content=short_summary, metadata=node_meta))
         return chunk_nodes
 
-    def _build_part_digest_documents(self, chapter_digest_docs, ingest_id, source_basename, doc_title):
+    def _build_part_digest_documents(self, chapter_digest_docs, ingest_id, source_basename, doc_title, on_step=None):
         if not chapter_digest_docs:
             return []
         grouped_parts = {}
@@ -11138,6 +11140,8 @@ class AgenticRAGApp:
                     self._human_message(content=f"Part: {part_title}\n\nChapter summaries:\n" + "\n\n".join(rollup)),
                 ]
             )
+            if on_step:
+                on_step(ordinal, part_title)
             metadata = {
                 "doc_type": "part_digest",
                 "digest_scope": "part",
@@ -11325,7 +11329,7 @@ class AgenticRAGApp:
             return merged[:max_chars]
         return self.recursive_summarise(merged, max_tokens=max_tokens)
 
-    def _build_digest_documents(self, docs, ingest_id, source_basename, doc_title):
+    def _build_digest_documents(self, docs, ingest_id, source_basename, doc_title, on_step=None):
         groups = self._group_chunks_for_digest(docs)
         if not groups:
             return []
@@ -11357,6 +11361,8 @@ class AgenticRAGApp:
                     self._human_message(content=human_content),
                 ]
             )
+            if on_step:
+                on_step(digest_index, section_title)
             metadata = {
                 "doc_type": "digest",
                 "digest_scope": "section",
@@ -11384,6 +11390,7 @@ class AgenticRAGApp:
         ingest_id,
         source_basename,
         doc_title,
+        on_step=None,
     ):
         if not digest_docs:
             return []
@@ -11408,6 +11415,8 @@ class AgenticRAGApp:
                 self._human_message(content=summary_input),
             ]
         )
+        if on_step:
+            on_step(1, doc_title or source_basename)
         child_digest_ids = [
             (getattr(doc, "metadata", {}) or {}).get("digest_id") for doc in digest_docs
         ]
@@ -16335,21 +16344,59 @@ class AgenticRAGApp:
 
             if ingest_ctx["build_digest_index"]:
                 if db_type == "chroma":
-                    self.log("Building summary tree (L0 chunk, L1 chapter/section, L2 part, L3 book)...")
+                    # Pre-count LLM steps so Step 3/4 can show accurate progress
+                    _s3_sec_groups = self._group_chunks_for_digest(docs)
+                    _s3_ch_groups = self._group_chunks_for_chapter_digest(docs)
+                    _s3_n_sections = len(_s3_sec_groups)
+                    _s3_n_chapters = len(_s3_ch_groups)
+                    # Parts: chapters are bucketed in groups of ~5
+                    _s3_n_parts = len({
+                        ((ch_idx - 1) // 5 if isinstance(ch_idx, int) else 0)
+                        for (ch_idx, _), _ in _s3_ch_groups
+                    }) if _s3_ch_groups else 0
+                    _s3_n_book = 1 if (_s3_n_sections or _s3_n_chapters) else 0
+                    _s3_total = _s3_n_sections + _s3_n_chapters + _s3_n_parts + _s3_n_book
+                    _s3_done = [0]
+
+                    def _s3_progress_ui(done, total, status_text):
+                        if not (hasattr(self, "progress") and self._safe_widget_exists(self.progress)):
+                            return
+                        self.progress.stop()
+                        self.progress.config(mode="determinate", maximum=max(1, total), value=done)
+                        self._set_startup_status(status_text)
+
+                    def _s3_on_step(phase, item_label):
+                        _s3_done[0] += 1
+                        pct = int(100 * _s3_done[0] / _s3_total) if _s3_total else 100
+                        self.log(f"  [{phase}] {item_label} ({_s3_done[0]}/{_s3_total}, {pct}%)")
+                        self._run_on_ui(
+                            _s3_progress_ui, _s3_done[0], _s3_total,
+                            f"Step 3/4: {phase} {_s3_done[0]}/{_s3_total} ({pct}%)"
+                        )
+
+                    self.log(
+                        f"Building summary tree (L0 chunk, L1 chapter/section, L2 part, L3 book)... "
+                        f"~{_s3_total} LLM step(s): "
+                        f"{_s3_n_sections} section(s), {_s3_n_chapters} chapter(s), "
+                        f"~{_s3_n_parts} part(s), {_s3_n_book} book node."
+                    )
                     chunk_summary_docs = self._build_chunk_summary_nodes(
                         docs, chunk_ingest_id, source_basename, doc_title
                     )
                     section_digest_docs = self._build_digest_documents(
-                        docs, chunk_ingest_id, source_basename, doc_title
+                        docs, chunk_ingest_id, source_basename, doc_title,
+                        on_step=lambda i, t: _s3_on_step("Section", f"{i}/{_s3_n_sections}: {str(t or '')[:40]}"),
                     )
                     chapter_digest_docs = self._build_chapter_digest_documents(
-                        docs, chunk_ingest_id, source_basename, doc_title
+                        docs, chunk_ingest_id, source_basename, doc_title,
+                        on_step=lambda i, t: _s3_on_step("Chapter", f"{i}/{_s3_n_chapters}: {str(t or '')[:40]}"),
                     )
                     part_digest_docs = self._build_part_digest_documents(
                         chapter_digest_docs,
                         chunk_ingest_id,
                         source_basename,
                         doc_title,
+                        on_step=lambda i, t: _s3_on_step("Part", f"{i}/{_s3_n_parts}: {str(t or '')[:40]}"),
                     )
                     digest_docs = [*part_digest_docs, *chapter_digest_docs, *section_digest_docs]
                     summary_tree_docs = [*chunk_summary_docs, *digest_docs]
@@ -16358,6 +16405,7 @@ class AgenticRAGApp:
                         chunk_ingest_id,
                         source_basename,
                         doc_title,
+                        on_step=lambda i, t: _s3_on_step("Book summary", ""),
                     )
                     summary_tree_docs.extend(book_digest_docs)
                     self.log(
