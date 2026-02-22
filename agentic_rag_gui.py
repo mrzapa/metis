@@ -10398,7 +10398,8 @@ class AgenticRAGApp:
         base_dir = self.selected_index_path or self._get_chroma_persist_root()
         out_dir = os.path.join(base_dir, "comprehension")
         os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, f"comprehension_{ingest_id}.jsonl")
+        safe_id = ingest_id.replace(":", "-").replace("+", "_")
+        out_path = os.path.join(out_dir, f"comprehension_{safe_id}.jsonl")
         with open(out_path, "w", encoding="utf-8") as handle:
             for item in artifacts:
                 handle.write(json.dumps(item, ensure_ascii=False) + "\n")
