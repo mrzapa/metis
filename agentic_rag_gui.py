@@ -12974,7 +12974,9 @@ class AgenticRAGApp:
         meta = (metadata or {}).copy()
         header_path_tokens = self._normalize_header_path_tokens(meta.get("header_path_tokens") or meta.get("header_path"))
         header_path = " > ".join(header_path_tokens)
-        meta["header_path_tokens"] = header_path_tokens
+        # ChromaDB does not accept list metadata values; store as JSON string (None when empty to preserve
+        # falsy fallback behaviour in or-chains that rely on an absent/empty header_path_tokens value)
+        meta["header_path_tokens"] = json.dumps(header_path_tokens) if header_path_tokens else None
         meta["header_path"] = header_path
         source_title = (
             str(meta.get("source_title") or meta.get("doc_title") or meta.get("title") or meta.get("source") or "").strip()
@@ -13530,6 +13532,14 @@ class AgenticRAGApp:
         text = str(header_path_value).strip()
         if not text:
             return []
+        # Handle JSON-encoded list stored in ChromaDB metadata (lists not supported natively)
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    return [str(part).strip() for part in parsed if str(part).strip()]
+            except (json.JSONDecodeError, ValueError):
+                pass
         return [part.strip() for part in text.split(" > ") if part.strip()]
 
     def _build_sht_node_documents(self, structure_tree, selected_file, source_basename, ingest_id, doc_title=None):
@@ -13687,7 +13697,7 @@ class AgenticRAGApp:
                     "section_hint": str(enriched.get("section_hint") or enriched.get("section_title") or enriched.get("chapter_title") or "").strip(),
                     "position_hint": str(enriched.get("position_hint") or "").strip(),
                     "header_path": str(enriched.get("header_path") or "").strip(),
-                    "header_path_tokens": list(enriched.get("header_path_tokens") or []),
+                    "header_path_tokens": self._normalize_header_path_tokens(enriched.get("header_path_tokens")),
                     "breadcrumb_tokens": self._normalize_header_path_tokens(
                         enriched.get("breadcrumb_tokens")
                         or enriched.get("breadcrumb")
@@ -13725,7 +13735,7 @@ class AgenticRAGApp:
             if not entry.get("header_path"):
                 entry["header_path"] = str(enriched.get("header_path") or "").strip()
             if not entry.get("header_path_tokens"):
-                entry["header_path_tokens"] = list(enriched.get("header_path_tokens") or [])
+                entry["header_path_tokens"] = self._normalize_header_path_tokens(enriched.get("header_path_tokens"))
             if not entry.get("breadcrumb_tokens"):
                 entry["breadcrumb_tokens"] = self._normalize_header_path_tokens(
                     enriched.get("breadcrumb_tokens")
