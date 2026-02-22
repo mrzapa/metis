@@ -15624,7 +15624,11 @@ class AgenticRAGApp:
 
             if not api_key:
                 raise ValueError("Voyage API Key missing")
-            return embedding_cls(voyage_api_key=api_key, model=model_name)
+            try:
+                return embedding_cls(voyage_api_key=api_key, model=model_name, truncation=True)
+            except TypeError:
+                # Older langchain-voyageai versions may not support truncation kwarg
+                return embedding_cls(voyage_api_key=api_key, model=model_name)
 
         if provider == "local_huggingface":
             # Uses local CPU/GPU via HuggingFace
