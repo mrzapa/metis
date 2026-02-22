@@ -15901,6 +15901,7 @@ class AgenticRAGApp:
             self._frontier_evidence_pack_mode = False
             self.log("Starting ingestion pipeline...")
             self._run_on_ui(self._set_startup_status, "Ingestion in progress…")
+            _pipeline_start_time = time.monotonic()
             self.log(
                 "Frontier flags (ingestion): "
                 f"langextract={self._frontier_enabled('langextract')}, "
@@ -15912,6 +15913,7 @@ class AgenticRAGApp:
 
             # 1. Load & Clean
             self.log("Step 1/4: Parsing File...")
+            _s1_start_time = time.monotonic()
             text_content = ""
             doc_title = None
 
@@ -16190,9 +16192,17 @@ class AgenticRAGApp:
                 self._latest_semantic_regions = []
             self._latest_sht_doc_title = str(doc_title or os.path.basename(selected_file or "") or "document")
             self.log(f"File loaded. Raw text length: {len(text_content)} characters.")
+            _s1_elapsed = time.monotonic() - _s1_start_time
+            _s1_elapsed_str = (
+                f"{int(_s1_elapsed // 60)}m{int(_s1_elapsed % 60):02d}s"
+                if _s1_elapsed >= 60
+                else f"{_s1_elapsed:.1f}s"
+            )
+            self.log(f"Step 1/4 complete (100%, {_s1_elapsed_str}).")
 
             # 2. Split
             self.log("Step 2/4: Splitting Text...")
+            _s2_start_time = time.monotonic()
             try:
                 from langchain.text_splitter import RecursiveCharacterTextSplitter
             except ImportError:
@@ -16375,8 +16385,17 @@ class AgenticRAGApp:
                 if jsonl_path:
                     self.log(f"Comprehension JSONL exported: {jsonl_path}")
 
+            _s2_elapsed = time.monotonic() - _s2_start_time
+            _s2_elapsed_str = (
+                f"{int(_s2_elapsed // 60)}m{int(_s2_elapsed % 60):02d}s"
+                if _s2_elapsed >= 60
+                else f"{_s2_elapsed:.1f}s"
+            )
+            self.log(f"Step 2/4 complete (100%, {_s2_elapsed_str}).")
+
             # 3. Initialize Vector DB & Embeddings
             self.log("Step 3/4: Initializing Vector Store...")
+            _s3_start_time_outer = time.monotonic()
             embeddings = self.get_embeddings(ingest_ctx.get("embedding_ctx"))
 
             new_index_path = None
@@ -16533,9 +16552,17 @@ class AgenticRAGApp:
             self.index_embedding_signature = self._current_embedding_signature()
             self.save_config()
             self._run_on_ui(self._refresh_compatibility_warning)
+            _s3_elapsed = time.monotonic() - _s3_start_time_outer
+            _s3_elapsed_str = (
+                f"{int(_s3_elapsed // 60)}m{int(_s3_elapsed % 60):02d}s"
+                if _s3_elapsed >= 60
+                else f"{_s3_elapsed:.1f}s"
+            )
+            self.log(f"Step 3/4 complete (100%, {_s3_elapsed_str}).")
 
             # 4. Batch Embed & Upsert
             self.log("Step 4/4: Embedding & Storing (This takes time)...")
+            _s4_start_time = time.monotonic()
             embedding_provider = str((ingest_ctx.get("embedding_ctx") or {}).get("provider") or "")
             batch_size = 32 if embedding_provider == "local_sentence_transformers" else 100
             total_docs = len(docs)
@@ -16555,7 +16582,14 @@ class AgenticRAGApp:
                     if hasattr(self, "progress") and self._safe_widget_exists(self.progress):
                         self.progress.config(value=_v)
                 self._run_on_ui(_update_embed_progress)
-                self.log(f"Indexed {min(i + batch_size, total_docs)}/{total_docs} chunks...")
+                _s4_pct = int(100 * _done_so_far / total_docs) if total_docs else 100
+                _s4_batch_elapsed = time.monotonic() - _s4_start_time
+                _s4_batch_elapsed_str = (
+                    f"{int(_s4_batch_elapsed // 60)}m{int(_s4_batch_elapsed % 60):02d}s"
+                    if _s4_batch_elapsed >= 60
+                    else f"{_s4_batch_elapsed:.1f}s"
+                )
+                self.log(f"Indexed {_done_so_far}/{total_docs} chunks ({_s4_pct}%, {_s4_batch_elapsed_str} elapsed)...")
 
             if summary_tree_docs:
                 self.log("Storing summary tree nodes...")
@@ -16625,7 +16659,20 @@ class AgenticRAGApp:
                     self.vector_store.add_documents(concept_docs)
                 self.log(f"Indexed {len(concept_docs)} concept cards for retrieval.")
 
-            self.log("Ingestion Complete! You can now chat.")
+            _s4_elapsed = time.monotonic() - _s4_start_time
+            _s4_elapsed_str = (
+                f"{int(_s4_elapsed // 60)}m{int(_s4_elapsed % 60):02d}s"
+                if _s4_elapsed >= 60
+                else f"{_s4_elapsed:.1f}s"
+            )
+            self.log(f"Step 4/4 complete (100%, {_s4_elapsed_str}).")
+            _pipeline_elapsed = time.monotonic() - _pipeline_start_time
+            _pipeline_elapsed_str = (
+                f"{int(_pipeline_elapsed // 60)}m{int(_pipeline_elapsed % 60):02d}s"
+                if _pipeline_elapsed >= 60
+                else f"{_pipeline_elapsed:.1f}s"
+            )
+            self.log(f"Ingestion Complete! You can now chat. (Total pipeline time: {_pipeline_elapsed_str})")
             self._run_on_ui(self._refresh_document_outline_panel)
             self._run_on_ui(self._refresh_semantic_region_panel)
             self._run_on_ui(self._lib_reveal_post_ingestion)
