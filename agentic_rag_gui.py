@@ -16526,13 +16526,21 @@ class AgenticRAGApp:
             batch_size = 32 if embedding_provider == "local_sentence_transformers" else 100
             total_docs = len(docs)
 
-            self._run_on_ui(self.progress.config, maximum=total_docs, value=0)
+            def _start_embed_progress():
+                if hasattr(self, "progress") and self._safe_widget_exists(self.progress):
+                    self.progress.stop()
+                    self.progress.config(mode="determinate", maximum=max(1, total_docs), value=0)
+            self._run_on_ui(_start_embed_progress)
 
             for i in range(0, total_docs, batch_size):
                 self._job_cancel_checkpoint(cancel_event, "ingestion", "chunk embedding")
                 batch = docs[i : i + batch_size]
                 self.vector_store.add_documents(batch)
-                self._run_on_ui(self.progress.config, value=i + len(batch))
+                _done_so_far = i + len(batch)
+                def _update_embed_progress(_v=_done_so_far):
+                    if hasattr(self, "progress") and self._safe_widget_exists(self.progress):
+                        self.progress.config(value=_v)
+                self._run_on_ui(_update_embed_progress)
                 self.log(f"Indexed {min(i + batch_size, total_docs)}/{total_docs} chunks...")
 
             if summary_tree_docs:
