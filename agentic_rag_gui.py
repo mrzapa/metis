@@ -14154,6 +14154,10 @@ class AgenticRAGApp:
     def _verify_evidence_pack_claims(self, answer_text, synthesis_cards):
         if not answer_text:
             return answer_text
+
+        def _lightly_sanitize_original(text):
+            return "\n".join(line.rstrip() for line in str(text).splitlines()).strip()
+
         citation_re = re.compile(r"\[(S\d+(?:\s*,\s*S\d+)*)\]")
         bullet_re = re.compile(r"^(\s*(?:[-*+]\s+|\d+[.)]\s+))(.*)$")
         factual_hint_re = re.compile(
@@ -14250,6 +14254,7 @@ class AgenticRAGApp:
                         mapped_labels = best_labels[:2]
 
                 if not mapped_labels:
+                    kept_sentences.append(sentence)
                     continue
 
                 if not sentence_labels:
@@ -14261,7 +14266,17 @@ class AgenticRAGApp:
             rebuilt = " ".join(kept_sentences).strip()
             cleaned_lines.append(f"{bullet_prefix}{rebuilt}" if bullet_prefix else rebuilt)
 
-        return "\n".join(cleaned_lines).strip()
+        rebuilt_text = "\n".join(cleaned_lines).strip()
+        original_sanitized = _lightly_sanitize_original(answer_text)
+        if not rebuilt_text:
+            return original_sanitized
+
+        original_signal = len(re.sub(r"\s+", "", original_sanitized))
+        rebuilt_signal = len(re.sub(r"\s+", "", rebuilt_text))
+        if original_signal > 0 and rebuilt_signal < max(40, int(original_signal * 0.35)):
+            return original_sanitized
+
+        return rebuilt_text
 
     @staticmethod
     def _infer_theme_from_incident(incident):
