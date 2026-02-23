@@ -16294,10 +16294,10 @@ class AgenticRAGApp:
                             last_heading = candidate
                 return last_heading
 
+            _cch_applied = 0
             if chatgpt_docs is None:
                 last_section_title = None
                 search_cursor = 0
-                _cch_applied = 0
                 for chunk_id, doc in enumerate(docs, start=1):
                     if str((doc.metadata or {}).get("content_type") or "").strip().lower() == "sht_node":
                         metadata = (doc.metadata or {}).copy()
