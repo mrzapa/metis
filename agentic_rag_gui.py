@@ -15167,6 +15167,23 @@ class AgenticRAGApp:
         failures = []
         cleaned_lines = []
         factual_hint_re = re.compile(r"\b(is|are|was|were|has|have|had|shows?|indicates?|states?|reports?|found|observed|according|caused?|led|resulted)\b", re.I)
+        current_heading = None
+
+        def _best_explanatory_sentence(sentences):
+            if not sentences:
+                return ""
+            ranked = []
+            for sentence in sentences:
+                text = sentence.strip()
+                if not text:
+                    continue
+                factual_score = 0
+                factual_score += int(bool(factual_hint_re.search(text)))
+                factual_score += int(bool(re.search(r"\d", text)))
+                factual_score += int(bool(self._extract_chunk_citation_numbers(text)))
+                ranked.append((factual_score, len(text), text))
+            ranked.sort(key=lambda item: (item[0], item[1]))
+            return ranked[0][2] if ranked else ""
 
         for raw_line in answer_text.splitlines():
             if not raw_line.strip():
@@ -15174,6 +15191,7 @@ class AgenticRAGApp:
                 continue
             if re.match(r"^\s{0,3}#{1,6}\s+\S", raw_line):
                 cleaned_lines.append(raw_line)
+                current_heading = raw_line.strip().lower()
                 continue
 
             bullet_match = bullet_re.match(raw_line)
@@ -15237,12 +15255,92 @@ class AgenticRAGApp:
                 continue
 
             if not kept_sentences:
+                fallback_sentence = _best_explanatory_sentence(sentences)
+                if fallback_sentence:
+                    best_chunk, best_score = self._best_supporting_chunk(
+                        fallback_sentence,
+                        chunks,
+                        chunk_tokens,
+                        chunk_embeddings,
+                        embedding_model,
+                    )
+                    support_threshold = 0.08 if embedding_model is None else 0.45
+                    rebuilt_fallback = fallback_sentence
+                    if best_chunk is not None and best_score >= support_threshold:
+                        rebuilt_fallback = re.sub(r"\[Chunk\s+\d+\]", "", rebuilt_fallback).strip()
+                        rebuilt_fallback = f"{rebuilt_fallback} [Chunk {best_chunk}]".strip()
+                    cleaned_lines.append(f"{bullet_prefix}{rebuilt_fallback}" if bullet_prefix else rebuilt_fallback)
+                    failures.append("Retained one explanatory sentence to preserve section continuity.")
                 continue
             rebuilt = " ".join(kept_sentences).strip()
             cleaned_lines.append(f"{bullet_prefix}{rebuilt}" if bullet_prefix else rebuilt)
 
         cleaned_text = "\n".join(cleaned_lines).strip()
         return cleaned_text, failures
+
+    def _post_sanitize_format_cleanup(self, text):
+        cleaned = str(text or "")
+        cleaned = re.sub(r'\\+"', '"', cleaned)
+        cleaned = re.sub(
+            r'(?m)(^|[\s(])"\s*(\[(?:Chunk\s+\d+|S\d+(?:\s*,\s*S\d+)*)\])',
+            r'\1\2',
+            cleaned,
+        )
+        cleaned = re.sub(
+            r'(?m)^\s*\[(?:Chunk\s+\d+|S\d+(?:\s*,\s*S\d+)*)\]\s*$',
+            '',
+            cleaned,
+        )
+        cleaned_lines = []
+        for line in cleaned.splitlines():
+            quote_count = line.count('"')
+            if quote_count % 2 == 1:
+                if line.rstrip().endswith('"'):
+                    line = line.rstrip()[:-1]
+                elif line.lstrip().startswith('"'):
+                    idx = line.find('"')
+                    line = line[:idx] + line[idx + 1 :]
+            cleaned_lines.append(line)
+        cleaned = "\n".join(cleaned_lines)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
+    def _content_sentence_count(self, text):
+        return len([s for s in self._sentence_split(str(text or "")) if re.search(r"[A-Za-z0-9]", s)])
+
+    def _content_is_mostly_structure(self, text):
+        lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+        if not lines:
+            return True
+        structural = 0
+        citation_only = re.compile(r"^\[(?:Chunk\s+\d+|S\d+(?:\s*,\s*S\d+)*)\]$")
+        for line in lines:
+            if re.match(r"^#{1,6}\s+", line):
+                structural += 1
+                continue
+            if citation_only.match(line):
+                structural += 1
+                continue
+            plain = re.sub(r"\[(?:Chunk\s+\d+|S\d+(?:\s*,\s*S\d+)*)\]", "", line).strip(" -:•\t")
+            if len(plain) < 12:
+                structural += 1
+        return (structural / max(1, len(lines))) >= 0.65
+
+    def _enforce_minimum_content_floor(self, candidate_text, baseline_text, context_text, stage_label):
+        baseline_count = self._content_sentence_count(baseline_text)
+        candidate_count = self._content_sentence_count(candidate_text)
+        self.log(
+            f"Claim-level retention metrics ({stage_label}): sentences before={baseline_count}, after={candidate_count}"
+        )
+        too_short = baseline_count >= 3 and candidate_count <= max(1, int(baseline_count * 0.35))
+        mostly_structure = self._content_is_mostly_structure(candidate_text)
+        if too_short or mostly_structure:
+            fallback = self._append_missing_citations(baseline_text, context_text)
+            self.log(
+                f"Minimum-content floor triggered ({stage_label}); reverted to pre-sanitize draft with citation append."
+            )
+            return fallback
+        return candidate_text
 
     @staticmethod
     def _strip_unsupported_placeholders(text):
@@ -15409,6 +15507,7 @@ class AgenticRAGApp:
 
     def _validate_and_repair(self, answer_text, context_text, iteration_id=None, evidence_pack_mode=False, synthesis_cards=None, mode_name="Q&A"):
         answer_text = self._strip_unsupported_placeholders(answer_text)
+        pre_claim_text = answer_text
         output_style = self.output_style.get().strip()
         mode_name = self._normalize_mode_name(mode_name)
         agentic_mode = self.agentic_mode.get()
@@ -15443,6 +15542,13 @@ class AgenticRAGApp:
                 answer_text, context_text, output_style, mode_name=mode_name
             )
             failures.extend(fallback_failures)
+        answer_text = self._post_sanitize_format_cleanup(answer_text)
+        answer_text = self._enforce_minimum_content_floor(
+            answer_text,
+            pre_claim_text,
+            context_text,
+            "initial-pass",
+        )
         if is_valid:
             style_valid, style_failures = self._validate_answer(
                 answer_text, context_text, output_style, mode_name=mode_name
@@ -15477,11 +15583,19 @@ class AgenticRAGApp:
                 + "; ".join(unique_failures)
             )
         repaired = self._repair_answer(answer_text, context_text, unique_failures, output_style)
+        pre_post_repair_claim_text = repaired
         repaired = self._append_missing_citations(repaired, context_text)
         if claim_level_enabled:
             repaired, post_failures = self._claim_level_grounding_validate(repaired, context_text)
         else:
             repaired, post_failures = self._claim_level_sanitize(repaired, context_text)
+        repaired = self._post_sanitize_format_cleanup(repaired)
+        repaired = self._enforce_minimum_content_floor(
+            repaired,
+            pre_post_repair_claim_text,
+            context_text,
+            "post-repair-pass",
+        )
         post_unique = self._summarize_failures(post_failures)
         if post_unique:
             self.log(
