@@ -17296,14 +17296,53 @@ class AgenticRAGApp:
                 keyword in normalized_query for keyword in long_form_keywords
             )
             is_evidence_pack = bool(resolved_settings.get("evidence_pack_mode"))
-            comprehension_first_intent = self._is_comprehension_first_query(query) or output_style == "Blinkist-style summary" or mode_name in {"Tutor", "Summary", "Research"}
-            use_comprehension_first = bool(rag_ctx["prefer_comprehension_index"] and comprehension_first_intent)
+            has_explicit_comprehension_intent = self._is_comprehension_first_query(query)
+            is_blinkist_output_style = output_style == "Blinkist-style summary"
+            is_tutor_or_summary_mode = mode_name in {"Tutor", "Summary"}
+            research_summary_signals = (
+                "summarize",
+                "summary",
+                "key takeaways",
+                "takeaways",
+                "teach",
+                "overview",
+            )
+            research_summary_signal_match = any(
+                signal in normalized_query for signal in research_summary_signals
+            )
+            research_mode_summary_fallback = mode_name == "Research" and research_summary_signal_match
+            comprehension_first_intent = (
+                has_explicit_comprehension_intent
+                or is_blinkist_output_style
+                or is_tutor_or_summary_mode
+                or research_mode_summary_fallback
+            )
+            use_comprehension_first = bool(
+                rag_ctx["prefer_comprehension_index"] and comprehension_first_intent
+            )
+            route_reason = "raw_or_hierarchical_first"
+            if use_comprehension_first:
+                if has_explicit_comprehension_intent:
+                    route_reason = "explicit_comprehension_intent"
+                elif is_blinkist_output_style:
+                    route_reason = "blinkist_style"
+                elif is_tutor_or_summary_mode:
+                    route_reason = f"mode_{mode_name.lower()}"
+                elif research_mode_summary_fallback:
+                    route_reason = "research_summary_signal"
+            elif mode_name == "Research":
+                route_reason = "research_raw_first"
             precomputed_comprehension_artifacts = []
             if use_comprehension_first:
                 precomputed_comprehension_artifacts = self.search_comprehension_artifacts(query, k=18)
                 self.log(
                     "Comprehension routing: queried structured index first "
                     f"({len(precomputed_comprehension_artifacts)} artifacts), then retrieving raw chunks for corroboration."
+                )
+            else:
+                self.log(
+                    "Comprehension routing: using raw/hierarchical chunk retrieval first "
+                    f"(reason={route_reason})."
                 )
             recursive_mode_enabled = bool(rag_ctx["enable_recursive_retrieval"])
             use_recursive_retrieval = (
@@ -17356,6 +17395,9 @@ class AgenticRAGApp:
                     "profile": rag_ctx["selected_profile"],
                     "recursive_mode_enabled": int(recursive_mode_enabled),
                     "recursive_mode_active": int(use_recursive_retrieval),
+                    "comprehension_first_intent": int(comprehension_first_intent),
+                    "use_comprehension_first": int(use_comprehension_first),
+                    "comprehension_route_reason": route_reason,
                 }
             )
             self._record_trace_stage(
