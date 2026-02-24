@@ -1227,6 +1227,9 @@ class CollapsibleFrame(ttk.Frame):
             self.arrow_label.config(text="▾")
             self._expanded.set(True)
             self._animating = False
+            # Re-measure after all pending layout tasks settle so that content
+            # which was previously collapsed always expands to its true height.
+            self.after_idle(lambda: self._set_clip_height(self._measure_content_height()))
 
         collapse_duration = int(STYLE_CONFIG.get("animation", {}).get("collapse_duration_ms", 200))
         self._animate_height(0, target_height, collapse_duration, on_complete=_done)
@@ -3105,20 +3108,20 @@ class AgenticRAGApp:
 
     def _get_required_packages(self):
         return [
-            "langchain",
-            "langchain-community",
-            "langchain-openai",
-            "langchain-anthropic",
-            "langchain-google-genai",
-            "langchain-cohere",
-            "langchain-voyageai",
-            "langchain-chroma",
-            "langchain-weaviate",
-            "langchain-text-splitters",
-            "chromadb",
-            "beautifulsoup4",
-            "tiktoken",
-            "weaviate-client",
+            "langchain>=0.3.0",
+            "langchain-community>=0.3.0",
+            "langchain-openai>=0.2.0",
+            "langchain-anthropic>=0.3.0",
+            "langchain-google-genai>=2.0.0",
+            "langchain-cohere>=0.3.0",
+            "langchain-voyageai>=0.1.0",
+            "langchain-chroma>=0.1.0",
+            "langchain-weaviate>=0.0.4",
+            "langchain-text-splitters>=0.3.0",
+            "chromadb>=0.5.0",
+            "beautifulsoup4>=4.12.0",
+            "tiktoken>=0.7.0",
+            "weaviate-client>=4.0.0",
         ]
 
     def _build_evidence_pack_context(self, docs, budget_chars, per_doc_chars=600):
@@ -4438,8 +4441,22 @@ class AgenticRAGApp:
             self.embedding_model.set(emb_options[0])
 
         self._toggle_custom_entries()
+        self._refresh_custom_llm_options()
         self._update_local_gguf_ui_state()
         self._update_local_sentence_transformers_ui_state()
+
+    def _refresh_custom_llm_options(self):
+        """Populate the custom LLM combobox with registered GGUF model names when
+        the local_gguf provider is active, otherwise clear the suggestion list."""
+        widget = getattr(self, "llm_model_custom_entry", None)
+        if widget is None or not self._safe_widget_exists(widget):
+            return
+        if self.llm_provider.get() == "local_gguf":
+            gguf_entries = self.local_model_registry.get("gguf", [])
+            names = [e["name"] for e in gguf_entries if e.get("name")]
+        else:
+            names = []
+        widget["values"] = names
 
     def _toggle_custom_entries(self):
         llm_custom_enabled = self.llm_model.get() == "custom"
@@ -4872,6 +4889,8 @@ class AgenticRAGApp:
                 item["path"] = clean_value if normalized_type == "gguf" else ""
                 self._refresh_local_model_registry_table()
                 self.save_config()
+                if normalized_type == "gguf":
+                    self._run_on_ui(self._refresh_custom_llm_options)
                 return True
 
         bucket.append(
@@ -4885,6 +4904,8 @@ class AgenticRAGApp:
         )
         self._refresh_local_model_registry_table()
         self.save_config()
+        if normalized_type == "gguf":
+            self._run_on_ui(self._refresh_custom_llm_options)
         return True
 
     def add_local_gguf_model(self):
@@ -5932,8 +5953,8 @@ class AgenticRAGApp:
         self.create_label(llm_frame, text="Custom Generation Model (optional):").grid(
             row=2, column=0, sticky="w"
         )
-        self.llm_model_custom_entry = self.create_entry(
-            llm_frame, textvariable=self.llm_model_custom
+        self.llm_model_custom_entry = self.create_combobox(
+            llm_frame, textvariable=self.llm_model_custom, values=[]
         )
         self.llm_model_custom_entry.grid(
             row=2, column=1, sticky="ew", padx=5, pady=5
@@ -6482,8 +6503,12 @@ class AgenticRAGApp:
                 section.grid()
                 if query and (has_visible_rows or section_match):
                     section.set_expanded(True)
-                elif not query:
-                    section.set_expanded(advanced)
+                elif not query and not advanced:
+                    # In recommended mode, keep sections collapsed. In advanced
+                    # mode the user controls collapse state manually; do not
+                    # override it here (expansion is handled by
+                    # _apply_basic_advanced_visibility on mode switch).
+                    section.set_expanded(False)
             else:
                 section.grid_remove()
 
@@ -16049,10 +16074,8 @@ class AgenticRAGApp:
         selected = self.llm_model.get().strip()
         custom = self.llm_model_custom.get().strip()
         if selected == "custom":
-            if not custom:
-                raise ValueError("Custom generation model is selected but empty")
-            return custom
-        return selected or custom
+            return custom or None
+        return selected or custom or None
 
     def _resolve_embedding_model(self):
         if self.embedding_provider.get() == "local_sentence_transformers":
