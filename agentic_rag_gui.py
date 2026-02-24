@@ -1657,6 +1657,7 @@ class AgenticRAGApp:
         self._latest_extracted_events = []
         self._latest_grounding_html_path = ""
         self._source_id_by_tree_iid = {}
+        self._claim_cleanup_counters = {"rewritten": 0, "dropped": 0, "continuity": 0}
 
         self.vector_store = None
         self.index_embedding_signature = ""
@@ -15289,9 +15290,25 @@ class AgenticRAGApp:
                 )
                 if rewritten:
                     kept.append(f"{prefix}{rewritten}" if prefix else rewritten)
+                    self._claim_cleanup_counters["rewritten"] += 1
                     failures.append("Generalized weakly supported claim to grounded statement.")
                     continue
 
+            line_class = self._classify_unsupported_line(claim_wo_cites)
+            best_label = scored[0][1] if scored else (candidate_labels[0] if candidate_labels else None)
+            if line_class == "structural_continuity":
+                kept.append(f"{prefix}{claim_wo_cites}" if prefix else claim_wo_cites)
+                self._claim_cleanup_counters["continuity"] += 1
+                failures.append("Preserved structural continuity line during claim-level grounding cleanup.")
+                continue
+            if line_class == "rewriteable_hedged" and best_label:
+                rewritten = self._rewrite_to_bounded_language(claim_wo_cites, best_label, source_type="source")
+                kept.append(f"{prefix}{rewritten}" if prefix else rewritten)
+                self._claim_cleanup_counters["rewritten"] += 1
+                failures.append("Rewrote weakly supported interpretation with bounded language and nearby citation.")
+                continue
+
+            self._claim_cleanup_counters["dropped"] += 1
             failures.append("Dropped unsupported factual claim during claim-level grounding.")
 
         cleaned = "\n".join(line for line in kept if line.strip()).strip()
@@ -15398,9 +15415,23 @@ class AgenticRAGApp:
                         failures.append("Added citation to previously uncited factual claim.")
                     continue
 
+                line_class = self._classify_unsupported_line(sentence, current_heading)
+                if line_class == "structural_continuity":
+                    kept_sentences.append(sentence)
+                    self._claim_cleanup_counters["continuity"] += 1
+                    failures.append("Preserved structural continuity sentence despite weak support.")
+                    continue
+                if line_class == "rewriteable_hedged" and best_chunk is not None:
+                    rewritten = self._rewrite_to_bounded_language(sentence, best_chunk, source_type="chunk")
+                    kept_sentences.append(rewritten)
+                    self._claim_cleanup_counters["rewritten"] += 1
+                    failures.append("Rewrote unsupported interpretation to bounded language with nearby citation.")
+                    continue
                 if cited_chunks:
+                    self._claim_cleanup_counters["dropped"] += 1
                     failures.append("Removed factual claim with unsupported citation evidence.")
                 else:
+                    self._claim_cleanup_counters["dropped"] += 1
                     failures.append("Removed uncited factual claim with no supporting evidence.")
                 continue
 
@@ -15455,6 +15486,53 @@ class AgenticRAGApp:
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
         return cleaned.strip()
 
+    def _classify_unsupported_line(self, text, current_heading=""):
+        line = re.sub(r"\s+", " ", str(text or "").strip())
+        if not line:
+            return "structural_continuity"
+        heading = str(current_heading or "").strip().lower()
+        if re.match(r"^(overall|in summary|to conclude|in conclusion|next|meanwhile|however|therefore|additionally|finally)\b", line, re.I):
+            return "structural_continuity"
+        if heading and any(key in heading for key in ["summary", "overview", "conclusion", "next steps", "timeline"]):
+            if len(line.split()) <= 16:
+                return "structural_continuity"
+        if re.search(r"\b(may|might|could|appears?|seems?|suggests?|likely|possibly|perhaps|potentially|interpreted|can indicate)\b", line, re.I):
+            return "rewriteable_hedged"
+        return "removable_factual"
+
+    def _rewrite_to_bounded_language(self, text, citation_ref, source_type="chunk"):
+        cleaned = re.sub(r"\[(?:Chunk\s+\d+|S\d+(?:\s*,\s*S\d+)*)\]", "", str(text or "")).strip()
+        cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        if not cleaned:
+            return ""
+        lowered = cleaned[0].lower() + cleaned[1:] if len(cleaned) > 1 else cleaned.lower()
+        bounded = f"Based on available records, {lowered}"
+        citation = f"[Chunk {citation_ref}]" if source_type == "chunk" else f"[{citation_ref}]"
+        return f"{bounded} {citation}".strip()
+
+    def _restore_minimal_connective_structure(self, candidate_text, baseline_text):
+        candidate_lines = [line for line in str(candidate_text or "").splitlines()]
+        baseline_lines = [line for line in str(baseline_text or "").splitlines()]
+        if not baseline_lines:
+            return str(candidate_text or "")
+        candidate_norm = {re.sub(r"\s+", " ", line.strip().lower()) for line in candidate_lines if line.strip()}
+        connective = []
+        for line in baseline_lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if re.match(r"^\s{0,3}#{1,6}\s+\S", line) or self._classify_unsupported_line(stripped) == "structural_continuity":
+                norm = re.sub(r"\s+", " ", stripped.lower())
+                if norm not in candidate_norm and stripped not in connective:
+                    connective.append(stripped)
+            if len(connective) >= 4:
+                break
+        if not connective:
+            return str(candidate_text or "")
+        body = "\n".join(line for line in candidate_lines if line.strip()).strip()
+        prefix = "\n".join(connective).strip()
+        return f"{prefix}\n\n{body}".strip() if body else prefix
+
     def _content_sentence_count(self, text):
         return len([s for s in self._sentence_split(str(text or "")) if re.search(r"[A-Za-z0-9]", s)])
 
@@ -15485,9 +15563,10 @@ class AgenticRAGApp:
         too_short = baseline_count >= 3 and candidate_count <= max(1, int(baseline_count * 0.35))
         mostly_structure = self._content_is_mostly_structure(candidate_text)
         if too_short or mostly_structure:
-            fallback = self._append_missing_citations(baseline_text, context_text)
+            fallback = self._restore_minimal_connective_structure(candidate_text, baseline_text)
+            fallback = self._append_missing_citations(fallback, context_text)
             self.log(
-                f"Minimum-content floor triggered ({stage_label}); reverted to pre-sanitize draft with citation append."
+                f"Minimum-content floor triggered ({stage_label}); preserved sanitized body and restored minimal connective structure."
             )
             return fallback
         return candidate_text
@@ -15631,7 +15710,10 @@ class AgenticRAGApp:
         failure_text = "\n".join(f"- {item}" for item in failures)
         repair_prompt = (
             "You are a repair assistant. Fix the draft using ONLY the provided context. "
-            "Rules: remove unsupported content, add correct citations ([Chunk N] or [S#]) to every "
+            "Rules: classify unsupported lines into removable factual claims, rewriteable hedged interpretations, "
+            "and structural continuity lines. Remove only unsupported factual claims, rewrite hedged interpretations "
+            "with bounded phrasing like 'Based on available records...' plus nearby citations, and preserve "
+            "structural continuity lines when possible. Add correct citations ([Chunk N] or [S#]) to every "
             "factual paragraph, include no placeholders, and omit unsupported content. "
             "Omit unsupported claims; deepen supported ones; do not ask for more docs or missing info; "
             "do not use placeholders. If evidence is thin, you may include one short 'Scope:' note "
@@ -15656,6 +15738,7 @@ class AgenticRAGApp:
         return repaired.content
 
     def _validate_and_repair(self, answer_text, context_text, iteration_id=None, evidence_pack_mode=False, synthesis_cards=None, mode_name="Q&A"):
+        self._claim_cleanup_counters = {"rewritten": 0, "dropped": 0, "continuity": 0}
         answer_text = self._strip_unsupported_placeholders(answer_text)
         pre_claim_text = answer_text
         output_style = self.output_style.get().strip()
@@ -15752,6 +15835,12 @@ class AgenticRAGApp:
                     "Claim-level pass removed/adjusted unsupported content. Top unique issues: "
                     + "; ".join(unique_failures)
                 )
+            self.log(
+                "Claim-level cleanup counters: "
+                f"rewritten={self._claim_cleanup_counters.get('rewritten', 0)}, "
+                f"dropped={self._claim_cleanup_counters.get('dropped', 0)}, "
+                f"continuity={self._claim_cleanup_counters.get('continuity', 0)}"
+            )
             return answer_text
         unique_failures = self._summarize_failures(failures)
         self.log(
@@ -19277,6 +19366,7 @@ class AgenticRAGApp:
                     payload={
                         "answer_chars": len(str(validated_answer or "")),
                         "citation_count": self._count_citations(validated_answer),
+                        "claim_cleanup_counters": dict(self._claim_cleanup_counters),
                     },
                 )
                 self._remove_thinking_indicator()
@@ -20095,6 +20185,7 @@ class AgenticRAGApp:
                     payload={
                         "answer_chars": len(str(validated_answer or "")),
                         "citation_count": self._count_citations(validated_answer),
+                        "claim_cleanup_counters": dict(self._claim_cleanup_counters),
                     },
                 )
                 self._remove_thinking_indicator()
@@ -20148,6 +20239,7 @@ class AgenticRAGApp:
                     "timing_ms": {
                         "run_total": int((time.perf_counter() - run_started_at) * 1000),
                     },
+                    "claim_cleanup_counters": dict(self._claim_cleanup_counters),
                 }
             )
             self._finalize_agent_lightning_run(run_id, final_docs, validated_answer or latest_answer)
