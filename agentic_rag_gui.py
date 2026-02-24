@@ -3105,20 +3105,20 @@ class AgenticRAGApp:
 
     def _get_required_packages(self):
         return [
-            "langchain",
-            "langchain-community",
-            "langchain-openai",
-            "langchain-anthropic",
-            "langchain-google-genai",
-            "langchain-cohere",
-            "langchain-voyageai",
-            "langchain-chroma",
-            "langchain-weaviate",
-            "langchain-text-splitters",
-            "chromadb",
-            "beautifulsoup4",
-            "tiktoken",
-            "weaviate-client",
+            "langchain>=0.3.0",
+            "langchain-community>=0.3.0",
+            "langchain-openai>=0.2.0",
+            "langchain-anthropic>=0.3.0",
+            "langchain-google-genai>=2.0.0",
+            "langchain-cohere>=0.3.0",
+            "langchain-voyageai>=0.1.0",
+            "langchain-chroma>=0.1.0",
+            "langchain-weaviate>=0.0.4",
+            "langchain-text-splitters>=0.3.0",
+            "chromadb>=0.5.0",
+            "beautifulsoup4>=4.12.0",
+            "tiktoken>=0.7.0",
+            "weaviate-client>=4.0.0",
         ]
 
     def _build_evidence_pack_context(self, docs, budget_chars, per_doc_chars=600):
@@ -16049,10 +16049,8 @@ class AgenticRAGApp:
         selected = self.llm_model.get().strip()
         custom = self.llm_model_custom.get().strip()
         if selected == "custom":
-            if not custom:
-                raise ValueError("Custom generation model is selected but empty")
-            return custom
-        return selected or custom
+            return custom or None
+        return selected or custom or None
 
     def _resolve_embedding_model(self):
         if self.embedding_provider.get() == "local_sentence_transformers":
