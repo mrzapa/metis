@@ -9396,6 +9396,17 @@ class AgenticRAGApp:
         }
         month_pool.discard("undated")
         min_month_buckets = min(3, len(month_pool))
+        pool_incident_keys = {
+            incident_key
+            for _score, incident_key, _doc in (scored_priority + scored_other)
+            if incident_key
+        }
+
+        effective_group_limit = max(1, int(group_limit))
+        if not evidence_pack_mode:
+            low_diversity_pool = len(pool_incident_keys) <= max(3, final_k // 3) or len(month_pool) <= 1
+            if low_diversity_pool:
+                effective_group_limit = max(effective_group_limit, group_limit + 2)
 
         def _diversity_boost(item):
             score, incident_key, doc = item
@@ -9427,7 +9438,7 @@ class AgenticRAGApp:
                     continue
                 group_key = self._doc_group_key(doc)
                 count = group_counts.get(group_key, 0)
-                if count >= group_limit and not self._is_must_include(doc):
+                if count >= effective_group_limit and not self._is_must_include(doc):
                     continue
                 selected.append(doc)
                 selected_ids.add(id(doc))
@@ -9483,7 +9494,7 @@ class AgenticRAGApp:
                 break
             group_key = self._doc_group_key(doc)
             count = group_counts.get(group_key, 0)
-            if count >= group_limit and not self._is_must_include(doc):
+            if count >= effective_group_limit and not self._is_must_include(doc):
                 continue
             _add_docs([(_score, incident_key, doc)])
 
@@ -12594,7 +12605,7 @@ class AgenticRAGApp:
             "Q&A": {"retrieve_k": 25, "final_k": 5, "mmr_lambda": 0.5, "retrieval_mode": "flat", "agentic_mode": False, "max_iterations": 2},
             "Summary": {"retrieve_k": 20, "final_k": 4, "mmr_lambda": 0.6, "retrieval_mode": "hierarchical", "agentic_mode": False, "max_iterations": 2},
             "Tutor": {"retrieve_k": 24, "final_k": 6, "mmr_lambda": 0.55, "retrieval_mode": "hierarchical", "agentic_mode": True, "max_iterations": 2},
-            "Research": {"retrieve_k": 30, "final_k": 7, "mmr_lambda": 0.4, "retrieval_mode": "hierarchical", "agentic_mode": True, "max_iterations": 3},
+            "Research": {"retrieve_k": 42, "final_k": 12, "mmr_lambda": 0.4, "retrieval_mode": "hierarchical", "agentic_mode": True, "max_iterations": 3},
             "Evidence Pack": {"retrieve_k": 35, "final_k": 10, "mmr_lambda": 0.5, "retrieval_mode": "hierarchical", "agentic_mode": True, "max_iterations": 3},
         }
         return defaults.get(mode, defaults["Q&A"])
@@ -18423,7 +18434,19 @@ class AgenticRAGApp:
                 seen_chunk_ids=None,
             ):
                 candidates = self._promote_lexical_overlap(doc_list, rerank_query)
-                rerank_top_n = min(len(candidates), max(final_k * 6, 80))
+                adaptive_final_k = int(final_k)
+                if mode_name == "Research":
+                    candidate_incidents = {
+                        (getattr(doc, "metadata", {}) or {}).get("incident_key") or self._build_incident_key(doc)
+                        for doc in candidates
+                    }
+                    candidate_incidents = {key for key in candidate_incidents if key}
+                    incident_count = len(candidate_incidents)
+                    if incident_count >= 12:
+                        adaptive_final_k = max(adaptive_final_k, min(14, incident_count // 2))
+                    elif incident_count >= 9:
+                        adaptive_final_k = max(adaptive_final_k, 12)
+                rerank_top_n = min(len(candidates), max(adaptive_final_k * 6, 80))
                 if rag_ctx["use_reranker"] and rag_ctx["cohere_api_key"]:
                     try:
                         self.log("Reranking with Cohere...")
@@ -18447,16 +18470,16 @@ class AgenticRAGApp:
                 group_limit = 1 if evidence_pack_mode else MAX_GROUP_DOCS
                 candidates = self._apply_coverage_selection(
                     candidates,
-                    final_k,
+                    adaptive_final_k,
                     group_limit=group_limit,
                     evidence_pack_mode=evidence_pack_mode,
                     seen_chunk_ids=seen_chunk_ids,
                 )
-                if len(candidates) < final_k:
+                if len(candidates) < adaptive_final_k:
                     fallback = self._merge_dedupe_docs(candidates + doc_list)
-                    candidates = fallback[:final_k]
+                    candidates = fallback[:adaptive_final_k]
                 else:
-                    candidates = candidates[:final_k]
+                    candidates = candidates[:adaptive_final_k]
                 self._record_trace_stage(
                     run_id,
                     "rerank",
@@ -18596,7 +18619,41 @@ class AgenticRAGApp:
                 citation_v2_enabled = self._frontier_enabled("citation_v2")
                 citation_manager = CitationManager()
 
-                for idx, doc in enumerate(doc_list, start=1):
+                must_include_docs = [doc for doc in doc_list if self._is_must_include(doc)]
+                remaining_docs = [doc for doc in doc_list if doc not in must_include_docs]
+                diversified_docs = []
+                seen_incidents = set()
+                seen_months = set()
+                while remaining_docs:
+                    best_doc = None
+                    best_score = None
+                    for pos, candidate in enumerate(remaining_docs):
+                        md = getattr(candidate, "metadata", {}) or {}
+                        incident_key = md.get("incident_key") or self._build_incident_key(candidate)
+                        month_bucket = md.get("month_bucket") or "undated"
+                        novelty = 0
+                        if incident_key and incident_key not in seen_incidents:
+                            novelty += 3
+                        if month_bucket != "undated" and month_bucket not in seen_months:
+                            novelty += 2
+                        relevance = float(md.get("relevance_score") or 0.0)
+                        score = (novelty, relevance, -pos)
+                        if best_score is None or score > best_score:
+                            best_score = score
+                            best_doc = candidate
+                    diversified_docs.append(best_doc)
+                    remaining_docs.remove(best_doc)
+                    md = getattr(best_doc, "metadata", {}) or {}
+                    incident_key = md.get("incident_key") or self._build_incident_key(best_doc)
+                    month_bucket = md.get("month_bucket") or "undated"
+                    if incident_key:
+                        seen_incidents.add(incident_key)
+                    if month_bucket != "undated":
+                        seen_months.add(month_bucket)
+
+                ordered_docs = must_include_docs + diversified_docs
+
+                for idx, doc in enumerate(ordered_docs, start=1):
                     metadata = getattr(doc, "metadata", {}) or {}
                     score = metadata.get("relevance_score", "N/A")
                     source = (
