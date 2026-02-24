@@ -8887,6 +8887,122 @@ class AgenticRAGApp:
                 lines.append(item)
         return lines
 
+    def _derive_planner_anchor_terms(self, query, max_terms=12):
+        stop_words = {
+            "the", "and", "for", "with", "from", "that", "this", "what", "when", "where",
+            "which", "into", "about", "have", "has", "had", "were", "been", "your", "their",
+        }
+
+        def _normalize(text):
+            return re.sub(r"\s+", " ", str(text or "").strip())
+
+        def _add_term(term, bucket):
+            normalized = _normalize(term)
+            lowered = normalized.lower()
+            if not normalized or lowered in seen_terms:
+                return
+            seen_terms.add(lowered)
+            anchors.append(normalized)
+            if bucket == "entity":
+                entity_anchors.append(normalized)
+
+        anchors = []
+        entity_anchors = []
+        seen_terms = set()
+
+        for phrase in re.findall(r'"([^"]{3,})"', query or ""):
+            _add_term(phrase, "query")
+        for token in re.findall(r"\b[a-zA-Z][a-zA-Z0-9_\-]{2,}\b", query or ""):
+            if token.lower() in stop_words:
+                continue
+            _add_term(token, "query")
+
+        sample_docs = []
+        try:
+            collection = getattr(getattr(self, "vector_store", None), "_collection", None)
+            if collection is not None:
+                snapshot = collection.get(limit=60, include=["metadatas", "documents"])
+                for meta in (snapshot.get("metadatas") or []):
+                    metadata = meta or {}
+                    source_name = (
+                        metadata.get("source")
+                        or metadata.get("file_path")
+                        or metadata.get("filename")
+                        or metadata.get("source_title")
+                    )
+                    if source_name:
+                        _add_term(os.path.basename(str(source_name)), "metadata")
+                    for key in (
+                        "known_entities",
+                        "entities",
+                        "entity_names",
+                        "people",
+                        "organizations",
+                        "actors",
+                        "parties",
+                    ):
+                        value = metadata.get(key)
+                        if isinstance(value, (list, tuple, set)):
+                            for item in value:
+                                _add_term(item, "entity")
+                        elif isinstance(value, str):
+                            for item in re.split(r"[,;|]", value):
+                                _add_term(item, "entity")
+                for content in (snapshot.get("documents") or []):
+                    if str(content or "").strip():
+                        sample_docs.append(self._document(page_content=str(content)))
+        except Exception as exc:
+            self.log(f"Planner anchor derivation metadata probe skipped: {exc}")
+
+        if sample_docs:
+            for phrase in self._extract_candidate_keyphrases(sample_docs, max_phrases=6):
+                _add_term(phrase, "keyphrase")
+
+        return {
+            "anchors": anchors[:max_terms],
+            "entity_anchors": entity_anchors[: max(1, min(max_terms, 6))],
+        }
+
+    def _anchor_overlap_metrics(self, text, anchors):
+        anchor_tokens = set()
+        for anchor in anchors or []:
+            for token in re.findall(r"\b[a-zA-Z][a-zA-Z0-9_\-]{2,}\b", str(anchor).lower()):
+                anchor_tokens.add(token)
+        query_tokens = {
+            token
+            for token in re.findall(r"\b[a-zA-Z][a-zA-Z0-9_\-]{2,}\b", str(text or "").lower())
+        }
+        overlap = sorted(anchor_tokens & query_tokens)
+        return {
+            "overlap_count": len(overlap),
+            "query_token_count": len(query_tokens),
+            "overlap_tokens": overlap,
+        }
+
+    def _build_anchor_enforced_templates(self, query, anchors, entity_anchors, max_queries=4):
+        anchors = [str(item).strip() for item in (anchors or []) if str(item).strip()]
+        entities = [str(item).strip() for item in (entity_anchors or []) if str(item).strip()]
+        primary = anchors[0] if anchors else (query or "").strip()
+        actor = entities[0] if entities else primary
+        templates = [
+            f"{primary} timeline dates chronology key events",
+            f"{actor} actions statements decisions role impact timeline",
+        ]
+        if len(anchors) > 1:
+            templates.append(f"{anchors[1]} evidence sequence by month and date")
+        if len(entities) > 1:
+            templates.append(f"{entities[1]} interactions with {primary} chronology")
+        deduped = []
+        seen = set()
+        for candidate in templates:
+            key = candidate.lower().strip()
+            if key and key not in seen:
+                seen.add(key)
+                deduped.append(candidate)
+            if len(deduped) >= max_queries:
+                break
+        return deduped
+
     def _generate_sub_queries(self, query):
         try:
             llm = self.get_llm()
@@ -19365,6 +19481,15 @@ class AgenticRAGApp:
                 coverage_stats = {"triggered": False}
                 if iteration == 1:
                     planner_llm = self._get_llm_with_temperature(0.2, rag_ctx.get("llm_ctx"))
+                    planner_anchor_payload = self._derive_planner_anchor_terms(query, max_terms=12)
+                    planner_anchors = planner_anchor_payload.get("anchors", [])
+                    planner_entity_anchors = planner_anchor_payload.get("entity_anchors", [])
+                    anchor_constraint_block = (
+                        " Domain anchoring constraints: reuse anchor entities/terms provided in the input. "
+                        "Do not introduce unseen legal/court terminology unless that terminology appears "
+                        "in the anchors. Include at least one timeline/date retrieval query and at least "
+                        "one actor-centric retrieval query, both grounded in the anchors."
+                    )
                     if is_evidence_pack:
                         planner_prompt = (
                             "You are an evidence-pack retrieval planner. Given the user query and "
@@ -19376,14 +19501,15 @@ class AgenticRAGApp:
                             "(months/years), channel terms (Teams/email/call/meeting/WhatsApp), and role "
                             "queries (formal grievance examples, key incidents, what happened impact "
                             "evidence). Ensure checklist and queries cover chronology/timeline, impacts, "
-                            "grievances, and concrete examples. Do not include any extra text."
+                            "grievances, and concrete examples."
+                            f"{anchor_constraint_block} Do not include any extra text."
                         )
                     else:
                         planner_prompt = (
                             "You are a retrieval planner. Given the user query and output_style, "
                             "return strict JSON with keys: checklist_items (array of strings), "
                             "retrieval_queries (array of 4-10 strings), section_plan (optional array). "
-                            "Do not include any extra text."
+                            f"{anchor_constraint_block} Do not include any extra text."
                         )
                     planner_messages = [
                         self._system_message(content=planner_prompt),
@@ -19392,6 +19518,8 @@ class AgenticRAGApp:
                                 {
                                     "query": query,
                                     "output_style": output_style,
+                                    "anchors": planner_anchors,
+                                    "entity_anchors": planner_entity_anchors,
                                 }
                             )
                         ),
@@ -19417,9 +19545,24 @@ class AgenticRAGApp:
                     ]
                     if not checklist:
                         checklist = [query.strip()]
+                    rejected_planner_queries = []
+                    anchored_sub_queries = []
+                    for candidate in sub_queries:
+                        overlap = self._anchor_overlap_metrics(candidate, planner_anchors)
+                        if overlap["overlap_count"] <= 0:
+                            rejected_planner_queries.append(
+                                {
+                                    "query": candidate,
+                                    "reason": "low_anchor_overlap",
+                                    "overlap_tokens": overlap["overlap_tokens"],
+                                }
+                            )
+                            continue
+                        anchored_sub_queries.append(candidate)
+
                     seen_queries = set()
                     normalized_sub_queries = []
-                    for candidate in [query, *sub_queries]:
+                    for candidate in [query, *anchored_sub_queries]:
                         key = candidate.lower().strip()
                         if key and key not in seen_queries:
                             seen_queries.add(key)
@@ -19427,6 +19570,30 @@ class AgenticRAGApp:
                     if len(normalized_sub_queries) < 4:
                         fallback_queries = self._generate_sub_queries(query)
                         for candidate in fallback_queries:
+                            overlap = self._anchor_overlap_metrics(candidate, planner_anchors)
+                            if overlap["overlap_count"] <= 0:
+                                rejected_planner_queries.append(
+                                    {
+                                        "query": candidate,
+                                        "reason": "fallback_low_anchor_overlap",
+                                        "overlap_tokens": overlap["overlap_tokens"],
+                                    }
+                                )
+                                continue
+                            key = candidate.lower().strip()
+                            if key and key not in seen_queries:
+                                seen_queries.add(key)
+                                normalized_sub_queries.append(candidate)
+                            if len(normalized_sub_queries) >= 4:
+                                break
+                    if len(normalized_sub_queries) < 4:
+                        template_queries = self._build_anchor_enforced_templates(
+                            query,
+                            planner_anchors,
+                            planner_entity_anchors,
+                            max_queries=6,
+                        )
+                        for candidate in template_queries:
                             key = candidate.lower().strip()
                             if key and key not in seen_queries:
                                 seen_queries.add(key)
@@ -19435,14 +19602,62 @@ class AgenticRAGApp:
                                 break
                     if len(normalized_sub_queries) < 4:
                         normalized_sub_queries.append(query)
+
+                    def _contains_timeline_or_date(item):
+                        return bool(re.search(r"\b(timeline|chronology|date|dated|month|year|\d{4})\b", str(item), flags=re.I))
+
+                    def _contains_actor(item):
+                        actor_terms = [str(a) for a in planner_entity_anchors if str(a).strip()]
+                        if actor_terms:
+                            lowered = str(item).lower()
+                            return any(term.lower() in lowered for term in actor_terms)
+                        return bool(re.search(r"\b(actor|person|people|role|party|who|employee|manager|director)\b", str(item), flags=re.I))
+
+                    template_queries = self._build_anchor_enforced_templates(
+                        query,
+                        planner_anchors,
+                        planner_entity_anchors,
+                        max_queries=6,
+                    )
+                    if not any(_contains_timeline_or_date(item) for item in normalized_sub_queries):
+                        for candidate in template_queries:
+                            if _contains_timeline_or_date(candidate):
+                                key = candidate.lower().strip()
+                                if key and key not in seen_queries:
+                                    seen_queries.add(key)
+                                    normalized_sub_queries.append(candidate)
+                                break
+                    if not any(_contains_actor(item) for item in normalized_sub_queries):
+                        for candidate in template_queries:
+                            if _contains_actor(candidate):
+                                key = candidate.lower().strip()
+                                if key and key not in seen_queries:
+                                    seen_queries.add(key)
+                                    normalized_sub_queries.append(candidate)
+                                break
+
+                    if rejected_planner_queries:
+                        self.log(
+                            "Planner query rejections (anchor validation): "
+                            f"{json.dumps(rejected_planner_queries, ensure_ascii=False)}"
+                        )
                     iteration_queries = normalized_sub_queries[:10]
                     self._record_agent_lightning_span(
                         run_id,
                         "Planner",
                         iteration,
                         planner_started_at,
-                        input_payload={"query": query, "output_style": output_style},
-                        output_payload={"queries": iteration_queries, "checklist": checklist},
+                        input_payload={
+                            "query": query,
+                            "output_style": output_style,
+                            "anchors": planner_anchors,
+                            "entity_anchors": planner_entity_anchors,
+                        },
+                        output_payload={
+                            "queries": iteration_queries,
+                            "checklist": checklist,
+                            "rejected_queries": rejected_planner_queries,
+                        },
                         metrics={"subquery_count": len(iteration_queries), "checklist_items": len(checklist)},
                     )
                 else:
