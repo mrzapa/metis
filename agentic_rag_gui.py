@@ -1507,28 +1507,29 @@ class AgenticRAGApp:
         self._pending_selected_index_label = None
         self._langchain_core_cache = None
         self.default_system_instructions = (
-            "You are an expert analyst assistant. Use ONLY the provided context for factual claims. "
-            "Never ask for details already present in the retrieved context. "
-            "Omit unsupported claims; deepen supported ones; do not ask for more docs or missing info; "
-            "do not use placeholders. If evidence is thin, you may add one short 'Scope:' note at the "
-            "top describing limitations. Every paragraph with factual content must end with one or more "
-            "[S#] citations. Use the exact [S#] format only; do not use alternative formats "
-            "(e.g., (1), [1], or inline URLs). Example: \"The policy was revised in 2023.\" [S1] "
-            "For Script / talk track and Structured report styles, include at least one short verbatim "
-            "quote (<=25 words) per major section with an [S#] citation. "
-            "Coverage rule: if N items are requested, output N items, omitting unsupported claims."
+            "You are a highly capable AI assistant with access to retrieved document context. "
+            "Think carefully and reason step-by-step about the user's question before answering. "
+            "When retrieved context is provided, ground your factual claims in it using [S#] citations "
+            "(e.g. [S1], [S2]) but write naturally — synthesize, analyse, and explain rather than "
+            "merely listing what the sources say. Add your own reasoning, identify patterns, draw "
+            "connections between sources, and highlight implications the user may not have considered. "
+            "If the context is insufficient, say so briefly and still provide the best analysis you can. "
+            "Do not ask the user for information that is already in the retrieved context. "
+            "Use the exact [S#] citation format only; do not use (1), [1], or inline URLs. "
+            "Structure your response clearly with headings and paragraphs where appropriate."
         )
         self.verbose_system_instructions = (
-            "You are an expert analyst assistant. Use ONLY the provided context for factual claims. "
-            "Never ask for details already present in the retrieved context. "
-            "Omit unsupported claims; deepen supported ones; do not ask the user for missing info; "
-            "do not use placeholders. Every paragraph with factual content must end with one or more "
-            "[S#] citations. Use the exact [S#] format only; do not use alternative formats "
-            "(e.g., (1), [1], or inline URLs). Example: \"The policy was revised in 2023.\" [S1] "
-            "For Script / talk track and Structured report styles, include at least one short verbatim "
-            "quote (<=25 words) per major section with an [S#] citation. "
-            "Provide a concise summary, cite evidence from the context, list key points, "
-            "and explicitly note uncertainties or gaps."
+            "You are a highly capable AI assistant with access to retrieved document context. "
+            "Think carefully and reason step-by-step about the user's question before answering. "
+            "When retrieved context is provided, ground your factual claims in it using [S#] citations "
+            "(e.g. [S1], [S2]) but write naturally — synthesize, analyse, and explain rather than "
+            "merely listing what the sources say. Add your own reasoning, identify patterns, draw "
+            "connections between sources, and highlight implications the user may not have considered. "
+            "If the context is insufficient, say so briefly and still provide the best analysis you can. "
+            "Do not ask the user for information that is already in the retrieved context. "
+            "Use the exact [S#] citation format only; do not use (1), [1], or inline URLs. "
+            "Provide thorough analysis: summarise key findings, cite supporting evidence, "
+            "identify patterns and gaps, and note any uncertainties or limitations in the evidence."
         )
 
         # --- State Variables ---
@@ -4081,6 +4082,21 @@ class AgenticRAGApp:
             var.trace_add("write", lambda *_: self._run_on_ui(self._update_current_state_strip))
         for var in (self.llm_provider, self.local_gguf_model_path):
             var.trace_add("write", lambda *_: self._run_on_ui(self._update_local_gguf_ui_state))
+        self.selected_mode.trace_add("write", lambda *_: self._sync_output_style_from_mode())
+
+    _MODE_OUTPUT_STYLE_MAP = {
+        "Q&A": "Default answer",
+        "Research": "Structured report",
+        "Evidence Pack": "Structured report",
+        "Summary": "Blinkist-style summary",
+        "Tutor": "Detailed answer",
+    }
+
+    def _sync_output_style_from_mode(self):
+        """Auto-select an appropriate output style when the mode changes."""
+        mode = self._normalize_mode_name(self.selected_mode.get())
+        style = self._MODE_OUTPUT_STYLE_MAP.get(mode, "Default answer")
+        self.output_style.set(style)
 
     @staticmethod
     def _shorten_path(path, max_len=54):
@@ -6931,98 +6947,82 @@ class AgenticRAGApp:
         frame = self.create_frame(self.tab_chat, padding=0)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        header = self.create_frame(frame)
-        header.pack(fill="x", pady=(0, UI_SPACING["s"]))
-        header_left = self.create_frame(header)
-        header_left.pack(side="left", fill="x", expand=True)
-        self.create_label(header_left, text="Chat", style="Header.TLabel").pack(anchor="w")
-        self.create_label(
-            header_left,
-            text="Flow: Library builds index → Chat answers with evidence → Settings tunes behavior.",
-            style="Caption.TLabel",
-        ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
-        self.create_label(
-            header,
-            textvariable=self.chat_llm_badge_var,
-            style="Badge.TLabel",
-        ).pack(side="right", anchor="ne")
-        if self.test_mode_active:
-            self.create_label(
-                header_left,
-                textvariable=self.test_mode_banner_var,
-                style="Success.TLabel",
-            ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+        # ── Minimal toolbar ──────────────────────────────────────────────────
+        toolbar = self.create_frame(frame, style="Card.Flat.TFrame", padding=(UI_SPACING["s"], UI_SPACING["xs"]))
+        toolbar.pack(fill="x", pady=(0, UI_SPACING["xs"]))
 
-        state_strip = self.create_frame(frame, style="Card.Flat.TFrame", padding=UI_SPACING["s"])
-        state_strip.pack(fill="x", pady=(0, UI_SPACING["s"]))
-        self.create_label(state_strip, text="Current State:", style="Bold.TLabel").pack(side="left", padx=(0, UI_SPACING["xs"]))
-        self.create_label(state_strip, textvariable=self.current_state_var).pack(side="left", fill="x", expand=True)
-        self.state_warning_label = self.create_label(frame, textvariable=self.current_warning_var, style="Danger.TLabel")
-        self.state_warning_label.pack(fill="x", pady=(0, UI_SPACING["s"]))
-
-
-        _conv_setup_cf = CollapsibleFrame(frame, "Conversation Setup", expanded=True, animator=self._animator)
-        _conv_setup_cf.pack(fill="x", pady=(0, UI_SPACING["xs"]))
-        top_bar = ttk.Frame(_conv_setup_cf.content, padding=UI_SPACING["m"])
-        top_bar.pack(fill="both", expand=True)
-        for col in range(8):
-            top_bar.columnconfigure(col, weight=1)
-
-        self.create_label(top_bar, text="Profile:").grid(row=0, column=0, sticky="w")
-        self.cb_profile = self.create_combobox(top_bar, textvariable=self.selected_profile, state="readonly", width=FORM_WIDTHS["input"])
-        self.cb_profile.grid(row=0, column=1, sticky="ew", padx=(6, 12))
-        self._refresh_profile_options()
-
-        self.create_label(top_bar, text="Mode:").grid(row=0, column=2, sticky="w")
+        # Left side: Mode + Index + RAG/Direct toggle
+        self.create_label(toolbar, text="Mode:", style="Caption.TLabel").pack(side="left", padx=(0, 4))
         self.create_combobox(
-            top_bar,
+            toolbar,
             textvariable=self.selected_mode,
             values=self.mode_options,
             state="readonly",
-            width=18,
-        ).grid(row=0, column=3, sticky="ew", padx=(6, 12))
+            width=14,
+        ).pack(side="left", padx=(0, UI_SPACING["s"]))
 
-        self._index_label = self.create_label(top_bar, text="Index:")
-        self._index_label.grid(row=0, column=4, sticky="w")
-        self.cb_existing_index = self.create_combobox(top_bar, textvariable=self.existing_index_var, state="readonly")
-        self.cb_existing_index.grid(row=0, column=5, sticky="ew", padx=(6, 12))
+        self._index_label = self.create_label(toolbar, text="Index:", style="Caption.TLabel")
+        self._index_label.pack(side="left", padx=(0, 4))
+        self.cb_existing_index = self.create_combobox(toolbar, textvariable=self.existing_index_var, state="readonly", width=18)
+        self.cb_existing_index.pack(side="left", padx=(0, UI_SPACING["s"]))
         self.cb_existing_index.bind("<<ComboboxSelected>>", self._on_existing_index_change)
 
-        self.create_label(top_bar, text="Model:").grid(row=0, column=6, sticky="w")
-        self.cb_chat_model = self.create_combobox(top_bar, textvariable=self.llm_model, state="readonly", width=22)
-        self.cb_chat_model.grid(row=0, column=7, sticky="ew", padx=(6, 12))
-        self.cb_chat_model.bind("<<ComboboxSelected>>", self._on_llm_model_change)
-
-        actions_row = self.create_frame(top_bar)
-        actions_row.grid(row=1, column=0, columnspan=8, sticky="ew", pady=(UI_SPACING["s"], 0))
-        self.create_button(actions_row, text="Refresh Indexes", command=self._refresh_existing_indexes_async, style="Secondary.TButton").pack(side="left")
-        self.create_button(actions_row, text="Settings", command=lambda: self._switch_main_view("settings"), style="Secondary.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
-        if self.test_mode_active:
-            self.create_button(actions_row, text="Reset test environment", command=self.reset_test_environment, style="Danger.TButton").pack(side="left", padx=(UI_SPACING["s"], 0))
-        if self.basic_mode:
-            self.create_button(actions_row, text="Switch to Advanced", command=self.switch_to_advanced_mode, style="Secondary.TButton").pack(side="right")
-        else:
-            self.create_button(actions_row, text="Run Setup Wizard", command=self.run_setup_wizard, style="Secondary.TButton").pack(side="right")
         self._rag_toggle_btn = IOSSegmentedToggle(
-            actions_row,
+            toolbar,
             options=["RAG", "Direct"],
             variable=self.use_rag,
             palette=getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"]),
             command=self._toggle_rag_mode,
         )
-        self._rag_toggle_btn.pack(side="right", padx=(UI_SPACING["s"], 0))
+        self._rag_toggle_btn.pack(side="left", padx=(0, UI_SPACING["s"]))
+
+        # Right side: Evidence toggle, New Chat, LLM badge
+        self.create_label(
+            toolbar,
+            textvariable=self.chat_llm_badge_var,
+            style="Badge.TLabel",
+        ).pack(side="right", padx=(UI_SPACING["s"], 0))
+
         self._evidence_toggle_btn = self.create_button(
-            actions_row,
+            toolbar,
             text="⊞ Evidence",
             command=self._toggle_evidence_panel,
             style="Secondary.TButton",
         )
-        self._evidence_toggle_btn.pack(side="right", padx=(UI_SPACING["s"], 0))
+        self._evidence_toggle_btn.pack(side="right", padx=(UI_SPACING["xs"], 0))
 
+        self.create_button(
+            toolbar,
+            text="＋ New Chat",
+            command=lambda: self.start_new_chat(load_in_ui=True),
+            style="Secondary.TButton",
+        ).pack(side="right", padx=(UI_SPACING["xs"], 0))
 
-        # Main chat body: full-width chat pane + optional evidence pane (hidden by default)
+        if self.test_mode_active:
+            self.create_label(
+                toolbar,
+                textvariable=self.test_mode_banner_var,
+                style="Success.TLabel",
+            ).pack(side="right", padx=(UI_SPACING["xs"], 0))
+
+        # Warning label (hidden unless there's an issue)
+        self.state_warning_label = self.create_label(frame, textvariable=self.current_warning_var, style="Danger.TLabel")
+        self.state_warning_label.pack(fill="x", pady=(0, 0))
+
+        # Hidden profile combobox (needed by profile-load / session-restore logic)
+        self.cb_profile = self.create_combobox(frame, textvariable=self.selected_profile, state="readonly", width=FORM_WIDTHS["input"])
+        self._refresh_profile_options()
+        # Keep widget alive but invisible
+        self.cb_profile.pack_forget()
+
+        # Hidden model combobox (needed by model-switch and session-restore logic)
+        self.cb_chat_model = self.create_combobox(frame, textvariable=self.llm_model, state="readonly", width=22)
+        self.cb_chat_model.bind("<<ComboboxSelected>>", self._on_llm_model_change)
+        self.cb_chat_model.pack_forget()
+
+        # ── Main chat body: full-width chat pane + optional evidence pane ─────
         body_frame = self.create_frame(frame)
-        body_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        body_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 0))
 
         chat_pane = self.create_frame(body_frame, style="Card.Elevated.TFrame", padding=UI_SPACING["m"])
         chat_pane.pack(side="left", fill=tk.BOTH, expand=True)
@@ -7075,7 +7075,6 @@ class AgenticRAGApp:
         )
 
         # Scrollable area for collapsible sections (logs + advanced settings).
-        # This allows the user to expand sections without losing access to the composer.
         _coll_pal_bg = self._pal("surface_alt", self._pal("surface", "#212C3D"))
         _coll_container = ttk.Frame(input_bar)
         _coll_container.pack(fill="x", pady=(0, UI_SPACING["xs"]))
@@ -7112,7 +7111,6 @@ class AgenticRAGApp:
         _coll_inner.bind("<Configure>", _sync_coll_scroll)
         _coll_canvas.bind("<Configure>", _sync_coll_width)
 
-        # Bind mousewheel scrolling when pointer is inside the collapsible area
         def _coll_mousewheel(evt):
             _coll_canvas.yview_scroll(-1 * (evt.delta // 120 or (-1 if evt.delta < 0 else 1)), "units")
 
@@ -7124,23 +7122,34 @@ class AgenticRAGApp:
         self.log_area_surface, self.log_area = self.create_rich_text_surface(logs_section.content, surface_id="chat_logs", height=4, state="disabled", wrap=tk.WORD, scrolled=True)
         self.log_area_surface.pack(fill=tk.BOTH, expand=True)
 
-        self.chat_settings_section = CollapsibleFrame(_coll_inner, "Advanced chat settings", expanded=False, animator=self._animator)
+        self.chat_settings_section = CollapsibleFrame(_coll_inner, "Advanced settings", expanded=False, animator=self._animator)
         self.chat_settings_section.pack(fill="x", pady=(0, 6))
 
         settings_content = self.chat_settings_section.content
+
+        # Model + Profile row
+        model_profile_frame = self.create_frame(settings_content, text="Model & Profile", padding=8, kind="labelframe")
+        model_profile_frame.pack(fill="x", pady=(0, 6))
+        self.create_label(model_profile_frame, text="Model:").grid(row=0, column=0, sticky="w")
+        settings_model_combo = self.create_combobox(model_profile_frame, textvariable=self.llm_model, state="readonly", width=22)
+        settings_model_combo.grid(row=0, column=1, sticky="w", padx=(6, 14))
+        settings_model_combo.bind("<<ComboboxSelected>>", self._on_llm_model_change)
+        self.create_label(model_profile_frame, text="Profile:").grid(row=0, column=2, sticky="w")
+        self.settings_profile_combo = self.create_combobox(model_profile_frame, textvariable=self.selected_profile, state="readonly", width=FORM_WIDTHS["input"])
+        self.settings_profile_combo.grid(row=0, column=3, sticky="w", padx=(6, 0))
+        self._refresh_profile_options()
+        profile_btn_row = self.create_frame(model_profile_frame)
+        profile_btn_row.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(4, 0))
+        self.create_button(profile_btn_row, text="Save Profile", command=self.save_profile).pack(side="left")
+        self.create_button(profile_btn_row, text="Load Profile", command=self.load_selected_profile).pack(side="left", padx=(6, 0))
+        self.create_button(profile_btn_row, text="Duplicate", command=self.duplicate_profile).pack(side="left", padx=(6, 0))
+
         retrieval_frame = self.create_frame(settings_content, text="Retrieval Parameters", padding=8, kind="labelframe")
         retrieval_frame.pack(fill="x", pady=(0, 6))
         self.create_label(retrieval_frame, text="retrieve_k:").grid(row=0, column=0, sticky="w")
         self.create_entry(retrieval_frame, textvariable=self.retrieval_k, width=8).grid(row=0, column=1, sticky="w", padx=(6, 14))
         self.create_label(retrieval_frame, text="final_k:").grid(row=0, column=2, sticky="w")
         self.create_entry(retrieval_frame, textvariable=self.final_k, width=8).grid(row=0, column=3, sticky="w", padx=(6, 0))
-
-        profile_frame = self.create_frame(settings_content, text="Mode & Agent Profile", padding=8, kind="labelframe")
-        profile_frame.pack(fill="x", pady=(0, 6))
-        self.create_label(profile_frame, text="Profile actions:").grid(row=0, column=0, sticky="w")
-        self.create_button(profile_frame, text="Save Profile", command=self.save_profile).grid(row=0, column=1, sticky="w", pady=(2, 0))
-        self.create_button(profile_frame, text="Load Profile", command=self.load_selected_profile).grid(row=0, column=2, sticky="w", padx=(6, 0), pady=(2, 0))
-        self.create_button(profile_frame, text="Duplicate", command=self.duplicate_profile).grid(row=0, column=3, sticky="w", padx=(6, 0), pady=(2, 0))
 
         agentic_frame = self.create_frame(settings_content, text="Agentic Options", padding=8, kind="labelframe")
         agentic_frame.pack(fill="x", pady=(0, 6))
@@ -7159,7 +7168,7 @@ class AgenticRAGApp:
         self.chk_enable_summarizer.pack(side="left", padx=(10, 0))
         self.create_checkbox(secure_frame, text="Experimental override", variable=self.experimental_override).pack(side="left", padx=(14, 0))
 
-        frontier_wrap = self.create_frame(settings_content, text="Frontier", padding=8, kind="labelframe")
+        frontier_wrap = self.create_frame(settings_content, text="Frontier RAG Options", padding=8, kind="labelframe")
         frontier_wrap.pack(fill="x")
         self.create_checkbox(frontier_wrap, text="Enable langextract", variable=self.enable_langextract).pack(anchor="w")
         self.create_checkbox(frontier_wrap, text="Structured Extraction", variable=self.enable_structured_extraction).pack(anchor="w")
@@ -7170,23 +7179,9 @@ class AgenticRAGApp:
         self.create_checkbox(frontier_wrap, text="Claim-level grounding (CiteFix-lite)", variable=self.enable_claim_level_grounding_citefix_lite).pack(anchor="w")
         self.create_checkbox(frontier_wrap, text="Agent Lightning traces", variable=self.agent_lightning_enabled).pack(anchor="w")
 
-        action_row = self.create_frame(input_bar)
-        action_row.pack(fill="x", pady=(0, 6))
-        self.create_button(
-            action_row,
-            text="＋ New Chat",
-            command=lambda: self.start_new_chat(load_in_ui=True),
-            style="Secondary.TButton",
-        ).pack(side="left")
-        self._more_btn = self.create_button(
-            action_row,
-            text="⋯ More",
-            command=self._open_more_menu,
-            style="Secondary.TButton",
-        )
-        self._more_btn.pack(side="left", padx=(UI_SPACING["s"], 0))
+        # Progress bar
         progress_row = self.create_frame(input_bar)
-        progress_row.pack(fill="x", pady=(0, 6))
+        progress_row.pack(fill="x", pady=(0, 4))
         self.rag_progress = ttk.Progressbar(progress_row, orient="horizontal", mode="indeterminate")
         self.rag_progress.pack(side="left", fill="x", expand=True)
         self.btn_cancel_rag = self.create_button(
@@ -7197,32 +7192,25 @@ class AgenticRAGApp:
         )
         self.btn_cancel_rag.pack(side="left", padx=(UI_SPACING["s"], 0))
 
-        # ── Composer header ───────────────────────────────────────────────────
-        _composer_lbl_row = self.create_frame(input_bar)
-        _composer_lbl_row.pack(fill="x", pady=(UI_SPACING["s"], UI_SPACING["xs"]))
-        self.create_label(_composer_lbl_row, text="Your message", style="Bold.TLabel").pack(side="left")
-        self.create_label(_composer_lbl_row, text="   Ctrl+Enter to send", style="Caption.TLabel").pack(side="left", pady=(2, 0))
-
-        # ── Composer input + send button ──────────────────────────────────────
+        # ── Composer ─────────────────────────────────────────────────────────
         composer_row = self.create_frame(input_bar, style="Card.Elevated.TFrame", padding=UI_SPACING["s"])
         composer_row.pack(fill="x")
-        self.txt_input_surface, self.txt_input = self.create_rich_text_surface(composer_row, surface_id="chat_input", height=4, font=("Segoe UI", 11), wrap=tk.WORD)
+        self.txt_input_surface, self.txt_input = self.create_rich_text_surface(composer_row, surface_id="chat_input", height=3, font=("Segoe UI", 11), wrap=tk.WORD)
         self.txt_input_surface.pack(side="left", fill="both", expand=True, padx=(0, UI_SPACING["s"]))
         self.txt_input.bind("<Control-Return>", lambda _e: (self.send_message(), "break")[1])
         self._setup_input_placeholder()
 
-        send_row = self.create_frame(composer_row)
-        send_row.pack(side="right", fill="y")
-        self.create_label(send_row, text="Output style:", style="Muted.TLabel").pack(anchor="e", pady=(0, UI_SPACING["xs"]))
-        self.create_combobox(
-            send_row,
-            textvariable=self.output_style,
-            values=self.output_style_options,
-            state="readonly",
-            width=22,
-        ).pack(anchor="e", pady=(0, UI_SPACING["xs"]))
-        self.btn_send = self.create_button(send_row, text="Send \u23ce", command=self.send_message, style="Primary.TButton")
-        self.btn_send.pack(anchor="e", fill="x")
+        send_col = self.create_frame(composer_row)
+        send_col.pack(side="right", fill="y")
+        self.btn_send = self.create_button(send_col, text="Send \u23ce", command=self.send_message, style="Primary.TButton")
+        self.btn_send.pack(anchor="e", fill="x", expand=True)
+        self._more_btn = self.create_button(
+            send_col,
+            text="⋯",
+            command=self._open_more_menu,
+            style="Secondary.TButton",
+        )
+        self._more_btn.pack(anchor="e", fill="x", pady=(UI_SPACING["xs"], 0))
 
         # Right evidence pane
         evidence_wrap = self.create_frame(self._evidence_pane, text="Evidence Navigator", padding=UI_SPACING["m"], kind="labelframe")
@@ -7393,17 +7381,24 @@ class AgenticRAGApp:
         # The IOSSegmentedToggle reads use_rag directly; just refresh colours/state.
         self._rag_toggle_btn.update_palette(pal)
         if self.use_rag.get():
-            # Show index selector
+            # Show index selector (pack-based layout)
             if hasattr(self, "_index_label") and self._safe_widget_exists(self._index_label):
-                self._index_label.grid()
+                try:
+                    self._index_label.pack_info()
+                except tk.TclError:
+                    # Re-pack after the mode combo, before the RAG toggle
+                    self._index_label.pack(side="left", padx=(0, 4), before=self._rag_toggle_btn)
             if hasattr(self, "cb_existing_index") and self._safe_widget_exists(self.cb_existing_index):
-                self.cb_existing_index.grid()
+                try:
+                    self.cb_existing_index.pack_info()
+                except tk.TclError:
+                    self.cb_existing_index.pack(side="left", padx=(0, UI_SPACING["s"]), before=self._rag_toggle_btn)
         else:
             # Hide index selector
             if hasattr(self, "_index_label") and self._safe_widget_exists(self._index_label):
-                self._index_label.grid_remove()
+                self._index_label.pack_forget()
             if hasattr(self, "cb_existing_index") and self._safe_widget_exists(self.cb_existing_index):
-                self.cb_existing_index.grid_remove()
+                self.cb_existing_index.pack_forget()
 
     def _open_more_menu(self, event=None):
         """Pop up a small context menu with secondary chat actions."""
