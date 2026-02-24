@@ -7049,13 +7049,13 @@ class AgenticRAGApp:
         self.chat_display.tag_config(
             "user",
             font=self._fonts["body_bold"],
-            spacing1=14, spacing3=12, lmargin1=20, lmargin2=20, rmargin=16,
+            spacing1=16, spacing3=16, lmargin1=20, lmargin2=28, rmargin=20,
             background=self._pal("chat_user_bg", self._pal("surface")),
         )
         self.chat_display.tag_config(
             "agent",
             font=self._fonts["body"],
-            spacing1=10, spacing3=16, lmargin1=20, lmargin2=20, rmargin=16,
+            spacing1=14, spacing3=18, lmargin1=20, lmargin2=20, rmargin=20,
             background=self._pal("chat_agent_bg", self._pal("surface")),
         )
         self.chat_display.tag_config(
@@ -7066,6 +7066,13 @@ class AgenticRAGApp:
             background=self._pal("chat_system_bg"),
         )
         self.chat_display.tag_config("source", font=self._fonts["code"], foreground=self._pal("source", self._pal("muted_text")))
+        self.chat_display.tag_config(
+            "thinking_indicator",
+            font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
+            spacing1=10, spacing3=10, lmargin1=20, rmargin=20,
+            foreground=self._pal("primary"),
+            background=self._pal("chat_agent_bg", self._pal("surface")),
+        )
 
         # Scrollable area for collapsible sections (logs + advanced settings).
         # This allows the user to expand sections without losing access to the composer.
@@ -20696,6 +20703,11 @@ class AgenticRAGApp:
         self._animator.animate_value(anim_id, 0.0, 1.0, duration_ms, 8, _set_bg, on_complete=_done)
 
     def append_chat(self, tag, message, run_id=None):
+        # Agent responses are streamed word-by-word for a smooth animated feel.
+        if tag == "agent":
+            self._run_on_ui(self._stream_text_to_chat, tag, message, run_id)
+            return
+
         def _append():
             self.chat_display.config(state="normal")
             start = self.chat_display.index(tk.END)
@@ -20708,6 +20720,67 @@ class AgenticRAGApp:
             to_bg = self.chat_display.cget("bg")
             self._fade_out_tag(transient_tag, from_bg, to_bg, duration_ms=int(STYLE_CONFIG.get("animation", {}).get("message_fade_ms", 120)))
             self._tag_citations_in_chat(start, end)
+            self.chat_display.insert(tk.END, "\n")
+            self.chat_display.see(tk.END)
+            self.chat_display.config(state="disabled")
+
+        self._run_on_ui(_append)
+
+    def _stream_text_to_chat(self, tag, message, run_id=None):
+        """Insert a message into the chat display with a smooth word-by-word streaming animation."""
+        import re as _re
+        if not hasattr(self, "chat_display") or not self._safe_widget_exists(self.chat_display):
+            return
+
+        # Split into tokens preserving whitespace structure (words + spaces/newlines)
+        tokens = _re.split(r'(\s+)', message)
+        tokens = [t for t in tokens if t]
+
+        # Adaptive speed: shorter messages feel more natural at a slower rate
+        word_count = sum(1 for t in tokens if not _re.match(r'^\s+$', t))
+        if word_count <= 60:
+            speed_ms = 18
+        elif word_count <= 200:
+            speed_ms = 10
+        else:
+            speed_ms = 5
+
+        # Capture the insertion start position before any text is added
+        self.chat_display.config(state="normal")
+        msg_start = self.chat_display.index(tk.END)
+        self.chat_display.config(state="disabled")
+
+        def _insert_token(idx):
+            if not self._safe_widget_exists(self.chat_display):
+                return
+            if idx >= len(tokens):
+                _finalize()
+                return
+            self.chat_display.config(state="normal")
+            self.chat_display.insert(tk.END, tokens[idx], tag)
+            self.chat_display.see(tk.END)
+            self.chat_display.config(state="disabled")
+            self.root.after(speed_ms, _insert_token, idx + 1)
+
+        def _finalize():
+            if not self._safe_widget_exists(self.chat_display):
+                return
+            self.chat_display.config(state="normal")
+            # Terminate the message line
+            self.chat_display.insert(tk.END, "\n", tag)
+            msg_end = self.chat_display.index(tk.END)
+            # Flash-highlight the completed message
+            transient_tag = f"flash_{int(time.time() * 1000)}_{self._assistant_message_counter}"
+            self.chat_display.tag_add(transient_tag, msg_start, msg_end)
+            palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+            from_bg = palette.get("selection_bg", "#35557a")
+            to_bg = self.chat_display.cget("bg")
+            self._fade_out_tag(
+                transient_tag, from_bg, to_bg,
+                duration_ms=int(STYLE_CONFIG.get("animation", {}).get("message_fade_ms", 120)),
+            )
+            # Tag any citation references that appeared in the streamed text
+            self._tag_citations_in_chat(msg_start, msg_end)
             if tag == "agent":
                 if run_id:
                     self._assistant_message_counter += 1
@@ -20717,26 +20790,27 @@ class AgenticRAGApp:
                     self.chat_display.insert(tk.END, "👍", up_tag)
                     self.chat_display.insert(tk.END, "  ")
                     self.chat_display.insert(tk.END, "👎", down_tag)
-                    palette = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
-                    self.chat_display.tag_config(up_tag, foreground=palette["success"], underline=1, font=("Segoe UI Emoji", 11))
-                    self.chat_display.tag_config(down_tag, foreground=palette["danger"], underline=1, font=("Segoe UI Emoji", 11))
+                    _pal = getattr(self, "_active_palette", STYLE_CONFIG["themes"]["space_dust"])
+                    self.chat_display.tag_config(up_tag, foreground=_pal["success"], underline=1, font=("Segoe UI Emoji", 11))
+                    self.chat_display.tag_config(down_tag, foreground=_pal["danger"], underline=1, font=("Segoe UI Emoji", 11))
                     self.chat_display.tag_bind(up_tag, "<Button-1>", lambda _e, rid=run_id: self._submit_feedback(rid, 1))
                     self.chat_display.tag_bind(down_tag, "<Button-1>", lambda _e, rid=run_id: self._submit_feedback(rid, -1))
-                    self.chat_display.tag_bind(up_tag, "<Enter>", lambda _e, tag_name=up_tag: self._on_feedback_hover(tag_name, positive=True))
-                    self.chat_display.tag_bind(down_tag, "<Enter>", lambda _e, tag_name=down_tag: self._on_feedback_hover(tag_name, positive=False))
-                    self.chat_display.tag_bind(up_tag, "<Leave>", lambda _e, tag_name=up_tag: self._on_feedback_leave(tag_name, positive=True))
-                    self.chat_display.tag_bind(down_tag, "<Leave>", lambda _e, tag_name=down_tag: self._on_feedback_leave(tag_name, positive=False))
+                    self.chat_display.tag_bind(up_tag, "<Enter>", lambda _e, tn=up_tag: self._on_feedback_hover(tn, positive=True))
+                    self.chat_display.tag_bind(down_tag, "<Enter>", lambda _e, tn=down_tag: self._on_feedback_hover(tn, positive=False))
+                    self.chat_display.tag_bind(up_tag, "<Leave>", lambda _e, tn=up_tag: self._on_feedback_leave(tn, positive=True))
+                    self.chat_display.tag_bind(down_tag, "<Leave>", lambda _e, tn=down_tag: self._on_feedback_leave(tn, positive=False))
                 self.chat_display.insert(tk.END, "\n\n")
                 if hasattr(self, "answer_text"):
                     answer_body = str(message).replace("AI:", "", 1).strip()
                     self._set_readonly_text(self.answer_text, answer_body)
                     self._tag_citations_in_answer()
-            else:
-                self.chat_display.insert(tk.END, "\n")
             self.chat_display.see(tk.END)
             self.chat_display.config(state="disabled")
 
-        self._run_on_ui(_append)
+        if not tokens:
+            _finalize()
+        else:
+            self.root.after(0, _insert_token, 0)
 
     def clear_chat(self):
         self.chat_display.config(state="normal")
