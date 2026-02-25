@@ -1,25 +1,20 @@
-"""axiom_app.views.app_view — Top-level application window (skeleton).
+"""axiom_app.views.app_view — Top-level application window.
 
-AppView owns the root Tk window and the top-level frame layout.  It does
-NOT recreate the full Axiom UI yet; that happens incrementally as each
-panel is migrated from agentic_rag_gui.py.
+Provides a ttk.Notebook with four tabs (Documents, Chat, Settings, Logs),
+a determinate/indeterminate ttk.Progressbar, and a status label — all
+wired with grid so the window resizes cleanly.
 
-Current state: a root window with a single label and a placeholder frame
-that future panels will be placed into.
+Only used when AXIOM_NEW_APP=1.  The legacy agentic_rag_gui UI is unchanged.
 """
 
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass  # future: from axiom_app.models.app_model import AppModel
+from tkinter import scrolledtext, ttk
 
 
 class AppView:
-    """Minimal root window for the MVC skeleton.
+    """Root window with tabbed layout.
 
     Parameters
     ----------
@@ -30,6 +25,7 @@ class AppView:
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
+        self._progress_mode: str = "determinate"  # "determinate" | "indeterminate"
         self._build()
 
     # ------------------------------------------------------------------
@@ -37,64 +33,146 @@ class AppView:
     # ------------------------------------------------------------------
 
     def _build(self) -> None:
-        """Build the minimal placeholder UI."""
         self.root.title("Axiom")
-        self.root.geometry("800x600")
-        self.root.minsize(480, 320)
+        self.root.geometry("900x620")
+        self.root.minsize(540, 360)
 
-        # Top-level container
-        self._outer = ttk.Frame(self.root)
-        self._outer.pack(fill="both", expand=True, padx=16, pady=16)
+        # Root grid: row 0 = notebook (expands), row 1 = bottom bar (fixed).
+        self.root.rowconfigure(0, weight=1)
+        self.root.rowconfigure(1, weight=0)
+        self.root.columnconfigure(0, weight=1)
 
-        # Placeholder banner
-        self._banner = ttk.Label(
-            self._outer,
-            text="Axiom  (refactor in progress)",
-            font=("TkDefaultFont", 16, "bold"),
-            anchor="center",
-        )
-        self._banner.pack(fill="x", pady=(0, 12))
+        # ── Notebook ─────────────────────────────────────────────────
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
 
-        # Placeholder content frame — panels will be packed here later
-        self.content_frame = ttk.Frame(self._outer, relief="sunken", borderwidth=1)
-        self.content_frame.pack(fill="both", expand=True)
+        self.tab_documents = self._make_placeholder_tab("Documents",
+            "Document list and file-open controls will appear here.")
+        self.tab_chat = self._make_placeholder_tab("Chat",
+            "Chat input/output panel will appear here.")
+        self.tab_settings = self._make_placeholder_tab("Settings",
+            "Provider and embedding settings will appear here.")
+        self.tab_logs = self._make_log_tab()
 
-        ttk.Label(
-            self.content_frame,
-            text="[ UI panels will appear here as they are migrated ]",
-            foreground="gray",
-            anchor="center",
-        ).pack(expand=True)
+        self.notebook.add(self.tab_documents, text="Documents")
+        self.notebook.add(self.tab_chat,      text="Chat")
+        self.notebook.add(self.tab_settings,  text="Settings")
+        self.notebook.add(self.tab_logs,      text="Logs")
 
-        # Status bar at the bottom
+        # ── Bottom bar ───────────────────────────────────────────────
+        # Two-column grid inside a frame: status label (expands) | progress bar (fixed).
+        bottom = ttk.Frame(self.root)
+        bottom.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 6))
+        bottom.columnconfigure(0, weight=1)
+        bottom.columnconfigure(1, weight=0)
+
         self._status_var = tk.StringVar(value="Ready.")
-        self._status_bar = ttk.Label(
-            self.root,
+        self._status_label = ttk.Label(
+            bottom,
             textvariable=self._status_var,
             relief="sunken",
             anchor="w",
-            padding=(4, 2),
+            padding=(6, 3),
         )
-        self._status_bar.pack(side="bottom", fill="x")
+        self._status_label.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+
+        self._progressbar = ttk.Progressbar(
+            bottom,
+            orient="horizontal",
+            mode="determinate",
+            length=200,
+        )
+        self._progressbar.grid(row=0, column=1, sticky="e")
+
+    def _make_placeholder_tab(self, title: str, hint: str) -> ttk.Frame:
+        """Return a tab frame with a centred hint label."""
+        frame = ttk.Frame(self.notebook, padding=12)
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+        ttk.Label(
+            frame,
+            text=f"[ {title} — {hint} ]",
+            foreground="gray",
+            anchor="center",
+            justify="center",
+        ).grid(row=0, column=0, sticky="nsew")
+        return frame
+
+    def _make_log_tab(self) -> ttk.Frame:
+        """Return the Logs tab with a scrolled text area."""
+        frame = ttk.Frame(self.notebook, padding=6)
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        self._log_text = scrolledtext.ScrolledText(
+            frame,
+            state="disabled",
+            wrap="word",
+            font=("TkFixedFont", 10),
+            background="#1e1e1e",
+            foreground="#d4d4d4",
+            insertbackground="#d4d4d4",
+        )
+        self._log_text.grid(row=0, column=0, sticky="nsew")
+
+        # Clear button
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=1, column=0, sticky="e", pady=(4, 0))
+        ttk.Button(btn_frame, text="Clear log", command=self._clear_log).pack()
+
+        return frame
 
     # ------------------------------------------------------------------
-    # Public helpers (controller will call these)
+    # Public interface (called by controller / poll loop)
     # ------------------------------------------------------------------
 
-    def set_status(self, message: str) -> None:
-        """Update the status-bar text."""
-        self._status_var.set(message)
+    def set_status(self, text: str) -> None:
+        """Update the status-bar label text."""
+        self._status_var.set(text)
 
-    def set_progress(self, current: int, total: int) -> None:
-        """Reflect task progress in the UI.
+    def set_progress(self, current: int, total: int | None) -> None:
+        """Update the progress bar.
 
-        Placeholder — a ``ttk.Progressbar`` will be wired here when the
-        ingestion panel is migrated.  For now, we fall back to a status-bar
-        percentage so the controller can call this unconditionally.
+        Parameters
+        ----------
+        current:
+            Items completed so far.
+        total:
+            Total items, or ``None`` / ``0`` for indeterminate (bouncing) mode.
         """
-        if total > 0:
-            pct = int(current / total * 100)
-            self._status_var.set(f"{current}/{total}  ({pct} %)")
+        if not total:
+            # Switch to indeterminate bounce (e.g. unknown total).
+            if self._progress_mode != "indeterminate":
+                self._progressbar.configure(mode="indeterminate")
+                self._progress_mode = "indeterminate"
+                self._progressbar.start(15)
+        else:
+            if self._progress_mode != "determinate":
+                self._progressbar.stop()
+                self._progressbar.configure(mode="determinate")
+                self._progress_mode = "determinate"
+            pct = min(100, int(current / total * 100))
+            self._progressbar["value"] = pct
+
+    def reset_progress(self) -> None:
+        """Stop any animation and return the bar to zero."""
+        if self._progress_mode == "indeterminate":
+            self._progressbar.stop()
+            self._progressbar.configure(mode="determinate")
+            self._progress_mode = "determinate"
+        self._progressbar["value"] = 0
+
+    def append_log(self, line: str) -> None:
+        """Append *line* to the Logs tab (thread-safe: must be called from main thread)."""
+        self._log_text.configure(state="normal")
+        self._log_text.insert("end", line if line.endswith("\n") else line + "\n")
+        self._log_text.see("end")
+        self._log_text.configure(state="disabled")
+
+    def _clear_log(self) -> None:
+        self._log_text.configure(state="normal")
+        self._log_text.delete("1.0", "end")
+        self._log_text.configure(state="disabled")
 
     def show(self) -> None:
         """Make the window visible (call after controller.wire_events())."""
