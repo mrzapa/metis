@@ -57,10 +57,15 @@ class AppModel:
 
     def __init__(self) -> None:
         self.documents: list[Any] = []
-        self.index_state: dict[str, Any] = {"built": False, "doc_count": 0}
+        self.index_state: dict[str, Any] = {"built": False, "doc_count": 0, "chunk_count": 0}
         self.chat_history: list[dict[str, Any]] = []
         self.settings: dict[str, Any] = {}
         self.logger: logging.Logger = logging.getLogger(__name__)
+        # In-memory index populated by the "Build Index" background task.
+        # chunks[i] is a dict: {"id": str, "text": str, "source": str, "chunk_idx": int}
+        # embeddings[i] is the corresponding float vector (parallel list).
+        self.chunks: list[dict[str, Any]] = []
+        self.embeddings: list[list[float]] = []
 
     # ------------------------------------------------------------------
     # Settings
