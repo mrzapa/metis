@@ -14,6 +14,7 @@ as logic is extracted from agentic_rag_gui.py.
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -47,6 +48,7 @@ class AppController:
         self.background_runner = BackgroundRunner()
         self._active_token: CancelToken | None = None
         self._active_future: Future | None = None
+        self._log = logging.getLogger(__name__)
 
     # ------------------------------------------------------------------
     # Event wiring
@@ -83,6 +85,7 @@ class AppController:
         Messages are picked up by the always-on poll loop in ``app.py``.
         """
         if self._active_token is not None:
+            self._log.debug("Cancelling previous task before starting '%s'", task_name)
             self._active_token.cancel()
 
         token = CancelToken()
@@ -90,6 +93,7 @@ class AppController:
         self._active_future = self.background_runner.submit(
             fn, *args, cancel_token=token, task_name=task_name
         )
+        self._log.info("Task started: %s", task_name)
 
     def cancel_current_task(self) -> None:
         """Signal the active background task to stop (cooperative)."""
@@ -99,6 +103,7 @@ class AppController:
 
     def shutdown(self) -> None:
         """Tear down the thread pool (call on window close)."""
+        self._log.info("AppController shutting down")
         if self._active_token is not None:
             self._active_token.cancel()
         self.background_runner.shutdown(wait=False)
@@ -136,6 +141,9 @@ class AppController:
         elif mtype == "error":
             text = msg.get("text", "unknown error")
             tb = msg.get("traceback", "")
+            self._log.error("Task error [%s]: %s", msg.get("task_name", "?"), text)
+            if tb:
+                self._log.debug("Traceback:\n%s", tb.rstrip())
             self.view.set_status(f"Error: {text}")
             self.view.append_log(f"[error] {text}")
             if tb:
@@ -143,6 +151,7 @@ class AppController:
         elif mtype == "done":
             task = msg.get("task_name", "Task")
             label = f"{task} complete." if task else "Done."
+            self._log.info("Task complete: %s", task or "(unnamed)")
             self.view.set_status(label)
             self.view.append_log(f"[done]  {label}")
         elif mtype == "log":
