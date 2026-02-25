@@ -3,9 +3,10 @@
 AppController mediates between AppModel (state) and AppView (UI).  It
 binds user actions to model mutations and triggers view refreshes.
 
-Background tasks are submitted via a BackgroundRunner; a recurring
-``root.after()`` poll drains the message queue and routes each message
-to the appropriate view method.
+Message polling is driven externally by a recurring ``root.after()`` loop
+in ``axiom_app.app`` (always-on, 100 ms interval).  The controller exposes
+``poll_and_dispatch()`` which drains the queue and routes each message to
+the appropriate view method — callers never touch the runner directly.
 
 All action methods are stubs (TODO/pass) for now.  They will be filled in
 as logic is extracted from agentic_rag_gui.py.
@@ -22,9 +23,6 @@ if TYPE_CHECKING:
     from axiom_app.models.app_model import AppModel
     from axiom_app.views.app_view import AppView
 
-# How often (ms) the main thread polls the message queue while a task runs.
-_POLL_INTERVAL_MS = 100
-
 
 class AppController:
     """Mediates between AppModel and AppView.
@@ -35,12 +33,18 @@ class AppController:
         The single AppModel instance holding application state.
     view:
         The AppView instance owning the root Tk window.
+
+    Attributes
+    ----------
+    background_runner:
+        Public reference to the BackgroundRunner; ``app.py`` calls
+        ``poll_and_dispatch()`` rather than accessing the runner directly.
     """
 
     def __init__(self, model: AppModel, view: AppView) -> None:
         self.model = model
         self.view = view
-        self._runner = BackgroundRunner()
+        self.background_runner = BackgroundRunner()
         self._active_token: CancelToken | None = None
         self._active_future: Future | None = None
 
@@ -62,7 +66,7 @@ class AppController:
     # ------------------------------------------------------------------
 
     def start_task(self, task_name: str, fn: Callable[..., Any], /, *args: Any) -> None:
-        """Submit *fn* to the background runner and begin polling.
+        """Submit *fn* to the background runner.
 
         Parameters
         ----------
@@ -76,15 +80,16 @@ class AppController:
             two injected ones.
 
         If a task is already running, it is cancelled before the new one starts.
+        Messages are picked up by the always-on poll loop in ``app.py``.
         """
-        # Cancel any in-flight task first.
         if self._active_token is not None:
             self._active_token.cancel()
 
         token = CancelToken()
         self._active_token = token
-        self._active_future = self._runner.submit(fn, *args, cancel_token=token, task_name=task_name)
-        self._schedule_poll()
+        self._active_future = self.background_runner.submit(
+            fn, *args, cancel_token=token, task_name=task_name
+        )
 
     def cancel_current_task(self) -> None:
         """Signal the active background task to stop (cooperative)."""
@@ -96,38 +101,53 @@ class AppController:
         """Tear down the thread pool (call on window close)."""
         if self._active_token is not None:
             self._active_token.cancel()
-        self._runner.shutdown(wait=False)
+        self.background_runner.shutdown(wait=False)
 
     # ------------------------------------------------------------------
-    # Internal poll loop
+    # Message dispatch (called by the poll loop in app.py)
     # ------------------------------------------------------------------
 
-    def _schedule_poll(self) -> None:
-        self.view.root.after(_POLL_INTERVAL_MS, self._poll)
+    def poll_and_dispatch(self) -> None:
+        """Drain the message queue and update the view.
 
-    def _poll(self) -> None:
-        """Drain the message queue and update the view; reschedule if needed."""
-        for msg in self._runner.poll_messages():
+        Called every 100 ms from the always-on ``root.after()`` loop in
+        ``axiom_app.app``.  Clears the active-task reference once the
+        future is finished so the progress bar can be reset.
+        """
+        for msg in self.background_runner.poll_messages():
             self._handle_message(msg)
 
-        # Keep polling while the task is still running.
-        if self._active_future is not None and not self._active_future.done():
-            self._schedule_poll()
-        else:
+        # Once the future is done, clear tracking state.
+        if self._active_future is not None and self._active_future.done():
             self._active_future = None
             self._active_token = None
+            self.view.reset_progress()
 
     def _handle_message(self, msg: dict[str, Any]) -> None:
         mtype = msg.get("type")
         if mtype == "status":
             self.view.set_status(msg.get("text", ""))
+            self.view.append_log(f"[status] {msg.get('text', '')}")
         elif mtype == "progress":
-            self.view.set_progress(int(msg.get("current", 0)), int(msg.get("total", 1)))
+            current = int(msg.get("current", 0))
+            total = msg.get("total")
+            total = int(total) if total is not None else None
+            self.view.set_progress(current, total)
         elif mtype == "error":
-            self.view.set_status(f"Error: {msg.get('text', 'unknown error')}")
+            text = msg.get("text", "unknown error")
+            tb = msg.get("traceback", "")
+            self.view.set_status(f"Error: {text}")
+            self.view.append_log(f"[error] {text}")
+            if tb:
+                self.view.append_log(tb)
         elif mtype == "done":
             task = msg.get("task_name", "Task")
-            self.view.set_status(f"{task} complete." if task else "Done.")
+            label = f"{task} complete." if task else "Done."
+            self.view.set_status(label)
+            self.view.append_log(f"[done]  {label}")
+        elif mtype == "log":
+            # Workers may emit {"type": "log", "text": "..."} for verbose output.
+            self.view.append_log(msg.get("text", ""))
 
     # ------------------------------------------------------------------
     # Window close
