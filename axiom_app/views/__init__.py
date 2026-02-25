@@ -1,9 +1,9 @@
-"""axiom_app.views — Tkinter/ttk UI layer (widgets, panels, tabs).
+"""axiom_app.views — Tkinter/ttk UI layer.
 
-Planned contents (to be migrated from agentic_rag_gui.py):
-  - Custom widgets: TooltipManager, IOSSegmentedToggle,
-    CollapsibleFrame, RoundedCard, AnimationEngine
-  - Tab panels: ChatPanel, IngestionPanel, SettingsPanel,
-    HistoryPanel, SourcesPanel
-  - Main window / layout shell
+Modules
+-------
+styles  : STYLE_CONFIG, UI_SPACING, get_palette, resolve_fonts, apply_ttk_theme
+widgets : AnimationEngine, IOSSegmentedToggle, CollapsibleFrame, RoundedCard,
+          TooltipManager
+app_view: AppView — sidebar-based main window (replaces the old ttk.Notebook layout)
 """

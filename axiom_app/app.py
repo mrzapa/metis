@@ -74,8 +74,9 @@ def run_app() -> None:
         )
 
         # ── 4. View ───────────────────────────────────────────────────
-        view = AppView(root)
-        logger.debug("AppView constructed")
+        theme_name = model.settings.get("theme", "space_dust")
+        view = AppView(root, theme_name=theme_name)
+        logger.debug("AppView constructed (theme=%s)", theme_name)
 
         # ── 5. Controller ─────────────────────────────────────────────
         controller = AppController(model, view)
