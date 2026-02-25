@@ -114,11 +114,21 @@ class AppController:
     def wire_events(self) -> None:
         """Bind view widgets to controller callbacks."""
         self.view.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Library view buttons (lazily built — switch_view("library") triggers build)
+        # We pre-switch to ensure library is built before wiring, then return to chat.
+        self.view.switch_view("library")
         self.view.btn_open_files.configure(command=self.on_open_files)
         self.view.btn_build_index.configure(command=self.on_build_index)
+        self.view.switch_view("chat")
+
+        # Chat view widgets
         self.view.btn_send.configure(command=self._on_send_clicked)
-        # <Return> in the prompt entry also submits
-        self.view.prompt_entry.bind("<Return>", lambda _e: self._on_send_clicked())
+        self.view.btn_cancel_rag.configure(command=self.on_cancel_job)
+
+        # Ctrl+Enter / Return in the multi-line Text input submits
+        self.view.prompt_entry.bind("<Return>",
+                                   lambda _e: self._on_send_clicked() or "break")
 
     # ------------------------------------------------------------------
     # Background task management
@@ -135,6 +145,10 @@ class AppController:
             fn, *args, cancel_token=token, task_name=task_name
         )
         self._log.info("Task started: %s", task_name)
+        try:
+            self.view.btn_cancel_rag.configure(state="normal")
+        except Exception:
+            pass
 
     def cancel_current_task(self) -> None:
         """Signal the active background task to stop (cooperative)."""
@@ -161,8 +175,12 @@ class AppController:
             self._active_future = None
             self._active_token = None
             self.view.reset_progress()
-            # Re-enable Build Index once any task finishes.
-            self.view.btn_build_index.configure(state="normal")
+            # Re-enable Build Index and disable Cancel once any task finishes.
+            try:
+                self.view.btn_build_index.configure(state="normal")
+                self.view.btn_cancel_rag.configure(state="disabled")
+            except Exception:
+                pass
 
     def _handle_message(self, msg: dict[str, Any]) -> None:
         mtype = msg.get("type")
@@ -337,7 +355,7 @@ class AppController:
                 "⚠  No index built yet.\n"
                 "   Open a text file and click 'Build Index' first.\n\n"
             )
-            self.view.notebook.select(self.view.tab_chat)
+            self.view.switch_view("chat")
             return
 
         top_k = int(self.model.settings.get("top_k", 3))
@@ -385,7 +403,7 @@ class AppController:
             scores[hits[0]] if hits else 0.0,
         )
 
-        self.view.notebook.select(self.view.tab_chat)
+        self.view.switch_view("chat")
 
     def on_cancel_job(self) -> None:
         """Cancel any running background job."""
