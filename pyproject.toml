@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "axiom-app"
+version = "0.1.0"
+description = "Axiom — Personal RAG desktop application (MVC refactor in progress)"
+readme = "README.md"
+requires-python = ">=3.10"
+# Runtime dependencies are intentionally minimal; heavy ML libs (LangChain,
+# sentence-transformers, llama-cpp-python) are optional/user-installed.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+]
+
+[project.scripts]
+# Once the legacy monolith is retired:
+# axiom = "axiom_app.app:run_app"
+
+[tool.setuptools.packages.find]
+# Only package axiom_app; exclude the legacy monolith and test tree.
+include = ["axiom_app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts   = "-q --tb=short"

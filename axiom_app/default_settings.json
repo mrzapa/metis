@@ -1,0 +1,18 @@
+{
+  "_comment": "Axiom default settings. Copy to settings.json in the repo root to override.",
+
+  "ui_backend": "ttk",
+  "theme": "light",
+
+  "embeddings_backend": "mock",
+  "sentence_transformers_model": "all-MiniLM-L6-v2",
+
+  "cache_dir": ".axiom_cache",
+
+  "log_dir": "logs",
+  "log_level": "DEBUG",
+
+  "chunk_size": 1000,
+  "chunk_overlap": 100,
+  "top_k": 5
+}
