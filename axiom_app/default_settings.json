@@ -14,5 +14,7 @@
 
   "chunk_size": 1000,
   "chunk_overlap": 100,
-  "top_k": 5
+  "top_k": 5,
+
+  "document_loader": "auto"
 }

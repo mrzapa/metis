@@ -27,6 +27,7 @@ from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any, Callable
 
 from axiom_app.utils.background import BackgroundRunner, CancelToken
+from axiom_app.utils.document_loader import KREUZBERG_EXTENSIONS, is_kreuzberg_available, load_document
 from axiom_app.utils.mock_embeddings import MockEmbeddings
 
 if TYPE_CHECKING:
@@ -248,14 +249,30 @@ class AppController:
     def on_open_files(self) -> None:
         """Open a file dialog and load selected files into the model."""
         from tkinter import filedialog  # lazy: only valid when Tk is running
-        paths = filedialog.askopenfilenames(
-            title="Select text file(s)",
-            filetypes=[
+
+        if is_kreuzberg_available():
+            # Build a rich filetype list from the extensions kreuzberg supports.
+            filetypes: list[tuple[str, str]] = [
+                ("All supported", " ".join(
+                    ext for exts in KREUZBERG_EXTENSIONS.values() for ext in exts
+                ) + " *.txt *.md"),
+            ]
+            for label, exts in KREUZBERG_EXTENSIONS.items():
+                filetypes.append((label, " ".join(exts)))
+            filetypes += [
+                ("Text / Markdown", "*.txt *.md"),
+                ("All files",       "*.*"),
+            ]
+            title = "Select document(s)"
+        else:
+            filetypes = [
                 ("Text files", "*.txt"),
                 ("Markdown",   "*.md"),
                 ("All files",  "*.*"),
-            ],
-        )
+            ]
+            title = "Select text file(s)"
+
+        paths = filedialog.askopenfilenames(title=title, filetypes=filetypes)
         if not paths:
             return  # user cancelled
 
@@ -282,6 +299,9 @@ class AppController:
         overlap    = int(self.model.settings.get("chunk_overlap", 100))
         docs       = list(self.model.documents)  # snapshot; safe to read in worker
 
+        loader_setting = self.model.settings.get("document_loader", "auto")
+        use_kreuzberg  = loader_setting != "plain"
+
         def _worker(post_msg: Any, cancel: CancelToken) -> dict[str, Any]:
             emb         = MockEmbeddings(dimensions=_EMB_DIM)
             all_chunks:  list[dict[str, Any]] = []
@@ -295,9 +315,7 @@ class AppController:
                 post_msg({"type": "status", "text": f"Reading {source}…"})
 
                 try:
-                    text = pathlib.Path(path).read_text(
-                        encoding="utf-8", errors="replace"
-                    )
+                    text = load_document(path, use_kreuzberg=use_kreuzberg)
                 except OSError as exc:
                     post_msg({"type": "log",
                               "text": f"[warn]  Could not read {path}: {exc}"})

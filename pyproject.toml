@@ -16,6 +16,12 @@ dependencies = []
 dev = [
     "pytest>=8",
 ]
+kreuzberg = [
+    "kreuzberg",
+]
+all = [
+    "kreuzberg",
+]
 
 [project.scripts]
 # Once the legacy monolith is retired:
