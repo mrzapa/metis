@@ -131,6 +131,9 @@ class AppController:
         self.view.prompt_entry.bind("<Return>",
                                    lambda _e: self._on_send_clicked() or "break")
 
+        # Pass loaded settings to the view for display in the Settings tab.
+        self.view.populate_settings(self.model.settings)
+
     # ------------------------------------------------------------------
     # Background task management
     # ------------------------------------------------------------------

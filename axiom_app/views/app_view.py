@@ -35,7 +35,8 @@ Public view-mutating methods (main thread only):
   get_prompt_text() -> str
   clear_prompt()
   append_log(line)
-  switch_view(key)    — switch sidebar active view ("chat"|"library"|"history"|"settings")
+  populate_settings(settings)  — pass settings dict from controller to display in Settings tab
+  switch_view(key)    — switch sidebar active view ("chat"|"library"|"history"|"settings"|"logs")
   show()              — deiconify + lift
 
 Only used when AXIOM_NEW_APP=1.  The legacy agentic_rag_gui UI is unchanged.
@@ -111,6 +112,15 @@ class AppView:
         self._sidebar_accents: dict[str, tk.Frame] = {}
         self._sidebar_logo_photo = None
 
+        # Settings display data — populated by controller via populate_settings().
+        self._settings_data: dict = {}
+        self._settings_entries: dict = {}          # key -> (ttk.Entry, tk.StringVar)
+
+        # Logs tab text widget — None until _build_logs_view() runs.
+        self._logs_view_text: tk.Text | None = None
+        # Accumulates all log lines before the Logs tab is first opened.
+        self._log_buffer: list[str] = []
+
         # Will be set by _build_chat_view() / _build_library_view():
         self.btn_send: ttk.Button
         self.btn_open_files: ttk.Button
@@ -182,6 +192,7 @@ class AppView:
             ("library",  "📚  Library"),
             ("history",  "🕘  History"),
             ("settings", "⚙️   Settings"),
+            ("logs",     "📋  Logs"),
         ]
         sidebar_bg = pal.get("sidebar_bg", pal.get("surface_alt", "#0D1520"))
 
@@ -232,8 +243,8 @@ class AppView:
         self.main_content_frame.grid_rowconfigure(0, weight=1)
         self.main_content_frame.grid_columnconfigure(0, weight=1)
 
-        # Create all four view frames now (stacked; only one visible at a time).
-        for key in ("chat", "library", "history", "settings"):
+        # Create all view frames now (stacked; only one visible at a time).
+        for key in ("chat", "library", "history", "settings", "logs"):
             frame = ttk.Frame(self.main_content_frame, style="Card.TFrame")
             frame.grid(row=0, column=0, sticky="nsew")
             self._views[key] = frame
@@ -557,17 +568,203 @@ class AppView:
         ).grid(row=0, column=0, sticky="nsew")
 
     def _build_settings_view(self) -> None:
-        """Settings view: placeholder stub."""
+        """Settings view: scrollable read-only form of active settings."""
+        pal = self._palette
         frame = self._views["settings"]
-        frame.rowconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
         frame.columnconfigure(0, weight=1)
+
+        # ── Header ────────────────────────────────────────────────────
+        hdr = ttk.Frame(frame, style="Card.Flat.TFrame",
+                        padding=(UI_SPACING["m"], UI_SPACING["s"]))
+        hdr.grid(row=0, column=0, sticky="ew")
+        ttk.Label(hdr, text="Settings", style="Header.TLabel").pack(side="left")
+
+        # ── Scrollable canvas area ─────────────────────────────────────
+        canvas_host = ttk.Frame(frame, style="Card.TFrame")
+        canvas_host.grid(row=1, column=0, sticky="nsew",
+                         padx=UI_SPACING["m"], pady=(UI_SPACING["xs"], 0))
+        canvas_host.rowconfigure(0, weight=1)
+        canvas_host.columnconfigure(0, weight=1)
+
+        canvas = tk.Canvas(
+            canvas_host,
+            bg=pal.get("surface", "#111827"),
+            highlightthickness=0,
+            bd=0,
+        )
+        canvas.grid(row=0, column=0, sticky="nsew")
+
+        vsb = ttk.Scrollbar(canvas_host, orient="vertical", command=canvas.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        canvas.configure(yscrollcommand=vsb.set)
+
+        # Inner frame lives inside the canvas window
+        inner = ttk.Frame(canvas, style="Card.TFrame")
+        inner.columnconfigure(1, weight=1)
+
+        canvas_window = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _on_inner_configure(_event: tk.Event) -> None:
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(event: tk.Event) -> None:
+            canvas.itemconfig(canvas_window, width=event.width)
+
+        inner.bind("<Configure>", _on_inner_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_mousewheel(event: tk.Event) -> None:
+            try:
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except tk.TclError:
+                pass
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # ── Section definitions ────────────────────────────────────────
+        sections = [
+            ("UI", [
+                ("ui_backend",  "UI Backend"),
+                ("theme",       "Theme"),
+            ]),
+            ("Embeddings", [
+                ("embeddings_backend",         "Embeddings Backend"),
+                ("sentence_transformers_model", "Sentence Transformers Model"),
+                ("cache_dir",                  "Cache Directory"),
+            ]),
+            ("Ingestion", [
+                ("chunk_size",      "Chunk Size"),
+                ("chunk_overlap",   "Chunk Overlap"),
+                ("document_loader", "Document Loader"),
+            ]),
+            ("Retrieval", [
+                ("top_k", "Top-K Results"),
+            ]),
+            ("Logging", [
+                ("log_dir",   "Log Directory"),
+                ("log_level", "Log Level"),
+            ]),
+        ]
+
+        row_idx = 0
+        for section_title, keys in sections:
+            ttk.Label(
+                inner,
+                text=section_title.upper(),
+                style="Overline.TLabel",
+            ).grid(
+                row=row_idx, column=0, columnspan=2, sticky="w",
+                padx=UI_SPACING["m"],
+                pady=(UI_SPACING["l"] if row_idx > 0 else UI_SPACING["m"],
+                      UI_SPACING["xs"]),
+            )
+            row_idx += 1
+
+            ttk.Separator(inner, orient="horizontal").grid(
+                row=row_idx, column=0, columnspan=2, sticky="ew",
+                padx=UI_SPACING["m"], pady=(0, UI_SPACING["xs"]),
+            )
+            row_idx += 1
+
+            for key, display_label in keys:
+                ttk.Label(
+                    inner,
+                    text=display_label,
+                    style="Caption.TLabel",
+                    anchor="e",
+                    width=26,
+                ).grid(
+                    row=row_idx, column=0, sticky="e",
+                    padx=(UI_SPACING["m"], UI_SPACING["s"]),
+                    pady=(0, UI_SPACING["xs"]),
+                )
+                val = str(self._settings_data.get(key, ""))
+                entry_var = tk.StringVar(value=val)
+                entry = ttk.Entry(
+                    inner,
+                    textvariable=entry_var,
+                    state="readonly",
+                    font=self._fonts["code"],
+                )
+                entry.grid(
+                    row=row_idx, column=1, sticky="ew",
+                    padx=(0, UI_SPACING["m"]),
+                    pady=(0, UI_SPACING["xs"]),
+                )
+                self._settings_entries[key] = (entry, entry_var)
+                row_idx += 1
+
+        # Bottom spacer
+        ttk.Frame(inner, style="Card.TFrame", height=UI_SPACING["l"]).grid(
+            row=row_idx, column=0, columnspan=2,
+        )
+
+        # ── Footer ────────────────────────────────────────────────────
+        footer = ttk.Frame(frame, style="Card.Flat.TFrame",
+                           padding=(UI_SPACING["m"], UI_SPACING["s"]))
+        footer.grid(row=2, column=0, sticky="ew")
         ttk.Label(
-            frame,
-            text="[ Settings — Provider and embedding settings will appear here. ]",
-            foreground=self._palette.get("muted_text", "#8A9DC0"),
-            anchor="center",
-            justify="center",
-        ).grid(row=0, column=0, sticky="nsew")
+            footer,
+            text="Edit settings.json at repository root to modify.",
+            style="Caption.TLabel",
+        ).pack(side="left")
+
+    def _build_logs_view(self) -> None:
+        """Logs view: full-screen scrollable log text area."""
+        pal = self._palette
+        frame = self._views["logs"]
+        frame.rowconfigure(1, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        # ── Header ────────────────────────────────────────────────────
+        hdr = ttk.Frame(frame, style="Card.Flat.TFrame",
+                        padding=(UI_SPACING["m"], UI_SPACING["s"]))
+        hdr.grid(row=0, column=0, sticky="ew")
+        ttk.Label(hdr, text="Logs & Telemetry",
+                  style="Header.TLabel").pack(side="left")
+
+        # ── Text area ─────────────────────────────────────────────────
+        text_host = ttk.Frame(frame, style="Card.Elevated.TFrame")
+        text_host.grid(row=1, column=0, sticky="nsew",
+                       padx=UI_SPACING["m"],
+                       pady=(UI_SPACING["xs"], UI_SPACING["m"]))
+        text_host.rowconfigure(0, weight=1)
+        text_host.columnconfigure(0, weight=1)
+
+        self._logs_view_text = tk.Text(
+            text_host,
+            state="disabled",
+            wrap=tk.WORD,
+            font=self._fonts["code"],
+            bg=pal.get("input_bg", "#07101A"),
+            fg=pal.get("muted_text", "#8A9DC0"),
+            insertbackground=pal["text"],
+            selectbackground=pal["selection_bg"],
+            selectforeground=pal["selection_fg"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+            padx=UI_SPACING["s"],
+            pady=UI_SPACING["s"],
+        )
+        self._logs_view_text.grid(row=0, column=0, sticky="nsew")
+
+        logs_scroll = ttk.Scrollbar(text_host, orient="vertical",
+                                    command=self._logs_view_text.yview)
+        logs_scroll.grid(row=0, column=1, sticky="ns")
+        self._logs_view_text.configure(yscrollcommand=logs_scroll.set)
+
+        # Replay any log lines buffered before this tab was first opened
+        if self._log_buffer:
+            self._logs_view_text.configure(state="normal")
+            for buffered_line in self._log_buffer:
+                self._logs_view_text.insert(
+                    "end",
+                    buffered_line if buffered_line.endswith("\n") else buffered_line + "\n",
+                )
+            self._logs_view_text.see("end")
+            self._logs_view_text.configure(state="disabled")
 
     # ------------------------------------------------------------------
     # View switching
@@ -581,9 +778,10 @@ class AppView:
         # Lazy-build on first access
         if not self._tab_built.get(key):
             builders = {
-                "library": self._build_library_view,
-                "history": self._build_history_view,
+                "library":  self._build_library_view,
+                "history":  self._build_history_view,
                 "settings": self._build_settings_view,
+                "logs":     self._build_logs_view,
             }
             builder = builders.get(key)
             if builder:
@@ -682,7 +880,11 @@ class AppView:
             pass
 
     def append_log(self, line: str) -> None:
-        """Append *line* to the chat Logs collapsible section."""
+        """Append *line* to the chat Logs collapsible section and the Logs tab."""
+        # Always buffer so the Logs tab can replay on first open.
+        self._log_buffer.append(line)
+
+        # Write to chat-view collapsible log widget.
         try:
             self._log_text.configure(state="normal")
             self._log_text.insert("end", line if line.endswith("\n") else line + "\n")
@@ -690,6 +892,33 @@ class AppView:
             self._log_text.configure(state="disabled")
         except tk.TclError:
             pass
+
+        # Write to dedicated Logs tab widget if it has been built.
+        if self._logs_view_text is not None:
+            try:
+                self._logs_view_text.configure(state="normal")
+                self._logs_view_text.insert(
+                    "end", line if line.endswith("\n") else line + "\n"
+                )
+                self._logs_view_text.see("end")
+                self._logs_view_text.configure(state="disabled")
+            except tk.TclError:
+                pass
+
+    def populate_settings(self, settings: dict) -> None:
+        """Store settings data and update the Settings view if already built.
+
+        Called by the controller once after ``wire_events()``.  Safe to call
+        before or after the Settings tab is first opened.
+        """
+        self._settings_data = dict(settings)
+        if not self._tab_built.get("settings"):
+            # Tab not yet built — data is stored and will be read by
+            # _build_settings_view() when the user first opens Settings.
+            return
+        # Tab already built — update existing StringVars in place.
+        for key, (_entry, var) in self._settings_entries.items():
+            var.set(str(self._settings_data.get(key, "")))
 
     def show(self) -> None:
         """Make the window visible."""
