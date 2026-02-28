@@ -31,7 +31,7 @@ _log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 try:
-    from kreuzberg import KreuzbergError, extract_file_sync  # type: ignore[import]
+    from kreuzberg import extract_file_sync  # type: ignore[import]
 
     _KREUZBERG_AVAILABLE = True
     _log.debug("kreuzberg available — multi-format document extraction enabled")

@@ -162,7 +162,7 @@ def cmd_query(args: argparse.Namespace) -> int:
     print()
     print(f"Question : {question}")
     print(f"Source   : {src}")
-    print(f"Backend  : keyword match (no LLM configured)")
+    print("Backend  : keyword match (no LLM configured)")
     print()
     print(_SEP)
 
