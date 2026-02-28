@@ -30,6 +30,7 @@ from axiom_app.utils.background import BackgroundRunner, CancelToken
 from axiom_app.utils.document_loader import KREUZBERG_EXTENSIONS, is_kreuzberg_available, load_document
 from axiom_app.utils.llm_backends import LocalGGUFBackend, LocalGGUFConfig
 from axiom_app.utils.mock_embeddings import MockEmbeddings
+from axiom_app.utils.knowledge_graph import build_knowledge_graph, collect_graph_chunk_candidates
 
 if TYPE_CHECKING:
     from axiom_app.models.app_model import AppModel
@@ -234,6 +235,8 @@ class AppController:
                 # Commit worker result to the model on the main thread.
                 self.model.chunks     = result["chunks"]
                 self.model.embeddings = result["embeddings"]
+                self.model.knowledge_graph = result.get("knowledge_graph")
+                self.model.entity_to_chunks = result.get("entity_to_chunks", {})
                 n = len(result["chunks"])
                 self.model.index_state = {
                     "built":       True,
@@ -364,7 +367,13 @@ class AppController:
                         post_msg({"type": "log",
                                   "text": f"  {source}: chunk {i+1}/{n} embedded"})
 
-            return {"chunks": all_chunks, "embeddings": all_vectors}
+            graph, entity_to_chunks = build_knowledge_graph([c["text"] for c in all_chunks])
+            return {
+                "chunks": all_chunks,
+                "embeddings": all_vectors,
+                "knowledge_graph": graph,
+                "entity_to_chunks": entity_to_chunks,
+            }
 
         self.view.btn_build_index.configure(state="disabled")
         self.view.set_index_info("Indexing…")
@@ -407,7 +416,26 @@ class AppController:
         scores = [_cosine(q_vec, cv) for cv in self.model.embeddings]
 
         ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
-        hits   = ranked[:top_k]
+
+        kg_mode = str(self.model.settings.get("kg_query_mode", "hybrid") or "hybrid")
+        graph = getattr(self.model, "knowledge_graph", None)
+        graph_hits: list[int] = []
+        entity_to_chunks = getattr(self.model, "entity_to_chunks", {})
+        if graph is not None and entity_to_chunks:
+            graph_hits = collect_graph_chunk_candidates(
+                graph=graph,
+                entity_to_chunks=entity_to_chunks,
+                question=prompt,
+                mode=kg_mode,
+                limit=max(top_k * 3, top_k),
+            )
+
+        if kg_mode in {"naive", "bypass"} or not graph_hits:
+            hits = ranked[:top_k]
+        else:
+            graph_hit_set = set(graph_hits)
+            ordered = graph_hits + [i for i in ranked if i not in graph_hit_set]
+            hits = ordered[:top_k]
 
         selected_mode = self.model.settings.get("selected_mode", "Q&A")
         sep = "─" * 52
@@ -418,8 +446,9 @@ class AppController:
         else:
             n_chunks = len(self.model.embeddings)
             lines.append(
-                f"Axiom [mock rag, mode={selected_mode}, {n_chunks} chunk(s) indexed]:\n\n"
-                f"Top {min(top_k, len(hits))} passage(s) by cosine similarity:\n\n"
+                f"Axiom [mock rag, mode={selected_mode}, {n_chunks} chunk(s) indexed]:\n"
+                f"Graph mode: {kg_mode}\n\n"
+                f"Top {min(top_k, len(hits))} passage(s) by graph+cosine ranking:\n\n"
             )
             for rank, idx in enumerate(hits, 1):
                 chunk   = self.model.chunks[idx]

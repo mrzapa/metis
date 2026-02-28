@@ -73,5 +73,6 @@
   "agent_lightning_enabled": false,
   "prefer_comprehension_index": true,
   "log_dir": "logs",
-  "log_level": "DEBUG"
+  "log_level": "DEBUG",
+  "kg_query_mode": "hybrid"
 }

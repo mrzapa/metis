@@ -73,3 +73,16 @@ def test_on_send_prompt_rag_mode_uses_selected_mode_header() -> None:
     assert len(model.chat_history) == 2
     assert "Axiom [mock rag, mode=Deep Dive, 1 chunk(s) indexed]:" in view.chat_messages[0]
     assert view.switched_to[-1] == "chat"
+
+
+def test_on_send_prompt_rag_includes_graph_mode_label() -> None:
+    view = _FakeView(chat_mode="rag")
+    model = _FakeModel(index_built=True)
+    model.settings.update({"selected_mode": "Q&A", "kg_query_mode": "local"})
+    model.embeddings = [[0.1] * 32]
+    model.chunks = [{"text": "Indexed chunk body", "source": "doc.txt", "chunk_idx": 0}]
+    controller = AppController(model=model, view=view)
+
+    controller.on_send_prompt("hello")
+
+    assert "Graph mode: local" in view.chat_messages[0]
