@@ -1265,6 +1265,17 @@ class AppView:
                     pass
         self._refresh_llm_badge()
 
+    def refresh_llm_status_badge(self) -> None:
+        """Refresh the LLM badge and emit a short status line with provider/model."""
+        self._refresh_llm_badge()
+        provider = str(self._settings_data.get("llm_provider", "") or "").strip() or "--"
+        model = (
+            str(self._settings_data.get("llm_model", "") or "").strip()
+            or str(self._settings_data.get("llm_model_custom", "") or "").strip()
+            or "--"
+        )
+        self.set_status(f"Settings saved. Active LLM: {provider} / {model}")
+
     def _refresh_llm_badge(self) -> None:
         """Show active provider/model in the chat header badge."""
         provider = str(self._settings_data.get("llm_provider", "") or "").strip() or "--"

@@ -637,6 +637,17 @@ class AppController:
             self.view.set_status("Settings warning: local_gguf requires a GGUF model path.")
             return
 
+        if str(coerced.get("llm_provider", "") or "").strip() == "local_gguf":
+            model_path = pathlib.Path(str(coerced.get("local_gguf_model_path", "")).strip()).expanduser()
+            if not model_path.is_file():
+                messagebox.showerror(
+                    "Invalid Local GGUF Model",
+                    "LLM Provider is set to local_gguf, but the configured GGUF model file "
+                    f"does not exist:\n\n{model_path}",
+                )
+                self.view.set_status("Settings warning: local_gguf model file was not found.")
+                return
+
         try:
             self.model.save_settings(coerced)
         except OSError as exc:
@@ -649,6 +660,7 @@ class AppController:
 
         self.view.set_status("Settings saved to settings.json.")
         self.view.populate_settings(coerced)
+        self.view.refresh_llm_status_badge()
         self._log.info("Settings saved successfully (%d keys).", len(coerced))
 
         new_theme = coerced.get("theme", self.view._theme_name)
