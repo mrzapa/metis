@@ -19,12 +19,14 @@ from __future__ import annotations
 import logging
 import pathlib
 import sys
+import threading
 import tkinter as tk
 import traceback
 from tkinter import messagebox
 
 from axiom_app.controllers.app_controller import AppController
 from axiom_app.models.app_model import AppModel
+from axiom_app.utils.dependency_bootstrap import ensure_startup_dependencies
 from axiom_app.utils.logging_setup import setup_logging
 from axiom_app.views.app_view import AppView
 
@@ -99,6 +101,40 @@ def run_app() -> None:
         view.set_status(f"Documents: {len(model.documents)}  |  Index: {index_state}")
         view.append_log("Axiom MVC skeleton started (AXIOM_NEW_APP=1).\n")
         view.show()
+
+        # ── 8. Non-blocking dependency guardrail ───────────────────
+        def _dep_progress(line: str) -> None:
+            root.after(0, lambda msg=line: view.append_log(f"[deps] {msg}\n"))
+
+        def _dep_done(installed: bool) -> None:
+            if installed:
+                view.append_log("[deps] Dependency setup complete.\n")
+                view.set_status(
+                    f"Documents: {len(model.documents)}  |  Index: {index_state}  |  Dependencies updated"
+                )
+            else:
+                view.append_log("[deps] Dependency check passed.\n")
+
+        def _dep_failed(exc: Exception) -> None:
+            logger.exception("Startup dependency check/install failed")
+            view.append_log(f"[deps] Automatic install failed: {exc}\n")
+            view.set_status("Dependency setup failed — see log output")
+
+        def _run_dependency_guardrail() -> None:
+            try:
+                installed = ensure_startup_dependencies(logger, progress_callback=_dep_progress)
+            except Exception as exc:
+                root.after(0, lambda err=exc: _dep_failed(err))
+                return
+            root.after(0, lambda did_install=installed: _dep_done(did_install))
+
+        view.set_status("Checking dependencies in background…")
+        view.append_log("[deps] Running startup dependency check in background…\n")
+        threading.Thread(
+            target=_run_dependency_guardrail,
+            daemon=True,
+            name="axiom-dependency-bootstrap",
+        ).start()
 
         logger.info("Entering Tk mainloop")
         root.mainloop()
