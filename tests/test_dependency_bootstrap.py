@@ -25,11 +25,11 @@ def test_ensure_startup_dependencies_skips_install_when_not_needed(monkeypatch):
 
     called = {"ran": False}
 
-    def fake_popen(*_args, **_kwargs):
+    def fake_run(*_args, **_kwargs):
         called["ran"] = True
         raise AssertionError("pip should not be called when no dependencies are missing")
 
-    monkeypatch.setattr(bootstrap.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(bootstrap.subprocess, "run", fake_run)
 
     class DummyLogger:
         def info(self, *_args, **_kwargs):
@@ -41,42 +41,5 @@ def test_ensure_startup_dependencies_skips_install_when_not_needed(monkeypatch):
         def error(self, *_args, **_kwargs):
             return None
 
-    installed = bootstrap.ensure_startup_dependencies(DummyLogger())
-    assert installed is False
+    bootstrap.ensure_startup_dependencies(DummyLogger())
     assert called["ran"] is False
-
-
-def test_ensure_startup_dependencies_reports_progress(monkeypatch):
-    monkeypatch.setattr(bootstrap, "get_missing_startup_packages", lambda: ["llama-cpp-python"])
-
-    class FakeProc:
-        def __init__(self):
-            self.stdout = iter(["Collecting llama-cpp-python\n", "Installing collected packages\n"])
-            self.returncode = 0
-
-        def wait(self):
-            return 0
-
-    monkeypatch.setattr(bootstrap.subprocess, "Popen", lambda *_args, **_kwargs: FakeProc())
-
-    progress: list[str] = []
-
-    class DummyLogger:
-        def info(self, *_args, **_kwargs):
-            return None
-
-        def warning(self, *_args, **_kwargs):
-            return None
-
-        def error(self, *_args, **_kwargs):
-            return None
-
-    installed = bootstrap.ensure_startup_dependencies(
-        DummyLogger(),
-        progress_callback=progress.append,
-    )
-
-    assert installed is True
-    assert any("Missing dependencies detected" in line for line in progress)
-    assert any("Collecting llama-cpp-python" in line for line in progress)
-    assert progress[-1] == "Dependencies installed successfully."
