@@ -478,21 +478,38 @@ class AppController:
     def _handle_direct_prompt_local_gguf(self, prompt: str) -> str:
         """Handle direct-chat prompts with the Local GGUF provider."""
         settings = self.model.settings
-        model_path = str(settings.get("local_gguf_model_path", "") or "").strip()
-        if not model_path:
+        prefix = "Axiom [local_gguf, direct]:"
+
+        try:
+            model_path = str(settings.get("local_gguf_model_path", "") or "").strip()
+            if not model_path:
+                raise ValueError("local_gguf_model_path is not configured")
+
+            resolved = pathlib.Path(model_path).expanduser()
+            if not resolved.exists():
+                raise FileNotFoundError(f"GGUF model file not found: {resolved}")
+
+            config = LocalGGUFConfig(
+                model_path=model_path,
+                context_length=int(settings.get("local_gguf_context_length", 2048)),
+                gpu_layers=int(settings.get("local_gguf_gpu_layers", 0)),
+                threads=int(settings.get("local_gguf_threads", 0)),
+            )
+        except ValueError as exc:
+            self._log.exception("Invalid local GGUF configuration for direct mode")
             return (
                 f"You: {prompt}\n"
                 "────────────────────────────────────────────────────\n"
-                "Axiom [local_gguf, direct]: Local GGUF model path is not configured. "
-                "Set local_gguf_model_path in Settings and try again.\n\n"
+                f"{prefix} Invalid local GGUF setting: {exc}.\n\n"
+            )
+        except FileNotFoundError as exc:
+            self._log.exception("Local GGUF model file does not exist for direct mode")
+            return (
+                f"You: {prompt}\n"
+                "────────────────────────────────────────────────────\n"
+                f"{prefix} Model path not found: {exc}.\n\n"
             )
 
-        config = LocalGGUFConfig(
-            model_path=model_path,
-            context_length=int(settings.get("local_gguf_context_length", 2048)),
-            gpu_layers=int(settings.get("local_gguf_gpu_layers", 0)),
-            threads=int(settings.get("local_gguf_threads", 0)),
-        )
         try:
             if self._gguf_backend is None or self._gguf_backend_config != config:
                 self._gguf_backend = LocalGGUFBackend(config)
@@ -506,21 +523,43 @@ class AppController:
             return (
                 f"You: {prompt}\n"
                 "────────────────────────────────────────────────────\n"
-                f"Axiom [local_gguf, direct]: {generated}\n\n"
+                f"{prefix} {generated}\n\n"
+            )
+        except ValueError as exc:
+            self._gguf_backend = None
+            self._gguf_backend_config = None
+            self._log.exception("Invalid local GGUF setting while initializing backend")
+            return (
+                f"You: {prompt}\n"
+                "────────────────────────────────────────────────────\n"
+                f"{prefix} Invalid local GGUF setting: {exc}.\n\n"
+            )
+        except FileNotFoundError as exc:
+            self._gguf_backend = None
+            self._gguf_backend_config = None
+            self._log.exception("Local GGUF model path was not found while initializing backend")
+            return (
+                f"You: {prompt}\n"
+                "────────────────────────────────────────────────────\n"
+                f"{prefix} Model path not found: {exc}.\n\n"
+            )
+        except RuntimeError as exc:
+            self._gguf_backend = None
+            self._gguf_backend_config = None
+            self._log.exception("Local GGUF runtime initialization failed")
+            return (
+                f"You: {prompt}\n"
+                "────────────────────────────────────────────────────\n"
+                f"{prefix} Runtime dependency issue: {exc}.\n\n"
             )
         except Exception as exc:
             self._gguf_backend = None
             self._gguf_backend_config = None
-            self._log.error(
-                "Could not initialize local GGUF backend: %s. "
-                "Verify local_gguf_model_path exists and llama-cpp-python is installed.",
-                exc,
-            )
+            self._log.exception("Could not initialize or run local GGUF backend")
             return (
                 f"You: {prompt}\n"
                 "────────────────────────────────────────────────────\n"
-                "Axiom [local_gguf, direct]: Could not initialize local GGUF backend. "
-                "Verify the configured model path and dependencies, then try again.\n\n"
+                f"{prefix} Backend/model load failed: {exc}.\n\n"
             )
 
     def on_cancel_job(self) -> None:
