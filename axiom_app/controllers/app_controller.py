@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from axiom_app.utils.background import BackgroundRunner, CancelToken
 from axiom_app.utils.document_loader import KREUZBERG_EXTENSIONS, is_kreuzberg_available, load_document
+from axiom_app.utils.llm_backends import LocalGGUFBackend, LocalGGUFConfig
 from axiom_app.utils.mock_embeddings import MockEmbeddings
 
 if TYPE_CHECKING:
@@ -107,6 +108,8 @@ class AppController:
         self._active_token: CancelToken | None = None
         self._active_future: Future | None = None
         self._log = logging.getLogger(__name__)
+        self._gguf_backend: LocalGGUFBackend | None = None
+        self._gguf_backend_config: LocalGGUFConfig | None = None
 
     # ------------------------------------------------------------------
     # Event wiring
@@ -377,6 +380,11 @@ class AppController:
         if not prompt.strip():
             return
 
+        llm_provider = str(self.model.settings.get("llm_provider", "")).strip().lower()
+        if llm_provider == "local_gguf":
+            self._send_prompt_direct_local_gguf(prompt)
+            return
+
         if not self.model.index_state.get("built"):
             self.view.append_chat(
                 "⚠  No index built yet.\n"
@@ -430,6 +438,71 @@ class AppController:
             scores[hits[0]] if hits else 0.0,
         )
 
+        self.view.switch_view("chat")
+
+    def _send_prompt_direct_local_gguf(self, prompt: str) -> None:
+        """Run direct generation using a local llama.cpp-style GGUF backend."""
+        model_path = str(self.model.settings.get("local_gguf_model_path", "")).strip()
+        if not model_path:
+            error_text = (
+                "⚠  Local GGUF model path is not configured.\n"
+                "   Set 'local_gguf_model_path' in Settings and try again.\n\n"
+            )
+            self.view.append_chat(error_text)
+            self.model.chat_history.append({"role": "user", "content": prompt})
+            self.model.chat_history.append({"role": "assistant", "content": error_text})
+            self.view.switch_view("chat")
+            return
+
+        config = LocalGGUFConfig(
+            model_path=model_path,
+            context_length=int(self.model.settings.get("local_gguf_context_length", 2048)),
+            gpu_layers=int(self.model.settings.get("local_gguf_gpu_layers", 0)),
+            threads=int(self.model.settings.get("local_gguf_threads", 0)),
+        )
+
+        if self._gguf_backend is None or self._gguf_backend_config != config:
+            try:
+                self._gguf_backend = LocalGGUFBackend(config)
+                self._gguf_backend_config = config
+            except Exception as exc:
+                self._log.exception(
+                    "Local GGUF backend initialization failed. "
+                    "Verify local_gguf_model_path exists and llama-cpp-python is installed. "
+                    "path=%s ctx=%s gpu_layers=%s threads=%s",
+                    config.model_path,
+                    config.context_length,
+                    config.gpu_layers,
+                    config.threads,
+                )
+                error_text = (
+                    "⚠  Could not initialize local GGUF backend.\n"
+                    f"   Details: {exc}\n\n"
+                )
+                self.view.append_chat(error_text)
+                self.model.chat_history.append({"role": "user", "content": prompt})
+                self.model.chat_history.append({"role": "assistant", "content": error_text})
+                self.view.switch_view("chat")
+                return
+
+        assert self._gguf_backend is not None
+        max_tokens = int(self.model.settings.get("llm_max_tokens", 1024))
+        temperature = float(self.model.settings.get("llm_temperature", 0.0))
+
+        try:
+            completion = self._gguf_backend.generate(
+                prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        except Exception as exc:
+            self._log.exception("Local GGUF generation failed for prompt length=%d", len(prompt))
+            completion = f"⚠  Local GGUF generation failed: {exc}"
+
+        response = f"You: {prompt}\n\nAxiom [local_gguf, direct]:\n{completion}\n\n"
+        self.view.append_chat(response)
+        self.model.chat_history.append({"role": "user", "content": prompt})
+        self.model.chat_history.append({"role": "assistant", "content": response})
         self.view.switch_view("chat")
 
     def on_cancel_job(self) -> None:
