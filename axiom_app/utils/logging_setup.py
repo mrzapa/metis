@@ -65,12 +65,29 @@ def setup_logging(
     """
     log_dir = pathlib.Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = (log_dir / _LOG_FILENAME).resolve()
 
     logger = logging.getLogger(_LOGGER_NAME)
 
-    # Idempotent: if handlers are already attached we were called before.
-    if logger.handlers:
-        return logger
+    file_level = (
+        getattr(logging, level.upper(), logging.DEBUG)
+        if isinstance(level, str)
+        else int(level)
+    )
+
+    # If already configured, only rebuild handlers when target file or level changed.
+    existing_file_handler = next(
+        (h for h in logger.handlers if isinstance(h, RotatingFileHandler)),
+        None,
+    )
+    if existing_file_handler is not None:
+        existing_path = pathlib.Path(existing_file_handler.baseFilename).resolve()
+        if existing_path == log_path and existing_file_handler.level == file_level:
+            return logger
+
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            handler.close()
 
     # The logger itself accepts everything; individual handlers filter.
     logger.setLevel(logging.DEBUG)
@@ -79,13 +96,8 @@ def setup_logging(
     formatter = logging.Formatter(_FMT, datefmt=_DATEFMT)
 
     # ── rotating file handler (DEBUG+, or caller-supplied level) ─────
-    file_level = (
-        getattr(logging, level.upper(), logging.DEBUG)
-        if isinstance(level, str)
-        else int(level)
-    )
     fh = RotatingFileHandler(
-        log_dir / _LOG_FILENAME,
+        log_path,
         maxBytes=5 * 1024 * 1024,   # 5 MB
         backupCount=3,
         encoding="utf-8",
