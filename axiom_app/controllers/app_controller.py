@@ -451,53 +451,10 @@ class AppController:
     def _handle_direct_prompt(self, prompt: str) -> None:
         """Handle direct-chat prompts without retrieval/index requirements."""
         settings = self.model.settings
-        provider = str(settings.get("llm_provider", "") or "").strip()
+        provider = str(settings.get("llm_provider", "mock") or "mock").strip() or "mock"
 
         if provider == "local_gguf":
-            model_path = str(settings.get("local_gguf_model_path", "") or "").strip()
-            if not model_path:
-                response = (
-                    f"You: {prompt}\n"
-                    "────────────────────────────────────────────────────\n"
-                    "Axiom [local_gguf, direct]: Local GGUF model path is not configured. "
-                    "Set local_gguf_model_path in Settings and try again.\n\n"
-                )
-            else:
-                config = LocalGGUFConfig(
-                    model_path=model_path,
-                    context_length=int(settings.get("local_gguf_context_length", 2048)),
-                    gpu_layers=int(settings.get("local_gguf_gpu_layers", 0)),
-                    threads=int(settings.get("local_gguf_threads", 0)),
-                )
-                try:
-                    if self._gguf_backend is None or self._gguf_backend_config != config:
-                        self._gguf_backend = LocalGGUFBackend(config)
-                        self._gguf_backend_config = config
-
-                    generated = self._gguf_backend.generate(
-                        prompt,
-                        max_tokens=int(settings.get("llm_max_tokens", 256)),
-                        temperature=float(settings.get("llm_temperature", 0.7)),
-                    )
-                    response = (
-                        f"You: {prompt}\n"
-                        "────────────────────────────────────────────────────\n"
-                        f"Axiom [local_gguf, direct]: {generated}\n\n"
-                    )
-                except Exception as exc:
-                    self._gguf_backend = None
-                    self._gguf_backend_config = None
-                    self._log.error(
-                        "Could not initialize local GGUF backend: %s. "
-                        "Verify local_gguf_model_path exists and llama-cpp-python is installed.",
-                        exc,
-                    )
-                    response = (
-                        f"You: {prompt}\n"
-                        "────────────────────────────────────────────────────\n"
-                        "Axiom [local_gguf, direct]: Could not initialize local GGUF backend. "
-                        "Verify the configured model path and dependencies, then try again.\n\n"
-                    )
+            response = self._handle_direct_prompt_local_gguf(prompt)
         else:
             response = (
                 f"You: {prompt}\n"
@@ -515,6 +472,54 @@ class AppController:
             prompt[:60],
         )
         self.view.switch_view("chat")
+
+    def _handle_direct_prompt_local_gguf(self, prompt: str) -> str:
+        """Handle direct-chat prompts with the Local GGUF provider."""
+        settings = self.model.settings
+        model_path = str(settings.get("local_gguf_model_path", "") or "").strip()
+        if not model_path:
+            return (
+                f"You: {prompt}\n"
+                "────────────────────────────────────────────────────\n"
+                "Axiom [local_gguf, direct]: Local GGUF model path is not configured. "
+                "Set local_gguf_model_path in Settings and try again.\n\n"
+            )
+
+        config = LocalGGUFConfig(
+            model_path=model_path,
+            context_length=int(settings.get("local_gguf_context_length", 2048)),
+            gpu_layers=int(settings.get("local_gguf_gpu_layers", 0)),
+            threads=int(settings.get("local_gguf_threads", 0)),
+        )
+        try:
+            if self._gguf_backend is None or self._gguf_backend_config != config:
+                self._gguf_backend = LocalGGUFBackend(config)
+                self._gguf_backend_config = config
+
+            generated = self._gguf_backend.generate(
+                prompt,
+                max_tokens=int(settings.get("llm_max_tokens", 256)),
+                temperature=float(settings.get("llm_temperature", 0.7)),
+            )
+            return (
+                f"You: {prompt}\n"
+                "────────────────────────────────────────────────────\n"
+                f"Axiom [local_gguf, direct]: {generated}\n\n"
+            )
+        except Exception as exc:
+            self._gguf_backend = None
+            self._gguf_backend_config = None
+            self._log.error(
+                "Could not initialize local GGUF backend: %s. "
+                "Verify local_gguf_model_path exists and llama-cpp-python is installed.",
+                exc,
+            )
+            return (
+                f"You: {prompt}\n"
+                "────────────────────────────────────────────────────\n"
+                "Axiom [local_gguf, direct]: Could not initialize local GGUF backend. "
+                "Verify the configured model path and dependencies, then try again.\n\n"
+            )
 
     def on_cancel_job(self) -> None:
         """Cancel any running background job."""
