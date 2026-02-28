@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import queue
 import sys
 import threading
 import tkinter as tk
@@ -101,7 +102,8 @@ def run_app() -> None:
 
         # ── 7. Initial UI state + reveal ──────────────────────────────
         index_state = "built" if model.index_state.get("built") else "not built"
-        view.set_status(f"Documents: {len(model.documents)}  |  Index: {index_state}")
+        base_status = f"Documents: {len(model.documents)}  |  Index: {index_state}"
+        view.set_status(base_status)
         view.append_log("Axiom MVC skeleton started (AXIOM_NEW_APP=1).\n")
         view.show()
 
