@@ -1125,6 +1125,7 @@ class AppView:
         self._use_rag_var.set(
             str(self._settings_data.get("chat_path", "RAG")).strip().lower() != "direct"
         )
+        self._refresh_llm_badge()
         if not self._tab_built.get("settings"):
             # Tab not yet built — data is stored and will be read by
             # _build_settings_view() when the user first opens Settings.
@@ -1152,6 +1153,7 @@ class AppView:
                         var.set(str(val))
                 except tk.TclError:
                     pass
+        self._refresh_llm_badge()
 
     def collect_settings(self) -> dict:
         """Read all settings widget values and return as a flat dict.
@@ -1230,6 +1232,9 @@ class AppView:
     def _on_llm_provider_changed(self, _event: tk.Event | None = None) -> None:
         """When LLM provider is switched to local_gguf, open the GGUF file browser."""
         entry = self._settings_entries.get("llm_provider")
+        if entry and entry[1] is not None:
+            self._settings_data["llm_provider"] = entry[1].get()
+            self._refresh_llm_badge()
         if entry and entry[1] is not None and entry[1].get() == "local_gguf":
             self._browse_gguf_file()
 
@@ -1251,12 +1256,24 @@ class AppView:
             ("llm_model",             stem),
             ("llm_model_custom",      stem),
         ]:
+            self._settings_data[key] = value
             entry = self._settings_entries.get(key)
             if entry and entry[1] is not None:
                 try:
                     entry[1].set(value)
                 except tk.TclError:
                     pass
+        self._refresh_llm_badge()
+
+    def _refresh_llm_badge(self) -> None:
+        """Show active provider/model in the chat header badge."""
+        provider = str(self._settings_data.get("llm_provider", "") or "").strip() or "--"
+        model = (
+            str(self._settings_data.get("llm_model", "") or "").strip()
+            or str(self._settings_data.get("llm_model_custom", "") or "").strip()
+            or "--"
+        )
+        self._llm_badge_var.set(f"🤖 LLM: {provider} / {model}")
 
     # ------------------------------------------------------------------
     # Internal helpers
