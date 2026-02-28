@@ -1,0 +1,50 @@
+name: Release Axiom MVC Windows EXE
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+
+      - name: Build Axiom MVC executable
+        shell: bash
+        run: |
+          bash scripts/build_windows_exe.sh
+
+      - name: Create release archive
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          cp dist/Axiom.exe release-artifacts/Axiom.exe
+          cd release-artifacts
+          7z a Axiom-windows-x64.zip Axiom.exe
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Axiom-windows-x64
+          path: release-artifacts/Axiom-windows-x64.zip
+
+      - name: Attach artifact to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/Axiom-windows-x64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
