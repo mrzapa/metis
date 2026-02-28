@@ -244,6 +244,7 @@ class AppView:
         # Settings display data — populated by controller via populate_settings().
         self._settings_data: dict = {}
         self._settings_entries: dict = {}          # key -> (ttk.Entry, tk.StringVar)
+        self._mode_state_callback = None
 
         # Logs tab text widget — None until _build_logs_view() runs.
         self._logs_view_text: tk.Text | None = None
@@ -260,6 +261,10 @@ class AppView:
 
         apply_ttk_theme(root, self._palette, self._fonts)
         self._build()
+
+        # Keep toolbar mode widgets and canonical settings keys in sync.
+        self._mode_var.trace_add("write", self._on_mode_var_changed)
+        self._use_rag_var.trace_add("write", self._on_chat_path_var_changed)
 
     # ------------------------------------------------------------------
     # Theme
@@ -436,6 +441,7 @@ class AppView:
             options=["RAG", "Direct"],
             variable=self._use_rag_var,
             palette=pal,
+            command=self._on_rag_toggle_clicked,
         )
         self._rag_toggle.pack(side="left", padx=(0, UI_SPACING["s"]))
 
@@ -1111,6 +1117,10 @@ class AppView:
         before or after the Settings tab is first opened.
         """
         self._settings_data = dict(settings)
+        self._mode_var.set(str(self._settings_data.get("selected_mode", MODE_OPTIONS[0])))
+        self._use_rag_var.set(
+            str(self._settings_data.get("chat_path", "RAG")).strip().lower() != "direct"
+        )
         if not self._tab_built.get("settings"):
             # Tab not yet built — data is stored and will be read by
             # _build_settings_view() when the user first opens Settings.
@@ -1132,7 +1142,10 @@ class AppView:
                     var.set(False)
             else:
                 try:
-                    var.set(str(val))
+                    if key == "selected_mode":
+                        var.set(self._mode_var.get())
+                    else:
+                        var.set(str(val))
                 except tk.TclError:
                     pass
 
@@ -1162,7 +1175,44 @@ class AppView:
                     result[key] = var.get()
                 except tk.TclError:
                     result[key] = ""
+
+        result["selected_mode"] = self._mode_var.get()
+        result["chat_path"] = "RAG" if self._use_rag_var.get() else "Direct"
         return result
+
+    def set_mode_state_callback(self, callback) -> None:
+        """Register callback invoked when selected_mode/chat_path changes."""
+        self._mode_state_callback = callback
+
+    def _emit_mode_state(self) -> None:
+        chat_path = "RAG" if self._use_rag_var.get() else "Direct"
+        self._settings_data["selected_mode"] = self._mode_var.get()
+        self._settings_data["chat_path"] = chat_path
+
+        mode_entry = self._settings_entries.get("selected_mode")
+        if mode_entry is not None:
+            _, mode_var = mode_entry
+            if mode_var is not None and mode_var.get() != self._mode_var.get():
+                mode_var.set(self._mode_var.get())
+
+        if callable(self._mode_state_callback):
+            self._mode_state_callback({
+                "selected_mode": self._mode_var.get(),
+                "chat_path": chat_path,
+            })
+
+    def _on_mode_var_changed(self, *_args) -> None:
+        self._emit_mode_state()
+
+    def _on_chat_path_var_changed(self, *_args) -> None:
+        self._emit_mode_state()
+        try:
+            self._rag_toggle._draw()
+        except Exception:
+            pass
+
+    def _on_rag_toggle_clicked(self) -> None:
+        self._use_rag_var.set(not self._use_rag_var.get())
 
     def show(self) -> None:
         """Make the window visible."""

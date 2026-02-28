@@ -131,6 +131,7 @@ class AppController:
         # Chat view widgets
         self.view.btn_send.configure(command=self._on_send_clicked)
         self.view.btn_cancel_rag.configure(command=self.on_cancel_job)
+        self.view.set_mode_state_callback(self._on_mode_state_changed)
 
         # Ctrl+Enter / Return in the multi-line Text input submits
         self.view.prompt_entry.bind("<Return>",
@@ -139,6 +140,11 @@ class AppController:
         # Pass loaded settings to the view for display in the Settings tab.
         # Called last so the settings tab is already built and widgets update immediately.
         self.view.populate_settings(self.model.settings)
+
+    def _on_mode_state_changed(self, mode_state: dict[str, str]) -> None:
+        """Keep runtime canonical chat mode state in the model settings."""
+        self.model.settings["selected_mode"] = mode_state.get("selected_mode", "Q&A")
+        self.model.settings["chat_path"] = mode_state.get("chat_path", "RAG")
 
     # ------------------------------------------------------------------
     # Background task management
@@ -377,10 +383,28 @@ class AppController:
         if not prompt.strip():
             return
 
+        selected_mode = str(self.model.settings.get("selected_mode", "Q&A")).strip() or "Q&A"
+        chat_path = str(self.model.settings.get("chat_path", "RAG")).strip().lower()
+
+        if chat_path == "direct":
+            response = (
+                f"You: {prompt}\n"
+                f"{'─' * 52}\n"
+                f"Axiom [direct, mode={selected_mode}]:\n\n"
+                "Direct mode is active, so retrieval was skipped.\n"
+                "(LLM synthesis is not wired yet in this MVC slice.)\n\n"
+            )
+            self.view.append_chat(response)
+            self.model.chat_history.append({"role": "user", "content": prompt})
+            self.model.chat_history.append({"role": "assistant", "content": response})
+            self._log.info("Query answered in direct path (mode=%s)", selected_mode)
+            self.view.switch_view("chat")
+            return
+
         if not self.model.index_state.get("built"):
             self.view.append_chat(
                 "⚠  No index built yet.\n"
-                "   Open a text file and click 'Build Index' first.\n\n"
+                "   Open a text file and click 'Build Index' first, or switch to Direct mode.\n\n"
             )
             self.view.switch_view("chat")
             return
@@ -400,7 +424,7 @@ class AppController:
         else:
             n_chunks = len(self.model.embeddings)
             lines.append(
-                f"Axiom [mock, {n_chunks} chunk(s) indexed]:\n\n"
+                f"Axiom [mock rag, mode={selected_mode}, {n_chunks} chunk(s) indexed]:\n\n"
                 f"Top {min(top_k, len(hits))} passage(s) by cosine similarity:\n\n"
             )
             for rank, idx in enumerate(hits, 1):
