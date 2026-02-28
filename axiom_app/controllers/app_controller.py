@@ -121,6 +121,11 @@ class AppController:
         self.view.switch_view("library")
         self.view.btn_open_files.configure(command=self.on_open_files)
         self.view.btn_build_index.configure(command=self.on_build_index)
+
+        # Settings view (lazily built) — force build now so btn_save_settings exists.
+        self.view.switch_view("settings")
+        self.view.btn_save_settings.configure(command=self.on_save_settings)
+
         self.view.switch_view("chat")
 
         # Chat view widgets
@@ -132,6 +137,7 @@ class AppController:
                                    lambda _e: self._on_send_clicked() or "break")
 
         # Pass loaded settings to the view for display in the Settings tab.
+        # Called last so the settings tab is already built and widgets update immediately.
         self.view.populate_settings(self.model.settings)
 
     # ------------------------------------------------------------------
@@ -429,3 +435,107 @@ class AppController:
     def on_cancel_job(self) -> None:
         """Cancel any running background job."""
         self.cancel_current_task()
+
+    def on_save_settings(self) -> None:
+        """Collect settings from the view, coerce types, and persist via the model.
+
+        Called when the user clicks "Save Settings" in the Settings pane.
+        Validates all numeric fields and shows a messagebox on error or success.
+        """
+        from tkinter import messagebox  # lazy; only valid while Tk is running
+
+        raw = self.view.collect_settings()
+
+        # ── Type coercion tables ────────────────────────────────────────
+        # (key, cast_fn, clamp_min_or_None, clamp_max_or_None)
+        _INT_FIELDS = [
+            ("chunk_size",                int, 1,   None),
+            ("chunk_overlap",             int, 0,   None),
+            ("top_k",                     int, 1,   None),
+            ("retrieval_k",               int, 1,   None),
+            ("llm_max_tokens",            int, 1,   None),
+            ("local_gguf_context_length", int, 128, None),
+            ("local_gguf_gpu_layers",     int, 0,   None),
+            ("local_gguf_threads",        int, 0,   None),
+            ("local_st_batch_size",       int, 1,   None),
+            ("agentic_max_iterations",    int, 1,   10),
+            ("subquery_max_docs",         int, 1,   None),
+            ("chat_history_max_turns",    int, 1,   None),
+        ]
+        _FLOAT_FIELDS = [
+            ("llm_temperature", float, 0.0, 2.0),
+            ("mmr_lambda",      float, 0.0, 1.0),
+        ]
+        _BOOL_FIELDS = [
+            "verbose_mode", "force_embedding_compat",
+            "structure_aware_ingestion", "semantic_layout_ingestion",
+            "build_digest_index", "build_comprehension_index",
+            "use_reranker", "use_sub_queries",
+            "agentic_mode", "show_retrieved_context",
+            "enable_summarizer", "enable_langextract",
+            "enable_structured_extraction", "enable_recursive_memory",
+            "enable_recursive_retrieval", "enable_citation_v2",
+            "enable_claim_level_grounding_citefix_lite",
+            "agent_lightning_enabled", "prefer_comprehension_index",
+        ]
+
+        coerced: dict[str, Any] = {}
+        errors: list[str] = []
+
+        for key, cast_fn, lo, hi in _INT_FIELDS:
+            raw_val = raw.get(key, "")
+            try:
+                v = cast_fn(str(raw_val).strip())
+                if lo is not None:
+                    v = max(lo, v)
+                if hi is not None:
+                    v = min(hi, v)
+                coerced[key] = v
+            except (ValueError, TypeError):
+                errors.append(f"'{key}' must be a whole number (got: {raw_val!r})")
+
+        for key, cast_fn, lo, hi in _FLOAT_FIELDS:
+            raw_val = raw.get(key, "")
+            try:
+                v = cast_fn(str(raw_val).strip())
+                if lo is not None:
+                    v = max(lo, v)
+                if hi is not None:
+                    v = min(hi, v)
+                coerced[key] = v
+            except (ValueError, TypeError):
+                errors.append(f"'{key}' must be a number (got: {raw_val!r})")
+
+        for key in _BOOL_FIELDS:
+            coerced[key] = bool(raw.get(key, False))
+
+        # All remaining keys are strings — strip whitespace.
+        _typed_keys = (
+            {k for k, *_ in _INT_FIELDS}
+            | {k for k, *_ in _FLOAT_FIELDS}
+            | set(_BOOL_FIELDS)
+        )
+        for key, val in raw.items():
+            if key not in _typed_keys:
+                coerced[key] = str(val).strip() if isinstance(val, str) else val
+
+        if errors:
+            messagebox.showerror(
+                "Invalid Settings",
+                "Please fix these errors before saving:\n\n"
+                + "\n".join(f"• {e}" for e in errors),
+            )
+            return
+
+        try:
+            self.model.save_settings(coerced)
+        except OSError as exc:
+            messagebox.showerror(
+                "Save Failed",
+                f"Could not write settings.json:\n{exc}",
+            )
+            self._log.error("save_settings failed: %s", exc)
+            return
+
+        self.view.set_status("Settings saved to settings.json.")
+        self._log.info("Settings saved successfully (%d keys).", len(coerced))

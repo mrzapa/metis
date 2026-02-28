@@ -75,6 +75,134 @@ MODE_OPTIONS = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"]
 
 _SIDEBAR_W = 230  # fixed sidebar width in px
 
+# ---------------------------------------------------------------------------
+# Settings specification — module-level so it is defined once, not per-call.
+# Format per row: (setting_key, display_label, widget_type, options_or_None)
+# widget_type in: "combobox" | "entry" | "entry_password" | "checkbutton" | "text"
+# ---------------------------------------------------------------------------
+
+_SETTINGS_SPEC: list[tuple[str, list]] = [
+    ("UI & Startup", [
+        ("theme",                "Theme",         "combobox",
+            ["space_dust", "light", "dark"]),
+        ("startup_mode_setting", "Startup Mode",  "combobox",
+            ["advanced", "basic", "test"]),
+        ("ui_backend",           "UI Backend",    "combobox",
+            ["ttk"]),
+    ]),
+    ("LLM", [
+        ("llm_provider",    "LLM Provider",  "combobox",
+            ["anthropic", "openai", "google", "xai",
+             "local_lm_studio", "local_gguf", "mock"]),
+        ("llm_model",       "LLM Model",     "entry",       None),
+        ("llm_model_custom","Custom Model",  "entry",       None),
+        ("llm_temperature", "Temperature",   "entry",       None),
+        ("llm_max_tokens",  "Max Tokens",    "entry",       None),
+        ("verbose_mode",    "Verbose Mode",  "checkbutton", None),
+    ]),
+    ("Local LLM", [
+        ("local_llm_url",             "LM Studio URL",   "entry", None),
+        ("local_gguf_model_path",     "GGUF Model Path", "entry", None),
+        ("local_gguf_context_length", "Context Length",  "entry", None),
+        ("local_gguf_gpu_layers",     "GPU Layers",      "entry", None),
+        ("local_gguf_threads",        "CPU Threads",     "entry", None),
+    ]),
+    ("System Instructions", [
+        ("system_instructions", "System Prompt", "text", None),
+    ]),
+    ("Embeddings", [
+        ("embeddings_backend",    "Backend",          "combobox",
+            ["mock", "sentence_transformers", "voyage", "openai"]),
+        ("embedding_provider",    "Provider",         "combobox",
+            ["voyage", "openai", "google",
+             "local_huggingface", "local_sentence_transformers", "mock"]),
+        ("embedding_model",       "Model",            "entry", None),
+        ("embedding_model_custom","Custom Model",     "entry", None),
+        ("sentence_transformers_model", "ST Model",   "entry", None),
+        ("local_st_cache_dir",    "ST Cache Dir",     "entry", None),
+        ("local_st_batch_size",   "ST Batch Size",    "entry", None),
+        ("force_embedding_compat","Force Compat",     "checkbutton", None),
+        ("cache_dir",             "Axiom Cache Dir",  "entry", None),
+    ]),
+    ("Vector DB", [
+        ("vector_db_type",  "DB Type",       "combobox",
+            ["chroma", "weaviate"]),
+        ("weaviate_url",    "Weaviate URL",  "entry",          None),
+        ("weaviate_api_key","Weaviate Key",  "entry_password", None),
+    ]),
+    ("API Keys", [
+        ("api_key_openai",       "OpenAI",       "entry_password", None),
+        ("api_key_anthropic",    "Anthropic",    "entry_password", None),
+        ("api_key_google",       "Google",       "entry_password", None),
+        ("api_key_xai",          "xAI",          "entry_password", None),
+        ("api_key_cohere",       "Cohere",       "entry_password", None),
+        ("api_key_mistral",      "Mistral",      "entry_password", None),
+        ("api_key_groq",         "Groq",         "entry_password", None),
+        ("api_key_azure_openai", "Azure OpenAI", "entry_password", None),
+        ("api_key_together",     "Together AI",  "entry_password", None),
+        ("api_key_voyage",       "Voyage",       "entry_password", None),
+        ("api_key_huggingface",  "HuggingFace",  "entry_password", None),
+        ("api_key_fireworks",    "Fireworks",    "entry_password", None),
+        ("api_key_perplexity",   "Perplexity",   "entry_password", None),
+    ]),
+    ("Ingestion", [
+        ("document_loader",              "Document Loader",     "combobox",
+            ["auto", "plain"]),
+        ("chunk_size",                   "Chunk Size",          "entry", None),
+        ("chunk_overlap",                "Chunk Overlap",       "entry", None),
+        ("structure_aware_ingestion",    "Structure-Aware",     "checkbutton", None),
+        ("semantic_layout_ingestion",    "Semantic Layout",     "checkbutton", None),
+        ("build_digest_index",           "Build Digest Index",  "checkbutton", None),
+        ("build_comprehension_index",    "Build Comprehension", "checkbutton", None),
+        ("comprehension_extraction_depth","Extraction Depth",   "combobox",
+            ["Standard", "Deep", "Exhaustive"]),
+    ]),
+    ("Retrieval", [
+        ("top_k",           "Top-K (final)",   "entry",    None),
+        ("retrieval_k",     "Retrieval K",     "entry",    None),
+        ("retrieval_mode",  "Retrieval Mode",  "combobox",
+            ["flat", "hierarchical"]),
+        ("search_type",     "Search Type",     "combobox",
+            ["similarity", "mmr"]),
+        ("mmr_lambda",      "MMR Lambda",      "entry",    None),
+        ("use_reranker",    "Use Reranker",    "checkbutton", None),
+        ("use_sub_queries", "Sub-Queries",     "checkbutton", None),
+        ("subquery_max_docs","Max Sub-Q Docs", "entry",    None),
+    ]),
+    ("Session", [
+        ("chat_history_max_turns", "History Turns", "entry", None),
+        ("output_style", "Output Style", "combobox",
+            ["Default answer", "Detailed answer", "Brief / exec summary",
+             "Script / talk track", "Structured report", "Blinkist-style summary"]),
+        ("selected_mode", "Mode", "combobox",
+            ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"]),
+    ]),
+    ("Agentic", [
+        ("agentic_mode",           "Agentic Mode",   "checkbutton", None),
+        ("agentic_max_iterations", "Max Iterations", "entry",       None),
+        ("show_retrieved_context", "Show Context",   "checkbutton", None),
+    ]),
+    ("Frontier / Advanced", [
+        ("enable_summarizer",                       "Summarizer",           "checkbutton", None),
+        ("enable_langextract",                      "LangExtract",          "checkbutton", None),
+        ("enable_structured_extraction",            "Structured Extraction","checkbutton", None),
+        ("enable_recursive_memory",                 "Recursive Memory",     "checkbutton", None),
+        ("enable_recursive_retrieval",              "Recursive Retrieval",  "checkbutton", None),
+        ("enable_citation_v2",                      "Citation v2",          "checkbutton", None),
+        ("enable_claim_level_grounding_citefix_lite","CiteFix Lite",        "checkbutton", None),
+        ("agent_lightning_enabled",                 "Lightning Mode",       "checkbutton", None),
+        ("prefer_comprehension_index",              "Prefer Comprehension", "checkbutton", None),
+    ]),
+    ("Logging", [
+        ("log_dir",   "Log Directory", "entry",    None),
+        ("log_level", "Log Level",     "combobox",
+            ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
+    ]),
+]
+
+# Sections expanded by default on first open
+_SETTINGS_EXPANDED = {"UI & Startup", "LLM", "Embeddings"}
+
 
 class AppView:
     """Root window with sidebar navigation and lazy-loaded content views.
@@ -121,11 +249,12 @@ class AppView:
         # Accumulates all log lines before the Logs tab is first opened.
         self._log_buffer: list[str] = []
 
-        # Will be set by _build_chat_view() / _build_library_view():
+        # Will be set by _build_chat_view() / _build_library_view() / _build_settings_view():
         self.btn_send: ttk.Button
         self.btn_open_files: ttk.Button
         self.btn_build_index: ttk.Button
         self.btn_cancel_rag: ttk.Button
+        self.btn_save_settings: ttk.Button
         self.prompt_entry: tk.Text   # aliased from txt_input
 
         apply_ttk_theme(root, self._palette, self._fonts)
@@ -568,10 +697,11 @@ class AppView:
         ).grid(row=0, column=0, sticky="nsew")
 
     def _build_settings_view(self) -> None:
-        """Settings view: scrollable read-only form of active settings."""
+        """Settings view: scrollable editable settings pane with collapsible sections."""
         pal = self._palette
         frame = self._views["settings"]
         frame.rowconfigure(1, weight=1)
+        frame.rowconfigure(2, weight=0)
         frame.columnconfigure(0, weight=1)
 
         # ── Header ────────────────────────────────────────────────────
@@ -601,7 +731,7 @@ class AppView:
 
         # Inner frame lives inside the canvas window
         inner = ttk.Frame(canvas, style="Card.TFrame")
-        inner.columnconfigure(1, weight=1)
+        inner.columnconfigure(0, weight=1)
 
         canvas_window = canvas.create_window((0, 0), window=inner, anchor="nw")
 
@@ -622,91 +752,123 @@ class AppView:
 
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
-        # ── Section definitions ────────────────────────────────────────
-        sections = [
-            ("UI", [
-                ("ui_backend",  "UI Backend"),
-                ("theme",       "Theme"),
-            ]),
-            ("Embeddings", [
-                ("embeddings_backend",         "Embeddings Backend"),
-                ("sentence_transformers_model", "Sentence Transformers Model"),
-                ("cache_dir",                  "Cache Directory"),
-            ]),
-            ("Ingestion", [
-                ("chunk_size",      "Chunk Size"),
-                ("chunk_overlap",   "Chunk Overlap"),
-                ("document_loader", "Document Loader"),
-            ]),
-            ("Retrieval", [
-                ("top_k", "Top-K Results"),
-            ]),
-            ("Logging", [
-                ("log_dir",   "Log Directory"),
-                ("log_level", "Log Level"),
-            ]),
-        ]
-
-        row_idx = 0
-        for section_title, keys in sections:
-            ttk.Label(
+        # ── Build collapsible sections ─────────────────────────────────
+        for sec_row, (section_title, field_specs) in enumerate(_SETTINGS_SPEC):
+            expanded = section_title in _SETTINGS_EXPANDED
+            coll = CollapsibleFrame(
                 inner,
-                text=section_title.upper(),
-                style="Overline.TLabel",
-            ).grid(
-                row=row_idx, column=0, columnspan=2, sticky="w",
-                padx=UI_SPACING["m"],
-                pady=(UI_SPACING["l"] if row_idx > 0 else UI_SPACING["m"],
-                      UI_SPACING["xs"]),
+                title=section_title,
+                expanded=expanded,
+                animator=self._animator,
             )
-            row_idx += 1
+            coll.grid(row=sec_row, column=0, sticky="ew",
+                      padx=UI_SPACING["s"],
+                      pady=(UI_SPACING["xs"] if sec_row == 0 else 0, 0))
+            coll.content.columnconfigure(1, weight=1)
 
-            ttk.Separator(inner, orient="horizontal").grid(
-                row=row_idx, column=0, columnspan=2, sticky="ew",
-                padx=UI_SPACING["m"], pady=(0, UI_SPACING["xs"]),
-            )
-            row_idx += 1
+            for field_row, (key, label, wtype, options) in enumerate(field_specs):
+                val = self._settings_data.get(key, "")
 
-            for key, display_label in keys:
-                ttk.Label(
-                    inner,
-                    text=display_label,
-                    style="Caption.TLabel",
-                    anchor="e",
-                    width=26,
-                ).grid(
-                    row=row_idx, column=0, sticky="e",
-                    padx=(UI_SPACING["m"], UI_SPACING["s"]),
-                    pady=(0, UI_SPACING["xs"]),
-                )
-                val = str(self._settings_data.get(key, ""))
-                entry_var = tk.StringVar(value=val)
-                entry = ttk.Entry(
-                    inner,
-                    textvariable=entry_var,
-                    state="readonly",
-                    font=self._fonts["code"],
-                )
-                entry.grid(
-                    row=row_idx, column=1, sticky="ew",
-                    padx=(0, UI_SPACING["m"]),
-                    pady=(0, UI_SPACING["xs"]),
-                )
-                self._settings_entries[key] = (entry, entry_var)
-                row_idx += 1
+                if wtype == "text":
+                    # Full-width multi-line text widget (e.g. system_instructions)
+                    ttk.Label(
+                        coll.content,
+                        text=label,
+                        style="Caption.TLabel",
+                    ).grid(row=field_row * 2, column=0, columnspan=2,
+                           sticky="w",
+                           padx=UI_SPACING["m"],
+                           pady=(UI_SPACING["xs"], 0))
+                    widget = tk.Text(
+                        coll.content,
+                        height=6,
+                        wrap=tk.WORD,
+                        font=self._fonts["body"],
+                        bg=pal.get("input_bg", "#07101A"),
+                        fg=pal["text"],
+                        insertbackground=pal["text"],
+                        relief="flat",
+                        borderwidth=0,
+                        highlightthickness=1,
+                        highlightbackground=pal.get("outline", "#2A3E58"),
+                    )
+                    widget.insert("1.0", str(val))
+                    widget.grid(row=field_row * 2 + 1, column=0, columnspan=2,
+                                sticky="ew",
+                                padx=UI_SPACING["m"],
+                                pady=(UI_SPACING["xs"], UI_SPACING["xs"]))
+                    self._settings_entries[key] = (widget, None)
 
-        # Bottom spacer
+                else:
+                    ttk.Label(
+                        coll.content,
+                        text=label,
+                        style="Caption.TLabel",
+                        anchor="e",
+                        width=24,
+                    ).grid(row=field_row, column=0, sticky="e",
+                           padx=(UI_SPACING["m"], UI_SPACING["s"]),
+                           pady=(0, UI_SPACING["xs"]))
+
+                    if wtype == "checkbutton":
+                        var: tk.Variable = tk.BooleanVar(value=bool(val))
+                        widget = ttk.Checkbutton(coll.content, variable=var)
+                        widget.grid(row=field_row, column=1, sticky="w",
+                                    padx=(0, UI_SPACING["m"]),
+                                    pady=(0, UI_SPACING["xs"]))
+
+                    elif wtype == "combobox":
+                        var = tk.StringVar(value=str(val))
+                        widget = ttk.Combobox(
+                            coll.content,
+                            textvariable=var,
+                            values=options,
+                            state="readonly",
+                            font=self._fonts["code"],
+                        )
+                        widget.grid(row=field_row, column=1, sticky="ew",
+                                    padx=(0, UI_SPACING["m"]),
+                                    pady=(0, UI_SPACING["xs"]))
+
+                    elif wtype == "entry_password":
+                        var = tk.StringVar(value=str(val))
+                        widget = ttk.Entry(
+                            coll.content,
+                            textvariable=var,
+                            show="*",
+                            font=self._fonts["code"],
+                        )
+                        widget.grid(row=field_row, column=1, sticky="ew",
+                                    padx=(0, UI_SPACING["m"]),
+                                    pady=(0, UI_SPACING["xs"]))
+
+                    else:  # plain "entry"
+                        var = tk.StringVar(value=str(val))
+                        widget = ttk.Entry(
+                            coll.content,
+                            textvariable=var,
+                            font=self._fonts["code"],
+                        )
+                        widget.grid(row=field_row, column=1, sticky="ew",
+                                    padx=(0, UI_SPACING["m"]),
+                                    pady=(0, UI_SPACING["xs"]))
+
+                    self._settings_entries[key] = (widget, var)
+
+        # Bottom spacer inside the scroll area
         ttk.Frame(inner, style="Card.TFrame", height=UI_SPACING["l"]).grid(
-            row=row_idx, column=0, columnspan=2,
+            row=len(_SETTINGS_SPEC), column=0,
         )
 
-        # ── Footer ────────────────────────────────────────────────────
+        # ── Footer with Save button ────────────────────────────────────
         footer = ttk.Frame(frame, style="Card.Flat.TFrame",
                            padding=(UI_SPACING["m"], UI_SPACING["s"]))
         footer.grid(row=2, column=0, sticky="ew")
+        self.btn_save_settings = ttk.Button(footer, text="Save Settings")
+        self.btn_save_settings.pack(side="left", padx=(0, UI_SPACING["s"]))
         ttk.Label(
             footer,
-            text="Edit settings.json at repository root to modify.",
+            text="Saves to settings.json at repository root.",
             style="Caption.TLabel",
         ).pack(side="left")
 
@@ -916,9 +1078,54 @@ class AppView:
             # Tab not yet built — data is stored and will be read by
             # _build_settings_view() when the user first opens Settings.
             return
-        # Tab already built — update existing StringVars in place.
-        for key, (_entry, var) in self._settings_entries.items():
-            var.set(str(self._settings_data.get(key, "")))
+        # Tab already built — update existing widget variables in place.
+        for key, (widget, var) in self._settings_entries.items():
+            val = self._settings_data.get(key, "")
+            if var is None:
+                # tk.Text widget (system_instructions)
+                try:
+                    widget.delete("1.0", "end")
+                    widget.insert("1.0", str(val))
+                except tk.TclError:
+                    pass
+            elif isinstance(var, tk.BooleanVar):
+                try:
+                    var.set(bool(val))
+                except (tk.TclError, ValueError):
+                    var.set(False)
+            else:
+                try:
+                    var.set(str(val))
+                except tk.TclError:
+                    pass
+
+    def collect_settings(self) -> dict:
+        """Read all settings widget values and return as a flat dict.
+
+        For tk.Text widgets the full text content is returned.
+        For BooleanVar a Python bool is returned.
+        For StringVar the current string is returned.
+        Type coercion (str→int/float) is the controller's responsibility.
+        """
+        result: dict = {}
+        for key, (widget, var) in self._settings_entries.items():
+            if var is None:
+                # tk.Text widget
+                try:
+                    result[key] = widget.get("1.0", "end-1c")
+                except tk.TclError:
+                    result[key] = ""
+            elif isinstance(var, tk.BooleanVar):
+                try:
+                    result[key] = var.get()
+                except tk.TclError:
+                    result[key] = False
+            else:
+                try:
+                    result[key] = var.get()
+                except tk.TclError:
+                    result[key] = ""
+        return result
 
     def show(self) -> None:
         """Make the window visible."""

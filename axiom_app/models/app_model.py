@@ -116,6 +116,30 @@ class AppModel:
 
         self.logger.debug("Active settings: %s", self.settings)
 
+    def save_settings(self, settings_dict: dict[str, Any]) -> None:
+        """Persist *settings_dict* to ``<repo_root>/settings.json``.
+
+        Writes the full merged dict as formatted JSON, then updates
+        ``self.settings`` so the in-memory view stays consistent without
+        requiring a full reload.
+
+        Raises
+        ------
+        OSError
+            If the file cannot be written (propagated to the caller).
+        """
+        merged = dict(self.settings)
+        merged.update(settings_dict)
+        merged.pop("_comment", None)
+        _USER_SETTINGS_PATH.write_text(
+            json.dumps(merged, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        self.settings = merged
+        self.logger.info(
+            "Settings saved to %s (%d key(s))", _USER_SETTINGS_PATH, len(merged)
+        )
+
     # ------------------------------------------------------------------
     # Documents
     # ------------------------------------------------------------------
