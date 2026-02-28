@@ -453,36 +453,10 @@ class AppController:
     def _handle_direct_prompt(self, prompt: str) -> None:
         """Handle direct-chat prompts without retrieval/index requirements."""
         settings = self.model.settings
-        provider = str(settings.get("llm_provider", "") or "").strip()
+        provider = str(settings.get("llm_provider", "mock") or "mock").strip() or "mock"
 
         if provider == "local_gguf":
-            backend, init_error = self._get_local_gguf_backend(settings)
-            if init_error is not None or backend is None:
-                response = (
-                    f"You: {prompt}\n"
-                    "────────────────────────────────────────────────────\n"
-                    f"Axiom [local_gguf, direct]: {init_error}\n\n"
-                )
-            else:
-                try:
-                    generated = backend.generate(
-                        prompt,
-                        max_tokens=int(settings.get("llm_max_tokens", 256)),
-                        temperature=float(settings.get("llm_temperature", 0.7)),
-                    )
-                    response = (
-                        f"You: {prompt}\n"
-                        "────────────────────────────────────────────────────\n"
-                        f"Axiom [local_gguf, direct]: {generated}\n\n"
-                    )
-                except Exception as exc:
-                    self._log.error("Local GGUF generation failed: %s", exc)
-                    response = (
-                        f"You: {prompt}\n"
-                        "────────────────────────────────────────────────────\n"
-                        "Axiom [local_gguf, direct]: Could not generate with local GGUF backend. "
-                        "Verify model settings and try again.\n\n"
-                    )
+            response = self._handle_direct_prompt_local_gguf(prompt)
         else:
             response = (
                 f"You: {prompt}\n"
@@ -501,61 +475,53 @@ class AppController:
         )
         self.view.switch_view("chat")
 
-    def _build_local_gguf_config(self, settings: dict[str, Any]) -> LocalGGUFConfig:
-        """Build a LocalGGUFConfig from application settings."""
-        return LocalGGUFConfig(
-            model_path=str(settings.get("local_gguf_model_path", "") or "").strip(),
+    def _handle_direct_prompt_local_gguf(self, prompt: str) -> str:
+        """Handle direct-chat prompts with the Local GGUF provider."""
+        settings = self.model.settings
+        model_path = str(settings.get("local_gguf_model_path", "") or "").strip()
+        if not model_path:
+            return (
+                f"You: {prompt}\n"
+                "────────────────────────────────────────────────────\n"
+                "Axiom [local_gguf, direct]: Local GGUF model path is not configured. "
+                "Set local_gguf_model_path in Settings and try again.\n\n"
+            )
+
+        config = LocalGGUFConfig(
+            model_path=model_path,
             context_length=int(settings.get("local_gguf_context_length", 2048)),
             gpu_layers=int(settings.get("local_gguf_gpu_layers", 0)),
             threads=int(settings.get("local_gguf_threads", 0)),
         )
-
-    def _get_local_gguf_backend(
-        self, settings: dict[str, Any]
-    ) -> tuple[LocalGGUFBackend | None, str | None]:
-        """Create/reuse the cached LocalGGUFBackend and return any user-facing error."""
-        config = self._build_local_gguf_config(settings)
-
-        if not config.model_path:
-            return (
-                None,
-                "Local GGUF model path is not configured. "
-                "Set local_gguf_model_path in Settings and try again.",
-            )
-
-        if self._gguf_backend is not None and self._gguf_backend_config == config:
-            return self._gguf_backend, None
-
         try:
-            self._gguf_backend = LocalGGUFBackend(config)
-            self._gguf_backend_config = config
-            return self._gguf_backend, None
-        except FileNotFoundError as exc:
-            self._log.error(
-                "Could not initialize local GGUF backend: %s. "
-                "Verify local_gguf_model_path exists and llama-cpp-python is installed.",
-                exc,
+            if self._gguf_backend is None or self._gguf_backend_config != config:
+                self._gguf_backend = LocalGGUFBackend(config)
+                self._gguf_backend_config = config
+
+            generated = self._gguf_backend.generate(
+                prompt,
+                max_tokens=int(settings.get("llm_max_tokens", 256)),
+                temperature=float(settings.get("llm_temperature", 0.7)),
             )
-        except RuntimeError as exc:
-            self._log.error(
-                "Could not initialize local GGUF backend: %s. "
-                "Verify local_gguf_model_path exists and llama-cpp-python is installed.",
-                exc,
+            return (
+                f"You: {prompt}\n"
+                "────────────────────────────────────────────────────\n"
+                f"Axiom [local_gguf, direct]: {generated}\n\n"
             )
         except Exception as exc:
-            self._log.exception(
+            self._gguf_backend = None
+            self._gguf_backend_config = None
+            self._log.error(
                 "Could not initialize local GGUF backend: %s. "
                 "Verify local_gguf_model_path exists and llama-cpp-python is installed.",
                 exc,
             )
-
-        self._gguf_backend = None
-        self._gguf_backend_config = None
-        return (
-            None,
-            "Could not initialize local GGUF backend. "
-            "Verify model path and llama-cpp-python installation.",
-        )
+            return (
+                f"You: {prompt}\n"
+                "────────────────────────────────────────────────────\n"
+                "Axiom [local_gguf, direct]: Could not initialize local GGUF backend. "
+                "Verify the configured model path and dependencies, then try again.\n\n"
+            )
 
     def on_cancel_job(self) -> None:
         """Cancel any running background job."""
