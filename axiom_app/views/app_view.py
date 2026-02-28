@@ -45,6 +45,7 @@ Only used when AXIOM_NEW_APP=1.  The legacy agentic_rag_gui UI is unchanged.
 from __future__ import annotations
 
 import os
+import pathlib
 import sys
 import tkinter as tk
 from tkinter import ttk
@@ -102,7 +103,7 @@ _SETTINGS_SPEC: list[tuple[str, list]] = [
     ]),
     ("Local LLM", [
         ("local_llm_url",             "LM Studio URL",   "entry", None),
-        ("local_gguf_model_path",     "GGUF Model Path", "entry", None),
+        ("local_gguf_model_path",     "GGUF Model Path", "file_browse", None),
         ("local_gguf_context_length", "Context Length",  "entry", None),
         ("local_gguf_gpu_layers",     "GPU Layers",      "entry", None),
         ("local_gguf_threads",        "CPU Threads",     "entry", None),
@@ -843,6 +844,28 @@ class AppView:
                         widget.grid(row=field_row, column=1, sticky="ew",
                                     padx=(0, UI_SPACING["m"]),
                                     pady=(0, UI_SPACING["xs"]))
+                        if key == "llm_provider":
+                            widget.bind("<<ComboboxSelected>>",
+                                        self._on_llm_provider_changed)
+
+                    elif wtype == "file_browse":
+                        var = tk.StringVar(value=str(val))
+                        browse_frame = ttk.Frame(coll.content)
+                        browse_frame.columnconfigure(0, weight=1)
+                        browse_frame.grid(row=field_row, column=1, sticky="ew",
+                                          padx=(0, UI_SPACING["m"]),
+                                          pady=(0, UI_SPACING["xs"]))
+                        widget = ttk.Entry(
+                            browse_frame,
+                            textvariable=var,
+                            font=self._fonts["code"],
+                        )
+                        widget.grid(row=0, column=0, sticky="ew")
+                        ttk.Button(
+                            browse_frame,
+                            text="Browse…",
+                            command=self._browse_gguf_file,
+                        ).grid(row=0, column=1, padx=(UI_SPACING["xs"], 0))
 
                     elif wtype == "entry_password":
                         var = tk.StringVar(value=str(val))
@@ -1145,6 +1168,41 @@ class AppView:
         """Make the window visible."""
         self.root.deiconify()
         self.root.lift()
+
+    # ------------------------------------------------------------------
+    # GGUF file selection helpers
+    # ------------------------------------------------------------------
+
+    def _on_llm_provider_changed(self, _event: tk.Event | None = None) -> None:
+        """When LLM provider is switched to local_gguf, open the GGUF file browser."""
+        entry = self._settings_entries.get("llm_provider")
+        if entry and entry[1] is not None and entry[1].get() == "local_gguf":
+            self._browse_gguf_file()
+
+    def _browse_gguf_file(self) -> None:
+        """Open a file dialog for .gguf files and auto-fill the relevant settings fields."""
+        from tkinter import filedialog
+
+        path = filedialog.askopenfilename(
+            title="Select GGUF model file",
+            filetypes=[("GGUF files", "*.gguf"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+
+        stem = pathlib.Path(path).stem  # filename without extension
+
+        for key, value in [
+            ("local_gguf_model_path", path),
+            ("llm_model",             stem),
+            ("llm_model_custom",      stem),
+        ]:
+            entry = self._settings_entries.get(key)
+            if entry and entry[1] is not None:
+                try:
+                    entry[1].set(value)
+                except tk.TclError:
+                    pass
 
     # ------------------------------------------------------------------
     # Internal helpers
