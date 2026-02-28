@@ -472,6 +472,9 @@ class AppController:
         self.view.append_chat(response)
         self.model.chat_history.append({"role": "user", "content": prompt})
         self.model.chat_history.append({"role": "assistant", "content": response})
+        self.view.append_log(
+            f"[direct] provider={provider_name} mode=direct prompt_len={len(prompt)}"
+        )
         self._log.info(
             "Direct mode query answered for provider '%s' and prompt '%s'",
             provider_name,
@@ -588,6 +591,10 @@ class AppController:
                 f"[direct.gguf] init_or_generate_exception type={exc.__class__.__name__} msg={exc}"
             )
             self._log.exception("Local GGUF runtime initialization failed")
+            self.view.append_log(
+                "[direct][local_gguf] runtime initialization failed; "
+                "verify local_gguf_model_path and llama-cpp-python install"
+            )
             return (
                 f"You: {prompt}\n"
                 "────────────────────────────────────────────────────\n"
