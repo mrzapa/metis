@@ -569,6 +569,9 @@ class AppController:
             "enable_claim_level_grounding_citefix_lite",
             "agent_lightning_enabled", "prefer_comprehension_index",
         ]
+        _STRING_FIELDS = [
+            "local_gguf_model_path",
+        ]
 
         coerced: dict[str, Any] = {}
         errors: list[str] = []
@@ -600,11 +603,15 @@ class AppController:
         for key in _BOOL_FIELDS:
             coerced[key] = bool(raw.get(key, False))
 
+        for key in _STRING_FIELDS:
+            coerced[key] = str(raw.get(key, "") or "").strip()
+
         # All remaining keys are strings — strip whitespace.
         _typed_keys = (
             {k for k, *_ in _INT_FIELDS}
             | {k for k, *_ in _FLOAT_FIELDS}
             | set(_BOOL_FIELDS)
+            | set(_STRING_FIELDS)
         )
         for key, val in raw.items():
             if key not in _typed_keys:
@@ -618,6 +625,18 @@ class AppController:
             )
             return
 
+        if (
+            str(coerced.get("llm_provider", "") or "").strip() == "local_gguf"
+            and not str(coerced.get("local_gguf_model_path", "") or "").strip()
+        ):
+            messagebox.showerror(
+                "Local GGUF Model Required",
+                "LLM Provider is set to local_gguf, but GGUF Model Path is empty. "
+                "Please select a .gguf model file before saving.",
+            )
+            self.view.set_status("Settings warning: local_gguf requires a GGUF model path.")
+            return
+
         try:
             self.model.save_settings(coerced)
         except OSError as exc:
@@ -629,6 +648,7 @@ class AppController:
             return
 
         self.view.set_status("Settings saved to settings.json.")
+        self.view.populate_settings(coerced)
         self._log.info("Settings saved successfully (%d keys).", len(coerced))
 
         new_theme = coerced.get("theme", self.view._theme_name)
