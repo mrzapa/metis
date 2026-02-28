@@ -18,13 +18,16 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import queue
 import sys
+import threading
 import tkinter as tk
 import traceback
 from tkinter import messagebox
 
 from axiom_app.controllers.app_controller import AppController
 from axiom_app.models.app_model import AppModel
+from axiom_app.utils.dependency_bootstrap import ensure_startup_dependencies
 from axiom_app.utils.logging_setup import setup_logging
 from axiom_app.views.app_view import AppView
 
@@ -96,9 +99,59 @@ def run_app() -> None:
 
         # ── 7. Initial UI state + reveal ──────────────────────────────
         index_state = "built" if model.index_state.get("built") else "not built"
-        view.set_status(f"Documents: {len(model.documents)}  |  Index: {index_state}")
+        base_status = f"Documents: {len(model.documents)}  |  Index: {index_state}"
+        view.set_status(base_status)
         view.append_log("Axiom MVC skeleton started (AXIOM_NEW_APP=1).\n")
         view.show()
+
+        # ── 8. Non-blocking dependency guardrail ───────────────────
+        dep_events: queue.Queue[tuple[str, str]] = queue.Queue()
+
+        def _run_dependency_guardrail() -> None:
+            try:
+                installed = ensure_startup_dependencies(
+                    logger,
+                    progress_callback=lambda line: dep_events.put(("progress", line)),
+                )
+            except Exception as exc:
+                dep_events.put(("error", str(exc)))
+                return
+
+            if installed:
+                dep_events.put(("done", "installed"))
+            else:
+                dep_events.put(("done", "checked"))
+
+        def _drain_dependency_events() -> None:
+            while True:
+                try:
+                    event_type, payload = dep_events.get_nowait()
+                except queue.Empty:
+                    break
+
+                if event_type == "progress":
+                    view.append_log(f"[deps] {payload}\n")
+                elif event_type == "error":
+                    logger.error("Startup dependency check/install failed: %s", payload)
+                    view.append_log(f"[deps] Automatic install failed: {payload}\n")
+                    view.set_status(f"{base_status}  |  Dependency setup failed")
+                elif event_type == "done" and payload == "installed":
+                    view.append_log("[deps] Dependency setup complete.\n")
+                    view.set_status(f"{base_status}  |  Dependencies updated")
+                elif event_type == "done":
+                    view.append_log("[deps] Dependency check passed.\n")
+                    view.set_status(base_status)
+
+            root.after(_POLL_MS, _drain_dependency_events)
+
+        view.set_status(f"{base_status}  |  Checking dependencies…")
+        view.append_log("[deps] Running startup dependency check in background…\n")
+        root.after(_POLL_MS, _drain_dependency_events)
+        threading.Thread(
+            target=_run_dependency_guardrail,
+            daemon=True,
+            name="axiom-dependency-bootstrap",
+        ).start()
 
         logger.info("Entering Tk mainloop")
         root.mainloop()
