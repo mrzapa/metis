@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from axiom_app.utils.background import BackgroundRunner, CancelToken
 from axiom_app.utils.document_loader import KREUZBERG_EXTENSIONS, is_kreuzberg_available, load_document
+from axiom_app.utils.llm_backends import LocalGGUFBackend, LocalGGUFConfig
 from axiom_app.utils.mock_embeddings import MockEmbeddings
 
 if TYPE_CHECKING:
@@ -107,6 +108,8 @@ class AppController:
         self._active_token: CancelToken | None = None
         self._active_future: Future | None = None
         self._log = logging.getLogger(__name__)
+        self._gguf_backend: LocalGGUFBackend | None = None
+        self._gguf_backend_config: LocalGGUFConfig | None = None
 
     # ------------------------------------------------------------------
     # Event wiring
