@@ -25,6 +25,7 @@ from tkinter import messagebox
 
 from axiom_app.controllers.app_controller import AppController
 from axiom_app.models.app_model import AppModel
+from axiom_app.utils.dependency_bootstrap import ensure_startup_dependencies
 from axiom_app.utils.logging_setup import setup_logging
 from axiom_app.views.app_view import AppView
 
@@ -46,6 +47,9 @@ def run_app() -> None:
     logger.info("Log file: %s", (_default_log_dir / "axiom.log").resolve())
     logger.info("=" * 60)
     logger.info("Axiom starting up  (AXIOM_NEW_APP=1)")
+
+    # ── 1b. Dependency guardrail ───────────────────────────────────
+    ensure_startup_dependencies(logger)
 
     # ── 2. Tk root — hidden until construction is complete ───────────
     root = tk.Tk()
