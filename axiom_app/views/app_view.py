@@ -1071,6 +1071,10 @@ class AppView:
         except tk.TclError:
             return ""
 
+    def get_chat_mode(self) -> str:
+        """Return the active chat mode: ``"rag"`` or ``"direct"``."""
+        return "rag" if self._use_rag_var.get() else "direct"
+
     def clear_prompt(self) -> None:
         """Empty the prompt input."""
         try:
