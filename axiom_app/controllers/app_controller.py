@@ -386,9 +386,11 @@ class AppController:
         if not prompt.strip():
             return
 
-        chat_mode = self.view.get_chat_mode()
+        get_chat_mode = getattr(self.view, "get_chat_mode", None)
+        chat_mode = get_chat_mode() if callable(get_chat_mode) else "rag"
 
-        if chat_mode == "direct":
+        provider = str(self.model.settings.get("llm_provider", "") or "").strip()
+        if chat_mode == "direct" or provider == "local_gguf":
             self._handle_direct_prompt(prompt)
             return
 
