@@ -261,6 +261,20 @@ class AppView:
         self._build()
 
     # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+
+    def apply_theme(self, theme_name: str) -> None:
+        """Re-apply *theme_name* to all ttk styles and the root window.
+
+        Called at runtime when the user saves a new theme choice via the
+        Settings GUI, so the change takes effect immediately without restarting.
+        """
+        self._theme_name = theme_name
+        self._palette = get_palette(theme_name)
+        apply_ttk_theme(self.root, self._palette, self._fonts)
+
+    # ------------------------------------------------------------------
     # Window construction
     # ------------------------------------------------------------------
 
