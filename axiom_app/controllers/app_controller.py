@@ -454,6 +454,7 @@ class AppController:
         """Handle direct-chat prompts without retrieval/index requirements."""
         provider = self.model.settings.get("llm_provider", "mock")
         provider_name = str(provider or "mock").strip() or "mock"
+        self.view.append_log(f"[direct] provider_selected provider={provider_name}")
 
         if provider_name == "local_gguf":
             response = self._handle_direct_prompt_local_gguf(prompt)
@@ -463,6 +464,9 @@ class AppController:
                 "────────────────────────────────────────────────────\n"
                 f"Axiom [{provider_name}, direct]: direct LLM path is not wired yet, "
                 "returning a temporary mock response.\n\n"
+            )
+            self.view.append_log(
+                f"[direct] generation_completed provider={provider_name} backend=mock"
             )
 
         self.view.append_chat(response)
@@ -480,8 +484,21 @@ class AppController:
         settings = self.model.settings
         prefix = "Axiom [local_gguf, direct]:"
 
+        def _sanitize_model_path(path_value: str) -> str:
+            cleaned = path_value.strip()
+            if not cleaned:
+                return "(unset)"
+            resolved = pathlib.Path(cleaned).expanduser()
+            if resolved.parent == resolved:
+                return resolved.name or str(resolved)
+            parent = resolved.parent.name or "…"
+            return f"…/{parent}/{resolved.name}"
+
         try:
             model_path = str(settings.get("local_gguf_model_path", "") or "").strip()
+            self.view.append_log(
+                f"[direct.gguf] model_path path={_sanitize_model_path(model_path)}"
+            )
             if not model_path:
                 raise ValueError("local_gguf_model_path is not configured")
 
@@ -496,6 +513,9 @@ class AppController:
                 threads=int(settings.get("local_gguf_threads", 0)),
             )
         except ValueError as exc:
+            self.view.append_log(
+                f"[direct.gguf] init_exception type={exc.__class__.__name__} msg={exc}"
+            )
             self._log.exception("Invalid local GGUF configuration for direct mode")
             return (
                 f"You: {prompt}\n"
@@ -503,6 +523,9 @@ class AppController:
                 f"{prefix} Invalid local GGUF setting: {exc}.\n\n"
             )
         except FileNotFoundError as exc:
+            self.view.append_log(
+                f"[direct.gguf] init_exception type={exc.__class__.__name__} msg={exc}"
+            )
             self._log.exception("Local GGUF model file does not exist for direct mode")
             return (
                 f"You: {prompt}\n"
@@ -511,7 +534,12 @@ class AppController:
             )
 
         try:
-            if self._gguf_backend is None or self._gguf_backend_config != config:
+            backend_reused = self._gguf_backend is not None and self._gguf_backend_config == config
+            self.view.append_log(
+                f"[direct.gguf] backend_init_attempt reused={str(backend_reused).lower()}"
+            )
+
+            if not backend_reused:
                 self._gguf_backend = LocalGGUFBackend(config)
                 self._gguf_backend_config = config
 
@@ -519,6 +547,10 @@ class AppController:
                 prompt,
                 max_tokens=int(settings.get("llm_max_tokens", 256)),
                 temperature=float(settings.get("llm_temperature", 0.7)),
+            )
+            backend_status = "reused" if backend_reused else "initialized"
+            self.view.append_log(
+                f"[direct.gguf] generation_completed backend={backend_status}"
             )
             return (
                 f"You: {prompt}\n"
@@ -528,6 +560,9 @@ class AppController:
         except ValueError as exc:
             self._gguf_backend = None
             self._gguf_backend_config = None
+            self.view.append_log(
+                f"[direct.gguf] init_or_generate_exception type={exc.__class__.__name__} msg={exc}"
+            )
             self._log.exception("Invalid local GGUF setting while initializing backend")
             return (
                 f"You: {prompt}\n"
@@ -537,6 +572,9 @@ class AppController:
         except FileNotFoundError as exc:
             self._gguf_backend = None
             self._gguf_backend_config = None
+            self.view.append_log(
+                f"[direct.gguf] init_or_generate_exception type={exc.__class__.__name__} msg={exc}"
+            )
             self._log.exception("Local GGUF model path was not found while initializing backend")
             return (
                 f"You: {prompt}\n"
@@ -546,6 +584,9 @@ class AppController:
         except RuntimeError as exc:
             self._gguf_backend = None
             self._gguf_backend_config = None
+            self.view.append_log(
+                f"[direct.gguf] init_or_generate_exception type={exc.__class__.__name__} msg={exc}"
+            )
             self._log.exception("Local GGUF runtime initialization failed")
             return (
                 f"You: {prompt}\n"
@@ -555,6 +596,9 @@ class AppController:
         except Exception as exc:
             self._gguf_backend = None
             self._gguf_backend_config = None
+            self.view.append_log(
+                f"[direct.gguf] init_or_generate_exception type={exc.__class__.__name__} msg={exc}"
+            )
             self._log.exception("Could not initialize or run local GGUF backend")
             return (
                 f"You: {prompt}\n"
