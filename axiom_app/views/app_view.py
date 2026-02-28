@@ -163,6 +163,8 @@ _SETTINGS_SPEC: list[tuple[str, list]] = [
             ["flat", "hierarchical"]),
         ("search_type",     "Search Type",     "combobox",
             ["similarity", "mmr"]),
+        ("kg_query_mode",   "KG Query Mode",   "combobox",
+            ["naive", "local", "global", "hybrid", "mix", "bypass"]),
         ("mmr_lambda",      "MMR Lambda",      "entry",    None),
         ("use_reranker",    "Use Reranker",    "checkbutton", None),
         ("use_sub_queries", "Sub-Queries",     "checkbutton", None),

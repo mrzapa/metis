@@ -66,6 +66,8 @@ class AppModel:
         # embeddings[i] is the corresponding float vector (parallel list).
         self.chunks: list[dict[str, Any]] = []
         self.embeddings: list[list[float]] = []
+        self.knowledge_graph: Any | None = None
+        self.entity_to_chunks: dict[str, set[int]] = {}
 
     # ------------------------------------------------------------------
     # Settings
