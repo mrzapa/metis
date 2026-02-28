@@ -28,6 +28,9 @@ class _FakeView:
         _ = tag
         self.chat_messages.append(text)
 
+    def get_chat_mode(self) -> str:
+        return "direct"
+
     def switch_view(self, name: str) -> None:
         self.switched_to.append(name)
 
@@ -50,9 +53,13 @@ def test_local_gguf_missing_model_path_shows_user_visible_error() -> None:
     controller.on_send_prompt("hello")
 
     assert view.chat_messages
+    assert "Axiom [local_gguf, direct]" in view.chat_messages[-1]
     assert "Local GGUF model path is not configured" in view.chat_messages[-1]
-    assert model.chat_history[0] == {"role": "user", "content": "hello"}
-    assert "Local GGUF model path is not configured" in model.chat_history[1]["content"]
+    assert model.chat_history == [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": view.chat_messages[-1]},
+    ]
+    assert view.switched_to[-1] == "chat"
 
 
 def test_local_gguf_backend_is_reused(monkeypatch) -> None:
@@ -85,6 +92,14 @@ def test_local_gguf_backend_is_reused(monkeypatch) -> None:
 
     assert calls == {"init": 1, "generate": 2}
     assert "Axiom [local_gguf, direct]" in view.chat_messages[-1]
+    assert "ok:second:55:0.2" in view.chat_messages[-1]
+    assert model.chat_history == [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": view.chat_messages[0]},
+        {"role": "user", "content": "second"},
+        {"role": "assistant", "content": view.chat_messages[1]},
+    ]
+    assert view.switched_to == ["chat", "chat"]
 
 
 def test_local_gguf_init_failure_is_logged_with_actionable_message(monkeypatch, caplog) -> None:
@@ -103,5 +118,11 @@ def test_local_gguf_init_failure_is_logged_with_actionable_message(monkeypatch, 
     with caplog.at_level(logging.ERROR):
         controller.on_send_prompt("prompt")
 
+    assert "Axiom [local_gguf, direct]" in view.chat_messages[-1]
     assert "Could not initialize local GGUF backend" in view.chat_messages[-1]
     assert "Verify local_gguf_model_path exists and llama-cpp-python is installed" in caplog.text
+    assert model.chat_history == [
+        {"role": "user", "content": "prompt"},
+        {"role": "assistant", "content": view.chat_messages[-1]},
+    ]
+    assert view.switched_to[-1] == "chat"
