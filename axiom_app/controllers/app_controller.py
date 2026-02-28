@@ -377,6 +377,12 @@ class AppController:
         if not prompt.strip():
             return
 
+        chat_mode = self.view.get_chat_mode()
+
+        if chat_mode == "direct":
+            self._handle_direct_prompt(prompt)
+            return
+
         if not self.model.index_state.get("built"):
             self.view.append_chat(
                 "⚠  No index built yet.\n"
@@ -430,6 +436,20 @@ class AppController:
             scores[hits[0]] if hits else 0.0,
         )
 
+        self.view.switch_view("chat")
+
+    def _handle_direct_prompt(self, prompt: str) -> None:
+        """Handle direct-chat prompts without retrieval/index requirements."""
+        response = (
+            f"You: {prompt}\n"
+            "────────────────────────────────────────────────────\n"
+            "Axiom [direct mode]: direct LLM path is not wired yet, "
+            "returning a temporary mock response.\n\n"
+        )
+        self.view.append_chat(response)
+        self.model.chat_history.append({"role": "user", "content": prompt})
+        self.model.chat_history.append({"role": "assistant", "content": response})
+        self._log.info("Direct mode query answered for prompt '%s'", prompt[:60])
         self.view.switch_view("chat")
 
     def on_cancel_job(self) -> None:
