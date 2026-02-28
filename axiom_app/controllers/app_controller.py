@@ -134,6 +134,7 @@ class AppController:
         # Chat view widgets
         self.view.btn_send.configure(command=self._on_send_clicked)
         self.view.btn_cancel_rag.configure(command=self.on_cancel_job)
+        self.view.set_mode_state_callback(self._on_mode_state_changed)
 
         # Ctrl+Enter / Return in the multi-line Text input submits
         self.view.prompt_entry.bind("<Return>",
@@ -142,6 +143,11 @@ class AppController:
         # Pass loaded settings to the view for display in the Settings tab.
         # Called last so the settings tab is already built and widgets update immediately.
         self.view.populate_settings(self.model.settings)
+
+    def _on_mode_state_changed(self, mode_state: dict[str, str]) -> None:
+        """Keep runtime canonical chat mode state in the model settings."""
+        self.model.settings["selected_mode"] = mode_state.get("selected_mode", "Q&A")
+        self.model.settings["chat_path"] = mode_state.get("chat_path", "RAG")
 
     # ------------------------------------------------------------------
     # Background task management
@@ -389,7 +395,7 @@ class AppController:
         if not self.model.index_state.get("built"):
             self.view.append_chat(
                 "⚠  No index built yet.\n"
-                "   Open a text file and click 'Build Index' first.\n\n"
+                "   Open a text file and click 'Build Index' first, or switch to Direct mode.\n\n"
             )
             self.view.switch_view("chat")
             return
@@ -409,7 +415,7 @@ class AppController:
         else:
             n_chunks = len(self.model.embeddings)
             lines.append(
-                f"Axiom [mock, {n_chunks} chunk(s) indexed]:\n\n"
+                f"Axiom [mock rag, mode={selected_mode}, {n_chunks} chunk(s) indexed]:\n\n"
                 f"Top {min(top_k, len(hits))} passage(s) by cosine similarity:\n\n"
             )
             for rank, idx in enumerate(hits, 1):
