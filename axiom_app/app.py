@@ -49,6 +49,9 @@ def run_app() -> None:
     logger.info("=" * 60)
     logger.info("Axiom starting up  (AXIOM_NEW_APP=1)")
 
+    # ── 1b. Dependency guardrail ───────────────────────────────────
+    ensure_startup_dependencies(logger)
+
     # ── 2. Tk root — hidden until construction is complete ───────────
     root = tk.Tk()
     root.withdraw()
