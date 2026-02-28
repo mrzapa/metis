@@ -43,6 +43,7 @@ def run_app() -> None:
     # loaded yet, so use a safe default and re-check after model init.
     _default_log_dir = _REPO_ROOT / "logs"
     logger = setup_logging(_default_log_dir, level="DEBUG")
+    logger.info("Log file: %s", (_default_log_dir / "axiom.log").resolve())
     logger.info("=" * 60)
     logger.info("Axiom starting up  (AXIOM_NEW_APP=1)")
 
@@ -64,6 +65,7 @@ def run_app() -> None:
                 resolved = _REPO_ROOT / resolved
             if resolved != _default_log_dir:
                 logger = setup_logging(resolved, level=model.settings.get("log_level", "DEBUG"))
+                logger.info("Log file: %s", (resolved / "axiom.log").resolve())
                 logger.debug("Log directory updated to %s from settings", resolved)
 
         logger.info(
