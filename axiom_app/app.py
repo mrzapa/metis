@@ -50,6 +50,9 @@ def run_app() -> None:
     logger.info("=" * 60)
     logger.info("Axiom starting up  (AXIOM_NEW_APP=1)")
 
+    # ── 1b. Dependency guardrail ───────────────────────────────────
+    ensure_startup_dependencies(logger)
+
     # ── 2. Tk root — hidden until construction is complete ───────────
     root = tk.Tk()
     root.withdraw()
@@ -105,48 +108,33 @@ def run_app() -> None:
         view.show()
 
         # ── 8. Non-blocking dependency guardrail ───────────────────
-        dep_events: queue.Queue[tuple[str, str]] = queue.Queue()
+        def _dep_progress(line: str) -> None:
+            root.after(0, lambda msg=line: view.append_log(f"[deps] {msg}\n"))
+
+        def _dep_done(installed: bool) -> None:
+            if installed:
+                view.append_log("[deps] Dependency setup complete.\n")
+                view.set_status(
+                    f"Documents: {len(model.documents)}  |  Index: {index_state}  |  Dependencies updated"
+                )
+            else:
+                view.append_log("[deps] Dependency check passed.\n")
+
+        def _dep_failed(exc: Exception) -> None:
+            logger.exception("Startup dependency check/install failed")
+            view.append_log(f"[deps] Automatic install failed: {exc}\n")
+            view.set_status("Dependency setup failed — see log output")
 
         def _run_dependency_guardrail() -> None:
             try:
-                installed = ensure_startup_dependencies(
-                    logger,
-                    progress_callback=lambda line: dep_events.put(("progress", line)),
-                )
+                installed = ensure_startup_dependencies(logger, progress_callback=_dep_progress)
             except Exception as exc:
-                dep_events.put(("error", str(exc)))
+                root.after(0, lambda err=exc: _dep_failed(err))
                 return
+            root.after(0, lambda did_install=installed: _dep_done(did_install))
 
-            if installed:
-                dep_events.put(("done", "installed"))
-            else:
-                dep_events.put(("done", "checked"))
-
-        def _drain_dependency_events() -> None:
-            while True:
-                try:
-                    event_type, payload = dep_events.get_nowait()
-                except queue.Empty:
-                    break
-
-                if event_type == "progress":
-                    view.append_log(f"[deps] {payload}\n")
-                elif event_type == "error":
-                    logger.error("Startup dependency check/install failed: %s", payload)
-                    view.append_log(f"[deps] Automatic install failed: {payload}\n")
-                    view.set_status(f"{base_status}  |  Dependency setup failed")
-                elif event_type == "done" and payload == "installed":
-                    view.append_log("[deps] Dependency setup complete.\n")
-                    view.set_status(f"{base_status}  |  Dependencies updated")
-                elif event_type == "done":
-                    view.append_log("[deps] Dependency check passed.\n")
-                    view.set_status(base_status)
-
-            root.after(_POLL_MS, _drain_dependency_events)
-
-        view.set_status(f"{base_status}  |  Checking dependencies…")
+        view.set_status("Checking dependencies in background…")
         view.append_log("[deps] Running startup dependency check in background…\n")
-        root.after(_POLL_MS, _drain_dependency_events)
         threading.Thread(
             target=_run_dependency_guardrail,
             daemon=True,

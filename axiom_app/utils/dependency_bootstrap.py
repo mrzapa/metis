@@ -11,7 +11,6 @@ import logging
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -58,58 +57,34 @@ def get_missing_startup_packages() -> list[str]:
     return missing
 
 
-def ensure_startup_dependencies(
-    logger: logging.Logger,
-    progress_callback: Callable[[str], None] | None = None,
-) -> bool:
+def ensure_startup_dependencies(logger: logging.Logger) -> None:
     """Ensure required runtime dependencies are installed.
 
     Installs missing packages in one pip call. Raises RuntimeError if
     installation fails so startup can surface a clear failure message.
-
-    Returns ``True`` if a pip installation was attempted, otherwise ``False``.
     """
 
     missing = get_missing_startup_packages()
     if not missing:
         logger.info("Startup dependency check: all dependencies already installed.")
-        return False
-
-    if progress_callback:
-        progress_callback("Missing dependencies detected — installing required packages…")
+        return
 
     logger.warning("Missing startup dependencies detected: %s", ", ".join(missing))
     cmd = [sys.executable, "-m", "pip", "install", *missing]
     logger.info("Installing missing dependencies with pip...")
 
-    proc = subprocess.Popen(
+    proc = subprocess.run(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        capture_output=True,
         text=True,
-        bufsize=1,
-        universal_newlines=True,
+        check=False,
     )
 
-    output_lines: list[str] = []
-    if proc.stdout is not None:
-        for raw_line in proc.stdout:
-            line = raw_line.strip()
-            if not line:
-                continue
-            output_lines.append(line)
-            logger.info("[pip] %s", line)
-            if progress_callback:
-                progress_callback(line)
-
-    proc.wait()
-
     if proc.returncode != 0:
-        detail = output_lines[-1] if output_lines else "Unknown pip failure"
+        stderr = (proc.stderr or "").strip()
+        stdout = (proc.stdout or "").strip()
+        detail = stderr or stdout or "Unknown pip failure"
         logger.error("Dependency installation failed: %s", detail)
         raise RuntimeError(f"Automatic dependency install failed: {detail}")
 
     logger.info("Startup dependency installation complete.")
-    if progress_callback:
-        progress_callback("Dependencies installed successfully.")
-    return True
