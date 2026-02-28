@@ -452,16 +452,16 @@ class AppController:
 
     def _handle_direct_prompt(self, prompt: str) -> None:
         """Handle direct-chat prompts without retrieval/index requirements."""
-        settings = self.model.settings
-        provider = str(settings.get("llm_provider", "mock") or "mock").strip() or "mock"
+        provider = self.model.settings.get("llm_provider", "mock")
+        provider_name = str(provider or "mock").strip() or "mock"
 
-        if provider == "local_gguf":
+        if provider_name == "local_gguf":
             response = self._handle_direct_prompt_local_gguf(prompt)
         else:
             response = (
                 f"You: {prompt}\n"
                 "────────────────────────────────────────────────────\n"
-                "Axiom [direct mode]: direct LLM path is not wired yet, "
+                f"Axiom [{provider_name}, direct]: direct LLM path is not wired yet, "
                 "returning a temporary mock response.\n\n"
             )
 
@@ -470,7 +470,7 @@ class AppController:
         self.model.chat_history.append({"role": "assistant", "content": response})
         self._log.info(
             "Direct mode query answered for provider '%s' and prompt '%s'",
-            provider or "mock",
+            provider_name,
             prompt[:60],
         )
         self.view.switch_view("chat")
