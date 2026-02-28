@@ -539,3 +539,7 @@ class AppController:
 
         self.view.set_status("Settings saved to settings.json.")
         self._log.info("Settings saved successfully (%d keys).", len(coerced))
+
+        new_theme = coerced.get("theme", self.view._theme_name)
+        if new_theme != self.view._theme_name:
+            self.view.apply_theme(new_theme)
