@@ -6,7 +6,6 @@ the deterministic SHA-256-based vectors.
 
 from __future__ import annotations
 
-import pytest
 
 from axiom_app.utils.mock_embeddings import MockEmbeddings
 

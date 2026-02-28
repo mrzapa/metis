@@ -6,9 +6,8 @@ the suite runs in milliseconds.
 
 from __future__ import annotations
 
-import pytest
 
-from axiom_app.models.sht import SHTNode, _stable_node_id, build_sht_tree
+from axiom_app.models.sht import _stable_node_id, build_sht_tree
 
 # ---------------------------------------------------------------------------
 # Helpers

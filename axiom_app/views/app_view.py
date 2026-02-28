@@ -46,14 +46,12 @@ from __future__ import annotations
 
 import os
 import pathlib
-import sys
 import tkinter as tk
 from tkinter import ttk
 
 from axiom_app.views.styles import (
     STYLE_CONFIG,
     UI_SPACING,
-    _pal,
     apply_ttk_theme,
     get_palette,
     resolve_fonts,

@@ -10,6 +10,7 @@ class _FakeView:
         self._chat_mode = chat_mode
         self.chat_messages: list[str] = []
         self.switched_to: list[str] = []
+        self.logs: list[str] = []
 
     def get_chat_mode(self) -> str:
         return self._chat_mode
@@ -20,6 +21,9 @@ class _FakeView:
 
     def switch_view(self, key: str) -> None:
         self.switched_to.append(key)
+
+    def append_log(self, text: str) -> None:
+        self.logs.append(text)
 
 
 class _FakeModel:
@@ -40,7 +44,7 @@ def test_on_send_prompt_direct_mode_does_not_require_index() -> None:
 
     assert len(model.chat_history) == 2
     assert "No index built yet" not in view.chat_messages[0]
-    assert "Axiom [direct mode]" in view.chat_messages[0]
+    assert "Axiom [mock, direct]" in view.chat_messages[0]
     assert view.switched_to[-1] == "chat"
 
 
