@@ -9,9 +9,48 @@ Axiom is a personal RAG desktop application currently in an MVC refactor. It sup
 - **New MVC app** (`axiom_app`) enabled via `AXIOM_NEW_APP=1`.
 - **Headless CLI** for indexing and querying local files without Tk.
 
-## Quick start
+## Quick Install
 
-### 1) Create a virtual environment
+### One-liner (recommended)
+
+**macOS / Linux:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.ps1 | iex
+```
+
+The installer clones the repo, creates a virtual environment, installs
+dependencies, and generates an `axiom` launcher that auto-pulls the latest code
+on every run.
+
+### Installer options
+
+| Flag | Description |
+|------|-------------|
+| `--install` | Fresh install (default) |
+| `--reinstall` | Remove venv and reinstall from scratch |
+| `--uninstall` | Remove Axiom completely |
+| `--update` | Pull latest code and update dependencies |
+
+```bash
+# Reinstall from scratch
+./scripts/install_axiom.sh --reinstall
+
+# Uninstall
+./scripts/install_axiom.sh --uninstall
+```
+
+Environment overrides: `AXIOM_INSTALL_DIR`, `AXIOM_REPO`, `AXIOM_BRANCH`, `AXIOM_PYTHON`.
+
+### Manual setup
+
+#### 1) Create a virtual environment
 
 ```bash
 python -m venv .venv
@@ -19,7 +58,7 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 ```
 
-### 2) Install in editable mode
+#### 2) Install in editable mode
 
 ```bash
 pip install -e .

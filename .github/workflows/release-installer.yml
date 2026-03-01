@@ -1,0 +1,139 @@
+name: Release Axiom Installer
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-installer:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare release artifacts
+        run: |
+          mkdir -p release-artifacts
+
+          # Copy installer scripts
+          cp scripts/install_axiom.sh  release-artifacts/install_axiom.sh
+          cp scripts/install_axiom.ps1 release-artifacts/install_axiom.ps1
+          chmod +x release-artifacts/install_axiom.sh
+
+          # Create a one-liner bootstrap wrapper for curl|bash convenience
+          cat > release-artifacts/install.sh <<'BOOTSTRAP'
+          #!/usr/bin/env bash
+          # Axiom quick-install bootstrap
+          # Usage: curl -fsSL https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.sh | bash
+          set -euo pipefail
+          TMPDIR=$(mktemp -d)
+          trap 'rm -rf "$TMPDIR"' EXIT
+          curl -fsSL https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.sh -o "$TMPDIR/install_axiom.sh"
+          chmod +x "$TMPDIR/install_axiom.sh"
+          exec "$TMPDIR/install_axiom.sh" "$@"
+          BOOTSTRAP
+          chmod +x release-artifacts/install.sh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiom-installer
+          path: release-artifacts/
+
+      - name: Attach installers to GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/install_axiom.sh
+            release-artifacts/install_axiom.ps1
+            release-artifacts/install.sh
+          body: |
+            ## Axiom Installer Release
+
+            ### Quick Install
+
+            **macOS / Linux:**
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.sh | bash
+            ```
+
+            **Windows (PowerShell):**
+            ```powershell
+            irm https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.ps1 | iex
+            ```
+
+            ### Manual Install
+            Download the installer script for your platform from the assets below and run it.
+
+            ### Options
+            | Flag | Description |
+            |------|-------------|
+            | `--install` | Fresh install (default) |
+            | `--reinstall` | Remove venv and reinstall from scratch |
+            | `--uninstall` | Remove Axiom completely |
+            | `--update` | Pull latest code and update deps |
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Also build the Windows EXE alongside the installer
+  windows-exe:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+
+      - name: Build Axiom MVC executable
+        shell: bash
+        run: |
+          pyinstaller \
+            --noconfirm \
+            --clean \
+            --name Axiom \
+            --windowed \
+            --onefile \
+            --icon logo.png \
+            --add-data "axiom_app/default_settings.json;axiom_app" \
+            --hidden-import tkinter \
+            --collect-submodules axiom_app \
+            release/axiom_mvc_entry.py
+
+      - name: Create release archive
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          cp dist/Axiom.exe release-artifacts/Axiom.exe
+          cd release-artifacts
+          7z a Axiom-windows-x64.zip Axiom.exe
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Axiom-windows-x64
+          path: release-artifacts/Axiom-windows-x64.zip
+
+      - name: Attach EXE to GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/Axiom-windows-x64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
