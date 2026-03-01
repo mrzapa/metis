@@ -111,8 +111,8 @@ class AppController:
         self._active_token: CancelToken | None = None
         self._active_future: Future | None = None
         self._log = logging.getLogger(__name__)
-        self._gguf_backend: LocalGGUFBackend | None = None
-        self._gguf_backend_config: LocalGGUFConfig | None = None
+        # Metadata for in-flight RAG queries (set before task dispatch).
+        self._pending_rag_meta: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Event wiring
@@ -249,6 +249,46 @@ class AppController:
                 self.view.set_index_info(info)
                 self.view.set_status(info)
                 self.view.append_log(f"[done]  {info}")
+
+            elif task == _TASK_RAG_QUERY and isinstance(result, dict):
+                response = result.get("response", "")
+                prompt   = result.get("prompt", "")
+                meta     = getattr(self, "_pending_rag_meta", {})
+                provider = str(self.model.settings.get("llm_provider", "mock") or "mock")
+                selected_mode = meta.get("selected_mode", "Q&A")
+                n_chunks = meta.get("n_chunks", 0)
+                top_score = meta.get("top_score", 0.0)
+
+                header = (
+                    f"Axiom [{provider}, rag, mode={selected_mode}, "
+                    f"{n_chunks} chunk(s)]:\n\n"
+                )
+                self.view.append_chat(header + response + "\n\n")
+                self.model.chat_history.append({"role": "user", "content": prompt})
+                self.model.chat_history.append({"role": "assistant", "content": response})
+                self._log.info("RAG query answered — top score=%.3f", top_score)
+                self.view.set_status("Done.")
+
+            elif task == _TASK_DIRECT_QUERY and isinstance(result, dict):
+                response = result.get("response", "")
+                prompt   = result.get("prompt", "")
+                provider = str(self.model.settings.get("llm_provider", "mock") or "mock")
+
+                if result.get("error"):
+                    self.view.append_log(f"[direct] error: {result['error']}")
+                else:
+                    self.view.append_log(
+                        f"[direct] generation_completed provider={provider}"
+                    )
+
+                self.view.append_chat(
+                    f"Axiom [{provider}, direct]:\n\n{response}\n\n"
+                )
+                self.model.chat_history.append({"role": "user", "content": prompt})
+                self.model.chat_history.append({"role": "assistant", "content": response})
+                self._log.info("Direct query answered — provider=%s", provider)
+                self.view.set_status("Done.")
+
             else:
                 label = f"{task} complete." if task else "Done."
                 self.view.set_status(label)
@@ -325,8 +365,17 @@ class AppController:
         loader_setting = self.model.settings.get("document_loader", "auto")
         use_kreuzberg  = loader_setting != "plain"
 
+        # Snapshot settings so the worker thread sees a frozen copy.
+        settings_snapshot = dict(self.model.settings)
+
         def _worker(post_msg: Any, cancel: CancelToken) -> dict[str, Any]:
-            emb         = MockEmbeddings(dimensions=_EMB_DIM)
+            try:
+                emb = create_embeddings(settings_snapshot)
+            except (ValueError, ImportError) as exc:
+                post_msg({"type": "log",
+                          "text": f"[warn]  Embedding provider failed: {exc}; falling back to mock"})
+                emb = MockEmbeddings(dimensions=_EMB_DIM)
+
             all_chunks:  list[dict[str, Any]] = []
             all_vectors: list[list[float]]    = []
 
@@ -389,10 +438,12 @@ class AppController:
             self.on_send_prompt(prompt)
 
     def on_send_prompt(self, prompt: str = "") -> None:
-        """Cosine-similarity retrieval + templated response (no LLM).
+        """Retrieve relevant chunks, then synthesise an answer via the LLM.
 
-        Runs synchronously on the main thread — MockEmbeddings + pure-Python
-        cosine over 32-dim vectors is fast even for thousands of chunks.
+        Retrieval (cosine similarity + knowledge graph) runs synchronously on
+        the main thread — it's pure Python over small vectors and is fast even
+        for thousands of chunks.  The LLM call is dispatched to a background
+        thread so the UI stays responsive for cloud providers.
         """
         if not prompt.strip():
             return
@@ -400,8 +451,7 @@ class AppController:
         get_chat_mode = getattr(self.view, "get_chat_mode", None)
         chat_mode = get_chat_mode() if callable(get_chat_mode) else "rag"
 
-        provider = str(self.model.settings.get("llm_provider", "") or "").strip()
-        if chat_mode == "direct" or provider == "local_gguf":
+        if chat_mode == "direct":
             self._handle_direct_prompt(prompt)
             return
 
@@ -413,8 +463,15 @@ class AppController:
             self.view.switch_view("chat")
             return
 
+        # ── Retrieval (synchronous) ──────────────────────────────────────
         top_k = int(self.model.settings.get("top_k", 3))
-        q_vec = MockEmbeddings(dimensions=_EMB_DIM).embed_query(prompt)
+
+        try:
+            emb = create_embeddings(dict(self.model.settings))
+        except (ValueError, ImportError):
+            emb = MockEmbeddings(dimensions=_EMB_DIM)
+
+        q_vec = emb.embed_query(prompt)
         scores = [_cosine(q_vec, cv) for cv in self.model.embeddings]
 
         ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
@@ -439,210 +496,112 @@ class AppController:
             ordered = graph_hits + [i for i in ranked if i not in graph_hit_set]
             hits = ordered[:top_k]
 
-        selected_mode = self.model.settings.get("selected_mode", "Q&A")
+        # ── Build context string ─────────────────────────────────────────
+        context_parts: list[str] = []
+        for rank, idx in enumerate(hits, 1):
+            chunk = self.model.chunks[idx]
+            snippet = chunk["text"].strip()
+            context_parts.append(
+                f"[{rank}] {chunk['source']} > chunk {chunk['chunk_idx']} "
+                f"(score={scores[idx]:.3f}):\n{snippet}"
+            )
+        context_block = "\n\n".join(context_parts) if context_parts else "(no relevant passages found)"
+
+        # Show the user's prompt immediately.
         sep = "─" * 52
-        lines: list[str] = [f"You: {prompt}\n", sep + "\n"]
-
-        if not hits:
-            lines.append("(Index is empty — no chunks to retrieve.)\n")
-        else:
-            n_chunks = len(self.model.embeddings)
-            lines.append(
-                f"Axiom [mock rag, mode={selected_mode}, {n_chunks} chunk(s) indexed]:\n"
-                f"Graph mode: {kg_mode}\n\n"
-                f"Top {min(top_k, len(hits))} passage(s) by graph+cosine ranking:\n\n"
-            )
-            for rank, idx in enumerate(hits, 1):
-                chunk   = self.model.chunks[idx]
-                score   = scores[idx]
-                snippet = chunk["text"].strip()
-                if len(snippet) > 300:
-                    snippet = snippet[:300] + " …"
-                lines.append(
-                    f"[{rank}] score={score:.3f}  "
-                    f"{chunk['source']} › chunk {chunk['chunk_idx']}\n"
-                    f"{snippet}\n\n"
-                )
-            lines.append(
-                sep + "\n"
-                "Note: raw retrieval shown — no LLM synthesis configured yet.\n"
-            )
-
-        response = "".join(lines) + "\n"
-        self.view.append_chat(response)
-
-        self.model.chat_history.append({"role": "user",      "content": prompt})
-        self.model.chat_history.append({"role": "assistant", "content": response})
-        self._log.info(
-            "Query '%s' answered — top score=%.3f",
-            prompt[:60],
-            scores[hits[0]] if hits else 0.0,
-        )
-
+        self.view.append_chat(f"You: {prompt}\n{sep}\n")
         self.view.switch_view("chat")
+
+        # ── LLM synthesis (background thread) ────────────────────────────
+        settings_snap = dict(self.model.settings)
+        selected_mode = settings_snap.get("selected_mode", "Q&A")
+
+        # Snapshot model-level data the worker will need.
+        n_chunks = len(self.model.embeddings)
+        top_score = scores[hits[0]] if hits else 0.0
+
+        def _rag_worker(post_msg: Any, cancel: CancelToken) -> dict[str, str]:
+            post_msg({"type": "status", "text": "Generating answer…"})
+            try:
+                llm = create_llm(settings_snap)
+            except (ValueError, ImportError) as exc:
+                return {
+                    "response": (
+                        f"Axiom [rag, mode={selected_mode}]: "
+                        f"LLM unavailable ({exc}). Showing raw retrieval.\n\n"
+                        f"CONTEXT:\n{context_block}\n"
+                    ),
+                    "prompt": prompt,
+                }
+
+            system_prompt = (
+                f"You are Axiom, an AI assistant. Mode: {selected_mode}.\n"
+                "Answer the user's question using ONLY the CONTEXT below. "
+                "Cite passages as [1], [2], etc. If the context is insufficient, say so.\n\n"
+                f"CONTEXT:\n{context_block}"
+            )
+            messages = [
+                {"type": "system", "content": system_prompt},
+                {"type": "human", "content": prompt},
+            ]
+            result = llm.invoke(messages)
+            answer = str(getattr(result, "content", result) or "")
+            return {"response": answer, "prompt": prompt}
+
+        # Store retrieval metadata for _handle_message to use.
+        self._pending_rag_meta = {
+            "kg_mode": kg_mode,
+            "selected_mode": selected_mode,
+            "n_chunks": n_chunks,
+            "top_score": top_score,
+            "prompt": prompt,
+        }
+        self.start_task(_TASK_RAG_QUERY, _rag_worker)
 
     def _handle_direct_prompt(self, prompt: str) -> None:
-        """Handle direct-chat prompts without retrieval/index requirements."""
-        provider = self.model.settings.get("llm_provider", "mock")
-        provider_name = str(provider or "mock").strip() or "mock"
+        """Handle direct-chat prompts (no retrieval) via the provider factory.
+
+        All providers — OpenAI, Anthropic, Google, xAI, LM Studio, local GGUF,
+        and mock — are routed through ``create_llm(settings)``.  The LLM call
+        runs in a background thread so the UI stays responsive.
+        """
+        provider_name = str(self.model.settings.get("llm_provider", "mock") or "mock").strip() or "mock"
         self.view.append_log(f"[direct] provider_selected provider={provider_name}")
 
-        if provider_name == "local_gguf":
-            response = self._handle_direct_prompt_local_gguf(prompt)
-        else:
-            response = (
-                f"You: {prompt}\n"
-                "────────────────────────────────────────────────────\n"
-                f"Axiom [{provider_name}, direct]: direct LLM path is not wired yet, "
-                "returning a temporary mock response.\n\n"
-            )
-            self.view.append_log(
-                f"[direct] generation_completed provider={provider_name} backend=mock"
-            )
-
-        self.view.append_chat(response)
-        self.model.chat_history.append({"role": "user", "content": prompt})
-        self.model.chat_history.append({"role": "assistant", "content": response})
-        self.view.append_log(
-            f"[direct] provider={provider_name} mode=direct prompt_len={len(prompt)}"
-        )
-        self._log.info(
-            "Direct mode query answered for provider '%s' and prompt '%s'",
-            provider_name,
-            prompt[:60],
-        )
+        sep = "─" * 52
+        self.view.append_chat(f"You: {prompt}\n{sep}\n")
         self.view.switch_view("chat")
 
-    def _handle_direct_prompt_local_gguf(self, prompt: str) -> str:
-        """Handle direct-chat prompts with the Local GGUF provider."""
-        settings = self.model.settings
-        prefix = "Axiom [local_gguf, direct]:"
+        settings_snap = dict(self.model.settings)
 
-        def _sanitize_model_path(path_value: str) -> str:
-            cleaned = path_value.strip()
-            if not cleaned:
-                return "(unset)"
-            resolved = pathlib.Path(cleaned).expanduser()
-            if resolved.parent == resolved:
-                return resolved.name or str(resolved)
-            parent = resolved.parent.name or "…"
-            return f"…/{parent}/{resolved.name}"
+        def _direct_worker(post_msg: Any, cancel: CancelToken) -> dict[str, str]:
+            post_msg({"type": "status", "text": f"Generating ({provider_name})…"})
+            try:
+                llm = create_llm(settings_snap)
+            except (ValueError, ImportError, RuntimeError) as exc:
+                return {
+                    "response": f"Axiom [{provider_name}, direct]: {exc}\n\n",
+                    "prompt": prompt,
+                    "error": str(exc),
+                }
 
-        try:
-            model_path = str(settings.get("local_gguf_model_path", "") or "").strip()
-            self.view.append_log(
-                f"[direct.gguf] model_path path={_sanitize_model_path(model_path)}"
-            )
-            if not model_path:
-                raise ValueError("local_gguf_model_path is not configured")
+            messages = [
+                {"type": "system", "content": "You are Axiom, an AI assistant. Answer the user's question."},
+                {"type": "human", "content": prompt},
+            ]
+            try:
+                result = llm.invoke(messages)
+                answer = str(getattr(result, "content", result) or "")
+            except Exception as exc:
+                return {
+                    "response": f"Axiom [{provider_name}, direct]: LLM error: {exc}\n\n",
+                    "prompt": prompt,
+                    "error": str(exc),
+                }
 
-            resolved = pathlib.Path(model_path).expanduser()
-            if not resolved.exists():
-                raise FileNotFoundError(f"GGUF model file not found: {resolved}")
+            return {"response": answer, "prompt": prompt}
 
-            config = LocalGGUFConfig(
-                model_path=model_path,
-                context_length=int(settings.get("local_gguf_context_length", 2048)),
-                gpu_layers=int(settings.get("local_gguf_gpu_layers", 0)),
-                threads=int(settings.get("local_gguf_threads", 0)),
-            )
-        except ValueError as exc:
-            self.view.append_log(
-                f"[direct.gguf] init_exception type={exc.__class__.__name__} msg={exc}"
-            )
-            self._log.exception("Invalid local GGUF configuration for direct mode")
-            return (
-                f"You: {prompt}\n"
-                "────────────────────────────────────────────────────\n"
-                f"{prefix} Invalid local GGUF setting: {exc}.\n\n"
-            )
-        except FileNotFoundError as exc:
-            self.view.append_log(
-                f"[direct.gguf] init_exception type={exc.__class__.__name__} msg={exc}"
-            )
-            self._log.exception("Local GGUF model file does not exist for direct mode")
-            return (
-                f"You: {prompt}\n"
-                "────────────────────────────────────────────────────\n"
-                f"{prefix} Model path not found: {exc}.\n\n"
-            )
-
-        try:
-            backend_reused = self._gguf_backend is not None and self._gguf_backend_config == config
-            self.view.append_log(
-                f"[direct.gguf] backend_init_attempt reused={str(backend_reused).lower()}"
-            )
-
-            if not backend_reused:
-                self._gguf_backend = LocalGGUFBackend(config)
-                self._gguf_backend_config = config
-
-            generated = self._gguf_backend.generate(
-                prompt,
-                max_tokens=int(settings.get("llm_max_tokens", 256)),
-                temperature=float(settings.get("llm_temperature", 0.7)),
-            )
-            backend_status = "reused" if backend_reused else "initialized"
-            self.view.append_log(
-                f"[direct.gguf] generation_completed backend={backend_status}"
-            )
-            return (
-                f"You: {prompt}\n"
-                "────────────────────────────────────────────────────\n"
-                f"{prefix} {generated}\n\n"
-            )
-        except ValueError as exc:
-            self._gguf_backend = None
-            self._gguf_backend_config = None
-            self.view.append_log(
-                f"[direct.gguf] init_or_generate_exception type={exc.__class__.__name__} msg={exc}"
-            )
-            self._log.exception("Invalid local GGUF setting while initializing backend")
-            return (
-                f"You: {prompt}\n"
-                "────────────────────────────────────────────────────\n"
-                f"{prefix} Invalid local GGUF setting: {exc}.\n\n"
-            )
-        except FileNotFoundError as exc:
-            self._gguf_backend = None
-            self._gguf_backend_config = None
-            self.view.append_log(
-                f"[direct.gguf] init_or_generate_exception type={exc.__class__.__name__} msg={exc}"
-            )
-            self._log.exception("Local GGUF model path was not found while initializing backend")
-            return (
-                f"You: {prompt}\n"
-                "────────────────────────────────────────────────────\n"
-                f"{prefix} Model path not found: {exc}.\n\n"
-            )
-        except RuntimeError as exc:
-            self._gguf_backend = None
-            self._gguf_backend_config = None
-            self.view.append_log(
-                f"[direct.gguf] init_or_generate_exception type={exc.__class__.__name__} msg={exc}"
-            )
-            self._log.exception("Local GGUF runtime initialization failed")
-            self.view.append_log(
-                "[direct][local_gguf] runtime initialization failed; "
-                "verify local_gguf_model_path and llama-cpp-python install"
-            )
-            return (
-                f"You: {prompt}\n"
-                "────────────────────────────────────────────────────\n"
-                f"{prefix} Runtime dependency issue: {exc}.\n\n"
-            )
-        except Exception as exc:
-            self._gguf_backend = None
-            self._gguf_backend_config = None
-            self.view.append_log(
-                f"[direct.gguf] init_or_generate_exception type={exc.__class__.__name__} msg={exc}"
-            )
-            self._log.exception("Could not initialize or run local GGUF backend")
-            return (
-                f"You: {prompt}\n"
-                "────────────────────────────────────────────────────\n"
-                f"{prefix} Backend/model load failed: {exc}.\n\n"
-            )
+        self.start_task(_TASK_DIRECT_QUERY, _direct_worker)
 
     def on_cancel_job(self) -> None:
         """Cancel any running background job."""
