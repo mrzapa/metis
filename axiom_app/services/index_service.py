@@ -9,8 +9,10 @@ import json
 import math
 import pathlib
 import re
+import shutil
 from typing import Any, Callable
 
+from axiom_app.models.parity_types import IndexManifest
 from axiom_app.models.session_types import EvidenceSource
 from axiom_app.utils.document_loader import load_document
 from axiom_app.utils.embedding_providers import create_embeddings
@@ -26,6 +28,9 @@ _PACKAGE_ROOT = _HERE.parent
 _REPO_ROOT = _PACKAGE_ROOT.parent
 _DEFAULT_INDEX_DIR = _REPO_ROOT / "indexes"
 _EMB_DIM = 32
+_MANIFEST_FILE = "manifest.json"
+_BUNDLE_FILE = "bundle.json"
+_ARTIFACTS_DIR = "artifacts"
 
 
 def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
@@ -275,6 +280,322 @@ def _semantic_regions_for_chunks(chunks: list[dict[str, Any]]) -> list[dict[str,
     return regions
 
 
+def _manifest_path(path: str | pathlib.Path) -> pathlib.Path:
+    raw = pathlib.Path(path)
+    return raw / _MANIFEST_FILE if raw.is_dir() else raw
+
+
+def _is_manifest_reference(path: pathlib.Path) -> bool:
+    return path.name == _MANIFEST_FILE or path.is_dir()
+
+
+def _load_json(path: pathlib.Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_json(path: pathlib.Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _relative_to(root: pathlib.Path, value: str | pathlib.Path | None) -> str:
+    if not value:
+        return ""
+    path = pathlib.Path(value)
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(path)
+
+
+def _resolve_from_manifest_root(root: pathlib.Path, path_value: str) -> pathlib.Path:
+    path = pathlib.Path(path_value)
+    return path if path.is_absolute() else root / path
+
+
+def _legacy_manifest_for_bundle(path: pathlib.Path, bundle: IndexBundle) -> IndexManifest:
+    return IndexManifest(
+        index_id=bundle.index_id or path.stem,
+        backend=str(bundle.vector_backend or "json"),
+        created_at=bundle.created_at or datetime.now(timezone.utc).isoformat(),
+        embedding_signature=str(bundle.embedding_signature or ""),
+        source_files=list(bundle.documents),
+        manifest_path=str(path),
+        bundle_path=str(path),
+        vector_store_path="",
+        collection_name=str(bundle.metadata.get("collection_name") or bundle.index_id or ""),
+        document_count=len(bundle.documents),
+        chunk_count=len(bundle.chunks),
+        outline_path="",
+        semantic_regions_path="",
+        events_path="",
+        grounding_artifact_path=str(bundle.grounding_html_path or ""),
+        restore_requirements={},
+        metadata=dict(bundle.metadata or {}),
+        legacy_compat=True,
+    )
+
+
+def resolve_manifest_storage_dir(
+    bundle: IndexBundle,
+    *,
+    target_path: str | pathlib.Path | None = None,
+    index_dir: str | pathlib.Path | None = None,
+) -> pathlib.Path:
+    if target_path is not None:
+        target = pathlib.Path(target_path)
+        if target.name == _MANIFEST_FILE:
+            return target.parent
+        if target.suffix:
+            return target
+        return target
+    root = pathlib.Path(index_dir) if index_dir is not None else _DEFAULT_INDEX_DIR
+    return root / str(bundle.index_id or "axiom-index")
+
+
+def persist_index_bundle(
+    bundle: IndexBundle,
+    *,
+    backend: str | None = None,
+    target_dir: str | pathlib.Path | None = None,
+    index_dir: str | pathlib.Path | None = None,
+    vector_store_path: str | pathlib.Path | None = None,
+    collection_name: str = "",
+    restore_requirements: dict[str, Any] | None = None,
+    manifest_metadata: dict[str, Any] | None = None,
+) -> IndexManifest:
+    backend_name = str(backend or bundle.vector_backend or "json")
+    root = (
+        pathlib.Path(target_dir)
+        if target_dir is not None
+        else resolve_manifest_storage_dir(bundle, index_dir=index_dir)
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    artifacts_dir = root / _ARTIFACTS_DIR
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest_path = root / _MANIFEST_FILE
+    bundle_path = root / _BUNDLE_FILE
+    outline_path = artifacts_dir / "document_outline.json"
+    semantic_regions_path = artifacts_dir / "semantic_regions.json"
+    events_path = artifacts_dir / "events.json"
+
+    _write_json(outline_path, list(bundle.document_outline))
+    _write_json(semantic_regions_path, list(bundle.semantic_regions))
+    _write_json(events_path, list(bundle.events))
+
+    grounding_artifact_path = ""
+    grounding_source = str(bundle.grounding_html_path or "").strip()
+    if grounding_source:
+        source_path = pathlib.Path(grounding_source)
+        if source_path.exists() and source_path.is_file():
+            target_grounding = artifacts_dir / source_path.name
+            if source_path.resolve() != target_grounding.resolve():
+                shutil.copy2(source_path, target_grounding)
+            grounding_artifact_path = _relative_to(root, target_grounding)
+        else:
+            grounding_artifact_path = grounding_source
+
+    merged_metadata = {
+        **dict(bundle.metadata or {}),
+        **dict(manifest_metadata or {}),
+        "collection_name": str(collection_name or bundle.metadata.get("collection_name") or ""),
+        "vector_store_path": _relative_to(root, vector_store_path),
+        "restore_requirements": dict(restore_requirements or {}),
+    }
+    bundle.vector_backend = backend_name
+    bundle.index_path = str(manifest_path)
+    bundle.grounding_html_path = grounding_artifact_path
+    bundle.metadata = merged_metadata
+    _write_json(bundle_path, bundle.to_payload())
+
+    manifest = IndexManifest(
+        index_id=str(bundle.index_id or root.name),
+        backend=backend_name,
+        created_at=str(bundle.created_at or datetime.now(timezone.utc).isoformat()),
+        embedding_signature=str(bundle.embedding_signature or ""),
+        source_files=list(bundle.documents),
+        manifest_path=str(manifest_path),
+        bundle_path=_relative_to(root, bundle_path),
+        vector_store_path=_relative_to(root, vector_store_path),
+        collection_name=str(collection_name or merged_metadata.get("collection_name") or bundle.index_id or ""),
+        document_count=len(bundle.documents),
+        chunk_count=len(bundle.chunks),
+        outline_path=_relative_to(root, outline_path),
+        semantic_regions_path=_relative_to(root, semantic_regions_path),
+        events_path=_relative_to(root, events_path),
+        grounding_artifact_path=grounding_artifact_path,
+        restore_requirements=dict(restore_requirements or {}),
+        metadata=merged_metadata,
+    )
+    _write_json(manifest_path, manifest.to_payload())
+    return manifest
+
+
+def save_index_bundle(
+    bundle: IndexBundle,
+    *,
+    target_path: str | pathlib.Path | None = None,
+    index_dir: str | pathlib.Path | None = None,
+) -> pathlib.Path:
+    if target_path is not None:
+        out_path = pathlib.Path(target_path)
+        if out_path.suffix.lower() == ".json" and out_path.name != _MANIFEST_FILE:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            bundle.index_path = str(out_path)
+            out_path.write_text(
+                json.dumps(bundle.to_payload(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return out_path
+        manifest = persist_index_bundle(
+            bundle,
+            backend=bundle.vector_backend,
+            target_dir=resolve_manifest_storage_dir(bundle, target_path=out_path),
+        )
+        return pathlib.Path(manifest.manifest_path)
+
+    manifest = persist_index_bundle(
+        bundle,
+        backend=bundle.vector_backend,
+        index_dir=index_dir,
+    )
+    return pathlib.Path(manifest.manifest_path)
+
+
+def refresh_index_bundle(bundle: IndexBundle) -> pathlib.Path:
+    """Rewrite bundle/manifest metadata in-place for an existing persisted index."""
+    candidate = pathlib.Path(str(bundle.index_path or ""))
+    if not candidate.exists() and candidate.name != _MANIFEST_FILE:
+        raise FileNotFoundError(f"Persisted index not found: {candidate}")
+    manifest = load_index_manifest(candidate)
+    if manifest.legacy_compat:
+        return save_index_bundle(bundle, target_path=manifest.manifest_path)
+
+    root = pathlib.Path(manifest.manifest_path).parent
+    vector_store_path = (
+        _resolve_from_manifest_root(root, manifest.vector_store_path)
+        if manifest.vector_store_path
+        else None
+    )
+    rewritten = persist_index_bundle(
+        bundle,
+        backend=manifest.backend,
+        target_dir=root,
+        vector_store_path=vector_store_path,
+        collection_name=manifest.collection_name,
+        restore_requirements=manifest.restore_requirements,
+        manifest_metadata=manifest.metadata,
+    )
+    return pathlib.Path(rewritten.manifest_path)
+
+
+def load_index_manifest(path: str | pathlib.Path) -> IndexManifest:
+    candidate = pathlib.Path(path)
+    if candidate.is_dir():
+        candidate = candidate / _MANIFEST_FILE
+    if candidate.name == _MANIFEST_FILE:
+        payload = _load_json(candidate)
+        if not isinstance(payload, dict):
+            raise ValueError(f"Invalid manifest payload: {candidate}")
+        manifest = IndexManifest.from_payload(payload)
+        manifest.manifest_path = str(candidate)
+        return manifest
+
+    bundle = load_index_bundle(candidate)
+    return _legacy_manifest_for_bundle(candidate, bundle)
+
+
+def list_index_manifests(index_dir: str | pathlib.Path) -> list[IndexManifest]:
+    root = pathlib.Path(index_dir)
+    if not root.exists():
+        return []
+    manifests: list[IndexManifest] = []
+    for path in sorted(root.glob(f"*/{_MANIFEST_FILE}")):
+        try:
+            manifests.append(load_index_manifest(path))
+        except Exception:
+            continue
+    for path in sorted(root.glob("*.json")):
+        if path.name == _MANIFEST_FILE:
+            continue
+        try:
+            manifests.append(load_index_manifest(path))
+        except Exception:
+            continue
+    return manifests
+
+
+def load_index_bundle(path: str | pathlib.Path) -> IndexBundle:
+    candidate = pathlib.Path(path)
+    if _is_manifest_reference(candidate):
+        manifest = load_index_manifest(candidate)
+        if manifest.legacy_compat and manifest.bundle_path == str(candidate):
+            payload = _load_json(candidate)
+            bundle = IndexBundle.from_payload(payload if isinstance(payload, dict) else {})
+            bundle.index_path = str(candidate)
+            return bundle
+
+        root = pathlib.Path(manifest.manifest_path).parent
+        bundle_path = _resolve_from_manifest_root(root, manifest.bundle_path)
+        payload = _load_json(bundle_path)
+        if not isinstance(payload, dict):
+            raise ValueError(f"Invalid bundle payload: {bundle_path}")
+        bundle = IndexBundle.from_payload(payload)
+        bundle.index_path = str(manifest.manifest_path)
+        bundle.vector_backend = str(manifest.backend or bundle.vector_backend or "json")
+        if not bundle.embedding_signature:
+            bundle.embedding_signature = str(manifest.embedding_signature or "")
+        if not bundle.document_outline and manifest.outline_path:
+            outline_path = _resolve_from_manifest_root(root, manifest.outline_path)
+            if outline_path.exists():
+                outline_payload = _load_json(outline_path)
+                if isinstance(outline_payload, list):
+                    bundle.document_outline = [
+                        dict(item) for item in outline_payload if isinstance(item, dict)
+                    ]
+        if not bundle.semantic_regions and manifest.semantic_regions_path:
+            regions_path = _resolve_from_manifest_root(root, manifest.semantic_regions_path)
+            if regions_path.exists():
+                regions_payload = _load_json(regions_path)
+                if isinstance(regions_payload, list):
+                    bundle.semantic_regions = [
+                        dict(item) for item in regions_payload if isinstance(item, dict)
+                    ]
+        if not bundle.events and manifest.events_path:
+            events_path = _resolve_from_manifest_root(root, manifest.events_path)
+            if events_path.exists():
+                events_payload = _load_json(events_path)
+                if isinstance(events_payload, list):
+                    bundle.events = [
+                        dict(item) for item in events_payload if isinstance(item, dict)
+                    ]
+        if manifest.grounding_artifact_path:
+            grounding_path = _resolve_from_manifest_root(root, manifest.grounding_artifact_path)
+            bundle.grounding_html_path = (
+                str(grounding_path)
+                if grounding_path.exists()
+                else str(manifest.grounding_artifact_path)
+            )
+        bundle.metadata = {
+            **dict(bundle.metadata or {}),
+            **dict(manifest.metadata or {}),
+            "manifest_path": str(manifest.manifest_path),
+            "collection_name": str(manifest.collection_name or ""),
+            "vector_store_path": str(manifest.vector_store_path or ""),
+            "restore_requirements": dict(manifest.restore_requirements or {}),
+        }
+        return bundle
+
+    payload = _load_json(candidate)
+    bundle = IndexBundle.from_payload(payload if isinstance(payload, dict) else {})
+    bundle.index_path = str(candidate)
+    return bundle
+
+
 def build_index_bundle(
     documents: list[str],
     settings: dict[str, Any],
@@ -383,47 +704,20 @@ def build_index_bundle(
     )
 
 
-def save_index_bundle(
-    bundle: IndexBundle,
-    *,
-    target_path: str | pathlib.Path | None = None,
-    index_dir: str | pathlib.Path | None = None,
-) -> pathlib.Path:
-    if target_path is not None:
-        out_path = pathlib.Path(target_path)
-    else:
-        root = pathlib.Path(index_dir) if index_dir is not None else _DEFAULT_INDEX_DIR
-        out_path = root / f"{bundle.index_id}.json"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    bundle.index_path = str(out_path)
-    out_path.write_text(
-        json.dumps(bundle.to_payload(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return out_path
+def _score_for_index(score_lookup: dict[int, float] | list[float], idx: int) -> float:
+    if isinstance(score_lookup, dict):
+        return float(score_lookup.get(idx, 0.0) or 0.0)
+    if 0 <= idx < len(score_lookup):
+        return float(score_lookup[idx] or 0.0)
+    return 0.0
 
 
-def load_index_bundle(path: str | pathlib.Path) -> IndexBundle:
-    payload = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
-    bundle = IndexBundle.from_payload(payload)
-    bundle.index_path = str(pathlib.Path(path))
-    return bundle
-
-
-def query_index_bundle(
+def select_hit_indices(
     bundle: IndexBundle,
     question: str,
+    ranked_indices: list[int],
     settings: dict[str, Any],
-) -> QueryResult:
-    try:
-        emb = create_embeddings(settings)
-    except (ValueError, ImportError):
-        emb = MockEmbeddings(dimensions=_EMB_DIM)
-
-    q_vec = emb.embed_query(question)
-    scores = [cosine_similarity(q_vec, vector) for vector in bundle.embeddings]
-    ranked = sorted(range(len(scores)), key=lambda idx: scores[idx], reverse=True)
-
+) -> list[int]:
     top_k = int(settings.get("top_k", 3))
     kg_mode = str(settings.get("kg_query_mode", "hybrid") or "hybrid")
     graph_hits: list[int] = []
@@ -437,23 +731,33 @@ def query_index_bundle(
         )
 
     if kg_mode in {"naive", "bypass"} or not graph_hits:
-        hits = ranked[:top_k]
-    else:
-        hit_set = set(graph_hits)
-        hits = (graph_hits + [idx for idx in ranked if idx not in hit_set])[:top_k]
+        return ranked_indices[:top_k]
 
+    hit_set = set(graph_hits)
+    return (graph_hits + [idx for idx in ranked_indices if idx not in hit_set])[:top_k]
+
+
+def build_query_result(
+    bundle: IndexBundle,
+    question: str,
+    hit_indices: list[int],
+    score_lookup: dict[int, float] | list[float],
+) -> QueryResult:
     sources: list[EvidenceSource] = []
     context_parts: list[str] = []
-    for rank, idx in enumerate(hits, start=1):
+    for rank, idx in enumerate(hit_indices, start=1):
+        if idx < 0 or idx >= len(bundle.chunks):
+            continue
         chunk = bundle.chunks[idx]
         sid = f"S{rank}"
+        score = _score_for_index(score_lookup, idx)
         source = EvidenceSource(
             sid=sid,
             source=str(chunk.get("source") or "unknown"),
             snippet=str(chunk.get("text") or "").strip(),
             chunk_id=str(chunk.get("id") or ""),
             chunk_idx=int(chunk.get("chunk_idx", rank - 1)),
-            score=float(scores[idx]),
+            score=score,
             title=str(chunk.get("source") or "unknown"),
             label=str(chunk.get("label") or chunk.get("source") or "unknown"),
             section_hint=str(chunk.get("section_hint") or ""),
@@ -476,10 +780,30 @@ def query_index_bundle(
             f"(score={source.score:.3f}):\n{source.snippet}"
         )
 
+    top_score = 0.0
+    if hit_indices:
+        top_score = _score_for_index(score_lookup, hit_indices[0])
     return QueryResult(
         prompt=question,
         context_block="\n\n".join(context_parts) if context_parts else "(no relevant passages found)",
         sources=sources,
-        hit_indices=hits,
-        top_score=scores[hits[0]] if hits else 0.0,
+        hit_indices=[idx for idx in hit_indices if 0 <= idx < len(bundle.chunks)],
+        top_score=top_score,
     )
+
+
+def query_index_bundle(
+    bundle: IndexBundle,
+    question: str,
+    settings: dict[str, Any],
+) -> QueryResult:
+    try:
+        emb = create_embeddings(settings)
+    except (ValueError, ImportError):
+        emb = MockEmbeddings(dimensions=_EMB_DIM)
+
+    q_vec = emb.embed_query(question)
+    scores = [cosine_similarity(q_vec, vector) for vector in bundle.embeddings]
+    ranked = sorted(range(len(scores)), key=lambda idx: scores[idx], reverse=True)
+    hits = select_hit_indices(bundle, question, ranked, settings)
+    return build_query_result(bundle, question, hits, scores)

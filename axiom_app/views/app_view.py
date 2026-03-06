@@ -48,9 +48,15 @@ import json
 import os
 import pathlib
 import re
+import sys
 import tkinter as tk
 from tkinter import ttk
 
+from axiom_app.services.wizard_recommendation import (
+    describe_auto_recommendation,
+    estimate_setup_cost,
+    recommend_auto_settings,
+)
 from axiom_app.views.styles import (
     STYLE_CONFIG,
     UI_SPACING,
@@ -809,6 +815,25 @@ class AppView:
         self._trace_detail_text = self._build_detail_text(self._evidence_traces_tab)
         self._trace_tree.bind("<<TreeviewSelect>>", self._on_trace_selected)
 
+        self._grounding_artifact_var = tk.StringVar(value="No grounding artifact recorded.")
+        grounding_toolbar = ttk.Frame(self._evidence_grounding_tab, style="Card.Flat.TFrame")
+        grounding_toolbar.grid(row=0, column=0, sticky="ew", pady=(0, UI_SPACING["s"]))
+        grounding_toolbar.columnconfigure(0, weight=1)
+        ttk.Label(
+            grounding_toolbar,
+            textvariable=self._grounding_artifact_var,
+            style="Caption.TLabel",
+            wraplength=340,
+            justify="left",
+        ).grid(row=0, column=0, sticky="w")
+        self.btn_open_grounding_artifact = ttk.Button(
+            grounding_toolbar,
+            text="Open Artifact",
+            style="Secondary.TButton",
+            state="disabled",
+            command=self._open_grounding_artifact,
+        )
+        self.btn_open_grounding_artifact.grid(row=0, column=1, padx=(UI_SPACING["s"], 0))
         self._grounding_text = self._build_detail_text(self._evidence_grounding_tab)
 
     def _build_simple_tree(
@@ -1824,10 +1849,32 @@ class AppView:
                 ),
             )
 
+    def _open_grounding_artifact(self) -> None:
+        path = str(getattr(self, "_grounding_artifact_path", "") or "").strip()
+        if not path or not os.path.exists(path):
+            return
+        if os.name == "nt":
+            os.startfile(path)  # type: ignore[attr-defined]
+            return
+        import subprocess
+
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        subprocess.Popen([opener, path])
+
     def render_grounding_info(self, text: str) -> None:
         """Render stored grounding info or artifact paths."""
+        normalized = str(text or "").strip()
+        self._grounding_artifact_path = normalized if os.path.isfile(normalized) else ""
+        if hasattr(self, "_grounding_artifact_var"):
+            self._grounding_artifact_var.set(
+                self._grounding_artifact_path or "No grounding artifact recorded."
+            )
+        if hasattr(self, "btn_open_grounding_artifact"):
+            self.btn_open_grounding_artifact.configure(
+                state="normal" if self._grounding_artifact_path else "disabled"
+            )
         if hasattr(self, "_grounding_text"):
-            self._set_text_widget(self._grounding_text, text or "No grounding artifact recorded.")
+            self._set_text_widget(self._grounding_text, normalized or "No grounding artifact recorded.")
 
     def bind_history_search(self, callback) -> None:
         """Bind the History search entry to a callback."""
@@ -1924,6 +1971,13 @@ class AppView:
                 role = str(getattr(message, "role", "") or "").capitalize()
                 content = str(getattr(message, "content", "") or "")
             lines.append(f"{idx}. {role}: {content[:240]}")
+        feedback_items = list(getattr(detail, "feedback", []) or [])
+        if feedback_items:
+            lines.extend(["", "Feedback:"])
+            for item in feedback_items[-5:]:
+                vote = "thumbs-up" if int(getattr(item, "vote", 0) or 0) > 0 else "thumbs-down"
+                note = str(getattr(item, "note", "") or "").strip() or "(no note)"
+                lines.append(f"- {vote}: {note}")
         self._set_history_detail_text("\n".join(lines))
 
     def get_prompt_text(self) -> str:
@@ -2343,8 +2397,9 @@ class AppView:
                 selected_index_label = label
                 break
         index_var = tk.StringVar(value=selected_index_label)
-        chunk_size_var = tk.StringVar(value=str(initial_state.get("chunk_size", 1000)))
-        overlap_var = tk.StringVar(value=str(initial_state.get("chunk_overlap", 100)))
+        recommendation = dict(initial_state.get("wizard_recommendation") or {})
+        chunk_size_var = tk.StringVar(value=str(initial_state.get("chunk_size", recommendation.get("chunk_size", 1000))))
+        overlap_var = tk.StringVar(value=str(initial_state.get("chunk_overlap", recommendation.get("chunk_overlap", 100))))
         digest_var = tk.BooleanVar(value=bool(initial_state.get("build_digest_index", True)))
         comprehension_var = tk.BooleanVar(value=bool(initial_state.get("build_comprehension_index", False)))
         comprehension_depth_var = tk.StringVar(value=str(initial_state.get("comprehension_extraction_depth", "Standard")))
@@ -2353,13 +2408,24 @@ class AppView:
         llm_model_var = tk.StringVar(value=str(initial_state.get("llm_model", "") or ""))
         embedding_provider_var = tk.StringVar(value=str(initial_state.get("embedding_provider", "") or "mock"))
         embedding_model_var = tk.StringVar(value=str(initial_state.get("embedding_model", "") or ""))
+        retrieval_k_var = tk.StringVar(value=str(initial_state.get("retrieval_k", recommendation.get("retrieval_k", 25))))
+        top_k_var = tk.StringVar(value=str(initial_state.get("top_k", recommendation.get("final_k", 5))))
+        mmr_lambda_var = tk.StringVar(value=str(initial_state.get("mmr_lambda", recommendation.get("mmr_lambda", 0.5))))
+        retrieval_mode_var = tk.StringVar(value=str(initial_state.get("retrieval_mode", recommendation.get("retrieval_mode", "flat")) or "flat"))
+        agentic_mode_var = tk.BooleanVar(value=bool(initial_state.get("agentic_mode", recommendation.get("agentic_mode", False))))
+        agentic_iterations_var = tk.StringVar(
+            value=str(initial_state.get("agentic_max_iterations", recommendation.get("agentic_max_iterations", 2)))
+        )
+        output_style_var = tk.StringVar(value=str(initial_state.get("output_style", "") or "Default answer"))
+        reranker_var = tk.BooleanVar(value=bool(initial_state.get("use_reranker", recommendation.get("use_reranker", False))))
         openai_key_var = tk.StringVar(value=str(self._settings_data.get("api_key_openai", "") or ""))
         anthropic_key_var = tk.StringVar(value=str(self._settings_data.get("api_key_anthropic", "") or ""))
         google_key_var = tk.StringVar(value=str(self._settings_data.get("api_key_google", "") or ""))
         xai_key_var = tk.StringVar(value=str(self._settings_data.get("api_key_xai", "") or ""))
         mode_var = tk.StringVar(value=str(initial_state.get("mode_preset", "Q&A") or "Q&A"))
-        deepread_var = tk.BooleanVar(value=bool(self._settings_data.get("deepread_mode", False)))
+        deepread_var = tk.BooleanVar(value=bool(initial_state.get("deepread_mode", self._settings_data.get("deepread_mode", False))))
         backend_var = tk.StringVar(value=str(self._settings_data.get("vector_db_type", "json") or "json"))
+        recommendation_text_var = tk.StringVar(value="")
 
         ttk.Label(source_tab, text="New source file", style="Caption.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Entry(source_tab, textvariable=file_var).grid(row=0, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0))
@@ -2379,28 +2445,46 @@ class AppView:
             width=70,
         ).grid(row=1, column=1, columnspan=2, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
 
-        ttk.Label(ingest_tab, text="Chunk size", style="Caption.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Entry(ingest_tab, textvariable=chunk_size_var).grid(row=0, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0))
-        ttk.Label(ingest_tab, text="Chunk overlap", style="Caption.TLabel").grid(row=1, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
-        ttk.Entry(ingest_tab, textvariable=overlap_var).grid(row=1, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
-        ttk.Checkbutton(ingest_tab, text="Build digest index", variable=digest_var).grid(row=2, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["s"], 0))
-        ttk.Checkbutton(ingest_tab, text="Build comprehension index", variable=comprehension_var).grid(row=3, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
-        ttk.Label(ingest_tab, text="Comprehension depth", style="Caption.TLabel").grid(row=4, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        recommendation_host = ttk.Frame(ingest_tab, style="Card.Flat.TFrame")
+        recommendation_host.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, UI_SPACING["s"]))
+        recommendation_host.columnconfigure(0, weight=1)
+        ttk.Label(
+            recommendation_host,
+            textvariable=recommendation_text_var,
+            style="Caption.TLabel",
+            wraplength=520,
+            justify="left",
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Button(
+            recommendation_host,
+            text="Apply Recommendation",
+            style="Secondary.TButton",
+            command=lambda: _apply_recommendation(_current_recommendation()),
+        ).grid(row=0, column=1, padx=(UI_SPACING["s"], 0))
+
+        ttk.Label(ingest_tab, text="Chunk size", style="Caption.TLabel").grid(row=1, column=0, sticky="w")
+        ttk.Entry(ingest_tab, textvariable=chunk_size_var).grid(row=1, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0))
+        ttk.Label(ingest_tab, text="Chunk overlap", style="Caption.TLabel").grid(row=2, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Entry(ingest_tab, textvariable=overlap_var).grid(row=2, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+        ttk.Checkbutton(ingest_tab, text="Build digest index", variable=digest_var).grid(row=3, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Checkbutton(ingest_tab, text="Build comprehension index", variable=comprehension_var).grid(row=4, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
+        ttk.Label(ingest_tab, text="Comprehension depth", style="Caption.TLabel").grid(row=5, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
         ttk.Combobox(
             ingest_tab,
             textvariable=comprehension_depth_var,
             values=["Standard", "Deep", "Exhaustive"],
             state="readonly",
-        ).grid(row=4, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
-        ttk.Checkbutton(ingest_tab, text="Prefer comprehension index", variable=prefer_comprehension_var).grid(row=5, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
-        ttk.Checkbutton(ingest_tab, text="Enable deepread (forces structure-aware ingestion)", variable=deepread_var).grid(row=6, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
-        ttk.Label(ingest_tab, text="Vector backend", style="Caption.TLabel").grid(row=7, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ).grid(row=5, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+        ttk.Checkbutton(ingest_tab, text="Prefer comprehension index", variable=prefer_comprehension_var).grid(row=6, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
+        ttk.Checkbutton(ingest_tab, text="Enable deepread (forces structure-aware ingestion)", variable=deepread_var).grid(row=7, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
+        ttk.Checkbutton(ingest_tab, text="Use reranker", variable=reranker_var).grid(row=8, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
+        ttk.Label(ingest_tab, text="Vector backend", style="Caption.TLabel").grid(row=9, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
         ttk.Combobox(
             ingest_tab,
             textvariable=backend_var,
             values=["json", "chroma", "weaviate"],
             state="readonly",
-        ).grid(row=7, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+        ).grid(row=9, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
 
         provider_values = ["anthropic", "openai", "google", "xai", "local_lm_studio", "local_gguf", "mock"]
         embedding_values = ["voyage", "openai", "google", "local_huggingface", "local_sentence_transformers", "mock"]
@@ -2412,6 +2496,31 @@ class AppView:
         ttk.Combobox(provider_tab, textvariable=embedding_provider_var, values=embedding_values, state="readonly").grid(row=2, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
         ttk.Label(provider_tab, text="Embedding model", style="Caption.TLabel").grid(row=3, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
         ttk.Entry(provider_tab, textvariable=embedding_model_var).grid(row=3, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+        ttk.Label(provider_tab, text="Retrieval K", style="Caption.TLabel").grid(row=4, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Entry(provider_tab, textvariable=retrieval_k_var).grid(row=4, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+        ttk.Label(provider_tab, text="Final K", style="Caption.TLabel").grid(row=5, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Entry(provider_tab, textvariable=top_k_var).grid(row=5, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+        ttk.Label(provider_tab, text="MMR lambda", style="Caption.TLabel").grid(row=6, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Entry(provider_tab, textvariable=mmr_lambda_var).grid(row=6, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+        ttk.Label(provider_tab, text="Retrieval mode", style="Caption.TLabel").grid(row=7, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Combobox(provider_tab, textvariable=retrieval_mode_var, values=["flat", "hierarchical"], state="readonly").grid(row=7, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+        ttk.Checkbutton(provider_tab, text="Agentic retrieval", variable=agentic_mode_var).grid(row=8, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Label(provider_tab, text="Agentic iterations", style="Caption.TLabel").grid(row=9, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Entry(provider_tab, textvariable=agentic_iterations_var).grid(row=9, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+        ttk.Label(provider_tab, text="Output style", style="Caption.TLabel").grid(row=10, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Combobox(
+            provider_tab,
+            textvariable=output_style_var,
+            values=[
+                "Default answer",
+                "Detailed answer",
+                "Brief / exec summary",
+                "Script / talk track",
+                "Structured report",
+                "Blinkist-style summary",
+            ],
+            state="readonly",
+        ).grid(row=10, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
 
         for row, (label, var) in enumerate(
             (
@@ -2425,7 +2534,12 @@ class AppView:
             ttk.Entry(keys_tab, textvariable=var, show="*").grid(row=row, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=((UI_SPACING["s"] if row else 0), 0))
 
         ttk.Label(mode_tab, text="Mode preset", style="Caption.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Combobox(mode_tab, textvariable=mode_var, values=MODE_OPTIONS, state="readonly").grid(row=0, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0))
+        ttk.Combobox(
+            mode_tab,
+            textvariable=mode_var,
+            values=["Q&A", "Book summary", "Tutor", "Research", "Evidence Pack"],
+            state="readonly",
+        ).grid(row=0, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0))
 
         confirm_text = tk.Text(
             confirm_tab,
@@ -2441,20 +2555,61 @@ class AppView:
         confirm_text.grid(row=0, column=0, columnspan=2, sticky="nsew")
         confirm_tab.rowconfigure(0, weight=1)
 
+        def _current_recommendation() -> dict:
+            return recommend_auto_settings(
+                file_path=file_var.get().strip() or None,
+                index_path=index_label_map.get(index_var.get().strip(), "") or None,
+            )
+
+        def _apply_recommendation(rec: dict) -> None:
+            chunk_size_var.set(str(rec.get("chunk_size", chunk_size_var.get())))
+            overlap_var.set(str(rec.get("chunk_overlap", overlap_var.get())))
+            digest_var.set(bool(rec.get("build_digest_index", digest_var.get())))
+            comprehension_var.set(bool(rec.get("build_comprehension_index", comprehension_var.get())))
+            comprehension_depth_var.set(
+                str(rec.get("comprehension_extraction_depth", comprehension_depth_var.get()) or "Standard")
+            )
+            prefer_comprehension_var.set(
+                bool(rec.get("prefer_comprehension_index", prefer_comprehension_var.get()))
+            )
+            retrieval_k_var.set(str(rec.get("retrieval_k", retrieval_k_var.get())))
+            top_k_var.set(str(rec.get("final_k", top_k_var.get())))
+            mmr_lambda_var.set(str(rec.get("mmr_lambda", mmr_lambda_var.get())))
+            retrieval_mode_var.set(str(rec.get("retrieval_mode", retrieval_mode_var.get()) or "flat"))
+            agentic_mode_var.set(bool(rec.get("agentic_mode", agentic_mode_var.get())))
+            agentic_iterations_var.set(str(rec.get("agentic_max_iterations", agentic_iterations_var.get())))
+            reranker_var.set(bool(rec.get("use_reranker", reranker_var.get())))
+            if bool(rec.get("deepread_mode")):
+                deepread_var.set(True)
+
         def _refresh_summary(*_args) -> None:
+            current_recommendation = _current_recommendation()
+            recommendation_text_var.set(describe_auto_recommendation(current_recommendation))
             summary = {
                 "file_path": file_var.get().strip(),
                 "selected_index_path": index_label_map.get(index_var.get().strip(), ""),
                 "chunk_size": chunk_size_var.get().strip(),
                 "chunk_overlap": overlap_var.get().strip(),
+                "retrieval_k": retrieval_k_var.get().strip(),
+                "top_k": top_k_var.get().strip(),
+                "mmr_lambda": mmr_lambda_var.get().strip(),
+                "retrieval_mode": retrieval_mode_var.get().strip(),
+                "agentic_mode": bool(agentic_mode_var.get()),
+                "agentic_max_iterations": agentic_iterations_var.get().strip(),
+                "use_reranker": bool(reranker_var.get()),
                 "llm_provider": llm_provider_var.get().strip(),
                 "llm_model": llm_model_var.get().strip(),
                 "embedding_provider": embedding_provider_var.get().strip(),
                 "embedding_model": embedding_model_var.get().strip(),
                 "mode_preset": mode_var.get().strip(),
+                "output_style": output_style_var.get().strip(),
                 "vector_db_type": backend_var.get().strip(),
                 "deepread_mode": bool(deepread_var.get()),
-                "cost_estimate": "Mock/local providers: low cost. Cloud providers depend on prompt length and model choice.",
+                "cost_estimate": estimate_setup_cost(
+                    current_recommendation,
+                    llm_provider=llm_provider_var.get().strip(),
+                    embedding_provider=embedding_provider_var.get().strip(),
+                ),
             }
             confirm_text.configure(state="normal")
             confirm_text.delete("1.0", "end")
@@ -2466,6 +2621,14 @@ class AppView:
             index_var,
             chunk_size_var,
             overlap_var,
+            retrieval_k_var,
+            top_k_var,
+            mmr_lambda_var,
+            retrieval_mode_var,
+            agentic_mode_var,
+            agentic_iterations_var,
+            output_style_var,
+            reranker_var,
             llm_provider_var,
             llm_model_var,
             embedding_provider_var,
@@ -2487,6 +2650,9 @@ class AppView:
 
         def _finish() -> None:
             nonlocal result
+            selected_output_style = output_style_var.get().strip()
+            if mode_var.get().strip() == "Book summary" and selected_output_style in {"", "Default answer"}:
+                selected_output_style = "Blinkist-style summary"
             result = {
                 "file_path": file_var.get().strip(),
                 "selected_index_path": index_label_map.get(index_var.get().strip(), ""),
@@ -2500,6 +2666,14 @@ class AppView:
                 "llm_model": llm_model_var.get().strip(),
                 "embedding_provider": embedding_provider_var.get().strip(),
                 "embedding_model": embedding_model_var.get().strip(),
+                "retrieval_k": retrieval_k_var.get().strip(),
+                "top_k": top_k_var.get().strip(),
+                "mmr_lambda": mmr_lambda_var.get().strip(),
+                "retrieval_mode": retrieval_mode_var.get().strip(),
+                "agentic_mode": agentic_mode_var.get(),
+                "agentic_max_iterations": agentic_iterations_var.get().strip(),
+                "output_style": selected_output_style,
+                "use_reranker": reranker_var.get(),
                 "api_key_openai": openai_key_var.get().strip(),
                 "api_key_anthropic": anthropic_key_var.get().strip(),
                 "api_key_google": google_key_var.get().strip(),

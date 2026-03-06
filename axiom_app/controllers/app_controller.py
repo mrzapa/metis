@@ -35,13 +35,27 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from axiom_app.models.parity_types import AgentProfile
 from axiom_app.models.session_types import EvidenceSource
-from axiom_app.services.index_service import IndexBundle, load_index_bundle
+from axiom_app.services.index_service import (
+    IndexBundle,
+    list_index_manifests,
+    load_index_bundle,
+    refresh_index_bundle,
+)
 from axiom_app.services.local_model_registry import LocalModelRegistryService
 from axiom_app.services.profile_repository import ProfileRepository
+from axiom_app.services.response_pipeline import (
+    apply_claim_level_grounding,
+    build_grounding_html,
+    is_blinkist_summary_mode,
+    is_tutor_mode,
+    run_blinkist_summary_pipeline,
+    run_tutor_pipeline,
+)
 from axiom_app.services.runtime_resolution import resolve_runtime_settings
 from axiom_app.services.session_repository import SessionRepository
 from axiom_app.services.trace_store import TraceStore
 from axiom_app.services.vector_store import resolve_vector_store
+from axiom_app.services.wizard_recommendation import recommend_auto_settings
 from axiom_app.utils.background import BackgroundRunner, CancelToken
 from axiom_app.utils.dependency_bootstrap import install_packages
 from axiom_app.utils.document_loader import KREUZBERG_EXTENSIONS, is_kreuzberg_available
@@ -229,26 +243,23 @@ class AppController:
         if not root.exists():
             return []
         rows: list[dict[str, Any]] = []
-        for path in sorted(root.glob("*.json")):
-            try:
-                bundle = load_index_bundle(path)
-            except Exception as exc:
-                self._log.warning("Skipping unreadable index '%s': %s", path, exc)
-                continue
+        for manifest in list_index_manifests(root):
             rows.append(
                 {
-                    "index_id": bundle.index_id,
+                    "index_id": manifest.index_id,
                     "label": (
-                        f"{bundle.index_id} "
-                        f"({bundle.vector_backend or 'json'} · {len(bundle.documents)} file(s) · "
-                        f"{len(bundle.chunks)} chunk(s))"
+                        f"{manifest.index_id} "
+                        f"({manifest.backend or 'json'} · {manifest.document_count} file(s) · "
+                        f"{manifest.chunk_count} chunk(s))"
                     ),
-                    "path": str(path),
-                    "vector_backend": str(bundle.vector_backend or "json"),
-                    "document_count": len(bundle.documents),
-                    "chunk_count": len(bundle.chunks),
-                    "created_at": bundle.created_at,
-                    "embedding_signature": bundle.embedding_signature,
+                    "path": str(manifest.manifest_path),
+                    "vector_backend": str(manifest.backend or "json"),
+                    "document_count": int(manifest.document_count or 0),
+                    "chunk_count": int(manifest.chunk_count or 0),
+                    "created_at": manifest.created_at,
+                    "embedding_signature": manifest.embedding_signature,
+                    "collection_name": str(manifest.collection_name or ""),
+                    "legacy_compat": bool(manifest.legacy_compat),
                 }
             )
         return rows
@@ -268,7 +279,9 @@ class AppController:
         if bundle is None:
             return
         self.model.settings["selected_index_path"] = str(bundle.index_path or "")
-        self.model.settings["selected_collection_name"] = str(bundle.index_id or "")
+        self.model.settings["selected_collection_name"] = str(
+            bundle.metadata.get("collection_name") or bundle.index_id or ""
+        )
         self.model.settings["index_embedding_signature"] = str(bundle.embedding_signature or "")
         self.model.settings["vector_db_type"] = str(bundle.vector_backend or "json")
         if save:
@@ -295,6 +308,7 @@ class AppController:
 
         backend_settings = {
             **dict(self.model.settings),
+            **dict(initial_bundle.metadata.get("weaviate_settings") or {}),
             "vector_db_type": str(initial_bundle.vector_backend or "json"),
         }
         adapter = resolve_vector_store(backend_settings)
@@ -318,7 +332,7 @@ class AppController:
             )
         if persist:
             self._persist_active_index_selection(bundle)
-        self.refresh_available_indexes(select_path=str(path))
+        self.refresh_available_indexes(select_path=str(bundle.index_path or path))
         self._render_bundle_metadata(bundle, traces={})
         return bundle
 
@@ -327,7 +341,7 @@ class AppController:
         if not candidate:
             selected_collection = str(self.model.settings.get("selected_collection_name", "") or "").strip()
             for row in self.model.available_indexes:
-                if str(row.get("index_id", "") or "") == selected_collection:
+                if str(row.get("index_id", "") or "") == selected_collection or str(row.get("collection_name", "") or "") == selected_collection:
                     candidate = str(row.get("path", "") or "")
                     break
         if candidate:
@@ -428,6 +442,110 @@ class AppController:
             digest_usage=bool(self.model.settings.get("build_digest_index", True)),
         )
 
+    @staticmethod
+    def _wizard_preset_to_runtime_mode(preset: str) -> str:
+        mapping = {
+            "Q&A": "Q&A",
+            "Book summary": "Summary",
+            "Summary": "Summary",
+            "Tutor": "Tutor",
+            "Research": "Research",
+            "Evidence Pack": "Evidence Pack",
+        }
+        return mapping.get(str(preset or "").strip(), "Q&A")
+
+    def _active_index_has_deepread_metadata(self) -> bool:
+        bundle = self._current_index_bundle()
+        if bundle is None:
+            return False
+        if bundle.document_outline:
+            return True
+        for chunk in bundle.chunks:
+            header_path = str(chunk.get("header_path") or "").strip()
+            metadata = dict(chunk.get("metadata") or {})
+            if header_path or str(metadata.get("header_path") or "").strip():
+                return True
+        return False
+
+    def _current_state_constraints(
+        self,
+        settings: dict[str, Any] | None = None,
+        *,
+        scope: str = "query",
+    ) -> dict[str, Any]:
+        effective = dict(self.model.settings)
+        if settings:
+            effective.update(settings)
+        blockers: list[str] = []
+        advisories: list[str] = []
+        if bool(effective.get("structure_aware_ingestion")) and bool(
+            effective.get("semantic_layout_ingestion")
+        ):
+            blockers.append(
+                "Structure-aware ingestion cannot be combined with Semantic Layout. Disable one option."
+            )
+        if bool(effective.get("secure_mode")) and not bool(
+            effective.get("enable_summarizer", True)
+        ):
+            blockers.append(
+                "Secure mode requires the summarizer safety pass. Enable summarizer or disable Secure mode."
+            )
+        if scope == "query" and bool(effective.get("deepread_mode")) and not self._active_index_has_deepread_metadata():
+            blockers.append(
+                "DeepRead requires document outline/header metadata in the active index."
+            )
+        active_backend = str(
+            effective.get("vector_db_type")
+            or self._current_vector_backend()
+            or "json"
+        )
+        if bool(effective.get("semantic_layout_ingestion")) and active_backend != "chroma":
+            advisories.append(
+                "Semantic Layout is tuned for Chroma indexes; non-Chroma backends remain experimental."
+            )
+        if scope == "build" and bool(effective.get("deepread_mode")):
+            advisories.append(
+                "DeepRead build will force structure-aware ingestion and comprehension metadata."
+            )
+        return {"blockers": blockers, "advisories": advisories}
+
+    def _confirm_experimental_override(self, scope: str, blockers: list[str]) -> bool:
+        if not blockers:
+            return True
+        if not bool(self.model.settings.get("experimental_override", False)):
+            return False
+        from tkinter import messagebox
+
+        body = "\n".join(f"- {item}" for item in blockers)
+        approved = messagebox.askyesno(
+            "Experimental override",
+            f"{scope} has incompatible settings:\n\n{body}\n\nProceed anyway with Experimental override?",
+        )
+        if approved:
+            self._safe_view_call("append_log", f"[override] {scope}: {'; '.join(blockers)}")
+        return approved
+
+    def _grounding_output_dir(self) -> pathlib.Path:
+        bundle = self._current_index_bundle()
+        active_path = pathlib.Path(str(getattr(self.model, "active_index_path", "") or ""))
+        if bundle is not None and str(bundle.index_path or "").strip():
+            active_path = pathlib.Path(str(bundle.index_path or ""))
+        if active_path.exists():
+            if active_path.is_dir():
+                return active_path
+            if active_path.name == "manifest.json":
+                return active_path.parent / "artifacts"
+            return active_path.parent
+        return pathlib.Path(getattr(self.model, "index_storage_dir", pathlib.Path(".")))
+
+    def _persist_runtime_artifacts(self, bundle: IndexBundle | None) -> None:
+        if bundle is None or not str(bundle.index_path or "").strip():
+            return
+        try:
+            refresh_index_bundle(bundle)
+        except Exception as exc:
+            self._safe_view_call("append_log", f"[artifacts] Failed to refresh index metadata: {exc}")
+
     def _apply_profile_to_settings(self, profile: AgentProfile, *, label: str) -> None:
         self.model.current_profile_label = label
         self.model.settings["selected_profile"] = label
@@ -469,6 +587,9 @@ class AppController:
                 self.model.settings["comprehension_extraction_depth"] = str(comprehension["depth"])
 
     def _apply_wizard_result(self, result: dict[str, Any]) -> None:
+        runtime_mode = self._wizard_preset_to_runtime_mode(
+            str(result.get("mode_preset", self.model.settings.get("selected_mode", "Q&A")) or "Q&A")
+        )
         updates = {
             "chunk_size": int(result.get("chunk_size", self.model.settings.get("chunk_size", 1000)) or 1000),
             "chunk_overlap": int(result.get("chunk_overlap", self.model.settings.get("chunk_overlap", 100)) or 100),
@@ -498,15 +619,37 @@ class AppController:
                 result.get("embedding_provider", self.model.settings.get("embedding_provider", "")) or ""
             ),
             "embedding_model": str(result.get("embedding_model", self._effective_embedding_model()) or ""),
-            "selected_mode": str(result.get("mode_preset", self.model.settings.get("selected_mode", "Q&A")) or "Q&A"),
+            "selected_mode": runtime_mode,
             "basic_wizard_completed": True,
             "startup_mode_setting": "advanced",
             "last_used_mode": "advanced",
             "deepread_mode": bool(result.get("deepread_mode", self.model.settings.get("deepread_mode", False))),
         }
+        typed_keys = {
+            "retrieval_k": int,
+            "top_k": int,
+            "mmr_lambda": float,
+            "retrieval_mode": str,
+            "agentic_mode": bool,
+            "agentic_max_iterations": int,
+            "output_style": str,
+            "use_reranker": bool,
+        }
+        for key, caster in typed_keys.items():
+            if key not in result:
+                continue
+            raw_value = result[key]
+            if caster is bool:
+                updates[key] = bool(raw_value)
+                continue
+            try:
+                updates[key] = caster(raw_value)
+            except (TypeError, ValueError):
+                continue
         if updates["deepread_mode"]:
             updates["structure_aware_ingestion"] = True
-            updates["semantic_layout_ingestion"] = True
+            updates["build_comprehension_index"] = True
+            updates["prefer_comprehension_index"] = True
         for key in (
             "api_key_openai",
             "api_key_anthropic",
@@ -730,20 +873,77 @@ class AppController:
         self._safe_view_call("set_status", "Test mode reset.")
 
     def _wizard_initial_state(self) -> dict[str, Any]:
+        current_mode = str(self.model.settings.get("selected_mode", "Q&A") or "Q&A")
+        recommendation = recommend_auto_settings(
+            file_path=self.model.documents[0] if self.model.documents else None,
+            index_path=str(self.model.settings.get("selected_index_path", "") or "") or None,
+        )
         return {
             "file_path": self.model.documents[0] if self.model.documents else "",
             "selected_index_path": str(self.model.settings.get("selected_index_path", "") or ""),
-            "chunk_size": int(self.model.settings.get("chunk_size", 1000) or 1000),
-            "chunk_overlap": int(self.model.settings.get("chunk_overlap", 100) or 100),
-            "build_digest_index": bool(self.model.settings.get("build_digest_index", True)),
-            "build_comprehension_index": bool(self.model.settings.get("build_comprehension_index", False)),
+            "chunk_size": int(
+                self.model.settings.get("chunk_size", recommendation.get("chunk_size", 1000)) or 1000
+            ),
+            "chunk_overlap": int(
+                self.model.settings.get("chunk_overlap", recommendation.get("chunk_overlap", 100)) or 100
+            ),
+            "build_digest_index": bool(
+                self.model.settings.get(
+                    "build_digest_index",
+                    recommendation.get("build_digest_index", True),
+                )
+            ),
+            "build_comprehension_index": bool(
+                self.model.settings.get(
+                    "build_comprehension_index",
+                    recommendation.get("build_comprehension_index", False),
+                )
+            ),
             "comprehension_extraction_depth": str(self.model.settings.get("comprehension_extraction_depth", "Standard") or "Standard"),
-            "prefer_comprehension_index": bool(self.model.settings.get("prefer_comprehension_index", True)),
+            "prefer_comprehension_index": bool(
+                self.model.settings.get(
+                    "prefer_comprehension_index",
+                    recommendation.get("prefer_comprehension_index", True),
+                )
+            ),
             "llm_provider": str(self.model.settings.get("llm_provider", "") or ""),
             "llm_model": self._effective_llm_model(),
             "embedding_provider": str(self.model.settings.get("embedding_provider", "") or ""),
             "embedding_model": self._effective_embedding_model(),
-            "mode_preset": str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
+            "mode_preset": "Book summary" if current_mode == "Summary" else current_mode,
+            "retrieval_k": int(self.model.settings.get("retrieval_k", recommendation.get("retrieval_k", 25)) or 25),
+            "top_k": int(self.model.settings.get("top_k", recommendation.get("final_k", 5)) or 5),
+            "mmr_lambda": float(
+                self.model.settings.get("mmr_lambda", recommendation.get("mmr_lambda", 0.5)) or 0.5
+            ),
+            "retrieval_mode": str(
+                self.model.settings.get("retrieval_mode", recommendation.get("retrieval_mode", "flat"))
+                or "flat"
+            ),
+            "agentic_mode": bool(
+                self.model.settings.get("agentic_mode", recommendation.get("agentic_mode", False))
+            ),
+            "agentic_max_iterations": int(
+                self.model.settings.get(
+                    "agentic_max_iterations",
+                    recommendation.get("agentic_max_iterations", 2),
+                )
+                or 2
+            ),
+            "output_style": str(
+                self.model.settings.get(
+                    "output_style",
+                    "Blinkist-style summary" if current_mode == "Summary" else "Default answer",
+                )
+                or ""
+            ),
+            "use_reranker": bool(
+                self.model.settings.get("use_reranker", recommendation.get("use_reranker", False))
+            ),
+            "deepread_mode": bool(
+                self.model.settings.get("deepread_mode", recommendation.get("deepread_mode", False))
+            ),
+            "wizard_recommendation": recommendation,
         }
 
     def _ensure_test_mode_environment(self) -> str:
@@ -867,17 +1067,34 @@ class AppController:
                     for item in (meta.get("sources") or [])
                 ]
                 run_id = str(meta.get("run_id") or "")
+                context_block = str(result.get("context_block") or meta.get("context_block") or "").strip()
+
+                if bool(meta.get("show_retrieved_context")) and context_block:
+                    self._safe_view_call(
+                        "append_chat",
+                        f"Retrieved context:\n{context_block}\n\n",
+                        "system",
+                    )
 
                 header = (
                     f"Axiom [{provider}, rag, mode={selected_mode}, "
                     f"{n_chunks} chunk(s)]:\n\n"
                 )
                 self._safe_view_call("append_chat", header + response + "\n\n")
+                for note in result.get("validation_notes") or []:
+                    self._safe_view_call("append_log", f"[grounding] {note}")
                 self.model.chat_history.append({"role": "user", "content": prompt})
                 self.model.chat_history.append({"role": "assistant", "content": response})
                 self.model.last_sources = sources
                 self.model.last_run_id = run_id
                 self._safe_view_call("render_evidence_sources", sources)
+                bundle = self._current_index_bundle()
+                grounding_html_path = str(result.get("grounding_html_path", "") or "").strip()
+                if grounding_html_path:
+                    if bundle is not None:
+                        bundle.grounding_html_path = grounding_html_path
+                        self._persist_runtime_artifacts(bundle)
+                    self._safe_view_call("render_grounding_info", grounding_html_path)
                 self._persist_run(
                     prompt=prompt,
                     response=response,
@@ -885,7 +1102,7 @@ class AppController:
                     sources=sources,
                 )
                 self._render_bundle_metadata(
-                    self._current_index_bundle(),
+                    bundle,
                     {run_id: self.trace_store.read_run(run_id)},
                 )
                 self._log.info("RAG query answered — top score=%.3f", top_score)
@@ -1015,6 +1232,19 @@ class AppController:
                     self.model.settings[key] = settings_snapshot[key]
                 except (TypeError, ValueError):
                     continue
+        if bool(settings_snapshot.get("deepread_mode")):
+            settings_snapshot["structure_aware_ingestion"] = True
+            settings_snapshot["build_comprehension_index"] = True
+            settings_snapshot["prefer_comprehension_index"] = True
+
+        constraints = self._current_state_constraints(settings_snapshot, scope="build")
+        blockers = list(constraints.get("blockers") or [])
+        advisories = list(constraints.get("advisories") or [])
+        if blockers and not self._confirm_experimental_override("Index build", blockers):
+            self._safe_view_call("set_status", blockers[0])
+            return
+        for advisory in advisories:
+            self._safe_view_call("append_log", f"[build] advisory: {advisory}")
 
         adapter = resolve_vector_store(settings_snapshot)
         available, reason = adapter.is_available(settings_snapshot)
@@ -1104,6 +1334,16 @@ class AppController:
                 "agentic_max_iterations": resolved.agentic_max_iterations,
             }
         )
+        constraints = self._current_state_constraints(query_settings, scope="query")
+        blockers = list(constraints.get("blockers") or [])
+        advisories = list(constraints.get("advisories") or [])
+        if blockers and not self._confirm_experimental_override("RAG query", blockers):
+            self._safe_view_call("append_chat", f"⚠  {' '.join(blockers)}\n\n")
+            self._safe_view_call("set_status", blockers[0])
+            self._safe_view_call("switch_view", "chat")
+            return
+        for advisory in advisories:
+            self._safe_view_call("append_log", f"[query] advisory: {advisory}")
         adapter = resolve_vector_store(
             {**dict(self.model.settings), "vector_db_type": getattr(bundle, "vector_backend", self.model.settings.get("vector_db_type", "json"))}
         )
@@ -1164,7 +1404,7 @@ class AppController:
             payload={"profile": profile_label, "mode": selected_mode},
         )
 
-        def _rag_worker(post_msg: Any, cancel: CancelToken) -> dict[str, str]:
+        def _rag_worker(post_msg: Any, cancel: CancelToken) -> dict[str, Any]:
             post_msg({"type": "status", "text": "Generating answer…"})
             try:
                 llm = create_llm(settings_snap)
@@ -1182,35 +1422,99 @@ class AppController:
                         f"CONTEXT:\n{query_result.context_block}\n"
                     ),
                     "prompt": prompt,
+                    "context_block": query_result.context_block,
                 }
+            grounding_html_path = ""
+            validation_notes: list[str] = []
+            if is_blinkist_summary_mode(selected_mode, str(settings_snap.get("output_style", "") or "")):
+                self.trace_store.append_event(
+                    run_id=run_id,
+                    stage="pipeline",
+                    event_type="blinkist_summary",
+                    payload={"provider": provider, "profile": profile_label},
+                )
+                pipeline_result = run_blinkist_summary_pipeline(
+                    llm,
+                    query_text=prompt,
+                    context_block=query_result.context_block,
+                    sources=list(query_result.sources),
+                )
+                answer = pipeline_result.response_text
+            elif is_tutor_mode(selected_mode):
+                self.trace_store.append_event(
+                    run_id=run_id,
+                    stage="pipeline",
+                    event_type="tutor_mode",
+                    payload={"provider": provider, "profile": profile_label},
+                )
+                pipeline_result = run_tutor_pipeline(
+                    llm,
+                    query_text=prompt,
+                    context_block=query_result.context_block,
+                    sources=list(query_result.sources),
+                )
+                answer = pipeline_result.response_text
+            else:
+                system_prompt = (
+                    f"{resolved.system_prompt}\n\n"
+                    "Answer the user's question using ONLY the CONTEXT below. "
+                    "Cite passages as [S1], [S2], etc. If the context is insufficient, say so.\n\n"
+                    f"CONTEXT:\n{query_result.context_block}"
+                )
+                messages = [
+                    {"type": "system", "content": system_prompt},
+                    {"type": "human", "content": prompt},
+                ]
+                self.trace_store.append_event(
+                    run_id=run_id,
+                    stage="synthesis",
+                    event_type="llm_request",
+                    prompt={"system": system_prompt[:4000], "user": prompt},
+                    payload={"provider": provider, "profile": profile_label},
+                )
+                result = llm.invoke(messages)
+                answer = str(getattr(result, "content", result) or "")
+                self.trace_store.append_event(
+                    run_id=run_id,
+                    stage="synthesis",
+                    event_type="llm_response",
+                    citations_chosen=[item.sid for item in query_result.sources],
+                    payload={"response_preview": answer[:400], "provider": provider},
+                )
 
-            system_prompt = (
-                f"{resolved.system_prompt}\n\n"
-                "Answer the user's question using ONLY the CONTEXT below. "
-                "Cite passages as [S1], [S2], etc. If the context is insufficient, say so.\n\n"
-                f"CONTEXT:\n{query_result.context_block}"
-            )
-            messages = [
-                {"type": "system", "content": system_prompt},
-                {"type": "human", "content": prompt},
-            ]
-            self.trace_store.append_event(
-                run_id=run_id,
-                stage="synthesis",
-                event_type="llm_request",
-                prompt={"system": system_prompt[:4000], "user": prompt},
-                payload={"provider": provider, "profile": profile_label},
-            )
-            result = llm.invoke(messages)
-            answer = str(getattr(result, "content", result) or "")
-            self.trace_store.append_event(
-                run_id=run_id,
-                stage="synthesis",
-                event_type="llm_response",
-                citations_chosen=[item.sid for item in query_result.sources],
-                payload={"response_preview": answer[:400], "provider": provider},
-            )
-            return {"response": answer, "prompt": prompt}
+            if bool(settings_snap.get("enable_claim_level_grounding_citefix_lite")):
+                answer, validation_notes = apply_claim_level_grounding(answer, list(query_result.sources))
+                self.trace_store.append_event(
+                    run_id=run_id,
+                    stage="validation",
+                    event_type="claim_grounding",
+                    citations_chosen=[item.sid for item in query_result.sources],
+                    validator={"notes": list(validation_notes)},
+                    payload={"note_count": len(validation_notes)},
+                )
+
+            if bool(settings_snap.get("enable_langextract")):
+                grounding_html_path = build_grounding_html(
+                    self._grounding_output_dir(),
+                    title=f"Axiom grounding · {selected_mode}",
+                    query_text=prompt,
+                    answer_text=answer,
+                    sources=list(query_result.sources),
+                )
+                self.trace_store.append_event(
+                    run_id=run_id,
+                    stage="grounding",
+                    event_type="langextract_html",
+                    payload={"artifact_path": grounding_html_path},
+                )
+
+            return {
+                "response": answer,
+                "prompt": prompt,
+                "grounding_html_path": grounding_html_path,
+                "validation_notes": validation_notes,
+                "context_block": query_result.context_block,
+            }
 
         # Store retrieval metadata for _handle_message to use.
         self._pending_task_meta = {
@@ -1222,6 +1526,8 @@ class AppController:
             "run_id": run_id,
             "sources": list(query_result.sources),
             "profile_label": profile_label,
+            "show_retrieved_context": bool(settings_snap.get("show_retrieved_context", False)),
+            "context_block": query_result.context_block,
             "trace_payload": self.trace_store.read_run(run_id),
         }
         self.start_task(_TASK_RAG_QUERY, _rag_worker)
@@ -1551,12 +1857,24 @@ class AppController:
         self._safe_view_call("set_status", f"Duplicated profile: {new_name}")
 
     def on_submit_feedback(self, vote: int) -> None:
+        from tkinter import simpledialog
+
         session_id = str(getattr(self.model, "current_session_id", "") or "")
         run_id = str(getattr(self.model, "last_run_id", "") or "")
         if not session_id or not run_id:
             self._safe_view_call("set_status", "No completed run is available for feedback.")
             return
-        self.session_repository.save_feedback(session_id, run_id=run_id, vote=int(vote), note="")
+        note = simpledialog.askstring(
+            "Feedback note",
+            "Optional note for this rating:",
+            initialvalue="",
+        )
+        self.session_repository.save_feedback(
+            session_id,
+            run_id=run_id,
+            vote=int(vote),
+            note=str(note or ""),
+        )
         detail = self.session_repository.get_session(session_id)
         if detail is not None:
             detail.traces = self._session_trace_payload(detail)
@@ -1794,9 +2112,18 @@ class AppController:
         candidate = str(extra.get("selected_index_path") or "").strip() if isinstance(extra, dict) else ""
         if not candidate and getattr(summary, "index_id", ""):
             root = pathlib.Path(getattr(self.model, "index_storage_dir", pathlib.Path(".")))
-            guessed = root / f"{summary.index_id}.json"
-            if guessed.exists():
-                candidate = str(guessed)
+            guessed_manifest = root / str(summary.index_id) / "manifest.json"
+            guessed_legacy = root / f"{summary.index_id}.json"
+            if guessed_manifest.exists():
+                candidate = str(guessed_manifest)
+            elif guessed_legacy.exists():
+                candidate = str(guessed_legacy)
+        if not candidate and isinstance(extra, dict):
+            selected_collection = str(extra.get("selected_collection_name") or "").strip()
+            for row in self.model.available_indexes:
+                if str(row.get("collection_name", "") or "") == selected_collection:
+                    candidate = str(row.get("path", "") or "")
+                    break
         if not candidate:
             return
         self._load_bundle_from_path(candidate, persist=False)
@@ -1816,9 +2143,14 @@ class AppController:
             "chunk_count": len(bundle.chunks),
         }
         self.model.settings["selected_index_path"] = str(bundle.index_path or "")
-        self.model.settings["selected_collection_name"] = str(bundle.index_id or "")
+        self.model.settings["selected_collection_name"] = str(
+            bundle.metadata.get("collection_name") or bundle.index_id or ""
+        )
         self.model.settings["index_embedding_signature"] = str(bundle.embedding_signature or "")
         self.model.settings["vector_db_type"] = str(bundle.vector_backend or "json")
+        weaviate_settings = dict(bundle.metadata.get("weaviate_settings") or {})
+        for key, value in weaviate_settings.items():
+            self.model.settings[str(key)] = value
         self._safe_view_call(
             "set_active_index_summary",
             f"Active index: {bundle.index_id}  |  {len(bundle.documents)} file(s)  |  {len(bundle.chunks)} chunk(s)",
@@ -1848,6 +2180,9 @@ class AppController:
             index_path=str(getattr(self.model, "active_index_path", "") or ""),
             vector_backend=self._current_vector_backend(),
             embedding_signature=str(self.model.settings.get("index_embedding_signature", "") or ""),
+            metadata={
+                "collection_name": str(self.model.settings.get("selected_collection_name", "") or ""),
+            },
         )
 
     def _effective_llm_model(self) -> str:
@@ -1867,7 +2202,13 @@ class AppController:
         payload = {
             "selected_profile": self._current_profile_label(),
             "selected_index_path": str(getattr(self.model, "active_index_path", "") or ""),
-            "selected_collection_name": str(getattr(self.model, "active_index_id", "") or ""),
+            "selected_collection_name": str(
+                (
+                    getattr(getattr(self.model, "index_bundle", None), "metadata", {}) or {}
+                ).get("collection_name")
+                or getattr(self.model, "active_index_id", "")
+                or ""
+            ),
             "index_embedding_signature": str(self.model.settings.get("index_embedding_signature", "") or ""),
             "output_style": self.model.settings.get("output_style", ""),
             "llm_temperature": self.model.settings.get("llm_temperature", 0.0),
@@ -1887,6 +2228,11 @@ class AppController:
             "subquery_max_docs": self.model.settings.get("subquery_max_docs", 0),
             "chat_path": self.model.settings.get("chat_path", "RAG"),
             "vector_db_type": self._current_vector_backend(),
+            "weaviate_url": self.model.settings.get("weaviate_url", ""),
+            "weaviate_api_key": self.model.settings.get("weaviate_api_key", ""),
+            "weaviate_grpc_host": self.model.settings.get("weaviate_grpc_host", ""),
+            "weaviate_grpc_port": self.model.settings.get("weaviate_grpc_port", ""),
+            "weaviate_grpc_secure": self.model.settings.get("weaviate_grpc_secure", ""),
             "startup_mode_setting": self.model.settings.get("startup_mode_setting", "advanced"),
             "last_used_mode": self.model.settings.get("last_used_mode", "advanced"),
             "basic_wizard_completed": self.model.settings.get("basic_wizard_completed", False),
@@ -1924,7 +2270,13 @@ class AppController:
         raw = self.view.collect_settings()
         raw["selected_profile"] = self._current_profile_label()
         raw["selected_index_path"] = str(getattr(self.model, "active_index_path", "") or "")
-        raw["selected_collection_name"] = str(getattr(self.model, "active_index_id", "") or "")
+        raw["selected_collection_name"] = str(
+            (
+                getattr(getattr(self.model, "index_bundle", None), "metadata", {}) or {}
+            ).get("collection_name")
+            or getattr(self.model, "active_index_id", "")
+            or ""
+        )
         raw["index_embedding_signature"] = str(self.model.settings.get("index_embedding_signature", "") or "")
 
         # ── Type coercion tables ────────────────────────────────────────

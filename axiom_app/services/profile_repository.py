@@ -49,7 +49,7 @@ class ProfileRepository:
             mode_default="Research",
             style_template="Structure output as claims, arguments, and counterclaims.",
             citation_policy="Every claim and counterclaim requires citation.",
-            retrieval_strategy={"retrieve_k": 42, "final_k": 12, "mmr_lambda": 0.4},
+            retrieval_strategy={"retrieve_k": 30, "final_k": 7, "mmr_lambda": 0.4},
             iteration_strategy={"agentic_mode": True, "max_iterations": 3},
             retrieval_mode="hierarchical",
             digest_usage=True,

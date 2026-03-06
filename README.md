@@ -102,10 +102,27 @@ python -m axiom_app.cli query --file README.md --question "install"
 
 ### Index output file
 
-`index` writes a shared persisted index to `<file>.axiom-index.json` by default.
+`index` writes a manifest-backed persisted index to `<file>.axiom-index/manifest.json` by default.
 
 ```bash
 python -m axiom_app.cli index --file docs/my_notes.txt
+```
+
+Run the MVC parity audit:
+
+```bash
+axiom-parity-audit
+```
+
+Run the strict live-backend audit against local Docker Weaviate:
+
+```bash
+docker compose -f docker/weaviate/docker-compose.yml up -d
+export AXIOM_TEST_WEAVIATE_URL=http://127.0.0.1:8080
+export AXIOM_TEST_WEAVIATE_GRPC_HOST=127.0.0.1
+export AXIOM_TEST_WEAVIATE_GRPC_PORT=50051
+export AXIOM_TEST_WEAVIATE_GRPC_SECURE=false
+axiom-parity-audit --require-live-backends
 ```
 
 ### Query behavior
@@ -122,6 +139,14 @@ python -m axiom_app.cli query --file docs/my_notes.txt --question "dependency"
   - `0` (default): run legacy GUI path.
   - `1`: enable the new MVC path in `main.py`.
   - In new mode, `--cli` forces headless CLI handling.
+- `AXIOM_TEST_WEAVIATE_URL`
+- `AXIOM_TEST_WEAVIATE_API_KEY`
+- `AXIOM_TEST_WEAVIATE_GRPC_HOST`
+- `AXIOM_TEST_WEAVIATE_GRPC_PORT`
+- `AXIOM_TEST_WEAVIATE_GRPC_SECURE`
+  - Canonical env contract for the live Weaviate parity proof.
+- `AXIOM_PARITY_REQUIRE_LIVE_BACKENDS`
+  - `1`: make `axiom-parity-audit` fail unless the live backend proof runs and passes.
 
 ## Optional dependencies and fallback behavior
 
@@ -132,6 +157,7 @@ Heavy ML/runtime dependencies are intentionally optional. The MVC app and CLI su
 ```bash
 python -m pytest
 python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
+python -m pytest -q tests/test_live_weaviate_proof.py
 ```
 
 ## Run CI checks locally
@@ -139,6 +165,7 @@ python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
 ```bash
 ruff check .
 python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
+axiom-parity-audit --require-live-backends
 python - <<'PY'
 import json
 json.load(open('axiom_app/default_settings.json', encoding='utf-8'))

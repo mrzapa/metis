@@ -6,6 +6,7 @@ from axiom_app.models.app_model import AppModel
 from axiom_app.models.parity_types import AgentProfile
 from axiom_app.services.local_model_registry import LocalModelRegistryService
 from axiom_app.services.profile_repository import ProfileRepository
+from axiom_app.services.runtime_resolution import resolve_runtime_settings
 import axiom_app.models.app_model as app_model_module
 
 
@@ -108,3 +109,45 @@ def test_local_model_registry_adds_and_activates_entries() -> None:
         embedding_settings["local_st_model_name"]
         == "sentence-transformers/all-MiniLM-L6-v2"
     )
+
+
+def test_runtime_resolution_matches_monolith_mode_prompt_and_precedence() -> None:
+    profile = AgentProfile(
+        name="Research Analyst",
+        mode_default="Research",
+        provider="anthropic",
+        model="claude-opus-4-6",
+        system_instructions="Demand evidentiary grounding.",
+        style_template="Claims, counterclaims, and gaps.",
+        citation_policy="Every factual claim needs [S#].",
+        retrieval_strategy={"retrieve_k": 30, "final_k": 7, "mmr_lambda": 0.4},
+        iteration_strategy={"agentic_mode": True, "max_iterations": 3},
+        retrieval_mode="hierarchical",
+    )
+    settings = {
+        "selected_mode": "Research",
+        "llm_provider": "openai",
+        "llm_model": "gpt-5.4",
+        "embedding_provider": "voyage",
+        "embedding_model": "voyage-4-large",
+        "search_type": "mmr",
+        "output_style": "Structured report",
+    }
+
+    resolved = resolve_runtime_settings(
+        settings,
+        profile,
+        profile_label="File: research.json",
+        query="Map the strongest claims and counterclaims.",
+    )
+
+    assert resolved.mode == "Research"
+    assert resolved.prompt_pack_id == "Research"
+    assert resolved.retrieve_k == 30
+    assert resolved.final_k == 7
+    assert resolved.agentic_mode is True
+    assert resolved.agentic_max_iterations == 3
+    assert resolved.llm_provider == "anthropic"
+    assert "Mode: Research." in resolved.mode_prompt_pack
+    assert "Profile overlay:" in resolved.system_prompt
+    assert resolved.resolution_payload["prompt_pack_id"] == "Research"

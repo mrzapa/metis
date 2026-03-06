@@ -9,6 +9,8 @@ from axiom_app.models.parity_types import AgentProfile, ResolvedRuntimeSettings
 MODE_ALIASES = {
     "qa": "Q&A",
     "q&a": "Q&A",
+    "book summary": "Summary",
+    "blinkist": "Summary",
     "summary": "Summary",
     "tutor": "Tutor",
     "research": "Research",
@@ -24,11 +26,26 @@ MODE_DEFAULTS: dict[str, dict[str, Any]] = {
 }
 
 MODE_PROMPT_PACKS = {
-    "Q&A": "Answer directly and clearly. Prefer concise factual grounding over speculation.",
-    "Summary": "Synthesize the material into a structured, high-signal summary with themes and chronology when relevant.",
-    "Tutor": "Teach progressively. Explain first principles, then reinforce with examples and checks for understanding.",
-    "Research": "Structure the response as claims, evidence, counterpoints, and open questions where appropriate.",
-    "Evidence Pack": "Assemble a chronology- and evidence-first packet with concrete factual lines and dense citations.",
+    "Q&A": (
+        "Mode: Q&A. Provide succinct, direct answers first, then supporting details. "
+        "Ground factual statements with citations and avoid unnecessary verbosity."
+    ),
+    "Summary": (
+        "Mode: Summary (Blinkist style). Focus on key ideas and practical takeaways, avoid over-detailing, "
+        "and include a concise timeline of important events where relevant."
+    ),
+    "Tutor": (
+        "Mode: Tutor. Use an educational tone, ask clarifying Socratic questions when useful, and include "
+        "practice flashcards/quiz prompts grounded in retrieved evidence."
+    ),
+    "Research": (
+        "Mode: Research. Extract and structure claims and counterclaims with explicit argument mapping and "
+        "citation-backed evidence quality notes. Prefer hierarchical retrieval synthesis."
+    ),
+    "Evidence Pack": (
+        "Mode: Evidence Pack. Build a structured timeline and narrative with exhaustive citations, ensuring "
+        "every factual statement is explicitly grounded."
+    ),
 }
 
 
@@ -121,8 +138,27 @@ def resolve_runtime_settings(
         embedding_model=embedding_model,
         output_style=str(settings.get("output_style", "") or ""),
         mode_prompt_pack=mode_prompt,
+        prompt_pack_id=resolved_mode,
         system_prompt=system_prompt,
         evidence_pack_mode=resolved_mode == "Evidence Pack",
+        resolution_payload={
+            "mode": resolved_mode,
+            "profile_label": str(profile_label or "Built-in: Default"),
+            "retrieve_k": retrieve_k,
+            "final_k": final_k,
+            "mmr_lambda": mmr_lambda,
+            "search_type": str(retrieval.get("search_type", settings.get("search_type", "similarity")) or "similarity"),
+            "retrieval_mode": retrieval_mode,
+            "agentic_mode": agentic_mode,
+            "agentic_max_iterations": agentic_max_iterations,
+            "llm_provider": str(profile.provider or settings.get("llm_provider", "") or ""),
+            "llm_model": llm_model,
+            "embedding_provider": str(settings.get("embedding_provider", "") or ""),
+            "embedding_model": embedding_model,
+            "output_style": str(settings.get("output_style", "") or ""),
+            "prompt_pack_id": resolved_mode,
+            "mode_prompt_pack": mode_prompt,
+        },
     )
 
 
@@ -145,12 +181,10 @@ def build_system_prompt(
     segments = [
         f"Active mode: {mode}",
         base_instructions,
-        f"Mode prompt: {mode_prompt}",
         (
             "Retrieval strategy: "
             f"mode={retrieval_mode}, retrieve_k={retrieve_k}, final_k={final_k}, mmr_lambda={mmr_lambda}."
         ),
-        f"Agentic: enabled={int(agentic_mode)}, max_iterations={agentic_max_iterations}.",
     ]
     if profile.system_instructions:
         segments.append(f"Profile overlay:\n{profile.system_instructions}")
@@ -158,6 +192,11 @@ def build_system_prompt(
         segments.append(f"Profile style template:\n{profile.style_template}")
     if profile.citation_policy:
         segments.append(f"Profile citation policy:\n{profile.citation_policy}")
+    if mode_prompt:
+        segments.append(mode_prompt)
+    segments.append(
+        f"Agentic: enabled={int(agentic_mode)}, max_iterations={agentic_max_iterations}."
+    )
     output_style = str(settings.get("output_style", "") or "").strip()
     if output_style:
         segments.append(f"Output style: {output_style}")

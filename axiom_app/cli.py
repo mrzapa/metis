@@ -10,7 +10,7 @@ Usage
 Index a document::
 
     python main.py --cli index --file README.md
-    python main.py --cli index --file paper.txt --out paper.axiom-index.json
+    python main.py --cli index --file paper.txt --out paper.axiom-index
 
 Query a document::
 
@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import sys
+import tempfile
 import textwrap
 from typing import Sequence
 
@@ -81,11 +82,11 @@ def cmd_index(args: argparse.Namespace) -> int:
     if args.out:
         out_path = pathlib.Path(args.out)
     else:
-        out_path = src.with_name(src.name + ".axiom-index.json")
+        out_path = src.with_name(src.name + ".axiom-index")
 
     try:
         adapter.save(bundle, target_path=out_path)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         print(f"error writing index to {out_path}: {exc}", file=sys.stderr)
         return 1
 
@@ -144,11 +145,25 @@ def cmd_query(args: argparse.Namespace) -> int:
                 print(f"error: vector backend unavailable: {reason}", file=sys.stderr)
                 return 1
             bundle = adapter.build([str(src)], model.settings)
+            if str(bundle.vector_backend or "json") != "json":
+                with tempfile.TemporaryDirectory(prefix="axiom_cli_query_") as temp_dir:
+                    manifest_path = adapter.save(bundle, index_dir=temp_dir)
+                    bundle = adapter.load(manifest_path)
+                    result = adapter.query(bundle, question, model.settings)
+                    return _print_query_result(src, question, bundle, result)
     except OSError as exc:
         print(f"error reading/building index: {exc}", file=sys.stderr)
         return 1
+    except ValueError as exc:
+        print(f"error preparing index: {exc}", file=sys.stderr)
+        return 1
 
     result = adapter.query(bundle, question, model.settings)
+    return _print_query_result(src, question, bundle, result)
+
+
+def _print_query_result(src: pathlib.Path, question: str, bundle, result) -> int:
+    """Render a query result consistently for both saved and transient indexes."""
 
     print()
     print(f"Question : {question}")
@@ -196,7 +211,7 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog=textwrap.dedent("""\
             examples:
               python main.py --cli index --file paper.txt
-              python main.py --cli index --file paper.txt --out paper.json
+              python main.py --cli index --file paper.txt --out paper.axiom-index
               python main.py --cli query --file paper.txt --question "main contribution"
               python -m axiom_app.cli query --file README.md --question "install"
         """),
@@ -216,7 +231,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--out", "-o",
         default=None,
         metavar="PATH",
-        help="Output path for the index JSON (default: <file>.axiom-index.json).",
+        help="Output directory or manifest path for the persisted index (default: <file>.axiom-index).",
     )
 
     # query
@@ -237,7 +252,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--index",
         default=None,
         metavar="PATH",
-        help="Optional path to a previously built JSON index.",
+        help="Optional path to a previously built index directory, manifest, or legacy JSON bundle.",
     )
 
     return parser

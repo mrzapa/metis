@@ -115,6 +115,57 @@ class LocalModelEntry:
 
 
 @dataclass(slots=True)
+class IndexManifest:
+    """Canonical persisted index contract for all vector backends."""
+
+    index_id: str
+    backend: str
+    created_at: str
+    embedding_signature: str = ""
+    source_files: list[str] = field(default_factory=list)
+    manifest_path: str = ""
+    bundle_path: str = "bundle.json"
+    vector_store_path: str = ""
+    collection_name: str = ""
+    document_count: int = 0
+    chunk_count: int = 0
+    outline_path: str = "artifacts/document_outline.json"
+    semantic_regions_path: str = "artifacts/semantic_regions.json"
+    events_path: str = "artifacts/events.json"
+    grounding_artifact_path: str = ""
+    restore_requirements: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    legacy_compat: bool = False
+
+    def to_payload(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "IndexManifest":
+        data = dict(payload or {})
+        return cls(
+            index_id=str(data.get("index_id") or ""),
+            backend=str(data.get("backend") or "json"),
+            created_at=str(data.get("created_at") or utc_now_iso()),
+            embedding_signature=str(data.get("embedding_signature") or ""),
+            source_files=[str(item) for item in (data.get("source_files") or [])],
+            manifest_path=str(data.get("manifest_path") or ""),
+            bundle_path=str(data.get("bundle_path") or "bundle.json"),
+            vector_store_path=str(data.get("vector_store_path") or ""),
+            collection_name=str(data.get("collection_name") or ""),
+            document_count=int(data.get("document_count") or 0),
+            chunk_count=int(data.get("chunk_count") or 0),
+            outline_path=str(data.get("outline_path") or "artifacts/document_outline.json"),
+            semantic_regions_path=str(data.get("semantic_regions_path") or "artifacts/semantic_regions.json"),
+            events_path=str(data.get("events_path") or "artifacts/events.json"),
+            grounding_artifact_path=str(data.get("grounding_artifact_path") or ""),
+            restore_requirements=dict(data.get("restore_requirements") or {}),
+            metadata=dict(data.get("metadata") or {}),
+            legacy_compat=bool(data.get("legacy_compat", False)),
+        )
+
+
+@dataclass(slots=True)
 class TraceEvent:
     """Monolith-compatible trace event persisted as JSON lines."""
 
@@ -216,5 +267,7 @@ class ResolvedRuntimeSettings:
     embedding_model: str
     output_style: str
     mode_prompt_pack: str
+    prompt_pack_id: str
     system_prompt: str
     evidence_pack_mode: bool = False
+    resolution_payload: dict[str, Any] = field(default_factory=dict)

@@ -26,6 +26,8 @@ class _FakeView:
         self.log_messages: list[str] = []
         self.status_messages: list[str] = []
         self.sources = []
+        self.grounding_info = ""
+        self.history_detail = None
 
     def get_chat_mode(self) -> str:
         return self._chat_mode
@@ -51,6 +53,12 @@ class _FakeView:
 
     def render_evidence_sources(self, sources) -> None:
         self.sources = list(sources)
+
+    def render_grounding_info(self, text: str) -> None:
+        self.grounding_info = text
+
+    def set_history_detail(self, detail) -> None:
+        self.history_detail = detail
 
 
 @dataclass
@@ -122,3 +130,151 @@ def test_rag_prompt_persists_sources_to_session_db(tmp_path, monkeypatch) -> Non
     assert detail.messages[1].sources
     assert detail.messages[1].sources[0].sid == "S1"
     assert view.sources
+
+
+def test_rag_prompt_shows_retrieved_context_and_grounding(tmp_path, monkeypatch) -> None:
+    model = AppModel()
+    model.session_db_path = tmp_path / "rag_sessions.db"
+    model.index_storage_dir = tmp_path / "indexes"
+    model.settings = {
+        "llm_provider": "mock",
+        "llm_model": "mock-v1",
+        "embedding_provider": "mock",
+        "selected_mode": "Research",
+        "top_k": 1,
+        "show_retrieved_context": True,
+        "enable_langextract": True,
+        "enable_claim_level_grounding_citefix_lite": True,
+    }
+    model.index_state = {"built": True}
+    model.documents = ["doc.txt"]
+    model.chunks = [
+        {
+            "id": "doc.txt::chunk0",
+            "text": "Ada Lovelace wrote the first algorithm.",
+            "source": "doc.txt",
+            "chunk_idx": 0,
+        }
+    ]
+    model.embeddings = [[0.1] * 32]
+    view = _FakeView(chat_mode="rag")
+    controller = AppController(model=model, view=view)
+
+    class _FakeLLM:
+        def invoke(self, _messages):
+            return _FakeMessage(
+                content="The document states that Ada Lovelace wrote the first algorithm for Babbage's machine."
+            )
+
+    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+
+    controller.on_send_prompt("Who wrote the first algorithm?")
+    _drain(controller)
+
+    assert any("Retrieved context:" in message for message in view.chat_messages)
+    assert any("[grounding]" in line for line in view.log_messages)
+    assert view.grounding_info.endswith(".html")
+
+
+def test_tutor_mode_uses_structured_pipeline(tmp_path, monkeypatch) -> None:
+    model = AppModel()
+    model.session_db_path = tmp_path / "rag_sessions.db"
+    model.settings = {
+        "llm_provider": "mock",
+        "llm_model": "mock-v1",
+        "embedding_provider": "mock",
+        "selected_mode": "Tutor",
+        "top_k": 1,
+    }
+    model.index_state = {"built": True}
+    model.documents = ["doc.txt"]
+    model.chunks = [
+        {
+            "id": "doc.txt::chunk0",
+            "text": "Embeddings map text into vectors for similarity search.",
+            "source": "doc.txt",
+            "chunk_idx": 0,
+        }
+    ]
+    model.embeddings = [[0.1] * 32]
+    view = _FakeView(chat_mode="rag")
+    controller = AppController(model=model, view=view)
+
+    tutor_json = """
+    {
+      "lesson": {
+        "concept": "Embeddings",
+        "explanation": "Embeddings convert text into vectors.",
+        "sources": ["S1"]
+      },
+      "analogies": [{"example": "Like map coordinates for meaning.", "sources": ["S1"]}],
+      "socratic_questions": ["How would similar meanings cluster?"],
+      "flashcards": [{"q": "What is an embedding?", "a": "A vector representation of text.", "sources": ["S1"]}],
+      "quiz": {
+        "questions": [{"question": "What do embeddings represent?"}],
+        "answer_key": [{"answer": "Semantic meaning.", "why": "They map language to vector space.", "sources": ["S1"]}]
+      }
+    }
+    """
+
+    class _FakeLLM:
+        def invoke(self, _messages):
+            return _FakeMessage(content=tutor_json)
+
+    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+
+    controller.on_send_prompt("Teach me embeddings.")
+    _drain(controller)
+
+    assert any("### Flashcards" in message for message in view.chat_messages)
+    assert any("### Quiz" in message for message in view.chat_messages)
+
+
+def test_secure_mode_blocks_rag_without_override(tmp_path) -> None:
+    model = AppModel()
+    model.session_db_path = tmp_path / "rag_sessions.db"
+    model.settings = {
+        "llm_provider": "mock",
+        "llm_model": "mock-v1",
+        "embedding_provider": "mock",
+        "selected_mode": "Research",
+        "top_k": 1,
+        "secure_mode": True,
+        "enable_summarizer": False,
+    }
+    model.index_state = {"built": True}
+    model.documents = ["doc.txt"]
+    model.chunks = [{"id": "doc.txt::chunk0", "text": "Secure mode sample.", "source": "doc.txt", "chunk_idx": 0}]
+    model.embeddings = [[0.1] * 32]
+    view = _FakeView(chat_mode="rag")
+    controller = AppController(model=model, view=view)
+
+    controller.on_send_prompt("What does secure mode do?")
+
+    assert controller._active_future is None
+    assert any("Secure mode requires the summarizer safety pass." in message for message in view.chat_messages)
+
+
+def test_feedback_note_is_saved(tmp_path, monkeypatch) -> None:
+    model = AppModel()
+    model.session_db_path = tmp_path / "rag_sessions.db"
+    model.settings = {"llm_provider": "mock", "llm_model": "mock-v1"}
+    view = _FakeView(chat_mode="direct")
+    controller = AppController(model=model, view=view)
+
+    class _FakeLLM:
+        def invoke(self, _messages):
+            return _FakeMessage(content="Direct response")
+
+    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr("tkinter.simpledialog.askstring", lambda *args, **kwargs: "useful")
+
+    controller.on_send_prompt("hello")
+    _drain(controller)
+    controller.on_submit_feedback(1)
+
+    sessions = controller.session_repository.list_sessions()
+    detail = controller.session_repository.get_session(sessions[0].session_id)
+    assert detail is not None
+    assert detail.feedback
+    assert detail.feedback[0].note == "useful"

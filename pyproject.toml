@@ -42,8 +42,7 @@ all = [
 ]
 
 [project.scripts]
-# Once the legacy monolith is retired:
-# axiom = "axiom_app.app:run_app"
+axiom-parity-audit = "axiom_app.audit:main"
 
 [tool.setuptools]
 license-files = ["LICENSE"]
