@@ -1,21 +1,20 @@
-"""axiom_app.models — Data models, dataclasses, and domain exceptions.
+"""axiom_app.models — shared typed models used across MVC parity work."""
 
-Migrated so far:
-  - SHTNode        (axiom_app.models.sht)
-  - build_sht_tree (axiom_app.models.sht)
-
-Planned (to be migrated from agentic_rag_gui.py):
-  - JobCancelledError
-  - EvidenceRef
-  - Incident
-  - SourceLocator
-  - AgentProfile
-  - TraceEvent
-"""
-
+from axiom_app.models.parity_types import (
+    AgentProfile,
+    IndexManifest,
+    LocalModelEntry,
+    ResolvedRuntimeSettings,
+    TraceEvent,
+)
 from axiom_app.models.sht import SHTNode, build_sht_tree
 
 __all__ = [
+    "AgentProfile",
+    "IndexManifest",
+    "LocalModelEntry",
+    "ResolvedRuntimeSettings",
     "SHTNode",
+    "TraceEvent",
     "build_sht_tree",
 ]

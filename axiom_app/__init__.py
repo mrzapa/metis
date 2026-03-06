@@ -1,6 +1,5 @@
-"""axiom_app — MVC refactor package for the Axiom RAG desktop app.
+"""axiom_app — Opt-in MVC runtime package for the Axiom RAG desktop app.
 
-This package is being built incrementally. The monolithic entry point
-(agentic_rag_gui.py) continues to run unchanged while code is migrated
-here module by module.
+The MVC app coexists with the legacy monolith while parity work is completed
+behind the ``AXIOM_NEW_APP=1`` runtime gate.
 """

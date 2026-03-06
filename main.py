@@ -4,7 +4,7 @@ Default behaviour (AXIOM_NEW_APP unset or 0):
   Delegates to agentic_rag_gui so that ``python main.py`` is identical to
   ``python agentic_rag_gui.py``.
 
-New MVC skeleton (opt-in via AXIOM_NEW_APP=1):
+New MVC app (opt-in via AXIOM_NEW_APP=1):
   Runs axiom_app.app.run_app() (tabbed Tk UI).
 
   Automatic CLI fallback — two situations trigger headless mode instead:
@@ -20,10 +20,8 @@ New MVC skeleton (opt-in via AXIOM_NEW_APP=1):
 
       AXIOM_NEW_APP=1 python main.py          # → CLI help if no display
 
-Migration path:
-  TODO (Phase N): once AgenticRAGApp has been fully split into
-  axiom_app controllers/views, remove the legacy branch and make the
-  new app the only code path.
+Runtime path:
+  The MVC app remains opt-in until the parity audit is complete.
 
   TODO: add CLI argument parsing here (--smoke, --profile, --theme …)
         so agentic_rag_gui.py no longer needs to inspect sys.argv directly.
@@ -53,7 +51,7 @@ def _is_display_error(exc: BaseException) -> bool:
 def main() -> None:
     if os.environ.get("AXIOM_NEW_APP", "0").strip() == "1":
         # -----------------------------------------------------------------------
-        # New MVC skeleton (opt-in via AXIOM_NEW_APP=1)
+        # New MVC app (opt-in via AXIOM_NEW_APP=1)
         # -----------------------------------------------------------------------
         if "--cli" in sys.argv:
             # Explicit CLI mode: strip the --cli sentinel and hand the rest

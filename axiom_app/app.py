@@ -1,6 +1,6 @@
 """axiom_app.app — MVC application bootstrap.
 
-Entry point for the refactored Axiom application.  Initialises logging
+Entry point for the opt-in MVC Axiom application.  Initialises logging
 first (so even Tk startup errors land in the log), then instantiates
 model/view/controller, wires events, starts an always-on message-poll
 loop, and hands off to the Tk main loop.
@@ -46,7 +46,7 @@ def run_app() -> None:
     logger = setup_logging(_default_log_dir, level="DEBUG")
     logger.info("Log file: %s", (_default_log_dir / "axiom.log").resolve())
     logger.info("=" * 60)
-    logger.info("Axiom starting up  (AXIOM_NEW_APP=1)")
+    logger.info("Axiom MVC starting up  (AXIOM_NEW_APP=1)")
 
     # ── 1b. Dependency guardrail ───────────────────────────────────
     ensure_startup_dependencies(logger)
@@ -87,6 +87,7 @@ def run_app() -> None:
         # ── 5. Controller ─────────────────────────────────────────────
         controller = AppController(model, view)
         controller.wire_events()
+        controller.bootstrap_app()
         logger.debug("AppController wired")
 
         # ── 6. Always-on poll loop ────────────────────────────────────
@@ -102,7 +103,7 @@ def run_app() -> None:
         index_state = "built" if model.index_state.get("built") else "not built"
         base_status = f"Documents: {len(model.documents)}  |  Index: {index_state}"
         view.set_status(base_status)
-        view.append_log("Axiom MVC skeleton started (AXIOM_NEW_APP=1).\n")
+        view.append_log("Axiom MVC started (AXIOM_NEW_APP=1).\n")
         view.show()
 
         # ── 8. Non-blocking dependency guardrail ───────────────────
