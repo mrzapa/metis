@@ -33,8 +33,11 @@ _REPO_ROOT    = _PACKAGE_ROOT.parent                              # <repo root>
 
 _DEFAULT_SETTINGS_PATH = _PACKAGE_ROOT / "default_settings.json"
 _USER_SETTINGS_PATH    = _REPO_ROOT    / "settings.json"
+_LEGACY_CONFIG_PATH    = _REPO_ROOT    / "agentic_rag_config.json"
 _SESSION_DB_PATH       = _REPO_ROOT    / "rag_sessions.db"
 _INDEX_STORAGE_DIR     = _REPO_ROOT    / "indexes"
+_PROFILES_DIR          = _REPO_ROOT    / "profiles"
+_TRACE_DIR             = _REPO_ROOT    / "traces"
 
 
 class AppModel:
@@ -77,8 +80,16 @@ class AppModel:
         self.active_index_id: str = ""
         self.active_index_path: str = ""
         self.index_bundle: Any | None = None
+        self.available_indexes: list[Any] = []
+        self.current_profile_label: str = "Built-in: Default"
+        self.last_run_id: str = ""
+        self.rag_blocked_reason: str = ""
+        self.bootstrap_complete: bool = False
         self.session_db_path: pathlib.Path = _SESSION_DB_PATH
         self.index_storage_dir: pathlib.Path = _INDEX_STORAGE_DIR
+        self.profiles_dir: pathlib.Path = _PROFILES_DIR
+        self.trace_dir: pathlib.Path = _TRACE_DIR
+        self.legacy_config_path: pathlib.Path = _LEGACY_CONFIG_PATH
 
     # ------------------------------------------------------------------
     # Settings
@@ -109,12 +120,22 @@ class AppModel:
 
         self.settings = dict(defaults)
 
+        # ── compatibility import from legacy config ─────────────────
+        legacy: dict[str, Any] = {}
+        if _LEGACY_CONFIG_PATH.exists():
+            try:
+                legacy = json.loads(_LEGACY_CONFIG_PATH.read_text(encoding="utf-8"))
+                legacy.pop("_comment", None)
+                self.logger.info("Legacy config import available at %s", _LEGACY_CONFIG_PATH)
+            except Exception as exc:
+                self.logger.warning("Could not read legacy config (%s): %s", _LEGACY_CONFIG_PATH, exc)
+
         # ── overlay user overrides ───────────────────────────────────
+        user: dict[str, Any] = {}
         if _USER_SETTINGS_PATH.exists():
             try:
-                user: dict[str, Any] = json.loads(_USER_SETTINGS_PATH.read_text(encoding="utf-8"))
+                user = json.loads(_USER_SETTINGS_PATH.read_text(encoding="utf-8"))
                 user.pop("_comment", None)
-                self.settings.update(user)
                 self.logger.info(
                     "User settings loaded from %s (%d key(s) overriding defaults)",
                     _USER_SETTINGS_PATH,
@@ -126,6 +147,14 @@ class AppModel:
             self.logger.debug(
                 "No user settings.json at %s — using defaults only.", _USER_SETTINGS_PATH
             )
+
+        for key, value in legacy.items():
+            if key not in user:
+                self.settings[key] = value
+        self.settings.update(user)
+        self.current_profile_label = str(
+            self.settings.get("selected_profile", self.current_profile_label) or self.current_profile_label
+        )
 
         self.logger.debug("Active settings: %s", self.settings)
 
@@ -180,4 +209,6 @@ class AppModel:
             "settings_loaded": bool(self.settings),
             "active_index_id": self.active_index_id,
             "current_session_id": self.current_session_id,
+            "selected_profile": self.current_profile_label,
+            "bootstrap_complete": self.bootstrap_complete,
         }

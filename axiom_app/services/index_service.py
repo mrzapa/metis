@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 import pathlib
+import re
 from typing import Any, Callable
 
 from axiom_app.models.session_types import EvidenceSource
@@ -60,6 +61,13 @@ class IndexBundle:
     knowledge_graph: KnowledgeGraph | None = None
     entity_to_chunks: dict[str, set[int]] = field(default_factory=dict)
     index_path: str = ""
+    vector_backend: str = "json"
+    embedding_signature: str = ""
+    semantic_regions: list[dict[str, Any]] = field(default_factory=list)
+    document_outline: list[dict[str, Any]] = field(default_factory=list)
+    events: list[dict[str, Any]] = field(default_factory=list)
+    grounding_html_path: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
         edges: dict[str, dict[str, list[str]]] = {}
@@ -84,6 +92,13 @@ class IndexBundle:
                 for key, values in (self.entity_to_chunks or {}).items()
             },
             "index_path": self.index_path,
+            "vector_backend": self.vector_backend,
+            "embedding_signature": self.embedding_signature,
+            "semantic_regions": list(self.semantic_regions),
+            "document_outline": list(self.document_outline),
+            "events": list(self.events),
+            "grounding_html_path": self.grounding_html_path,
+            "metadata": dict(self.metadata or {}),
         }
 
     @classmethod
@@ -122,6 +137,25 @@ class IndexBundle:
             knowledge_graph=graph,
             entity_to_chunks=entity_to_chunks,
             index_path=str(payload.get("index_path") or ""),
+            vector_backend=str(payload.get("vector_backend") or "json"),
+            embedding_signature=str(payload.get("embedding_signature") or ""),
+            semantic_regions=[
+                dict(item)
+                for item in (payload.get("semantic_regions") or [])
+                if isinstance(item, dict)
+            ],
+            document_outline=[
+                dict(item)
+                for item in (payload.get("document_outline") or [])
+                if isinstance(item, dict)
+            ],
+            events=[
+                dict(item)
+                for item in (payload.get("events") or [])
+                if isinstance(item, dict)
+            ],
+            grounding_html_path=str(payload.get("grounding_html_path") or ""),
+            metadata=dict(payload.get("metadata") or {}),
         )
 
 
@@ -132,6 +166,113 @@ class QueryResult:
     sources: list[EvidenceSource]
     hit_indices: list[int]
     top_score: float
+
+
+def _embedding_signature(settings: dict[str, Any]) -> str:
+    provider = str(
+        settings.get("embedding_provider")
+        or settings.get("embeddings_backend")
+        or ""
+    ).strip()
+    model = str(
+        settings.get("embedding_model")
+        or settings.get("embedding_model_custom")
+        or settings.get("sentence_transformers_model")
+        or settings.get("local_st_model_name")
+        or ""
+    ).strip()
+    return f"{provider}:{model}".strip(":")
+
+
+def _extract_outline_nodes(text: str, source_path: str) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+    stack: list[dict[str, Any]] = []
+    for idx, match in enumerate(re.finditer(r"^(#{1,6})\s+(.+)$", text, flags=re.MULTILINE), start=1):
+        level = len(match.group(1))
+        title = match.group(2).strip()
+        while stack and int(stack[-1]["level"]) >= level:
+            stack.pop()
+        parent_id = str(stack[-1]["id"]) if stack else ""
+        header_path = [str(item["node_title"]) for item in stack] + [title]
+        node = {
+            "id": f"outline-{idx}",
+            "parent_id": parent_id,
+            "node_title": title,
+            "level": level,
+            "header_path": header_path,
+            "char_span": [match.start(), match.end()],
+            "page_span": [None, None],
+            "file_path": source_path,
+        }
+        nodes.append(node)
+        stack.append(node)
+    if nodes:
+        return nodes
+    source_name = pathlib.Path(source_path).name
+    return [
+        {
+            "id": "outline-root",
+            "parent_id": "",
+            "node_title": source_name,
+            "level": 1,
+            "header_path": [source_name],
+            "char_span": [0, len(text)],
+            "page_span": [None, None],
+            "file_path": source_path,
+        }
+    ]
+
+
+def _heading_for_offset(outline_nodes: list[dict[str, Any]], offset: int) -> dict[str, Any]:
+    selected = outline_nodes[0] if outline_nodes else {}
+    for node in outline_nodes:
+        span = node.get("char_span") or [0, 0]
+        start = int(span[0] or 0)
+        if start <= offset:
+            selected = node
+        else:
+            break
+    return selected
+
+
+def _extract_events(text: str, source_name: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    date_pattern = re.compile(r"\b(?:\d{4}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b", re.IGNORECASE)
+    for sentence in sentences:
+        snippet = " ".join(sentence.split()).strip()
+        if len(snippet) < 24 or not date_pattern.search(snippet):
+            continue
+        date_match = date_pattern.search(snippet)
+        events.append(
+            {
+                "date": date_match.group(0) if date_match else "undated",
+                "actors": [source_name],
+                "action": snippet[:220],
+                "impact": snippet[220:440],
+                "source_citation": "",
+            }
+        )
+        if len(events) >= 12:
+            break
+    return events
+
+
+def _semantic_regions_for_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    regions: list[dict[str, Any]] = []
+    for idx, chunk in enumerate(chunks, start=1):
+        regions.append(
+            {
+                "region_label": f"R{idx}",
+                "region_type": "chunk",
+                "page": None,
+                "bbox": {},
+                "chunk_id": str(chunk.get("id") or ""),
+                "header_path": str(chunk.get("header_path") or ""),
+                "file_path": str(chunk.get("file_path") or ""),
+            }
+        )
+    return regions
 
 
 def build_index_bundle(
@@ -152,6 +293,8 @@ def build_index_bundle(
 
     all_chunks: list[dict[str, Any]] = []
     total_docs = max(1, len(documents))
+    all_outline_nodes: list[dict[str, Any]] = []
+    all_events: list[dict[str, Any]] = []
     for doc_idx, path in enumerate(documents, start=1):
         if cancel_token is not None and getattr(cancel_token, "cancelled", False):
             break
@@ -159,14 +302,45 @@ def build_index_bundle(
         if callable(post_message):
             post_message({"type": "status", "text": f"Reading {source}…"})
         text = load_document(path, use_kreuzberg=use_kreuzberg)
+        outline_nodes = _extract_outline_nodes(text, str(path))
+        all_outline_nodes.extend(outline_nodes)
+        all_events.extend(_extract_events(text, source))
         raw_chunks = chunk_text(text, chunk_size, overlap)
+        search_cursor = 0
         for idx, chunk in enumerate(raw_chunks):
+            char_start = text.find(chunk, search_cursor)
+            if char_start < 0:
+                char_start = text.find(chunk)
+            if char_start < 0:
+                char_start = search_cursor
+            char_end = char_start + len(chunk)
+            search_cursor = max(char_end - overlap, char_start)
+            heading = _heading_for_offset(outline_nodes, char_start)
+            header_tokens = list(heading.get("header_path") or [])
+            header_path = " > ".join([str(item).strip() for item in header_tokens if str(item).strip()])
             all_chunks.append(
                 {
                     "id": f"{source}::chunk{idx}",
                     "text": chunk,
                     "source": source,
                     "chunk_idx": idx,
+                    "file_path": str(path),
+                    "source_path": str(path),
+                    "title": source,
+                    "label": source,
+                    "section_hint": str(heading.get("node_title") or source),
+                    "header_path": header_path,
+                    "breadcrumb": header_path or source,
+                    "locator": f"chunk {idx}",
+                    "anchor": f"chunk-{idx}",
+                    "excerpt": chunk[:320],
+                    "type": "chunk",
+                    "char_span": [char_start, char_end],
+                    "metadata": {
+                        "source_path": str(path),
+                        "char_span": [char_start, char_end],
+                        "header_path": header_path,
+                    },
                 }
             )
         if callable(post_message):
@@ -197,6 +371,15 @@ def build_index_bundle(
         embeddings=embeddings,
         knowledge_graph=graph,
         entity_to_chunks=entity_to_chunks,
+        vector_backend=str(settings.get("vector_db_type", "json") or "json"),
+        embedding_signature=_embedding_signature(settings),
+        semantic_regions=_semantic_regions_for_chunks(all_chunks),
+        document_outline=all_outline_nodes,
+        events=all_events,
+        metadata={
+            "selected_source_paths": list(documents),
+            "document_title": pathlib.Path(documents[0]).name if documents else "",
+        },
     )
 
 
@@ -272,7 +455,20 @@ def query_index_bundle(
             chunk_idx=int(chunk.get("chunk_idx", rank - 1)),
             score=float(scores[idx]),
             title=str(chunk.get("source") or "unknown"),
-            metadata={"index_id": bundle.index_id},
+            label=str(chunk.get("label") or chunk.get("source") or "unknown"),
+            section_hint=str(chunk.get("section_hint") or ""),
+            locator=str(chunk.get("locator") or ""),
+            entry_type=str(chunk.get("type") or "chunk"),
+            file_path=str(chunk.get("file_path") or ""),
+            anchor=str(chunk.get("anchor") or ""),
+            excerpt=str(chunk.get("excerpt") or chunk.get("text") or ""),
+            header_path=str(chunk.get("header_path") or ""),
+            breadcrumb=str(chunk.get("breadcrumb") or chunk.get("header_path") or ""),
+            metadata={
+                "index_id": bundle.index_id,
+                "vector_backend": bundle.vector_backend,
+                **dict(chunk.get("metadata") or {}),
+            },
         )
         sources.append(source)
         context_parts.append(

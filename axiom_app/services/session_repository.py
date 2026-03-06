@@ -408,6 +408,51 @@ class SessionRepository:
             conn.execute("DELETE FROM message_feedback WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
 
+    def rename_session(self, session_id: str, title: str) -> SessionSummary:
+        normalized = str(title or "").strip() or "Untitled"
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE sessions SET title = ?, updated_at = ? WHERE session_id = ?",
+                (normalized, _now_iso(), session_id),
+            )
+        return self.get_session(session_id).summary  # type: ignore[union-attr]
+
+    def duplicate_session(
+        self,
+        session_id: str,
+        *,
+        title: str | None = None,
+    ) -> SessionSummary:
+        detail = self.get_session(session_id)
+        if detail is None:
+            raise FileNotFoundError(f"Session not found: {session_id}")
+        summary = detail.summary
+        clone = self.create_session(
+            title=str(title or f"{summary.title} Copy").strip(),
+            summary=summary.summary,
+            active_profile=summary.active_profile,
+            mode=summary.mode,
+            index_id=summary.index_id,
+            vector_backend=summary.vector_backend,
+            llm_provider=summary.llm_provider,
+            llm_model=summary.llm_model,
+            embed_model=summary.embed_model,
+            retrieve_k=summary.retrieve_k,
+            final_k=summary.final_k,
+            mmr_lambda=summary.mmr_lambda,
+            agentic_iterations=summary.agentic_iterations,
+            extra_json=summary.extra_json,
+        )
+        for message in detail.messages:
+            self.append_message(
+                clone.session_id,
+                role=message.role,
+                content=message.content,
+                run_id=message.run_id,
+                sources=message.sources,
+            )
+        return self.get_session(clone.session_id).summary  # type: ignore[union-attr]
+
     def export_session(self, session_id: str, save_dir: str | pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
         detail = self.get_session(session_id)
         if detail is None:

@@ -44,6 +44,7 @@ Only used when AXIOM_NEW_APP=1.  The legacy agentic_rag_gui UI is unchanged.
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -126,7 +127,7 @@ _SETTINGS_SPEC: list[tuple[str, list]] = [
     ]),
     ("Vector DB", [
         ("vector_db_type",  "DB Type",       "combobox",
-            ["chroma", "weaviate"]),
+            ["json", "chroma", "weaviate"]),
         ("weaviate_url",    "Weaviate URL",  "entry",          None),
         ("weaviate_api_key","Weaviate Key",  "entry_password", None),
     ]),
@@ -233,6 +234,9 @@ class AppView:
         self._status_var = tk.StringVar(value="Ready.")
         # Tk variable for index info (shown in Library toolbar)
         self._index_info_var = tk.StringVar(value="No index built.")
+        self._profile_var = tk.StringVar(value="Built-in: Default")
+        self._history_profile_var = tk.StringVar(value="All Profiles")
+        self._available_index_var = tk.StringVar(value="")
 
         self._progress_mode = "determinate"
         self._views: dict[str, ttk.Frame] = {}
@@ -245,6 +249,11 @@ class AppView:
         self._history_session_by_id: dict[str, object] = {}
         self._evidence_source_by_sid: dict[str, dict] = {}
         self._evidence_source_by_iid: dict[str, str] = {}
+        self._event_payload_by_iid: dict[str, dict] = {}
+        self._region_payload_by_iid: dict[str, dict] = {}
+        self._trace_payload_by_iid: dict[str, dict] = {}
+        self._outline_payload_by_iid: dict[str, dict] = {}
+        self._available_index_rows: list[dict] = []
 
         # Settings display data — populated by controller via populate_settings().
         self._settings_data: dict = {}
@@ -446,6 +455,24 @@ class AppView:
         )
         self._mode_combo.pack(side="left", padx=(0, UI_SPACING["s"]))
 
+        ttk.Label(toolbar, text="Profile:", style="Caption.TLabel").pack(
+            side="left", padx=(0, 4)
+        )
+        self._profile_combo = ttk.Combobox(
+            toolbar,
+            textvariable=self._profile_var,
+            values=["Built-in: Default"],
+            state="readonly",
+            width=24,
+        )
+        self._profile_combo.pack(side="left", padx=(0, UI_SPACING["xs"]))
+        self.btn_profile_load = ttk.Button(toolbar, text="Load", style="Secondary.TButton")
+        self.btn_profile_load.pack(side="left", padx=(0, UI_SPACING["xs"]))
+        self.btn_profile_save = ttk.Button(toolbar, text="Save", style="Secondary.TButton")
+        self.btn_profile_save.pack(side="left", padx=(0, UI_SPACING["xs"]))
+        self.btn_profile_duplicate = ttk.Button(toolbar, text="Duplicate", style="Secondary.TButton")
+        self.btn_profile_duplicate.pack(side="left", padx=(0, UI_SPACING["s"]))
+
         # RAG/Direct toggle
         self._rag_toggle = IOSSegmentedToggle(
             toolbar,
@@ -472,6 +499,19 @@ class AppView:
             command=self._toggle_evidence_panel,
         )
         self._evidence_toggle_btn.pack(side="right", padx=(UI_SPACING["xs"], 0))
+
+        self.btn_feedback_down = ttk.Button(toolbar, text="👎", style="Secondary.TButton", width=3)
+        self.btn_feedback_down.pack(side="right", padx=(UI_SPACING["xs"], 0))
+
+        self.btn_feedback_up = ttk.Button(toolbar, text="👍", style="Secondary.TButton", width=3)
+        self.btn_feedback_up.pack(side="right", padx=(UI_SPACING["xs"], 0))
+
+        self.btn_reset_test_mode = ttk.Button(
+            toolbar,
+            text="Reset Test Mode",
+            style="Secondary.TButton",
+        )
+        self.btn_reset_test_mode.pack(side="right", padx=(UI_SPACING["xs"], 0))
 
         # ── Body: chat pane + optional evidence pane ──────────────────
         body = ttk.Frame(outer, style="Card.TFrame")
@@ -668,8 +708,24 @@ class AppView:
             wraplength=360,
             justify="left",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+        self._evidence_notebook = ttk.Notebook(frame)
+        self._evidence_notebook.pack(fill="both", expand=True)
 
-        list_host = ttk.Frame(frame, style="Card.Elevated.TFrame")
+        self._evidence_sources_tab = ttk.Frame(self._evidence_notebook)
+        self._evidence_events_tab = ttk.Frame(self._evidence_notebook)
+        self._evidence_regions_tab = ttk.Frame(self._evidence_notebook)
+        self._evidence_outline_tab = ttk.Frame(self._evidence_notebook)
+        self._evidence_traces_tab = ttk.Frame(self._evidence_notebook)
+        self._evidence_grounding_tab = ttk.Frame(self._evidence_notebook)
+
+        self._evidence_notebook.add(self._evidence_sources_tab, text="Sources")
+        self._evidence_notebook.add(self._evidence_events_tab, text="Events")
+        self._evidence_notebook.add(self._evidence_regions_tab, text="Semantic Regions")
+        self._evidence_notebook.add(self._evidence_outline_tab, text="Document Outline")
+        self._evidence_notebook.add(self._evidence_traces_tab, text="Trace")
+        self._evidence_notebook.add(self._evidence_grounding_tab, text="Grounding")
+
+        list_host = ttk.Frame(self._evidence_sources_tab, style="Card.Elevated.TFrame")
         list_host.pack(fill="both", expand=True)
         list_host.rowconfigure(0, weight=1)
         list_host.columnconfigure(0, weight=1)
@@ -697,7 +753,7 @@ class AppView:
         self._evidence_tree.configure(yscrollcommand=evidence_scroll.set)
         self._evidence_tree.bind("<<TreeviewSelect>>", self._on_evidence_selected)
 
-        detail_host = ttk.Frame(frame, style="Card.Elevated.TFrame")
+        detail_host = ttk.Frame(self._evidence_sources_tab, style="Card.Elevated.TFrame")
         detail_host.pack(fill="both", expand=True, pady=(UI_SPACING["s"], 0))
         detail_host.rowconfigure(0, weight=1)
         detail_host.columnconfigure(0, weight=1)
@@ -724,6 +780,104 @@ class AppView:
         detail_scroll.grid(row=0, column=1, sticky="ns")
         self._evidence_detail_text.configure(yscrollcommand=detail_scroll.set)
         self._set_evidence_detail("No evidence selected.")
+
+        self._events_tree = self._build_simple_tree(
+            self._evidence_events_tab,
+            ("date", "action", "source"),
+            ("Date", "Action", "Source"),
+        )
+        self._event_detail_text = self._build_detail_text(self._evidence_events_tab)
+        self._events_tree.bind("<<TreeviewSelect>>", self._on_event_selected)
+
+        self._regions_tree = self._build_simple_tree(
+            self._evidence_regions_tab,
+            ("label", "type", "file"),
+            ("Region", "Type", "File"),
+        )
+        self._region_detail_text = self._build_detail_text(self._evidence_regions_tab)
+        self._regions_tree.bind("<<TreeviewSelect>>", self._on_region_selected)
+
+        self._outline_tree = self._build_outline_tree(self._evidence_outline_tab)
+        self._outline_detail_text = self._build_detail_text(self._evidence_outline_tab)
+        self._outline_tree.bind("<<TreeviewSelect>>", self._on_outline_selected)
+
+        self._trace_tree = self._build_simple_tree(
+            self._evidence_traces_tab,
+            ("run_id", "stage", "event_type", "timestamp"),
+            ("Run", "Stage", "Type", "Timestamp"),
+        )
+        self._trace_detail_text = self._build_detail_text(self._evidence_traces_tab)
+        self._trace_tree.bind("<<TreeviewSelect>>", self._on_trace_selected)
+
+        self._grounding_text = self._build_detail_text(self._evidence_grounding_tab)
+
+    def _build_simple_tree(
+        self,
+        parent: ttk.Frame,
+        columns: tuple[str, ...],
+        headings: tuple[str, ...],
+    ) -> ttk.Treeview:
+        parent.rowconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
+        parent.columnconfigure(0, weight=1)
+        host = ttk.Frame(parent, style="Card.Elevated.TFrame")
+        host.grid(row=0, column=0, sticky="nsew")
+        host.rowconfigure(0, weight=1)
+        host.columnconfigure(0, weight=1)
+        tree = ttk.Treeview(host, columns=columns, show="headings", selectmode="browse")
+        for column, heading in zip(columns, headings):
+            tree.heading(column, text=heading)
+            tree.column(column, width=120, anchor="w")
+        tree.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(host, orient="vertical", command=tree.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        tree.configure(yscrollcommand=scroll.set)
+        return tree
+
+    def _build_outline_tree(self, parent: ttk.Frame) -> ttk.Treeview:
+        parent.rowconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
+        parent.columnconfigure(0, weight=1)
+        host = ttk.Frame(parent, style="Card.Elevated.TFrame")
+        host.grid(row=0, column=0, sticky="nsew")
+        host.rowconfigure(0, weight=1)
+        host.columnconfigure(0, weight=1)
+        tree = ttk.Treeview(host, columns=("title", "file"), show="tree headings", selectmode="browse")
+        tree.heading("#0", text="Node")
+        tree.heading("title", text="Title")
+        tree.heading("file", text="File")
+        tree.column("#0", width=100, anchor="w")
+        tree.column("title", width=180, anchor="w")
+        tree.column("file", width=120, anchor="w")
+        tree.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(host, orient="vertical", command=tree.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        tree.configure(yscrollcommand=scroll.set)
+        return tree
+
+    def _build_detail_text(self, parent: ttk.Frame) -> tk.Text:
+        host = ttk.Frame(parent, style="Card.Elevated.TFrame")
+        host.grid(row=1, column=0, sticky="nsew", pady=(UI_SPACING["s"], 0))
+        host.rowconfigure(0, weight=1)
+        host.columnconfigure(0, weight=1)
+        text = tk.Text(
+            host,
+            wrap=tk.WORD,
+            height=8,
+            state="disabled",
+            font=self._fonts["code"],
+            bg=self._palette.get("input_bg", "#07101A"),
+            fg=self._palette["text"],
+            insertbackground=self._palette["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        text.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(host, orient="vertical", command=text.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        text.configure(yscrollcommand=scroll.set)
+        return text
 
     def _build_library_view(self) -> None:
         """Library view: step-based file selection, build controls, and index summary."""
@@ -828,6 +982,19 @@ class AppView:
             padding=(UI_SPACING["m"], UI_SPACING["s"]),
         )
         step_three.grid(row=2, column=0, sticky="ew", pady=(UI_SPACING["m"], 0))
+        selector = ttk.Frame(step_three, style="Card.Flat.TFrame")
+        selector.pack(fill="x", pady=(0, UI_SPACING["s"]))
+        ttk.Label(selector, text="Saved indexes", style="Caption.TLabel").pack(side="left")
+        self._available_index_combo = ttk.Combobox(
+            selector,
+            textvariable=self._available_index_var,
+            values=[],
+            state="readonly",
+            width=72,
+        )
+        self._available_index_combo.pack(side="left", fill="x", expand=True, padx=(UI_SPACING["xs"], UI_SPACING["xs"]))
+        self.btn_library_load_index = ttk.Button(selector, text="Load Selected", style="Secondary.TButton")
+        self.btn_library_load_index.pack(side="left")
         self._active_index_summary_var = tk.StringVar(value="No persisted index selected.")
         self._active_index_path_var = tk.StringVar(value="")
         ttk.Label(step_three, textvariable=self._active_index_summary_var, style="TLabel").pack(anchor="w")
@@ -866,10 +1033,25 @@ class AppView:
         self.btn_history_open.pack(side="left", padx=(UI_SPACING["xs"], 0))
         self.btn_history_delete = ttk.Button(actions, text="Delete", style="Secondary.TButton")
         self.btn_history_delete.pack(side="left", padx=(UI_SPACING["xs"], 0))
+        self.btn_history_rename = ttk.Button(actions, text="Rename", style="Secondary.TButton")
+        self.btn_history_rename.pack(side="left", padx=(UI_SPACING["xs"], 0))
+        self.btn_history_duplicate = ttk.Button(actions, text="Duplicate", style="Secondary.TButton")
+        self.btn_history_duplicate.pack(side="left", padx=(UI_SPACING["xs"], 0))
         self.btn_history_export = ttk.Button(actions, text="Export", style="Secondary.TButton")
         self.btn_history_export.pack(side="left", padx=(UI_SPACING["xs"], 0))
         self.btn_history_refresh = ttk.Button(actions, text="Refresh", style="Secondary.TButton")
         self.btn_history_refresh.pack(side="left", padx=(UI_SPACING["xs"], 0))
+        ttk.Label(actions, text="Profile", style="Caption.TLabel").pack(
+            side="left", padx=(UI_SPACING["m"], UI_SPACING["xs"])
+        )
+        self._history_profile_combo = ttk.Combobox(
+            actions,
+            textvariable=self._history_profile_var,
+            values=["All Profiles"],
+            state="readonly",
+            width=24,
+        )
+        self._history_profile_combo.pack(side="left")
         ttk.Label(actions, text="Search", style="Caption.TLabel").pack(side="left", padx=(UI_SPACING["m"], UI_SPACING["xs"]))
         self._history_search_var = tk.StringVar()
         self._history_search_entry = ttk.Entry(actions, textvariable=self._history_search_var, width=28)
@@ -1112,9 +1294,74 @@ class AppView:
 
                     self._settings_entries[key] = (widget, var)
 
+        local_models = ttk.LabelFrame(
+            inner,
+            text="Local Model Registry",
+            padding=(UI_SPACING["m"], UI_SPACING["s"]),
+        )
+        local_models.grid(
+            row=len(_SETTINGS_SPEC),
+            column=0,
+            sticky="ew",
+            padx=UI_SPACING["s"],
+            pady=(UI_SPACING["m"], 0),
+        )
+        local_models.rowconfigure(1, weight=1)
+        local_models.columnconfigure(0, weight=1)
+        deps = ttk.Frame(local_models, style="Card.Flat.TFrame")
+        deps.grid(row=0, column=0, sticky="ew")
+        self._gguf_dependency_var = tk.StringVar(value="llama-cpp-python: missing")
+        self._st_dependency_var = tk.StringVar(value="sentence-transformers: missing")
+        ttk.Label(deps, textvariable=self._gguf_dependency_var, style="Caption.TLabel").pack(side="left")
+        ttk.Label(deps, textvariable=self._st_dependency_var, style="Caption.TLabel").pack(
+            side="left",
+            padx=(UI_SPACING["m"], 0),
+        )
+        registry_host = ttk.Frame(local_models, style="Card.Elevated.TFrame")
+        registry_host.grid(row=1, column=0, sticky="nsew", pady=(UI_SPACING["s"], 0))
+        registry_host.rowconfigure(0, weight=1)
+        registry_host.columnconfigure(0, weight=1)
+        self._local_model_tree = ttk.Treeview(
+            registry_host,
+            columns=("type", "name", "path", "active"),
+            show="headings",
+            selectmode="browse",
+            height=8,
+        )
+        for name, label, width in (
+            ("type", "Type", 120),
+            ("name", "Name", 180),
+            ("path", "Path / Value", 360),
+            ("active", "Active", 140),
+        ):
+            self._local_model_tree.heading(name, text=label)
+            self._local_model_tree.column(name, width=width, anchor="w")
+        self._local_model_tree.grid(row=0, column=0, sticky="nsew")
+        local_scroll = ttk.Scrollbar(registry_host, orient="vertical", command=self._local_model_tree.yview)
+        local_scroll.grid(row=0, column=1, sticky="ns")
+        self._local_model_tree.configure(yscrollcommand=local_scroll.set)
+        local_actions = ttk.Frame(local_models, style="Card.Flat.TFrame")
+        local_actions.grid(row=2, column=0, sticky="ew", pady=(UI_SPACING["s"], 0))
+        self.btn_add_local_gguf_model = ttk.Button(local_actions, text="Add GGUF")
+        self.btn_add_local_gguf_model.pack(side="left")
+        self.btn_add_local_st_model = ttk.Button(local_actions, text="Add ST")
+        self.btn_add_local_st_model.pack(side="left", padx=(UI_SPACING["xs"], 0))
+        self.btn_remove_local_model = ttk.Button(local_actions, text="Remove")
+        self.btn_remove_local_model.pack(side="left", padx=(UI_SPACING["xs"], 0))
+        self.btn_activate_local_model_llm = ttk.Button(local_actions, text="Use as LLM")
+        self.btn_activate_local_model_llm.pack(side="left", padx=(UI_SPACING["xs"], 0))
+        self.btn_activate_local_model_embedding = ttk.Button(local_actions, text="Use as Embedding")
+        self.btn_activate_local_model_embedding.pack(side="left", padx=(UI_SPACING["xs"], 0))
+        self.btn_open_local_model_folder = ttk.Button(local_actions, text="Open Folder")
+        self.btn_open_local_model_folder.pack(side="left", padx=(UI_SPACING["xs"], 0))
+        self.btn_install_local_gguf_dep = ttk.Button(local_actions, text="Install llama-cpp")
+        self.btn_install_local_gguf_dep.pack(side="right")
+        self.btn_install_local_st_dep = ttk.Button(local_actions, text="Install sentence-transformers")
+        self.btn_install_local_st_dep.pack(side="right", padx=(0, UI_SPACING["xs"]))
+
         # Bottom spacer inside the scroll area
         ttk.Frame(inner, style="Card.TFrame", height=UI_SPACING["l"]).grid(
-            row=len(_SETTINGS_SPEC), column=0,
+            row=len(_SETTINGS_SPEC) + 1, column=0,
         )
 
         # ── Footer with Save button ────────────────────────────────────
@@ -1292,6 +1539,102 @@ class AppView:
         if hasattr(self, "_active_index_path_var"):
             self._active_index_path_var.set(index_path)
 
+    def set_available_indexes(self, rows: list[dict], selected_path: str = "") -> None:
+        """Populate the persisted-index selector in the Library view."""
+        self._available_index_rows = list(rows or [])
+        labels = [str(row.get("label", "") or row.get("index_id", "")) for row in self._available_index_rows]
+        if hasattr(self, "_available_index_combo"):
+            self._available_index_combo.configure(values=labels)
+        chosen = ""
+        for row in self._available_index_rows:
+            if str(row.get("path", "") or "") == str(selected_path or ""):
+                chosen = str(row.get("label", "") or row.get("index_id", ""))
+                break
+        self._available_index_var.set(chosen)
+
+    def get_selected_available_index_path(self) -> str:
+        """Return the currently selected persisted index path."""
+        label = self._available_index_var.get().strip()
+        for row in self._available_index_rows:
+            if str(row.get("label", "") or row.get("index_id", "")) == label:
+                return str(row.get("path", "") or "")
+        return ""
+
+    def set_profile_options(self, labels: list[str], selected_label: str = "") -> None:
+        """Populate profile selectors in chat and history."""
+        normalized = list(labels or ["Built-in: Default"])
+        if hasattr(self, "_profile_combo"):
+            self._profile_combo.configure(values=normalized)
+        chosen = selected_label if selected_label in normalized else (normalized[0] if normalized else "Built-in: Default")
+        self._profile_var.set(chosen)
+        if hasattr(self, "_history_profile_combo"):
+            history_values = ["All Profiles", *normalized]
+            self._history_profile_combo.configure(values=history_values)
+            if self._history_profile_var.get() not in history_values:
+                self._history_profile_var.set("All Profiles")
+
+    def select_profile_label(self, label: str) -> None:
+        """Set the active profile selector."""
+        self._profile_var.set(str(label or "Built-in: Default"))
+
+    def get_selected_profile_label(self) -> str:
+        """Return the active profile label from the chat toolbar."""
+        return self._profile_var.get().strip() or "Built-in: Default"
+
+    def set_local_model_rows(
+        self,
+        rows: list[dict],
+        dependency_status: dict[str, bool] | None = None,
+    ) -> None:
+        """Render the local-model registry table and dependency status."""
+        if hasattr(self, "_local_model_tree"):
+            self._local_model_tree.delete(*self._local_model_tree.get_children())
+            for row in rows or []:
+                active = []
+                if row.get("active_llm"):
+                    active.append("LLM")
+                if row.get("active_embedding"):
+                    active.append("Embedding")
+                self._local_model_tree.insert(
+                    "",
+                    "end",
+                    iid=str(row.get("entry_id", "")),
+                    values=(
+                        str(row.get("model_type", "") or ""),
+                        str(row.get("name", "") or ""),
+                        str(row.get("path") or row.get("value") or ""),
+                        ", ".join(active) or "-",
+                    ),
+                )
+        deps = dependency_status or {}
+        if hasattr(self, "_gguf_dependency_var"):
+            self._gguf_dependency_var.set(
+                "llama-cpp-python: ready"
+                if deps.get("llama_cpp_python")
+                else "llama-cpp-python: missing"
+            )
+        if hasattr(self, "_st_dependency_var"):
+            self._st_dependency_var.set(
+                "sentence-transformers: ready"
+                if deps.get("sentence_transformers")
+                else "sentence-transformers: missing"
+            )
+
+    def get_selected_local_model_id(self) -> str:
+        """Return the selected local-model registry row id."""
+        if not hasattr(self, "_local_model_tree"):
+            return ""
+        selected = self._local_model_tree.selection()
+        return selected[0] if selected else ""
+
+    def set_prompt_text(self, text: str) -> None:
+        """Replace the current prompt text."""
+        self.clear_prompt()
+        try:
+            self.txt_input.insert("1.0", text)
+        except tk.TclError:
+            pass
+
     def append_chat(self, text: str, tag: str = "agent") -> None:
         """Append *text* (with optional *tag*) to the chat display."""
         self.chat_display.configure(state="normal")
@@ -1360,11 +1703,13 @@ class AppView:
                 iid=iid,
                 values=(
                     sid,
-                    str(payload.get("source") or "unknown"),
+                    str(payload.get("label") or payload.get("title") or payload.get("source") or "unknown"),
                     f"{float(payload.get('score')):.3f}" if payload.get("score") is not None else "-",
                 ),
             )
         self._evidence_status_var.set(f"{len(sources)} evidence item(s) loaded.")
+        if hasattr(self, "_evidence_notebook"):
+            self._evidence_notebook.select(self._evidence_sources_tab)
         first = self._evidence_tree.get_children("")
         if first:
             self._evidence_tree.selection_set(first[0])
@@ -1375,6 +1720,8 @@ class AppView:
         """Select a source in the evidence pane by its stable citation id."""
         if not hasattr(self, "_evidence_tree"):
             return
+        if hasattr(self, "_evidence_notebook"):
+            self._evidence_notebook.select(self._evidence_sources_tab)
         for iid, mapped_sid in self._evidence_source_by_iid.items():
             if mapped_sid == sid and self._evidence_tree.exists(iid):
                 self._evidence_tree.selection_set(iid)
@@ -1382,6 +1729,105 @@ class AppView:
                 self._evidence_tree.see(iid)
                 self._on_evidence_selected()
                 break
+
+    def render_events(self, events: list[dict]) -> None:
+        """Render extracted event metadata."""
+        if not hasattr(self, "_events_tree"):
+            return
+        self._event_payload_by_iid = {}
+        self._events_tree.delete(*self._events_tree.get_children())
+        self._set_text_widget(self._event_detail_text, "No event selected.")
+        for idx, event in enumerate(events or [], start=1):
+            iid = f"event-{idx}"
+            payload = dict(event or {})
+            self._event_payload_by_iid[iid] = payload
+            self._events_tree.insert(
+                "",
+                "end",
+                iid=iid,
+                values=(
+                    str(payload.get("date", "") or "-"),
+                    str(payload.get("action", "") or "-"),
+                    ", ".join(str(item) for item in (payload.get("actors") or [])) or "-",
+                ),
+            )
+
+    def render_semantic_regions(self, regions: list[dict]) -> None:
+        """Render semantic-region metadata."""
+        if not hasattr(self, "_regions_tree"):
+            return
+        self._region_payload_by_iid = {}
+        self._regions_tree.delete(*self._regions_tree.get_children())
+        self._set_text_widget(self._region_detail_text, "No semantic region selected.")
+        for idx, region in enumerate(regions or [], start=1):
+            iid = f"region-{idx}"
+            payload = dict(region or {})
+            self._region_payload_by_iid[iid] = payload
+            self._regions_tree.insert(
+                "",
+                "end",
+                iid=iid,
+                values=(
+                    str(payload.get("region_label", "") or "-"),
+                    str(payload.get("region_type", "") or "-"),
+                    str(payload.get("file_path", "") or "-"),
+                ),
+            )
+
+    def render_document_outline(self, outline_nodes: list[dict], grounding_path: str = "") -> None:
+        """Render the document outline tree."""
+        if not hasattr(self, "_outline_tree"):
+            return
+        self._outline_payload_by_iid = {}
+        self._outline_tree.delete(*self._outline_tree.get_children())
+        self._set_text_widget(self._outline_detail_text, "No outline node selected.")
+        for idx, node in enumerate(outline_nodes or [], start=1):
+            iid = str(node.get("id") or f"outline-{idx}")
+            parent = str(node.get("parent_id") or "")
+            if parent and not self._outline_tree.exists(parent):
+                parent = ""
+            payload = dict(node or {})
+            self._outline_payload_by_iid[iid] = payload
+            self._outline_tree.insert(
+                parent,
+                "end",
+                iid=iid,
+                text=str(payload.get("level", "") or ""),
+                values=(
+                    str(payload.get("node_title", "") or ""),
+                    str(payload.get("file_path", "") or ""),
+                ),
+            )
+        if grounding_path:
+            self.render_grounding_info(grounding_path)
+
+    def render_trace_events(self, events: list[dict]) -> None:
+        """Render run trace events."""
+        if not hasattr(self, "_trace_tree"):
+            return
+        self._trace_payload_by_iid = {}
+        self._trace_tree.delete(*self._trace_tree.get_children())
+        self._set_text_widget(self._trace_detail_text, "No trace event selected.")
+        for idx, event in enumerate(events or [], start=1):
+            iid = f"trace-{idx}"
+            payload = dict(event or {})
+            self._trace_payload_by_iid[iid] = payload
+            self._trace_tree.insert(
+                "",
+                "end",
+                iid=iid,
+                values=(
+                    str(payload.get("run_id", "") or "-"),
+                    str(payload.get("stage", "") or "-"),
+                    str(payload.get("event_type", "") or "-"),
+                    str(payload.get("timestamp", "") or "-"),
+                ),
+            )
+
+    def render_grounding_info(self, text: str) -> None:
+        """Render stored grounding info or artifact paths."""
+        if hasattr(self, "_grounding_text"):
+            self._set_text_widget(self._grounding_text, text or "No grounding artifact recorded.")
 
     def bind_history_search(self, callback) -> None:
         """Bind the History search entry to a callback."""
@@ -1393,9 +1839,19 @@ class AppView:
         if hasattr(self, "_history_tree"):
             self._history_tree.bind("<<TreeviewSelect>>", callback)
 
+    def bind_history_profile_filter(self, callback) -> None:
+        """Bind the History profile filter combo to a callback."""
+        if hasattr(self, "_history_profile_combo"):
+            self._history_profile_combo.bind("<<ComboboxSelected>>", callback)
+
     def get_history_search_query(self) -> str:
         """Return the current History search query."""
         return self._history_search_var.get().strip() if hasattr(self, "_history_search_var") else ""
+
+    def get_history_profile_filter(self) -> str:
+        """Return the selected History profile filter."""
+        value = self._history_profile_var.get().strip() if hasattr(self, "_history_profile_var") else ""
+        return "" if value in {"", "All Profiles"} else value
 
     def set_history_rows(self, rows: list) -> None:
         """Replace the History table contents."""
@@ -1442,6 +1898,7 @@ class AppView:
         headline = (
             f"{getattr(summary, 'title', '(untitled)')}\n"
             f"Mode: {getattr(summary, 'mode', '-') or '-'}  |  "
+            f"Profile: {getattr(summary, 'active_profile', '-') or '-'}  |  "
             f"Model: {getattr(summary, 'llm_model', '-') or '-'}  |  "
             f"Index: {getattr(summary, 'index_id', '(default)') or '(default)'}"
         )
@@ -1451,7 +1908,10 @@ class AppView:
             f"Session ID: {getattr(summary, 'session_id', '')}",
             f"Created: {getattr(summary, 'created_at', '')}",
             f"Updated: {getattr(summary, 'updated_at', '')}",
+            f"Vector backend: {getattr(summary, 'vector_backend', '') or '-'}",
             f"Summary: {getattr(summary, 'summary', '') or '(none)'}",
+            f"Feedback items: {len(getattr(detail, 'feedback', []) or [])}",
+            f"Trace runs: {len(getattr(detail, 'traces', {}) or {})}",
             "",
             "Transcript preview:",
             "",
@@ -1518,6 +1978,7 @@ class AppView:
         """
         self._settings_data = dict(settings)
         self._mode_var.set(str(self._settings_data.get("selected_mode", MODE_OPTIONS[0])))
+        self._profile_var.set(str(self._settings_data.get("selected_profile", "Built-in: Default") or "Built-in: Default"))
         self._use_rag_var.set(
             str(self._settings_data.get("chat_path", "RAG")).strip().lower() != "direct"
         )
@@ -1708,6 +2169,19 @@ class AppView:
         self._evidence_detail_text.insert("1.0", text)
         self._evidence_detail_text.configure(state="disabled")
 
+    @staticmethod
+    def _format_payload(payload: dict) -> str:
+        try:
+            return json.dumps(payload, ensure_ascii=False, indent=2)
+        except TypeError:
+            return str(payload)
+
+    def _set_text_widget(self, widget: tk.Text, text: str) -> None:
+        widget.configure(state="normal")
+        widget.delete("1.0", "end")
+        widget.insert("1.0", text)
+        widget.configure(state="disabled")
+
     def _on_evidence_selected(self, _event=None) -> None:
         if not hasattr(self, "_evidence_tree"):
             return
@@ -1722,15 +2196,62 @@ class AppView:
             return
         detail = [
             f"Citation: {sid}",
+            f"Title: {payload.get('title') or payload.get('label') or payload.get('source', 'unknown')}",
             f"Source: {payload.get('source', 'unknown')}",
             f"Chunk ID: {payload.get('chunk_id') or '-'}",
             f"Chunk Index: {payload.get('chunk_idx') if payload.get('chunk_idx') is not None else '-'}",
             f"Score: {payload.get('score') if payload.get('score') is not None else '-'}",
+            f"Section: {payload.get('section_hint') or '-'}",
+            f"Locator: {payload.get('locator') or '-'}",
+            f"Path: {payload.get('file_path') or '-'}",
+            f"Anchor: {payload.get('anchor') or '-'}",
+            f"Date: {payload.get('date') or payload.get('timestamp') or '-'}",
+            f"Actor/Speaker: {payload.get('actor') or payload.get('speaker') or '-'}",
+            f"Type: {payload.get('type') or '-'}",
             "",
             "Snippet:",
-            str(payload.get("snippet") or "(no snippet)"),
+            str(payload.get("excerpt") or payload.get("snippet") or "(no snippet)"),
         ]
+        metadata = payload.get("metadata") or {}
+        if metadata:
+            detail.extend(["", "Metadata:", self._format_payload(dict(metadata))])
         self._set_evidence_detail("\n".join(detail))
+
+    def _on_event_selected(self, _event=None) -> None:
+        if not hasattr(self, "_events_tree"):
+            return
+        selected = self._events_tree.selection()
+        if not selected:
+            return
+        payload = self._event_payload_by_iid.get(selected[0], {})
+        self._set_text_widget(self._event_detail_text, self._format_payload(payload))
+
+    def _on_region_selected(self, _event=None) -> None:
+        if not hasattr(self, "_regions_tree"):
+            return
+        selected = self._regions_tree.selection()
+        if not selected:
+            return
+        payload = self._region_payload_by_iid.get(selected[0], {})
+        self._set_text_widget(self._region_detail_text, self._format_payload(payload))
+
+    def _on_outline_selected(self, _event=None) -> None:
+        if not hasattr(self, "_outline_tree"):
+            return
+        selected = self._outline_tree.selection()
+        if not selected:
+            return
+        payload = self._outline_payload_by_iid.get(selected[0], {})
+        self._set_text_widget(self._outline_detail_text, self._format_payload(payload))
+
+    def _on_trace_selected(self, _event=None) -> None:
+        if not hasattr(self, "_trace_tree"):
+            return
+        selected = self._trace_tree.selection()
+        if not selected:
+            return
+        payload = self._trace_payload_by_iid.get(selected[0], {})
+        self._set_text_widget(self._trace_detail_text, self._format_payload(payload))
 
     def _on_citation_click(self, event=None) -> None:
         try:
@@ -1757,12 +2278,12 @@ class AppView:
         self._history_detail_text.configure(state="disabled")
 
     def _on_new_chat(self) -> None:
-        """Clear chat display (placeholder — controller can override)."""
+        """Clear the chat display immediately before the controller handles session state."""
         self.clear_chat()
         self.set_status("New chat started.")
 
     def _toggle_evidence_panel(self) -> None:
-        """Toggle the evidence side pane (placeholder; controller can wire)."""
+        """Toggle the evidence side pane."""
         self._evidence_visible = not self._evidence_visible
         if self._evidence_visible:
             self._evidence_sep.pack(side="left", fill="y")
@@ -1771,6 +2292,232 @@ class AppView:
         else:
             self._evidence_sep.pack_forget()
             self._evidence_pane.pack_forget()
+
+    def show_wizard_step(self, title: str) -> None:
+        """Expose the current wizard step in the status bar."""
+        self.set_status(f"Wizard: {title}")
+
+    def show_setup_wizard(self, initial_state: dict, index_options: list[dict]) -> dict | None:
+        """Show a modal setup dialog and return the selected values."""
+        from tkinter import filedialog
+
+        self.show_wizard_step("Setup")
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Axiom Setup Wizard")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.geometry("760x620")
+        dialog.minsize(680, 520)
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(0, weight=1)
+
+        notebook = ttk.Notebook(dialog)
+        notebook.grid(row=0, column=0, sticky="nsew", padx=UI_SPACING["m"], pady=UI_SPACING["m"])
+
+        source_tab = ttk.Frame(notebook, padding=UI_SPACING["m"])
+        ingest_tab = ttk.Frame(notebook, padding=UI_SPACING["m"])
+        provider_tab = ttk.Frame(notebook, padding=UI_SPACING["m"])
+        keys_tab = ttk.Frame(notebook, padding=UI_SPACING["m"])
+        mode_tab = ttk.Frame(notebook, padding=UI_SPACING["m"])
+        confirm_tab = ttk.Frame(notebook, padding=UI_SPACING["m"])
+        for tab, title in (
+            (source_tab, "1. Source"),
+            (ingest_tab, "2. Ingestion"),
+            (provider_tab, "3. Providers"),
+            (keys_tab, "4. API Keys"),
+            (mode_tab, "5. Mode"),
+            (confirm_tab, "6. Confirm"),
+        ):
+            notebook.add(tab, text=title)
+            tab.columnconfigure(1, weight=1)
+
+        file_var = tk.StringVar(value=str(initial_state.get("file_path", "") or ""))
+        index_label_map = {
+            str(row.get("label", "") or row.get("index_id", "")): str(row.get("path", "") or "")
+            for row in index_options or []
+        }
+        selected_index_label = ""
+        initial_index_path = str(initial_state.get("selected_index_path", "") or "")
+        for label, path in index_label_map.items():
+            if path == initial_index_path:
+                selected_index_label = label
+                break
+        index_var = tk.StringVar(value=selected_index_label)
+        chunk_size_var = tk.StringVar(value=str(initial_state.get("chunk_size", 1000)))
+        overlap_var = tk.StringVar(value=str(initial_state.get("chunk_overlap", 100)))
+        digest_var = tk.BooleanVar(value=bool(initial_state.get("build_digest_index", True)))
+        comprehension_var = tk.BooleanVar(value=bool(initial_state.get("build_comprehension_index", False)))
+        comprehension_depth_var = tk.StringVar(value=str(initial_state.get("comprehension_extraction_depth", "Standard")))
+        prefer_comprehension_var = tk.BooleanVar(value=bool(initial_state.get("prefer_comprehension_index", True)))
+        llm_provider_var = tk.StringVar(value=str(initial_state.get("llm_provider", "") or "mock"))
+        llm_model_var = tk.StringVar(value=str(initial_state.get("llm_model", "") or ""))
+        embedding_provider_var = tk.StringVar(value=str(initial_state.get("embedding_provider", "") or "mock"))
+        embedding_model_var = tk.StringVar(value=str(initial_state.get("embedding_model", "") or ""))
+        openai_key_var = tk.StringVar(value=str(self._settings_data.get("api_key_openai", "") or ""))
+        anthropic_key_var = tk.StringVar(value=str(self._settings_data.get("api_key_anthropic", "") or ""))
+        google_key_var = tk.StringVar(value=str(self._settings_data.get("api_key_google", "") or ""))
+        xai_key_var = tk.StringVar(value=str(self._settings_data.get("api_key_xai", "") or ""))
+        mode_var = tk.StringVar(value=str(initial_state.get("mode_preset", "Q&A") or "Q&A"))
+        deepread_var = tk.BooleanVar(value=bool(self._settings_data.get("deepread_mode", False)))
+        backend_var = tk.StringVar(value=str(self._settings_data.get("vector_db_type", "json") or "json"))
+
+        ttk.Label(source_tab, text="New source file", style="Caption.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Entry(source_tab, textvariable=file_var).grid(row=0, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0))
+        ttk.Button(
+            source_tab,
+            text="Browse…",
+            command=lambda: file_var.set(
+                filedialog.askopenfilename(title="Select source file") or file_var.get()
+            ),
+        ).grid(row=0, column=2, padx=(UI_SPACING["xs"], 0))
+        ttk.Label(source_tab, text="Or restore existing index", style="Caption.TLabel").grid(row=1, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Combobox(
+            source_tab,
+            textvariable=index_var,
+            values=list(index_label_map.keys()),
+            state="readonly",
+            width=70,
+        ).grid(row=1, column=1, columnspan=2, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+
+        ttk.Label(ingest_tab, text="Chunk size", style="Caption.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Entry(ingest_tab, textvariable=chunk_size_var).grid(row=0, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0))
+        ttk.Label(ingest_tab, text="Chunk overlap", style="Caption.TLabel").grid(row=1, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Entry(ingest_tab, textvariable=overlap_var).grid(row=1, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+        ttk.Checkbutton(ingest_tab, text="Build digest index", variable=digest_var).grid(row=2, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Checkbutton(ingest_tab, text="Build comprehension index", variable=comprehension_var).grid(row=3, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
+        ttk.Label(ingest_tab, text="Comprehension depth", style="Caption.TLabel").grid(row=4, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Combobox(
+            ingest_tab,
+            textvariable=comprehension_depth_var,
+            values=["Standard", "Deep", "Exhaustive"],
+            state="readonly",
+        ).grid(row=4, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+        ttk.Checkbutton(ingest_tab, text="Prefer comprehension index", variable=prefer_comprehension_var).grid(row=5, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
+        ttk.Checkbutton(ingest_tab, text="Enable deepread (forces structure-aware ingestion)", variable=deepread_var).grid(row=6, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["xs"], 0))
+        ttk.Label(ingest_tab, text="Vector backend", style="Caption.TLabel").grid(row=7, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Combobox(
+            ingest_tab,
+            textvariable=backend_var,
+            values=["json", "chroma", "weaviate"],
+            state="readonly",
+        ).grid(row=7, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+
+        provider_values = ["anthropic", "openai", "google", "xai", "local_lm_studio", "local_gguf", "mock"]
+        embedding_values = ["voyage", "openai", "google", "local_huggingface", "local_sentence_transformers", "mock"]
+        ttk.Label(provider_tab, text="LLM provider", style="Caption.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Combobox(provider_tab, textvariable=llm_provider_var, values=provider_values, state="readonly").grid(row=0, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0))
+        ttk.Label(provider_tab, text="LLM model", style="Caption.TLabel").grid(row=1, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Entry(provider_tab, textvariable=llm_model_var).grid(row=1, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+        ttk.Label(provider_tab, text="Embedding provider", style="Caption.TLabel").grid(row=2, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Combobox(provider_tab, textvariable=embedding_provider_var, values=embedding_values, state="readonly").grid(row=2, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+        ttk.Label(provider_tab, text="Embedding model", style="Caption.TLabel").grid(row=3, column=0, sticky="w", pady=(UI_SPACING["s"], 0))
+        ttk.Entry(provider_tab, textvariable=embedding_model_var).grid(row=3, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=(UI_SPACING["s"], 0))
+
+        for row, (label, var) in enumerate(
+            (
+                ("OpenAI key", openai_key_var),
+                ("Anthropic key", anthropic_key_var),
+                ("Google key", google_key_var),
+                ("xAI key", xai_key_var),
+            )
+        ):
+            ttk.Label(keys_tab, text=label, style="Caption.TLabel").grid(row=row, column=0, sticky="w", pady=((UI_SPACING["s"] if row else 0), 0))
+            ttk.Entry(keys_tab, textvariable=var, show="*").grid(row=row, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0), pady=((UI_SPACING["s"] if row else 0), 0))
+
+        ttk.Label(mode_tab, text="Mode preset", style="Caption.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Combobox(mode_tab, textvariable=mode_var, values=MODE_OPTIONS, state="readonly").grid(row=0, column=1, sticky="ew", padx=(UI_SPACING["xs"], 0))
+
+        confirm_text = tk.Text(
+            confirm_tab,
+            wrap=tk.WORD,
+            height=18,
+            font=self._fonts["code"],
+            bg=self._palette.get("input_bg", "#07101A"),
+            fg=self._palette["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        confirm_text.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        confirm_tab.rowconfigure(0, weight=1)
+
+        def _refresh_summary(*_args) -> None:
+            summary = {
+                "file_path": file_var.get().strip(),
+                "selected_index_path": index_label_map.get(index_var.get().strip(), ""),
+                "chunk_size": chunk_size_var.get().strip(),
+                "chunk_overlap": overlap_var.get().strip(),
+                "llm_provider": llm_provider_var.get().strip(),
+                "llm_model": llm_model_var.get().strip(),
+                "embedding_provider": embedding_provider_var.get().strip(),
+                "embedding_model": embedding_model_var.get().strip(),
+                "mode_preset": mode_var.get().strip(),
+                "vector_db_type": backend_var.get().strip(),
+                "deepread_mode": bool(deepread_var.get()),
+                "cost_estimate": "Mock/local providers: low cost. Cloud providers depend on prompt length and model choice.",
+            }
+            confirm_text.configure(state="normal")
+            confirm_text.delete("1.0", "end")
+            confirm_text.insert("1.0", self._format_payload(summary))
+            confirm_text.configure(state="disabled")
+
+        for var in (
+            file_var,
+            index_var,
+            chunk_size_var,
+            overlap_var,
+            llm_provider_var,
+            llm_model_var,
+            embedding_provider_var,
+            embedding_model_var,
+            mode_var,
+            backend_var,
+            deepread_var,
+        ):
+            try:
+                var.trace_add("write", _refresh_summary)
+            except Exception:
+                pass
+        _refresh_summary()
+
+        result: dict | None = None
+
+        footer = ttk.Frame(dialog, padding=(UI_SPACING["m"], 0, UI_SPACING["m"], UI_SPACING["m"]))
+        footer.grid(row=1, column=0, sticky="ew")
+
+        def _finish() -> None:
+            nonlocal result
+            result = {
+                "file_path": file_var.get().strip(),
+                "selected_index_path": index_label_map.get(index_var.get().strip(), ""),
+                "chunk_size": chunk_size_var.get().strip(),
+                "chunk_overlap": overlap_var.get().strip(),
+                "build_digest_index": digest_var.get(),
+                "build_comprehension_index": comprehension_var.get(),
+                "comprehension_extraction_depth": comprehension_depth_var.get().strip(),
+                "prefer_comprehension_index": prefer_comprehension_var.get(),
+                "llm_provider": llm_provider_var.get().strip(),
+                "llm_model": llm_model_var.get().strip(),
+                "embedding_provider": embedding_provider_var.get().strip(),
+                "embedding_model": embedding_model_var.get().strip(),
+                "api_key_openai": openai_key_var.get().strip(),
+                "api_key_anthropic": anthropic_key_var.get().strip(),
+                "api_key_google": google_key_var.get().strip(),
+                "api_key_xai": xai_key_var.get().strip(),
+                "mode_preset": mode_var.get().strip(),
+                "deepread_mode": deepread_var.get(),
+                "vector_db_type": backend_var.get().strip(),
+            }
+            dialog.destroy()
+
+        ttk.Button(footer, text="Cancel", style="Secondary.TButton", command=dialog.destroy).pack(side="right")
+        ttk.Button(footer, text="Finish Setup", style="Primary.TButton", command=_finish).pack(
+            side="right",
+            padx=(0, UI_SPACING["xs"]),
+        )
+
+        dialog.wait_window()
+        return result
 
     def _load_icon(self) -> None:
         """Best-effort window icon loading (PNG preferred; .ico on Windows)."""

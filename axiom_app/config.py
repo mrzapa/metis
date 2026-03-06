@@ -1,13 +1,8 @@
 """axiom_app.config — Application-wide configuration constants and Config dataclass.
 
-This module will become the single source of truth for app identity, theming
-defaults, and runtime configuration once constants are migrated out of
-agentic_rag_gui.py.
-
-Migration status: PLACEHOLDER — values here are not yet used by the running app.
-All live constants still reside in agentic_rag_gui.py.  Each constant below
-will be wired up and the duplicate in agentic_rag_gui.py removed in a
-subsequent refactor step.
+This module holds shared app identity and baseline runtime defaults used by the
+MVC app while the legacy runtime remains available behind the default entry
+path.
 """
 
 from __future__ import annotations
@@ -24,15 +19,14 @@ APP_SUBTITLE: str = "Personal RAG Assistant"
 
 # ---------------------------------------------------------------------------
 # UI backend
-# Resolved at runtime in agentic_rag_gui.py; mirrored here as the future
-# canonical location.  Valid values: "ctk" | "ttkbootstrap" | "ttk"
+# Valid values: "ctk" | "ttkbootstrap" | "ttk"
 # ---------------------------------------------------------------------------
 
 UI_BACKEND_DEFAULT: str = "ttk"
 
 # ---------------------------------------------------------------------------
 # Config dataclass
-# Fields will be populated as settings are migrated from AgenticRAGApp.__init__
+# Fields mirror the MVC runtime defaults.
 # ---------------------------------------------------------------------------
 
 
@@ -41,15 +35,7 @@ class Config:
     """Runtime configuration for the Axiom application.
 
     All fields are optional with sensible defaults so the dataclass can be
-    instantiated with zero arguments before full migration is complete.
-
-    TODO: migrate fields from AgenticRAGApp.__init__ tk.*Var declarations:
-      - llm_provider, embedding_provider, vector_db_type
-      - chunk_size, chunk_overlap
-      - retrieval_k, final_k, mmr_lambda
-      - agentic_mode, agentic_max_iterations
-      - theme selection
-      - api_keys (store as plain str, not tk.StringVar)
+    instantiated with zero arguments in non-GUI contexts.
     """
 
     # App identity (read-only at runtime)
@@ -62,7 +48,7 @@ class Config:
     llm_model: str = "claude-opus-4-6"
     embedding_provider: str = "voyage"
     embedding_model: str = "voyage-4-large"
-    vector_db_type: str = "chroma"
+    vector_db_type: str = "json"
 
     # Ingestion defaults
     chunk_size: int = 1000

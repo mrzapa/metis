@@ -20,6 +20,17 @@ class EvidenceSource:
     header_path: str = ""
     breadcrumb: str = ""
     title: str = ""
+    label: str = ""
+    section_hint: str = ""
+    locator: str = ""
+    date: str = ""
+    timestamp: str = ""
+    speaker: str = ""
+    actor: str = ""
+    entry_type: str = ""
+    file_path: str = ""
+    anchor: str = ""
+    excerpt: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -33,6 +44,17 @@ class EvidenceSource:
             "header_path": self.header_path,
             "breadcrumb": self.breadcrumb or self.header_path,
             "title": self.title or self.source,
+            "label": self.label or self.title or self.source,
+            "section_hint": self.section_hint,
+            "locator": self.locator,
+            "date": self.date,
+            "timestamp": self.timestamp,
+            "speaker": self.speaker,
+            "actor": self.actor,
+            "type": self.entry_type,
+            "file_path": self.file_path,
+            "anchor": self.anchor,
+            "excerpt": self.excerpt or self.snippet,
             "metadata": dict(self.metadata or {}),
         }
 
@@ -80,6 +102,26 @@ class EvidenceSource:
             header_path=header_path,
             breadcrumb=breadcrumb,
             title=str(data.get("title") or data.get("source_title") or source),
+            label=str(data.get("label") or data.get("title") or data.get("source_title") or source),
+            section_hint=str(
+                data.get("section_hint")
+                or data.get("section")
+                or data.get("chapter")
+                or ""
+            ),
+            locator=str(data.get("locator") or data.get("position_hint") or ""),
+            date=str(data.get("date") or data.get("month_bucket") or ""),
+            timestamp=str(data.get("timestamp") or ""),
+            speaker=str(data.get("speaker") or ""),
+            actor=str(data.get("actor") or ""),
+            entry_type=str(data.get("type") or ""),
+            file_path=str(
+                data.get("file_path")
+                or ((data.get("metadata") or {}).get("source_path"))
+                or ""
+            ),
+            anchor=str(data.get("anchor") or ""),
+            excerpt=str(data.get("excerpt") or snippet),
             metadata=dict(data.get("metadata") or {}),
         )
 
