@@ -2,7 +2,8 @@
 
 Provides ``index`` and ``query`` sub-commands that operate without any
 Tk/GUI dependency, making them usable in headless environments (CI, SSH,
-Docker, no-display servers).
+Docker, no-display servers) while reusing the same shared indexing and
+retrieval backends as the MVC app.
 
 Usage
 -----
@@ -11,7 +12,7 @@ Index a document::
     python main.py --cli index --file README.md
     python main.py --cli index --file paper.txt --out paper.axiom-index.json
 
-Query a document (keyword match; no LLM required)::
+Query a document::
 
     python main.py --cli query --file README.md --question "how to install"
     python main.py --cli query --file paper.txt --question "neural network"
@@ -20,13 +21,6 @@ Or invoke the module directly::
 
     python -m axiom_app.cli index --file README.md
     python -m axiom_app.cli query --file paper.txt --question "attention"
-
-Backends
---------
-Both commands use only stdlib and ``axiom_app.models.AppModel``.  When a
-full LLM/embedding stack is configured in future, ``cmd_query`` will
-delegate to it automatically; for now it performs a case-insensitive
-keyword search and returns matching lines with surrounding context.
 
 Exit codes
 ----------
@@ -44,12 +38,8 @@ import textwrap
 from typing import Sequence
 
 from axiom_app.models.app_model import AppModel
-from axiom_app.services.index_service import (
-    build_index_bundle,
-    load_index_bundle,
-    query_index_bundle,
-    save_index_bundle,
-)
+from axiom_app.services.index_service import load_index_bundle
+from axiom_app.services.vector_store import resolve_vector_store
 
 # ── constants ────────────────────────────────────────────────────────────────
 
@@ -63,7 +53,7 @@ _SNIPPET_CHARS  = 300         # chars in index summary snippet
 
 
 def cmd_index(args: argparse.Namespace) -> int:
-    """Build and persist a real JSON index using the shared MVC backend."""
+    """Build and persist an index using the shared MVC backend."""
     src = pathlib.Path(args.file)
     if not src.exists():
         print(f"error: file not found: {src}", file=sys.stderr)
@@ -72,16 +62,20 @@ def cmd_index(args: argparse.Namespace) -> int:
         print(f"error: not a regular file: {src}", file=sys.stderr)
         return 1
 
-    try:
-        text = src.read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
-        print(f"error reading {src}: {exc}", file=sys.stderr)
-        return 1
-
     model = AppModel()
     model.load_settings()
     model.set_documents([str(src)])
-    bundle = build_index_bundle([str(src)], model.settings)
+    adapter = resolve_vector_store(model.settings)
+    available, reason = adapter.is_available(model.settings)
+    if not available:
+        print(f"error: vector backend unavailable: {reason}", file=sys.stderr)
+        return 1
+    try:
+        text = src.read_text(encoding="utf-8", errors="replace")
+        bundle = adapter.build([str(src)], model.settings)
+    except OSError as exc:
+        print(f"error reading {src}: {exc}", file=sys.stderr)
+        return 1
 
     out_path: pathlib.Path
     if args.out:
@@ -90,7 +84,7 @@ def cmd_index(args: argparse.Namespace) -> int:
         out_path = src.with_name(src.name + ".axiom-index.json")
 
     try:
-        save_index_bundle(bundle, target_path=out_path)
+        adapter.save(bundle, target_path=out_path)
     except OSError as exc:
         print(f"error writing index to {out_path}: {exc}", file=sys.stderr)
         return 1
@@ -107,12 +101,13 @@ def cmd_index(args: argparse.Namespace) -> int:
     print(f"  Paragraphs : {para_count:>10,}")
     print(f"  Chunks     : {len(bundle.chunks):>10,}")
     print(f"  Index ID   : {bundle.index_id}")
+    print(f"  Backend    : {bundle.vector_backend}")
     print(f"Index written → {out_path}")
     return 0
 
 
 def cmd_query(args: argparse.Namespace) -> int:
-    """Query a shared JSON index or build one in memory from the source file."""
+    """Query a saved index or build one in memory from the source file."""
     src = pathlib.Path(args.file)
     if not src.exists():
         print(f"error: file not found: {src}", file=sys.stderr)
@@ -130,17 +125,35 @@ def cmd_query(args: argparse.Namespace) -> int:
     model.load_settings()
 
     try:
-        bundle = load_index_bundle(args.index) if args.index else build_index_bundle([str(src)], model.settings)
+        if args.index:
+            bundle = load_index_bundle(args.index)
+            adapter = resolve_vector_store(
+                {**model.settings, "vector_db_type": str(bundle.vector_backend or model.settings.get("vector_db_type", "json"))}
+            )
+            available, reason = adapter.is_available(
+                {**model.settings, "vector_db_type": str(bundle.vector_backend or model.settings.get("vector_db_type", "json"))}
+            )
+            if not available:
+                print(f"error: vector backend unavailable: {reason}", file=sys.stderr)
+                return 1
+            bundle = adapter.load(args.index)
+        else:
+            adapter = resolve_vector_store(model.settings)
+            available, reason = adapter.is_available(model.settings)
+            if not available:
+                print(f"error: vector backend unavailable: {reason}", file=sys.stderr)
+                return 1
+            bundle = adapter.build([str(src)], model.settings)
     except OSError as exc:
         print(f"error reading/building index: {exc}", file=sys.stderr)
         return 1
 
-    result = query_index_bundle(bundle, question, model.settings)
+    result = adapter.query(bundle, question, model.settings)
 
     print()
     print(f"Question : {question}")
     print(f"Source   : {src}")
-    print(f"Backend  : shared retrieval ({bundle.index_id})")
+    print(f"Backend  : shared retrieval ({bundle.vector_backend}:{bundle.index_id})")
     print()
     print(_SEP)
 

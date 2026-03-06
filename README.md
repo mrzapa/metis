@@ -3,7 +3,7 @@
 [![CI](https://github.com/mrzapa/workx/actions/workflows/ci.yml/badge.svg)](https://github.com/mrzapa/workx/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Axiom is a personal RAG desktop application currently in an MVC refactor. It supports:
+Axiom is a personal RAG desktop application with an opt-in MVC runtime. It supports:
 
 - **Legacy GUI app** (`agentic_rag_gui.py`) as the default runtime.
 - **New MVC app** (`axiom_app`) enabled via `AXIOM_NEW_APP=1`.
@@ -102,7 +102,7 @@ python -m axiom_app.cli query --file README.md --question "install"
 
 ### Index output file
 
-`index` writes a JSON stub by default to `<file>.axiom-index.json`.
+`index` writes a shared persisted index to `<file>.axiom-index.json` by default.
 
 ```bash
 python -m axiom_app.cli index --file docs/my_notes.txt
@@ -110,7 +110,7 @@ python -m axiom_app.cli index --file docs/my_notes.txt
 
 ### Query behavior
 
-`query` currently performs case-insensitive keyword matching as a fallback when a full RAG backend is not wired.
+`query` uses the same shared retrieval backend as the MVC app and can load previously saved indexes.
 
 ```bash
 python -m axiom_app.cli query --file docs/my_notes.txt --question "dependency"
@@ -125,7 +125,7 @@ python -m axiom_app.cli query --file docs/my_notes.txt --question "dependency"
 
 ## Optional dependencies and fallback behavior
 
-Heavy ML/runtime dependencies are intentionally optional. The CLI is designed to work in headless/non-ML environments using stdlib behavior and local app model state.
+Heavy ML/runtime dependencies are intentionally optional. The MVC app and CLI surface backend-readiness errors when a selected provider or vector backend is unavailable.
 
 ## Testing
 

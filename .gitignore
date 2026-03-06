@@ -29,7 +29,11 @@ env/
 
 # App runtime artifacts
 agentic_rag_config.json
+settings.json
 rag_sessions.db
 agentic_rag_runs.jsonl
 trace_store/
+indexes/
+logs/
+traces/
 profiles/
