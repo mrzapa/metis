@@ -7,7 +7,6 @@ Updated to work with the factory-based async dispatch.  Tests monkeypatch
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Any
 

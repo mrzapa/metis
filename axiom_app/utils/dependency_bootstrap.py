@@ -11,6 +11,7 @@ import logging
 import subprocess
 import sys
 from dataclasses import dataclass
+from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -57,7 +58,11 @@ def get_missing_startup_packages() -> list[str]:
     return missing
 
 
-def ensure_startup_dependencies(logger: logging.Logger) -> None:
+def ensure_startup_dependencies(
+    logger: logging.Logger,
+    *,
+    progress_callback: Callable[[str], None] | None = None,
+) -> bool:
     """Ensure required runtime dependencies are installed.
 
     Installs missing packages in one pip call. Raises RuntimeError if
@@ -67,11 +72,15 @@ def ensure_startup_dependencies(logger: logging.Logger) -> None:
     missing = get_missing_startup_packages()
     if not missing:
         logger.info("Startup dependency check: all dependencies already installed.")
-        return
+        if callable(progress_callback):
+            progress_callback("All startup dependencies are already installed.")
+        return False
 
     logger.warning("Missing startup dependencies detected: %s", ", ".join(missing))
     cmd = [sys.executable, "-m", "pip", "install", *missing]
     logger.info("Installing missing dependencies with pip...")
+    if callable(progress_callback):
+        progress_callback(f"Installing missing startup dependencies: {', '.join(missing)}")
 
     proc = subprocess.run(
         cmd,
@@ -88,3 +97,36 @@ def ensure_startup_dependencies(logger: logging.Logger) -> None:
         raise RuntimeError(f"Automatic dependency install failed: {detail}")
 
     logger.info("Startup dependency installation complete.")
+    if callable(progress_callback):
+        progress_callback("Startup dependency installation complete.")
+    return True
+
+
+def install_packages(
+    packages: list[str],
+    *,
+    logger: logging.Logger,
+    progress_callback: Callable[[str], None] | None = None,
+) -> None:
+    """Install *packages* with pip and emit optional progress lines."""
+
+    normalized = [str(item).strip() for item in packages if str(item).strip()]
+    if not normalized:
+        return
+    if callable(progress_callback):
+        progress_callback(f"Installing packages: {', '.join(normalized)}")
+    logger.info("Installing packages with pip: %s", ", ".join(normalized))
+    proc = subprocess.run(
+        [sys.executable, "-m", "pip", "install", *normalized],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        stdout = (proc.stdout or "").strip()
+        detail = stderr or stdout or "Unknown pip failure"
+        logger.error("Package installation failed: %s", detail)
+        raise RuntimeError(detail)
+    if callable(progress_callback):
+        progress_callback("Package installation complete.")

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "axiom-app"
 version = "0.1.0"
-description = "Axiom — Personal RAG desktop application (MVC refactor in progress)"
+description = "Axiom — Personal RAG desktop application with an opt-in MVC runtime"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
@@ -34,16 +34,19 @@ dev = [
     "ruff>=0.6",
     "pre-commit>=3.8",
 ]
+live-backends = [
+    "weaviate-client>=4,<5",
+]
 kreuzberg = [
     "kreuzberg",
 ]
 all = [
     "kreuzberg",
+    "weaviate-client>=4,<5",
 ]
 
 [project.scripts]
-# Once the legacy monolith is retired:
-# axiom = "axiom_app.app:run_app"
+axiom-parity-audit = "axiom_app.audit:main"
 
 [tool.setuptools]
 license-files = ["LICENSE"]

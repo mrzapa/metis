@@ -3,7 +3,7 @@
 [![CI](https://github.com/mrzapa/workx/actions/workflows/ci.yml/badge.svg)](https://github.com/mrzapa/workx/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Axiom is a personal RAG desktop application currently in an MVC refactor. It supports:
+Axiom is a personal RAG desktop application with an opt-in MVC runtime. It supports:
 
 - **Legacy GUI app** (`agentic_rag_gui.py`) as the default runtime.
 - **New MVC app** (`axiom_app`) enabled via `AXIOM_NEW_APP=1`.
@@ -70,6 +70,12 @@ For test/dev extras:
 pip install -e .[dev]
 ```
 
+For the strict live-backend proof extras:
+
+```bash
+pip install -e .[dev,live-backends]
+```
+
 ## Run modes (GUI + CLI)
 
 ### Legacy GUI (default path)
@@ -102,15 +108,33 @@ python -m axiom_app.cli query --file README.md --question "install"
 
 ### Index output file
 
-`index` writes a JSON stub by default to `<file>.axiom-index.json`.
+`index` writes a manifest-backed persisted index to `<file>.axiom-index/manifest.json` by default.
 
 ```bash
 python -m axiom_app.cli index --file docs/my_notes.txt
 ```
 
+Run the MVC parity audit:
+
+```bash
+axiom-parity-audit
+```
+
+Run the strict live-backend audit against local Docker Weaviate:
+
+```bash
+pip install -e .[dev,live-backends]
+docker compose -f docker/weaviate/docker-compose.yml up -d
+export AXIOM_TEST_WEAVIATE_URL=http://127.0.0.1:8080
+export AXIOM_TEST_WEAVIATE_GRPC_HOST=127.0.0.1
+export AXIOM_TEST_WEAVIATE_GRPC_PORT=50051
+export AXIOM_TEST_WEAVIATE_GRPC_SECURE=false
+axiom-parity-audit --require-live-backends
+```
+
 ### Query behavior
 
-`query` currently performs case-insensitive keyword matching as a fallback when a full RAG backend is not wired.
+`query` uses the same shared retrieval backend as the MVC app and can load previously saved indexes.
 
 ```bash
 python -m axiom_app.cli query --file docs/my_notes.txt --question "dependency"
@@ -122,16 +146,26 @@ python -m axiom_app.cli query --file docs/my_notes.txt --question "dependency"
   - `0` (default): run legacy GUI path.
   - `1`: enable the new MVC path in `main.py`.
   - In new mode, `--cli` forces headless CLI handling.
+- `AXIOM_TEST_WEAVIATE_URL`
+- `AXIOM_TEST_WEAVIATE_API_KEY`
+- `AXIOM_TEST_WEAVIATE_GRPC_HOST`
+- `AXIOM_TEST_WEAVIATE_GRPC_PORT`
+- `AXIOM_TEST_WEAVIATE_GRPC_SECURE`
+  - Canonical env contract for the live Weaviate parity proof.
+- `AXIOM_PARITY_REQUIRE_LIVE_BACKENDS`
+  - `1`: make `axiom-parity-audit` fail unless the live backend proof runs and passes.
 
 ## Optional dependencies and fallback behavior
 
-Heavy ML/runtime dependencies are intentionally optional. The CLI is designed to work in headless/non-ML environments using stdlib behavior and local app model state.
+Heavy ML/runtime dependencies are intentionally optional. The MVC app and CLI surface backend-readiness errors when a selected provider or vector backend is unavailable.
 
 ## Testing
 
 ```bash
 python -m pytest
 python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
+pip install -e .[dev,live-backends]
+python -m pytest -q tests/test_live_weaviate_proof.py
 ```
 
 ## Run CI checks locally
@@ -139,6 +173,7 @@ python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
 ```bash
 ruff check .
 python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
+axiom-parity-audit --require-live-backends
 python - <<'PY'
 import json
 json.load(open('axiom_app/default_settings.json', encoding='utf-8'))
