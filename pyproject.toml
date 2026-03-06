@@ -34,11 +34,15 @@ dev = [
     "ruff>=0.6",
     "pre-commit>=3.8",
 ]
+live-backends = [
+    "weaviate-client>=4,<5",
+]
 kreuzberg = [
     "kreuzberg",
 ]
 all = [
     "kreuzberg",
+    "weaviate-client>=4,<5",
 ]
 
 [project.scripts]

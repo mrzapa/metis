@@ -70,6 +70,12 @@ For test/dev extras:
 pip install -e .[dev]
 ```
 
+For the strict live-backend proof extras:
+
+```bash
+pip install -e .[dev,live-backends]
+```
+
 ## Run modes (GUI + CLI)
 
 ### Legacy GUI (default path)
@@ -117,6 +123,7 @@ axiom-parity-audit
 Run the strict live-backend audit against local Docker Weaviate:
 
 ```bash
+pip install -e .[dev,live-backends]
 docker compose -f docker/weaviate/docker-compose.yml up -d
 export AXIOM_TEST_WEAVIATE_URL=http://127.0.0.1:8080
 export AXIOM_TEST_WEAVIATE_GRPC_HOST=127.0.0.1
@@ -157,6 +164,7 @@ Heavy ML/runtime dependencies are intentionally optional. The MVC app and CLI su
 ```bash
 python -m pytest
 python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
+pip install -e .[dev,live-backends]
 python -m pytest -q tests/test_live_weaviate_proof.py
 ```
 
