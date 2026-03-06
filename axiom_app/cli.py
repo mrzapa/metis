@@ -38,13 +38,18 @@ Exit codes
 from __future__ import annotations
 
 import argparse
-import json
 import pathlib
 import sys
 import textwrap
 from typing import Sequence
 
 from axiom_app.models.app_model import AppModel
+from axiom_app.services.index_service import (
+    build_index_bundle,
+    load_index_bundle,
+    query_index_bundle,
+    save_index_bundle,
+)
 
 # ── constants ────────────────────────────────────────────────────────────────
 
@@ -58,7 +63,7 @@ _SNIPPET_CHARS  = 300         # chars in index summary snippet
 
 
 def cmd_index(args: argparse.Namespace) -> int:
-    """Read *args.file*, compute basic statistics, write a JSON index stub."""
+    """Build and persist a real JSON index using the shared MVC backend."""
     src = pathlib.Path(args.file)
     if not src.exists():
         print(f"error: file not found: {src}", file=sys.stderr)
@@ -73,61 +78,41 @@ def cmd_index(args: argparse.Namespace) -> int:
         print(f"error reading {src}: {exc}", file=sys.stderr)
         return 1
 
-    # ── statistics ───────────────────────────────────────────────────
-    char_count  = len(text)
-    word_count  = len(text.split())
-    line_count  = len(text.splitlines())
-    para_count  = len([p for p in text.split("\n\n") if p.strip()])
-
-    # ── model bookkeeping ────────────────────────────────────────────
     model = AppModel()
     model.load_settings()
     model.set_documents([str(src)])
+    bundle = build_index_bundle([str(src)], model.settings)
 
-    # ── write index stub ─────────────────────────────────────────────
     out_path: pathlib.Path
     if args.out:
         out_path = pathlib.Path(args.out)
     else:
         out_path = src.with_name(src.name + ".axiom-index.json")
 
-    index_payload: dict = {
-        "source":     str(src.resolve()),
-        "characters": char_count,
-        "words":      word_count,
-        "lines":      line_count,
-        "paragraphs": para_count,
-        "snippet":    text[:_SNIPPET_CHARS].replace("\n", " "),
-        "status":     model.get_status_snapshot(),
-        "_note":      (
-            "Index stub — full vector index not yet implemented. "
-            "Replace this file with a real embedding store once the "
-            "LLM backend is wired in."
-        ),
-    }
-
     try:
-        out_path.write_text(json.dumps(index_payload, indent=2), encoding="utf-8")
+        save_index_bundle(bundle, target_path=out_path)
     except OSError as exc:
         print(f"error writing index to {out_path}: {exc}", file=sys.stderr)
         return 1
 
-    # ── stdout report ────────────────────────────────────────────────
+    char_count  = len(text)
+    word_count  = len(text.split())
+    line_count  = len(text.splitlines())
+    para_count  = len([p for p in text.split("\n\n") if p.strip()])
+
     print(f"Indexing : {src}")
     print(f"  Characters : {char_count:>10,}")
     print(f"  Words      : {word_count:>10,}")
     print(f"  Lines      : {line_count:>10,}")
     print(f"  Paragraphs : {para_count:>10,}")
+    print(f"  Chunks     : {len(bundle.chunks):>10,}")
+    print(f"  Index ID   : {bundle.index_id}")
     print(f"Index written → {out_path}")
     return 0
 
 
 def cmd_query(args: argparse.Namespace) -> int:
-    """Search *args.file* for lines relevant to *args.question*.
-
-    Currently performs a plain keyword match.  When a full LLM/embedding
-    stack is available it will be used instead and this note will be removed.
-    """
+    """Query a shared JSON index or build one in memory from the source file."""
     src = pathlib.Path(args.file)
     if not src.exists():
         print(f"error: file not found: {src}", file=sys.stderr)
@@ -141,48 +126,42 @@ def cmd_query(args: argparse.Namespace) -> int:
         print("error: --question must not be empty", file=sys.stderr)
         return 1
 
+    model = AppModel()
+    model.load_settings()
+
     try:
-        text = src.read_text(encoding="utf-8", errors="replace")
+        bundle = load_index_bundle(args.index) if args.index else build_index_bundle([str(src)], model.settings)
     except OSError as exc:
-        print(f"error reading {src}: {exc}", file=sys.stderr)
+        print(f"error reading/building index: {exc}", file=sys.stderr)
         return 1
 
-    keywords = [kw for kw in question.lower().split() if len(kw) > 2]
-    if not keywords:
-        keywords = question.lower().split()  # fallback: use all tokens
+    result = query_index_bundle(bundle, question, model.settings)
 
-    lines = text.splitlines()
-    hits: list[tuple[int, str]] = []
-    for lineno, line in enumerate(lines, start=1):
-        lc = line.lower()
-        if any(kw in lc for kw in keywords):
-            hits.append((lineno, line))
-
-    # ── output ───────────────────────────────────────────────────────
     print()
     print(f"Question : {question}")
     print(f"Source   : {src}")
-    print("Backend  : keyword match (no LLM configured)")
+    print(f"Backend  : shared retrieval ({bundle.index_id})")
     print()
     print(_SEP)
 
-    if hits:
-        shown = hits[:_MAX_QUERY_HITS]
-        for lineno, line in shown:
-            clipped = line.strip()[:_CONTEXT_CHARS]
-            if len(line.strip()) > _CONTEXT_CHARS:
-                clipped += " …"
-            print(f"  [line {lineno:5d}]  {clipped}")
+    if result.sources:
+        for source in result.sources[:_MAX_QUERY_HITS]:
+            snippet = source.snippet.strip()[:_CONTEXT_CHARS]
+            if len(source.snippet.strip()) > _CONTEXT_CHARS:
+                snippet += " …"
+            score = f"{source.score:.3f}" if source.score is not None else "-"
+            print(
+                f"  [{source.sid}] {source.source} "
+                f"(score={score})"
+            )
+            print(f"      {snippet}")
         print(_SEP)
-        total = len(hits)
-        note  = f", showing first {_MAX_QUERY_HITS}" if total > _MAX_QUERY_HITS else ""
-        print(f"  {total} match(es) found{note}.")
+        print(f"  {len(result.sources)} evidence item(s) returned.")
     else:
-        print("  (no keyword matches found)")
+        print("  (no relevant passages found)")
         print(_SEP)
         wrapped = textwrap.fill(
-            "Tip: try broader keywords, or configure an LLM backend for "
-            "semantic search.",
+            "Tip: try broader wording, adjust chunk settings, or build an index first.",
             width=58,
             initial_indent="  ",
             subsequent_indent="  ",
@@ -240,6 +219,12 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
         metavar="TEXT",
         help="Question or keywords to search for.",
+    )
+    p_query.add_argument(
+        "--index",
+        default=None,
+        metavar="PATH",
+        help="Optional path to a previously built JSON index.",
     )
 
     return parser

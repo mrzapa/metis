@@ -19,18 +19,26 @@ via the poll loop in axiom_app.app — never inside the worker thread.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import pathlib
+import uuid
 from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any, Callable
 
+from axiom_app.models.session_types import EvidenceSource
+from axiom_app.services.index_service import (
+    IndexBundle,
+    build_index_bundle,
+    load_index_bundle,
+    query_index_bundle,
+    save_index_bundle,
+)
+from axiom_app.services.session_repository import SessionRepository
 from axiom_app.utils.background import BackgroundRunner, CancelToken
-from axiom_app.utils.document_loader import KREUZBERG_EXTENSIONS, is_kreuzberg_available, load_document
-from axiom_app.utils.embedding_providers import create_embeddings
-from axiom_app.utils.knowledge_graph import build_knowledge_graph, collect_graph_chunk_candidates
+from axiom_app.utils.document_loader import KREUZBERG_EXTENSIONS, is_kreuzberg_available
 from axiom_app.utils.llm_providers import create_llm
-from axiom_app.utils.mock_embeddings import MockEmbeddings
 
 if TYPE_CHECKING:
     from axiom_app.models.app_model import AppModel
@@ -104,15 +112,36 @@ class AppController:
         Public BackgroundRunner; ``app.py`` drives its poll loop.
     """
 
-    def __init__(self, model: AppModel, view: AppView) -> None:
+    def __init__(
+        self,
+        model: AppModel,
+        view: AppView,
+        *,
+        session_repository: SessionRepository | None = None,
+    ) -> None:
         self.model = model
         self.view = view
         self.background_runner = BackgroundRunner()
         self._active_token: CancelToken | None = None
         self._active_future: Future | None = None
         self._log = logging.getLogger(__name__)
-        # Metadata for in-flight RAG queries (set before task dispatch).
-        self._pending_rag_meta: dict[str, Any] = {}
+        self._pending_task_meta: dict[str, Any] = {}
+        db_path = getattr(self.model, "session_db_path", ":memory:")
+        self.session_repository = session_repository or SessionRepository(db_path)
+        self.session_repository.init_db()
+        self.refresh_history_rows(update_detail=False)
+
+    def _safe_view_call(self, method_name: str, *args: Any) -> Any:
+        method = getattr(self.view, method_name, None)
+        if callable(method):
+            return method(*args)
+        return None
+
+    def _selected_history_session_id(self) -> str:
+        getter = getattr(self.view, "get_selected_history_session_id", None)
+        if callable(getter):
+            return str(getter() or "")
+        return ""
 
     # ------------------------------------------------------------------
     # Event wiring
@@ -132,12 +161,37 @@ class AppController:
         self.view.switch_view("settings")
         self.view.btn_save_settings.configure(command=self.on_save_settings)
 
+        # History view — build before wiring its actions.
+        self.view.switch_view("history")
+        for attr, callback in (
+            ("btn_history_new_chat", self.on_new_chat),
+            ("btn_history_open", self.on_open_session),
+            ("btn_history_delete", self.on_delete_session),
+            ("btn_history_export", self.on_export_session),
+            ("btn_history_refresh", self.refresh_history_rows),
+        ):
+            widget = getattr(self.view, attr, None)
+            if widget is not None:
+                widget.configure(command=callback)
+        bind_history_search = getattr(self.view, "bind_history_search", None)
+        if callable(bind_history_search):
+            bind_history_search(self.on_history_search_changed)
+        bind_history_selection = getattr(self.view, "bind_history_selection", None)
+        if callable(bind_history_selection):
+            bind_history_selection(self.on_history_selection_changed)
+        history_tree = getattr(self.view, "_history_tree", None)
+        if history_tree is not None:
+            history_tree.bind("<Double-1>", lambda _e: self.on_open_session())
+
         self.view.switch_view("chat")
 
         # Chat view widgets
         self.view.btn_send.configure(command=self._on_send_clicked)
         self.view.btn_cancel_rag.configure(command=self.on_cancel_job)
         self.view.set_mode_state_callback(self._on_mode_state_changed)
+        btn_new_chat = getattr(self.view, "btn_new_chat", None)
+        if btn_new_chat is not None:
+            btn_new_chat.configure(command=self.on_new_chat)
 
         # Ctrl+Enter / Return in the multi-line Text input submits
         self.view.prompt_entry.bind("<Return>",
@@ -146,6 +200,7 @@ class AppController:
         # Pass loaded settings to the view for display in the Settings tab.
         # Called last so the settings tab is already built and widgets update immediately.
         self.view.populate_settings(self.model.settings)
+        self.refresh_history_rows(update_detail=False)
 
     def _on_mode_state_changed(self, mode_state: dict[str, str]) -> None:
         """Keep runtime canonical chat mode state in the model settings."""
@@ -176,7 +231,7 @@ class AppController:
         """Signal the active background task to stop (cooperative)."""
         if self._active_token is not None:
             self._active_token.cancel()
-        self.view.set_status("Cancelling…")
+        self._safe_view_call("set_status", "Cancelling…")
 
     def shutdown(self) -> None:
         """Tear down the thread pool."""
@@ -196,7 +251,8 @@ class AppController:
         if self._active_future is not None and self._active_future.done():
             self._active_future = None
             self._active_token = None
-            self.view.reset_progress()
+            self._pending_task_meta = {}
+            self._safe_view_call("reset_progress")
             # Re-enable Build Index and disable Cancel once any task finishes.
             try:
                 self.view.btn_build_index.configure(state="normal")
@@ -208,14 +264,14 @@ class AppController:
         mtype = msg.get("type")
 
         if mtype == "status":
-            self.view.set_status(msg.get("text", ""))
-            self.view.append_log(f"[status] {msg.get('text', '')}")
+            self._safe_view_call("set_status", msg.get("text", ""))
+            self._safe_view_call("append_log", f"[status] {msg.get('text', '')}")
 
         elif mtype == "progress":
             current = int(msg.get("current", 0))
             total = msg.get("total")
             total = int(total) if total is not None else None
-            self.view.set_progress(current, total)
+            self._safe_view_call("set_progress", current, total)
 
         elif mtype == "error":
             text = msg.get("text", "unknown error")
@@ -223,79 +279,97 @@ class AppController:
             self._log.error("Task error [%s]: %s", msg.get("task_name", "?"), text)
             if tb:
                 self._log.debug("Traceback:\n%s", tb.rstrip())
-            self.view.set_status(f"Error: {text}")
-            self.view.append_log(f"[error] {text}")
+            self._safe_view_call("set_status", f"Error: {text}")
+            self._safe_view_call("append_log", f"[error] {text}")
             if tb:
-                self.view.append_log(tb)
+                self._safe_view_call("append_log", tb)
 
         elif mtype == "done":
             task   = msg.get("task_name", "")
             result = msg.get("result")
             self._log.info("Task complete: %s", task or "(unnamed)")
 
-            if task == _TASK_BUILD_INDEX and isinstance(result, dict):
-                # Commit worker result to the model on the main thread.
-                self.model.chunks     = result["chunks"]
-                self.model.embeddings = result["embeddings"]
-                self.model.knowledge_graph = result.get("knowledge_graph")
-                self.model.entity_to_chunks = result.get("entity_to_chunks", {})
-                n = len(result["chunks"])
-                self.model.index_state = {
-                    "built":       True,
-                    "doc_count":   len(self.model.documents),
-                    "chunk_count": n,
-                }
-                info = f"Index ready — {n} chunk(s) from {len(self.model.documents)} file(s)."
-                self.view.set_index_info(info)
-                self.view.set_status(info)
-                self.view.append_log(f"[done]  {info}")
+            if task == _TASK_BUILD_INDEX and isinstance(result, IndexBundle):
+                self._apply_index_bundle(result)
+                info = (
+                    f"Index ready — {len(result.chunks)} chunk(s) "
+                    f"from {len(result.documents)} file(s)."
+                )
+                self._safe_view_call("set_index_info", info)
+                self._safe_view_call("set_status", info)
+                self._safe_view_call("append_log", f"[done]  {info}")
 
             elif task == _TASK_RAG_QUERY and isinstance(result, dict):
                 response = result.get("response", "")
                 prompt   = result.get("prompt", "")
-                meta     = getattr(self, "_pending_rag_meta", {})
-                provider = str(self.model.settings.get("llm_provider", "mock") or "mock")
+                meta     = dict(getattr(self, "_pending_task_meta", {}))
+                provider = str(meta.get("provider", self.model.settings.get("llm_provider", "mock")) or "mock")
                 selected_mode = meta.get("selected_mode", "Q&A")
                 n_chunks = meta.get("n_chunks", 0)
                 top_score = meta.get("top_score", 0.0)
+                sources = [
+                    item if isinstance(item, EvidenceSource) else EvidenceSource.from_dict(item)
+                    for item in (meta.get("sources") or [])
+                ]
+                run_id = str(meta.get("run_id") or "")
 
                 header = (
                     f"Axiom [{provider}, rag, mode={selected_mode}, "
                     f"{n_chunks} chunk(s)]:\n\n"
                 )
-                self.view.append_chat(header + response + "\n\n")
+                self._safe_view_call("append_chat", header + response + "\n\n")
                 self.model.chat_history.append({"role": "user", "content": prompt})
                 self.model.chat_history.append({"role": "assistant", "content": response})
+                self.model.last_sources = sources
+                self._safe_view_call("render_evidence_sources", sources)
+                self._persist_run(
+                    prompt=prompt,
+                    response=response,
+                    run_id=run_id,
+                    sources=sources,
+                )
                 self._log.info("RAG query answered — top score=%.3f", top_score)
-                self.view.set_status("Done.")
+                self._safe_view_call("set_status", "Done.")
 
             elif task == _TASK_DIRECT_QUERY and isinstance(result, dict):
                 response = result.get("response", "")
                 prompt   = result.get("prompt", "")
-                provider = str(self.model.settings.get("llm_provider", "mock") or "mock")
+                meta = dict(getattr(self, "_pending_task_meta", {}))
+                provider = str(meta.get("provider", self.model.settings.get("llm_provider", "mock")) or "mock")
+                run_id = str(meta.get("run_id") or "")
 
                 if result.get("error"):
-                    self.view.append_log(f"[direct] error: {result['error']}")
+                    self._safe_view_call("append_log", f"[direct] error: {result['error']}")
                 else:
-                    self.view.append_log(
+                    self._safe_view_call(
+                        "append_log",
                         f"[direct] generation_completed provider={provider}"
                     )
 
-                self.view.append_chat(
+                self._safe_view_call(
+                    "append_chat",
                     f"Axiom [{provider}, direct]:\n\n{response}\n\n"
                 )
                 self.model.chat_history.append({"role": "user", "content": prompt})
                 self.model.chat_history.append({"role": "assistant", "content": response})
+                self.model.last_sources = []
+                self._safe_view_call("render_evidence_sources", [])
+                self._persist_run(
+                    prompt=prompt,
+                    response=response,
+                    run_id=run_id,
+                    sources=[],
+                )
                 self._log.info("Direct query answered — provider=%s", provider)
-                self.view.set_status("Done.")
+                self._safe_view_call("set_status", "Done.")
 
             else:
                 label = f"{task} complete." if task else "Done."
-                self.view.set_status(label)
-                self.view.append_log(f"[done]  {label}")
+                self._safe_view_call("set_status", label)
+                self._safe_view_call("append_log", f"[done]  {label}")
 
         elif mtype == "log":
-            self.view.append_log(msg.get("text", ""))
+            self._safe_view_call("append_log", msg.get("text", ""))
 
     # ------------------------------------------------------------------
     # Window close
@@ -341,12 +415,14 @@ class AppController:
 
         self.model.set_documents(list(paths))
         # Show basenames in the listbox; full paths stay in the model.
-        self.view.set_file_list([pathlib.Path(p).name for p in paths])
-        self.view.set_index_info("Files loaded — click 'Build Index' to index.")
-        self.view.set_status(
+        self._safe_view_call("set_file_list", [pathlib.Path(p).name for p in paths])
+        self._safe_view_call("set_index_info", "Files loaded — click 'Build Index' to index.")
+        self._safe_view_call(
+            "set_status",
             f"{len(paths)} file(s) loaded. Click 'Build Index' to index."
         )
-        self.view.append_log(
+        self._safe_view_call(
+            "append_log",
             f"[open]  {len(paths)} file(s): "
             + ", ".join(pathlib.Path(p).name for p in paths)
         )
@@ -355,79 +431,35 @@ class AppController:
     def on_build_index(self) -> None:
         """Chunk and embed all loaded documents in a background thread."""
         if not self.model.documents:
-            self.view.set_status("No files loaded — use 'Open Text File…' first.")
+            self._safe_view_call("set_status", "No files loaded — use 'Open Files…' first.")
             return
 
-        chunk_size = int(self.model.settings.get("chunk_size",   800))
-        overlap    = int(self.model.settings.get("chunk_overlap", 100))
-        docs       = list(self.model.documents)  # snapshot; safe to read in worker
-
-        loader_setting = self.model.settings.get("document_loader", "auto")
-        use_kreuzberg  = loader_setting != "plain"
-
-        # Snapshot settings so the worker thread sees a frozen copy.
         settings_snapshot = dict(self.model.settings)
-
-        def _worker(post_msg: Any, cancel: CancelToken) -> dict[str, Any]:
-            try:
-                emb = create_embeddings(settings_snapshot)
-            except (ValueError, ImportError) as exc:
-                post_msg({"type": "log",
-                          "text": f"[warn]  Embedding provider failed: {exc}; falling back to mock"})
-                emb = MockEmbeddings(dimensions=_EMB_DIM)
-
-            all_chunks:  list[dict[str, Any]] = []
-            all_vectors: list[list[float]]    = []
-
-            for doc_idx, path in enumerate(docs):
-                if cancel.cancelled:
-                    break
-
-                source = pathlib.Path(path).name
-                post_msg({"type": "status", "text": f"Reading {source}…"})
-
+        docs = list(self.model.documents)
+        build_settings_getter = getattr(self.view, "get_library_build_settings", None)
+        if callable(build_settings_getter):
+            for key, value in dict(build_settings_getter() or {}).items():
                 try:
-                    text = load_document(path, use_kreuzberg=use_kreuzberg)
-                except OSError as exc:
-                    post_msg({"type": "log",
-                              "text": f"[warn]  Could not read {path}: {exc}"})
+                    settings_snapshot[key] = int(str(value).strip())
+                    self.model.settings[key] = settings_snapshot[key]
+                except (TypeError, ValueError):
                     continue
 
-                raw = _chunk_text(text, chunk_size, overlap)
-                n   = len(raw)
+        index_dir = getattr(self.model, "index_storage_dir", None)
 
-                for i, chunk_text_str in enumerate(raw):
-                    if cancel.cancelled:
-                        break
-                    all_chunks.append({
-                        "id":        f"{source}::chunk{i}",
-                        "text":      chunk_text_str,
-                        "source":    source,
-                        "chunk_idx": i,
-                    })
-                    all_vectors.append(emb.embed_query(chunk_text_str))
-
-                    # Report progress as a fraction across all documents.
-                    post_msg({
-                        "type":    "progress",
-                        "current": doc_idx * 1000 + i + 1,
-                        "total":   len(docs) * 1000,
-                    })
-                    # Periodic log line (every 10 chunks + last)
-                    if (i + 1) % 10 == 0 or i == n - 1:
-                        post_msg({"type": "log",
-                                  "text": f"  {source}: chunk {i+1}/{n} embedded"})
-
-            graph, entity_to_chunks = build_knowledge_graph([c["text"] for c in all_chunks])
-            return {
-                "chunks": all_chunks,
-                "embeddings": all_vectors,
-                "knowledge_graph": graph,
-                "entity_to_chunks": entity_to_chunks,
-            }
+        def _worker(post_msg: Any, cancel: CancelToken) -> IndexBundle:
+            bundle = build_index_bundle(
+                docs,
+                settings_snapshot,
+                post_message=post_msg,
+                cancel_token=cancel,
+            )
+            out_path = save_index_bundle(bundle, index_dir=index_dir)
+            post_msg({"type": "log", "text": f"[index] Saved persisted index to {out_path}"})
+            return bundle
 
         self.view.btn_build_index.configure(state="disabled")
-        self.view.set_index_info("Indexing…")
+        self._safe_view_call("set_index_info", "Indexing…")
         self.start_task(_TASK_BUILD_INDEX, _worker)
 
     def _on_send_clicked(self) -> None:
@@ -455,70 +487,30 @@ class AppController:
             self._handle_direct_prompt(prompt)
             return
 
-        if not self.model.index_state.get("built"):
-            self.view.append_chat(
+        bundle = self._current_index_bundle()
+        if bundle is None or not self.model.index_state.get("built"):
+            self._safe_view_call(
+                "append_chat",
                 "⚠  No index built yet.\n"
                 "   Open a text file and click 'Build Index' first, or switch to Direct mode.\n\n"
             )
-            self.view.switch_view("chat")
+            self._safe_view_call("switch_view", "chat")
             return
 
-        # ── Retrieval (synchronous) ──────────────────────────────────────
-        top_k = int(self.model.settings.get("top_k", 3))
-
-        try:
-            emb = create_embeddings(dict(self.model.settings))
-        except (ValueError, ImportError):
-            emb = MockEmbeddings(dimensions=_EMB_DIM)
-
-        q_vec = emb.embed_query(prompt)
-        scores = [_cosine(q_vec, cv) for cv in self.model.embeddings]
-
-        ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
-
-        kg_mode = str(self.model.settings.get("kg_query_mode", "hybrid") or "hybrid")
-        graph = getattr(self.model, "knowledge_graph", None)
-        graph_hits: list[int] = []
-        entity_to_chunks = getattr(self.model, "entity_to_chunks", {})
-        if graph is not None and entity_to_chunks:
-            graph_hits = collect_graph_chunk_candidates(
-                graph=graph,
-                entity_to_chunks=entity_to_chunks,
-                question=prompt,
-                mode=kg_mode,
-                limit=max(top_k * 3, top_k),
-            )
-
-        if kg_mode in {"naive", "bypass"} or not graph_hits:
-            hits = ranked[:top_k]
-        else:
-            graph_hit_set = set(graph_hits)
-            ordered = graph_hits + [i for i in ranked if i not in graph_hit_set]
-            hits = ordered[:top_k]
-
-        # ── Build context string ─────────────────────────────────────────
-        context_parts: list[str] = []
-        for rank, idx in enumerate(hits, 1):
-            chunk = self.model.chunks[idx]
-            snippet = chunk["text"].strip()
-            context_parts.append(
-                f"[{rank}] {chunk['source']} > chunk {chunk['chunk_idx']} "
-                f"(score={scores[idx]:.3f}):\n{snippet}"
-            )
-        context_block = "\n\n".join(context_parts) if context_parts else "(no relevant passages found)"
+        query_result = query_index_bundle(bundle, prompt, dict(self.model.settings))
+        self.model.last_sources = list(query_result.sources)
+        self._safe_view_call("render_evidence_sources", list(query_result.sources))
 
         # Show the user's prompt immediately.
         sep = "─" * 52
-        self.view.append_chat(f"You: {prompt}\n{sep}\n")
-        self.view.switch_view("chat")
+        self._safe_view_call("append_chat", f"You: {prompt}\n{sep}\n", "user")
+        self._safe_view_call("switch_view", "chat")
 
         # ── LLM synthesis (background thread) ────────────────────────────
         settings_snap = dict(self.model.settings)
         selected_mode = settings_snap.get("selected_mode", "Q&A")
-
-        # Snapshot model-level data the worker will need.
-        n_chunks = len(self.model.embeddings)
-        top_score = scores[hits[0]] if hits else 0.0
+        provider = str(settings_snap.get("llm_provider", "mock") or "mock")
+        run_id = str(uuid.uuid4())
 
         def _rag_worker(post_msg: Any, cancel: CancelToken) -> dict[str, str]:
             post_msg({"type": "status", "text": "Generating answer…"})
@@ -529,7 +521,7 @@ class AppController:
                     "response": (
                         f"Axiom [rag, mode={selected_mode}]: "
                         f"LLM unavailable ({exc}). Showing raw retrieval.\n\n"
-                        f"CONTEXT:\n{context_block}\n"
+                        f"CONTEXT:\n{query_result.context_block}\n"
                     ),
                     "prompt": prompt,
                 }
@@ -537,8 +529,8 @@ class AppController:
             system_prompt = (
                 f"You are Axiom, an AI assistant. Mode: {selected_mode}.\n"
                 "Answer the user's question using ONLY the CONTEXT below. "
-                "Cite passages as [1], [2], etc. If the context is insufficient, say so.\n\n"
-                f"CONTEXT:\n{context_block}"
+                "Cite passages as [S1], [S2], etc. If the context is insufficient, say so.\n\n"
+                f"CONTEXT:\n{query_result.context_block}"
             )
             messages = [
                 {"type": "system", "content": system_prompt},
@@ -549,12 +541,14 @@ class AppController:
             return {"response": answer, "prompt": prompt}
 
         # Store retrieval metadata for _handle_message to use.
-        self._pending_rag_meta = {
-            "kg_mode": kg_mode,
+        self._pending_task_meta = {
             "selected_mode": selected_mode,
-            "n_chunks": n_chunks,
-            "top_score": top_score,
+            "n_chunks": len(bundle.embeddings),
+            "top_score": query_result.top_score,
             "prompt": prompt,
+            "provider": provider,
+            "run_id": run_id,
+            "sources": list(query_result.sources),
         }
         self.start_task(_TASK_RAG_QUERY, _rag_worker)
 
@@ -566,13 +560,15 @@ class AppController:
         runs in a background thread so the UI stays responsive.
         """
         provider_name = str(self.model.settings.get("llm_provider", "mock") or "mock").strip() or "mock"
-        self.view.append_log(f"[direct] provider_selected provider={provider_name}")
+        self._safe_view_call("append_log", f"[direct] provider_selected provider={provider_name}")
 
         sep = "─" * 52
-        self.view.append_chat(f"You: {prompt}\n{sep}\n")
-        self.view.switch_view("chat")
+        self._safe_view_call("append_chat", f"You: {prompt}\n{sep}\n", "user")
+        self._safe_view_call("switch_view", "chat")
+        self._safe_view_call("render_evidence_sources", [])
 
         settings_snap = dict(self.model.settings)
+        run_id = str(uuid.uuid4())
 
         def _direct_worker(post_msg: Any, cancel: CancelToken) -> dict[str, str]:
             post_msg({"type": "status", "text": f"Generating ({provider_name})…"})
@@ -601,11 +597,342 @@ class AppController:
 
             return {"response": answer, "prompt": prompt}
 
+        self._pending_task_meta = {
+            "prompt": prompt,
+            "provider": provider_name,
+            "run_id": run_id,
+            "sources": [],
+        }
         self.start_task(_TASK_DIRECT_QUERY, _direct_worker)
 
     def on_cancel_job(self) -> None:
         """Cancel any running background job."""
         self.cancel_current_task()
+
+    def on_new_chat(self) -> None:
+        """Start a persisted chat session and clear transient UI state."""
+        session = self.session_repository.create_session(
+            title="New Chat",
+            mode=str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
+            index_id=str(getattr(self.model, "active_index_id", "") or ""),
+            vector_backend="json",
+            llm_provider=str(self.model.settings.get("llm_provider", "") or ""),
+            llm_model=self._effective_llm_model(),
+            embed_model=self._effective_embedding_model(),
+            retrieve_k=int(self.model.settings.get("retrieval_k", 0) or 0),
+            final_k=int(self.model.settings.get("top_k", 0) or 0),
+            mmr_lambda=float(self.model.settings.get("mmr_lambda", 0.0) or 0.0),
+            agentic_iterations=int(self.model.settings.get("agentic_max_iterations", 0) or 0),
+            extra_json=self._session_extra_json(),
+        )
+        self.model.current_session_id = session.session_id
+        self.model.loaded_session = None
+        self.model.chat_history = []
+        self.model.last_sources = []
+        self._safe_view_call("set_chat_transcript", [])
+        self._safe_view_call("render_evidence_sources", [])
+        self._safe_view_call("set_status", "New chat started.")
+        self._safe_view_call("switch_view", "chat")
+        self.refresh_history_rows(select_session_id=session.session_id, update_detail=True)
+
+    def refresh_history_rows(
+        self,
+        select_session_id: str | None = None,
+        update_detail: bool = True,
+    ) -> None:
+        getter = getattr(self.view, "get_history_search_query", None)
+        search = getter() if callable(getter) else ""
+        rows = self.session_repository.list_sessions(search=search)
+        self.model.session_list = rows
+        self._safe_view_call("set_history_rows", rows)
+        if select_session_id:
+            self._safe_view_call("select_history_session", select_session_id)
+        if update_detail:
+            self.on_history_selection_changed()
+
+    def on_history_search_changed(self, _event: Any | None = None) -> None:
+        self.refresh_history_rows(update_detail=True)
+
+    def on_history_selection_changed(self, _event: Any | None = None) -> None:
+        session_id = self._selected_history_session_id()
+        if not session_id:
+            return
+        detail = self.session_repository.get_session(session_id)
+        if detail is None:
+            return
+        self.model.loaded_session = detail
+        self._safe_view_call("set_history_detail", detail)
+
+    def on_open_session(self) -> None:
+        session_id = self._selected_history_session_id()
+        if not session_id:
+            return
+        detail = self.session_repository.get_session(session_id)
+        if detail is None:
+            return
+
+        self.model.current_session_id = session_id
+        self.model.loaded_session = detail
+        self.model.chat_history = [
+            {"role": msg.role, "content": msg.content}
+            for msg in detail.messages
+        ]
+        self._restore_session_settings(detail)
+        self._restore_index_from_session(detail)
+        self._safe_view_call("set_chat_transcript", detail.messages)
+
+        last_sources: list[EvidenceSource] = []
+        for message in reversed(detail.messages):
+            if message.sources:
+                last_sources = list(message.sources)
+                break
+        self.model.last_sources = last_sources
+        self._safe_view_call("render_evidence_sources", last_sources)
+        self._safe_view_call("set_history_detail", detail)
+        self._safe_view_call("set_status", f"Loaded session: {detail.summary.title}")
+        self._safe_view_call("switch_view", "chat")
+        self.refresh_history_rows(select_session_id=session_id, update_detail=False)
+
+    def on_delete_session(self) -> None:
+        session_id = self._selected_history_session_id()
+        if not session_id:
+            return
+        self.session_repository.delete_session(session_id)
+        if getattr(self.model, "current_session_id", "") == session_id:
+            self.model.current_session_id = ""
+            self.model.loaded_session = None
+            self.model.chat_history = []
+            self.model.last_sources = []
+            self._safe_view_call("set_chat_transcript", [])
+            self._safe_view_call("render_evidence_sources", [])
+        self.refresh_history_rows(update_detail=False)
+        self._safe_view_call("set_status", "Session deleted.")
+
+    def on_export_session(self) -> None:
+        session_id = self._selected_history_session_id()
+        if not session_id:
+            return
+
+        from tkinter import filedialog, messagebox
+
+        save_dir = filedialog.askdirectory(title="Select export directory")
+        if not save_dir:
+            return
+        try:
+            md_path, json_path = self.session_repository.export_session(session_id, save_dir)
+        except OSError as exc:
+            messagebox.showerror("Export Failed", f"Could not export session: {exc}")
+            return
+
+        self._safe_view_call(
+            "append_log",
+            f"[history] Exported session to {md_path} and {json_path}",
+        )
+        self._safe_view_call(
+            "set_status",
+            f"Exported session: {pathlib.Path(md_path).name}",
+        )
+        messagebox.showinfo("Session Export", f"Exported:\n{md_path}\n{json_path}")
+
+    def _ensure_session(self, prompt: str = "") -> str:
+        current = str(getattr(self.model, "current_session_id", "") or "")
+        if current and self.session_repository.get_session(current) is not None:
+            return current
+
+        title = self._title_from_prompt(prompt) if prompt else "New Chat"
+        session = self.session_repository.create_session(
+            title=title,
+            mode=str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
+            index_id=str(getattr(self.model, "active_index_id", "") or ""),
+            vector_backend="json",
+            llm_provider=str(self.model.settings.get("llm_provider", "") or ""),
+            llm_model=self._effective_llm_model(),
+            embed_model=self._effective_embedding_model(),
+            retrieve_k=int(self.model.settings.get("retrieval_k", 0) or 0),
+            final_k=int(self.model.settings.get("top_k", 0) or 0),
+            mmr_lambda=float(self.model.settings.get("mmr_lambda", 0.0) or 0.0),
+            agentic_iterations=int(self.model.settings.get("agentic_max_iterations", 0) or 0),
+            extra_json=self._session_extra_json(),
+        )
+        self.model.current_session_id = session.session_id
+        self.refresh_history_rows(select_session_id=session.session_id, update_detail=False)
+        return session.session_id
+
+    def _persist_run(
+        self,
+        *,
+        prompt: str,
+        response: str,
+        run_id: str,
+        sources: list[EvidenceSource],
+    ) -> None:
+        session_id = self._ensure_session(prompt)
+        self.session_repository.upsert_session(
+            session_id,
+            title=self._title_from_prompt(prompt),
+            summary=self._summary_from_response(response),
+            mode=str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
+            index_id=str(getattr(self.model, "active_index_id", "") or ""),
+            vector_backend="json",
+            llm_provider=str(self.model.settings.get("llm_provider", "") or ""),
+            llm_model=self._effective_llm_model(),
+            embed_model=self._effective_embedding_model(),
+            retrieve_k=int(self.model.settings.get("retrieval_k", 0) or 0),
+            final_k=int(self.model.settings.get("top_k", 0) or 0),
+            mmr_lambda=float(self.model.settings.get("mmr_lambda", 0.0) or 0.0),
+            agentic_iterations=int(self.model.settings.get("agentic_max_iterations", 0) or 0),
+            extra_json=self._session_extra_json(),
+        )
+        self.session_repository.append_message(
+            session_id,
+            role="user",
+            content=prompt,
+            run_id=run_id,
+        )
+        self.session_repository.append_message(
+            session_id,
+            role="assistant",
+            content=response,
+            run_id=run_id,
+            sources=sources,
+        )
+        self.refresh_history_rows(select_session_id=session_id, update_detail=False)
+
+    def _restore_session_settings(self, detail: Any) -> None:
+        summary = detail.summary if hasattr(detail, "summary") else detail
+        extra = getattr(summary, "extra", {})
+        if isinstance(extra, dict):
+            self.model.settings.update(extra)
+        if getattr(summary, "mode", ""):
+            self.model.settings["selected_mode"] = summary.mode
+        if getattr(summary, "llm_provider", ""):
+            self.model.settings["llm_provider"] = summary.llm_provider
+        if getattr(summary, "llm_model", ""):
+            self.model.settings["llm_model"] = summary.llm_model
+        if getattr(summary, "embed_model", ""):
+            self.model.settings["embedding_model"] = summary.embed_model
+        self.model.settings["retrieval_k"] = getattr(summary, "retrieve_k", self.model.settings.get("retrieval_k", 3))
+        self.model.settings["top_k"] = getattr(summary, "final_k", self.model.settings.get("top_k", 3))
+        self.model.settings["mmr_lambda"] = getattr(summary, "mmr_lambda", self.model.settings.get("mmr_lambda", 0.5))
+        self.model.settings["agentic_max_iterations"] = getattr(
+            summary,
+            "agentic_iterations",
+            self.model.settings.get("agentic_max_iterations", 2),
+        )
+        self._safe_view_call("populate_settings", self.model.settings)
+
+    def _restore_index_from_session(self, detail: Any) -> None:
+        summary = detail.summary if hasattr(detail, "summary") else detail
+        extra = getattr(summary, "extra", {})
+        candidate = str(extra.get("selected_index_path") or "").strip() if isinstance(extra, dict) else ""
+        if not candidate and getattr(summary, "index_id", ""):
+            root = pathlib.Path(getattr(self.model, "index_storage_dir", pathlib.Path(".")))
+            guessed = root / f"{summary.index_id}.json"
+            if guessed.exists():
+                candidate = str(guessed)
+        if not candidate:
+            return
+        index_path = pathlib.Path(candidate)
+        if not index_path.exists():
+            return
+        try:
+            bundle = load_index_bundle(index_path)
+        except Exception as exc:
+            self._log.warning("Could not restore index '%s': %s", index_path, exc)
+            return
+        self._apply_index_bundle(bundle)
+
+    def _apply_index_bundle(self, bundle: IndexBundle) -> None:
+        self.model.index_bundle = bundle
+        self.model.documents = list(bundle.documents)
+        self.model.chunks = list(bundle.chunks)
+        self.model.embeddings = list(bundle.embeddings)
+        self.model.knowledge_graph = bundle.knowledge_graph
+        self.model.entity_to_chunks = dict(bundle.entity_to_chunks)
+        self.model.active_index_id = bundle.index_id
+        self.model.active_index_path = bundle.index_path
+        self.model.index_state = {
+            "built": True,
+            "doc_count": len(bundle.documents),
+            "chunk_count": len(bundle.chunks),
+        }
+        self._safe_view_call(
+            "set_active_index_summary",
+            f"Active index: {bundle.index_id}  |  {len(bundle.documents)} file(s)  |  {len(bundle.chunks)} chunk(s)",
+            bundle.index_path,
+        )
+        self._safe_view_call(
+            "set_file_list",
+            [pathlib.Path(p).name for p in bundle.documents],
+        )
+
+    def _current_index_bundle(self) -> IndexBundle | None:
+        bundle = getattr(self.model, "index_bundle", None)
+        if isinstance(bundle, IndexBundle):
+            return bundle
+        if not getattr(self.model, "chunks", None) or not getattr(self.model, "embeddings", None):
+            return None
+        return IndexBundle(
+            index_id=str(getattr(self.model, "active_index_id", "") or "in-memory"),
+            created_at="",
+            documents=list(getattr(self.model, "documents", []) or []),
+            chunks=list(self.model.chunks),
+            embeddings=list(self.model.embeddings),
+            knowledge_graph=getattr(self.model, "knowledge_graph", None),
+            entity_to_chunks=dict(getattr(self.model, "entity_to_chunks", {}) or {}),
+            index_path=str(getattr(self.model, "active_index_path", "") or ""),
+        )
+
+    def _effective_llm_model(self) -> str:
+        return (
+            str(self.model.settings.get("llm_model", "") or "").strip()
+            or str(self.model.settings.get("llm_model_custom", "") or "").strip()
+        )
+
+    def _effective_embedding_model(self) -> str:
+        return (
+            str(self.model.settings.get("embedding_model", "") or "").strip()
+            or str(self.model.settings.get("embedding_model_custom", "") or "").strip()
+            or str(self.model.settings.get("sentence_transformers_model", "") or "").strip()
+        )
+
+    def _session_extra_json(self) -> str:
+        payload = {
+            "selected_index_path": str(getattr(self.model, "active_index_path", "") or ""),
+            "selected_collection_name": str(getattr(self.model, "active_index_id", "") or ""),
+            "output_style": self.model.settings.get("output_style", ""),
+            "llm_temperature": self.model.settings.get("llm_temperature", 0.0),
+            "llm_max_tokens": self.model.settings.get("llm_max_tokens", 0),
+            "embedding_provider": self.model.settings.get("embedding_provider", ""),
+            "llm_model_custom": self.model.settings.get("llm_model_custom", ""),
+            "embedding_model_custom": self.model.settings.get("embedding_model_custom", ""),
+            "local_gguf_model_path": self.model.settings.get("local_gguf_model_path", ""),
+            "local_gguf_context_length": self.model.settings.get("local_gguf_context_length", 0),
+            "local_gguf_gpu_layers": self.model.settings.get("local_gguf_gpu_layers", 0),
+            "local_gguf_threads": self.model.settings.get("local_gguf_threads", 0),
+            "search_type": self.model.settings.get("search_type", ""),
+            "retrieval_mode": self.model.settings.get("retrieval_mode", ""),
+            "agentic_mode": self.model.settings.get("agentic_mode", False),
+            "use_reranker": self.model.settings.get("use_reranker", False),
+            "use_sub_queries": self.model.settings.get("use_sub_queries", False),
+            "subquery_max_docs": self.model.settings.get("subquery_max_docs", 0),
+            "chat_path": self.model.settings.get("chat_path", "RAG"),
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
+    @staticmethod
+    def _title_from_prompt(prompt: str) -> str:
+        text = " ".join(str(prompt or "").split()).strip()
+        if not text:
+            return "New Chat"
+        return text[:72] + ("…" if len(text) > 72 else "")
+
+    @staticmethod
+    def _summary_from_response(response: str) -> str:
+        text = " ".join(str(response or "").split()).strip()
+        if not text:
+            return ""
+        return text[:180] + ("…" if len(text) > 180 else "")
 
     def on_save_settings(self) -> None:
         """Collect settings from the view, coerce types, and persist via the model.
@@ -738,11 +1065,27 @@ class AppController:
             self._log.error("save_settings failed: %s", exc)
             return
 
-        self.view.set_status("Settings saved to settings.json.")
-        self.view.populate_settings(coerced)
-        self.view.refresh_llm_status_badge()
+        self._safe_view_call("set_status", "Settings saved to settings.json.")
+        self._safe_view_call("populate_settings", coerced)
+        self._safe_view_call("refresh_llm_status_badge")
         self._log.info("Settings saved successfully (%d keys).", len(coerced))
 
         new_theme = coerced.get("theme", self.view._theme_name)
         if new_theme != self.view._theme_name:
             self.view.apply_theme(new_theme)
+
+        if getattr(self.model, "current_session_id", ""):
+            self.session_repository.upsert_session(
+                self.model.current_session_id,
+                mode=str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
+                index_id=str(getattr(self.model, "active_index_id", "") or ""),
+                vector_backend="json",
+                llm_provider=str(self.model.settings.get("llm_provider", "") or ""),
+                llm_model=self._effective_llm_model(),
+                embed_model=self._effective_embedding_model(),
+                retrieve_k=int(self.model.settings.get("retrieval_k", 0) or 0),
+                final_k=int(self.model.settings.get("top_k", 0) or 0),
+                mmr_lambda=float(self.model.settings.get("mmr_lambda", 0.0) or 0.0),
+                agentic_iterations=int(self.model.settings.get("agentic_max_iterations", 0) or 0),
+                extra_json=self._session_extra_json(),
+            )

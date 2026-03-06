@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import tkinter as tk
 from tkinter import ttk
 
@@ -240,6 +241,10 @@ class AppView:
         self._sidebar_nav_buttons: dict[str, ttk.Button] = {}
         self._sidebar_accents: dict[str, tk.Frame] = {}
         self._sidebar_logo_photo = None
+        self._history_rows: list = []
+        self._history_session_by_id: dict[str, object] = {}
+        self._evidence_source_by_sid: dict[str, dict] = {}
+        self._evidence_source_by_iid: dict[str, str] = {}
 
         # Settings display data — populated by controller via populate_settings().
         self._settings_data: dict = {}
@@ -257,6 +262,12 @@ class AppView:
         self.btn_build_index: ttk.Button
         self.btn_cancel_rag: ttk.Button
         self.btn_save_settings: ttk.Button
+        self.btn_new_chat: ttk.Button
+        self.btn_history_new_chat: ttk.Button
+        self.btn_history_open: ttk.Button
+        self.btn_history_delete: ttk.Button
+        self.btn_history_export: ttk.Button
+        self.btn_history_refresh: ttk.Button
         self.prompt_entry: tk.Text   # aliased from txt_input
 
         apply_ttk_theme(root, self._palette, self._fonts)
@@ -450,10 +461,11 @@ class AppView:
         ttk.Label(toolbar, textvariable=self._llm_badge_var,
                   style="Badge.TLabel").pack(side="right", padx=(UI_SPACING["s"], 0))
 
-        ttk.Button(
+        self.btn_new_chat = ttk.Button(
             toolbar, text="＋ New Chat", style="Secondary.TButton",
             command=self._on_new_chat,
-        ).pack(side="right", padx=(UI_SPACING["xs"], 0))
+        )
+        self.btn_new_chat.pack(side="right", padx=(UI_SPACING["xs"], 0))
 
         self._evidence_toggle_btn = ttk.Button(
             toolbar, text="⊞ Evidence", style="Secondary.TButton",
@@ -475,6 +487,7 @@ class AppView:
                                          padding=UI_SPACING["m"])
         self._evidence_pane.pack_propagate(False)
         self._evidence_visible = False
+        self._build_evidence_panel()
 
         # ── Input bar (pack FIRST so it stays at the bottom) ──────────
         input_bar = ttk.Frame(chat_pane, style="Card.Flat.TFrame",
@@ -539,6 +552,7 @@ class AppView:
             underline=1,
             font=self._fonts["code"],
         )
+        self.chat_display.tag_bind("citation", "<Button-1>", self._on_citation_click)
         self.chat_display.tag_config(
             "source",
             font=self._fonts["code"],
@@ -638,35 +652,113 @@ class AppView:
         # Bind Ctrl+Enter to send
         self.txt_input.bind("<Control-Return>", lambda _e: self._on_ctrl_enter())
 
+    def _build_evidence_panel(self) -> None:
+        """Construct the right-side evidence pane used by chat retrieval."""
+        frame = self._evidence_pane
+        frame.columnconfigure(0, weight=1)
+
+        header = ttk.Frame(frame, style="Card.Flat.TFrame")
+        header.pack(fill="x", pady=(0, UI_SPACING["s"]))
+        ttk.Label(header, text="Evidence", style="Header.TLabel").pack(anchor="w")
+        self._evidence_status_var = tk.StringVar(value="No retrieved evidence yet.")
+        ttk.Label(
+            header,
+            textvariable=self._evidence_status_var,
+            style="Caption.TLabel",
+            wraplength=360,
+            justify="left",
+        ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+
+        list_host = ttk.Frame(frame, style="Card.Elevated.TFrame")
+        list_host.pack(fill="both", expand=True)
+        list_host.rowconfigure(0, weight=1)
+        list_host.columnconfigure(0, weight=1)
+
+        self._evidence_tree = ttk.Treeview(
+            list_host,
+            columns=("sid", "source", "score"),
+            show="headings",
+            selectmode="browse",
+            height=10,
+        )
+        self._evidence_tree.heading("sid", text="ID")
+        self._evidence_tree.heading("source", text="Source")
+        self._evidence_tree.heading("score", text="Score")
+        self._evidence_tree.column("sid", width=54, anchor="center")
+        self._evidence_tree.column("source", width=180, anchor="w")
+        self._evidence_tree.column("score", width=72, anchor="e")
+        self._evidence_tree.grid(row=0, column=0, sticky="nsew")
+        evidence_scroll = ttk.Scrollbar(
+            list_host,
+            orient="vertical",
+            command=self._evidence_tree.yview,
+        )
+        evidence_scroll.grid(row=0, column=1, sticky="ns")
+        self._evidence_tree.configure(yscrollcommand=evidence_scroll.set)
+        self._evidence_tree.bind("<<TreeviewSelect>>", self._on_evidence_selected)
+
+        detail_host = ttk.Frame(frame, style="Card.Elevated.TFrame")
+        detail_host.pack(fill="both", expand=True, pady=(UI_SPACING["s"], 0))
+        detail_host.rowconfigure(0, weight=1)
+        detail_host.columnconfigure(0, weight=1)
+
+        self._evidence_detail_text = tk.Text(
+            detail_host,
+            wrap=tk.WORD,
+            height=12,
+            state="disabled",
+            font=self._fonts["code"],
+            bg=self._palette.get("input_bg", "#07101A"),
+            fg=self._palette["text"],
+            insertbackground=self._palette["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        self._evidence_detail_text.grid(row=0, column=0, sticky="nsew")
+        detail_scroll = ttk.Scrollbar(
+            detail_host,
+            orient="vertical",
+            command=self._evidence_detail_text.yview,
+        )
+        detail_scroll.grid(row=0, column=1, sticky="ns")
+        self._evidence_detail_text.configure(yscrollcommand=detail_scroll.set)
+        self._set_evidence_detail("No evidence selected.")
+
     def _build_library_view(self) -> None:
-        """Library view: file picker + build index + file list."""
+        """Library view: step-based file selection, build controls, and index summary."""
         frame = self._views["library"]
         frame.rowconfigure(1, weight=1)
         frame.columnconfigure(0, weight=1)
 
-        # Toolbar
-        toolbar = ttk.Frame(frame, style="Card.Flat.TFrame",
-                            padding=(UI_SPACING["s"], UI_SPACING["xs"]))
-        toolbar.grid(row=0, column=0, sticky="ew",
-                     padx=UI_SPACING["m"], pady=(UI_SPACING["m"], UI_SPACING["xs"]))
+        outer = ttk.Frame(frame, style="Card.TFrame")
+        outer.grid(
+            row=0, column=0, rowspan=3, sticky="nsew",
+            padx=UI_SPACING["m"], pady=UI_SPACING["m"],
+        )
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(1, weight=1)
 
-        self.btn_open_files = ttk.Button(toolbar, text="Open Files…",
-                                          style="Primary.TButton")
+        step_one = ttk.LabelFrame(
+            outer,
+            text="Step 1 · Source files",
+            padding=(UI_SPACING["m"], UI_SPACING["s"]),
+        )
+        step_one.grid(row=0, column=0, sticky="ew")
+        step_one.columnconfigure(0, weight=1)
+
+        toolbar = ttk.Frame(step_one, style="Card.Flat.TFrame")
+        toolbar.grid(row=0, column=0, sticky="ew")
+        self.btn_open_files = ttk.Button(toolbar, text="Open Files…", style="Primary.TButton")
         self.btn_open_files.pack(side="left", padx=(0, UI_SPACING["xs"]))
-
-        self.btn_build_index = ttk.Button(toolbar, text="Build Index",
-                                           style="Secondary.TButton")
+        self.btn_build_index = ttk.Button(toolbar, text="Build Index", style="Secondary.TButton")
         self.btn_build_index.pack(side="left")
-
-        ttk.Label(toolbar, textvariable=self._index_info_var,
-                  style="Caption.TLabel").pack(
+        ttk.Label(toolbar, textvariable=self._index_info_var, style="Caption.TLabel").pack(
             side="left", padx=(UI_SPACING["m"], 0)
         )
 
-        # File listbox
-        lb_frame = ttk.Frame(frame, style="Card.Elevated.TFrame")
-        lb_frame.grid(row=1, column=0, sticky="nsew",
-                      padx=UI_SPACING["m"], pady=(0, UI_SPACING["m"]))
+        lb_frame = ttk.Frame(step_one, style="Card.Elevated.TFrame")
+        lb_frame.grid(row=1, column=0, sticky="nsew", pady=(UI_SPACING["s"], 0))
         lb_frame.rowconfigure(0, weight=1)
         lb_frame.columnconfigure(0, weight=1)
 
@@ -697,25 +789,147 @@ class AppView:
                   padx=UI_SPACING["s"])
         self._file_listbox.configure(xscrollcommand=_hsb.set)
 
-        # Library also shows index progress
-        self.progress = ttk.Progressbar(
-            frame, orient="horizontal", mode="determinate"
+        step_two = ttk.LabelFrame(
+            outer,
+            text="Step 2 · Build settings",
+            padding=(UI_SPACING["m"], UI_SPACING["s"]),
         )
-        self.progress.grid(row=2, column=0, sticky="ew",
-                           padx=UI_SPACING["m"], pady=(0, UI_SPACING["s"]))
+        step_two.grid(row=1, column=0, sticky="nsew", pady=(UI_SPACING["m"], 0))
+        for column in range(6):
+            step_two.columnconfigure(column, weight=1 if column % 2 else 0)
+
+        self._lib_chunk_size_var = tk.StringVar(value=str(self._settings_data.get("chunk_size", 800)))
+        self._lib_chunk_overlap_var = tk.StringVar(value=str(self._settings_data.get("chunk_overlap", 100)))
+        self._lib_top_k_var = tk.StringVar(value=str(self._settings_data.get("top_k", 3)))
+
+        ttk.Label(step_two, text="Chunk Size", style="Caption.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Entry(step_two, textvariable=self._lib_chunk_size_var, width=10).grid(
+            row=0, column=1, sticky="w", padx=(UI_SPACING["xs"], UI_SPACING["m"])
+        )
+        ttk.Label(step_two, text="Chunk Overlap", style="Caption.TLabel").grid(row=0, column=2, sticky="w")
+        ttk.Entry(step_two, textvariable=self._lib_chunk_overlap_var, width=10).grid(
+            row=0, column=3, sticky="w", padx=(UI_SPACING["xs"], UI_SPACING["m"])
+        )
+        ttk.Label(step_two, text="Top-K", style="Caption.TLabel").grid(row=0, column=4, sticky="w")
+        ttk.Entry(step_two, textvariable=self._lib_top_k_var, width=10).grid(
+            row=0, column=5, sticky="w", padx=(UI_SPACING["xs"], 0)
+        )
+        ttk.Label(
+            step_two,
+            text="These controls feed the current MVC index/query path directly.",
+            style="Caption.TLabel",
+            wraplength=900,
+            justify="left",
+        ).grid(row=1, column=0, columnspan=6, sticky="w", pady=(UI_SPACING["s"], 0))
+
+        step_three = ttk.LabelFrame(
+            outer,
+            text="Step 3 · Active index",
+            padding=(UI_SPACING["m"], UI_SPACING["s"]),
+        )
+        step_three.grid(row=2, column=0, sticky="ew", pady=(UI_SPACING["m"], 0))
+        self._active_index_summary_var = tk.StringVar(value="No persisted index selected.")
+        self._active_index_path_var = tk.StringVar(value="")
+        ttk.Label(step_three, textvariable=self._active_index_summary_var, style="TLabel").pack(anchor="w")
+        ttk.Label(
+            step_three,
+            textvariable=self._active_index_path_var,
+            style="Caption.TLabel",
+            wraplength=900,
+            justify="left",
+        ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+
+        self.progress = ttk.Progressbar(outer, orient="horizontal", mode="determinate")
+        self.progress.grid(row=3, column=0, sticky="ew", pady=(UI_SPACING["m"], 0))
 
     def _build_history_view(self) -> None:
-        """History view: placeholder stub."""
+        """History view: session list, actions, and detail pane."""
         frame = self._views["history"]
-        frame.rowconfigure(0, weight=1)
-        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(2, weight=1)
+        frame.columnconfigure(0, weight=3)
+        frame.columnconfigure(1, weight=2)
+
+        header = ttk.Frame(frame, style="Card.Flat.TFrame", padding=(UI_SPACING["m"], UI_SPACING["s"]))
+        header.grid(row=0, column=0, columnspan=2, sticky="ew")
+        ttk.Label(header, text="History", style="Header.TLabel").pack(anchor="w")
         ttk.Label(
-            frame,
-            text="[ History — Session history will appear here. ]",
-            foreground=self._palette.get("muted_text", "#8A9DC0"),
-            anchor="center",
-            justify="center",
-        ).grid(row=0, column=0, sticky="nsew")
+            header,
+            text="Resume persisted sessions, inspect summaries, and export transcripts.",
+            style="Caption.TLabel",
+        ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+
+        actions = ttk.Frame(frame, style="Card.Flat.TFrame", padding=(UI_SPACING["m"], 0))
+        actions.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self.btn_history_new_chat = ttk.Button(actions, text="New Chat", style="Primary.TButton")
+        self.btn_history_new_chat.pack(side="left")
+        self.btn_history_open = ttk.Button(actions, text="Open", style="Secondary.TButton")
+        self.btn_history_open.pack(side="left", padx=(UI_SPACING["xs"], 0))
+        self.btn_history_delete = ttk.Button(actions, text="Delete", style="Secondary.TButton")
+        self.btn_history_delete.pack(side="left", padx=(UI_SPACING["xs"], 0))
+        self.btn_history_export = ttk.Button(actions, text="Export", style="Secondary.TButton")
+        self.btn_history_export.pack(side="left", padx=(UI_SPACING["xs"], 0))
+        self.btn_history_refresh = ttk.Button(actions, text="Refresh", style="Secondary.TButton")
+        self.btn_history_refresh.pack(side="left", padx=(UI_SPACING["xs"], 0))
+        ttk.Label(actions, text="Search", style="Caption.TLabel").pack(side="left", padx=(UI_SPACING["m"], UI_SPACING["xs"]))
+        self._history_search_var = tk.StringVar()
+        self._history_search_entry = ttk.Entry(actions, textvariable=self._history_search_var, width=28)
+        self._history_search_entry.pack(side="left", fill="x", expand=True)
+
+        left = ttk.Frame(frame, style="Card.Elevated.TFrame")
+        left.grid(row=2, column=0, sticky="nsew", padx=(UI_SPACING["m"], UI_SPACING["xs"]), pady=UI_SPACING["m"])
+        left.rowconfigure(0, weight=1)
+        left.columnconfigure(0, weight=1)
+
+        self._history_tree = ttk.Treeview(
+            left,
+            columns=("title", "updated", "mode", "model"),
+            show="headings",
+            selectmode="browse",
+        )
+        for name, label, width in (
+            ("title", "Title", 260),
+            ("updated", "Updated", 180),
+            ("mode", "Mode", 110),
+            ("model", "Model", 180),
+        ):
+            self._history_tree.heading(name, text=label)
+            self._history_tree.column(name, width=width, anchor="w")
+        self._history_tree.grid(row=0, column=0, sticky="nsew")
+        history_scroll = ttk.Scrollbar(left, orient="vertical", command=self._history_tree.yview)
+        history_scroll.grid(row=0, column=1, sticky="ns")
+        self._history_tree.configure(yscrollcommand=history_scroll.set)
+
+        right = ttk.Frame(frame, style="Card.Elevated.TFrame", padding=UI_SPACING["m"])
+        right.grid(row=2, column=1, sticky="nsew", padx=(UI_SPACING["xs"], UI_SPACING["m"]), pady=UI_SPACING["m"])
+        right.rowconfigure(1, weight=1)
+        right.columnconfigure(0, weight=1)
+
+        self._history_detail_summary_var = tk.StringVar(value="Select a session to inspect its details.")
+        ttk.Label(
+            right,
+            textvariable=self._history_detail_summary_var,
+            style="TLabel",
+            wraplength=420,
+            justify="left",
+        ).grid(row=0, column=0, sticky="ew")
+
+        self._history_detail_text = tk.Text(
+            right,
+            wrap=tk.WORD,
+            state="disabled",
+            font=self._fonts["code"],
+            bg=self._palette.get("input_bg", "#07101A"),
+            fg=self._palette["text"],
+            insertbackground=self._palette["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        self._history_detail_text.grid(row=1, column=0, sticky="nsew", pady=(UI_SPACING["s"], 0))
+        detail_scroll = ttk.Scrollbar(right, orient="vertical", command=self._history_detail_text.yview)
+        detail_scroll.grid(row=1, column=1, sticky="ns", pady=(UI_SPACING["s"], 0))
+        self._history_detail_text.configure(yscrollcommand=detail_scroll.set)
+        self._set_history_detail_text("Select a session to inspect its details.")
 
     def _build_settings_view(self) -> None:
         """Settings view: scrollable editable settings pane with collapsible sections."""
@@ -1063,12 +1277,194 @@ class AppView:
         except (tk.TclError, AttributeError):
             pass
 
+    def get_library_build_settings(self) -> dict[str, str]:
+        """Return current library build controls as strings."""
+        return {
+            "chunk_size": self._lib_chunk_size_var.get() if hasattr(self, "_lib_chunk_size_var") else "",
+            "chunk_overlap": self._lib_chunk_overlap_var.get() if hasattr(self, "_lib_chunk_overlap_var") else "",
+            "top_k": self._lib_top_k_var.get() if hasattr(self, "_lib_top_k_var") else "",
+        }
+
+    def set_active_index_summary(self, summary: str, index_path: str = "") -> None:
+        """Update the active-index summary shown in the Library view."""
+        if hasattr(self, "_active_index_summary_var"):
+            self._active_index_summary_var.set(summary)
+        if hasattr(self, "_active_index_path_var"):
+            self._active_index_path_var.set(index_path)
+
     def append_chat(self, text: str, tag: str = "agent") -> None:
         """Append *text* (with optional *tag*) to the chat display."""
         self.chat_display.configure(state="normal")
+        start = self.chat_display.index("end-1c")
+        if start == "1.0" and not self.chat_display.get("1.0", "end-1c"):
+            start = "1.0"
         self.chat_display.insert("end", text, tag)
+        for match in re.finditer(r"S\d+", text or ""):
+            tag_start = f"{start}+{match.start()}c"
+            tag_end = f"{start}+{match.end()}c"
+            self.chat_display.tag_add("citation", tag_start, tag_end)
         self.chat_display.see("end")
         self.chat_display.configure(state="disabled")
+
+    def clear_chat(self) -> None:
+        """Clear the chat transcript area."""
+        self.chat_display.configure(state="normal")
+        self.chat_display.delete("1.0", "end")
+        self.chat_display.configure(state="disabled")
+
+    def set_chat_transcript(self, messages: list) -> None:
+        """Replace the chat display with a persisted transcript."""
+        self.clear_chat()
+        for msg in messages or []:
+            role = ""
+            content = ""
+            if isinstance(msg, dict):
+                role = str(msg.get("role", "") or "")
+                content = str(msg.get("content", "") or "")
+            else:
+                role = str(getattr(msg, "role", "") or "")
+                content = str(getattr(msg, "content", "") or "")
+            role = role.strip().lower()
+            if role == "user":
+                self.append_chat(f"You: {content}\n{'─' * 52}\n", tag="user")
+            elif role == "assistant":
+                self.append_chat(f"{content}\n\n", tag="agent")
+            else:
+                self.append_chat(f"{content}\n\n", tag="system")
+
+    def render_evidence_sources(self, sources: list) -> None:
+        """Populate the evidence pane with structured retrieved sources."""
+        if not hasattr(self, "_evidence_tree"):
+            return
+        self._evidence_source_by_sid = {}
+        self._evidence_source_by_iid = {}
+        self._evidence_tree.delete(*self._evidence_tree.get_children())
+        if not sources:
+            self._evidence_status_var.set("No retrieved evidence yet.")
+            self._set_evidence_detail("No evidence selected.")
+            return
+
+        for idx, source in enumerate(sources, start=1):
+            if isinstance(source, dict):
+                sid = str(source.get("sid", "") or f"S{idx}")
+                payload = dict(source)
+            else:
+                sid = str(getattr(source, "sid", "") or f"S{idx}")
+                payload = source.to_dict() if hasattr(source, "to_dict") else {}
+            self._evidence_source_by_sid[sid] = payload
+            iid = f"evidence-{idx}"
+            self._evidence_source_by_iid[iid] = sid
+            self._evidence_tree.insert(
+                "",
+                "end",
+                iid=iid,
+                values=(
+                    sid,
+                    str(payload.get("source") or "unknown"),
+                    f"{float(payload.get('score')):.3f}" if payload.get("score") is not None else "-",
+                ),
+            )
+        self._evidence_status_var.set(f"{len(sources)} evidence item(s) loaded.")
+        first = self._evidence_tree.get_children("")
+        if first:
+            self._evidence_tree.selection_set(first[0])
+            self._evidence_tree.focus(first[0])
+            self._on_evidence_selected()
+
+    def focus_evidence_source(self, sid: str) -> None:
+        """Select a source in the evidence pane by its stable citation id."""
+        if not hasattr(self, "_evidence_tree"):
+            return
+        for iid, mapped_sid in self._evidence_source_by_iid.items():
+            if mapped_sid == sid and self._evidence_tree.exists(iid):
+                self._evidence_tree.selection_set(iid)
+                self._evidence_tree.focus(iid)
+                self._evidence_tree.see(iid)
+                self._on_evidence_selected()
+                break
+
+    def bind_history_search(self, callback) -> None:
+        """Bind the History search entry to a callback."""
+        if hasattr(self, "_history_search_entry"):
+            self._history_search_entry.bind("<KeyRelease>", callback)
+
+    def bind_history_selection(self, callback) -> None:
+        """Bind history selection and open actions to a callback."""
+        if hasattr(self, "_history_tree"):
+            self._history_tree.bind("<<TreeviewSelect>>", callback)
+
+    def get_history_search_query(self) -> str:
+        """Return the current History search query."""
+        return self._history_search_var.get().strip() if hasattr(self, "_history_search_var") else ""
+
+    def set_history_rows(self, rows: list) -> None:
+        """Replace the History table contents."""
+        if not hasattr(self, "_history_tree"):
+            return
+        self._history_rows = list(rows or [])
+        self._history_session_by_id = {
+            str(getattr(row, "session_id", "")): row
+            for row in self._history_rows
+        }
+        self._history_tree.delete(*self._history_tree.get_children())
+        for row in self._history_rows:
+            session_id = str(getattr(row, "session_id", "") or "")
+            self._history_tree.insert(
+                "",
+                "end",
+                iid=session_id,
+                values=(
+                    str(getattr(row, "title", "") or "(untitled)"),
+                    str(getattr(row, "updated_at", "") or ""),
+                    str(getattr(row, "mode", "") or "-"),
+                    str(getattr(row, "llm_model", "") or "-"),
+                ),
+            )
+
+    def select_history_session(self, session_id: str) -> None:
+        """Select a History row if it exists."""
+        if hasattr(self, "_history_tree") and self._history_tree.exists(session_id):
+            self._history_tree.selection_set(session_id)
+            self._history_tree.focus(session_id)
+            self._history_tree.see(session_id)
+
+    def get_selected_history_session_id(self) -> str:
+        """Return the selected History session id."""
+        if not hasattr(self, "_history_tree"):
+            return ""
+        selected = self._history_tree.selection()
+        return selected[0] if selected else ""
+
+    def set_history_detail(self, detail) -> None:
+        """Render summary and transcript metadata for a selected session."""
+        summary = getattr(detail, "summary", detail)
+        messages = list(getattr(detail, "messages", []) or [])
+        headline = (
+            f"{getattr(summary, 'title', '(untitled)')}\n"
+            f"Mode: {getattr(summary, 'mode', '-') or '-'}  |  "
+            f"Model: {getattr(summary, 'llm_model', '-') or '-'}  |  "
+            f"Index: {getattr(summary, 'index_id', '(default)') or '(default)'}"
+        )
+        self._history_detail_summary_var.set(headline)
+
+        lines = [
+            f"Session ID: {getattr(summary, 'session_id', '')}",
+            f"Created: {getattr(summary, 'created_at', '')}",
+            f"Updated: {getattr(summary, 'updated_at', '')}",
+            f"Summary: {getattr(summary, 'summary', '') or '(none)'}",
+            "",
+            "Transcript preview:",
+            "",
+        ]
+        for idx, message in enumerate(messages[-8:], start=max(1, len(messages) - 7)):
+            if isinstance(message, dict):
+                role = str(message.get("role", "") or "").capitalize()
+                content = str(message.get("content", "") or "")
+            else:
+                role = str(getattr(message, "role", "") or "").capitalize()
+                content = str(getattr(message, "content", "") or "")
+            lines.append(f"{idx}. {role}: {content[:240]}")
+        self._set_history_detail_text("\n".join(lines))
 
     def get_prompt_text(self) -> str:
         """Return the current contents of the prompt input."""
@@ -1125,6 +1521,12 @@ class AppView:
         self._use_rag_var.set(
             str(self._settings_data.get("chat_path", "RAG")).strip().lower() != "direct"
         )
+        if hasattr(self, "_lib_chunk_size_var"):
+            self._lib_chunk_size_var.set(str(self._settings_data.get("chunk_size", 800)))
+        if hasattr(self, "_lib_chunk_overlap_var"):
+            self._lib_chunk_overlap_var.set(str(self._settings_data.get("chunk_overlap", 100)))
+        if hasattr(self, "_lib_top_k_var"):
+            self._lib_top_k_var.set(str(self._settings_data.get("top_k", 3)))
         self._refresh_llm_badge()
         if not self._tab_built.get("settings"):
             # Tab not yet built — data is stored and will be read by
@@ -1298,11 +1700,65 @@ class AppView:
         except tk.TclError:
             pass
 
+    def _set_evidence_detail(self, text: str) -> None:
+        if not hasattr(self, "_evidence_detail_text"):
+            return
+        self._evidence_detail_text.configure(state="normal")
+        self._evidence_detail_text.delete("1.0", "end")
+        self._evidence_detail_text.insert("1.0", text)
+        self._evidence_detail_text.configure(state="disabled")
+
+    def _on_evidence_selected(self, _event=None) -> None:
+        if not hasattr(self, "_evidence_tree"):
+            return
+        selected = self._evidence_tree.selection()
+        if not selected:
+            return
+        iid = selected[0]
+        sid = self._evidence_source_by_iid.get(iid, "")
+        payload = self._evidence_source_by_sid.get(sid, {})
+        if not payload:
+            self._set_evidence_detail("No evidence selected.")
+            return
+        detail = [
+            f"Citation: {sid}",
+            f"Source: {payload.get('source', 'unknown')}",
+            f"Chunk ID: {payload.get('chunk_id') or '-'}",
+            f"Chunk Index: {payload.get('chunk_idx') if payload.get('chunk_idx') is not None else '-'}",
+            f"Score: {payload.get('score') if payload.get('score') is not None else '-'}",
+            "",
+            "Snippet:",
+            str(payload.get("snippet") or "(no snippet)"),
+        ]
+        self._set_evidence_detail("\n".join(detail))
+
+    def _on_citation_click(self, event=None) -> None:
+        try:
+            index = self.chat_display.index(f"@{event.x},{event.y}") if event else self.chat_display.index(tk.INSERT)
+            ranges = self.chat_display.tag_prevrange("citation", index)
+            if not ranges:
+                return
+            token = self.chat_display.get(ranges[0], ranges[1]).strip()
+            match = re.search(r"S\d+", token)
+            if not match:
+                return
+            self.focus_evidence_source(match.group(0))
+            if not self._evidence_visible:
+                self._toggle_evidence_panel()
+        except Exception:
+            pass
+
+    def _set_history_detail_text(self, text: str) -> None:
+        if not hasattr(self, "_history_detail_text"):
+            return
+        self._history_detail_text.configure(state="normal")
+        self._history_detail_text.delete("1.0", "end")
+        self._history_detail_text.insert("1.0", text)
+        self._history_detail_text.configure(state="disabled")
+
     def _on_new_chat(self) -> None:
         """Clear chat display (placeholder — controller can override)."""
-        self.chat_display.configure(state="normal")
-        self.chat_display.delete("1.0", "end")
-        self.chat_display.configure(state="disabled")
+        self.clear_chat()
         self.set_status("New chat started.")
 
     def _toggle_evidence_panel(self) -> None:

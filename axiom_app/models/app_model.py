@@ -33,6 +33,8 @@ _REPO_ROOT    = _PACKAGE_ROOT.parent                              # <repo root>
 
 _DEFAULT_SETTINGS_PATH = _PACKAGE_ROOT / "default_settings.json"
 _USER_SETTINGS_PATH    = _REPO_ROOT    / "settings.json"
+_SESSION_DB_PATH       = _REPO_ROOT    / "rag_sessions.db"
+_INDEX_STORAGE_DIR     = _REPO_ROOT    / "indexes"
 
 
 class AppModel:
@@ -68,6 +70,15 @@ class AppModel:
         self.embeddings: list[list[float]] = []
         self.knowledge_graph: Any | None = None
         self.entity_to_chunks: dict[str, set[int]] = {}
+        self.current_session_id: str = ""
+        self.session_list: list[Any] = []
+        self.loaded_session: Any | None = None
+        self.last_sources: list[Any] = []
+        self.active_index_id: str = ""
+        self.active_index_path: str = ""
+        self.index_bundle: Any | None = None
+        self.session_db_path: pathlib.Path = _SESSION_DB_PATH
+        self.index_storage_dir: pathlib.Path = _INDEX_STORAGE_DIR
 
     # ------------------------------------------------------------------
     # Settings
@@ -167,4 +178,6 @@ class AppModel:
             "index_built": self.index_state.get("built", False),
             "chat_turns": len(self.chat_history),
             "settings_loaded": bool(self.settings),
+            "active_index_id": self.active_index_id,
+            "current_session_id": self.current_session_id,
         }
