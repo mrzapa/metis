@@ -3,10 +3,10 @@
 [![CI](https://github.com/mrzapa/workx/actions/workflows/ci.yml/badge.svg)](https://github.com/mrzapa/workx/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Axiom is a personal RAG desktop application with an opt-in MVC runtime. It supports:
+Axiom is a personal RAG desktop application with an MVC runtime as the default app experience. It supports:
 
-- **Legacy GUI app** (`agentic_rag_gui.py`) as the default runtime.
-- **New MVC app** (`axiom_app`) enabled via `AXIOM_NEW_APP=1`.
+- **MVC app** (`axiom_app`) as the default runtime.
+- **Legacy GUI app** (`agentic_rag_gui.py`) available via `AXIOM_NEW_APP=0`.
 - **Headless CLI** for indexing and querying local files without Tk.
 
 ## Quick Install
@@ -87,23 +87,23 @@ pip install -e ".[dev,live-backends]"
 
 ## Run modes (GUI + CLI)
 
-### Legacy GUI (default path)
+### MVC GUI (default path)
 
 ```bash
 python main.py
 ```
 
-### New MVC GUI
+### Legacy GUI (opt-out path)
 
 ```bash
-AXIOM_NEW_APP=1 python main.py
+AXIOM_NEW_APP=0 python main.py
 ```
 
 ### CLI mode (headless)
 
 ```bash
-AXIOM_NEW_APP=1 python main.py --cli index --file README.md
-AXIOM_NEW_APP=1 python main.py --cli query --file README.md --question "quick start"
+python main.py --cli index --file README.md
+python main.py --cli query --file README.md --question "quick start"
 ```
 
 You can also run the CLI module directly:
@@ -152,9 +152,9 @@ python -m axiom_app.cli query --file docs/my_notes.txt --question "dependency"
 ## Environment variables
 
 - `AXIOM_NEW_APP`
-  - `0` (default): run legacy GUI path.
-  - `1`: enable the new MVC path in `main.py`.
-  - In new mode, `--cli` forces headless CLI handling.
+  - Unset or `1`: run the default MVC path in `main.py`.
+  - `0`: opt out to the legacy GUI path.
+  - `--cli` forces headless CLI handling regardless of GUI mode.
 - `AXIOM_TEST_WEAVIATE_URL`
 - `AXIOM_TEST_WEAVIATE_API_KEY`
 - `AXIOM_TEST_WEAVIATE_GRPC_HOST`
@@ -195,7 +195,7 @@ PY
 
 ## Project layout
 
-- `axiom_app/` — new MVC package, CLI, model/controller/view layers.
+- `axiom_app/` — default MVC package, CLI, model/controller/view layers.
 - `tests/` — unit and integration-style tests.
 - `agentic_rag_gui.py` — legacy monolithic GUI implementation.
 - `main.py` — canonical entry point with mode switching.

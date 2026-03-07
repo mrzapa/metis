@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Axiom Installer — install / reinstall / uninstall the Axiom MVC app
+# Axiom Installer — install / reinstall / uninstall the Axiom app
 #
 # Usage:
 #   curl -fsSL <raw-url>/scripts/install_axiom.sh | bash           # install
@@ -40,6 +40,30 @@ warn()  { printf "${YELLOW}[axiom]${NC} %s\n" "$*"; }
 err()   { printf "${RED}[axiom]${NC} %s\n" "$*" >&2; }
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+write_launcher() {
+    mkdir -p "$LAUNCHER_DIR"
+
+    cat > "$LAUNCHER" <<LAUNCHER_EOF
+#!/usr/bin/env bash
+# Auto-generated Axiom launcher — do not edit.
+# Pulls latest code and runs Axiom.
+set -euo pipefail
+
+AXIOM_DIR="$INSTALL_DIR"
+BRANCH="$BRANCH"
+
+# Pull latest code silently
+if [ -d "\$AXIOM_DIR/.git" ]; then
+    git -C "\$AXIOM_DIR" pull origin "\$BRANCH" --ff-only 2>/dev/null || true
+fi
+
+# Activate venv and run
+exec "$VENV_DIR/bin/python" "\$AXIOM_DIR/main.py" "\$@"
+LAUNCHER_EOF
+
+    chmod +x "$LAUNCHER"
+}
+
 require_cmd() {
     if ! command -v "$1" &>/dev/null; then
         err "Required command '$1' not found. Please install it and try again."
@@ -129,28 +153,7 @@ do_install() {
     ok "Dependencies installed."
 
     # ── Launcher script ──────────────────────────────────────────────────
-    mkdir -p "$LAUNCHER_DIR"
-
-    cat > "$LAUNCHER" <<LAUNCHER_EOF
-#!/usr/bin/env bash
-# Auto-generated Axiom launcher — do not edit.
-# Pulls latest code and runs the MVC app.
-set -euo pipefail
-
-AXIOM_DIR="$INSTALL_DIR"
-BRANCH="$BRANCH"
-
-# Pull latest code silently
-if [ -d "\$AXIOM_DIR/.git" ]; then
-    git -C "\$AXIOM_DIR" pull origin "\$BRANCH" --ff-only 2>/dev/null || true
-fi
-
-# Activate venv and run
-export AXIOM_NEW_APP=1
-exec "$VENV_DIR/bin/python" "\$AXIOM_DIR/main.py" "\$@"
-LAUNCHER_EOF
-
-    chmod +x "$LAUNCHER"
+    write_launcher
     ok "Launcher installed: $LAUNCHER"
 
     # ── Summary ──────────────────────────────────────────────────────────
@@ -192,6 +195,7 @@ do_update() {
     info "Updating dependencies…"
     "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet
     "$VENV_DIR/bin/pip" install -e "$INSTALL_SPEC" --quiet
+    write_launcher
 
     ok "Axiom updated to latest."
 }
