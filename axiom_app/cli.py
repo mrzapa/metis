@@ -44,10 +44,31 @@ from axiom_app.services.vector_store import resolve_vector_store
 
 # ── constants ────────────────────────────────────────────────────────────────
 
-_SEP = "─" * 60
+_SEP = "-" * 60
 _MAX_QUERY_HITS = 20          # cap displayed keyword matches
 _CONTEXT_CHARS  = 140         # chars shown per matching line
 _SNIPPET_CHARS  = 300         # chars in index summary snippet
+
+
+def _safe_write(text: str, stream) -> None:
+    """Write *text* to *stream*, replacing characters the stream cannot encode."""
+    try:
+        stream.write(text)
+    except UnicodeEncodeError:
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+        data = text.encode(encoding, errors="replace")
+        buffer = getattr(stream, "buffer", None)
+        if buffer is not None:
+            buffer.write(data)
+            buffer.flush()
+        else:
+            stream.write(data.decode(encoding, errors="replace"))
+
+
+def _safe_print(*values: object, sep: str = " ", end: str = "\n", file=None) -> None:
+    """Print using the target stream's encoding with replacement on failure."""
+    stream = file if file is not None else sys.stdout
+    _safe_write(sep.join(str(value) for value in values) + end, stream)
 
 
 # ── sub-command implementations ──────────────────────────────────────────────
@@ -57,10 +78,10 @@ def cmd_index(args: argparse.Namespace) -> int:
     """Build and persist an index using the shared MVC backend."""
     src = pathlib.Path(args.file)
     if not src.exists():
-        print(f"error: file not found: {src}", file=sys.stderr)
+        _safe_print(f"error: file not found: {src}", file=sys.stderr)
         return 1
     if not src.is_file():
-        print(f"error: not a regular file: {src}", file=sys.stderr)
+        _safe_print(f"error: not a regular file: {src}", file=sys.stderr)
         return 1
 
     model = AppModel()
@@ -69,13 +90,13 @@ def cmd_index(args: argparse.Namespace) -> int:
     adapter = resolve_vector_store(model.settings)
     available, reason = adapter.is_available(model.settings)
     if not available:
-        print(f"error: vector backend unavailable: {reason}", file=sys.stderr)
+        _safe_print(f"error: vector backend unavailable: {reason}", file=sys.stderr)
         return 1
     try:
         text = src.read_text(encoding="utf-8", errors="replace")
         bundle = adapter.build([str(src)], model.settings)
     except OSError as exc:
-        print(f"error reading {src}: {exc}", file=sys.stderr)
+        _safe_print(f"error reading {src}: {exc}", file=sys.stderr)
         return 1
 
     out_path: pathlib.Path
@@ -87,7 +108,7 @@ def cmd_index(args: argparse.Namespace) -> int:
     try:
         adapter.save(bundle, target_path=out_path)
     except (OSError, ValueError) as exc:
-        print(f"error writing index to {out_path}: {exc}", file=sys.stderr)
+        _safe_print(f"error writing index to {out_path}: {exc}", file=sys.stderr)
         return 1
 
     char_count  = len(text)
@@ -95,15 +116,15 @@ def cmd_index(args: argparse.Namespace) -> int:
     line_count  = len(text.splitlines())
     para_count  = len([p for p in text.split("\n\n") if p.strip()])
 
-    print(f"Indexing : {src}")
-    print(f"  Characters : {char_count:>10,}")
-    print(f"  Words      : {word_count:>10,}")
-    print(f"  Lines      : {line_count:>10,}")
-    print(f"  Paragraphs : {para_count:>10,}")
-    print(f"  Chunks     : {len(bundle.chunks):>10,}")
-    print(f"  Index ID   : {bundle.index_id}")
-    print(f"  Backend    : {bundle.vector_backend}")
-    print(f"Index written → {out_path}")
+    _safe_print(f"Indexing : {src}")
+    _safe_print(f"  Characters : {char_count:>10,}")
+    _safe_print(f"  Words      : {word_count:>10,}")
+    _safe_print(f"  Lines      : {line_count:>10,}")
+    _safe_print(f"  Paragraphs : {para_count:>10,}")
+    _safe_print(f"  Chunks     : {len(bundle.chunks):>10,}")
+    _safe_print(f"  Index ID   : {bundle.index_id}")
+    _safe_print(f"  Backend    : {bundle.vector_backend}")
+    _safe_print(f"Index written -> {out_path}")
     return 0
 
 
@@ -111,15 +132,15 @@ def cmd_query(args: argparse.Namespace) -> int:
     """Query a saved index or build one in memory from the source file."""
     src = pathlib.Path(args.file)
     if not src.exists():
-        print(f"error: file not found: {src}", file=sys.stderr)
+        _safe_print(f"error: file not found: {src}", file=sys.stderr)
         return 1
     if not src.is_file():
-        print(f"error: not a regular file: {src}", file=sys.stderr)
+        _safe_print(f"error: not a regular file: {src}", file=sys.stderr)
         return 1
 
     question = args.question.strip()
     if not question:
-        print("error: --question must not be empty", file=sys.stderr)
+        _safe_print("error: --question must not be empty", file=sys.stderr)
         return 1
 
     model = AppModel()
@@ -135,14 +156,14 @@ def cmd_query(args: argparse.Namespace) -> int:
                 {**model.settings, "vector_db_type": str(bundle.vector_backend or model.settings.get("vector_db_type", "json"))}
             )
             if not available:
-                print(f"error: vector backend unavailable: {reason}", file=sys.stderr)
+                _safe_print(f"error: vector backend unavailable: {reason}", file=sys.stderr)
                 return 1
             bundle = adapter.load(args.index)
         else:
             adapter = resolve_vector_store(model.settings)
             available, reason = adapter.is_available(model.settings)
             if not available:
-                print(f"error: vector backend unavailable: {reason}", file=sys.stderr)
+                _safe_print(f"error: vector backend unavailable: {reason}", file=sys.stderr)
                 return 1
             bundle = adapter.build([str(src)], model.settings)
             if str(bundle.vector_backend or "json") != "json":
@@ -152,10 +173,10 @@ def cmd_query(args: argparse.Namespace) -> int:
                     result = adapter.query(bundle, question, model.settings)
                     return _print_query_result(src, question, bundle, result)
     except OSError as exc:
-        print(f"error reading/building index: {exc}", file=sys.stderr)
+        _safe_print(f"error reading/building index: {exc}", file=sys.stderr)
         return 1
     except ValueError as exc:
-        print(f"error preparing index: {exc}", file=sys.stderr)
+        _safe_print(f"error preparing index: {exc}", file=sys.stderr)
         return 1
 
     result = adapter.query(bundle, question, model.settings)
@@ -165,38 +186,38 @@ def cmd_query(args: argparse.Namespace) -> int:
 def _print_query_result(src: pathlib.Path, question: str, bundle, result) -> int:
     """Render a query result consistently for both saved and transient indexes."""
 
-    print()
-    print(f"Question : {question}")
-    print(f"Source   : {src}")
-    print(f"Backend  : shared retrieval ({bundle.vector_backend}:{bundle.index_id})")
-    print()
-    print(_SEP)
+    _safe_print()
+    _safe_print(f"Question : {question}")
+    _safe_print(f"Source   : {src}")
+    _safe_print(f"Backend  : shared retrieval ({bundle.vector_backend}:{bundle.index_id})")
+    _safe_print()
+    _safe_print(_SEP)
 
     if result.sources:
         for source in result.sources[:_MAX_QUERY_HITS]:
             snippet = source.snippet.strip()[:_CONTEXT_CHARS]
             if len(source.snippet.strip()) > _CONTEXT_CHARS:
-                snippet += " …"
+                snippet += " ..."
             score = f"{source.score:.3f}" if source.score is not None else "-"
-            print(
+            _safe_print(
                 f"  [{source.sid}] {source.source} "
                 f"(score={score})"
             )
-            print(f"      {snippet}")
-        print(_SEP)
-        print(f"  {len(result.sources)} evidence item(s) returned.")
+            _safe_print(f"      {snippet}")
+        _safe_print(_SEP)
+        _safe_print(f"  {len(result.sources)} evidence item(s) returned.")
     else:
-        print("  (no relevant passages found)")
-        print(_SEP)
+        _safe_print("  (no relevant passages found)")
+        _safe_print(_SEP)
         wrapped = textwrap.fill(
             "Tip: try broader wording, adjust chunk settings, or build an index first.",
             width=58,
             initial_indent="  ",
             subsequent_indent="  ",
         )
-        print(wrapped)
+        _safe_print(wrapped)
 
-    print()
+    _safe_print()
     return 0
 
 
@@ -280,7 +301,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 1
     except Exception as exc:  # noqa: BLE001
-        print(f"internal error: {exc}", file=sys.stderr)
+        _safe_print(f"internal error: {exc}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return 2

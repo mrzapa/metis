@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import io
+import sys
+
 import pytest
 
 from axiom_app.cli import main as cli_main
@@ -111,3 +114,18 @@ def test_cli_default_index_output_is_manifest_directory(tmp_path) -> None:
 
     manifest_path = src.with_name(src.name + ".axiom-index") / "manifest.json"
     assert manifest_path.exists()
+
+
+def test_cli_index_handles_cp1252_stdout(tmp_path, monkeypatch) -> None:
+    src = tmp_path / "paper.txt"
+    src.write_text("ASCII only runtime smoke.\n", encoding="utf-8")
+
+    raw = io.BytesIO()
+    stdout = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+    monkeypatch.setattr(sys, "stdout", stdout)
+
+    assert cli_main(["index", "--file", str(src)]) == 0
+
+    stdout.flush()
+    output = raw.getvalue().decode("cp1252")
+    assert "Index written ->" in output

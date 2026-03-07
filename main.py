@@ -1,11 +1,11 @@
 """main.py — Canonical entry point for the Axiom application.
 
-Default behaviour (AXIOM_NEW_APP unset or 0):
-  Delegates to agentic_rag_gui so that ``python main.py`` is identical to
-  ``python agentic_rag_gui.py``.
-
-New MVC app (opt-in via AXIOM_NEW_APP=1):
+Default behaviour (AXIOM_NEW_APP unset or 1):
   Runs axiom_app.app.run_app() (tabbed Tk UI).
+
+Legacy GUI fallback (explicit opt-out via AXIOM_NEW_APP=0):
+  Delegates to agentic_rag_gui so that ``AXIOM_NEW_APP=0 python main.py`` is
+  identical to ``python agentic_rag_gui.py``.
 
   Automatic CLI fallback — two situations trigger headless mode instead:
     1. ``--cli`` flag is present anywhere in sys.argv.
@@ -21,8 +21,6 @@ New MVC app (opt-in via AXIOM_NEW_APP=1):
       AXIOM_NEW_APP=1 python main.py          # → CLI help if no display
 
 Runtime path:
-  The MVC app remains opt-in until the parity audit is complete.
-
   TODO: add CLI argument parsing here (--smoke, --profile, --theme …)
         so agentic_rag_gui.py no longer needs to inspect sys.argv directly.
 
@@ -49,9 +47,9 @@ def _is_display_error(exc: BaseException) -> bool:
 
 
 def main() -> None:
-    if os.environ.get("AXIOM_NEW_APP", "0").strip() == "1":
+    if os.environ.get("AXIOM_NEW_APP", "1").strip() != "0":
         # -----------------------------------------------------------------------
-        # New MVC app (opt-in via AXIOM_NEW_APP=1)
+        # New MVC app (default path; AXIOM_NEW_APP=0 opts out to legacy)
         # -----------------------------------------------------------------------
         if "--cli" in sys.argv:
             # Explicit CLI mode: strip the --cli sentinel and hand the rest
@@ -69,7 +67,7 @@ def main() -> None:
                 print(
                     f"[axiom] GUI unavailable ({exc}).\n"
                     "        Falling back to CLI — run with --cli <command> for headless use.\n"
-                    "        Example:  AXIOM_NEW_APP=1 python main.py --cli index --file doc.txt",
+                    "        Example:  python main.py --cli index --file doc.txt",
                     file=sys.stderr,
                 )
                 from axiom_app.cli import main as cli_main

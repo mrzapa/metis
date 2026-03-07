@@ -400,6 +400,9 @@ class RoundedCard(tk.Canvas):
         outer_bg: str | None = None,
         border_color: str = "#33465F",
         border_width: int = 1,
+        shadow_color: str | None = None,
+        shadow_offset: int = 0,
+        inner_padding: int | None = None,
         **kwargs,
     ) -> None:
         kwargs.setdefault("highlightthickness", 0)
@@ -415,10 +418,14 @@ class RoundedCard(tk.Canvas):
         self._card_bg = bg
         self._border_color = border_color
         self._border_width = border_width
+        self._shadow_color = shadow_color or ""
+        self._shadow_offset = max(0, int(shadow_offset))
+        self._inner_padding = max(0, int(inner_padding)) if inner_padding is not None else max(10, self._radius - 4)
         self._rect_tag = "card_bg"
+        self._shadow_tag = "card_shadow"
         self.inner = tk.Frame(self, bg=bg, bd=0, highlightthickness=0)
         self._win_id = self.create_window(
-            self._radius, self._radius, anchor="nw", window=self.inner
+            self._inner_padding, self._inner_padding, anchor="nw", window=self.inner
         )
         self.bind("<Configure>", self._redraw)
 
@@ -440,10 +447,20 @@ class RoundedCard(tk.Canvas):
         if w < 4 or h < 4:
             return
         bw = self._border_width
-        r = self._radius
+        shadow = self._shadow_offset
         self.delete(self._rect_tag)
+        self.delete(self._shadow_tag)
+        if self._shadow_color and shadow:
+            self.create_polygon(
+                self._smooth_pts(bw + shadow, bw + shadow, w - bw, h - bw),
+                smooth=True,
+                fill=self._shadow_color,
+                outline="",
+                tags=self._shadow_tag,
+            )
+            self.tag_lower(self._shadow_tag)
         self.create_polygon(
-            self._smooth_pts(bw, bw, w - bw, h - bw),
+            self._smooth_pts(bw, bw, w - bw - shadow, h - bw - shadow),
             smooth=True,
             fill=self._card_bg,
             outline=self._border_color if bw else "",
@@ -451,12 +468,12 @@ class RoundedCard(tk.Canvas):
             tags=self._rect_tag,
         )
         self.tag_lower(self._rect_tag)
-        inner_pad = r
+        inner_pad = self._inner_padding
         self.coords(self._win_id, inner_pad, inner_pad)
         self.itemconfig(
             self._win_id,
-            width=max(1, w - 2 * inner_pad),
-            height=max(1, h - 2 * inner_pad),
+            width=max(1, w - (2 * inner_pad) - shadow),
+            height=max(1, h - (2 * inner_pad) - shadow),
         )
 
     def configure_colors(
@@ -464,6 +481,7 @@ class RoundedCard(tk.Canvas):
         bg: str | None = None,
         border_color: str | None = None,
         outer_bg: str | None = None,
+        shadow_color: str | None = None,
     ) -> None:
         """Update colors and redraw; safe to call after theme changes."""
         if bg is not None:
@@ -473,6 +491,8 @@ class RoundedCard(tk.Canvas):
             self._border_color = border_color
         if outer_bg is not None:
             self.configure(bg=outer_bg)
+        if shadow_color is not None:
+            self._shadow_color = shadow_color
         self._redraw()
 
 
