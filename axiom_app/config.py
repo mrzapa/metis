@@ -19,10 +19,10 @@ APP_SUBTITLE: str = "Personal RAG Assistant"
 
 # ---------------------------------------------------------------------------
 # UI backend
-# Valid values: "ctk" | "ttkbootstrap" | "ttk"
+# Valid values: "pyside6" | "ttk"
 # ---------------------------------------------------------------------------
 
-UI_BACKEND_DEFAULT: str = "ttk"
+UI_BACKEND_DEFAULT: str = "pyside6"
 
 # ---------------------------------------------------------------------------
 # Config dataclass

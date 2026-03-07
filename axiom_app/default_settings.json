@@ -1,6 +1,6 @@
 {
   "_comment": "Axiom default settings. Copy to settings.json in the repo root to override.",
-  "ui_backend": "ttk",
+  "ui_backend": "pyside6",
   "theme": "space_dust",
   "startup_mode_setting": "advanced",
   "llm_provider": "anthropic",
