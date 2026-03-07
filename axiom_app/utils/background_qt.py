@@ -14,8 +14,6 @@ Usage in ``app.py``::
 
 from __future__ import annotations
 
-from typing import Any
-
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from axiom_app.utils.background import BackgroundRunner

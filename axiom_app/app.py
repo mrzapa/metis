@@ -20,14 +20,7 @@ import pathlib
 import sys
 import traceback
 
-from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtCore import QTimer
-
-from axiom_app.controllers.app_controller import AppController
-from axiom_app.models.app_model import AppModel
 from axiom_app.utils.logging_setup import setup_logging
-from axiom_app.views.app_view import AppView
-from axiom_app.views.styles import get_palette, resolve_fonts, apply_theme_to_app
 
 # Poll interval in milliseconds — matches BackgroundRunner's expected cadence.
 _POLL_MS = 100
@@ -72,12 +65,22 @@ def run_app() -> None:
     logger.info("=" * 60)
     logger.info("Axiom MVC starting up  (AXIOM_NEW_APP=1)")
 
-    # ── 2. QApplication — DPI handled natively by Qt ─────────────────
-    dpi_enabled = _enable_windows_dpi_awareness()
-    app = QApplication(sys.argv)
-    logger.debug("QApplication created")
-
     try:
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QApplication, QMessageBox
+
+        from axiom_app.controllers.app_controller import AppController
+        from axiom_app.models.app_model import AppModel
+        from axiom_app.views.app_view import AppView
+        from axiom_app.views.styles import apply_theme_to_app, get_palette, resolve_fonts
+
+        message_box = QMessageBox
+
+        # ── 2. QApplication — DPI handled natively by Qt ─────────────
+        dpi_enabled = _enable_windows_dpi_awareness()
+        app = QApplication(sys.argv)
+        logger.debug("QApplication created")
+
         if dpi_enabled:
             logger.debug("Windows DPI bootstrap applied (enabled=%s)", dpi_enabled)
 
@@ -145,11 +148,13 @@ def run_app() -> None:
         print(concise, file=sys.stderr)
         print(detail, file=sys.stderr)
         try:
-            QMessageBox.critical(
-                None,
-                "Startup Error",
-                f"{concise}\n\nDetails have been written to stderr and the log.",
-            )
+            message_box = locals().get("message_box")
+            if message_box is not None:
+                message_box.critical(
+                    None,
+                    "Startup Error",
+                    f"{concise}\n\nDetails have been written to stderr and the log.",
+                )
         except Exception:
             pass
 

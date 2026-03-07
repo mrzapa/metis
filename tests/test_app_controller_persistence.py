@@ -270,10 +270,7 @@ def test_feedback_note_is_saved(tmp_path, monkeypatch) -> None:
             return _FakeMessage(content="Direct response")
 
     monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
-    monkeypatch.setattr(
-        "PySide6.QtWidgets.QInputDialog.getText",
-        lambda *args, **kwargs: ("useful", True),
-    )
+    monkeypatch.setattr(controller, "_get_text_input", lambda *args, **kwargs: "useful")
 
     controller.on_send_prompt("hello")
     _drain(controller)

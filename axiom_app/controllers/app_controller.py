@@ -168,6 +168,112 @@ class AppController:
             return method(*args)
         return None
 
+    @staticmethod
+    def _connect_signal(signal: Any, callback: Callable[..., Any]) -> bool:
+        if signal is None or not hasattr(signal, "connect"):
+            return False
+        signal.connect(callback)
+        return True
+
+    @staticmethod
+    def _configure_command(widget: Any, callback: Callable[..., Any]) -> bool:
+        if widget is None:
+            return False
+        if hasattr(widget, "configure"):
+            widget.configure(command=callback)
+            return True
+        signal = getattr(widget, "clicked", None)
+        if signal is not None and hasattr(signal, "connect"):
+            signal.connect(callback)
+            return True
+        return False
+
+    @staticmethod
+    def _set_widget_enabled(widget: Any, enabled: bool) -> None:
+        if widget is None:
+            return
+        if hasattr(widget, "setEnabled"):
+            widget.setEnabled(bool(enabled))
+            return
+        if hasattr(widget, "configure"):
+            widget.configure(state="normal" if enabled else "disabled")
+
+    def _dialog_parent(self) -> Any:
+        getter = getattr(self.view, "dialog_parent", None)
+        if callable(getter):
+            return getter()
+        return None
+
+    @staticmethod
+    def _to_qt_filter(filetypes: list[tuple[str, str]]) -> str:
+        parts: list[str] = []
+        for label, pattern in filetypes:
+            cleaned = " ".join(part.strip() for part in str(pattern or "").split() if part.strip())
+            cleaned = cleaned or "*"
+            parts.append(f"{label} ({cleaned})")
+        return ";;".join(parts)
+
+    def _ask_yes_no(self, title: str, text: str) -> bool:
+        from PySide6.QtWidgets import QMessageBox
+
+        result = QMessageBox.question(
+            self._dialog_parent(),
+            title,
+            text,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return result == QMessageBox.Yes
+
+    def _show_error_dialog(self, title: str, text: str) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.critical(self._dialog_parent(), title, text)
+
+    def _show_info_dialog(self, title: str, text: str) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.information(self._dialog_parent(), title, text)
+
+    def _pick_open_files(self, *, title: str, filetypes: list[tuple[str, str]]) -> list[str]:
+        from PySide6.QtWidgets import QFileDialog
+
+        paths, _ = QFileDialog.getOpenFileNames(
+            self._dialog_parent(),
+            title,
+            "",
+            self._to_qt_filter(filetypes),
+        )
+        return [str(path) for path in paths]
+
+    def _pick_open_file(self, *, title: str, filetypes: list[tuple[str, str]]) -> str:
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self._dialog_parent(),
+            title,
+            "",
+            self._to_qt_filter(filetypes),
+        )
+        return str(path or "")
+
+    def _pick_directory(self, *, title: str) -> str:
+        from PySide6.QtWidgets import QFileDialog
+
+        return str(QFileDialog.getExistingDirectory(self._dialog_parent(), title) or "")
+
+    def _get_text_input(
+        self,
+        title: str,
+        label: str,
+        *,
+        text: str = "",
+    ) -> str:
+        from PySide6.QtWidgets import QInputDialog
+
+        value, accepted = QInputDialog.getText(self._dialog_parent(), title, label, text=text)
+        return str(value or "") if accepted else ""
+
     def _selected_history_session_id(self) -> str:
         getter = getattr(self.view, "get_selected_history_session_id", None)
         if callable(getter):
@@ -198,6 +304,18 @@ class AppController:
         if isinstance(bundle, IndexBundle):
             return str(bundle.vector_backend or "json")
         return str(self.model.settings.get("vector_db_type", "json") or "json")
+
+    def _set_build_index_enabled(self, enabled: bool) -> None:
+        if callable(getattr(self.view, "set_build_index_enabled", None)):
+            self.view.set_build_index_enabled(enabled)
+            return
+        self._set_widget_enabled(getattr(self.view, "btn_build_index", None), enabled)
+
+    def _set_cancel_rag_enabled(self, enabled: bool) -> None:
+        if callable(getattr(self.view, "set_cancel_rag_enabled", None)):
+            self.view.set_cancel_rag_enabled(enabled)
+            return
+        self._set_widget_enabled(getattr(self.view, "btn_cancel_rag", None), enabled)
 
     def _sync_profile_options(self) -> None:
         labels = self.profile_repository.list_labels()
@@ -514,10 +632,9 @@ class AppController:
             return True
         if not bool(self.model.settings.get("experimental_override", False)):
             return False
-        from tkinter import messagebox
 
         body = "\n".join(f"- {item}" for item in blockers)
-        approved = messagebox.askyesno(
+        approved = self._ask_yes_no(
             "Experimental override",
             f"{scope} has incompatible settings:\n\n{body}\n\nProceed anyway with Experimental override?",
         )
@@ -680,32 +797,67 @@ class AppController:
 
     def wire_events(self) -> None:
         """Bind view widgets to controller callbacks."""
-        self.view.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        if not self._connect_signal(getattr(self.view, "closeRequested", None), self._on_close):
+            root = getattr(self.view, "root", None)
+            if root is not None and hasattr(root, "protocol"):
+                root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Library view buttons (lazily built — switch_view("library") triggers build)
-        # We pre-switch to ensure library is built before wiring, then return to chat.
-        self.view.switch_view("library")
-        self.view.btn_open_files.configure(command=self.on_open_files)
-        self.view.btn_build_index.configure(command=self.on_build_index)
+        self._connect_signal(getattr(self.view, "openFilesRequested", None), self.on_open_files)
+        self._connect_signal(getattr(self.view, "buildIndexRequested", None), self.on_build_index)
+        self._connect_signal(getattr(self.view, "saveSettingsRequested", None), self.on_save_settings)
+        self._connect_signal(getattr(self.view, "sendRequested", None), self._on_send_clicked)
+        self._connect_signal(getattr(self.view, "cancelRequested", None), self.on_cancel_job)
+        self._connect_signal(getattr(self.view, "newChatRequested", None), self.on_new_chat)
+        self._connect_signal(getattr(self.view, "loadProfileRequested", None), self.on_load_profile)
+        self._connect_signal(getattr(self.view, "saveProfileRequested", None), self.on_save_profile)
+        self._connect_signal(getattr(self.view, "duplicateProfileRequested", None), self.on_duplicate_profile)
+        self._connect_signal(getattr(self.view, "feedbackRequested", None), self.on_submit_feedback)
+        self._connect_signal(getattr(self.view, "historyOpenRequested", None), self.on_open_session)
+        self._connect_signal(getattr(self.view, "historyDeleteRequested", None), self.on_delete_session)
+        self._connect_signal(getattr(self.view, "historyRenameRequested", None), self.on_rename_session)
+        self._connect_signal(getattr(self.view, "historyDuplicateRequested", None), self.on_duplicate_session)
+        self._connect_signal(getattr(self.view, "historyExportRequested", None), self.on_export_session)
+        self._connect_signal(getattr(self.view, "historyRefreshRequested", None), self.refresh_history_rows)
+        self._connect_signal(getattr(self.view, "historySearchRequested", None), self.on_history_search_changed)
+        self._connect_signal(getattr(self.view, "historySelectionRequested", None), self.on_history_selection_changed)
+        self._connect_signal(getattr(self.view, "historyProfileFilterRequested", None), self.on_history_profile_changed)
+        self._connect_signal(getattr(self.view, "loadIndexRequested", None), self.on_load_selected_index)
+        self._connect_signal(getattr(self.view, "addLocalGgufRequested", None), self.on_add_local_gguf_model)
+        self._connect_signal(getattr(self.view, "addLocalSentenceTransformerRequested", None), self.on_add_local_st_model)
+        self._connect_signal(getattr(self.view, "removeLocalModelRequested", None), self.on_remove_local_model)
+        self._connect_signal(getattr(self.view, "activateLocalModelRequested", None), self.on_activate_local_model)
+        self._connect_signal(getattr(self.view, "openLocalModelFolderRequested", None), self.on_open_local_model_folder)
+        self._connect_signal(getattr(self.view, "installLocalDependencyRequested", None), self.on_install_local_dependency)
 
-        # Settings view (lazily built) — force build now so btn_save_settings exists.
-        self.view.switch_view("settings")
-        self.view.btn_save_settings.configure(command=self.on_save_settings)
+        self._configure_command(getattr(self.view, "btn_open_files", None), self.on_open_files)
+        self._configure_command(getattr(self.view, "btn_build_index", None), self.on_build_index)
+        self._configure_command(getattr(self.view, "btn_save_settings", None), self.on_save_settings)
+        self._configure_command(getattr(self.view, "btn_send", None), self._on_send_clicked)
+        self._configure_command(getattr(self.view, "btn_cancel_rag", None), self.on_cancel_job)
+        self._configure_command(getattr(self.view, "btn_new_chat", None), self.on_new_chat)
+        self._configure_command(getattr(self.view, "btn_reset_test_mode", None), self.reset_test_mode)
+        self._configure_command(getattr(self.view, "btn_profile_load", None), self.on_load_profile)
+        self._configure_command(getattr(self.view, "btn_profile_save", None), self.on_save_profile)
+        self._configure_command(getattr(self.view, "btn_profile_duplicate", None), self.on_duplicate_profile)
+        self._configure_command(getattr(self.view, "btn_feedback_up", None), lambda: self.on_submit_feedback(1))
+        self._configure_command(getattr(self.view, "btn_feedback_down", None), lambda: self.on_submit_feedback(-1))
+        self._configure_command(getattr(self.view, "btn_history_new_chat", None), self.on_new_chat)
+        self._configure_command(getattr(self.view, "btn_history_open", None), self.on_open_session)
+        self._configure_command(getattr(self.view, "btn_history_delete", None), self.on_delete_session)
+        self._configure_command(getattr(self.view, "btn_history_rename", None), self.on_rename_session)
+        self._configure_command(getattr(self.view, "btn_history_duplicate", None), self.on_duplicate_session)
+        self._configure_command(getattr(self.view, "btn_history_export", None), self.on_export_session)
+        self._configure_command(getattr(self.view, "btn_history_refresh", None), self.refresh_history_rows)
+        self._configure_command(getattr(self.view, "btn_library_load_index", None), self.on_load_selected_index)
+        self._configure_command(getattr(self.view, "btn_add_local_gguf_model", None), self.on_add_local_gguf_model)
+        self._configure_command(getattr(self.view, "btn_add_local_st_model", None), self.on_add_local_st_model)
+        self._configure_command(getattr(self.view, "btn_remove_local_model", None), self.on_remove_local_model)
+        self._configure_command(getattr(self.view, "btn_activate_local_model_llm", None), lambda: self.on_activate_local_model("llm"))
+        self._configure_command(getattr(self.view, "btn_activate_local_model_embedding", None), lambda: self.on_activate_local_model("embedding"))
+        self._configure_command(getattr(self.view, "btn_open_local_model_folder", None), self.on_open_local_model_folder)
+        self._configure_command(getattr(self.view, "btn_install_local_gguf_dep", None), lambda: self.on_install_local_dependency(["llama-cpp-python"]))
+        self._configure_command(getattr(self.view, "btn_install_local_st_dep", None), lambda: self.on_install_local_dependency(["sentence-transformers"]))
 
-        # History view — build before wiring its actions.
-        self.view.switch_view("history")
-        for attr, callback in (
-            ("btn_history_new_chat", self.on_new_chat),
-            ("btn_history_open", self.on_open_session),
-            ("btn_history_delete", self.on_delete_session),
-            ("btn_history_rename", self.on_rename_session),
-            ("btn_history_duplicate", self.on_duplicate_session),
-            ("btn_history_export", self.on_export_session),
-            ("btn_history_refresh", self.refresh_history_rows),
-        ):
-            widget = getattr(self.view, attr, None)
-            if widget is not None:
-                widget.configure(command=callback)
         bind_history_search = getattr(self.view, "bind_history_search", None)
         if callable(bind_history_search):
             bind_history_search(self.on_history_search_changed)
@@ -715,60 +867,8 @@ class AppController:
         bind_history_profile = getattr(self.view, "bind_history_profile_filter", None)
         if callable(bind_history_profile):
             bind_history_profile(self.on_history_profile_changed)
-        history_tree = getattr(self.view, "_history_tree", None)
-        if history_tree is not None:
-            history_tree.bind("<Double-1>", lambda _e: self.on_open_session())
 
-        self.view.switch_view("chat")
-
-        # Chat view widgets
-        self.view.btn_send.configure(command=self._on_send_clicked)
-        self.view.btn_cancel_rag.configure(command=self.on_cancel_job)
         self.view.set_mode_state_callback(self._on_mode_state_changed)
-        btn_new_chat = getattr(self.view, "btn_new_chat", None)
-        if btn_new_chat is not None:
-            btn_new_chat.configure(command=self.on_new_chat)
-        btn_reset_test_mode = getattr(self.view, "btn_reset_test_mode", None)
-        if btn_reset_test_mode is not None:
-            btn_reset_test_mode.configure(command=self.reset_test_mode)
-        for attr, callback in (
-            ("btn_profile_load", self.on_load_profile),
-            ("btn_profile_save", self.on_save_profile),
-            ("btn_profile_duplicate", self.on_duplicate_profile),
-            ("btn_feedback_up", lambda: self.on_submit_feedback(1)),
-            ("btn_feedback_down", lambda: self.on_submit_feedback(-1)),
-        ):
-            widget = getattr(self.view, attr, None)
-            if widget is not None:
-                widget.configure(command=callback)
-
-        # Ctrl+Enter / Return in the multi-line Text input submits
-        self.view.prompt_entry.bind("<Return>",
-                                   lambda _e: self._on_send_clicked() or "break")
-
-        for attr, callback in (
-            ("btn_library_load_index", self.on_load_selected_index),
-        ):
-            widget = getattr(self.view, attr, None)
-            if widget is not None:
-                widget.configure(command=callback)
-
-        for attr, callback in (
-            ("btn_add_local_gguf_model", self.on_add_local_gguf_model),
-            ("btn_add_local_st_model", self.on_add_local_st_model),
-            ("btn_remove_local_model", self.on_remove_local_model),
-            ("btn_activate_local_model_llm", lambda: self.on_activate_local_model("llm")),
-            ("btn_activate_local_model_embedding", lambda: self.on_activate_local_model("embedding")),
-            ("btn_open_local_model_folder", self.on_open_local_model_folder),
-            ("btn_install_local_gguf_dep", lambda: self.on_install_local_dependency(["llama-cpp-python"])),
-            ("btn_install_local_st_dep", lambda: self.on_install_local_dependency(["sentence-transformers"])),
-        ):
-            widget = getattr(self.view, attr, None)
-            if widget is not None:
-                widget.configure(command=callback)
-
-        # Pass loaded settings to the view for display in the Settings tab.
-        # Called last so the settings tab is already built and widgets update immediately.
         self.view.populate_settings(self.model.settings)
         self.refresh_history_rows(update_detail=False)
 
@@ -974,10 +1074,7 @@ class AppController:
             fn, *args, cancel_token=token, task_name=task_name
         )
         self._log.info("Task started: %s", task_name)
-        try:
-            self.view.btn_cancel_rag.configure(state="normal")
-        except Exception:
-            pass
+        self._set_cancel_rag_enabled(True)
 
     def cancel_current_task(self) -> None:
         """Signal the active background task to stop (cooperative)."""
@@ -1005,12 +1102,8 @@ class AppController:
             self._active_token = None
             self._pending_task_meta = {}
             self._safe_view_call("reset_progress")
-            # Re-enable Build Index and disable Cancel once any task finishes.
-            try:
-                self.view.btn_build_index.configure(state="normal")
-                self.view.btn_cancel_rag.configure(state="disabled")
-            except Exception:
-                pass
+            self._set_build_index_enabled(True)
+            self._set_cancel_rag_enabled(False)
 
     def _handle_message(self, msg: dict[str, Any]) -> None:
         mtype = msg.get("type")
@@ -1165,7 +1258,13 @@ class AppController:
 
     def _on_close(self) -> None:
         self.shutdown()
-        self.view.root.destroy()
+        close_window = getattr(self.view, "close_window", None)
+        if callable(close_window):
+            close_window()
+            return
+        root = getattr(self.view, "root", None)
+        if root is not None and hasattr(root, "destroy"):
+            root.destroy()
 
     # ------------------------------------------------------------------
     # Action handlers
@@ -1173,8 +1272,6 @@ class AppController:
 
     def on_open_files(self) -> None:
         """Open a file dialog and load selected files into the model."""
-        from tkinter import filedialog  # lazy: only valid when Tk is running
-
         if is_kreuzberg_available():
             # Build a rich filetype list from the extensions kreuzberg supports.
             filetypes: list[tuple[str, str]] = [
@@ -1197,7 +1294,7 @@ class AppController:
             ]
             title = "Select text file(s)"
 
-        paths = filedialog.askopenfilenames(title=title, filetypes=filetypes)
+        paths = self._pick_open_files(title=title, filetypes=filetypes)
         if not paths:
             return  # user cancelled
 
@@ -1266,7 +1363,7 @@ class AppController:
             post_msg({"type": "log", "text": f"[index] Saved persisted index to {out_path}"})
             return bundle
 
-        self.view.btn_build_index.configure(state="disabled")
+        self._set_build_index_enabled(False)
         self._safe_view_call("set_index_info", "Indexing…")
         self.start_task(_TASK_BUILD_INDEX, _worker)
 
@@ -1749,9 +1846,7 @@ class AppController:
         session_id = self._selected_history_session_id()
         if not session_id:
             return
-        from tkinter import simpledialog
-
-        title = simpledialog.askstring("Rename Session", "New session title:")
+        title = self._get_text_input("Rename Session", "New session title:")
         if not title:
             return
         summary = self.session_repository.rename_session(session_id, title)
@@ -1771,15 +1866,13 @@ class AppController:
         if not session_id:
             return
 
-        from tkinter import filedialog, messagebox
-
-        save_dir = filedialog.askdirectory(title="Select export directory")
+        save_dir = self._pick_directory(title="Select export directory")
         if not save_dir:
             return
         try:
             md_path, json_path = self.session_repository.export_session(session_id, save_dir)
         except OSError as exc:
-            messagebox.showerror("Export Failed", f"Could not export session: {exc}")
+            self._show_error_dialog("Export Failed", f"Could not export session: {exc}")
             return
 
         self._safe_view_call(
@@ -1790,7 +1883,7 @@ class AppController:
             "set_status",
             f"Exported session: {pathlib.Path(md_path).name}",
         )
-        messagebox.showinfo("Session Export", f"Exported:\n{md_path}\n{json_path}")
+        self._show_info_dialog("Session Export", f"Exported:\n{md_path}\n{json_path}")
 
     def on_load_profile(self) -> None:
         label = self._current_profile_label()
@@ -1802,15 +1895,13 @@ class AppController:
         self._safe_view_call("set_status", f"Loaded profile: {profile.name}")
 
     def on_save_profile(self) -> None:
-        from tkinter import messagebox, simpledialog
-
         current_label = self._current_profile_label()
         current_path = self.profile_repository.path_from_label(current_label)
         if current_path is not None:
             target_name = current_path.stem
             target_path = current_path
         else:
-            target_name = simpledialog.askstring("Save Profile", "Profile name:")
+            target_name = self._get_text_input("Save Profile", "Profile name:")
             target_path = None
         if not target_name:
             return
@@ -1818,7 +1909,7 @@ class AppController:
         try:
             saved_path = self.profile_repository.save_profile(profile, target_path=target_path)
         except OSError as exc:
-            messagebox.showerror("Save Profile Failed", str(exc))
+            self._show_error_dialog("Save Profile Failed", str(exc))
             return
         label = self.profile_repository.label_for_path(saved_path)
         self.model.current_profile_label = label
@@ -1829,14 +1920,12 @@ class AppController:
         self._safe_view_call("set_status", f"Saved profile: {profile.name}")
 
     def on_duplicate_profile(self) -> None:
-        from tkinter import messagebox, simpledialog
-
         current_label = self._current_profile_label()
         source = self.profile_repository.get_profile(current_label)
-        new_name = simpledialog.askstring(
+        new_name = self._get_text_input(
             "Duplicate Profile",
             "Name for the duplicate profile:",
-            initialvalue=f"{source.name} Copy",
+            text=f"{source.name} Copy",
         )
         if not new_name:
             return
@@ -1846,7 +1935,7 @@ class AppController:
                 new_name=new_name,
             )
         except OSError as exc:
-            messagebox.showerror("Duplicate Profile Failed", str(exc))
+            self._show_error_dialog("Duplicate Profile Failed", str(exc))
             return
         label = self.profile_repository.label_for_path(saved_path)
         self.model.current_profile_label = label
@@ -1857,17 +1946,15 @@ class AppController:
         self._safe_view_call("set_status", f"Duplicated profile: {new_name}")
 
     def on_submit_feedback(self, vote: int) -> None:
-        from tkinter import simpledialog
-
         session_id = str(getattr(self.model, "current_session_id", "") or "")
         run_id = str(getattr(self.model, "last_run_id", "") or "")
         if not session_id or not run_id:
             self._safe_view_call("set_status", "No completed run is available for feedback.")
             return
-        note = simpledialog.askstring(
+        note = self._get_text_input(
             "Feedback note",
             "Optional note for this rating:",
-            initialvalue="",
+            text="",
         )
         self.session_repository.save_feedback(
             session_id,
@@ -1892,9 +1979,7 @@ class AppController:
             self._safe_view_call("set_status", f"Loaded index: {bundle.index_id}")
 
     def on_add_local_gguf_model(self) -> None:
-        from tkinter import filedialog
-
-        path = filedialog.askopenfilename(
+        path = self._pick_open_file(
             title="Select GGUF model file",
             filetypes=[("GGUF files", "*.gguf"), ("All files", "*.*")],
         )
@@ -1911,9 +1996,7 @@ class AppController:
         self._safe_view_call("set_status", f"Added GGUF model: {pathlib.Path(path).name}")
 
     def on_add_local_st_model(self) -> None:
-        from tkinter import simpledialog
-
-        name = simpledialog.askstring(
+        name = self._get_text_input(
             "Add Sentence Transformer",
             "Model name or HF id:",
         )
@@ -1943,8 +2026,6 @@ class AppController:
         self._safe_view_call("set_status", "Local model removed.")
 
     def on_activate_local_model(self, target: str) -> None:
-        from tkinter import messagebox
-
         entry_id = self._selected_local_model_entry_id()
         entry = self.local_model_registry_service.get_entry(
             self.model.settings.get("local_model_registry", {}),
@@ -1960,7 +2041,7 @@ class AppController:
                 target=target,
             )
         except ValueError as exc:
-            messagebox.showerror("Activation Failed", str(exc))
+            self._show_error_dialog("Activation Failed", str(exc))
             return
         self.model.save_settings(self.model.settings)
         self._safe_view_call("populate_settings", self.model.settings)
@@ -2265,8 +2346,6 @@ class AppController:
         Called when the user clicks "Save Settings" in the Settings pane.
         Validates all numeric fields and shows a messagebox on error or success.
         """
-        from tkinter import messagebox  # lazy; only valid while Tk is running
-
         raw = self.view.collect_settings()
         raw["selected_profile"] = self._current_profile_label()
         raw["selected_index_path"] = str(getattr(self.model, "active_index_path", "") or "")
@@ -2310,6 +2389,7 @@ class AppController:
             "enable_recursive_retrieval", "enable_citation_v2",
             "enable_claim_level_grounding_citefix_lite",
             "agent_lightning_enabled", "prefer_comprehension_index",
+            "deepread_mode", "secure_mode", "experimental_override",
         ]
         _STRING_FIELDS = [
             "local_gguf_model_path",
@@ -2360,7 +2440,7 @@ class AppController:
                 coerced[key] = str(val).strip() if isinstance(val, str) else val
 
         if errors:
-            messagebox.showerror(
+            self._show_error_dialog(
                 "Invalid Settings",
                 "Please fix these errors before saving:\n\n"
                 + "\n".join(f"• {e}" for e in errors),
@@ -2371,7 +2451,7 @@ class AppController:
             str(coerced.get("llm_provider", "") or "").strip() == "local_gguf"
             and not str(coerced.get("local_gguf_model_path", "") or "").strip()
         ):
-            messagebox.showerror(
+            self._show_error_dialog(
                 "Local GGUF Model Required",
                 "LLM Provider is set to local_gguf, but GGUF Model Path is empty. "
                 "Please select a .gguf model file before saving.",
@@ -2382,7 +2462,7 @@ class AppController:
         if str(coerced.get("llm_provider", "") or "").strip() == "local_gguf":
             model_path = pathlib.Path(str(coerced.get("local_gguf_model_path", "")).strip()).expanduser()
             if not model_path.is_file():
-                messagebox.showerror(
+                self._show_error_dialog(
                     "Invalid Local GGUF Model",
                     "LLM Provider is set to local_gguf, but the configured GGUF model file "
                     f"does not exist:\n\n{model_path}",
@@ -2393,7 +2473,7 @@ class AppController:
         try:
             self.model.save_settings(coerced)
         except OSError as exc:
-            messagebox.showerror(
+            self._show_error_dialog(
                 "Save Failed",
                 f"Could not write settings.json:\n{exc}",
             )
@@ -2408,8 +2488,9 @@ class AppController:
         self.refresh_available_indexes(select_path=str(self.model.settings.get("selected_index_path", "") or ""))
         self._log.info("Settings saved successfully (%d keys).", len(coerced))
 
-        new_theme = coerced.get("theme", self.view._theme_name)
-        if new_theme != self.view._theme_name:
+        current_theme = getattr(self.view, "_theme_name", coerced.get("theme", "space_dust"))
+        new_theme = coerced.get("theme", current_theme)
+        if new_theme != current_theme and callable(getattr(self.view, "apply_theme", None)):
             self.view.apply_theme(new_theme)
 
         if getattr(self.model, "current_session_id", ""):
