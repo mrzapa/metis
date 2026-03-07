@@ -83,9 +83,13 @@ APP_SUBTITLE = "Personal RAG Assistant"
 
 MODE_OPTIONS = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"]
 
-_SIDEBAR_W = 76
+_SIDEBAR_W = 88
 _SHELL_RADIUS = 28
 _CARD_RADIUS = 22
+_DEFAULT_WINDOW_W = 1480
+_DEFAULT_WINDOW_H = 960
+_MIN_WINDOW_W = 1180
+_MIN_WINDOW_H = 760
 _NAV_ITEMS = [
     ("chat", "⌂", "Chat"),
     ("library", "▣", "Library"),
@@ -237,7 +241,7 @@ class AppView:
         One of "space_dust" (default), "light", or "dark".
     """
 
-    def __init__(self, root: tk.Tk, theme_name: str = "light") -> None:
+    def __init__(self, root: tk.Tk, theme_name: str = "space_dust") -> None:
         self.root = root
         self._theme_name = theme_name
         self._palette = get_palette(theme_name)
@@ -277,6 +281,7 @@ class AppView:
         self._chat_has_messages = False
         self._sidebar_brand_canvas: tk.Canvas | None = None
         self._hero_orb_canvas: tk.Canvas | None = None
+        self._responsive_after_id = None
 
         # Settings display data — populated by controller via populate_settings().
         self._settings_data: dict = {}
@@ -330,8 +335,8 @@ class AppView:
 
     def _build(self) -> None:
         self.root.title(f"{APP_NAME} — {APP_SUBTITLE}" if APP_SUBTITLE else APP_NAME)
-        self.root.geometry("1320x900")
-        self.root.minsize(900, 600)
+        self.root.geometry(f"{_DEFAULT_WINDOW_W}x{_DEFAULT_WINDOW_H}")
+        self.root.minsize(_MIN_WINDOW_W, _MIN_WINDOW_H)
 
         self._load_icon()
 
@@ -371,6 +376,8 @@ class AppView:
         self._sidebar_divider.grid(row=0, column=1, sticky="ns")
         self._build_main_content()
         self._apply_runtime_palette()
+        self.root.bind("<Configure>", self._schedule_responsive_layout, add="+")
+        self.root.after_idle(self._refresh_responsive_layout)
 
     def _build_sidebar(self) -> None:
         pal = self._palette
@@ -384,10 +391,11 @@ class AppView:
 
         brand_wrap = ttk.Frame(self.sidebar_frame, style="Sidebar.TFrame")
         brand_wrap.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(UI_SPACING["m"], UI_SPACING["l"]))
+        self._sidebar_logo_photo = self._load_sidebar_logo(max_dim=46)
         self._sidebar_brand_canvas = tk.Canvas(
             brand_wrap,
-            width=40,
-            height=40,
+            width=56,
+            height=56,
             bg=pal.get("sidebar_bg", pal["surface"]),
             highlightthickness=0,
             bd=0,
@@ -442,7 +450,7 @@ class AppView:
         footer = ttk.Frame(self.sidebar_frame, style="Sidebar.TFrame")
         footer.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(UI_SPACING["s"], UI_SPACING["m"]))
         ttk.Label(footer, text=f"{APP_NAME} {APP_VERSION}", style="Sidebar.Caption.TLabel").pack(anchor="center")
-        ttk.Label(footer, text="ttk runtime", style="Sidebar.Caption.TLabel").pack(anchor="center", pady=(2, 0))
+        ttk.Label(footer, text="ttk runtime", style="Sidebar.Caption.TLabel").pack(anchor="center", pady=(3, 0))
 
     def _build_main_content(self) -> None:
         shell_inner = self._shell_inner
@@ -503,6 +511,160 @@ class AppView:
         inner.pack(fill="both", expand=True)
         return card, inner
 
+    def _create_scrollable_page(
+        self,
+        parent,
+        *,
+        bg_key: str = "workspace_bg",
+    ) -> tuple[ttk.Frame, tk.Canvas, ttk.Frame, ttk.Scrollbar]:
+        """Create a vertically scrollable page shell with scoped wheel support."""
+        pal = self._palette
+        host = ttk.Frame(parent, style="MainContent.TFrame")
+        host.rowconfigure(0, weight=1)
+        host.columnconfigure(0, weight=1)
+
+        canvas = tk.Canvas(
+            host,
+            bg=pal.get(bg_key, pal.get("workspace_bg", pal["surface"])),
+            highlightthickness=0,
+            bd=0,
+        )
+        canvas.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = ttk.Scrollbar(host, orient="vertical", command=canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        inner = ttk.Frame(canvas, style="MainContent.TFrame")
+        window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _sync_scrollregion(_event=None) -> None:
+            try:
+                bbox = canvas.bbox("all")
+                if bbox:
+                    canvas.configure(scrollregion=bbox)
+            except tk.TclError:
+                return
+
+        def _sync_width(event: tk.Event) -> None:
+            try:
+                canvas.itemconfigure(window_id, width=event.width)
+            except tk.TclError:
+                return
+
+        inner.bind("<Configure>", _sync_scrollregion, add="+")
+        canvas.bind("<Configure>", _sync_width, add="+")
+        self._bind_scoped_mousewheel(canvas, inner)
+        return host, canvas, inner, scrollbar
+
+    def _bind_scoped_mousewheel(self, canvas: tk.Canvas, *widgets: tk.Misc) -> None:
+        """Bind wheel events only while the pointer is over a scroll region."""
+
+        def _on_mousewheel(event: tk.Event) -> str | None:
+            try:
+                if getattr(event, "delta", 0):
+                    canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                    return "break"
+                num = getattr(event, "num", None)
+                if num == 4:
+                    canvas.yview_scroll(-1, "units")
+                    return "break"
+                if num == 5:
+                    canvas.yview_scroll(1, "units")
+                    return "break"
+            except tk.TclError:
+                return None
+            return None
+
+        def _bind(_event=None) -> None:
+            try:
+                self.root.bind_all("<MouseWheel>", _on_mousewheel, add="+")
+                self.root.bind_all("<Button-4>", _on_mousewheel, add="+")
+                self.root.bind_all("<Button-5>", _on_mousewheel, add="+")
+            except tk.TclError:
+                return
+
+        def _unbind(_event=None) -> None:
+            try:
+                self.root.unbind_all("<MouseWheel>")
+                self.root.unbind_all("<Button-4>")
+                self.root.unbind_all("<Button-5>")
+            except tk.TclError:
+                return
+
+        for widget in (canvas, *widgets):
+            widget.bind("<Enter>", _bind, add="+")
+            widget.bind("<Leave>", _unbind, add="+")
+
+    def _schedule_responsive_layout(self, _event=None) -> None:
+        if self._responsive_after_id is not None:
+            try:
+                self.root.after_cancel(self._responsive_after_id)
+            except tk.TclError:
+                pass
+        try:
+            self._responsive_after_id = self.root.after(30, self._refresh_responsive_layout)
+        except tk.TclError:
+            self._responsive_after_id = None
+
+    def _refresh_responsive_layout(self) -> None:
+        self._responsive_after_id = None
+        try:
+            content_width = max(self.main_content_frame.winfo_width(), _MIN_WINDOW_W - 180)
+        except Exception:
+            return
+
+        if hasattr(self, "_chat_primary_actions"):
+            if content_width < 1360:
+                self._chat_primary_actions.grid(row=1, column=0, columnspan=2, sticky="w", pady=(UI_SPACING["s"], 0))
+            else:
+                self._chat_primary_actions.grid(row=0, column=1, sticky="e", pady=0)
+
+        if hasattr(self, "_chat_secondary_actions"):
+            if content_width < 1280:
+                self._chat_secondary_actions.pack_forget()
+                self._chat_secondary_actions.pack(side="left", pady=(UI_SPACING["xs"], 0))
+                self._chat_status_cluster.pack_forget()
+                self._chat_status_cluster.pack(side="left", padx=(UI_SPACING["m"], 0), pady=(UI_SPACING["xs"], 0))
+            else:
+                self._chat_status_cluster.pack_forget()
+                self._chat_status_cluster.pack(side="right")
+                self._chat_secondary_actions.pack_forget()
+                self._chat_secondary_actions.pack(side="right")
+
+        if hasattr(self, "_suggestion_buttons"):
+            columns = 4 if content_width >= 1420 else 2
+            for idx in range(4):
+                self._suggestion_panel.grid_columnconfigure(idx, weight=1 if idx < columns else 0)
+            for idx, button in enumerate(self._suggestion_buttons):
+                row = 1 + (idx // columns)
+                column = idx % columns
+                padx = (0 if column == 0 else UI_SPACING["xs"], 0)
+                pady = (0, 0 if row == 1 else UI_SPACING["xs"])
+                button.grid_configure(row=row, column=column, padx=padx, pady=pady)
+
+        hero_wrap = max(460, min(content_width - 260, 860))
+        body_wrap = max(440, min(content_width - 320, 780))
+        if hasattr(self, "_hero_greeting_label"):
+            self._hero_greeting_label.configure(wraplength=hero_wrap)
+        if hasattr(self, "_hero_question_label"):
+            self._hero_question_label.configure(wraplength=hero_wrap)
+        if hasattr(self, "_hero_copy_label"):
+            self._hero_copy_label.configure(wraplength=body_wrap)
+        if hasattr(self, "_active_index_path_label"):
+            self._active_index_path_label.configure(wraplength=max(560, content_width - 260))
+        if hasattr(self, "_history_detail_summary_label"):
+            self._history_detail_summary_label.configure(wraplength=max(320, int(content_width * 0.28)))
+        if hasattr(self, "_evidence_status_label"):
+            self._evidence_status_label.configure(wraplength=320 if content_width < 1400 else 360)
+        if hasattr(self, "_evidence_pane_holder"):
+            width = 360 if content_width < 1380 else 420
+            try:
+                self._evidence_pane_holder.configure(width=width)
+                self._conversation_shell.grid_columnconfigure(1, minsize=width, weight=0)
+            except tk.TclError:
+                pass
+
     def _draw_brand_mark(self) -> None:
         if self._sidebar_brand_canvas is None:
             return
@@ -510,14 +672,28 @@ class AppView:
         canvas = self._sidebar_brand_canvas
         canvas.delete("all")
         canvas.configure(bg=pal.get("sidebar_bg", pal["surface"]))
-        canvas.create_oval(4, 4, 36, 36, fill=pal.get("secondary", pal["text"]), outline="")
-        canvas.create_oval(11, 11, 29, 29, fill=pal.get("surface", "#FFFFFF"), outline="")
+        if self._sidebar_logo_photo is None:
+            self._sidebar_logo_photo = self._load_sidebar_logo(max_dim=46)
+        canvas.create_oval(
+            4,
+            4,
+            52,
+            52,
+            fill=pal.get("surface_alt", pal["surface"]),
+            outline=pal.get("sidebar_border", pal["border"]),
+            width=1,
+        )
+        if self._sidebar_logo_photo is not None:
+            canvas.create_image(28, 28, image=self._sidebar_logo_photo)
+            return
+        canvas.create_oval(10, 10, 46, 46, fill=pal.get("secondary", pal["text"]), outline="")
+        canvas.create_oval(18, 18, 38, 38, fill=pal.get("surface", "#FFFFFF"), outline="")
         canvas.create_text(
-            20,
-            20,
+            28,
+            28,
             text="A",
             fill=pal.get("primary", pal["text"]),
-            font=(self._fonts["body_bold"][0], 13, "bold"),
+            font=(self._fonts["body_bold"][0], 15, "bold"),
         )
 
     def _draw_hero_orb(self) -> None:
@@ -527,11 +703,12 @@ class AppView:
         canvas = self._hero_orb_canvas
         canvas.delete("all")
         canvas.configure(bg=pal.get("workspace_bg", pal["surface"]))
-        center = 60
+        center = 72
         rings = [
-            (18, pal.get("primary", "#8C5AF7")),
-            (28, pal.get("tertiary", "#B78EFF")),
-            (40, pal.get("accent_glow", "#E8D9FF")),
+            (24, pal.get("primary", "#35B7FF")),
+            (36, pal.get("tertiary", "#8FE7FF")),
+            (52, pal.get("accent_glow", "#134A73")),
+            (64, pal.get("surface_alt", pal["surface"])),
         ]
         for radius, color in reversed(rings):
             canvas.create_oval(
@@ -542,8 +719,20 @@ class AppView:
                 fill=color,
                 outline="",
             )
-        canvas.create_oval(32, 26, 58, 50, fill="#FFFFFF", outline="")
-        canvas.create_oval(40, 34, 52, 46, fill=pal.get("tertiary", pal["primary"]), outline="")
+        canvas.create_oval(54, 42, 84, 72, fill="#FFFFFF", outline="")
+        canvas.create_oval(63, 51, 77, 65, fill=pal.get("tertiary", pal["primary"]), outline="")
+        canvas.create_oval(32, 88, 112, 124, fill=pal.get("surface", pal["surface_alt"]), outline="")
+        canvas.create_arc(
+            20,
+            84,
+            124,
+            126,
+            start=22,
+            extent=148,
+            style=tk.ARC,
+            width=4,
+            outline=pal.get("primary", "#35B7FF"),
+        )
 
     def _configure_chat_tags(self) -> None:
         pal = self._palette
@@ -715,6 +904,13 @@ class AppView:
                 )
             except tk.TclError:
                 pass
+        for canvas_attr in ("_library_page_canvas", "_settings_canvas"):
+            canvas_widget = getattr(self, canvas_attr, None)
+            if isinstance(canvas_widget, tk.Canvas):
+                try:
+                    canvas_widget.configure(bg=pal.get("workspace_bg", pal["surface"]))
+                except tk.TclError:
+                    pass
         if hasattr(self, "_sidebar_divider"):
             try:
                 self._sidebar_divider.configure(bg=pal.get("sidebar_border", pal["border"]))
@@ -734,12 +930,36 @@ class AppView:
                 )
             except tk.TclError:
                 pass
+        for widget_name in ("_chat_empty_inner", "_hero_line"):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                try:
+                    widget.configure(bg=pal.get("workspace_bg", pal["surface"]))
+                except tk.TclError:
+                    pass
+        if hasattr(self, "_hero_greeting_label"):
+            try:
+                self._hero_greeting_label.configure(
+                    bg=pal.get("workspace_bg", pal["surface"]),
+                    fg=pal["text"],
+                )
+            except tk.TclError:
+                pass
+        if hasattr(self, "_hero_copy_label"):
+            try:
+                self._hero_copy_label.configure(
+                    bg=pal.get("workspace_bg", pal["surface"]),
+                    fg=pal.get("muted_text", pal["status"]),
+                )
+            except tk.TclError:
+                pass
         if hasattr(self, "_rag_toggle"):
             self._rag_toggle.update_palette(pal)
         if hasattr(self, "chat_display"):
             self._configure_chat_tags()
         self._refresh_llm_badge()
         self._sync_mode_chip()
+        self._refresh_responsive_layout()
         if self._active_view:
             self.switch_view(self._active_view)
 
@@ -748,7 +968,7 @@ class AppView:
     # ------------------------------------------------------------------
 
     def _build_chat_view(self) -> None:
-        """Chat view: prompt-first shell with hero empty state and conversation mode."""
+        """Chat view: premium prompt-first shell with a stable toolbar and dock."""
         pal = self._palette
         frame = self._views["chat"]
         frame.rowconfigure(0, weight=1)
@@ -759,66 +979,83 @@ class AppView:
         outer.grid_rowconfigure(1, weight=1)
         outer.grid_columnconfigure(0, weight=1)
 
-        toolbar = ttk.Frame(outer, style="Utility.TFrame", padding=(0, 0, 0, UI_SPACING["s"]))
-        toolbar.grid(row=0, column=0, sticky="ew")
-        toolbar.grid_columnconfigure(0, weight=1)
-        toolbar.grid_columnconfigure(1, weight=1)
+        toolbar_card, toolbar_inner = self._create_card(
+            outer,
+            radius=18,
+            bg_key="surface_elevated",
+            border_key="border",
+            shadow_key=None,
+            inner_padding=16,
+            shadow_offset=0,
+        )
+        toolbar_card.grid(row=0, column=0, sticky="ew", pady=(0, UI_SPACING["m"]))
+        toolbar_inner.columnconfigure(0, weight=1)
 
-        left_tools = ttk.Frame(toolbar, style="Utility.TFrame")
-        left_tools.grid(row=0, column=0, sticky="w")
-        ttk.Label(left_tools, text="Mode", style="Caption.TLabel").pack(side="left", padx=(0, UI_SPACING["xs"]))
+        toolbar_top = ttk.Frame(toolbar_inner, style="Utility.TFrame")
+        toolbar_top.grid(row=0, column=0, sticky="ew")
+        toolbar_top.grid_columnconfigure(0, weight=1)
+        toolbar_top.grid_columnconfigure(1, weight=0)
+
+        self._chat_selectors = ttk.Frame(toolbar_top, style="Utility.TFrame")
+        self._chat_selectors.grid(row=0, column=0, sticky="w")
+        ttk.Label(self._chat_selectors, text="Mode", style="Caption.TLabel").pack(side="left", padx=(0, UI_SPACING["xs"]))
         self._mode_combo = ttk.Combobox(
-            left_tools,
+            self._chat_selectors,
             textvariable=self._mode_var,
             values=MODE_OPTIONS,
             state="readonly",
             width=12,
         )
-        self._mode_combo.pack(side="left", padx=(0, UI_SPACING["s"]))
-
-        ttk.Label(left_tools, text="Profile", style="Caption.TLabel").pack(side="left", padx=(0, UI_SPACING["xs"]))
+        self._mode_combo.pack(side="left", padx=(0, UI_SPACING["m"]))
+        ttk.Label(self._chat_selectors, text="Profile", style="Caption.TLabel").pack(side="left", padx=(0, UI_SPACING["xs"]))
         self._profile_combo = ttk.Combobox(
-            left_tools,
+            self._chat_selectors,
             textvariable=self._profile_var,
             values=["Built-in: Default"],
             state="readonly",
             width=22,
         )
-        self._profile_combo.pack(side="left", padx=(0, UI_SPACING["xs"]))
-        self.btn_profile_load = ttk.Button(left_tools, text="Load", style="Secondary.TButton")
-        self.btn_profile_load.pack(side="left", padx=(0, UI_SPACING["xs"]))
-        self.btn_profile_save = ttk.Button(left_tools, text="Save", style="Secondary.TButton")
-        self.btn_profile_save.pack(side="left", padx=(0, UI_SPACING["xs"]))
-        self.btn_profile_duplicate = ttk.Button(left_tools, text="Duplicate", style="Secondary.TButton")
-        self.btn_profile_duplicate.pack(side="left")
+        self._profile_combo.pack(side="left")
 
-        right_tools = ttk.Frame(toolbar, style="Utility.TFrame")
-        right_tools.grid(row=0, column=1, sticky="e")
-        self._llm_badge_var = tk.StringVar(value="LLM: --")
-        ttk.Label(right_tools, textvariable=self._llm_badge_var, style="Badge.TLabel").pack(
-            side="right",
-            padx=(UI_SPACING["xs"], 0),
-        )
+        self._chat_primary_actions = ttk.Frame(toolbar_top, style="Utility.TFrame")
+        self._chat_primary_actions.grid(row=0, column=1, sticky="e")
+        self.btn_profile_load = ttk.Button(self._chat_primary_actions, text="Load", style="Secondary.TButton")
+        self.btn_profile_load.pack(side="left", padx=(0, UI_SPACING["xs"]))
+        self.btn_profile_save = ttk.Button(self._chat_primary_actions, text="Save", style="Secondary.TButton")
+        self.btn_profile_save.pack(side="left", padx=(0, UI_SPACING["xs"]))
+        self.btn_profile_duplicate = ttk.Button(self._chat_primary_actions, text="Duplicate", style="Secondary.TButton")
+        self.btn_profile_duplicate.pack(side="left", padx=(0, UI_SPACING["xs"]))
         self.btn_new_chat = ttk.Button(
-            right_tools,
+            self._chat_primary_actions,
             text="New Chat",
             style="Primary.TButton",
             command=self._on_new_chat,
         )
-        self.btn_new_chat.pack(side="right", padx=(UI_SPACING["xs"], 0))
+        self.btn_new_chat.pack(side="left")
+
+        toolbar_bottom = ttk.Frame(toolbar_inner, style="Utility.TFrame")
+        toolbar_bottom.grid(row=1, column=0, sticky="ew", pady=(UI_SPACING["s"], 0))
+
+        self._chat_status_cluster = ttk.Frame(toolbar_bottom, style="Utility.TFrame")
+        self._chat_status_cluster.pack(side="right")
+        self._llm_badge_var = tk.StringVar(value="LLM: --")
+        ttk.Label(self._chat_status_cluster, textvariable=self._llm_badge_var, style="Badge.TLabel").pack(side="left")
+
+        self._chat_secondary_actions = ttk.Frame(toolbar_bottom, style="Utility.TFrame")
+        self._chat_secondary_actions.pack(side="right", padx=(UI_SPACING["m"], 0))
         self._evidence_toggle_btn = ttk.Button(
-            right_tools,
+            self._chat_secondary_actions,
             text="Evidence",
             style="Secondary.TButton",
             command=self._toggle_evidence_panel,
         )
-        self._evidence_toggle_btn.pack(side="right", padx=(UI_SPACING["xs"], 0))
-        self.btn_feedback_down = ttk.Button(right_tools, text="Down", style="Secondary.TButton", width=5)
-        self.btn_feedback_down.pack(side="right", padx=(UI_SPACING["xs"], 0))
-        self.btn_feedback_up = ttk.Button(right_tools, text="Up", style="Secondary.TButton", width=4)
-        self.btn_feedback_up.pack(side="right", padx=(UI_SPACING["xs"], 0))
-        self.btn_reset_test_mode = ttk.Button(right_tools, text="Reset Test Mode", style="Secondary.TButton")
-        self.btn_reset_test_mode.pack(side="right", padx=(UI_SPACING["xs"], 0))
+        self._evidence_toggle_btn.pack(side="left", padx=(0, UI_SPACING["xs"]))
+        self.btn_feedback_up = ttk.Button(self._chat_secondary_actions, text="Up", style="Secondary.TButton", width=4)
+        self.btn_feedback_up.pack(side="left", padx=(0, UI_SPACING["xs"]))
+        self.btn_feedback_down = ttk.Button(self._chat_secondary_actions, text="Down", style="Secondary.TButton", width=5)
+        self.btn_feedback_down.pack(side="left", padx=(0, UI_SPACING["xs"]))
+        self.btn_reset_test_mode = ttk.Button(self._chat_secondary_actions, text="Reset Test Mode", style="Secondary.TButton")
+        self.btn_reset_test_mode.pack(side="left")
 
         body = ttk.Frame(outer, style="MainContent.TFrame")
         body.grid(row=1, column=0, sticky="nsew")
@@ -835,43 +1072,67 @@ class AppView:
         self._chat_empty_state.grid(row=0, column=0, sticky="nsew")
         self._chat_empty_state.grid_rowconfigure(0, weight=1)
         self._chat_empty_state.grid_columnconfigure(0, weight=1)
-        empty_inner = ttk.Frame(self._chat_empty_state, style="MainContent.TFrame")
-        empty_inner.grid(row=0, column=0)
+        self._chat_empty_inner = tk.Frame(
+            self._chat_empty_state,
+            bg=pal.get("workspace_bg", pal["surface"]),
+            bd=0,
+            highlightthickness=0,
+        )
+        self._chat_empty_inner.grid(row=0, column=0, padx=UI_SPACING["xl"], pady=(UI_SPACING["xl"], UI_SPACING["m"]))
 
         self._hero_orb_canvas = tk.Canvas(
-            empty_inner,
-            width=120,
-            height=120,
+            self._chat_empty_inner,
+            width=144,
+            height=144,
             bg=pal.get("workspace_bg", pal["surface"]),
             highlightthickness=0,
             bd=0,
         )
-        self._hero_orb_canvas.pack(pady=(UI_SPACING["l"], UI_SPACING["s"]))
+        self._hero_orb_canvas.pack(pady=(0, UI_SPACING["s"]))
         self._draw_hero_orb()
 
         self._hero_greeting_var = tk.StringVar(value=self._current_greeting())
-        ttk.Label(empty_inner, textvariable=self._hero_greeting_var, style="Title.TLabel").pack()
+        self._hero_greeting_label = tk.Label(
+            self._chat_empty_inner,
+            textvariable=self._hero_greeting_var,
+            font=self._fonts["h1"],
+            bg=pal.get("workspace_bg", pal["surface"]),
+            fg=pal["text"],
+            justify="center",
+        )
+        self._hero_greeting_label.pack(pady=(0, UI_SPACING["xs"]))
 
-        hero_line = ttk.Frame(empty_inner, style="MainContent.TFrame")
-        hero_line.pack(pady=(4, UI_SPACING["xs"]))
+        self._hero_line = tk.Frame(
+            self._chat_empty_inner,
+            bg=pal.get("workspace_bg", pal["surface"]),
+            bd=0,
+            highlightthickness=0,
+        )
+        self._hero_line.pack(pady=(0, UI_SPACING["xs"]))
         self._hero_question_label = tk.Label(
-            hero_line,
+            self._hero_line,
             text="What should Axiom explore next?",
             font=self._fonts["h1"],
             bg=pal.get("workspace_bg", pal["surface"]),
             fg=pal["text"],
+            justify="center",
         )
         self._hero_question_label.pack()
-        ttk.Label(
-            empty_inner,
+        self._hero_copy_label = tk.Label(
+            self._chat_empty_inner,
             text="Ask questions, inspect sources, and keep retrieval settings close at hand.",
-            style="Muted.TLabel",
-        ).pack()
+            font=self._fonts["body"],
+            bg=pal.get("workspace_bg", pal["surface"]),
+            fg=pal.get("muted_text", pal["status"]),
+            justify="center",
+        )
+        self._hero_copy_label.pack()
 
         self._conversation_shell = ttk.Frame(self._chat_stage, style="MainContent.TFrame")
         self._conversation_shell.grid(row=0, column=0, sticky="nsew")
         self._conversation_shell.grid_rowconfigure(0, weight=1)
         self._conversation_shell.grid_columnconfigure(0, weight=1)
+        self._conversation_shell.grid_columnconfigure(1, minsize=420, weight=0)
 
         transcript_card, transcript_inner = self._create_card(
             self._conversation_shell,
@@ -902,26 +1163,28 @@ class AppView:
             pady=UI_SPACING["m"],
         )
         self.chat_display.grid(row=0, column=0, sticky="nsew")
-        chat_scroll = ttk.Scrollbar(transcript_inner, orient="vertical", command=self.chat_display.yview)
-        chat_scroll.grid(row=0, column=1, sticky="ns")
-        self.chat_display.configure(yscrollcommand=chat_scroll.set)
+        self._chat_transcript_scrollbar = ttk.Scrollbar(transcript_inner, orient="vertical", command=self.chat_display.yview)
+        self._chat_transcript_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.chat_display.configure(yscrollcommand=self._chat_transcript_scrollbar.set)
         self._configure_chat_tags()
 
         self._evidence_pane_holder = ttk.Frame(self._conversation_shell, style="MainContent.TFrame")
-        self._evidence_pane_holder.grid(row=0, column=1, sticky="ns", padx=(UI_SPACING["s"], 0))
+        self._evidence_pane_holder.grid(row=0, column=1, sticky="nsew", padx=(UI_SPACING["s"], 0))
+        self._evidence_pane_holder.configure(width=420)
+        self._evidence_pane_holder.grid_propagate(False)
         self._evidence_visible = False
         self._build_evidence_panel()
         self._evidence_pane_holder.grid_remove()
 
         composer_card, composer_inner = self._create_card(
-            body,
+            outer,
             radius=_CARD_RADIUS,
             bg_key="surface",
             border_key="border",
             shadow_key="workspace_shadow",
             shadow_offset=2,
         )
-        composer_card.grid(row=1, column=0, sticky="ew", pady=(UI_SPACING["m"], UI_SPACING["s"]))
+        composer_card.grid(row=2, column=0, sticky="ew", pady=(UI_SPACING["m"], UI_SPACING["s"]))
         composer_inner.grid_columnconfigure(0, weight=1)
         composer_inner.grid_rowconfigure(1, weight=1)
 
@@ -931,9 +1194,14 @@ class AppView:
             style="Muted.TLabel",
         ).grid(row=0, column=0, sticky="w", pady=(0, UI_SPACING["xs"]))
 
+        prompt_host = ttk.Frame(composer_inner, style="Card.Flat.TFrame")
+        prompt_host.grid(row=1, column=0, sticky="ew")
+        prompt_host.rowconfigure(0, weight=1)
+        prompt_host.columnconfigure(0, weight=1)
+
         self.txt_input = tk.Text(
-            composer_inner,
-            height=5,
+            prompt_host,
+            height=6,
             wrap=tk.WORD,
             font=self._fonts["body"],
             bg=pal.get("input_bg", pal["surface_alt"]),
@@ -949,7 +1217,10 @@ class AppView:
             padx=UI_SPACING["m"],
             pady=UI_SPACING["s"],
         )
-        self.txt_input.grid(row=1, column=0, sticky="ew")
+        self.txt_input.grid(row=0, column=0, sticky="ew")
+        self._prompt_scrollbar = ttk.Scrollbar(prompt_host, orient="vertical", command=self.txt_input.yview)
+        self._prompt_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.txt_input.configure(yscrollcommand=self._prompt_scrollbar.set)
 
         composer_actions = ttk.Frame(composer_inner, style="Utility.TFrame")
         composer_actions.grid(row=2, column=0, sticky="ew", pady=(UI_SPACING["s"], 0))
@@ -974,8 +1245,8 @@ class AppView:
         self.prompt_entry = self.txt_input
         self.txt_input.bind("<Control-Return>", lambda _e: self._on_ctrl_enter())
 
-        self._suggestion_panel = ttk.Frame(body, style="MainContent.TFrame")
-        self._suggestion_panel.grid(row=2, column=0, sticky="ew")
+        self._suggestion_panel = ttk.Frame(outer, style="MainContent.TFrame")
+        self._suggestion_panel.grid(row=3, column=0, sticky="ew")
         ttk.Label(self._suggestion_panel, text="GET STARTED WITH AN EXAMPLE BELOW", style="Overline.TLabel").grid(
             row=0,
             column=0,
@@ -1010,12 +1281,12 @@ class AppView:
             shadow_key=None,
             inner_padding=14,
         )
-        dock_card.grid(row=2, column=0, sticky="ew")
+        dock_card.grid(row=4, column=0, sticky="ew", pady=(UI_SPACING["m"], 0))
         status_row = ttk.Frame(dock_inner, style="Utility.TFrame")
         status_row.pack(fill="x")
         self._status_label = ttk.Label(status_row, textvariable=self._status_var, style="Status.TLabel")
         self._status_label.pack(side="left", padx=(0, UI_SPACING["s"]))
-        self.rag_progress = ttk.Progressbar(status_row, orient="horizontal", mode="determinate", length=180)
+        self.rag_progress = ttk.Progressbar(status_row, orient="horizontal", mode="determinate", length=220)
         self.rag_progress.pack(side="left", padx=(0, UI_SPACING["xs"]))
         self.btn_cancel_rag = ttk.Button(status_row, text="Cancel", style="Secondary.TButton", state="disabled")
         self.btn_cancel_rag.pack(side="left")
@@ -1036,9 +1307,9 @@ class AppView:
             highlightthickness=0,
         )
         self._log_text.pack(fill=tk.BOTH, expand=True, padx=UI_SPACING["s"], pady=UI_SPACING["xs"])
-        log_scroll = ttk.Scrollbar(self._logs_section.content, orient="vertical", command=self._log_text.yview)
-        log_scroll.pack(side="right", fill="y")
-        self._log_text.configure(yscrollcommand=log_scroll.set)
+        self._chat_log_scrollbar = ttk.Scrollbar(self._logs_section.content, orient="vertical", command=self._log_text.yview)
+        self._chat_log_scrollbar.pack(side="right", fill="y")
+        self._log_text.configure(yscrollcommand=self._chat_log_scrollbar.set)
 
         self._refresh_llm_badge()
         self._sync_mode_chip()
@@ -1060,13 +1331,14 @@ class AppView:
         header.pack(fill="x", pady=(0, UI_SPACING["s"]))
         ttk.Label(header, text="Evidence inspector", style="Header.TLabel").pack(anchor="w")
         self._evidence_status_var = tk.StringVar(value="No retrieved evidence yet.")
-        ttk.Label(
+        self._evidence_status_label = ttk.Label(
             header,
             textvariable=self._evidence_status_var,
             style="Caption.TLabel",
             wraplength=360,
             justify="left",
-        ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+        )
+        self._evidence_status_label.pack(anchor="w", pady=(UI_SPACING["xs"], 0))
         self._evidence_notebook = ttk.Notebook(frame)
         self._evidence_notebook.pack(fill="both", expand=True)
 
@@ -1103,13 +1375,13 @@ class AppView:
         self._evidence_tree.column("source", width=180, anchor="w")
         self._evidence_tree.column("score", width=72, anchor="e")
         self._evidence_tree.grid(row=0, column=0, sticky="nsew")
-        evidence_scroll = ttk.Scrollbar(
+        self._evidence_tree_scrollbar = ttk.Scrollbar(
             list_host,
             orient="vertical",
             command=self._evidence_tree.yview,
         )
-        evidence_scroll.grid(row=0, column=1, sticky="ns")
-        self._evidence_tree.configure(yscrollcommand=evidence_scroll.set)
+        self._evidence_tree_scrollbar.grid(row=0, column=1, sticky="ns")
+        self._evidence_tree.configure(yscrollcommand=self._evidence_tree_scrollbar.set)
         self._evidence_tree.bind("<<TreeviewSelect>>", self._on_evidence_selected)
 
         detail_host = ttk.Frame(self._evidence_sources_tab, style="Card.Elevated.TFrame")
@@ -1131,13 +1403,13 @@ class AppView:
             highlightthickness=0,
         )
         self._evidence_detail_text.grid(row=0, column=0, sticky="nsew")
-        detail_scroll = ttk.Scrollbar(
+        self._evidence_detail_scrollbar = ttk.Scrollbar(
             detail_host,
             orient="vertical",
             command=self._evidence_detail_text.yview,
         )
-        detail_scroll.grid(row=0, column=1, sticky="ns")
-        self._evidence_detail_text.configure(yscrollcommand=detail_scroll.set)
+        self._evidence_detail_scrollbar.grid(row=0, column=1, sticky="ns")
+        self._evidence_detail_text.configure(yscrollcommand=self._evidence_detail_scrollbar.set)
         self._set_evidence_detail("No evidence selected.")
 
         self._events_tree = self._build_simple_tree(
@@ -1263,8 +1535,8 @@ class AppView:
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
 
-        outer = ttk.Frame(frame, style="MainContent.TFrame")
-        outer.grid(row=0, column=0, sticky="nsew")
+        page_host, self._library_page_canvas, outer, self._library_page_scrollbar = self._create_scrollable_page(frame)
+        page_host.grid(row=0, column=0, sticky="nsew")
         outer.columnconfigure(0, weight=1)
 
         header = ttk.Frame(outer, style="MainContent.TFrame")
@@ -1303,6 +1575,7 @@ class AppView:
             list_host,
             selectmode="extended",
             activestyle="dotbox",
+            height=8,
             relief="flat",
             borderwidth=0,
             highlightthickness=0,
@@ -1377,16 +1650,18 @@ class AppView:
             sticky="w",
             pady=(UI_SPACING["s"], 0),
         )
-        ttk.Label(
+        self._active_index_path_label = ttk.Label(
             index_inner,
             textvariable=self._active_index_path_var,
             style="Caption.TLabel",
             wraplength=920,
             justify="left",
-        ).grid(row=4, column=0, columnspan=3, sticky="w", pady=(UI_SPACING["xs"], 0))
+        )
+        self._active_index_path_label.grid(row=4, column=0, columnspan=3, sticky="w", pady=(UI_SPACING["xs"], 0))
 
         self.progress = ttk.Progressbar(outer, orient="horizontal", mode="determinate")
         self.progress.grid(row=4, column=0, sticky="ew", pady=(UI_SPACING["m"], 0))
+        ttk.Frame(outer, style="MainContent.TFrame", height=UI_SPACING["l"]).grid(row=5, column=0, sticky="ew")
 
     def _build_history_view(self) -> None:
         """History view: command bar and master-detail cards."""
@@ -1466,13 +1741,14 @@ class AppView:
         right.columnconfigure(0, weight=1)
 
         self._history_detail_summary_var = tk.StringVar(value="Select a session to inspect its details.")
-        ttk.Label(
+        self._history_detail_summary_label = ttk.Label(
             right,
             textvariable=self._history_detail_summary_var,
             style="TLabel",
             wraplength=420,
             justify="left",
-        ).grid(row=0, column=0, sticky="ew")
+        )
+        self._history_detail_summary_label.grid(row=0, column=0, sticky="ew")
 
         self._history_detail_text = tk.Text(
             right,
@@ -1510,40 +1786,43 @@ class AppView:
         canvas_host.rowconfigure(0, weight=1)
         canvas_host.columnconfigure(0, weight=1)
 
-        canvas = tk.Canvas(
+        self._settings_canvas = tk.Canvas(
             canvas_host,
-            bg=pal.get("surface", "#111827"),
+            bg=pal.get("workspace_bg", pal["surface"]),
             highlightthickness=0,
             bd=0,
         )
-        canvas.grid(row=0, column=0, sticky="nsew")
+        self._settings_canvas.grid(row=0, column=0, sticky="nsew")
 
-        vsb = ttk.Scrollbar(canvas_host, orient="vertical", command=canvas.yview)
-        vsb.grid(row=0, column=1, sticky="ns")
-        canvas.configure(yscrollcommand=vsb.set)
+        self._settings_scrollbar = ttk.Scrollbar(
+            canvas_host,
+            orient="vertical",
+            command=self._settings_canvas.yview,
+        )
+        self._settings_scrollbar.grid(row=0, column=1, sticky="ns")
+        self._settings_canvas.configure(yscrollcommand=self._settings_scrollbar.set)
 
-        # Inner frame lives inside the canvas window
-        inner = ttk.Frame(canvas, style="Card.TFrame")
+        inner = ttk.Frame(self._settings_canvas, style="Card.TFrame")
         inner.columnconfigure(0, weight=1)
-
-        canvas_window = canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas_window = self._settings_canvas.create_window((0, 0), window=inner, anchor="nw")
 
         def _on_inner_configure(_event: tk.Event) -> None:
-            canvas.configure(scrollregion=canvas.bbox("all"))
+            try:
+                bbox = self._settings_canvas.bbox("all")
+                if bbox:
+                    self._settings_canvas.configure(scrollregion=bbox)
+            except tk.TclError:
+                return
 
         def _on_canvas_configure(event: tk.Event) -> None:
-            canvas.itemconfig(canvas_window, width=event.width)
+            try:
+                self._settings_canvas.itemconfig(canvas_window, width=event.width)
+            except tk.TclError:
+                return
 
         inner.bind("<Configure>", _on_inner_configure)
-        canvas.bind("<Configure>", _on_canvas_configure)
-
-        def _on_mousewheel(event: tk.Event) -> None:
-            try:
-                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            except tk.TclError:
-                pass
-
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        self._settings_canvas.bind("<Configure>", _on_canvas_configure)
+        self._bind_scoped_mousewheel(self._settings_canvas, inner)
 
         # ── Build collapsible sections ─────────────────────────────────
         for sec_row, (section_title, field_specs) in enumerate(_SETTINGS_SPEC):
@@ -1787,10 +2066,13 @@ class AppView:
         )
         self._logs_view_text.grid(row=0, column=0, sticky="nsew")
 
-        logs_scroll = ttk.Scrollbar(text_host, orient="vertical",
-                                    command=self._logs_view_text.yview)
-        logs_scroll.grid(row=0, column=1, sticky="ns")
-        self._logs_view_text.configure(yscrollcommand=logs_scroll.set)
+        self._logs_view_scrollbar = ttk.Scrollbar(
+            text_host,
+            orient="vertical",
+            command=self._logs_view_text.yview,
+        )
+        self._logs_view_scrollbar.grid(row=0, column=1, sticky="ns")
+        self._logs_view_text.configure(yscrollcommand=self._logs_view_scrollbar.set)
 
         # Replay any log lines buffered before this tab was first opened
         if self._log_buffer:
@@ -1841,6 +2123,7 @@ class AppView:
         for k, btn in self._sidebar_nav_buttons.items():
             btn.configure(style="Sidebar.Active.TButton" if k == key
                           else "Sidebar.TButton")
+        self._refresh_responsive_layout()
 
     # ------------------------------------------------------------------
     # Public interface (called from main thread only)
@@ -3063,7 +3346,7 @@ class AppView:
             except Exception:
                 pass
 
-    def _load_sidebar_logo(self) -> tk.PhotoImage | None:
+    def _load_sidebar_logo(self, max_dim: int = 120) -> tk.PhotoImage | None:
         """Best-effort sidebar logo loading; returns a Tk image or None."""
         script_dir = os.path.dirname(os.path.abspath(__file__))
         repo_root = os.path.join(script_dir, "..", "..")
@@ -3077,7 +3360,6 @@ class AppView:
                 continue
             try:
                 logo = tk.PhotoImage(file=path)
-                max_dim = 120
                 w = max(1, int(logo.width()))
                 h = max(1, int(logo.height()))
                 ds = max(1, (max(w, h) + max_dim - 1) // max_dim)
