@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import pathlib
+import sys
+from importlib import resources
 from typing import Any
 
 from PySide6.QtCore import QEvent, QObject, QSignalBlocker, Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QKeyEvent, QPainter, QPainterPath, QTextCursor
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QKeyEvent, QPainter, QPainterPath, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -15,6 +17,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -51,6 +54,8 @@ APP_NAME = "Axiom"
 APP_VERSION = "1.0"
 APP_SUBTITLE = "Personal RAG Assistant"
 MODE_OPTIONS = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"]
+_BRAND_ASSET_PACKAGE = "axiom_app.assets"
+_BRAND_ASSET_NAME = "logo.png"
 
 _DEFAULT_WINDOW_W = 1480
 _DEFAULT_WINDOW_H = 960
@@ -173,6 +178,54 @@ _SETTINGS_SPEC: list[tuple[str, list[tuple[str, str, str, list[str] | None]]]] =
 _SETTINGS_EXPANDED = {"UI & Startup", "LLM", "Embeddings"}
 
 
+def _crop_transparent_margins(pixmap: QPixmap) -> QPixmap:
+    """Trim transparent padding so the sidebar logo uses the visible mark area."""
+    if pixmap.isNull():
+        return pixmap
+    image = pixmap.toImage()
+    if not image.hasAlphaChannel():
+        return pixmap
+
+    left = image.width()
+    top = image.height()
+    right = -1
+    bottom = -1
+
+    for y in range(image.height()):
+        for x in range(image.width()):
+            if image.pixelColor(x, y).alpha() > 0:
+                left = min(left, x)
+                top = min(top, y)
+                right = max(right, x)
+                bottom = max(bottom, y)
+
+    if right < left or bottom < top:
+        return pixmap
+    return pixmap.copy(left, top, right - left + 1, bottom - top + 1)
+
+
+def _load_packaged_pixmap(package_name: str, resource_name: str) -> QPixmap:
+    pixmap = QPixmap()
+    data: bytes | None = None
+
+    try:
+        data = resources.files(package_name).joinpath(resource_name).read_bytes()
+    except Exception:
+        bundle_root = getattr(sys, "_MEIPASS", None)
+        if bundle_root:
+            candidate = pathlib.Path(bundle_root) / package_name.replace(".", "/") / resource_name
+            if candidate.is_file():
+                data = candidate.read_bytes()
+        if data is None:
+            package_dir = pathlib.Path(__file__).resolve().parents[1] / "assets" / resource_name
+            if package_dir.is_file():
+                data = package_dir.read_bytes()
+
+    if data and pixmap.loadFromData(data):
+        return _crop_transparent_margins(pixmap)
+    return QPixmap()
+
+
 class _BrandMark(QWidget):
     def __init__(self, palette: dict[str, str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -258,6 +311,7 @@ class AppView(QMainWindow):
         self._cards: list[RoundedCard] = []
         self._nav_buttons: dict[str, _NavButton] = {}
         self._active_view = "chat"
+        self._brand_logo_pixmap = QPixmap()
 
         self._load_icon()
         self._build()
@@ -346,8 +400,30 @@ class AppView(QMainWindow):
     def _build_sidebar(self, layout: QVBoxLayout) -> None:
         brand_row = QHBoxLayout()
         brand_row.setSpacing(UI_SPACING["s"])
+        self._brand_icon_stack = QStackedWidget(self)
+        self._brand_icon_stack.setFixedSize(72, 72)
+        self._brand_icon_stack.setObjectName("brandIconStack")
+
+        self._brand_logo_label = QLabel(self)
+        self._brand_logo_label.setObjectName("brandLogo")
+        self._brand_logo_label.setAlignment(Qt.AlignCenter)
+        self._brand_logo_label.setFixedSize(64, 64)
+
         self._brand_mark = _BrandMark(self._palette, self)
-        brand_row.addWidget(self._brand_mark, 0, Qt.AlignTop)
+
+        self._brand_logo_page = QWidget(self)
+        logo_page_layout = QVBoxLayout(self._brand_logo_page)
+        logo_page_layout.setContentsMargins(0, 0, 0, 0)
+        logo_page_layout.addWidget(self._brand_logo_label, 0, Qt.AlignCenter)
+
+        self._brand_mark_page = QWidget(self)
+        mark_page_layout = QVBoxLayout(self._brand_mark_page)
+        mark_page_layout.setContentsMargins(0, 0, 0, 0)
+        mark_page_layout.addWidget(self._brand_mark, 0, Qt.AlignCenter)
+
+        self._brand_icon_stack.addWidget(self._brand_logo_page)
+        self._brand_icon_stack.addWidget(self._brand_mark_page)
+        brand_row.addWidget(self._brand_icon_stack, 0, Qt.AlignTop)
         text_layout = QVBoxLayout()
         self._brand_title = QLabel(APP_NAME, self)
         self._brand_title.setObjectName("brandTitle")
@@ -359,7 +435,8 @@ class AppView(QMainWindow):
         brand_host = QWidget(self)
         brand_host.setLayout(brand_row)
         layout.addWidget(brand_host)
-        self.tooltip_manager.register(self._brand_mark, f"{APP_NAME} {APP_VERSION}")
+        self._apply_brand_logo()
+        self.tooltip_manager.register(brand_host, f"{APP_NAME} {APP_VERSION}")
 
         nav_layout = QVBoxLayout()
         nav_layout.setSpacing(UI_SPACING["xs"])
@@ -391,8 +468,8 @@ class AppView(QMainWindow):
         for page in self._pages.values():
             self._stack.addWidget(page)
 
-    def _make_tree(self, columns: list[str]) -> QTreeWidget:
-        tree = QTreeWidget(self)
+    def _make_tree(self, columns: list[str], parent: QWidget | None = None) -> QTreeWidget:
+        tree = QTreeWidget(parent or self)
         tree.setRootIsDecorated(False)
         tree.setAlternatingRowColors(True)
         tree.setSelectionMode(QTreeWidget.SingleSelection)
@@ -452,62 +529,100 @@ class AppView(QMainWindow):
         root.addWidget(splitter, 1)
 
         left = QWidget(splitter)
+        left.setMinimumWidth(640)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(UI_SPACING["m"])
 
-        self._chat_empty_state = QWidget(left)
+        self._conversation_shell = QFrame(left)
+        self._conversation_shell.setObjectName("chatConversationCard")
+        conversation_layout = QVBoxLayout(self._conversation_shell)
+        conversation_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
+        conversation_layout.setSpacing(UI_SPACING["s"])
+        self._conversation_title = QLabel("Conversation", self._conversation_shell)
+        self._conversation_title.setObjectName("chatSectionTitle")
+        conversation_layout.addWidget(self._conversation_title)
+
+        self._chat_state_stack = QStackedWidget(self._conversation_shell)
+        self._chat_state_stack.setObjectName("chatStateStack")
+        conversation_layout.addWidget(self._chat_state_stack, 1)
+
+        self._chat_empty_state = QWidget(self._chat_state_stack)
         empty_layout = QVBoxLayout(self._chat_empty_state)
         empty_layout.setContentsMargins(UI_SPACING["xl"], UI_SPACING["xl"], UI_SPACING["xl"], UI_SPACING["xl"])
+        empty_layout.addStretch(1)
         self._chat_empty_inner = QWidget(self._chat_empty_state)
         hero_layout = QVBoxLayout(self._chat_empty_inner)
+        hero_layout.setContentsMargins(0, 0, 0, 0)
+        hero_layout.setSpacing(UI_SPACING["xs"])
         self._hero_greeting_label = QLabel("Ask a document-grounded question", self._chat_empty_inner)
         self._hero_greeting_label.setObjectName("heroGreeting")
         self._hero_copy_label = QLabel(
             "Switch between retrieval-grounded RAG and direct chat without leaving the current session.",
             self._chat_empty_inner,
         )
+        self._hero_copy_label.setObjectName("heroCopy")
         self._hero_copy_label.setWordWrap(True)
+        self._hero_copy_label.setMaximumWidth(460)
         hero_layout.addWidget(self._hero_greeting_label)
         hero_layout.addWidget(self._hero_copy_label)
         empty_layout.addWidget(self._chat_empty_inner, 0, Qt.AlignCenter)
-        left_layout.addWidget(self._chat_empty_state, 1)
+        empty_layout.addStretch(1)
+        self._chat_state_stack.addWidget(self._chat_empty_state)
 
-        self._conversation_shell = QWidget(left)
-        conv_layout = QVBoxLayout(self._conversation_shell)
-        conv_layout.setContentsMargins(0, 0, 0, 0)
-        conv_layout.setSpacing(UI_SPACING["s"])
-        self._chat_transcript = QPlainTextEdit(self._conversation_shell)
+        self._chat_transcript_state = QWidget(self._chat_state_stack)
+        transcript_layout = QVBoxLayout(self._chat_transcript_state)
+        transcript_layout.setContentsMargins(0, 0, 0, 0)
+        transcript_layout.setSpacing(0)
+        self._chat_transcript = QPlainTextEdit(self._chat_transcript_state)
+        self._chat_transcript.setObjectName("chatTranscript")
         self._chat_transcript.setReadOnly(True)
         self._chat_transcript_scrollbar = self._chat_transcript.verticalScrollBar()
-        conv_layout.addWidget(self._chat_transcript, 1)
-        self.txt_input = QPlainTextEdit(self._conversation_shell)
+        transcript_layout.addWidget(self._chat_transcript, 1)
+        self._chat_state_stack.addWidget(self._chat_transcript_state)
+
+        left_layout.addWidget(self._conversation_shell, 1)
+
+        self._composer_shell = QFrame(left)
+        self._composer_shell.setObjectName("chatComposerCard")
+        composer_layout = QVBoxLayout(self._composer_shell)
+        composer_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
+        composer_layout.setSpacing(UI_SPACING["s"])
+        self._composer_title = QLabel("Ask Axiom", self._composer_shell)
+        self._composer_title.setObjectName("chatSectionTitle")
+        composer_layout.addWidget(self._composer_title)
+
+        self.txt_input = QPlainTextEdit(self._composer_shell)
+        self.txt_input.setObjectName("chatComposerInput")
+        self.txt_input.setMinimumHeight(120)
         self.txt_input.setPlaceholderText("Type a question. Press Enter to send, Shift+Enter for a newline.")
         self.prompt_entry = self.txt_input
         self.prompt_entry.installEventFilter(self)
         self._prompt_scrollbar = self.txt_input.verticalScrollBar()
-        conv_layout.addWidget(self.txt_input)
+        composer_layout.addWidget(self.txt_input)
         action_row = QHBoxLayout()
-        self._progress = QProgressBar(self._conversation_shell)
+        self._progress = QProgressBar(self._composer_shell)
         self._progress.setRange(0, 100)
         action_row.addWidget(self._progress, 1)
-        self.btn_cancel_rag = QPushButton("Cancel", self._conversation_shell)
+        self.btn_cancel_rag = QPushButton("Cancel", self._composer_shell)
         self.btn_cancel_rag.clicked.connect(self.cancelRequested.emit)
         self.btn_cancel_rag.setEnabled(False)
         action_row.addWidget(self.btn_cancel_rag)
-        self.btn_send = QPushButton("Send", self._conversation_shell)
+        self.btn_send = QPushButton("Send", self._composer_shell)
         self.btn_send.clicked.connect(self.sendRequested.emit)
         action_row.addWidget(self.btn_send)
-        conv_layout.addLayout(action_row)
-        left_layout.addWidget(self._conversation_shell, 1)
+        composer_layout.addLayout(action_row)
+        left_layout.addWidget(self._composer_shell, 0)
         splitter.addWidget(left)
 
         right = QTabWidget(splitter)
-        self._evidence_sources_tree = self._make_tree(["Source", "Score", "Snippet"])
-        self._events_tree = self._make_tree(["Time", "Stage", "Event", "Summary"])
-        self._regions_tree = self._make_tree(["Document", "Region", "Summary"])
-        self._outline_tree = self._make_tree(["Heading", "Meta"])
-        self._trace_tree = self._make_tree(["Time", "Stage", "Event", "Payload"])
+        right.setMinimumWidth(320)
+        right.setDocumentMode(True)
+        self._evidence_sources_tree = self._make_tree(["Source", "Score", "Snippet"], right)
+        self._events_tree = self._make_tree(["Time", "Stage", "Event", "Summary"], right)
+        self._regions_tree = self._make_tree(["Document", "Region", "Summary"], right)
+        self._outline_tree = self._make_tree(["Heading", "Meta"], right)
+        self._trace_tree = self._make_tree(["Time", "Stage", "Event", "Payload"], right)
         self._grounding_browser = QTextBrowser(right)
         self._grounding_browser.anchorClicked.connect(lambda url: QDesktopServices.openUrl(url))
         right.addTab(self._evidence_sources_tree, "Sources")
@@ -517,8 +632,10 @@ class AppView(QMainWindow):
         right.addTab(self._trace_tree, "Trace")
         right.addTab(self._grounding_browser, "Grounding")
         splitter.addWidget(right)
+        splitter.setChildrenCollapsible(False)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
+        splitter.setSizes([820, 360])
 
         self._refresh_chat_state()
         return page
@@ -603,7 +720,7 @@ class AppView(QMainWindow):
         root.addLayout(actions)
 
         splitter = QSplitter(Qt.Horizontal, page)
-        self._history_tree = self._make_tree(["Title", "Updated", "Mode", "Profile"])
+        self._history_tree = self._make_tree(["Title", "Updated", "Mode", "Profile"], splitter)
         self._history_tree.itemSelectionChanged.connect(self.historySelectionRequested.emit)
         self._history_tree.itemDoubleClicked.connect(lambda *_args: self.historyOpenRequested.emit())
         splitter.addWidget(self._history_tree)
@@ -630,24 +747,28 @@ class AppView(QMainWindow):
 
         for title, rows in _SETTINGS_SPEC:
             section = CollapsibleFrame(holder, title, title in _SETTINGS_EXPANDED, self._animator)
-            form = QGridLayout(section.content)
+            section_body = QWidget(section.content)
+            form = QGridLayout(section_body)
             form.setContentsMargins(0, 0, 0, 0)
             form.setHorizontalSpacing(UI_SPACING["m"])
             form.setVerticalSpacing(UI_SPACING["s"])
+            form.setColumnStretch(1, 1)
             row_index = 0
             for key, label, widget_type, options in rows:
-                widget = self._build_settings_widget(widget_type, options, holder)
+                widget = self._build_settings_widget(widget_type, options, section_body)
                 self._settings_widgets[key] = widget
-                form.addWidget(QLabel(label, holder), row_index, 0, Qt.AlignTop)
+                form.addWidget(QLabel(label, section_body), row_index, 0, Qt.AlignTop)
                 form.addWidget(widget, row_index, 1)
                 row_index += 1
+            section.content_layout.addWidget(section_body)
             holder_layout.addWidget(section)
 
         local_models = CollapsibleFrame(holder, "Local Models", True, self._animator)
-        local_layout = QVBoxLayout(local_models.content)
+        local_body = QWidget(local_models.content)
+        local_layout = QVBoxLayout(local_body)
         local_layout.setContentsMargins(0, 0, 0, 0)
         local_layout.setSpacing(UI_SPACING["s"])
-        self._local_model_tree = self._make_tree(["Name", "Type", "Value", "State"])
+        self._local_model_tree = self._make_tree(["Name", "Type", "Value", "State"], local_body)
         local_layout.addWidget(self._local_model_tree)
         button_row = QHBoxLayout()
         for attr, label, slot in (
@@ -655,32 +776,33 @@ class AppView(QMainWindow):
             ("btn_add_local_st_model", "Add Sentence Transformer", self.addLocalSentenceTransformerRequested.emit),
             ("btn_remove_local_model", "Remove", self.removeLocalModelRequested.emit),
         ):
-            button = QPushButton(label, holder)
+            button = QPushButton(label, local_body)
             button.clicked.connect(slot)
             setattr(self, attr, button)
             button_row.addWidget(button)
-        self.btn_activate_local_model_llm = QPushButton("Activate for LLM", holder)
+        self.btn_activate_local_model_llm = QPushButton("Activate for LLM", local_body)
         self.btn_activate_local_model_llm.clicked.connect(lambda: self.activateLocalModelRequested.emit("llm"))
         button_row.addWidget(self.btn_activate_local_model_llm)
-        self.btn_activate_local_model_embedding = QPushButton("Activate for Embedding", holder)
+        self.btn_activate_local_model_embedding = QPushButton("Activate for Embedding", local_body)
         self.btn_activate_local_model_embedding.clicked.connect(lambda: self.activateLocalModelRequested.emit("embedding"))
         button_row.addWidget(self.btn_activate_local_model_embedding)
-        self.btn_open_local_model_folder = QPushButton("Open Folder", holder)
+        self.btn_open_local_model_folder = QPushButton("Open Folder", local_body)
         self.btn_open_local_model_folder.clicked.connect(self.openLocalModelFolderRequested.emit)
         button_row.addWidget(self.btn_open_local_model_folder)
         local_layout.addLayout(button_row)
         install_row = QHBoxLayout()
-        self.btn_install_local_gguf_dep = QPushButton("Install llama-cpp-python", holder)
+        self.btn_install_local_gguf_dep = QPushButton("Install llama-cpp-python", local_body)
         self.btn_install_local_gguf_dep.clicked.connect(lambda: self.installLocalDependencyRequested.emit(["llama-cpp-python"]))
         install_row.addWidget(self.btn_install_local_gguf_dep)
-        self.btn_install_local_st_dep = QPushButton("Install sentence-transformers", holder)
+        self.btn_install_local_st_dep = QPushButton("Install sentence-transformers", local_body)
         self.btn_install_local_st_dep.clicked.connect(lambda: self.installLocalDependencyRequested.emit(["sentence-transformers"]))
         install_row.addWidget(self.btn_install_local_st_dep)
         install_row.addStretch(1)
         local_layout.addLayout(install_row)
-        self._local_model_dependency_label = QLabel("", holder)
+        self._local_model_dependency_label = QLabel("", local_body)
         self._local_model_dependency_label.setWordWrap(True)
         local_layout.addWidget(self._local_model_dependency_label)
+        local_models.content_layout.addWidget(local_body)
         holder_layout.addWidget(local_models)
         holder_layout.addStretch(1)
 
@@ -747,6 +869,7 @@ class AppView(QMainWindow):
                 shadow_color=self._palette.get("workspace_shadow", "#010408"),
             )
         self._brand_mark.update_palette(self._palette)
+        self._apply_brand_logo()
         self._rag_toggle.update_palette(self._palette)
         self._apply_local_styles()
         self.refresh_llm_status_badge()
@@ -757,12 +880,18 @@ class AppView(QMainWindow):
         text = self._palette.get("text", "#F2FAFF")
         muted = self._palette.get("muted_text", "#8AA5BE")
         border = self._palette.get("border", "#17405F")
+        surface_alt = self._palette.get("surface_alt", "#13283D")
+        supporting = self._palette.get("supporting_bg", surface_alt)
         self.setStyleSheet(
             f"""
             QLabel#brandTitle {{ font-size: 28px; font-weight: 700; }}
             QLabel#pageTitle {{ font-size: 26px; font-weight: 700; }}
             QLabel#heroGreeting {{ font-size: 30px; font-weight: 700; }}
+            QLabel#heroCopy {{ color: {muted}; font-size: 14px; }}
+            QLabel#brandLogo {{ background: transparent; border: none; }}
+            QLabel#chatSectionTitle {{ color: {muted}; font-size: 13px; font-weight: 700; }}
             QLabel#sidebarBadge, QLabel#llmStatusBadge {{
+                background-color: {surface_alt};
                 border: 1px solid {border};
                 border-radius: 12px;
                 padding: 6px 10px;
@@ -779,6 +908,23 @@ class AppView(QMainWindow):
                 border: 1px solid {border};
                 border-radius: 16px;
             }}
+            QFrame#chatConversationCard, QFrame#chatComposerCard {{
+                background-color: {supporting};
+                border: 1px solid {border};
+                border-radius: 20px;
+            }}
+            QStackedWidget#chatStateStack {{
+                background: transparent;
+                border: none;
+            }}
+            QPlainTextEdit#chatTranscript {{
+                background: transparent;
+                border: none;
+                padding: 0px;
+            }}
+            QPlainTextEdit#chatComposerInput {{
+                border-radius: 16px;
+            }}
             """
         )
         for key, button in self._nav_buttons.items():
@@ -787,12 +933,22 @@ class AppView(QMainWindow):
         self._footer_label.setStyleSheet(f"color: {muted};")
 
     def _load_icon(self) -> None:
-        repo_root = pathlib.Path(__file__).resolve().parents[2]
-        for candidate in ("logo.png", "assets/axiom_logo.png", "assets/axiom.png", "assets/app.png"):
-            path = repo_root / candidate
-            if path.exists():
-                self.setWindowIcon(QIcon(str(path)))
-                return
+        self._brand_logo_pixmap = self._load_packaged_brand_pixmap()
+        if not self._brand_logo_pixmap.isNull():
+            self.setWindowIcon(QIcon(self._brand_logo_pixmap))
+
+    def _load_packaged_brand_pixmap(self) -> QPixmap:
+        return _load_packaged_pixmap(_BRAND_ASSET_PACKAGE, _BRAND_ASSET_NAME)
+
+    def _apply_brand_logo(self) -> None:
+        if not hasattr(self, "_brand_icon_stack"):
+            return
+        if self._brand_logo_pixmap.isNull():
+            self._brand_icon_stack.setCurrentWidget(self._brand_mark_page)
+            return
+        scaled = self._brand_logo_pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self._brand_logo_label.setPixmap(scaled)
+        self._brand_icon_stack.setCurrentWidget(self._brand_logo_page)
 
     def _on_toggle_changed(self, value: bool) -> None:
         self._rag_toggle.set_value(value)
@@ -808,8 +964,8 @@ class AppView(QMainWindow):
         self.modeStateChanged.emit(payload)
 
     def _refresh_chat_state(self) -> None:
-        self._chat_empty_state.setVisible(not self._chat_has_messages)
-        self._conversation_shell.setVisible(self._chat_has_messages)
+        target = self._chat_transcript_state if self._chat_has_messages else self._chat_empty_state
+        self._chat_state_stack.setCurrentWidget(target)
 
     def switch_view(self, key: str) -> None:
         self._active_view = key if key in self._pages else "chat"
