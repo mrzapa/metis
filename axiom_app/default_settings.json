@@ -1,7 +1,7 @@
 {
   "_comment": "Axiom default settings. Copy to settings.json in the repo root to override.",
   "ui_backend": "ttk",
-  "theme": "light",
+  "theme": "space_dust",
   "startup_mode_setting": "advanced",
   "llm_provider": "anthropic",
   "llm_model": "claude-opus-4-6",

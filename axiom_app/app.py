@@ -34,6 +34,46 @@ _POLL_MS = 100
 _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
+def _enable_windows_dpi_awareness(platform_name: str | None = None, ctypes_module=None) -> bool:
+    """Best-effort Windows DPI awareness bootstrap before creating Tk."""
+    platform_name = platform_name or sys.platform
+    if platform_name != "win32":
+        return False
+    try:
+        ctypes_module = ctypes_module or __import__("ctypes")
+        user32 = getattr(getattr(ctypes_module, "windll", None), "user32", None)
+        shcore = getattr(getattr(ctypes_module, "windll", None), "shcore", None)
+        if user32 is not None and hasattr(user32, "SetProcessDpiAwarenessContext"):
+            # PER_MONITOR_AWARE_V2
+            if user32.SetProcessDpiAwarenessContext(-4):
+                return True
+        if shcore is not None and hasattr(shcore, "SetProcessDpiAwareness"):
+            shcore.SetProcessDpiAwareness(2)
+            return True
+        if user32 is not None and hasattr(user32, "SetProcessDPIAware"):
+            user32.SetProcessDPIAware()
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def _apply_tk_scaling(root: tk.Misc, platform_name: str | None = None) -> float | None:
+    """Apply Tk scaling from effective display DPI when appropriate."""
+    platform_name = platform_name or sys.platform
+    if platform_name != "win32":
+        return None
+    try:
+        dpi = float(root.winfo_fpixels("1i"))
+        if dpi <= 0:
+            return None
+        scaling = round(dpi / 72.0, 4)
+        root.tk.call("tk", "scaling", scaling)
+        return scaling
+    except Exception:
+        return None
+
+
 def run_app() -> None:
     """Initialise logging, instantiate the MVC triad, enter Tk mainloop."""
 
@@ -47,11 +87,16 @@ def run_app() -> None:
     logger.info("Axiom MVC starting up  (AXIOM_NEW_APP=1)")
 
     # ── 2. Tk root — hidden until construction is complete ───────────
+    dpi_enabled = _enable_windows_dpi_awareness()
     root = tk.Tk()
     root.withdraw()
     logger.debug("Tk root created")
 
     try:
+        scaling = _apply_tk_scaling(root)
+        if dpi_enabled or scaling is not None:
+            logger.debug("Windows DPI bootstrap applied (enabled=%s, scaling=%s)", dpi_enabled, scaling)
+
         # ── 3. Model + settings ──────────────────────────────────────
         model = AppModel()
         model.load_settings()
