@@ -2,17 +2,38 @@
 
 from __future__ import annotations
 
-from axiom_app.views.app_view import AppView
+import importlib
+import sys
+
+import pytest
 
 
-def _show(view: AppView, process_events) -> AppView:
+pytestmark = pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Qt smoke runs on Windows CI only.",
+)
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_qt_widgets(qapp):
+    yield
+    for widget in list(qapp.topLevelWidgets()):
+        try:
+            widget.close()
+        except Exception:
+            pass
+    qapp.processEvents()
+
+
+def _show(process_events):
+    view = importlib.import_module("axiom_app.views.app_view").AppView(theme_name="space_dust")
     view.show()
     process_events()
     return view
 
 
 def test_app_view_constructs_with_empty_chat_state(qapp, process_events) -> None:
-    view = _show(AppView(theme_name="space_dust"), process_events)
+    view = _show(process_events)
 
     assert view._active_view == "chat"
     assert view._theme_name == "space_dust"
@@ -25,7 +46,7 @@ def test_app_view_constructs_with_empty_chat_state(qapp, process_events) -> None
 
 
 def test_app_view_switches_between_empty_and_conversation_states(qapp, process_events) -> None:
-    view = _show(AppView(theme_name="space_dust"), process_events)
+    view = _show(process_events)
 
     view.append_chat("Hello from a smoke test.\n")
     process_events()
@@ -43,7 +64,7 @@ def test_app_view_switches_between_empty_and_conversation_states(qapp, process_e
 
 
 def test_app_view_switches_between_all_pages(qapp, process_events) -> None:
-    view = _show(AppView(theme_name="space_dust"), process_events)
+    view = _show(process_events)
 
     for key in ("chat", "library", "history", "settings", "logs"):
         view.switch_view(key)
@@ -58,7 +79,7 @@ def test_app_view_switches_between_all_pages(qapp, process_events) -> None:
 
 
 def test_app_view_applies_theme_and_updates_runtime_widgets(qapp, process_events) -> None:
-    view = _show(AppView(theme_name="space_dust"), process_events)
+    view = _show(process_events)
 
     view.populate_settings({"llm_provider": "openai", "llm_model": "gpt-test", "selected_mode": "Research"})
     view.apply_theme("dark")

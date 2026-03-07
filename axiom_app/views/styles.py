@@ -298,8 +298,6 @@ def generate_qss(palette: dict, fonts: dict[str, QFont]) -> str:
     workspace_bg = _get("workspace_bg", "surface")
     focus_ring = _get("focus_ring", "primary")
     tab_indicator = _get("tab_indicator", "primary")
-    progress_pulse = _get("progress_pulse")
-    link = _get("link", "primary")
 
     body_font = fonts.get("body")
     body_family = body_font.family() if body_font else "Segoe UI"

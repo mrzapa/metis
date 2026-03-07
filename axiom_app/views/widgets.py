@@ -18,9 +18,7 @@ from PySide6.QtCore import (
     QEasingCurve,
     QObject,
     QPropertyAnimation,
-    QRect,
     QRectF,
-    QSize,
     Qt,
     QTimer,
     QVariantAnimation,
@@ -29,11 +27,9 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QBrush,
     QColor,
-    QEnterEvent,
     QFont,
     QMouseEvent,
     QPainter,
-    QPainterPath,
     QPen,
 )
 from PySide6.QtWidgets import (
@@ -158,7 +154,6 @@ class IOSSegmentedToggle(QWidget):
 
     def paintEvent(self, event: Any) -> None:
         pal = self._palette
-        bg = QColor(pal.get("bg", "#141E2D"))
         track = QColor(pal.get("surface_alt", "#1A2B40"))
         border_col = QColor(pal.get("outline", "#2A3E58"))
         primary = QColor(pal.get("primary", "#4D9EFF"))
@@ -190,7 +185,6 @@ class IOSSegmentedToggle(QWidget):
 
         # Text
         painter.setFont(self._font)
-        mid_y = h / 2.0
 
         painter.setPen(text_on if left_active else text_off)
         painter.drawText(QRectF(0, 0, sw, h), Qt.AlignCenter, self._opts[0])
