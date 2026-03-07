@@ -1,13 +1,27 @@
-# Axiom
+<p align="center">
+  <img src="logo.png" alt="Axiom" width="140" />
+</p>
 
-[![CI](https://github.com/mrzapa/workx/actions/workflows/ci.yml/badge.svg)](https://github.com/mrzapa/workx/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<h1 align="center">Axiom</h1>
 
-Axiom is a personal RAG desktop application with an MVC runtime as the default app experience. It supports:
+<p align="center">
+  <strong>Personal RAG desktop app with an MVC runtime</strong>
+</p>
 
-- **MVC app** (`axiom_app`) as the default runtime.
-- **Legacy GUI app** (`agentic_rag_gui.py`) available via `AXIOM_NEW_APP=0`.
-- **Headless CLI** for indexing and querying local files without Tk.
+<p align="center">
+  <a href="https://github.com/mrzapa/workx/actions/workflows/ci.yml"><img src="https://github.com/mrzapa/workx/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+</p>
+
+---
+
+## Features
+
+- **MVC app** (`axiom_app`) — default runtime with model / controller / view layers
+- **Legacy GUI** (`agentic_rag_gui.py`) — available via `AXIOM_NEW_APP=0`
+- **Headless CLI** — index and query local files without Tk
+
+---
 
 ## Quick Install
 
@@ -46,12 +60,15 @@ the latest code on every run.
 ./scripts/install_axiom.sh --uninstall
 ```
 
-Environment overrides: `AXIOM_INSTALL_DIR`, `AXIOM_REPO`, `AXIOM_BRANCH`, `AXIOM_PYTHON`.
+> **Environment overrides:** `AXIOM_INSTALL_DIR`, `AXIOM_REPO`, `AXIOM_BRANCH`, `AXIOM_PYTHON`
 
 If a later update changes the pinned runtime bundle, run `axiom update` to
 repair the installation.
 
 ### Manual setup
+
+<details>
+<summary><strong>Click to expand manual setup steps</strong></summary>
 
 #### 1) Create a virtual environment
 
@@ -61,61 +78,59 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 ```
 
-#### 2) Install the GUI runtime bundle
+#### 2) Install a runtime bundle
 
 ```bash
+# Full GUI runtime
 pip install -e ".[runtime-all]"
-```
 
-For test/dev extras:
-
-```bash
+# Dev/test extras
 pip install -e ".[dev]"
-```
 
-For development with the full GUI/runtime bundle:
-
-```bash
+# Dev + full GUI runtime
 pip install -e ".[dev,runtime-all]"
-```
 
-For the strict live-backend proof extras:
-
-```bash
+# Strict live-backend proof extras
 pip install -e ".[dev,live-backends]"
 ```
 
-## Run modes (GUI + CLI)
+</details>
 
-### MVC GUI (default path)
+---
+
+## Usage
+
+### MVC GUI (default)
 
 ```bash
 python main.py
 ```
 
-### Legacy GUI (opt-out path)
+### Legacy GUI
 
 ```bash
 AXIOM_NEW_APP=0 python main.py
 ```
 
-### CLI mode (headless)
+### CLI (headless)
 
 ```bash
 python main.py --cli index --file README.md
 python main.py --cli query --file README.md --question "quick start"
 ```
 
-You can also run the CLI module directly:
+Or run the CLI module directly:
 
 ```bash
 python -m axiom_app.cli index --file README.md
 python -m axiom_app.cli query --file README.md --question "install"
 ```
 
-## CLI examples
+---
 
-### Index output file
+## CLI Examples
+
+### Indexing
 
 `index` writes a manifest-backed persisted index to `<file>.axiom-index/manifest.json` by default.
 
@@ -123,7 +138,15 @@ python -m axiom_app.cli query --file README.md --question "install"
 python -m axiom_app.cli index --file docs/my_notes.txt
 ```
 
-Run the MVC parity audit:
+### Querying
+
+`query` uses the same shared retrieval backend as the MVC app and can load previously saved indexes.
+
+```bash
+python -m axiom_app.cli query --file docs/my_notes.txt --question "dependency"
+```
+
+### Parity audit
 
 ```bash
 axiom-parity-audit
@@ -134,53 +157,47 @@ Run the strict live-backend audit against local Docker Weaviate:
 ```bash
 pip install -e .[dev,live-backends]
 docker compose -f docker/weaviate/docker-compose.yml up -d
+
 export AXIOM_TEST_WEAVIATE_URL=http://127.0.0.1:8080
 export AXIOM_TEST_WEAVIATE_GRPC_HOST=127.0.0.1
 export AXIOM_TEST_WEAVIATE_GRPC_PORT=50051
 export AXIOM_TEST_WEAVIATE_GRPC_SECURE=false
+
 axiom-parity-audit --require-live-backends
 ```
 
-### Query behavior
+---
 
-`query` uses the same shared retrieval backend as the MVC app and can load previously saved indexes.
+## Environment Variables
 
-```bash
-python -m axiom_app.cli query --file docs/my_notes.txt --question "dependency"
-```
+| Variable | Description |
+|----------|-------------|
+| `AXIOM_NEW_APP` | `1` (default): MVC path. `0`: legacy GUI. `--cli` forces headless mode regardless. |
+| `AXIOM_TEST_WEAVIATE_URL` | Weaviate instance URL for live parity proof |
+| `AXIOM_TEST_WEAVIATE_API_KEY` | Weaviate API key |
+| `AXIOM_TEST_WEAVIATE_GRPC_HOST` | Weaviate gRPC host |
+| `AXIOM_TEST_WEAVIATE_GRPC_PORT` | Weaviate gRPC port |
+| `AXIOM_TEST_WEAVIATE_GRPC_SECURE` | Enable TLS for gRPC |
+| `AXIOM_PARITY_REQUIRE_LIVE_BACKENDS` | `1`: fail audit unless the live backend proof passes |
 
-## Environment variables
-
-- `AXIOM_NEW_APP`
-  - Unset or `1`: run the default MVC path in `main.py`.
-  - `0`: opt out to the legacy GUI path.
-  - `--cli` forces headless CLI handling regardless of GUI mode.
-- `AXIOM_TEST_WEAVIATE_URL`
-- `AXIOM_TEST_WEAVIATE_API_KEY`
-- `AXIOM_TEST_WEAVIATE_GRPC_HOST`
-- `AXIOM_TEST_WEAVIATE_GRPC_PORT`
-- `AXIOM_TEST_WEAVIATE_GRPC_SECURE`
-  - Canonical env contract for the live Weaviate parity proof.
-- `AXIOM_PARITY_REQUIRE_LIVE_BACKENDS`
-  - `1`: make `axiom-parity-audit` fail unless the live backend proof runs and passes.
-
-## Optional dependencies and fallback behavior
-
-Heavy ML/runtime dependencies are intentionally optional for manual minimal
-installs. The installers provision the pinned `runtime-all` bundle, while the
-MVC app and CLI surface backend-readiness errors when a selected provider or
-vector backend is unavailable in a custom environment.
+---
 
 ## Testing
 
 ```bash
+# Unit tests
 python -m pytest
+
+# With coverage
 python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
+
+# Live Weaviate proof
 pip install -e ".[dev,live-backends]"
 python -m pytest -q tests/test_live_weaviate_proof.py
 ```
 
-## Run CI checks locally
+<details>
+<summary><strong>Run CI checks locally</strong></summary>
 
 ```bash
 ruff check .
@@ -193,12 +210,29 @@ print('default_settings.json is valid JSON')
 PY
 ```
 
-## Project layout
+</details>
 
-- `axiom_app/` — default MVC package, CLI, model/controller/view layers.
-- `tests/` — unit and integration-style tests.
-- `agentic_rag_gui.py` — legacy monolithic GUI implementation.
-- `main.py` — canonical entry point with mode switching.
+---
+
+## Project Layout
+
+| Path | Description |
+|------|-------------|
+| `axiom_app/` | Default MVC package, CLI, model/controller/view layers |
+| `tests/` | Unit and integration-style tests |
+| `agentic_rag_gui.py` | Legacy monolithic GUI implementation |
+| `main.py` | Canonical entry point with mode switching |
+
+---
+
+## Optional Dependencies
+
+Heavy ML/runtime dependencies are intentionally optional for manual minimal
+installs. The installers provision the pinned `runtime-all` bundle, while the
+MVC app and CLI surface backend-readiness errors when a selected provider or
+vector backend is unavailable in a custom environment.
+
+---
 
 ## Contributing
 
