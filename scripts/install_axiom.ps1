@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Axiom Installer for Windows — install, reinstall, or uninstall the Axiom MVC app.
+    Axiom Installer for Windows — install, reinstall, or uninstall the Axiom app.
 
 .DESCRIPTION
     Downloads (or updates) the Axiom repository, creates a Python virtual
@@ -51,6 +51,39 @@ function Write-Info  { param([string]$Msg) Write-Host "[axiom] $Msg" -Foreground
 function Write-Ok    { param([string]$Msg) Write-Host "[axiom] $Msg" -ForegroundColor Green }
 function Write-Warn  { param([string]$Msg) Write-Host "[axiom] $Msg" -ForegroundColor Yellow }
 function Write-Err   { param([string]$Msg) Write-Host "[axiom] $Msg" -ForegroundColor Red }
+
+function Write-Launchers {
+    param([string]$VenvPython)
+
+    if (-not (Test-Path $LauncherDir)) {
+        New-Item -ItemType Directory -Path $LauncherDir -Force | Out-Null
+    }
+
+    # PowerShell launcher
+    @"
+# Auto-generated Axiom launcher - do not edit.
+`$ErrorActionPreference = "Stop"
+`$axiomDir = "$InstallDir"
+`$branch   = "$Branch"
+
+# Pull latest code silently
+if (Test-Path (Join-Path `$axiomDir ".git")) {
+    try { git -C `$axiomDir pull origin `$branch --ff-only 2>`$null } catch {}
+}
+
+# Run Axiom (MVC is the default path in main.py)
+& "$VenvPython" (Join-Path `$axiomDir "main.py") @args
+"@ | Set-Content -Path $LauncherPs1 -Encoding UTF8
+
+    # CMD wrapper so `axiom` works from cmd.exe too
+    @"
+@echo off
+REM Auto-generated Axiom launcher - do not edit.
+cd /d "$InstallDir"
+git pull origin $Branch --ff-only >nul 2>&1
+"$VenvPython" "$InstallDir\main.py" %*
+"@ | Set-Content -Path $LauncherCmd -Encoding ASCII
+}
 
 function Assert-Command {
     param([string]$Name)
@@ -154,36 +187,7 @@ function Invoke-Install {
     Write-Ok "Dependencies installed."
 
     # ── Launcher scripts ─────────────────────────────────────────────────
-    if (-not (Test-Path $LauncherDir)) {
-        New-Item -ItemType Directory -Path $LauncherDir -Force | Out-Null
-    }
-
-    # PowerShell launcher
-    @"
-# Auto-generated Axiom launcher - do not edit.
-`$ErrorActionPreference = "Stop"
-`$axiomDir = "$InstallDir"
-`$branch   = "$Branch"
-
-# Pull latest code silently
-if (Test-Path (Join-Path `$axiomDir ".git")) {
-    try { git -C `$axiomDir pull origin `$branch --ff-only 2>`$null } catch {}
-}
-
-# Run MVC app
-`$env:AXIOM_NEW_APP = "1"
-& "$VenvPython" (Join-Path `$axiomDir "main.py") @args
-"@ | Set-Content -Path $LauncherPs1 -Encoding UTF8
-
-    # CMD wrapper so `axiom` works from cmd.exe too
-    @"
-@echo off
-REM Auto-generated Axiom launcher - do not edit.
-cd /d "$InstallDir"
-git pull origin $Branch --ff-only >nul 2>&1
-set AXIOM_NEW_APP=1
-"$VenvPython" "$InstallDir\main.py" %*
-"@ | Set-Content -Path $LauncherCmd -Encoding ASCII
+    Write-Launchers -VenvPython $VenvPython
 
     Write-Ok "Launchers installed:"
     Write-Ok "  PowerShell : $LauncherPs1"
@@ -235,6 +239,7 @@ function Invoke-Update {
     Write-Info "Updating dependencies..."
     & $VenvPython -m pip install --upgrade pip --quiet
     & $VenvPip install -e $InstallSpec --quiet
+    Write-Launchers -VenvPython $VenvPython
 
     Write-Ok "Axiom updated to latest."
 }

@@ -13,12 +13,12 @@ Legacy GUI fallback (explicit opt-out via AXIOM_NEW_APP=0):
 
   Explicit CLI invocations::
 
-      AXIOM_NEW_APP=1 python main.py --cli index --file paper.txt
-      AXIOM_NEW_APP=1 python main.py --cli query --file paper.txt --question "..."
+      python main.py --cli index --file paper.txt
+      python main.py --cli query --file paper.txt --question "..."
 
   Headless automatic fallback::
 
-      AXIOM_NEW_APP=1 python main.py          # → CLI help if no display
+      python main.py          # -> CLI help if no display
 
 Runtime path:
   TODO: add CLI argument parsing here (--smoke, --profile, --theme …)
