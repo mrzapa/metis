@@ -76,6 +76,9 @@ license-files = ["LICENSE"]
 # Only package axiom_app; exclude the legacy monolith and test tree.
 include = ["axiom_app*"]
 
+[tool.setuptools.package-data]
+"axiom_app.assets" = ["logo.png"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts   = "-q --tb=short"
