@@ -25,9 +25,9 @@ curl -fsSL https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_a
 irm https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.ps1 | iex
 ```
 
-The installer clones the repo, creates a virtual environment, installs
-dependencies, and generates an `axiom` launcher that auto-pulls the latest code
-on every run.
+The installer clones the repo, creates a virtual environment, installs the
+pinned `runtime-all` bundle, and generates an `axiom` launcher that auto-pulls
+the latest code on every run.
 
 ### Installer options
 
@@ -48,6 +48,9 @@ on every run.
 
 Environment overrides: `AXIOM_INSTALL_DIR`, `AXIOM_REPO`, `AXIOM_BRANCH`, `AXIOM_PYTHON`.
 
+If a later update changes the pinned runtime bundle, run `axiom update` to
+repair the installation.
+
 ### Manual setup
 
 #### 1) Create a virtual environment
@@ -58,22 +61,28 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 ```
 
-#### 2) Install in editable mode
+#### 2) Install the GUI runtime bundle
 
 ```bash
-pip install -e .
+pip install -e ".[runtime-all]"
 ```
 
 For test/dev extras:
 
 ```bash
-pip install -e .[dev]
+pip install -e ".[dev]"
+```
+
+For development with the full GUI/runtime bundle:
+
+```bash
+pip install -e ".[dev,runtime-all]"
 ```
 
 For the strict live-backend proof extras:
 
 ```bash
-pip install -e .[dev,live-backends]
+pip install -e ".[dev,live-backends]"
 ```
 
 ## Run modes (GUI + CLI)
@@ -157,14 +166,17 @@ python -m axiom_app.cli query --file docs/my_notes.txt --question "dependency"
 
 ## Optional dependencies and fallback behavior
 
-Heavy ML/runtime dependencies are intentionally optional. The MVC app and CLI surface backend-readiness errors when a selected provider or vector backend is unavailable.
+Heavy ML/runtime dependencies are intentionally optional for manual minimal
+installs. The installers provision the pinned `runtime-all` bundle, while the
+MVC app and CLI surface backend-readiness errors when a selected provider or
+vector backend is unavailable in a custom environment.
 
 ## Testing
 
 ```bash
 python -m pytest
 python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
-pip install -e .[dev,live-backends]
+pip install -e ".[dev,live-backends]"
 python -m pytest -q tests/test_live_weaviate_proof.py
 ```
 

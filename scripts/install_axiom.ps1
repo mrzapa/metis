@@ -41,6 +41,7 @@ $RepoUrl     = if ($env:AXIOM_REPO)        { $env:AXIOM_REPO }        else { "ht
 $Branch      = if ($env:AXIOM_BRANCH)      { $env:AXIOM_BRANCH }      else { "main" }
 $PythonBin   = if ($env:AXIOM_PYTHON)      { $env:AXIOM_PYTHON }      else { "python" }
 $VenvDir     = Join-Path $InstallDir ".venv"
+$InstallSpec = "{0}[runtime-all]" -f $InstallDir
 $LauncherDir = Join-Path $HOME ".local" "bin"
 $LauncherPs1 = Join-Path $LauncherDir "axiom.ps1"
 $LauncherCmd = Join-Path $LauncherDir "axiom.cmd"
@@ -149,7 +150,7 @@ function Invoke-Install {
 
     Write-Info "Installing dependencies..."
     & $VenvPython -m pip install --upgrade pip --quiet
-    & $VenvPip install -e $InstallDir --quiet
+    & $VenvPip install -e $InstallSpec --quiet
     Write-Ok "Dependencies installed."
 
     # ── Launcher scripts ─────────────────────────────────────────────────
@@ -233,7 +234,7 @@ function Invoke-Update {
 
     Write-Info "Updating dependencies..."
     & $VenvPython -m pip install --upgrade pip --quiet
-    & $VenvPip install -e $InstallDir --quiet
+    & $VenvPip install -e $InstallSpec --quiet
 
     Write-Ok "Axiom updated to latest."
 }

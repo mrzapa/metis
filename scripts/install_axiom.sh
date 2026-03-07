@@ -22,6 +22,7 @@ REPO_URL="${AXIOM_REPO:-https://github.com/mrzapa/workx.git}"
 BRANCH="${AXIOM_BRANCH:-main}"
 PYTHON="${AXIOM_PYTHON:-python3}"
 VENV_DIR="$INSTALL_DIR/.venv"
+INSTALL_SPEC="${INSTALL_DIR}[runtime-all]"
 LAUNCHER_DIR="$HOME/.local/bin"
 LAUNCHER="$LAUNCHER_DIR/axiom"
 
@@ -124,7 +125,7 @@ do_install() {
 
     info "Installing dependencies…"
     "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet
-    "$VENV_DIR/bin/pip" install -e "$INSTALL_DIR" --quiet
+    "$VENV_DIR/bin/pip" install -e "$INSTALL_SPEC" --quiet
     ok "Dependencies installed."
 
     # ── Launcher script ──────────────────────────────────────────────────
@@ -190,7 +191,7 @@ do_update() {
 
     info "Updating dependencies…"
     "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet
-    "$VENV_DIR/bin/pip" install -e "$INSTALL_DIR" --quiet
+    "$VENV_DIR/bin/pip" install -e "$INSTALL_SPEC" --quiet
 
     ok "Axiom updated to latest."
 }

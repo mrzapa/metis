@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - name: Checkout
@@ -122,3 +122,56 @@ jobs:
       - name: Stop Docker Weaviate
         if: always()
         run: docker compose -f docker/weaviate/docker-compose.yml down -v
+
+  windows-runtime-smoke:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Create venv and install runtime bundle
+        shell: pwsh
+        run: |
+          python -m venv .venv-ci
+          & .\.venv-ci\Scripts\python.exe -m pip install --upgrade pip
+          & .\.venv-ci\Scripts\python.exe -m pip install -e ".[runtime-all]"
+
+      - name: Verify dependency graph
+        shell: pwsh
+        run: |
+          & .\.venv-ci\Scripts\python.exe -m pip check
+
+      - name: CLI smoke (headless)
+        shell: pwsh
+        run: |
+          @'
+          import os
+          import pathlib
+          import subprocess
+          import sys
+          import tempfile
+
+          root = pathlib.Path.cwd()
+          with tempfile.TemporaryDirectory() as td:
+              td_path = pathlib.Path(td)
+              doc = td_path / "smoke.txt"
+              doc.write_text("Axiom smoke test content for CLI mode.\n", encoding="utf-8")
+
+              env = dict(os.environ)
+              env["AXIOM_NEW_APP"] = "1"
+
+              cmd_index = [sys.executable, "main.py", "--cli", "index", "--file", str(doc)]
+              cmd_query = [sys.executable, "main.py", "--cli", "query", "--file", str(doc), "--question", "smoke"]
+
+              subprocess.run(cmd_index, cwd=root, env=env, check=True)
+              subprocess.run(cmd_query, cwd=root, env=env, check=True)
+
+          print("CLI smoke test passed")
+          '@ | & .\.venv-ci\Scripts\python.exe -
