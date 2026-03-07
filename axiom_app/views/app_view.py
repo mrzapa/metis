@@ -44,6 +44,7 @@ Only used when AXIOM_NEW_APP=1.  The legacy agentic_rag_gui UI is unchanged.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import pathlib
@@ -68,6 +69,8 @@ from axiom_app.views.widgets import (
     AnimationEngine,
     CollapsibleFrame,
     IOSSegmentedToggle,
+    RoundedCard,
+    TooltipManager,
 )
 
 # ---------------------------------------------------------------------------
@@ -80,7 +83,16 @@ APP_SUBTITLE = "Personal RAG Assistant"
 
 MODE_OPTIONS = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"]
 
-_SIDEBAR_W = 230  # fixed sidebar width in px
+_SIDEBAR_W = 76
+_SHELL_RADIUS = 28
+_CARD_RADIUS = 22
+_NAV_ITEMS = [
+    ("chat", "⌂", "Chat"),
+    ("library", "▣", "Library"),
+    ("history", "↺", "History"),
+    ("settings", "⚙", "Settings"),
+    ("logs", "≡", "Logs"),
+]
 
 # ---------------------------------------------------------------------------
 # Settings specification — module-level so it is defined once, not per-call.
@@ -225,12 +237,13 @@ class AppView:
         One of "space_dust" (default), "light", or "dark".
     """
 
-    def __init__(self, root: tk.Tk, theme_name: str = "space_dust") -> None:
+    def __init__(self, root: tk.Tk, theme_name: str = "light") -> None:
         self.root = root
         self._theme_name = theme_name
         self._palette = get_palette(theme_name)
         self._fonts = resolve_fonts(root)
         self._animator = AnimationEngine(root)
+        self.tooltip_manager = TooltipManager(root, lambda: self._palette)
 
         # Tk variable for RAG/Direct toggle
         self._use_rag_var = tk.BooleanVar(value=True)
@@ -260,6 +273,10 @@ class AppView:
         self._trace_payload_by_iid: dict[str, dict] = {}
         self._outline_payload_by_iid: dict[str, dict] = {}
         self._available_index_rows: list[dict] = []
+        self._theme_cards: list[tuple[RoundedCard, str, str, str | None]] = []
+        self._chat_has_messages = False
+        self._sidebar_brand_canvas: tk.Canvas | None = None
+        self._hero_orb_canvas: tk.Canvas | None = None
 
         # Settings display data — populated by controller via populate_settings().
         self._settings_data: dict = {}
@@ -305,6 +322,7 @@ class AppView:
         self._theme_name = theme_name
         self._palette = get_palette(theme_name)
         apply_ttk_theme(self.root, self._palette, self._fonts)
+        self._apply_runtime_palette()
 
     # ------------------------------------------------------------------
     # Window construction
@@ -317,110 +335,132 @@ class AppView:
 
         self._load_icon()
 
-        # Root grid: col 0 = sidebar (fixed), col 1 = main content (expands)
         self.root.grid_rowconfigure(0, weight=1)
-        self.root.grid_columnconfigure(0, minsize=_SIDEBAR_W, weight=0)
-        self.root.grid_columnconfigure(1, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+
+        self._shell_card, shell_inner = self._create_card(
+            self.root,
+            radius=_SHELL_RADIUS,
+            bg_key="workspace_bg",
+            border_key="workspace_border",
+            shadow_key="workspace_shadow",
+            inner_padding=0,
+            shadow_offset=4,
+        )
+        self._shell_card.grid(
+            row=0,
+            column=0,
+            sticky="nsew",
+            padx=STYLE_CONFIG["padding"]["lg"],
+            pady=STYLE_CONFIG["padding"]["lg"],
+        )
+        shell_inner.grid_rowconfigure(0, weight=1)
+        shell_inner.grid_columnconfigure(0, minsize=_SIDEBAR_W, weight=0)
+        shell_inner.grid_columnconfigure(1, minsize=1, weight=0)
+        shell_inner.grid_columnconfigure(2, weight=1)
+        self._shell_inner = shell_inner
 
         self._build_sidebar()
+        self._sidebar_divider = tk.Frame(
+            shell_inner,
+            width=1,
+            bd=0,
+            highlightthickness=0,
+            bg=self._palette.get("sidebar_border", self._palette["border"]),
+        )
+        self._sidebar_divider.grid(row=0, column=1, sticky="ns")
         self._build_main_content()
+        self._apply_runtime_palette()
 
     def _build_sidebar(self) -> None:
         pal = self._palette
-        outer_pad = STYLE_CONFIG["padding"]["md"]
+        shell_inner = self._shell_inner
 
-        self.sidebar_frame = ttk.Frame(self.root, style="Sidebar.TFrame")
-        self.sidebar_frame.grid(
-            row=0, column=0, sticky="nsew",
-            padx=(outer_pad, UI_SPACING["s"]),
-            pady=(outer_pad, UI_SPACING["s"]),
-        )
+        self.sidebar_frame = ttk.Frame(shell_inner, style="Sidebar.TFrame")
+        self.sidebar_frame.grid(row=0, column=0, sticky="ns", padx=(0, 0), pady=0)
         self.sidebar_frame.grid_columnconfigure(0, minsize=4, weight=0)
-        self.sidebar_frame.grid_columnconfigure(1, weight=1)
-        self.sidebar_frame.grid_rowconfigure(50, weight=1)  # spacer
+        self.sidebar_frame.grid_columnconfigure(1, minsize=_SIDEBAR_W - 4, weight=1)
+        self.sidebar_frame.grid_rowconfigure(2, weight=1)
 
-        # ── Logo ──────────────────────────────────────────────────────
-        self._sidebar_logo_photo = self._load_sidebar_logo()
-        if self._sidebar_logo_photo is not None:
-            logo_lbl = ttk.Label(self.sidebar_frame, image=self._sidebar_logo_photo,
-                                 style="Sidebar.Title.TLabel")
-            logo_lbl.grid(row=0, column=0, columnspan=2, sticky="n",
-                          padx=UI_SPACING["m"],
-                          pady=(UI_SPACING["m"], UI_SPACING["xs"]))
+        brand_wrap = ttk.Frame(self.sidebar_frame, style="Sidebar.TFrame")
+        brand_wrap.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(UI_SPACING["m"], UI_SPACING["l"]))
+        self._sidebar_brand_canvas = tk.Canvas(
+            brand_wrap,
+            width=40,
+            height=40,
+            bg=pal.get("sidebar_bg", pal["surface"]),
+            highlightthickness=0,
+            bd=0,
+        )
+        self._sidebar_brand_canvas.pack(padx=UI_SPACING["m"])
+        self._draw_brand_mark()
+        self.tooltip_manager.register(self._sidebar_brand_canvas, f"{APP_NAME} {APP_VERSION}")
 
-        # ── Title + subtitle ──────────────────────────────────────────
-        title_row_top_pad = UI_SPACING["xs"] if self._sidebar_logo_photo else UI_SPACING["l"]
-        ttk.Label(
-            self.sidebar_frame, text=APP_NAME, style="Sidebar.Title.TLabel"
-        ).grid(row=1, column=0, columnspan=2, sticky="w",
-               padx=UI_SPACING["m"], pady=(title_row_top_pad, 2))
+        nav_wrap = ttk.Frame(self.sidebar_frame, style="Sidebar.TFrame")
+        nav_wrap.grid(row=1, column=0, columnspan=2, sticky="new")
+        nav_wrap.grid_columnconfigure(1, weight=1)
 
-        if APP_SUBTITLE:
-            ttk.Label(
-                self.sidebar_frame, text=APP_SUBTITLE, style="Sidebar.Caption.TLabel"
-            ).grid(row=2, column=0, columnspan=2, sticky="w",
-                   padx=UI_SPACING["m"], pady=(0, UI_SPACING["m"]))
-
-        # ── Navigation buttons ─────────────────────────────────────────
-        nav_items = [
-            ("chat",     "💬  Chat"),
-            ("library",  "📚  Library"),
-            ("history",  "🕘  History"),
-            ("settings", "⚙️   Settings"),
-            ("logs",     "📋  Logs"),
-        ]
-        sidebar_bg = pal.get("sidebar_bg", pal.get("surface_alt", "#0D1520"))
-
-        for idx, (key, label) in enumerate(nav_items, start=3):
-            accent = tk.Frame(
-                self.sidebar_frame, width=4, bd=0, highlightthickness=0,
-                bg=sidebar_bg,
-            )
-            accent.grid(row=idx, column=0, sticky="ns", pady=(0, 3))
+        for row, (key, icon, label) in enumerate(_NAV_ITEMS[:3]):
+            accent = tk.Frame(nav_wrap, width=3, bd=0, highlightthickness=0, bg=pal.get("sidebar_bg", pal["surface"]))
+            accent.grid(row=row, column=0, sticky="ns", pady=(0, UI_SPACING["xs"]))
             self._sidebar_accents[key] = accent
 
             btn = ttk.Button(
-                self.sidebar_frame,
-                text=label,
+                nav_wrap,
+                text=icon,
+                width=3,
                 style="Sidebar.TButton",
-                command=lambda k=key: self.switch_view(k),
+                command=lambda item=key: self.switch_view(item),
             )
-            btn.grid(row=idx, column=1, sticky="ew",
-                     padx=(2, UI_SPACING["xs"]), pady=(0, 3))
+            btn.grid(row=row, column=1, sticky="ew", padx=(0, UI_SPACING["s"]), pady=(0, UI_SPACING["xs"]))
+            self.tooltip_manager.register(btn, label)
             self._sidebar_nav_buttons[key] = btn
 
-        # ── Bottom: separator + version badge ─────────────────────────
-        ttk.Separator(self.sidebar_frame, orient="horizontal").grid(
-            row=51, column=0, columnspan=2, sticky="ew",
-            padx=UI_SPACING["s"], pady=(UI_SPACING["s"], 6),
-        )
-        ttk.Label(
-            self.sidebar_frame,
-            text=f"{APP_NAME} {APP_VERSION}",
-            style="Sidebar.Caption.TLabel",
-        ).grid(row=52, column=0, columnspan=2, sticky="w",
-               padx=UI_SPACING["m"], pady=(0, UI_SPACING["xs"]))
-        ttk.Label(
-            self.sidebar_frame,
-            text="Backend: ttk",
-            style="Sidebar.Caption.TLabel",
-        ).grid(row=53, column=0, columnspan=2, sticky="w",
-               padx=UI_SPACING["m"], pady=(0, UI_SPACING["l"]))
+        utility_wrap = ttk.Frame(self.sidebar_frame, style="Sidebar.TFrame")
+        utility_wrap.grid(row=2, column=0, columnspan=2, sticky="sew")
+        utility_wrap.grid_columnconfigure(1, weight=1)
+        utility_wrap.grid_rowconfigure(0, weight=1)
+        utility_items = _NAV_ITEMS[3:]
+        utility_start = 1
+        for offset, (key, icon, label) in enumerate(utility_items):
+            row = utility_start + offset
+            accent = tk.Frame(utility_wrap, width=3, bd=0, highlightthickness=0, bg=pal.get("sidebar_bg", pal["surface"]))
+            accent.grid(row=row, column=0, sticky="ns", pady=(0, UI_SPACING["xs"]))
+            self._sidebar_accents[key] = accent
+
+            btn = ttk.Button(
+                utility_wrap,
+                text=icon,
+                width=3,
+                style="Sidebar.TButton",
+                command=lambda item=key: self.switch_view(item),
+            )
+            btn.grid(row=row, column=1, sticky="ew", padx=(0, UI_SPACING["s"]), pady=(0, UI_SPACING["xs"]))
+            self.tooltip_manager.register(btn, label)
+            self._sidebar_nav_buttons[key] = btn
+
+        footer = ttk.Frame(self.sidebar_frame, style="Sidebar.TFrame")
+        footer.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(UI_SPACING["s"], UI_SPACING["m"]))
+        ttk.Label(footer, text=f"{APP_NAME} {APP_VERSION}", style="Sidebar.Caption.TLabel").pack(anchor="center")
+        ttk.Label(footer, text="ttk runtime", style="Sidebar.Caption.TLabel").pack(anchor="center", pady=(2, 0))
 
     def _build_main_content(self) -> None:
-        outer_pad = STYLE_CONFIG["padding"]["md"]
+        shell_inner = self._shell_inner
 
-        self.main_content_frame = ttk.Frame(self.root, style="MainContent.TFrame")
+        self.main_content_frame = ttk.Frame(shell_inner, style="MainContent.TFrame")
         self.main_content_frame.grid(
-            row=0, column=1, sticky="nsew",
-            padx=(0, outer_pad), pady=(outer_pad, UI_SPACING["s"]),
+            row=0,
+            column=2,
+            sticky="nsew",
+            padx=STYLE_CONFIG["padding"]["lg"],
+            pady=STYLE_CONFIG["padding"]["lg"],
         )
         self.main_content_frame.grid_rowconfigure(0, weight=1)
         self.main_content_frame.grid_columnconfigure(0, weight=1)
 
         # Create all view frames now (stacked; only one visible at a time).
         for key in ("chat", "library", "history", "settings", "logs"):
-            frame = ttk.Frame(self.main_content_frame, style="Card.TFrame")
+            frame = ttk.Frame(self.main_content_frame, style="MainContent.TFrame")
             frame.grid(row=0, column=0, sticky="nsew")
             self._views[key] = frame
             self._tab_built[key] = False
@@ -432,126 +472,425 @@ class AppView:
         # Activate chat to start.
         self.switch_view("chat")
 
+    def _create_card(
+        self,
+        parent,
+        *,
+        radius: int = _CARD_RADIUS,
+        bg_key: str = "surface",
+        border_key: str = "border",
+        shadow_key: str | None = "workspace_shadow",
+        inner_padding: int = 18,
+        shadow_offset: int = 2,
+    ) -> tuple[RoundedCard, ttk.Frame]:
+        """Create a rounded surface card and register it for theme updates."""
+        pal = self._palette
+        outer_bg = pal.get("workspace_bg", pal.get("app_bg", pal["bg"]))
+        card = RoundedCard(
+            parent,
+            radius=radius,
+            bg=pal.get(bg_key, pal["surface"]),
+            outer_bg=outer_bg,
+            border_color=pal.get(border_key, pal["border"]),
+            border_width=1,
+            shadow_color=pal.get(shadow_key, "") if shadow_key else "",
+            shadow_offset=shadow_offset,
+            inner_padding=inner_padding,
+        )
+        self._theme_cards.append((card, bg_key, border_key, shadow_key))
+        inner_style = "Card.Elevated.TFrame" if bg_key == "surface_elevated" else "Card.TFrame"
+        inner = ttk.Frame(card.inner, style=inner_style)
+        inner.pack(fill="both", expand=True)
+        return card, inner
+
+    def _draw_brand_mark(self) -> None:
+        if self._sidebar_brand_canvas is None:
+            return
+        pal = self._palette
+        canvas = self._sidebar_brand_canvas
+        canvas.delete("all")
+        canvas.configure(bg=pal.get("sidebar_bg", pal["surface"]))
+        canvas.create_oval(4, 4, 36, 36, fill=pal.get("secondary", pal["text"]), outline="")
+        canvas.create_oval(11, 11, 29, 29, fill=pal.get("surface", "#FFFFFF"), outline="")
+        canvas.create_text(
+            20,
+            20,
+            text="A",
+            fill=pal.get("primary", pal["text"]),
+            font=(self._fonts["body_bold"][0], 13, "bold"),
+        )
+
+    def _draw_hero_orb(self) -> None:
+        if self._hero_orb_canvas is None:
+            return
+        pal = self._palette
+        canvas = self._hero_orb_canvas
+        canvas.delete("all")
+        canvas.configure(bg=pal.get("workspace_bg", pal["surface"]))
+        center = 60
+        rings = [
+            (18, pal.get("primary", "#8C5AF7")),
+            (28, pal.get("tertiary", "#B78EFF")),
+            (40, pal.get("accent_glow", "#E8D9FF")),
+        ]
+        for radius, color in reversed(rings):
+            canvas.create_oval(
+                center - radius,
+                center - radius,
+                center + radius,
+                center + radius,
+                fill=color,
+                outline="",
+            )
+        canvas.create_oval(32, 26, 58, 50, fill="#FFFFFF", outline="")
+        canvas.create_oval(40, 34, 52, 46, fill=pal.get("tertiary", pal["primary"]), outline="")
+
+    def _configure_chat_tags(self) -> None:
+        pal = self._palette
+        self.chat_display.tag_config(
+            "user",
+            font=self._fonts["body_bold"],
+            spacing1=16,
+            spacing3=16,
+            lmargin1=20,
+            lmargin2=28,
+            rmargin=20,
+            background=pal.get("chat_user_bg", pal["surface_alt"]),
+        )
+        self.chat_display.tag_config(
+            "agent",
+            font=self._fonts["body"],
+            spacing1=14,
+            spacing3=18,
+            lmargin1=20,
+            lmargin2=20,
+            rmargin=20,
+            background=pal.get("chat_agent_bg", pal["surface"]),
+        )
+        self.chat_display.tag_config(
+            "system",
+            font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
+            spacing1=8,
+            spacing3=8,
+            lmargin1=20,
+            rmargin=20,
+            foreground=pal.get("muted_text", pal["status"]),
+            background=pal.get("chat_system_bg", pal["surface_alt"]),
+        )
+        self.chat_display.tag_config(
+            "citation",
+            foreground=pal.get("link", pal["primary"]),
+            underline=1,
+            font=self._fonts["code"],
+        )
+        self.chat_display.tag_bind("citation", "<Button-1>", self._on_citation_click)
+        self.chat_display.tag_config(
+            "source",
+            font=self._fonts["code"],
+            foreground=pal.get("source", pal.get("muted_text", pal["status"])),
+        )
+        self.chat_display.tag_config(
+            "thinking_indicator",
+            font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
+            spacing1=10,
+            spacing3=10,
+            lmargin1=20,
+            rmargin=20,
+            foreground=pal.get("primary", "#8C5AF7"),
+            background=pal.get("chat_agent_bg", pal["surface"]),
+        )
+
+    def _current_greeting(self) -> str:
+        hour = dt.datetime.now().hour
+        if hour < 12:
+            return "Good morning."
+        if hour < 18:
+            return "Good afternoon."
+        return "Good evening."
+
+    def _sync_mode_chip(self) -> None:
+        if hasattr(self, "_composer_mode_chip"):
+            self._composer_mode_chip.set(f"Mode: {self._mode_var.get() or MODE_OPTIONS[0]}")
+
+    def _set_chat_state(self, has_messages: bool) -> None:
+        self._chat_has_messages = bool(has_messages)
+        if hasattr(self, "_chat_empty_state"):
+            if self._chat_has_messages:
+                self._chat_empty_state.grid_remove()
+            else:
+                self._chat_empty_state.grid()
+        if hasattr(self, "_conversation_shell"):
+            if self._chat_has_messages:
+                self._conversation_shell.grid()
+            else:
+                self._conversation_shell.grid_remove()
+        if hasattr(self, "_suggestion_panel"):
+            if self._chat_has_messages:
+                self._suggestion_panel.grid_remove()
+            else:
+                self._suggestion_panel.grid()
+
+    def _on_suggestion_clicked(self, prompt: str) -> None:
+        self.set_prompt_text(prompt)
+        try:
+            self.txt_input.focus_set()
+        except tk.TclError:
+            pass
+
+    def _configure_text_palette(
+        self,
+        widget: tk.Text,
+        *,
+        bg_key: str,
+        fg_key: str = "text",
+        select_bg_key: str = "selection_bg",
+        select_fg_key: str = "selection_fg",
+        highlight: bool = False,
+    ) -> None:
+        pal = self._palette
+        if not widget or not widget.winfo_exists():
+            return
+        config = {
+            "bg": pal.get(bg_key, pal["surface"]),
+            "fg": pal.get(fg_key, pal["text"]),
+            "insertbackground": pal["text"],
+        }
+        if select_bg_key:
+            config["selectbackground"] = pal.get(select_bg_key, pal["selection_bg"])
+        if select_fg_key:
+            config["selectforeground"] = pal.get(select_fg_key, pal["selection_fg"])
+        if highlight:
+            config["highlightbackground"] = pal.get("border", pal["outline"])
+            config["highlightcolor"] = pal.get("focus_ring", pal["primary"])
+        try:
+            widget.configure(**config)
+        except tk.TclError:
+            return
+
+    def _apply_runtime_palette(self) -> None:
+        pal = self._palette
+        self.root.configure(bg=pal.get("app_bg", pal["bg"]))
+
+        if hasattr(self, "_shell_card"):
+            self._shell_card.configure_colors(
+                bg=pal.get("workspace_bg", pal["surface"]),
+                border_color=pal.get("workspace_border", pal["border"]),
+                outer_bg=pal.get("app_bg", pal["bg"]),
+                shadow_color=pal.get("workspace_shadow", ""),
+            )
+        for card, bg_key, border_key, shadow_key in self._theme_cards:
+            if card is getattr(self, "_shell_card", None):
+                continue
+            card.configure_colors(
+                bg=pal.get(bg_key, pal["surface"]),
+                border_color=pal.get(border_key, pal["border"]),
+                outer_bg=pal.get("workspace_bg", pal.get("app_bg", pal["bg"])),
+                shadow_color=pal.get(shadow_key, "") if shadow_key else "",
+            )
+
+        for widget in (
+            getattr(self, "chat_display", None),
+            getattr(self, "_log_text", None),
+            getattr(self, "_logs_view_text", None),
+            getattr(self, "_evidence_detail_text", None),
+            getattr(self, "_event_detail_text", None),
+            getattr(self, "_region_detail_text", None),
+            getattr(self, "_outline_detail_text", None),
+            getattr(self, "_trace_detail_text", None),
+            getattr(self, "_grounding_text", None),
+            getattr(self, "_history_detail_text", None),
+        ):
+            if isinstance(widget, tk.Text):
+                self._configure_text_palette(widget, bg_key="surface")
+
+        if hasattr(self, "txt_input"):
+            self._configure_text_palette(self.txt_input, bg_key="input_bg", highlight=True)
+        if hasattr(self, "_file_listbox"):
+            try:
+                self._file_listbox.configure(
+                    bg=pal.get("surface_alt", pal["surface"]),
+                    fg=pal["text"],
+                    selectbackground=pal["selection_bg"],
+                    selectforeground=pal["selection_fg"],
+                )
+            except tk.TclError:
+                pass
+        if hasattr(self, "_sidebar_divider"):
+            try:
+                self._sidebar_divider.configure(bg=pal.get("sidebar_border", pal["border"]))
+            except tk.TclError:
+                pass
+        if self._sidebar_brand_canvas is not None:
+            self._draw_brand_mark()
+        if self._hero_orb_canvas is not None:
+            self._draw_hero_orb()
+        if hasattr(self, "_hero_greeting_var"):
+            self._hero_greeting_var.set(self._current_greeting())
+        if hasattr(self, "_hero_question_label"):
+            try:
+                self._hero_question_label.configure(
+                    bg=pal.get("workspace_bg", pal["surface"]),
+                    fg=pal["text"],
+                )
+            except tk.TclError:
+                pass
+        if hasattr(self, "_rag_toggle"):
+            self._rag_toggle.update_palette(pal)
+        if hasattr(self, "chat_display"):
+            self._configure_chat_tags()
+        self._refresh_llm_badge()
+        self._sync_mode_chip()
+        if self._active_view:
+            self.switch_view(self._active_view)
+
     # ------------------------------------------------------------------
     # View builders
     # ------------------------------------------------------------------
 
     def _build_chat_view(self) -> None:
-        """Chat view: toolbar + chat display + collapsible sections + input bar."""
+        """Chat view: prompt-first shell with hero empty state and conversation mode."""
         pal = self._palette
         frame = self._views["chat"]
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
 
-        outer = ttk.Frame(frame, style="Card.TFrame")
-        outer.pack(fill=tk.BOTH, expand=True)
+        outer = ttk.Frame(frame, style="MainContent.TFrame")
+        outer.grid(row=0, column=0, sticky="nsew")
+        outer.grid_rowconfigure(1, weight=1)
+        outer.grid_columnconfigure(0, weight=1)
 
-        # ── Toolbar ───────────────────────────────────────────────────
-        toolbar = ttk.Frame(outer, style="Card.Flat.TFrame",
-                            padding=(UI_SPACING["s"], UI_SPACING["xs"]))
-        toolbar.pack(fill="x", pady=(0, UI_SPACING["xs"]))
+        toolbar = ttk.Frame(outer, style="Utility.TFrame", padding=(0, 0, 0, UI_SPACING["s"]))
+        toolbar.grid(row=0, column=0, sticky="ew")
+        toolbar.grid_columnconfigure(0, weight=1)
+        toolbar.grid_columnconfigure(1, weight=1)
 
-        # Left side: Mode selector
-        ttk.Label(toolbar, text="Mode:", style="Caption.TLabel").pack(
-            side="left", padx=(0, 4)
-        )
+        left_tools = ttk.Frame(toolbar, style="Utility.TFrame")
+        left_tools.grid(row=0, column=0, sticky="w")
+        ttk.Label(left_tools, text="Mode", style="Caption.TLabel").pack(side="left", padx=(0, UI_SPACING["xs"]))
         self._mode_combo = ttk.Combobox(
-            toolbar, textvariable=self._mode_var,
-            values=MODE_OPTIONS, state="readonly", width=14,
+            left_tools,
+            textvariable=self._mode_var,
+            values=MODE_OPTIONS,
+            state="readonly",
+            width=12,
         )
         self._mode_combo.pack(side="left", padx=(0, UI_SPACING["s"]))
 
-        ttk.Label(toolbar, text="Profile:", style="Caption.TLabel").pack(
-            side="left", padx=(0, 4)
-        )
+        ttk.Label(left_tools, text="Profile", style="Caption.TLabel").pack(side="left", padx=(0, UI_SPACING["xs"]))
         self._profile_combo = ttk.Combobox(
-            toolbar,
+            left_tools,
             textvariable=self._profile_var,
             values=["Built-in: Default"],
             state="readonly",
-            width=24,
+            width=22,
         )
         self._profile_combo.pack(side="left", padx=(0, UI_SPACING["xs"]))
-        self.btn_profile_load = ttk.Button(toolbar, text="Load", style="Secondary.TButton")
+        self.btn_profile_load = ttk.Button(left_tools, text="Load", style="Secondary.TButton")
         self.btn_profile_load.pack(side="left", padx=(0, UI_SPACING["xs"]))
-        self.btn_profile_save = ttk.Button(toolbar, text="Save", style="Secondary.TButton")
+        self.btn_profile_save = ttk.Button(left_tools, text="Save", style="Secondary.TButton")
         self.btn_profile_save.pack(side="left", padx=(0, UI_SPACING["xs"]))
-        self.btn_profile_duplicate = ttk.Button(toolbar, text="Duplicate", style="Secondary.TButton")
-        self.btn_profile_duplicate.pack(side="left", padx=(0, UI_SPACING["s"]))
+        self.btn_profile_duplicate = ttk.Button(left_tools, text="Duplicate", style="Secondary.TButton")
+        self.btn_profile_duplicate.pack(side="left")
 
-        # RAG/Direct toggle
-        self._rag_toggle = IOSSegmentedToggle(
-            toolbar,
-            options=["RAG", "Direct"],
-            variable=self._use_rag_var,
-            palette=pal,
-            command=self._on_rag_toggle_clicked,
+        right_tools = ttk.Frame(toolbar, style="Utility.TFrame")
+        right_tools.grid(row=0, column=1, sticky="e")
+        self._llm_badge_var = tk.StringVar(value="LLM: --")
+        ttk.Label(right_tools, textvariable=self._llm_badge_var, style="Badge.TLabel").pack(
+            side="right",
+            padx=(UI_SPACING["xs"], 0),
         )
-        self._rag_toggle.pack(side="left", padx=(0, UI_SPACING["s"]))
-
-        # Right side: Evidence panel toggle + New Chat + LLM badge
-        self._llm_badge_var = tk.StringVar(value="🤖 LLM: --")
-        ttk.Label(toolbar, textvariable=self._llm_badge_var,
-                  style="Badge.TLabel").pack(side="right", padx=(UI_SPACING["s"], 0))
-
         self.btn_new_chat = ttk.Button(
-            toolbar, text="＋ New Chat", style="Secondary.TButton",
+            right_tools,
+            text="New Chat",
+            style="Primary.TButton",
             command=self._on_new_chat,
         )
         self.btn_new_chat.pack(side="right", padx=(UI_SPACING["xs"], 0))
-
         self._evidence_toggle_btn = ttk.Button(
-            toolbar, text="⊞ Evidence", style="Secondary.TButton",
+            right_tools,
+            text="Evidence",
+            style="Secondary.TButton",
             command=self._toggle_evidence_panel,
         )
         self._evidence_toggle_btn.pack(side="right", padx=(UI_SPACING["xs"], 0))
-
-        self.btn_feedback_down = ttk.Button(toolbar, text="👎", style="Secondary.TButton", width=3)
+        self.btn_feedback_down = ttk.Button(right_tools, text="Down", style="Secondary.TButton", width=5)
         self.btn_feedback_down.pack(side="right", padx=(UI_SPACING["xs"], 0))
-
-        self.btn_feedback_up = ttk.Button(toolbar, text="👍", style="Secondary.TButton", width=3)
+        self.btn_feedback_up = ttk.Button(right_tools, text="Up", style="Secondary.TButton", width=4)
         self.btn_feedback_up.pack(side="right", padx=(UI_SPACING["xs"], 0))
-
-        self.btn_reset_test_mode = ttk.Button(
-            toolbar,
-            text="Reset Test Mode",
-            style="Secondary.TButton",
-        )
+        self.btn_reset_test_mode = ttk.Button(right_tools, text="Reset Test Mode", style="Secondary.TButton")
         self.btn_reset_test_mode.pack(side="right", padx=(UI_SPACING["xs"], 0))
 
-        # ── Body: chat pane + optional evidence pane ──────────────────
-        body = ttk.Frame(outer, style="Card.TFrame")
-        body.pack(fill=tk.BOTH, expand=True)
+        body = ttk.Frame(outer, style="MainContent.TFrame")
+        body.grid(row=1, column=0, sticky="nsew")
+        body.grid_rowconfigure(0, weight=1)
+        body.grid_columnconfigure(0, weight=1)
+        self._chat_body = body
 
-        chat_pane = ttk.Frame(body, style="Card.Elevated.TFrame",
-                              padding=UI_SPACING["m"])
-        chat_pane.pack(side="left", fill=tk.BOTH, expand=True)
+        self._chat_stage = ttk.Frame(body, style="MainContent.TFrame")
+        self._chat_stage.grid(row=0, column=0, sticky="nsew")
+        self._chat_stage.grid_rowconfigure(0, weight=1)
+        self._chat_stage.grid_columnconfigure(0, weight=1)
 
-        self._evidence_sep = tk.Frame(body, width=1, bg=pal["border"],
-                                      bd=0, highlightthickness=0)
-        self._evidence_pane = ttk.Frame(body, style="Card.Elevated.TFrame",
-                                         padding=UI_SPACING["m"])
-        self._evidence_pane.pack_propagate(False)
-        self._evidence_visible = False
-        self._build_evidence_panel()
+        self._chat_empty_state = ttk.Frame(self._chat_stage, style="MainContent.TFrame")
+        self._chat_empty_state.grid(row=0, column=0, sticky="nsew")
+        self._chat_empty_state.grid_rowconfigure(0, weight=1)
+        self._chat_empty_state.grid_columnconfigure(0, weight=1)
+        empty_inner = ttk.Frame(self._chat_empty_state, style="MainContent.TFrame")
+        empty_inner.grid(row=0, column=0)
 
-        # ── Input bar (pack FIRST so it stays at the bottom) ──────────
-        input_bar = ttk.Frame(chat_pane, style="Card.Flat.TFrame",
-                              padding=UI_SPACING["m"])
-        input_bar.pack(fill="x", side="bottom")
+        self._hero_orb_canvas = tk.Canvas(
+            empty_inner,
+            width=120,
+            height=120,
+            bg=pal.get("workspace_bg", pal["surface"]),
+            highlightthickness=0,
+            bd=0,
+        )
+        self._hero_orb_canvas.pack(pady=(UI_SPACING["l"], UI_SPACING["s"]))
+        self._draw_hero_orb()
 
-        # ── Chat display ──────────────────────────────────────────────
-        chat_surface = ttk.Frame(chat_pane, style="Card.Elevated.TFrame")
-        chat_surface.pack(fill=tk.BOTH, expand=True)
-        chat_surface.rowconfigure(0, weight=1)
-        chat_surface.columnconfigure(0, weight=1)
+        self._hero_greeting_var = tk.StringVar(value=self._current_greeting())
+        ttk.Label(empty_inner, textvariable=self._hero_greeting_var, style="Title.TLabel").pack()
+
+        hero_line = ttk.Frame(empty_inner, style="MainContent.TFrame")
+        hero_line.pack(pady=(4, UI_SPACING["xs"]))
+        self._hero_question_label = tk.Label(
+            hero_line,
+            text="What should Axiom explore next?",
+            font=self._fonts["h1"],
+            bg=pal.get("workspace_bg", pal["surface"]),
+            fg=pal["text"],
+        )
+        self._hero_question_label.pack()
+        ttk.Label(
+            empty_inner,
+            text="Ask questions, inspect sources, and keep retrieval settings close at hand.",
+            style="Muted.TLabel",
+        ).pack()
+
+        self._conversation_shell = ttk.Frame(self._chat_stage, style="MainContent.TFrame")
+        self._conversation_shell.grid(row=0, column=0, sticky="nsew")
+        self._conversation_shell.grid_rowconfigure(0, weight=1)
+        self._conversation_shell.grid_columnconfigure(0, weight=1)
+
+        transcript_card, transcript_inner = self._create_card(
+            self._conversation_shell,
+            radius=_CARD_RADIUS,
+            bg_key="surface",
+            border_key="border",
+            shadow_key="workspace_shadow",
+            shadow_offset=2,
+        )
+        transcript_card.grid(row=0, column=0, sticky="nsew")
+        transcript_inner.rowconfigure(0, weight=1)
+        transcript_inner.columnconfigure(0, weight=1)
 
         self.chat_display = tk.Text(
-            chat_surface,
+            transcript_inner,
             state="disabled",
             wrap=tk.WORD,
             font=self._fonts["body"],
-            bg=pal.get("content_bg", pal["surface"]),
+            bg=pal.get("surface", pal["content_bg"]),
             fg=pal["text"],
             insertbackground=pal["text"],
             selectbackground=pal["selection_bg"],
@@ -560,152 +899,166 @@ class AppView:
             borderwidth=0,
             highlightthickness=0,
             padx=UI_SPACING["m"],
-            pady=UI_SPACING["s"],
+            pady=UI_SPACING["m"],
         )
         self.chat_display.grid(row=0, column=0, sticky="nsew")
-
-        chat_scroll = ttk.Scrollbar(chat_surface, orient="vertical",
-                                    command=self.chat_display.yview)
+        chat_scroll = ttk.Scrollbar(transcript_inner, orient="vertical", command=self.chat_display.yview)
         chat_scroll.grid(row=0, column=1, sticky="ns")
         self.chat_display.configure(yscrollcommand=chat_scroll.set)
+        self._configure_chat_tags()
 
-        # Text tags
-        self.chat_display.tag_config(
-            "user",
-            font=self._fonts["body_bold"],
-            spacing1=16, spacing3=16,
-            lmargin1=20, lmargin2=28, rmargin=20,
-            background=pal.get("chat_user_bg", pal["surface"]),
-        )
-        self.chat_display.tag_config(
-            "agent",
-            font=self._fonts["body"],
-            spacing1=14, spacing3=18,
-            lmargin1=20, lmargin2=20, rmargin=20,
-            background=pal.get("chat_agent_bg", pal["surface"]),
-        )
-        self.chat_display.tag_config(
-            "system",
-            font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
-            spacing1=8, spacing3=8,
-            lmargin1=20, rmargin=20,
-            foreground=pal.get("muted_text", "#8A9DC0"),
-            background=pal.get("chat_system_bg", pal["surface"]),
-        )
-        self.chat_display.tag_config(
-            "citation",
-            foreground=pal.get("link", "#6BD4FF"),
-            underline=1,
-            font=self._fonts["code"],
-        )
-        self.chat_display.tag_bind("citation", "<Button-1>", self._on_citation_click)
-        self.chat_display.tag_config(
-            "source",
-            font=self._fonts["code"],
-            foreground=pal.get("source", pal.get("muted_text", "#8A9DC0")),
-        )
-        self.chat_display.tag_config(
-            "thinking_indicator",
-            font=(self._fonts["caption"][0], self._fonts["caption"][1], "italic"),
-            spacing1=10, spacing3=10,
-            lmargin1=20, rmargin=20,
-            foreground=pal.get("primary", "#4D9EFF"),
-            background=pal.get("chat_agent_bg", pal["surface"]),
-        )
+        self._evidence_pane_holder = ttk.Frame(self._conversation_shell, style="MainContent.TFrame")
+        self._evidence_pane_holder.grid(row=0, column=1, sticky="ns", padx=(UI_SPACING["s"], 0))
+        self._evidence_visible = False
+        self._build_evidence_panel()
+        self._evidence_pane_holder.grid_remove()
 
-        # ── Collapsible sections inside input bar ──────────────────────
-        # Logs section
-        _coll_frame = ttk.Frame(input_bar)
-        _coll_frame.pack(fill="x", pady=(0, UI_SPACING["xs"]))
-
-        self._logs_section = CollapsibleFrame(
-            _coll_frame, "Logs & telemetry",
-            expanded=False, animator=self._animator,
+        composer_card, composer_inner = self._create_card(
+            body,
+            radius=_CARD_RADIUS,
+            bg_key="surface",
+            border_key="border",
+            shadow_key="workspace_shadow",
+            shadow_offset=2,
         )
-        self._logs_section.pack(fill="x", pady=(0, 4))
+        composer_card.grid(row=1, column=0, sticky="ew", pady=(UI_SPACING["m"], UI_SPACING["s"]))
+        composer_inner.grid_columnconfigure(0, weight=1)
+        composer_inner.grid_rowconfigure(1, weight=1)
 
-        self._log_text = tk.Text(
-            self._logs_section.content,
-            state="disabled",
-            wrap=tk.WORD,
-            height=4,
-            font=self._fonts["code"],
-            bg=pal.get("input_bg", "#07101A"),
-            fg=pal.get("muted_text", "#8A9DC0"),
-            insertbackground=pal["text"],
-            relief="flat",
-            borderwidth=0,
-            highlightthickness=0,
-        )
-        self._log_text.pack(fill=tk.BOTH, expand=True,
-                            padx=UI_SPACING["s"], pady=UI_SPACING["xs"])
-        log_scroll = ttk.Scrollbar(self._logs_section.content, orient="vertical",
-                                   command=self._log_text.yview)
-        log_scroll.pack(side="right", fill="y")
-        self._log_text.configure(yscrollcommand=log_scroll.set)
-
-        # Progress row
-        progress_row = ttk.Frame(input_bar, style="Card.Flat.TFrame")
-        progress_row.pack(fill="x", pady=(0, 4))
-
-        self._status_label = ttk.Label(
-            progress_row, textvariable=self._status_var, style="Status.TLabel"
-        )
-        self._status_label.pack(side="left", padx=(0, UI_SPACING["s"]))
-
-        self.rag_progress = ttk.Progressbar(
-            progress_row, orient="horizontal", mode="determinate", length=180
-        )
-        self.rag_progress.pack(side="left", padx=(0, UI_SPACING["xs"]))
-
-        self.btn_cancel_rag = ttk.Button(
-            progress_row, text="Cancel", style="Secondary.TButton", state="disabled"
-        )
-        self.btn_cancel_rag.pack(side="left")
-
-        # Text input + Send button
-        input_row = ttk.Frame(input_bar, style="Card.Flat.TFrame")
-        input_row.pack(fill="x", pady=(UI_SPACING["xs"], 0))
-        input_row.columnconfigure(0, weight=1)
-        input_row.columnconfigure(1, weight=0)
+        ttk.Label(
+            composer_inner,
+            text="Ask Axiom a question or make a request...",
+            style="Muted.TLabel",
+        ).grid(row=0, column=0, sticky="w", pady=(0, UI_SPACING["xs"]))
 
         self.txt_input = tk.Text(
-            input_row,
-            height=3,
+            composer_inner,
+            height=5,
             wrap=tk.WORD,
             font=self._fonts["body"],
-            bg=pal.get("input_bg", "#07101A"),
+            bg=pal.get("input_bg", pal["surface_alt"]),
             fg=pal["text"],
             insertbackground=pal["text"],
             selectbackground=pal["selection_bg"],
             selectforeground=pal["selection_fg"],
             relief="flat",
             borderwidth=0,
-            highlightthickness=2,
-            highlightbackground=pal.get("outline", "#2A3E58"),
-            highlightcolor=pal.get("focus_ring", pal.get("primary", "#4D9EFF")),
+            highlightthickness=1,
+            highlightbackground=pal.get("border", pal["outline"]),
+            highlightcolor=pal.get("focus_ring", pal["primary"]),
+            padx=UI_SPACING["m"],
+            pady=UI_SPACING["s"],
         )
-        self.txt_input.grid(row=0, column=0, sticky="ew", padx=(0, UI_SPACING["s"]))
+        self.txt_input.grid(row=1, column=0, sticky="ew")
 
-        self.btn_send = ttk.Button(
-            input_row, text="Send", style="Primary.TButton", width=8
+        composer_actions = ttk.Frame(composer_inner, style="Utility.TFrame")
+        composer_actions.grid(row=2, column=0, sticky="ew", pady=(UI_SPACING["s"], 0))
+        composer_actions.grid_columnconfigure(1, weight=1)
+
+        left_actions = ttk.Frame(composer_actions, style="Utility.TFrame")
+        left_actions.grid(row=0, column=0, sticky="w")
+        self._rag_toggle = IOSSegmentedToggle(
+            left_actions,
+            options=["RAG", "Direct"],
+            variable=self._use_rag_var,
+            palette=pal,
+            command=self._on_rag_toggle_clicked,
         )
-        self.btn_send.grid(row=0, column=1, sticky="e")
+        self._rag_toggle.pack(side="left", padx=(0, UI_SPACING["s"]))
+        self._composer_mode_chip = tk.StringVar(value="Mode: Q&A")
+        ttk.Label(left_actions, textvariable=self._composer_mode_chip, style="Badge.TLabel").pack(side="left")
 
-        # Compatibility alias: controllers reference prompt_entry
+        self.btn_send = ttk.Button(composer_actions, text="Send", style="Primary.TButton", width=9)
+        self.btn_send.grid(row=0, column=2, sticky="e")
+
         self.prompt_entry = self.txt_input
-
-        # Bind Ctrl+Enter to send
         self.txt_input.bind("<Control-Return>", lambda _e: self._on_ctrl_enter())
 
+        self._suggestion_panel = ttk.Frame(body, style="MainContent.TFrame")
+        self._suggestion_panel.grid(row=2, column=0, sticky="ew")
+        ttk.Label(self._suggestion_panel, text="GET STARTED WITH AN EXAMPLE BELOW", style="Overline.TLabel").grid(
+            row=0,
+            column=0,
+            sticky="w",
+            pady=(0, UI_SPACING["s"]),
+        )
+        for column in range(4):
+            self._suggestion_panel.grid_columnconfigure(column, weight=1)
+        self._suggestion_buttons: list[ttk.Button] = []
+        for idx, prompt in enumerate(
+            [
+                "Summarize the main ideas in my latest source",
+                "Explain this topic like a tutor",
+                "Generate an evidence-backed answer with citations",
+                "Compare two documents and highlight differences",
+            ]
+        ):
+            button = ttk.Button(
+                self._suggestion_panel,
+                text=prompt,
+                style="Secondary.TButton",
+                command=lambda value=prompt: self._on_suggestion_clicked(value),
+            )
+            button.grid(row=1, column=idx, sticky="nsew", padx=(0 if idx == 0 else UI_SPACING["xs"], 0))
+            self._suggestion_buttons.append(button)
+
+        dock_card, dock_inner = self._create_card(
+            outer,
+            radius=18,
+            bg_key="surface_elevated",
+            border_key="border",
+            shadow_key=None,
+            inner_padding=14,
+        )
+        dock_card.grid(row=2, column=0, sticky="ew")
+        status_row = ttk.Frame(dock_inner, style="Utility.TFrame")
+        status_row.pack(fill="x")
+        self._status_label = ttk.Label(status_row, textvariable=self._status_var, style="Status.TLabel")
+        self._status_label.pack(side="left", padx=(0, UI_SPACING["s"]))
+        self.rag_progress = ttk.Progressbar(status_row, orient="horizontal", mode="determinate", length=180)
+        self.rag_progress.pack(side="left", padx=(0, UI_SPACING["xs"]))
+        self.btn_cancel_rag = ttk.Button(status_row, text="Cancel", style="Secondary.TButton", state="disabled")
+        self.btn_cancel_rag.pack(side="left")
+
+        self._logs_section = CollapsibleFrame(dock_inner, "Logs & telemetry", expanded=False, animator=self._animator)
+        self._logs_section.pack(fill="x", pady=(UI_SPACING["s"], 0))
+        self._log_text = tk.Text(
+            self._logs_section.content,
+            state="disabled",
+            wrap=tk.WORD,
+            height=4,
+            font=self._fonts["code"],
+            bg=pal.get("input_bg", pal["surface_alt"]),
+            fg=pal.get("muted_text", pal["status"]),
+            insertbackground=pal["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        self._log_text.pack(fill=tk.BOTH, expand=True, padx=UI_SPACING["s"], pady=UI_SPACING["xs"])
+        log_scroll = ttk.Scrollbar(self._logs_section.content, orient="vertical", command=self._log_text.yview)
+        log_scroll.pack(side="right", fill="y")
+        self._log_text.configure(yscrollcommand=log_scroll.set)
+
+        self._refresh_llm_badge()
+        self._sync_mode_chip()
+        self._set_chat_state(False)
+
     def _build_evidence_panel(self) -> None:
-        """Construct the right-side evidence pane used by chat retrieval."""
-        frame = self._evidence_pane
+        """Construct the right-side evidence inspector used by chat retrieval."""
+        _, frame = self._create_card(
+            self._evidence_pane_holder,
+            radius=_CARD_RADIUS,
+            bg_key="surface",
+            border_key="border",
+            shadow_key="workspace_shadow",
+            shadow_offset=2,
+        )
         frame.columnconfigure(0, weight=1)
 
-        header = ttk.Frame(frame, style="Card.Flat.TFrame")
+        header = ttk.Frame(frame, style="Utility.TFrame")
         header.pack(fill="x", pady=(0, UI_SPACING["s"]))
-        ttk.Label(header, text="Evidence", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(header, text="Evidence inspector", style="Header.TLabel").pack(anchor="w")
         self._evidence_status_var = tk.StringVar(value="No retrieved evidence yet.")
         ttk.Label(
             header,
@@ -905,153 +1258,154 @@ class AppView:
         return text
 
     def _build_library_view(self) -> None:
-        """Library view: step-based file selection, build controls, and index summary."""
+        """Library view: card-based source, build controls, and index summary."""
         frame = self._views["library"]
-        frame.rowconfigure(1, weight=1)
+        frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
 
-        outer = ttk.Frame(frame, style="Card.TFrame")
-        outer.grid(
-            row=0, column=0, rowspan=3, sticky="nsew",
-            padx=UI_SPACING["m"], pady=UI_SPACING["m"],
-        )
+        outer = ttk.Frame(frame, style="MainContent.TFrame")
+        outer.grid(row=0, column=0, sticky="nsew")
         outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(1, weight=1)
 
-        step_one = ttk.LabelFrame(
-            outer,
-            text="Step 1 · Source files",
-            padding=(UI_SPACING["m"], UI_SPACING["s"]),
+        header = ttk.Frame(outer, style="MainContent.TFrame")
+        header.grid(row=0, column=0, sticky="ew", pady=(0, UI_SPACING["m"]))
+        ttk.Label(header, text="Library", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(
+            header,
+            text="Bring in source files, tune the build, and manage persisted indexes from one workspace.",
+            style="Muted.TLabel",
+        ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+
+        source_card, source_inner = self._create_card(outer)
+        source_card.grid(row=1, column=0, sticky="ew")
+        source_inner.columnconfigure(0, weight=1)
+        ttk.Label(source_inner, text="Step 1 · Source files", style="Header.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(source_inner, text="Choose one or more files to include in the current working set.", style="Caption.TLabel").grid(
+            row=1,
+            column=0,
+            sticky="w",
+            pady=(UI_SPACING["xs"], UI_SPACING["s"]),
         )
-        step_one.grid(row=0, column=0, sticky="ew")
-        step_one.columnconfigure(0, weight=1)
 
-        toolbar = ttk.Frame(step_one, style="Card.Flat.TFrame")
-        toolbar.grid(row=0, column=0, sticky="ew")
-        self.btn_open_files = ttk.Button(toolbar, text="Open Files…", style="Primary.TButton")
+        toolbar = ttk.Frame(source_inner, style="Utility.TFrame")
+        toolbar.grid(row=2, column=0, sticky="ew")
+        self.btn_open_files = ttk.Button(toolbar, text="Open Files...", style="Primary.TButton")
         self.btn_open_files.pack(side="left", padx=(0, UI_SPACING["xs"]))
         self.btn_build_index = ttk.Button(toolbar, text="Build Index", style="Secondary.TButton")
         self.btn_build_index.pack(side="left")
-        ttk.Label(toolbar, textvariable=self._index_info_var, style="Caption.TLabel").pack(
-            side="left", padx=(UI_SPACING["m"], 0)
-        )
+        ttk.Label(toolbar, textvariable=self._index_info_var, style="Caption.TLabel").pack(side="left", padx=(UI_SPACING["m"], 0))
 
-        lb_frame = ttk.Frame(step_one, style="Card.Elevated.TFrame")
-        lb_frame.grid(row=1, column=0, sticky="nsew", pady=(UI_SPACING["s"], 0))
-        lb_frame.rowconfigure(0, weight=1)
-        lb_frame.columnconfigure(0, weight=1)
-
+        list_host = ttk.Frame(source_inner, style="Card.Flat.TFrame")
+        list_host.grid(row=3, column=0, sticky="nsew", pady=(UI_SPACING["s"], 0))
+        list_host.rowconfigure(0, weight=1)
+        list_host.columnconfigure(0, weight=1)
         self._file_listbox = tk.Listbox(
-            lb_frame,
+            list_host,
             selectmode="extended",
             activestyle="dotbox",
-            bg=self._palette.get("surface_alt", "#1E2D42"),
-            fg=self._palette["text"],
-            selectbackground=self._palette["selection_bg"],
-            selectforeground=self._palette["selection_fg"],
             relief="flat",
             borderwidth=0,
             highlightthickness=0,
         )
-        self._file_listbox.grid(row=0, column=0, sticky="nsew",
-                                padx=UI_SPACING["s"], pady=UI_SPACING["s"])
+        self._file_listbox.grid(row=0, column=0, sticky="nsew", padx=UI_SPACING["s"], pady=UI_SPACING["s"])
+        file_vsb = ttk.Scrollbar(list_host, orient="vertical", command=self._file_listbox.yview)
+        file_vsb.grid(row=0, column=1, sticky="ns", pady=UI_SPACING["s"])
+        self._file_listbox.configure(yscrollcommand=file_vsb.set)
+        file_hsb = ttk.Scrollbar(list_host, orient="horizontal", command=self._file_listbox.xview)
+        file_hsb.grid(row=1, column=0, sticky="ew", padx=UI_SPACING["s"])
+        self._file_listbox.configure(xscrollcommand=file_hsb.set)
 
-        _vsb = ttk.Scrollbar(lb_frame, orient="vertical",
-                             command=self._file_listbox.yview)
-        _vsb.grid(row=0, column=1, sticky="ns",
-                  pady=UI_SPACING["s"])
-        self._file_listbox.configure(yscrollcommand=_vsb.set)
-
-        _hsb = ttk.Scrollbar(lb_frame, orient="horizontal",
-                             command=self._file_listbox.xview)
-        _hsb.grid(row=1, column=0, sticky="ew",
-                  padx=UI_SPACING["s"])
-        self._file_listbox.configure(xscrollcommand=_hsb.set)
-
-        step_two = ttk.LabelFrame(
-            outer,
-            text="Step 2 · Build settings",
-            padding=(UI_SPACING["m"], UI_SPACING["s"]),
-        )
-        step_two.grid(row=1, column=0, sticky="nsew", pady=(UI_SPACING["m"], 0))
+        settings_card, settings_inner = self._create_card(outer)
+        settings_card.grid(row=2, column=0, sticky="ew", pady=(UI_SPACING["m"], 0))
         for column in range(6):
-            step_two.columnconfigure(column, weight=1 if column % 2 else 0)
+            settings_inner.columnconfigure(column, weight=1 if column % 2 else 0)
+        ttk.Label(settings_inner, text="Step 2 · Build settings", style="Header.TLabel").grid(row=0, column=0, columnspan=6, sticky="w")
+        ttk.Label(
+            settings_inner,
+            text="These controls feed the current MVC index and query path directly.",
+            style="Caption.TLabel",
+        ).grid(row=1, column=0, columnspan=6, sticky="w", pady=(UI_SPACING["xs"], UI_SPACING["s"]))
 
         self._lib_chunk_size_var = tk.StringVar(value=str(self._settings_data.get("chunk_size", 800)))
         self._lib_chunk_overlap_var = tk.StringVar(value=str(self._settings_data.get("chunk_overlap", 100)))
         self._lib_top_k_var = tk.StringVar(value=str(self._settings_data.get("top_k", 3)))
+        ttk.Label(settings_inner, text="Chunk size", style="Caption.TLabel").grid(row=2, column=0, sticky="w")
+        ttk.Entry(settings_inner, textvariable=self._lib_chunk_size_var, width=10).grid(
+            row=2,
+            column=1,
+            sticky="w",
+            padx=(UI_SPACING["xs"], UI_SPACING["m"]),
+        )
+        ttk.Label(settings_inner, text="Chunk overlap", style="Caption.TLabel").grid(row=2, column=2, sticky="w")
+        ttk.Entry(settings_inner, textvariable=self._lib_chunk_overlap_var, width=10).grid(
+            row=2,
+            column=3,
+            sticky="w",
+            padx=(UI_SPACING["xs"], UI_SPACING["m"]),
+        )
+        ttk.Label(settings_inner, text="Top-K", style="Caption.TLabel").grid(row=2, column=4, sticky="w")
+        ttk.Entry(settings_inner, textvariable=self._lib_top_k_var, width=10).grid(row=2, column=5, sticky="w", padx=(UI_SPACING["xs"], 0))
 
-        ttk.Label(step_two, text="Chunk Size", style="Caption.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Entry(step_two, textvariable=self._lib_chunk_size_var, width=10).grid(
-            row=0, column=1, sticky="w", padx=(UI_SPACING["xs"], UI_SPACING["m"])
+        index_card, index_inner = self._create_card(outer)
+        index_card.grid(row=3, column=0, sticky="ew", pady=(UI_SPACING["m"], 0))
+        index_inner.columnconfigure(1, weight=1)
+        ttk.Label(index_inner, text="Step 3 · Active index", style="Header.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Label(index_inner, text="Load a saved index or inspect the active persisted path.", style="Caption.TLabel").grid(
+            row=1,
+            column=0,
+            columnspan=3,
+            sticky="w",
+            pady=(UI_SPACING["xs"], UI_SPACING["s"]),
         )
-        ttk.Label(step_two, text="Chunk Overlap", style="Caption.TLabel").grid(row=0, column=2, sticky="w")
-        ttk.Entry(step_two, textvariable=self._lib_chunk_overlap_var, width=10).grid(
-            row=0, column=3, sticky="w", padx=(UI_SPACING["xs"], UI_SPACING["m"])
-        )
-        ttk.Label(step_two, text="Top-K", style="Caption.TLabel").grid(row=0, column=4, sticky="w")
-        ttk.Entry(step_two, textvariable=self._lib_top_k_var, width=10).grid(
-            row=0, column=5, sticky="w", padx=(UI_SPACING["xs"], 0)
-        )
-        ttk.Label(
-            step_two,
-            text="These controls feed the current MVC index/query path directly.",
-            style="Caption.TLabel",
-            wraplength=900,
-            justify="left",
-        ).grid(row=1, column=0, columnspan=6, sticky="w", pady=(UI_SPACING["s"], 0))
-
-        step_three = ttk.LabelFrame(
-            outer,
-            text="Step 3 · Active index",
-            padding=(UI_SPACING["m"], UI_SPACING["s"]),
-        )
-        step_three.grid(row=2, column=0, sticky="ew", pady=(UI_SPACING["m"], 0))
-        selector = ttk.Frame(step_three, style="Card.Flat.TFrame")
-        selector.pack(fill="x", pady=(0, UI_SPACING["s"]))
-        ttk.Label(selector, text="Saved indexes", style="Caption.TLabel").pack(side="left")
+        ttk.Label(index_inner, text="Saved indexes", style="Caption.TLabel").grid(row=2, column=0, sticky="w")
         self._available_index_combo = ttk.Combobox(
-            selector,
+            index_inner,
             textvariable=self._available_index_var,
             values=[],
             state="readonly",
             width=72,
         )
-        self._available_index_combo.pack(side="left", fill="x", expand=True, padx=(UI_SPACING["xs"], UI_SPACING["xs"]))
-        self.btn_library_load_index = ttk.Button(selector, text="Load Selected", style="Secondary.TButton")
-        self.btn_library_load_index.pack(side="left")
+        self._available_index_combo.grid(row=2, column=1, sticky="ew", padx=(UI_SPACING["xs"], UI_SPACING["xs"]))
+        self.btn_library_load_index = ttk.Button(index_inner, text="Load Selected", style="Secondary.TButton")
+        self.btn_library_load_index.grid(row=2, column=2, sticky="e")
         self._active_index_summary_var = tk.StringVar(value="No persisted index selected.")
         self._active_index_path_var = tk.StringVar(value="")
-        ttk.Label(step_three, textvariable=self._active_index_summary_var, style="TLabel").pack(anchor="w")
+        ttk.Label(index_inner, textvariable=self._active_index_summary_var, style="TLabel").grid(
+            row=3,
+            column=0,
+            columnspan=3,
+            sticky="w",
+            pady=(UI_SPACING["s"], 0),
+        )
         ttk.Label(
-            step_three,
+            index_inner,
             textvariable=self._active_index_path_var,
             style="Caption.TLabel",
-            wraplength=900,
+            wraplength=920,
             justify="left",
-        ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
+        ).grid(row=4, column=0, columnspan=3, sticky="w", pady=(UI_SPACING["xs"], 0))
 
         self.progress = ttk.Progressbar(outer, orient="horizontal", mode="determinate")
-        self.progress.grid(row=3, column=0, sticky="ew", pady=(UI_SPACING["m"], 0))
+        self.progress.grid(row=4, column=0, sticky="ew", pady=(UI_SPACING["m"], 0))
 
     def _build_history_view(self) -> None:
-        """History view: session list, actions, and detail pane."""
+        """History view: command bar and master-detail cards."""
         frame = self._views["history"]
         frame.rowconfigure(2, weight=1)
         frame.columnconfigure(0, weight=3)
         frame.columnconfigure(1, weight=2)
 
-        header = ttk.Frame(frame, style="Card.Flat.TFrame", padding=(UI_SPACING["m"], UI_SPACING["s"]))
-        header.grid(row=0, column=0, columnspan=2, sticky="ew")
+        header = ttk.Frame(frame, style="MainContent.TFrame")
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, UI_SPACING["m"]))
         ttk.Label(header, text="History", style="Header.TLabel").pack(anchor="w")
         ttk.Label(
             header,
             text="Resume persisted sessions, inspect summaries, and export transcripts.",
-            style="Caption.TLabel",
+            style="Muted.TLabel",
         ).pack(anchor="w", pady=(UI_SPACING["xs"], 0))
 
-        actions = ttk.Frame(frame, style="Card.Flat.TFrame", padding=(UI_SPACING["m"], 0))
-        actions.grid(row=1, column=0, columnspan=2, sticky="ew")
+        actions = ttk.Frame(frame, style="Utility.TFrame")
+        actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, UI_SPACING["s"]))
         self.btn_history_new_chat = ttk.Button(actions, text="New Chat", style="Primary.TButton")
         self.btn_history_new_chat.pack(side="left")
         self.btn_history_open = ttk.Button(actions, text="Open", style="Secondary.TButton")
@@ -1082,8 +1436,8 @@ class AppView:
         self._history_search_entry = ttk.Entry(actions, textvariable=self._history_search_var, width=28)
         self._history_search_entry.pack(side="left", fill="x", expand=True)
 
-        left = ttk.Frame(frame, style="Card.Elevated.TFrame")
-        left.grid(row=2, column=0, sticky="nsew", padx=(UI_SPACING["m"], UI_SPACING["xs"]), pady=UI_SPACING["m"])
+        left_card, left = self._create_card(frame)
+        left_card.grid(row=2, column=0, sticky="nsew", padx=(0, UI_SPACING["xs"]))
         left.rowconfigure(0, weight=1)
         left.columnconfigure(0, weight=1)
 
@@ -1106,8 +1460,8 @@ class AppView:
         history_scroll.grid(row=0, column=1, sticky="ns")
         self._history_tree.configure(yscrollcommand=history_scroll.set)
 
-        right = ttk.Frame(frame, style="Card.Elevated.TFrame", padding=UI_SPACING["m"])
-        right.grid(row=2, column=1, sticky="nsew", padx=(UI_SPACING["xs"], UI_SPACING["m"]), pady=UI_SPACING["m"])
+        right_card, right = self._create_card(frame)
+        right_card.grid(row=2, column=1, sticky="nsew", padx=(UI_SPACING["xs"], 0))
         right.rowconfigure(1, weight=1)
         right.columnconfigure(0, weight=1)
 
@@ -1147,15 +1501,12 @@ class AppView:
         frame.columnconfigure(0, weight=1)
 
         # ── Header ────────────────────────────────────────────────────
-        hdr = ttk.Frame(frame, style="Card.Flat.TFrame",
-                        padding=(UI_SPACING["m"], UI_SPACING["s"]))
-        hdr.grid(row=0, column=0, sticky="ew")
+        hdr = ttk.Frame(frame, style="MainContent.TFrame")
+        hdr.grid(row=0, column=0, sticky="ew", pady=(0, UI_SPACING["m"]))
         ttk.Label(hdr, text="Settings", style="Header.TLabel").pack(side="left")
 
-        # ── Scrollable canvas area ─────────────────────────────────────
-        canvas_host = ttk.Frame(frame, style="Card.TFrame")
-        canvas_host.grid(row=1, column=0, sticky="nsew",
-                         padx=UI_SPACING["m"], pady=(UI_SPACING["xs"], 0))
+        canvas_card, canvas_host = self._create_card(frame)
+        canvas_card.grid(row=1, column=0, sticky="nsew")
         canvas_host.rowconfigure(0, weight=1)
         canvas_host.columnconfigure(0, weight=1)
 
@@ -1408,18 +1759,13 @@ class AppView:
         frame.rowconfigure(1, weight=1)
         frame.columnconfigure(0, weight=1)
 
-        # ── Header ────────────────────────────────────────────────────
-        hdr = ttk.Frame(frame, style="Card.Flat.TFrame",
-                        padding=(UI_SPACING["m"], UI_SPACING["s"]))
-        hdr.grid(row=0, column=0, sticky="ew")
+        hdr = ttk.Frame(frame, style="MainContent.TFrame")
+        hdr.grid(row=0, column=0, sticky="ew", pady=(0, UI_SPACING["m"]))
         ttk.Label(hdr, text="Logs & Telemetry",
                   style="Header.TLabel").pack(side="left")
 
-        # ── Text area ─────────────────────────────────────────────────
-        text_host = ttk.Frame(frame, style="Card.Elevated.TFrame")
-        text_host.grid(row=1, column=0, sticky="nsew",
-                       padx=UI_SPACING["m"],
-                       pady=(UI_SPACING["xs"], UI_SPACING["m"]))
+        logs_card, text_host = self._create_card(frame)
+        logs_card.grid(row=1, column=0, sticky="nsew")
         text_host.rowconfigure(0, weight=1)
         text_host.columnconfigure(0, weight=1)
 
@@ -1673,12 +2019,14 @@ class AppView:
             self.chat_display.tag_add("citation", tag_start, tag_end)
         self.chat_display.see("end")
         self.chat_display.configure(state="disabled")
+        self._set_chat_state(True)
 
     def clear_chat(self) -> None:
         """Clear the chat transcript area."""
         self.chat_display.configure(state="normal")
         self.chat_display.delete("1.0", "end")
         self.chat_display.configure(state="disabled")
+        self._set_chat_state(False)
 
     def set_chat_transcript(self, messages: list) -> None:
         """Replace the chat display with a persisted transcript."""
@@ -1699,6 +2047,7 @@ class AppView:
                 self.append_chat(f"{content}\n\n", tag="agent")
             else:
                 self.append_chat(f"{content}\n\n", tag="system")
+        self._set_chat_state(bool(messages))
 
     def render_evidence_sources(self, sources: list) -> None:
         """Populate the evidence pane with structured retrieved sources."""
@@ -2111,6 +2460,7 @@ class AppView:
         chat_path = "RAG" if self._use_rag_var.get() else "Direct"
         self._settings_data["selected_mode"] = self._mode_var.get()
         self._settings_data["chat_path"] = chat_path
+        self._sync_mode_chip()
 
         mode_entry = self._settings_entries.get("selected_mode")
         if mode_entry is not None:
@@ -2201,7 +2551,7 @@ class AppView:
             or str(self._settings_data.get("llm_model_custom", "") or "").strip()
             or "--"
         )
-        self._llm_badge_var.set(f"🤖 LLM: {provider} / {model}")
+        self._llm_badge_var.set(f"LLM: {provider} / {model}")
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -2335,17 +2685,17 @@ class AppView:
         """Clear the chat display immediately before the controller handles session state."""
         self.clear_chat()
         self.set_status("New chat started.")
+        self._toggle_evidence_panel(force=False)
 
-    def _toggle_evidence_panel(self) -> None:
+    def _toggle_evidence_panel(self, force: bool | None = None) -> None:
         """Toggle the evidence side pane."""
-        self._evidence_visible = not self._evidence_visible
+        self._evidence_visible = (not self._evidence_visible) if force is None else bool(force)
+        if not hasattr(self, "_evidence_pane_holder"):
+            return
         if self._evidence_visible:
-            self._evidence_sep.pack(side="left", fill="y")
-            self._evidence_pane.pack(side="left", fill="y")
-            self._evidence_pane.configure(width=420)
+            self._evidence_pane_holder.grid()
         else:
-            self._evidence_sep.pack_forget()
-            self._evidence_pane.pack_forget()
+            self._evidence_pane_holder.grid_remove()
 
     def show_wizard_step(self, title: str) -> None:
         """Expose the current wizard step in the status bar."""
