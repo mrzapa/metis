@@ -1,9 +1,9 @@
 """axiom_app.app — MVC application bootstrap.
 
 Entry point for the opt-in MVC Axiom application.  Initialises logging
-first (so even Tk startup errors land in the log), then instantiates
+first (so even Qt startup errors land in the log), then instantiates
 model/view/controller, wires events, starts an always-on message-poll
-loop, and hands off to the Tk main loop.
+loop, and hands off to the Qt event loop.
 
 Usage (via env-var switch in main.py)::
 
@@ -18,14 +18,16 @@ from __future__ import annotations
 
 import pathlib
 import sys
-import tkinter as tk
 import traceback
-from tkinter import messagebox
+
+from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtCore import QTimer
 
 from axiom_app.controllers.app_controller import AppController
 from axiom_app.models.app_model import AppModel
 from axiom_app.utils.logging_setup import setup_logging
 from axiom_app.views.app_view import AppView
+from axiom_app.views.styles import get_palette, resolve_fonts, apply_theme_to_app
 
 # Poll interval in milliseconds — matches BackgroundRunner's expected cadence.
 _POLL_MS = 100
@@ -35,7 +37,7 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 def _enable_windows_dpi_awareness(platform_name: str | None = None, ctypes_module=None) -> bool:
-    """Best-effort Windows DPI awareness bootstrap before creating Tk."""
+    """Best-effort Windows DPI awareness bootstrap before creating Qt app."""
     platform_name = platform_name or sys.platform
     if platform_name != "win32":
         return False
@@ -58,24 +60,8 @@ def _enable_windows_dpi_awareness(platform_name: str | None = None, ctypes_modul
     return False
 
 
-def _apply_tk_scaling(root: tk.Misc, platform_name: str | None = None) -> float | None:
-    """Apply Tk scaling from effective display DPI when appropriate."""
-    platform_name = platform_name or sys.platform
-    if platform_name != "win32":
-        return None
-    try:
-        dpi = float(root.winfo_fpixels("1i"))
-        if dpi <= 0:
-            return None
-        scaling = round(dpi / 72.0, 4)
-        root.tk.call("tk", "scaling", scaling)
-        return scaling
-    except Exception:
-        return None
-
-
 def run_app() -> None:
-    """Initialise logging, instantiate the MVC triad, enter Tk mainloop."""
+    """Initialise logging, instantiate the MVC triad, enter Qt event loop."""
 
     # ── 1. Logging — must be first so every subsequent call can log ──
     # Resolve log_dir from settings if possible, but settings aren't
@@ -86,16 +72,14 @@ def run_app() -> None:
     logger.info("=" * 60)
     logger.info("Axiom MVC starting up  (AXIOM_NEW_APP=1)")
 
-    # ── 2. Tk root — hidden until construction is complete ───────────
+    # ── 2. QApplication — DPI handled natively by Qt ─────────────────
     dpi_enabled = _enable_windows_dpi_awareness()
-    root = tk.Tk()
-    root.withdraw()
-    logger.debug("Tk root created")
+    app = QApplication(sys.argv)
+    logger.debug("QApplication created")
 
     try:
-        scaling = _apply_tk_scaling(root)
-        if dpi_enabled or scaling is not None:
-            logger.debug("Windows DPI bootstrap applied (enabled=%s, scaling=%s)", dpi_enabled, scaling)
+        if dpi_enabled:
+            logger.debug("Windows DPI bootstrap applied (enabled=%s)", dpi_enabled)
 
         # ── 3. Model + settings ──────────────────────────────────────
         model = AppModel()
@@ -119,36 +103,40 @@ def run_app() -> None:
             model.settings.get("embeddings_backend", "?"),
         )
 
-        # ── 4. View ───────────────────────────────────────────────────
+        # ── 4. Apply theme to QApplication ───────────────────────────
         theme_name = model.settings.get("theme", "space_dust")
-        view = AppView(root, theme_name=theme_name)
+        palette = get_palette(theme_name)
+        fonts = resolve_fonts()
+        apply_theme_to_app(app, palette, fonts)
+        logger.debug("Theme applied to QApplication (theme=%s)", theme_name)
+
+        # ── 5. View ──────────────────────────────────────────────────
+        view = AppView(theme_name=theme_name)
         logger.debug("AppView constructed (theme=%s)", theme_name)
 
-        # ── 5. Controller ─────────────────────────────────────────────
+        # ── 6. Controller ────────────────────────────────────────────
         controller = AppController(model, view)
         controller.wire_events()
         controller.bootstrap_app()
         logger.debug("AppController wired")
 
-        # ── 6. Always-on poll loop ────────────────────────────────────
+        # ── 7. Always-on poll loop via QTimer ────────────────────────
         # Runs every _POLL_MS milliseconds for the window's lifetime.
         # Drains the background-runner queue and routes messages to the view.
-        def _poll_loop() -> None:
-            controller.poll_and_dispatch()
-            root.after(_POLL_MS, _poll_loop)
+        timer = QTimer()
+        timer.timeout.connect(controller.poll_and_dispatch)
+        timer.start(_POLL_MS)
 
-        root.after(_POLL_MS, _poll_loop)
-
-        # ── 7. Initial UI state + reveal ──────────────────────────────
+        # ── 8. Initial UI state + reveal ─────────────────────────────
         index_state = "built" if model.index_state.get("built") else "not built"
         base_status = f"Documents: {len(model.documents)}  |  Index: {index_state}"
         view.set_status(base_status)
         view.append_log("Axiom MVC started (AXIOM_NEW_APP=1).\n")
         view.show()
 
-        logger.info("Entering Tk mainloop")
-        root.mainloop()
-        logger.info("Tk mainloop exited — application shutting down")
+        logger.info("Entering Qt event loop")
+        app.exec()
+        logger.info("Qt event loop exited — application shutting down")
 
     except Exception as exc:
         detail = traceback.format_exc()
@@ -157,7 +145,8 @@ def run_app() -> None:
         print(concise, file=sys.stderr)
         print(detail, file=sys.stderr)
         try:
-            messagebox.showerror(
+            QMessageBox.critical(
+                None,
                 "Startup Error",
                 f"{concise}\n\nDetails have been written to stderr and the log.",
             )

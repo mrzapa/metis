@@ -6,19 +6,22 @@ from axiom_app.controllers.app_controller import AppController
 from axiom_app.models.app_model import AppModel
 
 
-class _FakeRoot:
-    def protocol(self, *_a, **_kw):
+class _FakeSignal:
+    """Minimal stand-in for a Qt signal (connect does nothing)."""
+    def connect(self, *_a, **_kw):
         pass
 
 
 class _FakeButton:
-    def configure(self, **_kw):
+    """Minimal stand-in for a QPushButton."""
+    clicked = _FakeSignal()
+
+    def setEnabled(self, _v):
         pass
 
 
 class _FakeView:
     def __init__(self, chat_mode: str) -> None:
-        self.root = _FakeRoot()
         self._chat_mode = chat_mode
         self.btn_cancel_rag = _FakeButton()
         self.btn_build_index = _FakeButton()
@@ -267,7 +270,10 @@ def test_feedback_note_is_saved(tmp_path, monkeypatch) -> None:
             return _FakeMessage(content="Direct response")
 
     monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
-    monkeypatch.setattr("tkinter.simpledialog.askstring", lambda *args, **kwargs: "useful")
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QInputDialog.getText",
+        lambda *args, **kwargs: ("useful", True),
+    )
 
     controller.on_send_prompt("hello")
     _drain(controller)
