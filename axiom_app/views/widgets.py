@@ -1,23 +1,50 @@
-"""axiom_app.views.widgets — Reusable custom tkinter widget classes.
-
-Extracted from agentic_rag_gui.py (the legacy monolith) and adapted for use
-inside the clean MVC package.  All classes are pure-tkinter and have no
-dependency on AgenticRAGApp or any model/controller code.
+"""axiom_app.views.widgets — Reusable custom PySide6 widget classes.
 
 Classes
 -------
-AnimationEngine      — root.after-based smooth value interpolation with easing
-IOSSegmentedToggle   — iOS-style two-option pill toggle (tk.Canvas)
-CollapsibleFrame     — animated accordion section (ttk.Frame)
-RoundedCard          — canvas-backed card with rounded corners
+AnimationEngine      — QVariantAnimation-based smooth value interpolation with easing
+IOSSegmentedToggle   — QPainter-rendered iOS-style two-option pill toggle
+CollapsibleFrame     — animated accordion section with height transitions
+RoundedCard          — QFrame with border-radius + QGraphicsDropShadowEffect
 TooltipManager       — hover tooltips with fade-in animation
 """
 
 from __future__ import annotations
 
 import logging
-import tkinter as tk
-from tkinter import ttk
+from typing import Any, Callable
+
+from PySide6.QtCore import (
+    QEasingCurve,
+    QObject,
+    QPropertyAnimation,
+    QRect,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+    QVariantAnimation,
+    Signal,
+)
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QEnterEvent,
+    QFont,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
+from PySide6.QtWidgets import (
+    QFrame,
+    QGraphicsDropShadowEffect,
+    QHBoxLayout,
+    QLabel,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from axiom_app.views.styles import STYLE_CONFIG, UI_SPACING, _pal
 
@@ -29,24 +56,18 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class AnimationEngine:
-    """Smooth value interpolation for tkinter widgets using root.after()."""
+class AnimationEngine(QObject):
+    """Smooth value interpolation using QVariantAnimation."""
 
-    def __init__(self, root: tk.Misc) -> None:
-        self.root = root
-        self._animations: dict = {}
-        self._token_counter = 0
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._animations: dict[str, QVariantAnimation] = {}
 
     def cancel(self, anim_id: str) -> None:
-        state = self._animations.pop(anim_id, None)
-        if not state:
-            return
-        after_id = state.get("after_id")
-        if after_id is not None and self._root_alive():
-            try:
-                self.root.after_cancel(after_id)
-            except tk.TclError:
-                pass
+        anim = self._animations.pop(anim_id, None)
+        if anim is not None and anim.state() == QVariantAnimation.Running:
+            anim.stop()
+            anim.deleteLater()
 
     def animate_value(
         self,
@@ -54,64 +75,22 @@ class AnimationEngine:
         start: float,
         end: float,
         duration_ms: int,
-        steps: int,
-        callback,
-        on_complete=None,
+        steps: int,  # ignored — Qt handles interpolation natively
+        callback: Callable[[float], Any],
+        on_complete: Callable[[], Any] | None = None,
     ) -> None:
         self.cancel(anim_id)
-        if not self._root_alive():
-            return
-        try:
-            duration = max(1, int(duration_ms))
-            total_steps = max(1, int(steps))
-        except (TypeError, ValueError):
-            duration = 1
-            total_steps = 1
-
-        self._token_counter += 1
-        token = self._token_counter
-        self._animations[anim_id] = {"token": token, "after_id": None}
-        step_delay = max(1, int(round(duration / total_steps)))
-
-        def _run(step_index: int) -> None:
-            state = self._animations.get(anim_id)
-            if state is None or state.get("token") != token:
-                return
-            if not self._root_alive():
-                self._animations.pop(anim_id, None)
-                return
-            t = min(1.0, max(0.0, step_index / total_steps))
-            eased = 1.0 - ((1.0 - t) ** 3)
-            value = float(start) + (float(end) - float(start)) * eased
-            try:
-                callback(value)
-            except Exception:
-                self._animations.pop(anim_id, None)
-                raise
-            if step_index >= total_steps:
-                self._animations.pop(anim_id, None)
-                if callable(on_complete):
-                    try:
-                        on_complete()
-                    except Exception:
-                        logger.exception("Animation completion callback failed for %s", anim_id)
-                return
-            try:
-                after_id = self.root.after(step_delay, lambda: _run(step_index + 1))
-            except tk.TclError:
-                self._animations.pop(anim_id, None)
-                return
-            state = self._animations.get(anim_id)
-            if state is not None and state.get("token") == token:
-                state["after_id"] = after_id
-
-        _run(0)
-
-    def _root_alive(self) -> bool:
-        try:
-            return bool(self.root) and bool(self.root.winfo_exists())
-        except tk.TclError:
-            return False
+        anim = QVariantAnimation(self)
+        anim.setStartValue(float(start))
+        anim.setEndValue(float(end))
+        anim.setDuration(max(1, int(duration_ms)))
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.valueChanged.connect(lambda val: callback(val))
+        if on_complete:
+            anim.finished.connect(on_complete)
+        anim.finished.connect(lambda: self._animations.pop(anim_id, None))
+        self._animations[anim_id] = anim
+        anim.start()
 
 
 # ---------------------------------------------------------------------------
@@ -119,113 +98,107 @@ class AnimationEngine:
 # ---------------------------------------------------------------------------
 
 
-class IOSSegmentedToggle(tk.Canvas):
-    """iOS-style segmented two-option toggle rendered on a tk.Canvas.
-
-    Shows both option labels side-by-side inside a rounded pill.  The active
-    segment is filled with the primary colour so both options are always
-    visible and new users can immediately see which mode is selected.
+class IOSSegmentedToggle(QWidget):
+    """iOS-style segmented two-option toggle rendered with QPainter.
 
     Parameters
     ----------
-    parent   : tk parent widget
+    parent   : QWidget parent
     options  : sequence of exactly 2 label strings, e.g. ["RAG", "Direct"]
-    variable : tk.BooleanVar – True selects options[0], False selects options[1]
+    value    : True selects options[0], False selects options[1]
     palette  : colour-dict (same shape as STYLE_CONFIG theme palettes)
     command  : optional callable invoked after each toggle
     height   : pixel height of the pill (default 28)
-    font     : tkinter font tuple (default Segoe UI 9 bold)
+    font     : QFont instance (default Segoe UI 9 bold)
     """
+
+    toggled = Signal(bool)
 
     def __init__(
         self,
-        parent,
-        options,
-        variable: tk.BooleanVar,
-        palette: dict,
+        parent: QWidget | None,
+        options: list[str] | tuple[str, str],
+        value: bool = True,
+        palette: dict | None = None,
         *,
-        command=None,
+        command: Callable[[], Any] | None = None,
         height: int = 28,
-        font=None,
-        **kwargs,
+        font: QFont | None = None,
     ) -> None:
+        super().__init__(parent)
         self._opts = list(options)
-        self._var = variable
-        self._palette = dict(palette)
+        self._value = value
+        self._palette = dict(palette) if palette else {}
         self._command = command
         self._h = height
-        self._font = font or ("Segoe UI", 9, "bold")
+        self._font = font or QFont("Segoe UI", 9, QFont.Bold)
         self._seg_w = max(68, max(len(o) for o in options) * 9 + 28)
         total_w = self._seg_w * 2 + 2
-        kwargs.setdefault("highlightthickness", 0)
-        kwargs.setdefault("borderwidth", 0)
-        bg = palette.get("bg", "#141E2D")
-        super().__init__(parent, width=total_w, height=height, bg=bg, **kwargs)
-        self.configure(cursor="hand2")
-        self.bind("<Button-1>", self._on_click)
-        self._draw()
+        self.setFixedSize(total_w, height)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def get_value(self) -> bool:
+        return self._value
+
+    def set_value(self, val: bool) -> None:
+        self._value = val
+        self.update()
 
     def update_palette(self, palette: dict) -> None:
-        """Re-colour the widget when the application theme changes."""
         self._palette = dict(palette)
-        self._draw()
+        self.update()
 
-    def _on_click(self, _event) -> None:
+    def mousePressEvent(self, event: QMouseEvent) -> None:
         if self._command:
             self._command()
         else:
-            self._var.set(not self._var.get())
-            self._draw()
+            self._value = not self._value
+            self.toggled.emit(self._value)
+            self.update()
 
-    def _rounded_rect(self, x1, y1, x2, y2, r, **kw) -> None:
-        r = min(r, (x2 - x1) // 2, (y2 - y1) // 2)
-        pts = [
-            x1 + r, y1,    x2 - r, y1,
-            x2,     y1,    x2,     y1 + r,
-            x2,     y2 - r, x2,   y2,
-            x2 - r, y2,    x1 + r, y2,
-            x1,     y2,    x1,     y2 - r,
-            x1,     y1 + r, x1,   y1,
-        ]
-        self.create_polygon(pts, smooth=True, **kw)
+    def paintEvent(self, event: Any) -> None:
+        pal = self._palette
+        bg = QColor(pal.get("bg", "#141E2D"))
+        track = QColor(pal.get("surface_alt", "#1A2B40"))
+        border_col = QColor(pal.get("outline", "#2A3E58"))
+        primary = QColor(pal.get("primary", "#4D9EFF"))
+        text_on = QColor(pal.get("text", "#EAF0FF"))
+        text_off = QColor(pal.get("muted_text", "#8A9DC0"))
 
-    def _draw(self) -> None:
-        pal        = self._palette
-        bg         = pal.get("bg",          "#141E2D")
-        track      = pal.get("surface_alt", "#1A2B40")
-        border_col = pal.get("outline",     "#2A3E58")
-        primary    = pal.get("primary",     "#4D9EFF")
-        text_on    = pal.get("text",        "#EAF0FF")
-        text_off   = pal.get("muted_text",  "#8A9DC0")
-
-        self.delete("all")
-        self.configure(bg=bg)
-
-        w   = self._seg_w * 2 + 2
-        h   = self._h
-        r   = h // 2
-        sw  = self._seg_w
+        w = self.width()
+        h = self._h
+        r = h / 2.0
+        sw = self._seg_w
         pad = 3
-        left_active = self._var.get()
+        left_active = self._value
 
-        self._rounded_rect(0, 0, w, h, r, fill=track, outline=border_col)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
 
+        # Track background
+        painter.setPen(QPen(border_col, 1))
+        painter.setBrush(QBrush(track))
+        painter.drawRoundedRect(QRectF(0, 0, w, h), r, r)
+
+        # Active segment
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(primary))
         if left_active:
-            self._rounded_rect(pad, pad, sw - pad + 1, h - pad, r - pad,
-                               fill=primary, outline="")
+            painter.drawRoundedRect(QRectF(pad, pad, sw - 2 * pad, h - 2 * pad), r - pad, r - pad)
         else:
-            self._rounded_rect(sw + pad - 1, pad, w - pad, h - pad, r - pad,
-                               fill=primary, outline="")
+            painter.drawRoundedRect(QRectF(sw + pad, pad, sw - 2 * pad, h - 2 * pad), r - pad, r - pad)
 
-        mid_y = h // 2
-        self.create_text(sw // 2, mid_y,
-                         text=self._opts[0],
-                         fill=text_on if left_active else text_off,
-                         font=self._font, anchor="center")
-        self.create_text(sw + sw // 2, mid_y,
-                         text=self._opts[1],
-                         fill=text_off if left_active else text_on,
-                         font=self._font, anchor="center")
+        # Text
+        painter.setFont(self._font)
+        mid_y = h / 2.0
+
+        painter.setPen(text_on if left_active else text_off)
+        painter.drawText(QRectF(0, 0, sw, h), Qt.AlignCenter, self._opts[0])
+
+        painter.setPen(text_off if left_active else text_on)
+        painter.drawText(QRectF(sw, 0, sw, h), Qt.AlignCenter, self._opts[1])
+
+        painter.end()
 
 
 # ---------------------------------------------------------------------------
@@ -233,12 +206,12 @@ class IOSSegmentedToggle(tk.Canvas):
 # ---------------------------------------------------------------------------
 
 
-class CollapsibleFrame(ttk.Frame):
+class CollapsibleFrame(QWidget):
     """Animated accordion section.
 
     Parameters
     ----------
-    parent    : tk parent widget
+    parent    : QWidget parent
     title     : header label text
     expanded  : initial state (default False = collapsed)
     animator  : AnimationEngine instance for smooth height transitions, or
@@ -247,128 +220,122 @@ class CollapsibleFrame(ttk.Frame):
 
     def __init__(
         self,
-        parent,
+        parent: QWidget | None,
         title: str,
         expanded: bool = False,
         animator: AnimationEngine | None = None,
-        **kwargs,
     ) -> None:
-        kwargs.setdefault("style", "Card.Elevated.TFrame")
-        super().__init__(parent, **kwargs)
+        super().__init__(parent)
         self._animator = animator
-        self._expanded = tk.BooleanVar(value=expanded)
+        self._expanded = expanded
         self._animating = False
         self._animation_id = f"collapsible_{id(self)}"
-        self._content_pad = (UI_SPACING["s"], UI_SPACING["s"])
+        self._content_pad = UI_SPACING["s"]
 
-        self.header = ttk.Frame(self, style="CollapsibleHeader.TFrame")
-        self.header.pack(fill="x", padx=UI_SPACING["s"], pady=(UI_SPACING["s"], 0))
-        self.arrow_label = ttk.Label(
-            self.header,
-            text="▾" if expanded else "▸",
-            style="CollapsibleArrow.TLabel",
-            width=2,
-            anchor="center",
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(
+            UI_SPACING["s"], UI_SPACING["s"], UI_SPACING["s"], UI_SPACING["s"]
         )
-        self.arrow_label.pack(side="left")
-        self.title_label = ttk.Label(
-            self.header, text=title, style="CollapsibleTitle.TLabel"
-        )
-        self.title_label.pack(side="left", padx=(UI_SPACING["xs"], 0), fill="x", expand=True)
+        main_layout.setSpacing(0)
 
-        for widget in (self.header, self.arrow_label, self.title_label):
-            widget.bind("<Button-1>", lambda _e: self.toggle(), add="+")
+        # Header
+        self.header = QWidget(self)
+        header_layout = QHBoxLayout(self.header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(UI_SPACING["xs"])
 
-        self._content_clip = ttk.Frame(self, style="Card.Elevated.TFrame", height=0)
-        self._content_clip.pack_propagate(False)
-        self.content = ttk.Frame(self._content_clip, style="Card.Elevated.TFrame")
-        self.content.pack(fill="x")
-        self.content.bind("<Configure>", self._on_content_configure, add="+")
-        if expanded:
-            self._content_clip.pack(fill="x", padx=UI_SPACING["s"], pady=self._content_pad)
-            self.after_idle(lambda: self._set_clip_height(self._measure_content_height()))
+        self.arrow_label = QLabel("▾" if expanded else "▸", self.header)
+        self.arrow_label.setFixedWidth(18)
+        self.arrow_label.setAlignment(Qt.AlignCenter)
+        self.arrow_label.setProperty("cssClass", "muted")
+        header_layout.addWidget(self.arrow_label)
 
-    def _on_content_configure(self, _event=None) -> None:
-        if self._expanded.get() and not self._animating:
-            self._set_clip_height(self._measure_content_height())
+        self.title_label = QLabel(title, self.header)
+        self.title_label.setProperty("cssClass", "bold")
+        header_layout.addWidget(self.title_label, 1)
+
+        self.header.setCursor(Qt.PointingHandCursor)
+        self.header.mousePressEvent = lambda _e: self.toggle()
+        main_layout.addWidget(self.header)
+
+        # Content wrapper
+        self.content = QWidget(self)
+        self.content.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self._content_layout = QVBoxLayout(self.content)
+        self._content_layout.setContentsMargins(0, self._content_pad, 0, self._content_pad)
+        main_layout.addWidget(self.content)
+
+        if not expanded:
+            self.content.setMaximumHeight(0)
+            self.content.setVisible(False)
 
     def _measure_content_height(self) -> int:
-        self.update_idletasks()
-        return max(1, int(self.content.winfo_reqheight()))
+        self.content.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
+        self.content.adjustSize()
+        h = max(1, self.content.sizeHint().height())
+        if not self._expanded and not self._animating:
+            self.content.setMaximumHeight(0)
+        return h
 
     def _set_clip_height(self, value: float) -> None:
-        try:
-            self._content_clip.configure(height=max(0, int(value)))
-        except tk.TclError:
-            return
-
-    def _animate_height(
-        self, start: float, end: float, duration_ms: int, on_complete=None
-    ) -> None:
-        if self._animator is None:
-            self._set_clip_height(end)
-            if callable(on_complete):
-                on_complete()
-            return
-        self._animator.animate_value(
-            self._animation_id,
-            start,
-            end,
-            duration_ms,
-            10,
-            lambda value: self._set_clip_height(value),
-            on_complete=on_complete,
-        )
+        self.content.setMaximumHeight(max(0, int(value)))
 
     def _expand(self) -> None:
         if self._animating:
             return
         self._animating = True
-        self._content_clip.pack(fill="x", padx=UI_SPACING["s"], pady=self._content_pad)
-        self._set_clip_height(0)
-        target_height = self._measure_content_height()
+        self.content.setVisible(True)
+        target = self._measure_content_height()
+        self.content.setMaximumHeight(0)
 
         def _done() -> None:
-            self._set_clip_height(target_height)
-            self.arrow_label.config(text="▾")
-            self._expanded.set(True)
+            self.content.setMaximumHeight(16777215)
+            self.arrow_label.setText("▾")
+            self._expanded = True
             self._animating = False
-            self.after_idle(lambda: self._set_clip_height(self._measure_content_height()))
 
-        collapse_duration = int(
-            STYLE_CONFIG.get("animation", {}).get("collapse_duration_ms", 200)
-        )
-        self._animate_height(0, target_height, collapse_duration, on_complete=_done)
+        duration = int(STYLE_CONFIG.get("animation", {}).get("collapse_duration_ms", 200))
+        if self._animator:
+            self._animator.animate_value(
+                self._animation_id, 0, target, duration, 10,
+                lambda v: self._set_clip_height(v),
+                on_complete=_done,
+            )
+        else:
+            self._set_clip_height(target)
+            _done()
 
     def _collapse(self) -> None:
         if self._animating:
             return
         self._animating = True
-        start_height = max(
-            1, self._content_clip.winfo_height(), self._measure_content_height()
-        )
+        start = max(1, self.content.height())
 
         def _done() -> None:
             self._set_clip_height(0)
-            self._content_clip.pack_forget()
-            self.arrow_label.config(text="▸")
-            self._expanded.set(False)
+            self.content.setVisible(False)
+            self.arrow_label.setText("▸")
+            self._expanded = False
             self._animating = False
 
-        collapse_duration = int(
-            STYLE_CONFIG.get("animation", {}).get("collapse_duration_ms", 200)
-        )
-        self._animate_height(start_height, 0, collapse_duration, on_complete=_done)
+        duration = int(STYLE_CONFIG.get("animation", {}).get("collapse_duration_ms", 200))
+        if self._animator:
+            self._animator.animate_value(
+                self._animation_id, start, 0, duration, 10,
+                lambda v: self._set_clip_height(v),
+                on_complete=_done,
+            )
+        else:
+            _done()
 
     def set_expanded(self, expanded: bool) -> None:
-        expanded = bool(expanded)
-        if expanded != bool(self._expanded.get()):
+        if bool(expanded) != self._expanded:
             self.toggle()
 
     def toggle(self) -> None:
         if self._animating:
             return
-        if self._expanded.get():
+        if self._expanded:
             self._collapse()
         else:
             self._expand()
@@ -379,22 +346,15 @@ class CollapsibleFrame(ttk.Frame):
 # ---------------------------------------------------------------------------
 
 
-class RoundedCard(tk.Canvas):
-    """Canvas-backed card widget with rounded corners.
+class RoundedCard(QFrame):
+    """QFrame with rounded corners and optional drop shadow.
 
-    Children should be placed inside ``card.inner`` (a plain ``tk.Frame``).
-
-    Example::
-
-        card = RoundedCard(parent, radius=16, bg=palette["surface"],
-                           border_color=palette["outline"], border_width=1)
-        ttk.Label(card.inner, text="Title").pack(anchor="w", padx=12, pady=(10, 4))
-        card.pack(fill="x", padx=8, pady=4)
+    Children should be placed inside ``card.inner`` (a plain ``QFrame``).
     """
 
     def __init__(
         self,
-        parent,
+        parent: QWidget | None,
         radius: int = 12,
         bg: str = "#161B22",
         outer_bg: str | None = None,
@@ -403,77 +363,40 @@ class RoundedCard(tk.Canvas):
         shadow_color: str | None = None,
         shadow_offset: int = 0,
         inner_padding: int | None = None,
-        **kwargs,
     ) -> None:
-        kwargs.setdefault("highlightthickness", 0)
-        kwargs.setdefault("bd", 0)
-        kwargs.setdefault("relief", "flat")
-        if outer_bg is None:
-            try:
-                outer_bg = parent.cget("background")
-            except Exception:
-                outer_bg = "#0D1117"
-        super().__init__(parent, bg=outer_bg, **kwargs)
+        super().__init__(parent)
         self._radius = max(2, int(radius))
         self._card_bg = bg
         self._border_color = border_color
         self._border_width = border_width
-        self._shadow_color = shadow_color or ""
         self._shadow_offset = max(0, int(shadow_offset))
-        self._inner_padding = max(0, int(inner_padding)) if inner_padding is not None else max(10, self._radius - 4)
-        self._rect_tag = "card_bg"
-        self._shadow_tag = "card_shadow"
-        self.inner = tk.Frame(self, bg=bg, bd=0, highlightthickness=0)
-        self._win_id = self.create_window(
-            self._inner_padding, self._inner_padding, anchor="nw", window=self.inner
-        )
-        self.bind("<Configure>", self._redraw)
+        inner_pad = max(0, int(inner_padding)) if inner_padding is not None else max(10, self._radius - 4)
 
-    def _smooth_pts(self, x0, y0, x1, y1) -> list:
-        r = self._radius
-        return [
-            x0 + r, y0,   x1 - r, y0,
-            x1,     y0,   x1,     y0 + r,
-            x1,     y1 - r, x1,   y1,
-            x1 - r, y1,   x0 + r, y1,
-            x0,     y1,   x0,     y1 - r,
-            x0,     y0 + r, x0,   y0,
-        ]
+        self._apply_card_style()
 
-    def _redraw(self, _event=None) -> None:
-        self.update_idletasks()
-        w = self.winfo_width()
-        h = self.winfo_height()
-        if w < 4 or h < 4:
-            return
+        # Drop shadow effect
+        if shadow_color and self._shadow_offset > 0:
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(self._shadow_offset * 4)
+            shadow.setOffset(0, self._shadow_offset)
+            shadow.setColor(QColor(shadow_color))
+            self.setGraphicsEffect(shadow)
+
+        # Inner frame for content
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(inner_pad, inner_pad, inner_pad, inner_pad)
+        layout.setSpacing(0)
+        self.inner = QFrame(self)
+        self.inner.setStyleSheet("background: transparent;")
+        layout.addWidget(self.inner)
+
+    def _apply_card_style(self) -> None:
         bw = self._border_width
-        shadow = self._shadow_offset
-        self.delete(self._rect_tag)
-        self.delete(self._shadow_tag)
-        if self._shadow_color and shadow:
-            self.create_polygon(
-                self._smooth_pts(bw + shadow, bw + shadow, w - bw, h - bw),
-                smooth=True,
-                fill=self._shadow_color,
-                outline="",
-                tags=self._shadow_tag,
-            )
-            self.tag_lower(self._shadow_tag)
-        self.create_polygon(
-            self._smooth_pts(bw, bw, w - bw - shadow, h - bw - shadow),
-            smooth=True,
-            fill=self._card_bg,
-            outline=self._border_color if bw else "",
-            width=bw,
-            tags=self._rect_tag,
-        )
-        self.tag_lower(self._rect_tag)
-        inner_pad = self._inner_padding
-        self.coords(self._win_id, inner_pad, inner_pad)
-        self.itemconfig(
-            self._win_id,
-            width=max(1, w - (2 * inner_pad) - shadow),
-            height=max(1, h - (2 * inner_pad) - shadow),
+        border = f"{bw}px solid {self._border_color}" if bw > 0 else "none"
+        self.setStyleSheet(
+            f"RoundedCard {{ background-color: {self._card_bg}; "
+            f"border: {border}; "
+            f"border-radius: {self._radius}px; }}"
         )
 
     def configure_colors(
@@ -483,17 +406,12 @@ class RoundedCard(tk.Canvas):
         outer_bg: str | None = None,
         shadow_color: str | None = None,
     ) -> None:
-        """Update colors and redraw; safe to call after theme changes."""
+        """Update colors and restyle; safe to call after theme changes."""
         if bg is not None:
             self._card_bg = bg
-            self.inner.configure(bg=bg)
         if border_color is not None:
             self._border_color = border_color
-        if outer_bg is not None:
-            self.configure(bg=outer_bg)
-        if shadow_color is not None:
-            self._shadow_color = shadow_color
-        self._redraw()
+        self._apply_card_style()
 
 
 # ---------------------------------------------------------------------------
@@ -501,184 +419,179 @@ class RoundedCard(tk.Canvas):
 # ---------------------------------------------------------------------------
 
 
+class _TooltipEventFilter(QObject):
+    """Event filter that intercepts hover/destroy events for tooltip management."""
+
+    def __init__(self, manager: TooltipManager) -> None:
+        super().__init__()
+        self._manager = manager
+
+    def eventFilter(self, obj: QObject, event: Any) -> bool:
+        from PySide6.QtCore import QEvent
+
+        t = event.type()
+        if t == QEvent.Enter:
+            self._manager._on_enter(obj, event)
+        elif t == QEvent.Leave:
+            self._manager._on_leave(obj)
+        elif t == QEvent.HoverMove:
+            self._manager._on_motion(obj, event)
+        elif t == QEvent.Destroy:
+            self._manager._on_destroy(obj)
+        return False
+
+
 class TooltipManager:
     """Hover tooltips with fade-in animation.
 
     Parameters
     ----------
-    root        : the Tk root window
-    get_palette : callable returning the active palette dict (for live theming)
-    delay_ms    : hover delay before tooltip appears
-    wrap_px     : maximum tooltip width in pixels
-    fade_ms     : fade-in duration (defaults to STYLE_CONFIG animation setting)
+    parent_widget : the root QWidget
+    get_palette   : callable returning the active palette dict (for live theming)
+    delay_ms      : hover delay before tooltip appears
+    wrap_px       : maximum tooltip width in pixels
+    fade_ms       : fade-in duration (defaults to STYLE_CONFIG animation setting)
     """
 
     def __init__(
         self,
-        root: tk.Tk,
-        get_palette,
+        parent_widget: QWidget,
+        get_palette: Callable[[], dict],
         *,
         delay_ms: int = 350,
         wrap_px: int = 340,
         fade_ms: int | None = None,
     ) -> None:
-        self.root = root
+        self._parent = parent_widget
         self.get_palette = get_palette
         self.delay_ms = delay_ms
         self.wrap_px = wrap_px
         if fade_ms is None:
             fade_ms = STYLE_CONFIG.get("animation", {}).get("tooltip_fade_ms", 150)
         self.fade_ms = max(1, int(fade_ms))
-        self._widget_text: dict = {}
-        self._tooltip_window: tk.Toplevel | None = None
-        self._tooltip_label: tk.Label | None = None
-        self._active_widget = None
-        self._after_id = None
-        self._fade_after_id = None
+        self._widget_text: dict[int, str] = {}  # id(widget) -> text
+        self._widget_refs: dict[int, QWidget] = {}  # id(widget) -> widget
+        self._tooltip_widget: QWidget | None = None
+        self._tooltip_label: QLabel | None = None
+        self._active_widget_id: int | None = None
+        self._timer = QTimer()
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._show_tooltip)
+        self._fade_anim: QPropertyAnimation | None = None
         self._last_pointer = (0, 0)
+        self._event_filter = _TooltipEventFilter(self)
 
-    def register(self, widget, text: str) -> None:
+    def register(self, widget: QWidget, text: str) -> None:
         if widget is None:
             return
         message = (text or "").strip()
         if not message:
             return
-        self._widget_text[widget] = message
-        widget.bind("<Enter>",   lambda e, w=widget: self._on_enter(w, e),   add="+")
-        widget.bind("<Leave>",   lambda _e, w=widget: self._on_leave(w),     add="+")
-        widget.bind("<Motion>",  lambda e, w=widget: self._on_motion(w, e),  add="+")
-        widget.bind("<Destroy>", lambda _e, w=widget: self._on_destroy(w),   add="+")
+        wid = id(widget)
+        self._widget_text[wid] = message
+        self._widget_refs[wid] = widget
+        widget.setAttribute(Qt.WA_Hover, True)
+        widget.installEventFilter(self._event_filter)
 
     def hide(self) -> None:
-        self._cancel_pending()
-        self._cancel_fade()
-        self._active_widget = None
-        if self._tooltip_window is not None and self._tooltip_window.winfo_exists():
-            self._tooltip_window.withdraw()
+        self._timer.stop()
+        if self._fade_anim is not None:
+            self._fade_anim.stop()
+        self._active_widget_id = None
+        if self._tooltip_widget is not None:
+            self._tooltip_widget.hide()
 
-    def _on_enter(self, widget, event) -> None:
-        self._active_widget = widget
-        self._last_pointer = (event.x_root, event.y_root)
-        self._schedule_show(widget)
+    def _on_enter(self, widget: QObject, event: Any) -> None:
+        wid = id(widget)
+        self._active_widget_id = wid
+        try:
+            self._last_pointer = (event.globalPosition().x(), event.globalPosition().y())
+        except AttributeError:
+            self._last_pointer = (0, 0)
+        self._timer.start(self.delay_ms)
 
-    def _on_leave(self, widget) -> None:
-        if widget == self._active_widget:
+    def _on_leave(self, widget: QObject) -> None:
+        if id(widget) == self._active_widget_id:
             self.hide()
 
-    def _on_motion(self, widget, event) -> None:
-        self._last_pointer = (event.x_root, event.y_root)
-        if (
-            widget == self._active_widget
-            and self._tooltip_window is not None
-            and self._tooltip_window.winfo_viewable()
-        ):
-            self._position_window(event.x_root, event.y_root)
+    def _on_motion(self, widget: QObject, event: Any) -> None:
+        try:
+            self._last_pointer = (event.globalPosition().x(), event.globalPosition().y())
+        except AttributeError:
+            pass
+        if id(widget) == self._active_widget_id and self._tooltip_widget is not None and self._tooltip_widget.isVisible():
+            self._position_window(*self._last_pointer)
 
-    def _on_destroy(self, widget) -> None:
-        self._widget_text.pop(widget, None)
-        if widget == self._active_widget:
+    def _on_destroy(self, widget: QObject) -> None:
+        wid = id(widget)
+        self._widget_text.pop(wid, None)
+        self._widget_refs.pop(wid, None)
+        if wid == self._active_widget_id:
             self.hide()
 
-    def _schedule_show(self, widget) -> None:
-        self._cancel_pending()
-        self._after_id = self.root.after(
-            self.delay_ms, lambda w=widget: self._show(w)
-        )
-
-    def _cancel_pending(self) -> None:
-        if self._after_id is not None:
-            try:
-                self.root.after_cancel(self._after_id)
-            except tk.TclError:
-                pass
-            self._after_id = None
-
-    def _show(self, widget) -> None:
-        self._after_id = None
-        if widget != self._active_widget or not widget.winfo_exists():
+    def _show_tooltip(self) -> None:
+        if self._active_widget_id is None:
             return
-        text = self._widget_text.get(widget, "").strip()
+        text = self._widget_text.get(self._active_widget_id, "").strip()
         if not text:
             return
-        if self._tooltip_window is None or not self._tooltip_window.winfo_exists():
-            self._create_tooltip_window()
+        widget = self._widget_refs.get(self._active_widget_id)
+        if widget is None:
+            return
+
+        if self._tooltip_widget is None:
+            self._create_tooltip_widget()
+
         palette = self.get_palette() or STYLE_CONFIG["themes"].get("space_dust", {})
-        self._tooltip_window.configure(
-            bg=_pal(palette, "border", default="#2A3A4F")
+        bg = _pal(palette, "surface_alt", fallback_key="surface", default="#161B22")
+        fg = _pal(palette, "text", default="#E8EEF8")
+        border = _pal(palette, "border", default="#2A3A4F")
+
+        self._tooltip_widget.setStyleSheet(
+            f"background-color: {bg}; color: {fg}; border: 1px solid {border}; "
+            f"border-radius: 6px; padding: 7px 10px;"
         )
-        self._tooltip_label.configure(
-            text=text,
-            bg=_pal(palette, "surface_alt", fallback_key="surface", default="#161B22"),
-            fg=_pal(palette, "text", default="#E8EEF8"),
-            wraplength=self.wrap_px,
-            padx=10, pady=7,
-            relief="flat", bd=0,
-            justify="left",
-        )
-        self._tooltip_window.deiconify()
-        self._tooltip_window.lift()
+        self._tooltip_label.setText(text)
+        self._tooltip_label.setWordWrap(True)
+        self._tooltip_label.setMaximumWidth(self.wrap_px)
+        self._tooltip_widget.adjustSize()
         self._position_window(*self._last_pointer)
-        self._fade_in_tooltip()
+        self._tooltip_widget.show()
+        self._fade_in()
 
-    def _create_tooltip_window(self) -> None:
-        self._tooltip_window = tk.Toplevel(self.root)
-        self._tooltip_window.withdraw()
-        self._tooltip_window.overrideredirect(True)
-        self._tooltip_window.attributes("-topmost", True)
-        self._tooltip_window.attributes("-alpha", 0.0)
-        try:
-            self._tooltip_window.attributes("-type", "tooltip")
-        except tk.TclError:
-            pass
-        shell = tk.Frame(self._tooltip_window, borderwidth=1, relief="flat")
-        shell.pack(fill="both", expand=True)
-        self._tooltip_label = tk.Label(shell, font=("Segoe UI", 9))
-        self._tooltip_label.pack(fill="both", expand=True, padx=1, pady=1)
+    def _create_tooltip_widget(self) -> None:
+        self._tooltip_widget = QWidget(None, Qt.ToolTip | Qt.FramelessWindowHint)
+        self._tooltip_widget.setAttribute(Qt.WA_TranslucentBackground, False)
+        layout = QVBoxLayout(self._tooltip_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self._tooltip_label = QLabel(self._tooltip_widget)
+        self._tooltip_label.setFont(QFont("Segoe UI", 9))
+        layout.addWidget(self._tooltip_label)
 
-    def _position_window(self, x_root: int, y_root: int) -> None:
-        if self._tooltip_window is None or not self._tooltip_window.winfo_exists():
+    def _position_window(self, x_root: float, y_root: float) -> None:
+        if self._tooltip_widget is None:
             return
-        self._tooltip_window.update_idletasks()
-        tip_w = self._tooltip_window.winfo_reqwidth()
-        tip_h = self._tooltip_window.winfo_reqheight()
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        x = min(max(x_root + 16, 4), max(4, screen_w - tip_w - 4))
-        y = y_root + 20
-        if y + tip_h > screen_h - 4:
-            y = y_root - tip_h - 14
-        y = min(max(y, 4), max(4, screen_h - tip_h - 4))
-        self._tooltip_window.geometry(f"+{x}+{y}")
-
-    def _cancel_fade(self) -> None:
-        if self._fade_after_id is not None:
-            try:
-                self.root.after_cancel(self._fade_after_id)
-            except tk.TclError:
-                pass
-            self._fade_after_id = None
-
-    def _fade_in_tooltip(self) -> None:
-        if self._tooltip_window is None or not self._tooltip_window.winfo_exists():
+        self._tooltip_widget.adjustSize()
+        tip_w = self._tooltip_widget.width()
+        tip_h = self._tooltip_widget.height()
+        screen = self._parent.screen()
+        if screen is None:
             return
-        self._cancel_fade()
-        steps = 8
-        interval = max(1, int(self.fade_ms / steps))
+        screen_rect = screen.availableGeometry()
+        x = min(max(int(x_root) + 16, 4), max(4, screen_rect.width() - tip_w - 4))
+        y = int(y_root) + 20
+        if y + tip_h > screen_rect.height() - 4:
+            y = int(y_root) - tip_h - 14
+        y = min(max(y, 4), max(4, screen_rect.height() - tip_h - 4))
+        self._tooltip_widget.move(x, y)
 
-        def _tick(step: int = 0) -> None:
-            if self._tooltip_window is None or not self._tooltip_window.winfo_exists():
-                self._fade_after_id = None
-                return
-            t = min(1.0, step / steps)
-            eased = 1.0 - ((1.0 - t) ** 3)
-            try:
-                self._tooltip_window.attributes("-alpha", 0.97 * eased)
-            except tk.TclError:
-                self._fade_after_id = None
-                return
-            if step >= steps:
-                self._fade_after_id = None
-                return
-            self._fade_after_id = self.root.after(interval, lambda: _tick(step + 1))
-
-        _tick(0)
+    def _fade_in(self) -> None:
+        if self._tooltip_widget is None:
+            return
+        self._tooltip_widget.setWindowOpacity(0.0)
+        self._fade_anim = QPropertyAnimation(self._tooltip_widget, b"windowOpacity")
+        self._fade_anim.setDuration(self.fade_ms)
+        self._fade_anim.setStartValue(0.0)
+        self._fade_anim.setEndValue(0.97)
+        self._fade_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._fade_anim.start()
