@@ -1,10 +1,18 @@
-"""axiom_app.views.styles — Shared design tokens and ttk theme configuration."""
+"""axiom_app.views.styles — Shared design tokens and QSS theme configuration.
+
+Provides:
+  * STYLE_CONFIG  — master design-token dictionary (palettes, type scale, radii, animation timings)
+  * UI_SPACING    — semantic spacing scale (xs … xxl)
+  * get_palette() — return a complete colour palette by name
+  * resolve_fonts()  — return QFont objects keyed by type-scale name
+  * generate_qss()   — produce a complete Qt Style Sheet for the active palette
+  * apply_theme_to_app() — apply QSS + QPalette to a QApplication
+"""
 
 from __future__ import annotations
 
-import tkinter as tk
-import tkinter.font as tkfont
-from tkinter import ttk
+from PySide6.QtGui import QFont, QFontDatabase, QPalette, QColor
+from PySide6.QtWidgets import QApplication
 
 
 STYLE_CONFIG: dict = {
@@ -206,16 +214,13 @@ def get_palette(name: str = "light") -> dict:
     return {**base, **selected}
 
 
-def resolve_fonts(root: tk.Misc | None = None) -> dict:  # noqa: ARG001
-    """Return a font dict keyed by the shared type-scale names."""
-    try:
-        families = set(tkfont.families())
-    except Exception:
-        families = set()
+def resolve_fonts() -> dict[str, QFont]:
+    """Return a QFont dict keyed by the shared type-scale names."""
+    available = set(QFontDatabase.families())
 
     base_family = (
         STYLE_CONFIG["font_family"]
-        if STYLE_CONFIG["font_family"] in families
+        if STYLE_CONFIG["font_family"] in available
         else STYLE_CONFIG["fallback_font"]
     )
 
@@ -224,356 +229,542 @@ def resolve_fonts(root: tk.Misc | None = None) -> dict:  # noqa: ARG001
         STYLE_CONFIG.get("fallback_mono_font", "Consolas"),
         "SF Mono",
         "Courier New",
-        "TkFixedFont",
+        "Monospace",
     )
-    code_family = next((family for family in mono_candidates if family in families), base_family)
+    code_family = next(
+        (family for family in mono_candidates if family in available),
+        base_family,
+    )
 
     type_scale = STYLE_CONFIG.get("type_scale", {})
 
-    def _font_for(name: str, family: str) -> tuple:
+    def _qfont(name: str, family: str) -> QFont:
         spec = type_scale.get(name, {})
         if not isinstance(spec, dict):
             spec = {}
         size = int(spec.get("size", 10))
-        weight = str(spec.get("weight", "normal") or "normal").strip().lower()
-        if weight == "bold":
-            return (family, size, "bold")
-        return (family, size)
+        weight_str = str(spec.get("weight", "normal") or "normal").strip().lower()
+        font = QFont(family, size)
+        if weight_str == "bold":
+            font.setBold(True)
+        return font
 
     return {
-        "h1": _font_for("h1", base_family),
-        "h2": _font_for("h2", base_family),
-        "h3": _font_for("h3", base_family),
-        "body": _font_for("body", base_family),
-        "body_bold": _font_for("body_bold", base_family),
-        "caption": _font_for("caption", base_family),
-        "code": _font_for("code", code_family),
-        "overline": _font_for("overline", base_family),
+        "h1": _qfont("h1", base_family),
+        "h2": _qfont("h2", base_family),
+        "h3": _qfont("h3", base_family),
+        "body": _qfont("body", base_family),
+        "body_bold": _qfont("body_bold", base_family),
+        "caption": _qfont("caption", base_family),
+        "code": _qfont("code", code_family),
+        "overline": _qfont("overline", base_family),
     }
 
 
-def apply_ttk_theme(root: tk.Tk, palette: dict, fonts: dict) -> None:
-    """Configure the shared ttk styles for the active palette."""
+def generate_qss(palette: dict, fonts: dict[str, QFont]) -> str:
+    """Produce a complete Qt Style Sheet string for the given palette and fonts."""
 
-    def get(key: str, fallback=None, default=None):
-        value = palette.get(key)
-        if value is not None:
-            return value
-        if isinstance(fallback, str):
-            value = palette.get(fallback)
-            if value is not None:
-                return value
-        elif fallback is not None:
-            return fallback
-        if default is not None:
-            return default
-        return STYLE_CONFIG["themes"]["light"].get(key)
+    def _get(key: str, fallback: str | None = None, default: str = "") -> str:
+        val = palette.get(key)
+        if val is not None:
+            return val
+        if fallback is not None:
+            val = palette.get(fallback)
+            if val is not None:
+                return val
+        return default or STYLE_CONFIG["themes"]["light"].get(key, "")
 
-    style = ttk.Style()
-    if "clam" in style.theme_names():
-        style.theme_use("clam")
+    app_bg = _get("app_bg", "bg")
+    surface = _get("surface")
+    surface_elevated = _get("surface_elevated", "surface")
+    surface_alt = _get("surface_alt", "surface")
+    sidebar_bg = _get("sidebar_bg", "surface")
+    text = _get("text")
+    muted = _get("muted_text")
+    border = _get("border", default="#E5E0EA")
+    outline = _get("outline", "border")
+    primary = _get("primary")
+    primary_hover = _get("primary_hover", "primary")
+    primary_pressed = _get("primary_pressed", "primary")
+    nav_hover = _get("nav_hover_bg", "surface_alt")
+    nav_active = _get("nav_active_bg", "surface_alt")
+    input_bg = _get("input_bg", "surface_alt")
+    badge_bg = _get("badge_bg", "surface_alt")
+    selection_bg = _get("selection_bg")
+    selection_fg = _get("selection_fg")
+    danger = _get("danger")
+    success = _get("success")
+    warning = _get("warning")
+    workspace_bg = _get("workspace_bg", "surface")
+    focus_ring = _get("focus_ring", "primary")
+    tab_indicator = _get("tab_indicator", "primary")
+    progress_pulse = _get("progress_pulse")
+    link = _get("link", "primary")
 
-    root.configure(bg=get("app_bg", "bg"))
+    body_font = fonts.get("body")
+    body_family = body_font.family() if body_font else "Segoe UI"
+    body_size = body_font.pointSize() if body_font else 13
+    caption_font = fonts.get("caption")
+    caption_size = caption_font.pointSize() if caption_font else 11
+    code_font = fonts.get("code")
+    code_family = code_font.family() if code_font else "Consolas"
+    code_size = code_font.pointSize() if code_font else 11
 
-    app_bg = get("app_bg", "bg")
-    surface = get("surface")
-    surface_elevated = get("surface_elevated", "surface")
-    surface_alt = get("surface_alt", "surface")
-    sidebar_bg = get("sidebar_bg", "surface")
-    text = get("text")
-    muted = get("muted_text")
-    border = get("border", default="#E5E0EA")
-    outline = get("outline", "border")
-    primary = get("primary")
-    primary_hover = get("primary_hover", "primary")
-    primary_pressed = get("primary_pressed", "primary")
-    nav_hover = get("nav_hover_bg", "surface_alt")
-    nav_active = get("nav_active_bg", "surface_alt")
-    input_bg = get("input_bg", "surface_alt")
-    badge_bg = get("badge_bg", "surface_alt")
+    r = STYLE_CONFIG["radius_sm"]
 
-    style.configure(".", background=app_bg, foreground=text, fieldbackground=input_bg)
-    style.configure("TFrame", background=app_bg, borderwidth=0, relief="flat")
-    style.configure("Card.TFrame", background=surface, borderwidth=0, relief="flat")
-    style.configure("Card.Elevated.TFrame", background=surface_elevated, borderwidth=0, relief="flat")
-    style.configure("Card.Flat.TFrame", background=surface_alt, borderwidth=0, relief="flat")
-    style.configure("Workspace.TFrame", background=get("workspace_bg", "surface"), borderwidth=0, relief="flat")
-    style.configure("Sidebar.TFrame", background=sidebar_bg, borderwidth=0, relief="flat")
-    style.configure("MainContent.TFrame", background=get("workspace_bg", "surface"), borderwidth=0, relief="flat")
-    style.configure("Utility.TFrame", background=surface, borderwidth=0, relief="flat")
-    style.configure("MutedPanel.TFrame", background=surface_alt, borderwidth=0, relief="flat")
-    style.configure("StatusBar.TFrame", background=surface, borderwidth=0, relief="flat")
-    style.configure("CollapsibleHeader.TFrame", background=surface, borderwidth=0, relief="flat")
+    return f"""
+/* ======== BASE WIDGETS ======== */
+QMainWindow, QWidget {{
+    background-color: {app_bg};
+    color: {text};
+    font-family: "{body_family}";
+    font-size: {body_size}pt;
+}}
 
-    style.configure(
-        "TLabelframe",
-        background=surface,
-        bordercolor=border,
-        borderwidth=1,
-        relief="flat",
-        padding=(14, 12),
-    )
-    style.configure("TLabelframe.Label", background=surface, foreground=text, font=fonts["body_bold"])
+QWidget[cssClass="surface"] {{
+    background-color: {surface};
+}}
+QWidget[cssClass="surface_elevated"] {{
+    background-color: {surface_elevated};
+}}
+QWidget[cssClass="surface_alt"] {{
+    background-color: {surface_alt};
+}}
+QWidget[cssClass="workspace"] {{
+    background-color: {workspace_bg};
+}}
+QWidget[cssClass="sidebar"] {{
+    background-color: {sidebar_bg};
+}}
+QWidget[cssClass="content"] {{
+    background-color: {workspace_bg};
+}}
 
-    style.configure("TLabel", background=surface, foreground=text, font=fonts["body"])
-    style.configure("Header.TLabel", background=surface, foreground=text, font=fonts["h2"])
-    style.configure("Title.TLabel", background=surface, foreground=text, font=fonts["h1"])
-    style.configure("Bold.TLabel", background=surface, foreground=text, font=fonts["body_bold"])
-    style.configure("Muted.TLabel", background=surface, foreground=muted, font=fonts["body"])
-    style.configure("Caption.TLabel", background=surface, foreground=muted, font=fonts["caption"])
-    style.configure("Overline.TLabel", background=surface, foreground=muted, font=fonts["overline"])
-    style.configure("Code.TLabel", background=surface, foreground=get("source", "muted_text"), font=fonts["code"])
-    style.configure("Danger.TLabel", background=surface, foreground=get("danger"), font=fonts["body_bold"])
-    style.configure("Success.TLabel", background=surface, foreground=get("success"), font=fonts["body_bold"])
-    style.configure("Warning.TLabel", background=surface, foreground=get("warning"), font=fonts["body_bold"])
-    style.configure("Status.TLabel", background=surface, foreground=get("status", "muted_text"), font=fonts["caption"])
-    style.configure(
-        "Badge.TLabel",
-        background=badge_bg,
-        foreground=primary,
-        font=fonts["caption"],
-        padding=(12, 7),
-        borderwidth=1,
-        relief="flat",
-    )
-    style.configure("Sidebar.Title.TLabel", background=sidebar_bg, foreground=text, font=fonts["body_bold"])
-    style.configure("Sidebar.Caption.TLabel", background=sidebar_bg, foreground=muted, font=fonts["caption"])
-    style.configure("CollapsibleArrow.TLabel", background=surface, foreground=muted, font=fonts["body_bold"])
-    style.configure("CollapsibleTitle.TLabel", background=surface, foreground=text, font=fonts["body_bold"])
+/* ======== LABELS ======== */
+QLabel {{
+    background: transparent;
+    color: {text};
+    font-size: {body_size}pt;
+}}
+QLabel[cssClass="header"] {{
+    font-size: {fonts.get("h2", body_font).pointSize() if fonts.get("h2") else 24}pt;
+    font-weight: bold;
+}}
+QLabel[cssClass="title"] {{
+    font-size: {fonts.get("h1", body_font).pointSize() if fonts.get("h1") else 34}pt;
+    font-weight: bold;
+}}
+QLabel[cssClass="bold"] {{
+    font-weight: bold;
+}}
+QLabel[cssClass="muted"] {{
+    color: {muted};
+}}
+QLabel[cssClass="caption"] {{
+    color: {muted};
+    font-size: {caption_size}pt;
+}}
+QLabel[cssClass="overline"] {{
+    color: {muted};
+    font-size: {caption_size}pt;
+    font-weight: bold;
+    text-transform: uppercase;
+}}
+QLabel[cssClass="code"] {{
+    color: {_get("source", "muted_text")};
+    font-family: "{code_family}";
+    font-size: {code_size}pt;
+}}
+QLabel[cssClass="status"] {{
+    color: {_get("status", "muted_text")};
+    font-size: {caption_size}pt;
+}}
+QLabel[cssClass="badge"] {{
+    background-color: {badge_bg};
+    color: {primary};
+    font-size: {caption_size}pt;
+    padding: 7px 12px;
+    border-radius: {r}px;
+}}
+QLabel[cssClass="danger"] {{
+    color: {danger};
+    font-weight: bold;
+}}
+QLabel[cssClass="success"] {{
+    color: {success};
+    font-weight: bold;
+}}
+QLabel[cssClass="warning"] {{
+    color: {warning};
+    font-weight: bold;
+}}
 
-    style.configure(
-        "TButton",
-        padding=(15, 11),
-        borderwidth=1,
-        relief="flat",
-        background=surface,
-        foreground=text,
-        bordercolor=border,
-        focuscolor=surface,
-        font=fonts["body"],
-    )
-    style.map(
-        "TButton",
-        background=[("active", surface_alt), ("pressed", nav_hover)],
-        foreground=[("disabled", muted), ("active", text)],
-        bordercolor=[("focus", primary), ("active", outline)],
-    )
+/* ======== BUTTONS ======== */
+QPushButton {{
+    background-color: {surface};
+    color: {text};
+    border: 1px solid {border};
+    border-radius: {r}px;
+    padding: 11px 15px;
+    font-size: {body_size}pt;
+}}
+QPushButton:hover {{
+    background-color: {surface_alt};
+    border-color: {outline};
+}}
+QPushButton:pressed {{
+    background-color: {nav_hover};
+}}
+QPushButton:disabled {{
+    color: {muted};
+    background-color: {surface};
+    border-color: {border};
+}}
+QPushButton:focus {{
+    border-color: {primary};
+}}
 
-    style.configure(
-        "Primary.TButton",
-        padding=(17, 11),
-        borderwidth=0,
-        relief="flat",
-        background=primary,
-        foreground="#FFFFFF",
-        focuscolor=primary,
-        font=fonts["body_bold"],
-    )
-    style.map(
-        "Primary.TButton",
-        background=[
-            ("active", primary_hover),
-            ("pressed", primary_pressed),
-            ("disabled", outline),
-        ],
-        foreground=[("disabled", muted), ("active", "#FFFFFF")],
-    )
+QPushButton[cssClass="primary"] {{
+    background-color: {primary};
+    color: #FFFFFF;
+    border: none;
+    border-radius: {r}px;
+    padding: 11px 17px;
+    font-weight: bold;
+}}
+QPushButton[cssClass="primary"]:hover {{
+    background-color: {primary_hover};
+}}
+QPushButton[cssClass="primary"]:pressed {{
+    background-color: {primary_pressed};
+}}
+QPushButton[cssClass="primary"]:disabled {{
+    background-color: {outline};
+    color: {muted};
+}}
 
-    style.configure(
-        "Secondary.TButton",
-        padding=(15, 11),
-        borderwidth=1,
-        relief="flat",
-        background=surface,
-        foreground=text,
-        bordercolor=border,
-        focuscolor=surface,
-        font=fonts["body"],
-    )
-    style.map(
-        "Secondary.TButton",
-        background=[
-            ("active", surface_alt),
-            ("pressed", nav_hover),
-            ("disabled", surface),
-        ],
-        foreground=[("disabled", muted), ("active", text)],
-        bordercolor=[("focus", primary), ("active", outline)],
-    )
+QPushButton[cssClass="secondary"] {{
+    background-color: {surface};
+    color: {text};
+    border: 1px solid {border};
+    border-radius: {r}px;
+    padding: 11px 15px;
+}}
+QPushButton[cssClass="secondary"]:hover {{
+    background-color: {surface_alt};
+    border-color: {outline};
+}}
+QPushButton[cssClass="secondary"]:pressed {{
+    background-color: {nav_hover};
+}}
+QPushButton[cssClass="secondary"]:disabled {{
+    color: {muted};
+    background-color: {surface};
+}}
 
-    style.configure(
-        "Sidebar.TButton",
-        padding=(12, 14),
-        borderwidth=0,
-        relief="flat",
-        background=sidebar_bg,
-        foreground=muted,
-        anchor="center",
-        focuscolor=sidebar_bg,
-        font=fonts["body_bold"],
-    )
-    style.map(
-        "Sidebar.TButton",
-        background=[("active", nav_hover), ("pressed", nav_hover)],
-        foreground=[("active", text), ("pressed", text)],
-    )
+QPushButton[cssClass="sidebar"] {{
+    background-color: {sidebar_bg};
+    color: {muted};
+    border: none;
+    border-radius: {r}px;
+    padding: 14px 12px;
+    font-weight: bold;
+    text-align: center;
+}}
+QPushButton[cssClass="sidebar"]:hover {{
+    background-color: {nav_hover};
+    color: {text};
+}}
+QPushButton[cssClass="sidebar"]:pressed {{
+    background-color: {nav_hover};
+    color: {text};
+}}
+QPushButton[cssClass="sidebar_active"] {{
+    background-color: {nav_active};
+    color: {primary};
+    border: none;
+    border-radius: {r}px;
+    padding: 14px 12px;
+    font-weight: bold;
+    text-align: center;
+}}
 
-    style.configure(
-        "Sidebar.Active.TButton",
-        padding=(12, 14),
-        borderwidth=0,
-        relief="flat",
-        background=nav_active,
-        foreground=primary,
-        anchor="center",
-        focuscolor=nav_active,
-        font=fonts["body_bold"],
-    )
-    style.map(
-        "Sidebar.Active.TButton",
-        background=[("active", nav_active), ("pressed", nav_active)],
-        foreground=[("active", primary), ("pressed", primary)],
-    )
+/* ======== INPUTS ======== */
+QLineEdit {{
+    background-color: {input_bg};
+    color: {text};
+    border: 1px solid {border};
+    border-radius: {r}px;
+    padding: 9px 12px;
+    selection-background-color: {selection_bg};
+    selection-color: {selection_fg};
+}}
+QLineEdit:focus {{
+    border-color: {focus_ring};
+}}
 
-    style.configure(
-        "TCheckbutton",
-        background=surface,
-        foreground=text,
-        indicatorcolor=surface_alt,
-        relief="flat",
-    )
-    style.map(
-        "TCheckbutton",
-        background=[("active", surface), ("!active", surface)],
-        foreground=[("active", text), ("disabled", muted)],
-        indicatorcolor=[("selected", primary), ("!selected", surface_alt)],
-    )
+QTextEdit, QPlainTextEdit {{
+    background-color: {input_bg};
+    color: {text};
+    border: 1px solid {border};
+    border-radius: {r}px;
+    padding: 9px 12px;
+    selection-background-color: {selection_bg};
+    selection-color: {selection_fg};
+}}
+QTextEdit:focus, QPlainTextEdit:focus {{
+    border-color: {focus_ring};
+}}
+QTextEdit[cssClass="chat_display"] {{
+    background-color: {surface};
+    border: none;
+    border-radius: 0px;
+    padding: {UI_SPACING['m']}px;
+}}
+QTextEdit[cssClass="log_display"] {{
+    background-color: {surface};
+    color: {muted};
+    border: none;
+    font-family: "{code_family}";
+    font-size: {code_size}pt;
+}}
 
-    style.configure(
-        "TEntry",
-        fieldbackground=input_bg,
-        foreground=text,
-        bordercolor=border,
-        insertcolor=primary,
-        borderwidth=1,
-        relief="flat",
-        padding=(12, 9),
-    )
-    style.map("TEntry", bordercolor=[("focus", primary), ("active", outline)])
+/* ======== COMBOBOX ======== */
+QComboBox {{
+    background-color: {input_bg};
+    color: {text};
+    border: 1px solid {border};
+    border-radius: {r}px;
+    padding: 9px 12px;
+    min-width: 80px;
+}}
+QComboBox:focus {{
+    border-color: {focus_ring};
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 24px;
+}}
+QComboBox::down-arrow {{
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid {muted};
+    margin-right: 8px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {input_bg};
+    color: {text};
+    border: 1px solid {border};
+    selection-background-color: {selection_bg};
+    selection-color: {selection_fg};
+    outline: none;
+}}
 
-    style.configure(
-        "TCombobox",
-        fieldbackground=input_bg,
-        background=input_bg,
-        foreground=text,
-        arrowcolor=muted,
-        bordercolor=border,
-        relief="flat",
-        insertcolor=primary,
-        padding=(12, 9),
-    )
-    style.map(
-        "TCombobox",
-        fieldbackground=[("readonly", input_bg)],
-        selectbackground=[("readonly", get("selection_bg"))],
-        selectforeground=[("readonly", get("selection_fg"))],
-        foreground=[("readonly", text)],
-        bordercolor=[("focus", primary), ("active", outline)],
-    )
+/* ======== CHECKBOX ======== */
+QCheckBox {{
+    background: transparent;
+    color: {text};
+    spacing: 8px;
+}}
+QCheckBox::indicator {{
+    width: 18px;
+    height: 18px;
+    border: 1px solid {outline};
+    border-radius: 4px;
+    background-color: {surface_alt};
+}}
+QCheckBox::indicator:checked {{
+    background-color: {primary};
+    border-color: {primary};
+}}
+QCheckBox::indicator:hover {{
+    border-color: {primary_hover};
+}}
+QCheckBox:disabled {{
+    color: {muted};
+}}
 
-    root.option_add("*TCombobox*Listbox.background", input_bg)
-    root.option_add("*TCombobox*Listbox.foreground", text)
-    root.option_add("*TCombobox*Listbox.selectBackground", get("selection_bg"))
-    root.option_add("*TCombobox*Listbox.selectForeground", get("selection_fg"))
-    root.option_add("*TCombobox*Listbox.relief", "flat")
-    root.option_add("*TCombobox*Listbox.borderWidth", "0")
+/* ======== TREE / LIST ======== */
+QTreeWidget, QListWidget {{
+    background-color: {surface};
+    color: {text};
+    border: none;
+    outline: none;
+    font-size: {body_size}pt;
+}}
+QTreeWidget::item, QListWidget::item {{
+    padding: 6px 8px;
+    border: none;
+}}
+QTreeWidget::item:selected, QListWidget::item:selected {{
+    background-color: {selection_bg};
+    color: {selection_fg};
+}}
+QTreeWidget::item:hover, QListWidget::item:hover {{
+    background-color: {surface_alt};
+}}
+QHeaderView::section {{
+    background-color: {surface_alt};
+    color: {muted};
+    border: none;
+    padding: 7px 8px;
+    font-size: {caption_size}pt;
+}}
+QHeaderView::section:hover {{
+    background-color: {surface_elevated};
+    color: {text};
+}}
 
-    style.configure(
-        "Treeview",
-        background=surface,
-        fieldbackground=surface,
-        foreground=text,
-        bordercolor=border,
-        borderwidth=0,
-        rowheight=38,
-        relief="flat",
-    )
-    style.map(
-        "Treeview",
-        background=[("selected", get("selection_bg")), ("active", surface_alt)],
-        foreground=[("selected", get("selection_fg")), ("active", text)],
-    )
-    style.configure(
-        "Treeview.Heading",
-        background=surface_alt,
-        foreground=muted,
-        borderwidth=0,
-        relief="flat",
-        font=fonts["caption"],
-        padding=(8, 7),
-    )
-    style.map(
-        "Treeview.Heading",
-        background=[("active", surface_elevated)],
-        foreground=[("active", text)],
-    )
+/* ======== TAB WIDGET ======== */
+QTabWidget::pane {{
+    background-color: {surface};
+    border: none;
+}}
+QTabBar::tab {{
+    background-color: {surface_alt};
+    color: {muted};
+    border: none;
+    padding: 8px 14px;
+    font-size: {caption_size}pt;
+}}
+QTabBar::tab:selected {{
+    background-color: {surface};
+    color: {text};
+    border-bottom: 2px solid {tab_indicator};
+}}
+QTabBar::tab:hover {{
+    background-color: {surface_elevated};
+    color: {text};
+}}
 
-    style.configure(
-        "TNotebook",
-        background=surface,
-        borderwidth=0,
-        tabmargins=(0, 0, 0, 0),
-    )
-    style.configure(
-        "TNotebook.Tab",
-        background=surface_alt,
-        foreground=muted,
-        padding=(14, 8),
-        borderwidth=0,
-        font=fonts["caption"],
-    )
-    style.map(
-        "TNotebook.Tab",
-        background=[("selected", surface), ("active", surface_elevated)],
-        foreground=[("selected", text), ("active", text)],
-    )
+/* ======== SCROLLBAR ======== */
+QScrollBar:vertical {{
+    background-color: {surface_alt};
+    width: 12px;
+    border: none;
+}}
+QScrollBar::handle:vertical {{
+    background-color: {outline};
+    border-radius: 6px;
+    min-height: 30px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background-color: {primary};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0px;
+}}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+    background: none;
+}}
+QScrollBar:horizontal {{
+    background-color: {surface_alt};
+    height: 12px;
+    border: none;
+}}
+QScrollBar::handle:horizontal {{
+    background-color: {outline};
+    border-radius: 6px;
+    min-width: 30px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background-color: {primary};
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+    width: 0px;
+}}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+    background: none;
+}}
 
-    style.configure(
-        "Vertical.TScrollbar",
-        background=outline,
-        troughcolor=surface_alt,
-        bordercolor=surface_alt,
-        arrowcolor=outline,
-        relief="flat",
-        width=12,
-        arrowsize=0,
-    )
-    style.map(
-        "Vertical.TScrollbar",
-        background=[("active", primary), ("!active", outline)],
-    )
-    style.configure(
-        "Horizontal.TScrollbar",
-        background=outline,
-        troughcolor=surface_alt,
-        bordercolor=surface_alt,
-        arrowcolor=outline,
-        relief="flat",
-        width=12,
-        arrowsize=0,
-    )
-    style.map(
-        "Horizontal.TScrollbar",
-        background=[("active", primary), ("!active", outline)],
-    )
+/* ======== PROGRESS BAR ======== */
+QProgressBar {{
+    background-color: {surface_alt};
+    border: none;
+    border-radius: 5px;
+    text-align: center;
+    color: {text};
+    max-height: 10px;
+}}
+QProgressBar::chunk {{
+    background-color: {primary};
+    border-radius: 5px;
+}}
 
-    style.configure(
-        "TProgressbar",
-        troughcolor=surface_alt,
-        background=primary,
-        bordercolor=app_bg,
-        lightcolor=primary_hover,
-        darkcolor=primary,
-        relief="flat",
-    )
-    style.configure("TSeparator", background=border)
+/* ======== GROUP BOX ======== */
+QGroupBox {{
+    background-color: {surface};
+    border: 1px solid {border};
+    border-radius: {r}px;
+    margin-top: 12px;
+    padding: 12px 14px;
+    font-weight: bold;
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    left: 14px;
+    padding: 0 6px;
+    color: {text};
+    background-color: {surface};
+}}
+
+/* ======== TOOLTIP ======== */
+QToolTip {{
+    background-color: {surface_alt};
+    color: {text};
+    border: 1px solid {border};
+    padding: 7px 10px;
+    font-size: {caption_size}pt;
+    border-radius: 6px;
+}}
+
+/* ======== SEPARATOR ======== */
+QFrame[cssClass="separator"] {{
+    background-color: {border};
+    max-height: 1px;
+    min-height: 1px;
+}}
+QFrame[cssClass="v_separator"] {{
+    background-color: {border};
+    max-width: 1px;
+    min-width: 1px;
+}}
+
+/* ======== SCROLL AREA ======== */
+QScrollArea {{
+    background: transparent;
+    border: none;
+}}
+QScrollArea > QWidget > QWidget {{
+    background: transparent;
+}}
+"""
+
+
+def apply_theme_to_app(app: QApplication, palette: dict, fonts: dict[str, QFont]) -> None:
+    """Apply QSS theme and QPalette to the entire application."""
+    qss = generate_qss(palette, fonts)
+    app.setStyleSheet(qss)
+
+    # Also set the QPalette for widgets that don't fully respect QSS
+    qt_palette = QPalette()
+    text_color = QColor(palette.get("text", "#FFFFFF"))
+    bg_color = QColor(palette.get("app_bg", palette.get("bg", "#000000")))
+    surface_color = QColor(palette.get("surface", "#111111"))
+    primary_color = QColor(palette.get("primary", "#2EB7FF"))
+    selection_bg = QColor(palette.get("selection_bg", "#103C5A"))
+    selection_fg = QColor(palette.get("selection_fg", "#FFFFFF"))
+
+    qt_palette.setColor(QPalette.Window, bg_color)
+    qt_palette.setColor(QPalette.WindowText, text_color)
+    qt_palette.setColor(QPalette.Base, surface_color)
+    qt_palette.setColor(QPalette.AlternateBase, QColor(palette.get("surface_alt", "#222222")))
+    qt_palette.setColor(QPalette.Text, text_color)
+    qt_palette.setColor(QPalette.Button, surface_color)
+    qt_palette.setColor(QPalette.ButtonText, text_color)
+    qt_palette.setColor(QPalette.Highlight, selection_bg)
+    qt_palette.setColor(QPalette.HighlightedText, selection_fg)
+    qt_palette.setColor(QPalette.Link, primary_color)
+    qt_palette.setColor(QPalette.PlaceholderText, QColor(palette.get("muted_text", "#888888")))
+    app.setPalette(qt_palette)

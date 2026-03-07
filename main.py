@@ -1,7 +1,7 @@
 """main.py — Canonical entry point for the Axiom application.
 
 Default behaviour (AXIOM_NEW_APP unset or 1):
-  Runs axiom_app.app.run_app() (tabbed Tk UI).
+  Runs axiom_app.app.run_app() (PySide6 Qt UI).
 
 Legacy GUI fallback (explicit opt-out via AXIOM_NEW_APP=0):
   Delegates to agentic_rag_gui so that ``AXIOM_NEW_APP=0 python main.py`` is
@@ -9,7 +9,7 @@ Legacy GUI fallback (explicit opt-out via AXIOM_NEW_APP=0):
 
   Automatic CLI fallback — two situations trigger headless mode instead:
     1. ``--cli`` flag is present anywhere in sys.argv.
-    2. Tk raises TclError at startup (no DISPLAY, headless server, etc.).
+    2. Qt/Tk raises an error at startup (no DISPLAY, headless server, etc.).
 
   Explicit CLI invocations::
 
@@ -19,12 +19,6 @@ Legacy GUI fallback (explicit opt-out via AXIOM_NEW_APP=0):
   Headless automatic fallback::
 
       python main.py          # -> CLI help if no display
-
-Runtime path:
-  TODO: add CLI argument parsing here (--smoke, --profile, --theme …)
-        so agentic_rag_gui.py no longer needs to inspect sys.argv directly.
-
-  TODO: set up logging configuration before handing off to the app bootstrap.
 """
 
 import os
@@ -33,16 +27,19 @@ import sys
 
 def _is_display_error(exc: BaseException) -> bool:
     """Return True if *exc* indicates that no graphical display is available."""
-    # TclError is the canonical Tk error; we match by name to avoid importing
-    # tkinter at the top level (it may not be installed on headless servers).
-    if type(exc).__name__ == "TclError":
+    # Match common Qt and Tk display errors by name/message to avoid importing
+    # GUI frameworks at the top level (they may not be installed on headless servers).
+    name = type(exc).__name__
+    if name in ("TclError", "QtFatalError"):
         return True
     msg = str(exc).lower()
     return (
         "no display" in msg
         or "couldn't connect to display" in msg
+        or "could not connect to display" in msg
         or "can't find a usable init.tcl" in msg
-        or (isinstance(exc, ImportError) and "tkinter" in msg)
+        or "cannot load library" in msg
+        or (isinstance(exc, ImportError) and ("tkinter" in msg or "pyside6" in msg))
     )
 
 
@@ -82,7 +79,7 @@ def main() -> None:
                 sys.exit(1)
     else:
         # -----------------------------------------------------------------------
-        # Legacy path: run the monolithic app unchanged.
+        # Legacy path: run the monolithic app unchanged (tkinter-based).
         # -----------------------------------------------------------------------
         # Import triggers module-level setup in agentic_rag_gui (UI backend
         # detection, constant definitions) exactly as if the file were run directly.

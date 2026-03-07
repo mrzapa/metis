@@ -27,6 +27,7 @@ def test_main_uses_mvc_runtime_by_default(monkeypatch) -> None:
 
 
 def test_main_allows_explicit_legacy_opt_out(monkeypatch) -> None:
+    """Legacy path (AXIOM_NEW_APP=0) still uses tkinter — test with mocks."""
     calls: list[str] = []
 
     fake_legacy = types.ModuleType("agentic_rag_gui")
