@@ -280,7 +280,6 @@ def apply_ttk_theme(root: tk.Tk, palette: dict, fonts: dict) -> None:
     surface_elevated = get("surface_elevated", "surface")
     surface_alt = get("surface_alt", "surface")
     sidebar_bg = get("sidebar_bg", "surface")
-    content_bg = get("content_bg", "surface")
     text = get("text")
     muted = get("muted_text")
     border = get("border", default="#E5E0EA")
