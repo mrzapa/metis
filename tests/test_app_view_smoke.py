@@ -7,6 +7,10 @@ import sys
 
 import pytest
 
+qt_widgets = pytest.importorskip("PySide6.QtWidgets", reason="Qt runtime unavailable")
+QScrollBar = qt_widgets.QScrollBar
+QTreeWidget = qt_widgets.QTreeWidget
+
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "win32",
@@ -32,6 +36,15 @@ def _show(process_events):
     return view
 
 
+def _is_descendant(widget, ancestor) -> bool:
+    current = widget
+    while current is not None:
+        if current is ancestor:
+            return True
+        current = current.parentWidget()
+    return False
+
+
 def test_app_view_constructs_with_empty_chat_state(qapp, process_events) -> None:
     view = _show(process_events)
 
@@ -39,7 +52,10 @@ def test_app_view_constructs_with_empty_chat_state(qapp, process_events) -> None
     assert view._theme_name == "space_dust"
     assert view._chat_has_messages is False
     assert view._chat_empty_state.isVisible()
-    assert not view._conversation_shell.isVisible()
+    assert view._conversation_shell.isVisible()
+    assert view._composer_shell.isVisible()
+    assert view._chat_state_stack.currentWidget() is view._chat_empty_state
+    assert not view._chat_transcript_state.isVisible()
     assert view.minimumWidth() == 1180
     assert view.minimumHeight() == 760
     assert view._rag_toggle.get_value() is True
@@ -54,13 +70,18 @@ def test_app_view_switches_between_empty_and_conversation_states(qapp, process_e
     assert view._chat_has_messages is True
     assert not view._chat_empty_state.isVisible()
     assert view._conversation_shell.isVisible()
+    assert view._composer_shell.isVisible()
+    assert view._chat_state_stack.currentWidget() is view._chat_transcript_state
+    assert view._chat_transcript_state.isVisible()
 
     view.clear_chat()
     process_events()
 
     assert view._chat_has_messages is False
     assert view._chat_empty_state.isVisible()
-    assert not view._conversation_shell.isVisible()
+    assert view._conversation_shell.isVisible()
+    assert view._composer_shell.isVisible()
+    assert view._chat_state_stack.currentWidget() is view._chat_empty_state
 
 
 def test_app_view_switches_between_all_pages(qapp, process_events) -> None:
@@ -89,3 +110,37 @@ def test_app_view_applies_theme_and_updates_runtime_widgets(qapp, process_events
     assert view._palette["primary"] == view._rag_toggle._palette["primary"]
     assert "openai" in view._llm_status_badge.text()
     assert view._mode_combo.currentText() == "Research"
+
+
+def test_app_view_settings_widgets_are_owned_by_settings_page(qapp, process_events) -> None:
+    view = _show(process_events)
+    settings_page = view._pages["settings"]
+    view.switch_view("settings")
+    process_events()
+
+    for widget in view._settings_widgets.values():
+        assert _is_descendant(widget, settings_page)
+    assert _is_descendant(view._local_model_tree, settings_page)
+    assert not [tree for tree in view.findChildren(QTreeWidget) if tree.parentWidget() is view]
+    assert not [bar for bar in view.findChildren(QScrollBar) if bar.parentWidget() is view]
+
+
+def test_app_view_uses_packaged_brand_logo_when_available(qapp, process_events) -> None:
+    view = _show(process_events)
+
+    assert not view._brand_logo_pixmap.isNull()
+    assert not view.windowIcon().isNull()
+    assert view._brand_icon_stack.currentWidget() is view._brand_logo_page
+    assert view._brand_logo_label.pixmap() is not None
+
+
+def test_app_view_falls_back_to_vector_brand_mark_when_logo_missing(monkeypatch, qapp, process_events) -> None:
+    module = importlib.import_module("axiom_app.views.app_view")
+    monkeypatch.setattr(module.AppView, "_load_packaged_brand_pixmap", lambda self: module.QPixmap())
+
+    view = module.AppView(theme_name="space_dust")
+    view.show()
+    process_events()
+
+    assert view._brand_logo_pixmap.isNull()
+    assert view._brand_icon_stack.currentWidget() is view._brand_mark_page

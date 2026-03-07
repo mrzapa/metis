@@ -257,6 +257,7 @@ class CollapsibleFrame(QWidget):
         self.content.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self._content_layout = QVBoxLayout(self.content)
         self._content_layout.setContentsMargins(0, self._content_pad, 0, self._content_pad)
+        self._content_layout.setSpacing(UI_SPACING["s"])
         main_layout.addWidget(self.content)
 
         if not expanded:
@@ -270,6 +271,11 @@ class CollapsibleFrame(QWidget):
         if not self._expanded and not self._animating:
             self.content.setMaximumHeight(0)
         return h
+
+    @property
+    def content_layout(self) -> QVBoxLayout:
+        """Public layout API for adding content widgets to the accordion body."""
+        return self._content_layout
 
     def _set_clip_height(self, value: float) -> None:
         self.content.setMaximumHeight(max(0, int(value)))
