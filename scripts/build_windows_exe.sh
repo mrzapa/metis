@@ -11,6 +11,7 @@ pyinstaller \
   --windowed \
   --onefile \
   --icon logo.png \
+  --add-data "axiom_app/assets:axiom_app/assets" \
   --add-data "axiom_app/default_settings.json:axiom_app" \
   --hidden-import tkinter \
   --collect-submodules axiom_app \
