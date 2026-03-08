@@ -276,6 +276,7 @@ class SessionRepository:
         *,
         search: str = "",
         profile: str = "",
+        skill: str = "",
     ) -> list[SessionSummary]:
         sql = [
             """
@@ -306,7 +307,11 @@ class SessionRepository:
 
         with self._connect() as conn:
             rows = conn.execute("\n".join(sql), params).fetchall()
-        return [self._row_to_summary(row) for row in rows]
+        summaries = [self._row_to_summary(row) for row in rows]
+        skill_norm = (skill or "").strip()
+        if not skill_norm or skill_norm.lower() in {"all", "all skills"}:
+            return summaries
+        return [summary for summary in summaries if skill_norm in summary.skill_ids]
 
     def get_session(self, session_id: str) -> SessionDetail | None:
         with self._connect() as conn:
@@ -473,7 +478,8 @@ class SessionRepository:
             "",
             f"- Session ID: `{detail.summary.session_id}`",
             f"- Updated: `{detail.summary.updated_at or ''}`",
-            f"- Profile: `{detail.summary.active_profile or '-'}`",
+            f"- Skills: `{', '.join(detail.summary.skill_ids) or '-'}`",
+            f"- Primary Skill: `{detail.summary.primary_skill_id or '-'}`",
             f"- Mode: `{detail.summary.mode or '-'}`",
             f"- Index: `{detail.summary.index_id or '(default)'}`",
             f"- Model: `{detail.summary.llm_model or '-'}`",
