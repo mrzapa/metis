@@ -159,13 +159,24 @@ class BrainGraph:
                 index_lookup[str(collection_name)] = node_id
 
         mode_categories: dict[str, str] = {}
-        profile_categories: dict[str, str] = {}
+        skill_categories: dict[str, str] = {}
         for summary in list(sessions or []):
             session_id = str(getattr(summary, "session_id", "") or "").strip()
             if not session_id:
                 continue
             mode = str(getattr(summary, "mode", "") or "Q&A").strip() or "Q&A"
-            profile = str(getattr(summary, "active_profile", "") or "Unprofiled").strip() or "Unprofiled"
+            skill_ids = [str(item).strip() for item in (getattr(summary, "skill_ids", []) or []) if str(item).strip()]
+            primary_skill_id = str(
+                getattr(summary, "primary_skill_id", "")
+                or getattr(summary, "active_profile", "")
+                or ""
+            ).strip()
+            if primary_skill_id and primary_skill_id not in skill_ids:
+                skill_ids.insert(0, primary_skill_id)
+            if not skill_ids:
+                fallback_skill = str(getattr(summary, "active_profile", "") or "Unskilled").strip() or "Unskilled"
+                skill_ids = [fallback_skill]
+                primary_skill_id = primary_skill_id or fallback_skill
             title = str(getattr(summary, "title", "") or session_id)
             node_id = f"session:{session_id}"
             metadata = {
@@ -173,7 +184,10 @@ class BrainGraph:
                 "created_at": str(getattr(summary, "created_at", "") or ""),
                 "updated_at": str(getattr(summary, "updated_at", "") or ""),
                 "summary": str(getattr(summary, "summary", "") or ""),
-                "active_profile": profile,
+                "active_profile": primary_skill_id,
+                "primary_skill_id": primary_skill_id,
+                "skill_ids": list(skill_ids),
+                "skill_reasons": dict(getattr(summary, "skill_reasons", {}) or {}),
                 "mode": mode,
                 "index_id": str(getattr(summary, "index_id", "") or ""),
                 "vector_backend": str(getattr(summary, "vector_backend", "") or ""),
@@ -209,19 +223,25 @@ class BrainGraph:
                 self.add_edge(BrainEdge(mode_node_id, sessions_category.node_id, "category_member"))
             self.add_edge(BrainEdge(node_id, mode_categories[mode], "category_member"))
 
-            if profile not in profile_categories:
-                profile_node_id = f"category:profile:{profile.casefold()}"
-                profile_categories[profile] = profile_node_id
-                self.add_node(
-                    BrainNode(
-                        node_id=profile_node_id,
-                        node_type="category",
-                        label=profile,
-                        metadata={"category_kind": "profile", "profile": profile},
+            for skill_id in skill_ids:
+                if skill_id not in skill_categories:
+                    skill_node_id = f"category:skill:{skill_id.casefold()}"
+                    skill_categories[skill_id] = skill_node_id
+                    self.add_node(
+                        BrainNode(
+                            node_id=skill_node_id,
+                            node_type="category",
+                            label=skill_id,
+                            metadata={"category_kind": "skill", "skill_id": skill_id},
+                        )
                     )
-                )
-                self.add_edge(BrainEdge(profile_node_id, sessions_category.node_id, "category_member"))
-            self.add_edge(BrainEdge(node_id, profile_categories[profile], "category_member"))
+                    self.add_edge(BrainEdge(skill_node_id, sessions_category.node_id, "category_member"))
+                self.add_edge(BrainEdge(node_id, skill_categories[skill_id], "category_member"))
+
+            if not primary_skill_id and skill_ids:
+                primary_skill_id = skill_ids[0]
+            if primary_skill_id:
+                self.nodes[node_id].metadata["primary_skill_id"] = primary_skill_id
 
             index_id = str(getattr(summary, "index_id", "") or "").strip()
             target_index_id = index_lookup.get(index_id)

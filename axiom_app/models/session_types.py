@@ -154,6 +154,28 @@ class SessionSummary:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
+    @property
+    def skill_ids(self) -> list[str]:
+        extra = self.extra
+        skills = dict(extra.get("skills") or {})
+        return [str(item) for item in (skills.get("selected") or []) if str(item).strip()]
+
+    @property
+    def primary_skill_id(self) -> str:
+        extra = self.extra
+        skills = dict(extra.get("skills") or {})
+        return str(skills.get("primary") or "").strip()
+
+    @property
+    def skill_reasons(self) -> dict[str, str]:
+        extra = self.extra
+        skills = dict(extra.get("skills") or {})
+        return {
+            str(key): str(value)
+            for key, value in dict(skills.get("reasons") or {}).items()
+            if str(key).strip()
+        }
+
 
 @dataclass(slots=True)
 class SessionMessage:

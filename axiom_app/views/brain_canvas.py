@@ -444,6 +444,7 @@ class BrainPanel(QWidget):
     historyRefreshRequested = Signal()
     historySearchRequested = Signal()
     historySelectionRequested = Signal()
+    historySkillFilterRequested = Signal()
     historyProfileFilterRequested = Signal()
     brainNodeSelected = Signal(str)
     brainNodeActivated = Signal(str)
@@ -662,7 +663,10 @@ class BrainPanel(QWidget):
 
     def get_history_profile_filter(self) -> str:
         value = self._history_profile_filter.currentText().strip()
-        return "" if value == "All Profiles" else value
+        return "" if value == "All Skills" else value
+
+    def get_history_skill_filter(self) -> str:
+        return self.get_history_profile_filter()
 
     def bind_history_search(self, callback: Any) -> None:
         self._history_search.textChanged.connect(lambda *_args: callback())
@@ -672,6 +676,9 @@ class BrainPanel(QWidget):
 
     def bind_history_profile_filter(self, callback: Any) -> None:
         self._history_profile_filter.currentTextChanged.connect(lambda *_args: callback())
+
+    def bind_history_skill_filter(self, callback: Any) -> None:
+        self.bind_history_profile_filter(callback)
 
     def set_history_detail(self, detail: Any) -> None:
         if detail is None:
@@ -687,11 +694,14 @@ class BrainPanel(QWidget):
 
     def set_profile_filter_options(self, labels: list[str], current: str = "") -> None:
         self._history_profile_filter.blockSignals(True)
-        selected = current or self._history_profile_filter.currentText() or "All Profiles"
+        selected = current or self._history_profile_filter.currentText() or "All Skills"
         self._history_profile_filter.clear()
-        self._history_profile_filter.addItems(["All Profiles", *list(labels or [])])
-        self._history_profile_filter.setCurrentText(selected if selected else "All Profiles")
+        self._history_profile_filter.addItems(["All Skills", *list(labels or [])])
+        self._history_profile_filter.setCurrentText(selected if selected else "All Skills")
         self._history_profile_filter.blockSignals(False)
+
+    def set_skill_filter_options(self, labels: list[str], current: str = "") -> None:
+        self.set_profile_filter_options(labels, current)
 
     def select_brain_node(self, node_id: str, *, emit_signal: bool = False) -> None:
         self.canvas.select_node(node_id, emit_signal=emit_signal)
@@ -710,6 +720,7 @@ class BrainPanel(QWidget):
         self.historySearchRequested.emit()
 
     def _on_profile_filter_changed(self, _text: str) -> None:
+        self.historySkillFilterRequested.emit()
         self.historyProfileFilterRequested.emit()
 
     def _on_canvas_node_selected(self, node_id: str) -> None:

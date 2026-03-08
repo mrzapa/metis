@@ -55,6 +55,7 @@ def test_create_append_load_and_export_session(tmp_path) -> None:
     exported = json.loads(json_path.read_text(encoding="utf-8"))
     assert exported["messages"][1]["sources"][0]["sid"] == "S1"
     assert "Quarterly Review" in md_path.read_text(encoding="utf-8")
+    assert "Primary Skill" in md_path.read_text(encoding="utf-8")
 
 
 def test_loads_monolith_compatible_schema_without_migration(tmp_path) -> None:
@@ -79,7 +80,7 @@ def test_loads_monolith_compatible_schema_without_migration(tmp_path) -> None:
                 "2026-01-01T00:00:00+00:00",
                 "Legacy session",
                 "Imported from legacy",
-                "All Profiles",
+                "qa-core",
                 "Q&A",
                 "axiom-legacy",
                 "json",
@@ -125,3 +126,41 @@ def test_loads_monolith_compatible_schema_without_migration(tmp_path) -> None:
     assert detail.summary.title == "Legacy session"
     assert detail.summary.extra["selected_index_path"].endswith("legacy-index.json")
     assert detail.messages[0].sources[0].source == "legacy.txt"
+
+
+def test_list_sessions_filters_by_selected_skill(tmp_path) -> None:
+    repo = SessionRepository(tmp_path / "rag_sessions.db")
+    repo.init_db()
+    repo.create_session(
+        title="Research run",
+        active_profile="research-claims",
+        mode="Research",
+        extra_json=json.dumps(
+            {
+                "skills": {
+                    "selected": ["research-claims", "qa-core"],
+                    "primary": "research-claims",
+                    "reasons": {"research-claims": "keywords"},
+                }
+            }
+        ),
+    )
+    repo.create_session(
+        title="Summary run",
+        active_profile="summary-blinkist",
+        mode="Summary",
+        extra_json=json.dumps(
+            {
+                "skills": {
+                    "selected": ["summary-blinkist"],
+                    "primary": "summary-blinkist",
+                    "reasons": {"summary-blinkist": "mode"},
+                }
+            }
+        ),
+    )
+
+    filtered = repo.list_sessions(skill="research-claims")
+
+    assert len(filtered) == 1
+    assert filtered[0].primary_skill_id == "research-claims"

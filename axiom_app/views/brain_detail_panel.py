@@ -235,7 +235,8 @@ class BrainDetailPanel(QWidget):
         bits = [
             ("Updated", data.get("updated_at", "")),
             ("Mode", data.get("mode", "")),
-            ("Profile", data.get("active_profile", "")),
+            ("Primary Skill", data.get("primary_skill_id", data.get("active_profile", ""))),
+            ("Skills", ", ".join(str(item) for item in (data.get("skill_ids") or []) if str(item).strip())),
             ("Provider", data.get("llm_provider", "")),
             ("Model", data.get("llm_model", "")),
             ("Index", data.get("index_id", "")),

@@ -290,6 +290,9 @@ class AppView(QMainWindow):
     buildIndexRequested = Signal()
     saveSettingsRequested = Signal()
     newChatRequested = Signal()
+    toggleSkillRequested = Signal()
+    pinSkillRequested = Signal()
+    muteSkillRequested = Signal()
     loadProfileRequested = Signal()
     saveProfileRequested = Signal()
     duplicateProfileRequested = Signal()
@@ -302,6 +305,7 @@ class AppView(QMainWindow):
     historyRefreshRequested = Signal()
     historySearchRequested = Signal()
     historySelectionRequested = Signal()
+    historySkillFilterRequested = Signal()
     historyProfileFilterRequested = Signal()
     brainNodeSelected = Signal(str)
     brainNodeActivated = Signal(str)
@@ -521,14 +525,18 @@ class AppView(QMainWindow):
         top.addWidget(self.btn_reset_test_mode)
         self._profile_combo = QComboBox(page)
         self._profile_combo.setMinimumWidth(220)
+        self._profile_combo.currentTextChanged.connect(lambda *_args: self._update_skill_action_labels())
         top.addWidget(self._profile_combo)
-        self.btn_profile_load = QPushButton("Load Profile", page)
+        self.btn_profile_load = QPushButton("Toggle Skill", page)
+        self.btn_profile_load.clicked.connect(self.toggleSkillRequested.emit)
         self.btn_profile_load.clicked.connect(self.loadProfileRequested.emit)
         top.addWidget(self.btn_profile_load)
-        self.btn_profile_save = QPushButton("Save Profile", page)
+        self.btn_profile_save = QPushButton("Pin Skill", page)
+        self.btn_profile_save.clicked.connect(self.pinSkillRequested.emit)
         self.btn_profile_save.clicked.connect(self.saveProfileRequested.emit)
         top.addWidget(self.btn_profile_save)
-        self.btn_profile_duplicate = QPushButton("Duplicate Profile", page)
+        self.btn_profile_duplicate = QPushButton("Mute Skill", page)
+        self.btn_profile_duplicate.clicked.connect(self.muteSkillRequested.emit)
         self.btn_profile_duplicate.clicked.connect(self.duplicateProfileRequested.emit)
         top.addWidget(self.btn_profile_duplicate)
         top.addStretch(1)
@@ -732,6 +740,7 @@ class AppView(QMainWindow):
         self._brain_panel.historyRefreshRequested.connect(self.historyRefreshRequested.emit)
         self._brain_panel.historySearchRequested.connect(self.historySearchRequested.emit)
         self._brain_panel.historySelectionRequested.connect(self.historySelectionRequested.emit)
+        self._brain_panel.historySkillFilterRequested.connect(self.historySkillFilterRequested.emit)
         self._brain_panel.historyProfileFilterRequested.connect(self.historyProfileFilterRequested.emit)
         self._brain_panel.brainNodeSelected.connect(self.brainNodeSelected.emit)
         self._brain_panel.brainNodeActivated.connect(self.brainNodeActivated.emit)
@@ -1437,11 +1446,11 @@ class AppView(QMainWindow):
         return "rag" if self._rag_toggle.get_value() else "direct"
 
     def set_profile_options(self, labels: list[str], current: str) -> None:
-        labels = list(labels or []) or ["Built-in: Default"]
+        labels = list(labels or [])
         blocker = QSignalBlocker(self._profile_combo)
         self._profile_combo.clear()
         self._profile_combo.addItems(labels)
-        self._profile_combo.setCurrentText(current if current in labels else labels[0])
+        self._profile_combo.setCurrentText(current if current in labels else (labels[0] if labels else ""))
         del blocker
 
         if hasattr(self, "_brain_panel"):
@@ -1451,16 +1460,53 @@ class AppView(QMainWindow):
         selected = self._history_profile_filter.currentText()
         blocker = QSignalBlocker(self._history_profile_filter)
         self._history_profile_filter.clear()
-        self._history_profile_filter.addItems(["All Profiles", *labels])
-        self._history_profile_filter.setCurrentText(selected if selected else "All Profiles")
+        self._history_profile_filter.addItems(["All Skills", *labels])
+        self._history_profile_filter.setCurrentText(selected if selected else "All Skills")
         del blocker
+        self._update_skill_action_labels()
+
+    def set_skill_options(self, labels: list[str], current: str) -> None:
+        self.set_profile_options(labels, current)
+
+    def set_skill_filter_options(self, labels: list[str], current: str = "") -> None:
+        if hasattr(self, "_brain_panel"):
+            setter = getattr(self._brain_panel, "set_skill_filter_options", None)
+            if callable(setter):
+                setter(labels, current)
+                return
+        self.set_profile_options(labels, current)
 
     def get_selected_profile_label(self) -> str:
         return self._profile_combo.currentText().strip()
 
+    def get_selected_skill_id(self) -> str:
+        return self.get_selected_profile_label()
+
     def select_profile_label(self, label: str) -> None:
         if label:
             self._profile_combo.setCurrentText(label)
+
+    def select_skill_id(self, label: str) -> None:
+        self.select_profile_label(label)
+
+    def set_skill_rows(self, rows: list[dict[str, Any]]) -> None:
+        self._skill_rows = list(rows or [])
+        self._update_skill_action_labels()
+
+    def set_session_skill_state(self, payload: dict[str, Any]) -> None:
+        self._session_skill_state = dict(payload or {})
+        self._update_skill_action_labels()
+
+    def _update_skill_action_labels(self) -> None:
+        selected = self.get_selected_profile_label()
+        rows = {str(row.get("skill_id") or ""): dict(row) for row in getattr(self, "_skill_rows", []) or []}
+        row = rows.get(selected, {})
+        enabled = bool(row.get("enabled", False))
+        pinned = bool(row.get("pinned", False))
+        muted = bool(row.get("muted", False))
+        self.btn_profile_load.setText("Disable Skill" if enabled else "Enable Skill")
+        self.btn_profile_save.setText("Unpin Skill" if pinned else "Pin Skill")
+        self.btn_profile_duplicate.setText("Unmute Skill" if muted else "Mute Skill")
 
     def refresh_llm_status_badge(self) -> None:
         provider = str(self._settings_data.get("llm_provider", "") or "").strip() or "unset"
@@ -1823,7 +1869,7 @@ class AppView(QMainWindow):
                 str(getattr(row, "title", "")),
                 str(getattr(row, "updated_at", "")),
                 str(getattr(row, "mode", "")),
-                str(getattr(row, "active_profile", "")),
+                str(getattr(row, "primary_skill_id", "") or ", ".join(getattr(row, "skill_ids", []) or [])),
             ])
             item.setData(0, Qt.UserRole, str(getattr(row, "session_id", "")))
             self._history_tree.addTopLevelItem(item)
@@ -1853,7 +1899,14 @@ class AppView(QMainWindow):
         if hasattr(self, "_brain_panel"):
             return self._brain_panel.get_history_profile_filter()
         value = self._history_profile_filter.currentText().strip()
-        return "" if value == "All Profiles" else value
+        return "" if value == "All Skills" else value
+
+    def get_history_skill_filter(self) -> str:
+        if hasattr(self, "_brain_panel"):
+            getter = getattr(self._brain_panel, "get_history_skill_filter", None)
+            if callable(getter):
+                return str(getter() or "")
+        return self.get_history_profile_filter()
 
     def bind_history_search(self, callback: Any) -> None:
         if hasattr(self, "_brain_panel"):
@@ -1873,6 +1926,14 @@ class AppView(QMainWindow):
             return
         self._history_profile_filter.currentTextChanged.connect(lambda *_args: callback())
 
+    def bind_history_skill_filter(self, callback: Any) -> None:
+        if hasattr(self, "_brain_panel"):
+            binder = getattr(self._brain_panel, "bind_history_skill_filter", None)
+            if callable(binder):
+                binder(callback)
+                return
+        self.bind_history_profile_filter(callback)
+
     def set_history_detail(self, detail: Any) -> None:
         if hasattr(self, "_brain_panel"):
             self._brain_panel.set_history_detail(detail)
@@ -1883,7 +1944,8 @@ class AppView(QMainWindow):
         summary = getattr(detail, "summary", detail)
         lines = [
             f"Title: {getattr(summary, 'title', '')}",
-            f"Profile: {getattr(summary, 'active_profile', '')}",
+            f"Primary Skill: {getattr(summary, 'primary_skill_id', '') or getattr(summary, 'active_profile', '')}",
+            f"Skills: {', '.join(getattr(summary, 'skill_ids', []) or [])}",
             f"Mode: {getattr(summary, 'mode', '')}",
             f"Provider: {getattr(summary, 'llm_provider', '')}",
             "",

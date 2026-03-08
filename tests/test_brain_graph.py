@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from axiom_app.models.brain_graph import BrainGraph
 from axiom_app.models.session_types import SessionSummary
 
@@ -9,16 +11,18 @@ def _session(
     *,
     title: str,
     mode: str = "Research",
-    profile: str = "Built-in: Default",
+    primary_skill_id: str = "qa-core",
+    skill_ids: list[str] | None = None,
     index_id: str = "",
 ) -> SessionSummary:
+    selected = list(skill_ids or [primary_skill_id])
     return SessionSummary(
         session_id=session_id,
         created_at="2026-03-08T12:00:00Z",
         updated_at="2026-03-08T13:00:00Z",
         title=title,
         summary="Short summary",
-        active_profile=profile,
+        active_profile=primary_skill_id,
         mode=mode,
         index_id=index_id,
         vector_backend="json",
@@ -29,7 +33,15 @@ def _session(
         final_k=3,
         mmr_lambda=0.5,
         agentic_iterations=0,
-        extra_json="{}",
+        extra_json=json.dumps(
+            {
+                "skills": {
+                    "selected": selected,
+                    "primary": primary_skill_id,
+                    "reasons": {skill_id: "test" for skill_id in selected},
+                }
+            }
+        ),
     )
 
 
@@ -42,7 +54,7 @@ def test_brain_graph_builds_root_categories_for_empty_state() -> None:
     assert graph.get_node("category:brain").y == 0.0
 
 
-def test_brain_graph_links_sessions_to_indexes_modes_and_profiles() -> None:
+def test_brain_graph_links_sessions_to_indexes_modes_and_skills() -> None:
     indexes = [
         {
             "index_id": "books",
@@ -56,8 +68,22 @@ def test_brain_graph_links_sessions_to_indexes_modes_and_profiles() -> None:
         }
     ]
     sessions = [
-        _session("sess-1", title="Read notes", mode="Research", profile="Researcher", index_id="books"),
-        _session("sess-2", title="Executive recap", mode="Summary", profile="Executive", index_id="BooksCollection"),
+        _session(
+            "sess-1",
+            title="Read notes",
+            mode="Research",
+            primary_skill_id="research-claims",
+            skill_ids=["research-claims", "qa-core"],
+            index_id="books",
+        ),
+        _session(
+            "sess-2",
+            title="Executive recap",
+            mode="Summary",
+            primary_skill_id="summary-blinkist",
+            skill_ids=["summary-blinkist"],
+            index_id="BooksCollection",
+        ),
     ]
 
     graph = BrainGraph().build_from_indexes_and_sessions(indexes, sessions)
@@ -66,7 +92,7 @@ def test_brain_graph_links_sessions_to_indexes_modes_and_profiles() -> None:
     assert "session:sess-1" in graph.nodes
     assert "session:sess-2" in graph.nodes
     assert "category:mode:research" in graph.nodes
-    assert "category:profile:researcher" in graph.nodes
+    assert "category:skill:research-claims" in graph.nodes
     assert any(
         edge.edge_type == "uses_index"
         and edge.source_id == "session:sess-1"
@@ -74,9 +100,9 @@ def test_brain_graph_links_sessions_to_indexes_modes_and_profiles() -> None:
         for edge in graph.edges
     )
     assert any(
-        edge.edge_type == "uses_index"
-        and edge.source_id == "session:sess-2"
-        and edge.target_id == "index:books"
+        edge.edge_type == "category_member"
+        and edge.source_id == "session:sess-1"
+        and edge.target_id == "category:skill:research-claims"
         for edge in graph.edges
     )
 

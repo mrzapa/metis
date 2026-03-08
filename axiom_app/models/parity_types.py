@@ -68,6 +68,105 @@ class AgentProfile:
 
 
 @dataclass(slots=True)
+class SkillDefinition:
+    """Normalized `skills/<id>/SKILL.md` contract."""
+
+    skill_id: str
+    name: str
+    description: str
+    enabled_by_default: bool
+    priority: int
+    triggers: dict[str, list[str]] = field(default_factory=dict)
+    runtime_overrides: dict[str, Any] = field(default_factory=dict)
+    body: str = ""
+    path: str = ""
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def valid(self) -> bool:
+        return not self.errors
+
+    def capability_line(self) -> str:
+        description = str(self.description or "").strip()
+        if description:
+            return f"- {self.skill_id}: {description}"
+        return f"- {self.skill_id}: {self.name}"
+
+
+@dataclass(slots=True)
+class SkillMatch:
+    """Selection result for a skill during runtime resolution."""
+
+    skill_id: str
+    name: str
+    reason: str
+    score: int
+    pinned: bool
+    priority: int
+    runtime_overrides: dict[str, Any] = field(default_factory=dict)
+    body: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "skill_id": self.skill_id,
+            "name": self.name,
+            "reason": self.reason,
+            "score": int(self.score),
+            "pinned": bool(self.pinned),
+            "priority": int(self.priority),
+            "runtime_overrides": dict(self.runtime_overrides or {}),
+        }
+
+
+@dataclass(slots=True)
+class SkillSessionState:
+    """Per-session skill pins, mutes, and last resolution snapshot."""
+
+    pinned: list[str] = field(default_factory=list)
+    muted: list[str] = field(default_factory=list)
+    selected: list[str] = field(default_factory=list)
+    primary: str = ""
+    reasons: dict[str, str] = field(default_factory=dict)
+
+    def normalized(self) -> "SkillSessionState":
+        pinned = sorted({str(item).strip() for item in self.pinned if str(item).strip()})
+        muted = sorted(
+            {str(item).strip() for item in self.muted if str(item).strip() and str(item).strip() not in pinned}
+        )
+        selected = [str(item).strip() for item in self.selected if str(item).strip()]
+        reasons = {str(key).strip(): str(value).strip() for key, value in dict(self.reasons or {}).items() if str(key).strip()}
+        primary = str(self.primary or "").strip()
+        return SkillSessionState(
+            pinned=pinned,
+            muted=muted,
+            selected=selected,
+            primary=primary,
+            reasons=reasons,
+        )
+
+    def to_payload(self) -> dict[str, Any]:
+        normalized = self.normalized()
+        return {
+            "pinned": list(normalized.pinned),
+            "muted": list(normalized.muted),
+            "selected": list(normalized.selected),
+            "primary": normalized.primary,
+            "reasons": dict(normalized.reasons),
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any] | None) -> "SkillSessionState":
+        data = dict(payload or {})
+        return cls(
+            pinned=[str(item) for item in (data.get("pinned") or []) if str(item).strip()],
+            muted=[str(item) for item in (data.get("muted") or []) if str(item).strip()],
+            selected=[str(item) for item in (data.get("selected") or []) if str(item).strip()],
+            primary=str(data.get("primary") or "").strip(),
+            reasons={str(key): str(value) for key, value in dict(data.get("reasons") or {}).items()},
+        ).normalized()
+
+
+@dataclass(slots=True)
 class LocalModelEntry:
     """Normalized local-model registry row."""
 
@@ -261,11 +360,9 @@ class TraceEvent:
 
 @dataclass(slots=True)
 class ResolvedRuntimeSettings:
-    """Effective runtime settings after profile + mode resolution."""
+    """Effective runtime settings after skill-aware mode resolution."""
 
     mode: str
-    profile_label: str
-    profile: AgentProfile
     retrieve_k: int
     final_k: int
     mmr_lambda: float
@@ -282,4 +379,10 @@ class ResolvedRuntimeSettings:
     prompt_pack_id: str
     system_prompt: str
     evidence_pack_mode: bool = False
+    selected_skills: list[SkillMatch] = field(default_factory=list)
+    primary_skill_id: str = ""
+    capability_index: str = ""
+    skill_prompt_block: str = ""
+    session_skill_state: SkillSessionState = field(default_factory=SkillSessionState)
+    runtime_override_conflicts: list[dict[str, Any]] = field(default_factory=list)
     resolution_payload: dict[str, Any] = field(default_factory=dict)

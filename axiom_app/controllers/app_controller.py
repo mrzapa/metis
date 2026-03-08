@@ -34,7 +34,7 @@ import importlib.util
 from typing import TYPE_CHECKING, Any, Callable
 
 from axiom_app.models.brain_graph import BrainGraph
-from axiom_app.models.parity_types import AgentProfile
+from axiom_app.models.parity_types import SkillSessionState
 from axiom_app.models.session_types import EvidenceSource
 from axiom_app.services.index_service import (
     IndexBundle,
@@ -44,7 +44,6 @@ from axiom_app.services.index_service import (
 )
 from axiom_app.services.local_llm_recommender import ImportPlan, LocalLlmRecommenderService
 from axiom_app.services.local_model_registry import LocalModelRegistryService
-from axiom_app.services.profile_repository import ProfileRepository
 from axiom_app.services.response_pipeline import (
     apply_claim_level_grounding,
     build_grounding_html,
@@ -53,7 +52,8 @@ from axiom_app.services.response_pipeline import (
     run_blinkist_summary_pipeline,
     run_tutor_pipeline,
 )
-from axiom_app.services.runtime_resolution import resolve_runtime_settings
+from axiom_app.services.runtime_resolution import infer_file_types, resolve_runtime_settings
+from axiom_app.services.skill_repository import SkillRepository
 from axiom_app.services.session_repository import SessionRepository
 from axiom_app.services.trace_store import TraceStore
 from axiom_app.services.vector_store import resolve_vector_store
@@ -153,19 +153,17 @@ class AppController:
         self._log = logging.getLogger(__name__)
         self._pending_task_meta: dict[str, Any] = {}
         self._queued_local_gguf_import: dict[str, Any] | None = None
-        self.profile_repository = ProfileRepository(getattr(self.model, "profiles_dir", None))
+        self.skill_repository = SkillRepository(getattr(self.model, "skills_dir", None))
         self.local_llm_recommender_service = LocalLlmRecommenderService()
         self.local_model_registry_service = LocalModelRegistryService()
         self.trace_store = TraceStore(getattr(self.model, "trace_dir", None))
+        self._session_skill_state = SkillSessionState()
         self._test_mode_temp_dir = ""
         self._test_mode_sample_file = ""
         db_path = getattr(self.model, "session_db_path", ":memory:")
         self.session_repository = session_repository or SessionRepository(db_path)
         self.session_repository.init_db()
-        self.model.current_profile_label = str(
-            self.model.settings.get("selected_profile", getattr(self.model, "current_profile_label", "Built-in: Default"))
-            or "Built-in: Default"
-        )
+        self.model.current_skill_id = str(getattr(self.model, "current_skill_id", "") or "")
         self.refresh_history_rows(update_detail=False)
         self._clear_completed_response_state()
 
@@ -360,17 +358,18 @@ class AppController:
         return ""
 
     def _current_profile_label(self) -> str:
-        getter = getattr(self.view, "get_selected_profile_label", None)
+        getter = getattr(self.view, "get_selected_skill_id", None)
+        if not callable(getter):
+            getter = getattr(self.view, "get_selected_profile_label", None)
         selected = getter() if callable(getter) else ""
-        label = str(
-            selected
-            or getattr(self.model, "current_profile_label", "")
-            or self.model.settings.get("selected_profile", "")
-            or "Built-in: Default"
-        ).strip()
-        self.model.current_profile_label = label or "Built-in: Default"
-        self.model.settings["selected_profile"] = self.model.current_profile_label
-        return self.model.current_profile_label
+        labels = [row["skill_id"] for row in self.skill_repository.skill_rows(self.model.settings)]
+        label = str(selected or getattr(self.model, "current_skill_id", "") or "").strip()
+        if label and label not in labels:
+            label = ""
+        if not label and labels:
+            label = labels[0]
+        self.model.current_skill_id = label
+        return self.model.current_skill_id
 
     def _current_vector_backend(self) -> str:
         bundle = getattr(self.model, "index_bundle", None)
@@ -441,13 +440,72 @@ class AppController:
         self._set_widget_enabled(getattr(self.view, "_llm_status_badge", None), enabled)
 
     def _sync_profile_options(self) -> None:
-        labels = self.profile_repository.list_labels()
+        rows = self.skill_repository.skill_rows(
+            self.model.settings,
+            pinned=self._session_skill_state.pinned,
+            muted=self._session_skill_state.muted,
+        )
+        labels = [str(row.get("skill_id") or "") for row in rows if str(row.get("skill_id") or "").strip()]
         current = self._current_profile_label()
         if current not in labels:
-            current = "Built-in: Default"
-            self.model.current_profile_label = current
-            self.model.settings["selected_profile"] = current
-        self._safe_view_call("set_profile_options", labels, current)
+            current = labels[0] if labels else ""
+            self.model.current_skill_id = current
+        self._safe_view_call("set_skill_rows", rows)
+        if callable(getattr(self.view, "set_skill_options", None)):
+            self.view.set_skill_options(labels, current)
+        else:
+            self._safe_view_call("set_profile_options", labels, current)
+
+    def _current_session_skill_state(self) -> SkillSessionState:
+        return self._session_skill_state.normalized()
+
+    def _set_session_skill_state(self, state: SkillSessionState | dict[str, Any] | None, *, persist: bool = False) -> None:
+        payload = state if isinstance(state, SkillSessionState) else SkillSessionState.from_payload(state if isinstance(state, dict) else {})
+        self._session_skill_state = payload.normalized()
+        if not getattr(self.model, "current_skill_id", "") and self._session_skill_state.primary:
+            self.model.current_skill_id = self._session_skill_state.primary
+        self._sync_profile_options()
+        if callable(getattr(self.view, "set_session_skill_state", None)):
+            self.view.set_session_skill_state(self._session_skill_state.to_payload())
+        if persist:
+            self._sync_current_session_metadata()
+
+    def _resolved_runtime_for_prompt(self, prompt: str, *, bundle: IndexBundle | None = None) -> Any:
+        active_bundle = bundle or self._current_index_bundle()
+        enabled_skills = self.skill_repository.enabled_skills(self.model.settings)
+        invalid_skills = self.skill_repository.list_invalid_skills()
+        for skill in invalid_skills:
+            self._safe_view_call("append_log", f"[skills] Skipping invalid skill {skill.skill_id}: {'; '.join(skill.errors)}")
+        bundle_documents = list(getattr(active_bundle, "documents", []) or [])
+        model_documents = list(getattr(self.model, "documents", []) or [])
+        return resolve_runtime_settings(
+            dict(self.model.settings),
+            enabled_skills=enabled_skills,
+            session_skill_state=self._current_session_skill_state(),
+            query=prompt,
+            file_types=infer_file_types(bundle_documents or model_documents),
+        )
+
+    @staticmethod
+    def _loaded_skills_text(resolved: Any) -> str:
+        selected = list(getattr(resolved, "selected_skills", []) or [])
+        if not selected:
+            return "Loaded skills: none"
+        return "Loaded skills:\n" + "\n".join(f"- {item.skill_id}: {item.reason}" for item in selected)
+
+    def _resolved_skill_payload(self, resolved: Any | None = None) -> dict[str, Any]:
+        if resolved is not None:
+            payload = getattr(resolved, "session_skill_state", None)
+            if isinstance(payload, SkillSessionState):
+                return payload.to_payload()
+        return self._current_session_skill_state().to_payload()
+
+    def _resolved_primary_skill_id(self, resolved: Any | None = None) -> str:
+        if resolved is not None:
+            primary = str(getattr(resolved, "primary_skill_id", "") or "").strip()
+            if primary:
+                return primary
+        return self._current_profile_label()
 
     def _sync_local_model_rows(self) -> None:
         registry = self.model.settings.get("local_model_registry", {})
@@ -672,45 +730,6 @@ class AppController:
                 run_ids.append(run_id)
         return self.trace_store.read_runs(run_ids)
 
-    def _profile_from_settings(self, name: str) -> AgentProfile:
-        return AgentProfile(
-            name=str(name or "Custom Profile").strip() or "Custom Profile",
-            system_instructions=str(self.model.settings.get("system_instructions", "") or ""),
-            retrieval_strategy={
-                "retrieve_k": int(self.model.settings.get("retrieval_k", 25) or 25),
-                "final_k": int(self.model.settings.get("top_k", 5) or 5),
-                "mmr_lambda": float(self.model.settings.get("mmr_lambda", 0.5) or 0.5),
-                "search_type": str(self.model.settings.get("search_type", "similarity") or "similarity"),
-            },
-            iteration_strategy={
-                "agentic_mode": bool(self.model.settings.get("agentic_mode", False)),
-                "max_iterations": int(self.model.settings.get("agentic_max_iterations", 2) or 2),
-            },
-            comprehension_pipeline_on_ingest={
-                "enabled": bool(self.model.settings.get("build_comprehension_index", False)),
-                "depth": str(self.model.settings.get("comprehension_extraction_depth", "Standard") or "Standard"),
-            },
-            mode_default=str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
-            provider=str(self.model.settings.get("llm_provider", "") or ""),
-            model=self._effective_llm_model(),
-            retrieval_mode=str(self.model.settings.get("retrieval_mode", "flat") or "flat"),
-            llm_max_tokens=int(self.model.settings.get("llm_max_tokens", 0) or 0) or None,
-            frontier_toggles={
-                key: self.model.settings.get(key)
-                for key in (
-                    "enable_summarizer",
-                    "enable_langextract",
-                    "enable_structured_extraction",
-                    "enable_recursive_memory",
-                    "enable_recursive_retrieval",
-                    "enable_citation_v2",
-                    "enable_claim_level_grounding_citefix_lite",
-                    "agent_lightning_enabled",
-                )
-            },
-            digest_usage=bool(self.model.settings.get("build_digest_index", True)),
-        )
-
     @staticmethod
     def _wizard_preset_to_runtime_mode(preset: str) -> str:
         mapping = {
@@ -813,46 +832,6 @@ class AppController:
             refresh_index_bundle(bundle)
         except Exception as exc:
             self._safe_view_call("append_log", f"[artifacts] Failed to refresh index metadata: {exc}")
-
-    def _apply_profile_to_settings(self, profile: AgentProfile, *, label: str) -> None:
-        self.model.current_profile_label = label
-        self.model.settings["selected_profile"] = label
-        if profile.mode_default:
-            self.model.settings["selected_mode"] = profile.mode_default
-        if profile.provider:
-            self.model.settings["llm_provider"] = profile.provider
-        if profile.model:
-            self.model.settings["llm_model"] = profile.model
-            self.model.settings["llm_model_custom"] = profile.model
-        if profile.retrieval_mode:
-            self.model.settings["retrieval_mode"] = profile.retrieval_mode
-        if profile.llm_max_tokens is not None:
-            self.model.settings["llm_max_tokens"] = profile.llm_max_tokens
-        retrieval = dict(profile.retrieval_strategy or {})
-        if "retrieve_k" in retrieval:
-            self.model.settings["retrieval_k"] = int(retrieval["retrieve_k"] or 1)
-        if "final_k" in retrieval:
-            self.model.settings["top_k"] = int(retrieval["final_k"] or 1)
-        if "mmr_lambda" in retrieval:
-            self.model.settings["mmr_lambda"] = float(retrieval["mmr_lambda"] or 0.0)
-        if "search_type" in retrieval:
-            self.model.settings["search_type"] = str(retrieval["search_type"] or "similarity")
-        iteration = dict(profile.iteration_strategy or {})
-        if "agentic_mode" in iteration:
-            self.model.settings["agentic_mode"] = bool(iteration["agentic_mode"])
-        if "max_iterations" in iteration:
-            self.model.settings["agentic_max_iterations"] = int(iteration["max_iterations"] or 1)
-        if profile.system_instructions:
-            self.model.settings["system_instructions"] = profile.system_instructions
-        for key, value in dict(profile.frontier_toggles or {}).items():
-            self.model.settings[key] = value
-        if profile.digest_usage is not None:
-            self.model.settings["build_digest_index"] = bool(profile.digest_usage)
-        comprehension = profile.comprehension_pipeline_on_ingest
-        if isinstance(comprehension, dict):
-            self.model.settings["build_comprehension_index"] = bool(comprehension.get("enabled", False))
-            if comprehension.get("depth"):
-                self.model.settings["comprehension_extraction_depth"] = str(comprehension["depth"])
 
     def _apply_wizard_result(self, result: dict[str, Any]) -> None:
         runtime_mode = self._wizard_preset_to_runtime_mode(
@@ -1054,6 +1033,9 @@ class AppController:
         self._connect_signal(getattr(self.view, "sendRequested", None), self._on_send_clicked)
         self._connect_signal(getattr(self.view, "cancelRequested", None), self.on_cancel_job)
         self._connect_signal(getattr(self.view, "newChatRequested", None), self.on_new_chat)
+        self._connect_signal(getattr(self.view, "toggleSkillRequested", None), self.on_load_profile)
+        self._connect_signal(getattr(self.view, "pinSkillRequested", None), self.on_save_profile)
+        self._connect_signal(getattr(self.view, "muteSkillRequested", None), self.on_duplicate_profile)
         self._connect_signal(getattr(self.view, "loadProfileRequested", None), self.on_load_profile)
         self._connect_signal(getattr(self.view, "saveProfileRequested", None), self.on_save_profile)
         self._connect_signal(getattr(self.view, "duplicateProfileRequested", None), self.on_duplicate_profile)
@@ -1066,6 +1048,7 @@ class AppController:
         self._connect_signal(getattr(self.view, "historyRefreshRequested", None), self.refresh_history_rows)
         self._connect_signal(getattr(self.view, "historySearchRequested", None), self.on_history_search_changed)
         self._connect_signal(getattr(self.view, "historySelectionRequested", None), self.on_history_selection_changed)
+        self._connect_signal(getattr(self.view, "historySkillFilterRequested", None), self.on_history_profile_changed)
         self._connect_signal(getattr(self.view, "historyProfileFilterRequested", None), self.on_history_profile_changed)
         self._connect_signal(getattr(self.view, "brainNodeSelected", None), self.on_brain_node_selected)
         self._connect_signal(getattr(self.view, "brainNodeActivated", None), self.on_brain_node_activated)
@@ -1168,7 +1151,8 @@ class AppController:
         self.refresh_available_indexes()
         self.refresh_history_rows(update_detail=False)
         self._restore_index_from_settings()
-        self._safe_view_call("select_profile_label", self.model.current_profile_label)
+        self._safe_view_call("select_skill_id", self.model.current_skill_id)
+        self._safe_view_call("select_profile_label", self.model.current_skill_id)
         startup_mode = str(
             self.model.settings.get("startup_mode_setting")
             or self.model.settings.get("last_used_mode")
@@ -1534,6 +1518,7 @@ class AppController:
                 meta     = dict(getattr(self, "_pending_task_meta", {}))
                 provider = str(meta.get("provider", self.model.settings.get("llm_provider", "mock")) or "mock")
                 selected_mode = meta.get("selected_mode", "Q&A")
+                resolved = meta.get("resolved_runtime")
                 n_chunks = meta.get("n_chunks", 0)
                 top_score = meta.get("top_score", 0.0)
                 sources = [
@@ -1550,15 +1535,17 @@ class AppController:
                         "system",
                     )
 
+                loaded_skills_text = str(meta.get("loaded_skills_text", "") or "").strip()
                 header = (
                     f"Axiom [{provider}, rag, mode={selected_mode}, "
                     f"{n_chunks} chunk(s)]:\n\n"
                 )
-                self._safe_view_call("append_chat", header + response + "\n\n")
+                answer_block = (loaded_skills_text + "\n\n" if loaded_skills_text else "") + header + response + "\n\n"
+                self._safe_view_call("append_chat", answer_block)
                 for note in result.get("validation_notes") or []:
                     self._safe_view_call("append_log", f"[grounding] {note}")
                 self.model.chat_history.append({"role": "user", "content": prompt})
-                self.model.chat_history.append({"role": "assistant", "content": response})
+                self.model.chat_history.append({"role": "assistant", "content": answer_block.strip()})
                 self.model.last_sources = sources
                 self.model.last_run_id = run_id
                 self._safe_view_call("render_evidence_sources", sources)
@@ -1574,6 +1561,8 @@ class AppController:
                     response=response,
                     run_id=run_id,
                     sources=sources,
+                    resolved=resolved,
+                    loaded_skills_text=loaded_skills_text,
                 )
                 self._render_bundle_metadata(
                     bundle,
@@ -1589,6 +1578,7 @@ class AppController:
                 meta = dict(getattr(self, "_pending_task_meta", {}))
                 provider = str(meta.get("provider", self.model.settings.get("llm_provider", "mock")) or "mock")
                 run_id = str(meta.get("run_id") or "")
+                resolved = meta.get("resolved_runtime")
 
                 if result.get("error"):
                     self._safe_view_call("append_log", f"[direct] error: {result['error']}")
@@ -1598,12 +1588,18 @@ class AppController:
                         f"[direct] generation_completed provider={provider}"
                     )
 
+                loaded_skills_text = str(meta.get("loaded_skills_text", "") or "").strip()
                 self._safe_view_call(
                     "append_chat",
-                    f"Axiom [{provider}, direct]:\n\n{response}\n\n"
+                    (loaded_skills_text + "\n\n" if loaded_skills_text else "")
+                    + f"Axiom [{provider}, direct]:\n\n{response}\n\n"
+                )
+                answer_block = (
+                    (loaded_skills_text + "\n\n" if loaded_skills_text else "")
+                    + f"Axiom [{provider}, direct]:\n\n{response}\n\n"
                 )
                 self.model.chat_history.append({"role": "user", "content": prompt})
-                self.model.chat_history.append({"role": "assistant", "content": response})
+                self.model.chat_history.append({"role": "assistant", "content": answer_block.strip()})
                 self.model.last_sources = []
                 self.model.last_run_id = run_id
                 self._safe_view_call("render_evidence_sources", [])
@@ -1612,6 +1608,8 @@ class AppController:
                     response=response,
                     run_id=run_id,
                     sources=[],
+                    resolved=resolved,
+                    loaded_skills_text=loaded_skills_text,
                 )
                 self._render_bundle_metadata(
                     self._current_index_bundle(),
@@ -1796,14 +1794,8 @@ class AppController:
             self._safe_view_call("switch_view", "chat")
             return
 
-        profile_label = self._current_profile_label()
-        profile = self.profile_repository.get_profile(profile_label)
-        resolved = resolve_runtime_settings(
-            dict(self.model.settings),
-            profile,
-            profile_label=profile_label,
-            query=prompt,
-        )
+        resolved = self._resolved_runtime_for_prompt(prompt, bundle=bundle)
+        self._set_session_skill_state(resolved.session_skill_state)
         query_settings = dict(self.model.settings)
         query_settings.update(
             {
@@ -1814,6 +1806,7 @@ class AppController:
                 "retrieval_mode": resolved.retrieval_mode,
                 "agentic_mode": resolved.agentic_mode,
                 "agentic_max_iterations": resolved.agentic_max_iterations,
+                "output_style": resolved.output_style,
             }
         )
         constraints = self._current_state_constraints(query_settings, scope="query")
@@ -1875,6 +1868,30 @@ class AppController:
         run_id = str(uuid.uuid4())
         self.trace_store.append_event(
             run_id=run_id,
+            stage="skills",
+            event_type="skill_selection",
+            payload=resolved.resolution_payload,
+        )
+        self.trace_store.append_event(
+            run_id=run_id,
+            stage="skills",
+            event_type="skill_overrides_applied",
+            payload={
+                "primary_skill_id": resolved.primary_skill_id,
+                "selected_skills": [item.skill_id for item in resolved.selected_skills],
+                "mode": resolved.mode,
+                "retrieve_k": resolved.retrieve_k,
+                "final_k": resolved.final_k,
+                "mmr_lambda": resolved.mmr_lambda,
+                "retrieval_mode": resolved.retrieval_mode,
+                "agentic_mode": resolved.agentic_mode,
+                "agentic_max_iterations": resolved.agentic_max_iterations,
+                "output_style": resolved.output_style,
+                "runtime_override_conflicts": list(resolved.runtime_override_conflicts),
+            },
+        )
+        self.trace_store.append_event(
+            run_id=run_id,
             stage="retrieval",
             event_type="retrieval_results",
             retrieval_results={
@@ -1883,7 +1900,11 @@ class AppController:
                 "sources": [item.to_dict() for item in query_result.sources],
             },
             citations_chosen=[item.sid for item in query_result.sources],
-            payload={"profile": profile_label, "mode": selected_mode},
+            payload={
+                "primary_skill_id": resolved.primary_skill_id,
+                "selected_skills": [item.skill_id for item in resolved.selected_skills],
+                "mode": selected_mode,
+            },
         )
 
         def _rag_worker(post_msg: Any, cancel: CancelToken) -> dict[str, Any]:
@@ -1913,7 +1934,11 @@ class AppController:
                     run_id=run_id,
                     stage="pipeline",
                     event_type="blinkist_summary",
-                    payload={"provider": provider, "profile": profile_label},
+                    payload={
+                        "provider": provider,
+                        "primary_skill_id": resolved.primary_skill_id,
+                        "selected_skills": [item.skill_id for item in resolved.selected_skills],
+                    },
                 )
                 pipeline_result = run_blinkist_summary_pipeline(
                     llm,
@@ -1927,7 +1952,11 @@ class AppController:
                     run_id=run_id,
                     stage="pipeline",
                     event_type="tutor_mode",
-                    payload={"provider": provider, "profile": profile_label},
+                    payload={
+                        "provider": provider,
+                        "primary_skill_id": resolved.primary_skill_id,
+                        "selected_skills": [item.skill_id for item in resolved.selected_skills],
+                    },
                 )
                 pipeline_result = run_tutor_pipeline(
                     llm,
@@ -1952,7 +1981,11 @@ class AppController:
                     stage="synthesis",
                     event_type="llm_request",
                     prompt={"system": system_prompt[:4000], "user": prompt},
-                    payload={"provider": provider, "profile": profile_label},
+                    payload={
+                        "provider": provider,
+                        "primary_skill_id": resolved.primary_skill_id,
+                        "selected_skills": [item.skill_id for item in resolved.selected_skills],
+                    },
                 )
                 result = llm.invoke(messages)
                 answer = str(getattr(result, "content", result) or "")
@@ -2007,7 +2040,10 @@ class AppController:
             "provider": provider,
             "run_id": run_id,
             "sources": list(query_result.sources),
-            "profile_label": profile_label,
+            "primary_skill_id": resolved.primary_skill_id,
+            "selected_skills": [item.skill_id for item in resolved.selected_skills],
+            "resolved_runtime": resolved,
+            "loaded_skills_text": self._loaded_skills_text(resolved),
             "show_retrieved_context": bool(settings_snap.get("show_retrieved_context", False)),
             "context_block": query_result.context_block,
             "trace_payload": self.trace_store.read_run(run_id),
@@ -2029,29 +2065,46 @@ class AppController:
         self._safe_view_call("switch_view", "chat")
         self._safe_view_call("render_evidence_sources", [])
 
-        profile_label = self._current_profile_label()
-        profile = self.profile_repository.get_profile(profile_label)
-        resolved = resolve_runtime_settings(
-            dict(self.model.settings),
-            profile,
-            profile_label=profile_label,
-            query=prompt,
-        )
+        resolved = self._resolved_runtime_for_prompt(prompt)
+        self._set_session_skill_state(resolved.session_skill_state)
         settings_snap = dict(self.model.settings)
         settings_snap.update(
             {
                 "selected_mode": resolved.mode,
                 "llm_provider": resolved.llm_provider or settings_snap.get("llm_provider", "mock"),
                 "llm_model": resolved.llm_model or settings_snap.get("llm_model", ""),
+                "output_style": resolved.output_style,
             }
         )
         run_id = str(uuid.uuid4())
         self.trace_store.append_event(
             run_id=run_id,
+            stage="skills",
+            event_type="skill_selection",
+            payload=resolved.resolution_payload,
+        )
+        self.trace_store.append_event(
+            run_id=run_id,
+            stage="skills",
+            event_type="skill_overrides_applied",
+            payload={
+                "primary_skill_id": resolved.primary_skill_id,
+                "selected_skills": [item.skill_id for item in resolved.selected_skills],
+                "mode": resolved.mode,
+                "output_style": resolved.output_style,
+                "runtime_override_conflicts": list(resolved.runtime_override_conflicts),
+            },
+        )
+        self.trace_store.append_event(
+            run_id=run_id,
             stage="direct",
             event_type="direct_prompt",
             prompt={"user": prompt},
-            payload={"provider": provider_name, "profile": profile_label},
+            payload={
+                "provider": provider_name,
+                "primary_skill_id": resolved.primary_skill_id,
+                "selected_skills": [item.skill_id for item in resolved.selected_skills],
+            },
         )
 
         def _direct_worker(post_msg: Any, cancel: CancelToken) -> dict[str, str]:
@@ -2080,7 +2133,11 @@ class AppController:
                 stage="direct",
                 event_type="llm_request",
                 prompt={"system": resolved.system_prompt[:4000], "user": prompt},
-                payload={"provider": provider_name, "profile": profile_label},
+                payload={
+                    "provider": provider_name,
+                    "primary_skill_id": resolved.primary_skill_id,
+                    "selected_skills": [item.skill_id for item in resolved.selected_skills],
+                },
             )
             try:
                 result = llm.invoke(messages)
@@ -2111,7 +2168,10 @@ class AppController:
             "provider": provider_name,
             "run_id": run_id,
             "sources": [],
-            "profile_label": profile_label,
+            "primary_skill_id": resolved.primary_skill_id,
+            "selected_skills": [item.skill_id for item in resolved.selected_skills],
+            "resolved_runtime": resolved,
+            "loaded_skills_text": self._loaded_skills_text(resolved),
         }
         self.start_task(_TASK_DIRECT_QUERY, _direct_worker)
 
@@ -2123,7 +2183,7 @@ class AppController:
         """Start a persisted chat session and clear transient UI state."""
         session = self.session_repository.create_session(
             title="New Chat",
-            active_profile=self._current_profile_label(),
+            active_profile=self._resolved_primary_skill_id(),
             mode=str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
             index_id=str(getattr(self.model, "active_index_id", "") or ""),
             vector_backend=self._current_vector_backend(),
@@ -2154,9 +2214,11 @@ class AppController:
     ) -> None:
         getter = getattr(self.view, "get_history_search_query", None)
         search = getter() if callable(getter) else ""
-        profile_getter = getattr(self.view, "get_history_profile_filter", None)
-        profile = profile_getter() if callable(profile_getter) else ""
-        rows = self.session_repository.list_sessions(search=search, profile=profile)
+        skill_getter = getattr(self.view, "get_history_skill_filter", None)
+        if not callable(skill_getter):
+            skill_getter = getattr(self.view, "get_history_profile_filter", None)
+        skill = skill_getter() if callable(skill_getter) else ""
+        rows = self.session_repository.list_sessions(search=search, skill=skill)
         self.model.session_list = rows
         self._safe_view_call("set_history_rows", rows)
         selected_node_id = f"session:{select_session_id}" if select_session_id else getattr(self.model, "selected_brain_node", "")
@@ -2309,64 +2371,77 @@ class AppController:
         self._show_info_dialog("Session Export", f"Exported:\n{md_path}\n{json_path}")
 
     def on_load_profile(self) -> None:
-        label = self._current_profile_label()
-        profile = self.profile_repository.get_profile(label)
-        self._apply_profile_to_settings(profile, label=label)
+        skill_id = self._current_profile_label()
+        skill = self.skill_repository.get_skill(skill_id)
+        if skill is None:
+            self._safe_view_call("set_status", "Select a valid skill first.")
+            return
+        next_enabled = not self.skill_repository.is_globally_enabled(skill, self.model.settings)
+        self.model.settings = self.skill_repository.set_global_enabled(
+            self.model.settings,
+            skill_id,
+            next_enabled,
+        )
         self.model.save_settings(self.model.settings)
         self._safe_view_call("populate_settings", self.model.settings)
         self._sync_profile_options()
-        self._safe_view_call("set_status", f"Loaded profile: {profile.name}")
+        self._sync_current_session_metadata()
+        verb = "Enabled" if next_enabled else "Disabled"
+        self._safe_view_call("set_status", f"{verb} skill: {skill_id}")
 
     def on_save_profile(self) -> None:
-        current_label = self._current_profile_label()
-        current_path = self.profile_repository.path_from_label(current_label)
-        if current_path is not None:
-            target_name = current_path.stem
-            target_path = current_path
+        skill_id = self._current_profile_label()
+        if not skill_id:
+            self._safe_view_call("set_status", "Select a skill first.")
+            return
+        state = self._current_session_skill_state()
+        pinned = set(state.pinned)
+        muted = set(state.muted)
+        if skill_id in pinned:
+            pinned.discard(skill_id)
+            verb = "Unpinned"
         else:
-            target_name = self._get_text_input("Save Profile", "Profile name:")
-            target_path = None
-        if not target_name:
-            return
-        profile = self._profile_from_settings(str(target_name))
-        try:
-            saved_path = self.profile_repository.save_profile(profile, target_path=target_path)
-        except OSError as exc:
-            self._show_error_dialog("Save Profile Failed", str(exc))
-            return
-        label = self.profile_repository.label_for_path(saved_path)
-        self.model.current_profile_label = label
-        self.model.settings["selected_profile"] = label
-        self.model.save_settings(self.model.settings)
-        self._sync_profile_options()
-        self._safe_view_call("select_profile_label", label)
-        self._safe_view_call("set_status", f"Saved profile: {profile.name}")
+            pinned.add(skill_id)
+            muted.discard(skill_id)
+            verb = "Pinned"
+        self._set_session_skill_state(
+            SkillSessionState(
+                pinned=sorted(pinned),
+                muted=sorted(muted),
+                selected=list(state.selected),
+                primary=state.primary,
+                reasons=dict(state.reasons),
+            ),
+            persist=True,
+        )
+        self._safe_view_call("set_status", f"{verb} skill for this session: {skill_id}")
 
     def on_duplicate_profile(self) -> None:
-        current_label = self._current_profile_label()
-        source = self.profile_repository.get_profile(current_label)
-        new_name = self._get_text_input(
-            "Duplicate Profile",
-            "Name for the duplicate profile:",
-            text=f"{source.name} Copy",
+        skill_id = self._current_profile_label()
+        if not skill_id:
+            self._safe_view_call("set_status", "Select a skill first.")
+            return
+        state = self._current_session_skill_state()
+        pinned = set(state.pinned)
+        muted = set(state.muted)
+        if skill_id in muted:
+            muted.discard(skill_id)
+            verb = "Unmuted"
+        else:
+            muted.add(skill_id)
+            pinned.discard(skill_id)
+            verb = "Muted"
+        self._set_session_skill_state(
+            SkillSessionState(
+                pinned=sorted(pinned),
+                muted=sorted(muted),
+                selected=list(state.selected),
+                primary=state.primary,
+                reasons=dict(state.reasons),
+            ),
+            persist=True,
         )
-        if not new_name:
-            return
-        try:
-            saved_path = self.profile_repository.duplicate_profile(
-                current_label,
-                new_name=new_name,
-            )
-        except OSError as exc:
-            self._show_error_dialog("Duplicate Profile Failed", str(exc))
-            return
-        label = self.profile_repository.label_for_path(saved_path)
-        self.model.current_profile_label = label
-        self.model.settings["selected_profile"] = label
-        self.model.save_settings(self.model.settings)
-        self._sync_profile_options()
-        self._safe_view_call("select_profile_label", label)
-        self._safe_view_call("set_status", f"Duplicated profile: {new_name}")
+        self._safe_view_call("set_status", f"{verb} skill for this session: {skill_id}")
 
     def on_submit_feedback(self, vote: int) -> None:
         session_id = str(getattr(self.model, "current_session_id", "") or "")
@@ -2827,7 +2902,7 @@ class AppController:
 
         self.start_task(_TASK_INSTALL_DEPENDENCIES, _worker)
 
-    def _ensure_session(self, prompt: str = "") -> str:
+    def _ensure_session(self, prompt: str = "", *, resolved: Any | None = None) -> str:
         current = str(getattr(self.model, "current_session_id", "") or "")
         if current and self.session_repository.get_session(current) is not None:
             return current
@@ -2835,18 +2910,20 @@ class AppController:
         title = self._title_from_prompt(prompt) if prompt else "New Chat"
         session = self.session_repository.create_session(
             title=title,
-            active_profile=self._current_profile_label(),
-            mode=str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
+            active_profile=self._resolved_primary_skill_id(resolved),
+            mode=str(getattr(resolved, "mode", self.model.settings.get("selected_mode", "Q&A")) or "Q&A"),
             index_id=str(getattr(self.model, "active_index_id", "") or ""),
             vector_backend=self._current_vector_backend(),
-            llm_provider=str(self.model.settings.get("llm_provider", "") or ""),
-            llm_model=self._effective_llm_model(),
+            llm_provider=str(getattr(resolved, "llm_provider", self.model.settings.get("llm_provider", "")) or ""),
+            llm_model=str(getattr(resolved, "llm_model", self._effective_llm_model()) or ""),
             embed_model=self._effective_embedding_model(),
-            retrieve_k=int(self.model.settings.get("retrieval_k", 0) or 0),
-            final_k=int(self.model.settings.get("top_k", 0) or 0),
-            mmr_lambda=float(self.model.settings.get("mmr_lambda", 0.0) or 0.0),
-            agentic_iterations=int(self.model.settings.get("agentic_max_iterations", 0) or 0),
-            extra_json=self._session_extra_json(),
+            retrieve_k=int(getattr(resolved, "retrieve_k", self.model.settings.get("retrieval_k", 0)) or 0),
+            final_k=int(getattr(resolved, "final_k", self.model.settings.get("top_k", 0)) or 0),
+            mmr_lambda=float(getattr(resolved, "mmr_lambda", self.model.settings.get("mmr_lambda", 0.0)) or 0.0),
+            agentic_iterations=int(
+                getattr(resolved, "agentic_max_iterations", self.model.settings.get("agentic_max_iterations", 0)) or 0
+            ),
+            extra_json=self._session_extra_json(resolved),
         )
         self.model.current_session_id = session.session_id
         self.refresh_history_rows(select_session_id=session.session_id, update_detail=False)
@@ -2859,24 +2936,28 @@ class AppController:
         response: str,
         run_id: str,
         sources: list[EvidenceSource],
+        resolved: Any | None = None,
+        loaded_skills_text: str = "",
     ) -> None:
-        session_id = self._ensure_session(prompt)
+        session_id = self._ensure_session(prompt, resolved=resolved)
         self.session_repository.upsert_session(
             session_id,
             title=self._title_from_prompt(prompt),
             summary=self._summary_from_response(response),
-            active_profile=self._current_profile_label(),
-            mode=str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
+            active_profile=self._resolved_primary_skill_id(resolved),
+            mode=str(getattr(resolved, "mode", self.model.settings.get("selected_mode", "Q&A")) or "Q&A"),
             index_id=str(getattr(self.model, "active_index_id", "") or ""),
             vector_backend=self._current_vector_backend(),
-            llm_provider=str(self.model.settings.get("llm_provider", "") or ""),
-            llm_model=self._effective_llm_model(),
-            embed_model=self._effective_embedding_model(),
-            retrieve_k=int(self.model.settings.get("retrieval_k", 0) or 0),
-            final_k=int(self.model.settings.get("top_k", 0) or 0),
-            mmr_lambda=float(self.model.settings.get("mmr_lambda", 0.0) or 0.0),
-            agentic_iterations=int(self.model.settings.get("agentic_max_iterations", 0) or 0),
-            extra_json=self._session_extra_json(),
+            llm_provider=str(getattr(resolved, "llm_provider", self.model.settings.get("llm_provider", "")) or ""),
+            llm_model=str(getattr(resolved, "llm_model", self._effective_llm_model()) or ""),
+            embed_model=str(getattr(resolved, "embedding_model", self._effective_embedding_model()) or ""),
+            retrieve_k=int(getattr(resolved, "retrieve_k", self.model.settings.get("retrieval_k", 0)) or 0),
+            final_k=int(getattr(resolved, "final_k", self.model.settings.get("top_k", 0)) or 0),
+            mmr_lambda=float(getattr(resolved, "mmr_lambda", self.model.settings.get("mmr_lambda", 0.0)) or 0.0),
+            agentic_iterations=int(
+                getattr(resolved, "agentic_max_iterations", self.model.settings.get("agentic_max_iterations", 0)) or 0
+            ),
+            extra_json=self._session_extra_json(resolved),
         )
         self.session_repository.append_message(
             session_id,
@@ -2898,13 +2979,21 @@ class AppController:
         extra = getattr(summary, "extra", {})
         if isinstance(extra, dict):
             self.model.settings.update(extra)
-        profile_label = str(
-            getattr(summary, "active_profile", "")
-            or (extra.get("selected_profile") if isinstance(extra, dict) else "")
-            or "Built-in: Default"
+        skills_payload = dict(extra.get("skills") or {}) if isinstance(extra, dict) else {}
+        if not skills_payload and getattr(summary, "primary_skill_id", ""):
+            skills_payload = {
+                "selected": list(getattr(summary, "skill_ids", []) or []),
+                "primary": str(getattr(summary, "primary_skill_id", "") or ""),
+                "reasons": dict(getattr(summary, "skill_reasons", {}) or {}),
+            }
+        self._set_session_skill_state(skills_payload, persist=False)
+        restored_skill_id = str(
+            self._session_skill_state.primary
+            or getattr(summary, "primary_skill_id", "")
+            or getattr(summary, "active_profile", "")
+            or ""
         ).strip()
-        self.model.current_profile_label = profile_label or "Built-in: Default"
-        self.model.settings["selected_profile"] = self.model.current_profile_label
+        self.model.current_skill_id = restored_skill_id
         if getattr(summary, "mode", ""):
             self.model.settings["selected_mode"] = summary.mode
         if getattr(summary, "llm_provider", ""):
@@ -2924,7 +3013,8 @@ class AppController:
             self.model.settings.get("agentic_max_iterations", 2),
         )
         self._safe_view_call("populate_settings", self.model.settings)
-        self._safe_view_call("select_profile_label", self.model.current_profile_label)
+        self._safe_view_call("select_skill_id", self.model.current_skill_id)
+        self._safe_view_call("select_profile_label", self.model.current_skill_id)
 
     def _restore_index_from_session(self, detail: Any) -> None:
         summary = detail.summary if hasattr(detail, "summary") else detail
@@ -3019,9 +3109,9 @@ class AppController:
             or str(self.model.settings.get("sentence_transformers_model", "") or "").strip()
         )
 
-    def _session_extra_json(self) -> str:
+    def _session_extra_json(self, resolved: Any | None = None) -> str:
         payload = {
-            "selected_profile": self._current_profile_label(),
+            "skills": self._resolved_skill_payload(resolved),
             "selected_index_path": str(getattr(self.model, "active_index_path", "") or ""),
             "selected_collection_name": str(
                 (
@@ -3064,26 +3154,52 @@ class AppController:
             "experimental_override": self.model.settings.get("experimental_override", False),
             "show_retrieved_context": self.model.settings.get("show_retrieved_context", False),
         }
+        if resolved is not None:
+            payload.update(
+                {
+                    "selected_mode": str(getattr(resolved, "mode", self.model.settings.get("selected_mode", "Q&A")) or "Q&A"),
+                    "output_style": str(getattr(resolved, "output_style", self.model.settings.get("output_style", "")) or ""),
+                    "retrieval_k": int(getattr(resolved, "retrieve_k", self.model.settings.get("retrieval_k", 0)) or 0),
+                    "top_k": int(getattr(resolved, "final_k", self.model.settings.get("top_k", 0)) or 0),
+                    "mmr_lambda": float(getattr(resolved, "mmr_lambda", self.model.settings.get("mmr_lambda", 0.0)) or 0.0),
+                    "retrieval_mode": str(
+                        getattr(resolved, "retrieval_mode", self.model.settings.get("retrieval_mode", "")) or ""
+                    ),
+                    "agentic_mode": bool(getattr(resolved, "agentic_mode", self.model.settings.get("agentic_mode", False))),
+                    "agentic_max_iterations": int(
+                        getattr(
+                            resolved,
+                            "agentic_max_iterations",
+                            self.model.settings.get("agentic_max_iterations", 0),
+                        )
+                        or 0
+                    ),
+                    "primary_skill_id": self._resolved_primary_skill_id(resolved),
+                    "selected_skills": [item.skill_id for item in (getattr(resolved, "selected_skills", []) or [])],
+                }
+            )
         return json.dumps(payload, ensure_ascii=False)
 
-    def _sync_current_session_metadata(self) -> None:
+    def _sync_current_session_metadata(self, resolved: Any | None = None) -> None:
         session_id = str(getattr(self.model, "current_session_id", "") or "").strip()
         if not session_id:
             return
         self.session_repository.upsert_session(
             session_id,
-            active_profile=self._current_profile_label(),
-            mode=str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
+            active_profile=self._resolved_primary_skill_id(resolved),
+            mode=str(getattr(resolved, "mode", self.model.settings.get("selected_mode", "Q&A")) or "Q&A"),
             index_id=str(getattr(self.model, "active_index_id", "") or ""),
             vector_backend=self._current_vector_backend(),
-            llm_provider=str(self.model.settings.get("llm_provider", "") or ""),
-            llm_model=self._effective_llm_model(),
-            embed_model=self._effective_embedding_model(),
-            retrieve_k=int(self.model.settings.get("retrieval_k", 0) or 0),
-            final_k=int(self.model.settings.get("top_k", 0) or 0),
-            mmr_lambda=float(self.model.settings.get("mmr_lambda", 0.0) or 0.0),
-            agentic_iterations=int(self.model.settings.get("agentic_max_iterations", 0) or 0),
-            extra_json=self._session_extra_json(),
+            llm_provider=str(getattr(resolved, "llm_provider", self.model.settings.get("llm_provider", "")) or ""),
+            llm_model=str(getattr(resolved, "llm_model", self._effective_llm_model()) or ""),
+            embed_model=str(getattr(resolved, "embedding_model", self._effective_embedding_model()) or ""),
+            retrieve_k=int(getattr(resolved, "retrieve_k", self.model.settings.get("retrieval_k", 0)) or 0),
+            final_k=int(getattr(resolved, "final_k", self.model.settings.get("top_k", 0)) or 0),
+            mmr_lambda=float(getattr(resolved, "mmr_lambda", self.model.settings.get("mmr_lambda", 0.0)) or 0.0),
+            agentic_iterations=int(
+                getattr(resolved, "agentic_max_iterations", self.model.settings.get("agentic_max_iterations", 0)) or 0
+            ),
+            extra_json=self._session_extra_json(resolved),
         )
 
     @staticmethod
@@ -3152,7 +3268,7 @@ class AppController:
         Validates all numeric fields and shows a messagebox on error or success.
         """
         raw = self.view.collect_settings()
-        raw["selected_profile"] = self._current_profile_label()
+        raw["skills"] = dict(self.model.settings.get("skills") or {})
         raw["selected_index_path"] = str(getattr(self.model, "active_index_path", "") or "")
         raw["selected_collection_name"] = str(
             (
