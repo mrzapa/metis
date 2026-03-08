@@ -21,6 +21,7 @@ class _FakeView:
         self.chat_messages: list[str] = []
         self.switched_to: list[str] = []
         self.logs: list[str] = []
+        self.response_ui_states: list[tuple[bool, bool]] = []
         self.btn_cancel_rag = _FakeButton()
         self.btn_build_index = _FakeButton()
         self._status: str = ""
@@ -40,6 +41,9 @@ class _FakeView:
 
     def set_status(self, text: str) -> None:
         self._status = text
+
+    def set_chat_response_ui(self, has_completed_response: bool, feedback_pending: bool) -> None:
+        self.response_ui_states.append((bool(has_completed_response), bool(feedback_pending)))
 
     def set_progress(self, current: int, total: int | None = None) -> None:
         pass
@@ -72,6 +76,7 @@ def test_on_send_prompt_direct_mode_does_not_require_index() -> None:
     controller = AppController(model=model, view=view)
 
     controller.on_send_prompt("hello")
+    assert view.response_ui_states[-1] == (False, False)
     _drain(controller)
 
     assert len(model.chat_history) == 2
@@ -80,6 +85,7 @@ def test_on_send_prompt_direct_mode_does_not_require_index() -> None:
     assert "No index built yet" not in all_text
     assert "mock" in all_text.lower() or "direct" in all_text.lower()
     assert view.switched_to[-1] == "chat"
+    assert view.response_ui_states[-1] == (True, True)
 
 
 def test_on_send_prompt_rag_mode_requires_index() -> None:
@@ -92,6 +98,7 @@ def test_on_send_prompt_rag_mode_requires_index() -> None:
     assert model.chat_history == []
     assert "No index built yet" in view.chat_messages[0]
     assert view.switched_to[-1] == "chat"
+    assert view.response_ui_states[-1] == (False, False)
 
 
 def test_on_send_prompt_rag_mode_uses_selected_mode_header() -> None:
@@ -103,12 +110,14 @@ def test_on_send_prompt_rag_mode_uses_selected_mode_header() -> None:
     controller = AppController(model=model, view=view)
 
     controller.on_send_prompt("hello")
+    assert view.response_ui_states[-1] == (False, False)
     _drain(controller)
 
     assert len(model.chat_history) == 2
     all_text = " ".join(view.chat_messages)
     assert "Deep Dive" in all_text
     assert view.switched_to[-1] == "chat"
+    assert view.response_ui_states[-1] == (True, True)
 
 
 def test_on_send_prompt_rag_includes_graph_mode_label() -> None:
@@ -120,9 +129,11 @@ def test_on_send_prompt_rag_includes_graph_mode_label() -> None:
     controller = AppController(model=model, view=view)
 
     controller.on_send_prompt("hello")
+    assert view.response_ui_states[-1] == (False, False)
     _drain(controller)
 
     # The LLM receives context with graph-mode info; the response header
     # includes the mode label via _handle_message.
     all_text = " ".join(view.chat_messages)
     assert "rag" in all_text.lower() or "Q&A" in all_text
+    assert view.response_ui_states[-1] == (True, True)

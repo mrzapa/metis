@@ -31,6 +31,8 @@ class _FakeView:
         self.sources = []
         self.grounding_info = ""
         self.history_detail = None
+        self.response_ui_states: list[tuple[bool, bool]] = []
+        self.selected_session_id = ""
 
     def get_chat_mode(self) -> str:
         return self._chat_mode
@@ -48,6 +50,9 @@ class _FakeView:
     def set_status(self, text: str) -> None:
         self.status_messages.append(text)
 
+    def set_chat_response_ui(self, has_completed_response: bool, feedback_pending: bool) -> None:
+        self.response_ui_states.append((bool(has_completed_response), bool(feedback_pending)))
+
     def set_progress(self, current: int, total: int | None = None) -> None:
         _ = (current, total)
 
@@ -62,6 +67,9 @@ class _FakeView:
 
     def set_history_detail(self, detail) -> None:
         self.history_detail = detail
+
+    def get_selected_history_session_id(self) -> str:
+        return self.selected_session_id
 
 
 @dataclass
@@ -281,3 +289,123 @@ def test_feedback_note_is_saved(tmp_path, monkeypatch) -> None:
     assert detail is not None
     assert detail.feedback
     assert detail.feedback[0].note == "useful"
+
+
+def test_open_session_restores_pending_feedback_for_latest_run(tmp_path, monkeypatch) -> None:
+    model = AppModel()
+    model.session_db_path = tmp_path / "rag_sessions.db"
+    model.settings = {"llm_provider": "mock", "llm_model": "mock-v1"}
+    view = _FakeView(chat_mode="direct")
+    controller = AppController(model=model, view=view)
+
+    class _FakeLLM:
+        def invoke(self, _messages):
+            return _FakeMessage(content="Direct response")
+
+    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+
+    controller.on_send_prompt("hello")
+    _drain(controller)
+
+    sessions = controller.session_repository.list_sessions()
+    session_id = sessions[0].session_id
+
+    assert view.response_ui_states[-1] == (True, True)
+
+    model_reopen = AppModel()
+    model_reopen.session_db_path = model.session_db_path
+    model_reopen.settings = {"llm_provider": "mock", "llm_model": "mock-v1"}
+    view_reopen = _FakeView(chat_mode="direct")
+    view_reopen.selected_session_id = session_id
+    controller_reopen = AppController(model=model_reopen, view=view_reopen)
+
+    controller_reopen.on_open_session()
+
+    assert controller_reopen.model.last_run_id
+    assert view_reopen.response_ui_states[-1] == (True, True)
+
+
+def test_feedback_submission_and_reopen_hide_pending_feedback(tmp_path, monkeypatch) -> None:
+    model = AppModel()
+    model.session_db_path = tmp_path / "rag_sessions.db"
+    model.settings = {"llm_provider": "mock", "llm_model": "mock-v1"}
+    view = _FakeView(chat_mode="direct")
+    controller = AppController(model=model, view=view)
+
+    class _FakeLLM:
+        def invoke(self, _messages):
+            return _FakeMessage(content="Direct response")
+
+    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr(controller, "_get_text_input", lambda *args, **kwargs: "")
+
+    controller.on_send_prompt("hello")
+    _drain(controller)
+    controller.on_submit_feedback(1)
+
+    sessions = controller.session_repository.list_sessions()
+    session_id = sessions[0].session_id
+
+    assert view.response_ui_states[-1] == (True, False)
+
+    model_reopen = AppModel()
+    model_reopen.session_db_path = model.session_db_path
+    model_reopen.settings = {"llm_provider": "mock", "llm_model": "mock-v1"}
+    view_reopen = _FakeView(chat_mode="direct")
+    view_reopen.selected_session_id = session_id
+    controller_reopen = AppController(model=model_reopen, view=view_reopen)
+
+    controller_reopen.on_open_session()
+
+    assert view_reopen.response_ui_states[-1] == (True, False)
+
+
+def test_new_chat_and_delete_current_session_clear_response_ui(tmp_path, monkeypatch) -> None:
+    model = AppModel()
+    model.session_db_path = tmp_path / "rag_sessions.db"
+    model.settings = {"llm_provider": "mock", "llm_model": "mock-v1"}
+    view = _FakeView(chat_mode="direct")
+    controller = AppController(model=model, view=view)
+
+    class _FakeLLM:
+        def invoke(self, _messages):
+            return _FakeMessage(content="Direct response")
+
+    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+
+    controller.on_send_prompt("hello")
+    _drain(controller)
+    controller.on_new_chat()
+
+    assert controller.model.last_run_id == ""
+    assert view.response_ui_states[-1] == (False, False)
+
+    controller.on_send_prompt("second")
+    _drain(controller)
+    view.selected_session_id = controller.model.current_session_id
+    controller.on_delete_session()
+
+    assert controller.model.last_run_id == ""
+    assert view.response_ui_states[-1] == (False, False)
+
+
+def test_reset_test_mode_clears_response_ui(tmp_path, monkeypatch) -> None:
+    model = AppModel()
+    model.session_db_path = tmp_path / "rag_sessions.db"
+    model.settings = {"llm_provider": "mock", "llm_model": "mock-v1"}
+    view = _FakeView(chat_mode="direct")
+    controller = AppController(model=model, view=view)
+
+    class _FakeLLM:
+        def invoke(self, _messages):
+            return _FakeMessage(content="Direct response")
+
+    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr(model, "save_settings", lambda _settings: None)
+
+    controller.on_send_prompt("hello")
+    _drain(controller)
+    controller.reset_test_mode()
+
+    assert controller.model.last_run_id == ""
+    assert view.response_ui_states[-1] == (False, False)

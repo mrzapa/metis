@@ -165,12 +165,55 @@ class AppController:
             or "Built-in: Default"
         )
         self.refresh_history_rows(update_detail=False)
+        self._clear_completed_response_state()
 
     def _safe_view_call(self, method_name: str, *args: Any) -> Any:
         method = getattr(self.view, method_name, None)
         if callable(method):
             return method(*args)
         return None
+
+    def _set_chat_response_ui(self, has_completed_response: bool, feedback_pending: bool) -> None:
+        self._safe_view_call(
+            "set_chat_response_ui",
+            bool(has_completed_response),
+            bool(feedback_pending) and bool(has_completed_response),
+        )
+
+    def _clear_completed_response_state(self) -> None:
+        self.model.last_run_id = ""
+        self.model.last_sources = []
+        self._set_chat_response_ui(False, False)
+
+    @staticmethod
+    def _run_has_feedback(detail: Any | None, run_id: str) -> bool:
+        target = str(run_id or "").strip()
+        if not target or detail is None:
+            return False
+        for item in list(getattr(detail, "feedback", []) or []):
+            if str(getattr(item, "run_id", "") or "") == target:
+                return True
+        return False
+
+    @classmethod
+    def _latest_completed_assistant_run(
+        cls,
+        detail: Any | None,
+    ) -> tuple[str, list[EvidenceSource], bool]:
+        if detail is None:
+            return "", [], False
+        for message in reversed(list(getattr(detail, "messages", []) or [])):
+            if str(getattr(message, "role", "") or "").strip().lower() != "assistant":
+                continue
+            run_id = str(getattr(message, "run_id", "") or "").strip()
+            if not run_id:
+                continue
+            sources = [
+                item if isinstance(item, EvidenceSource) else EvidenceSource.from_dict(item)
+                for item in (getattr(message, "sources", []) or [])
+            ]
+            return run_id, sources, not cls._run_has_feedback(detail, run_id)
+        return "", [], False
 
     @staticmethod
     def _connect_signal(signal: Any, callback: Callable[..., Any]) -> bool:
@@ -1153,19 +1196,24 @@ class AppController:
         self._test_mode_sample_file = ""
         self.model.settings["startup_mode_setting"] = "advanced"
         self.model.settings["last_used_mode"] = "advanced"
+        self.model.current_session_id = ""
+        self.model.loaded_session = None
         self.model.documents = []
         self.model.index_state = {"built": False, "doc_count": 0, "chunk_count": 0}
+        self.model.chat_history = []
         self.model.chunks = []
         self.model.embeddings = []
         self.model.index_bundle = None
         self.model.active_index_id = ""
         self.model.active_index_path = ""
         self.model.rag_blocked_reason = ""
+        self._clear_completed_response_state()
         self.model.save_settings(self.model.settings)
         if temp_dir and os.path.isdir(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
         self._safe_view_call("set_file_list", [])
         self._safe_view_call("set_active_index_summary", "No persisted index selected.", "")
+        self._safe_view_call("set_chat_transcript", [])
         self._safe_view_call("render_evidence_sources", [])
         self._safe_view_call("render_events", [])
         self._safe_view_call("render_semantic_regions", [])
@@ -1490,6 +1538,7 @@ class AppController:
                     bundle,
                     {run_id: self.trace_store.read_run(run_id)},
                 )
+                self._set_chat_response_ui(True, True)
                 self._log.info("RAG query answered — top score=%.3f", top_score)
                 self._safe_view_call("set_status", "Done.")
 
@@ -1527,6 +1576,7 @@ class AppController:
                     self._current_index_bundle(),
                     {run_id: self.trace_store.read_run(run_id)},
                 )
+                self._set_chat_response_ui(True, True)
                 self._log.info("Direct query answered — provider=%s", provider)
                 self._safe_view_call("set_status", "Done.")
 
@@ -1676,6 +1726,8 @@ class AppController:
         """
         if not prompt.strip():
             return
+
+        self._clear_completed_response_state()
 
         get_chat_mode = getattr(self.view, "get_chat_mode", None)
         chat_mode = get_chat_mode() if callable(get_chat_mode) else "rag"
@@ -2046,7 +2098,7 @@ class AppController:
         self.model.current_session_id = session.session_id
         self.model.loaded_session = None
         self.model.chat_history = []
-        self.model.last_sources = []
+        self._clear_completed_response_state()
         self._safe_view_call("set_chat_transcript", [])
         self._safe_view_call("render_evidence_sources", [])
         self._safe_view_call("set_status", "New chat started.")
@@ -2105,15 +2157,12 @@ class AppController:
         self._restore_session_settings(detail)
         self._restore_index_from_session(detail)
         self._safe_view_call("set_chat_transcript", detail.messages)
-
-        last_sources: list[EvidenceSource] = []
-        for message in reversed(detail.messages):
-            if message.sources:
-                last_sources = list(message.sources)
-                break
+        last_run_id, last_sources, feedback_pending = self._latest_completed_assistant_run(detail)
+        self.model.last_run_id = last_run_id
         self.model.last_sources = last_sources
         self._safe_view_call("render_evidence_sources", last_sources)
         self._render_bundle_metadata(getattr(self.model, "index_bundle", None), detail.traces)
+        self._set_chat_response_ui(bool(last_run_id), feedback_pending)
         self._safe_view_call("set_history_detail", detail)
         self._safe_view_call("set_status", f"Loaded session: {detail.summary.title}")
         self._safe_view_call("switch_view", "chat")
@@ -2128,7 +2177,7 @@ class AppController:
             self.model.current_session_id = ""
             self.model.loaded_session = None
             self.model.chat_history = []
-            self.model.last_sources = []
+            self._clear_completed_response_state()
             self._safe_view_call("set_chat_transcript", [])
             self._safe_view_call("render_evidence_sources", [])
         self.refresh_history_rows(update_detail=False)
@@ -2257,7 +2306,12 @@ class AppController:
         detail = self.session_repository.get_session(session_id)
         if detail is not None:
             detail.traces = self._session_trace_payload(detail)
+            self.model.loaded_session = detail
             self._safe_view_call("set_history_detail", detail)
+            latest_run_id, latest_sources, feedback_pending = self._latest_completed_assistant_run(detail)
+            self.model.last_run_id = latest_run_id
+            self.model.last_sources = latest_sources
+            self._set_chat_response_ui(bool(latest_run_id), feedback_pending)
         self._safe_view_call("set_status", "Feedback saved.")
 
     def on_load_selected_index(self) -> None:

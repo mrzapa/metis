@@ -57,6 +57,9 @@ def test_app_view_constructs_with_empty_chat_state(qapp, process_events) -> None
     assert view._composer_shell.isVisible()
     assert view._chat_state_stack.currentWidget() is view._chat_empty_state
     assert not view._chat_transcript_state.isVisible()
+    assert not view._feedback_footer.isVisible()
+    assert not view._evidence_tabs.isVisible()
+    assert view._chat_splitter.sizes()[1] <= 0
     assert view.minimumWidth() == 1180
     assert view.minimumHeight() == 760
     assert view._rag_toggle.get_value() is True
@@ -74,6 +77,8 @@ def test_app_view_switches_between_empty_and_conversation_states(qapp, process_e
     assert view._composer_shell.isVisible()
     assert view._chat_state_stack.currentWidget() is view._chat_transcript_state
     assert view._chat_transcript_state.isVisible()
+    assert not view._feedback_footer.isVisible()
+    assert not view._evidence_tabs.isVisible()
 
     view.clear_chat()
     process_events()
@@ -83,6 +88,33 @@ def test_app_view_switches_between_empty_and_conversation_states(qapp, process_e
     assert view._conversation_shell.isVisible()
     assert view._composer_shell.isVisible()
     assert view._chat_state_stack.currentWidget() is view._chat_empty_state
+    assert not view._feedback_footer.isVisible()
+    assert not view._evidence_tabs.isVisible()
+
+
+def test_app_view_reveals_response_ui_only_for_completed_response(qapp, process_events) -> None:
+    view = _show(process_events)
+
+    view.append_chat("You: hello\n")
+    view.append_chat("Axiom: response\n")
+    view.set_chat_response_ui(True, True)
+    process_events()
+
+    assert view._feedback_footer.isVisible()
+    assert view._evidence_tabs.isVisible()
+    assert view._chat_splitter.sizes()[1] > 0
+
+    view.set_chat_response_ui(True, False)
+    process_events()
+
+    assert not view._feedback_footer.isVisible()
+    assert view._evidence_tabs.isVisible()
+
+    view.clear_chat()
+    process_events()
+
+    assert not view._feedback_footer.isVisible()
+    assert not view._evidence_tabs.isVisible()
 
 
 def test_app_view_switches_between_all_pages(qapp, process_events) -> None:
