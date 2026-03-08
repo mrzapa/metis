@@ -33,6 +33,7 @@ from concurrent.futures import Future
 import importlib.util
 from typing import TYPE_CHECKING, Any, Callable
 
+from axiom_app.models.brain_graph import BrainGraph
 from axiom_app.models.parity_types import AgentProfile
 from axiom_app.models.session_types import EvidenceSource
 from axiom_app.services.index_service import (
@@ -505,6 +506,29 @@ class AppController:
             )
         return rows
 
+    def _rebuild_brain_graph(self, *, selected_node_id: str | None = None) -> None:
+        previous = getattr(self.model, "brain_graph", None)
+        graph = BrainGraph().build_from_indexes_and_sessions(
+            getattr(self.model, "available_indexes", []),
+            getattr(self.model, "session_list", []),
+        )
+        graph.copy_positions_from(previous if isinstance(previous, BrainGraph) else None)
+        if isinstance(previous, BrainGraph):
+            graph.apply_force_layout(iterations=70)
+        preferred = str(
+            selected_node_id
+            or getattr(self.model, "selected_brain_node", "")
+            or self._safe_view_call("get_selected_brain_node_id")
+            or ""
+        ).strip()
+        if preferred and preferred not in graph.nodes:
+            preferred = ""
+        if not preferred and "category:brain" in graph.nodes:
+            preferred = "category:brain"
+        self.model.brain_graph = graph
+        self.model.selected_brain_node = preferred
+        self._safe_view_call("set_brain_graph", graph, preferred)
+
     def refresh_available_indexes(self, select_path: str | None = None) -> None:
         rows = self._index_option_rows()
         self.model.available_indexes = rows
@@ -515,6 +539,10 @@ class AppController:
             or ""
         )
         self._safe_view_call("set_available_indexes", rows, selected)
+        preferred_node_id = str(getattr(self.model, "selected_brain_node", "") or "")
+        if not preferred_node_id and getattr(self.model, "active_index_id", ""):
+            preferred_node_id = f"index:{self.model.active_index_id}"
+        self._rebuild_brain_graph(selected_node_id=preferred_node_id)
 
     def _persist_active_index_selection(self, bundle: IndexBundle | None, *, save: bool = True) -> None:
         if bundle is None:
@@ -1039,6 +1067,9 @@ class AppController:
         self._connect_signal(getattr(self.view, "historySearchRequested", None), self.on_history_search_changed)
         self._connect_signal(getattr(self.view, "historySelectionRequested", None), self.on_history_selection_changed)
         self._connect_signal(getattr(self.view, "historyProfileFilterRequested", None), self.on_history_profile_changed)
+        self._connect_signal(getattr(self.view, "brainNodeSelected", None), self.on_brain_node_selected)
+        self._connect_signal(getattr(self.view, "brainNodeActivated", None), self.on_brain_node_activated)
+        self._connect_signal(getattr(self.view, "brainRefreshRequested", None), self.on_brain_refresh_requested)
         self._connect_signal(getattr(self.view, "loadIndexRequested", None), self.on_load_selected_index)
         self._connect_signal(getattr(self.view, "addLocalGgufRequested", None), self.on_add_local_gguf_model)
         self._connect_signal(getattr(self.view, "addLocalSentenceTransformerRequested", None), self.on_add_local_st_model)
@@ -2106,6 +2137,7 @@ class AppController:
             extra_json=self._session_extra_json(),
         )
         self.model.current_session_id = session.session_id
+        self.model.selected_brain_node = f"session:{session.session_id}"
         self.model.loaded_session = None
         self.model.chat_history = []
         self._clear_completed_response_state()
@@ -2127,6 +2159,8 @@ class AppController:
         rows = self.session_repository.list_sessions(search=search, profile=profile)
         self.model.session_list = rows
         self._safe_view_call("set_history_rows", rows)
+        selected_node_id = f"session:{select_session_id}" if select_session_id else getattr(self.model, "selected_brain_node", "")
+        self._rebuild_brain_graph(selected_node_id=selected_node_id)
         if select_session_id:
             self._safe_view_call("select_history_session", select_session_id)
         if update_detail:
@@ -2147,7 +2181,44 @@ class AppController:
             return
         detail.traces = self._session_trace_payload(detail)
         self.model.loaded_session = detail
+        self.model.selected_brain_node = f"session:{session_id}"
         self._safe_view_call("set_history_detail", detail)
+
+    def on_brain_node_selected(self, node_id: str) -> None:
+        selected = str(node_id or "").strip()
+        self.model.selected_brain_node = selected
+        graph = getattr(self.model, "brain_graph", None)
+        if not isinstance(graph, BrainGraph):
+            return
+        node = graph.get_node(selected)
+        if node is None:
+            return
+        if node.node_type == "session":
+            session_id = str(node.metadata.get("session_id", "") or "")
+            if session_id:
+                detail = self.session_repository.get_session(session_id)
+                if detail is None:
+                    return
+                detail.traces = self._session_trace_payload(detail)
+                self.model.loaded_session = detail
+                self._safe_view_call("set_history_detail", detail)
+
+    def on_brain_node_activated(self, node_id: str) -> None:
+        selected = str(node_id or "").strip()
+        graph = getattr(self.model, "brain_graph", None)
+        if not isinstance(graph, BrainGraph):
+            return
+        node = graph.get_node(selected)
+        if node is None:
+            return
+        self.model.selected_brain_node = selected
+        if node.node_type == "index":
+            self.on_load_selected_index()
+        elif node.node_type == "session":
+            self.on_open_session()
+
+    def on_brain_refresh_requested(self) -> None:
+        self._rebuild_brain_graph(selected_node_id=getattr(self.model, "selected_brain_node", ""))
 
     def on_open_session(self) -> None:
         session_id = self._selected_history_session_id()
@@ -2159,6 +2230,7 @@ class AppController:
         detail.traces = self._session_trace_payload(detail)
 
         self.model.current_session_id = session_id
+        self.model.selected_brain_node = f"session:{session_id}"
         self.model.loaded_session = detail
         self.model.chat_history = [
             {"role": msg.role, "content": msg.content}
@@ -2885,6 +2957,7 @@ class AppController:
         self.model.entity_to_chunks = dict(bundle.entity_to_chunks)
         self.model.active_index_id = bundle.index_id
         self.model.active_index_path = bundle.index_path
+        self.model.selected_brain_node = f"index:{bundle.index_id}"
         self.model.index_state = {
             "built": True,
             "doc_count": len(bundle.documents),

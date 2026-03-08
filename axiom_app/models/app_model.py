@@ -24,6 +24,8 @@ import logging
 import pathlib
 from typing import Any
 
+from axiom_app.models.brain_graph import BrainGraph
+
 # axiom_app/models/app_model.py  → parent = axiom_app/models/
 #                                  .parent = axiom_app/
 #                                  .parent = repo root
@@ -81,6 +83,8 @@ class AppModel:
         self.active_index_path: str = ""
         self.index_bundle: Any | None = None
         self.available_indexes: list[Any] = []
+        self.brain_graph: BrainGraph | None = None
+        self.selected_brain_node: str = ""
         self.current_profile_label: str = "Built-in: Default"
         self.last_run_id: str = ""
         self.rag_blocked_reason: str = ""
@@ -209,6 +213,7 @@ class AppModel:
             "settings_loaded": bool(self.settings),
             "active_index_id": self.active_index_id,
             "current_session_id": self.current_session_id,
+            "selected_brain_node": self.selected_brain_node,
             "selected_profile": self.current_profile_label,
             "bootstrap_complete": self.bootstrap_complete,
         }

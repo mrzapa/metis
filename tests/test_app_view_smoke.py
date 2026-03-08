@@ -141,14 +141,17 @@ def test_app_view_reveals_response_ui_only_for_completed_response(qapp, process_
 def test_app_view_switches_between_all_pages(qapp, process_events) -> None:
     view = _show(process_events)
 
-    for key in ("chat", "library", "history", "settings", "logs"):
+    for key in ("chat", "brain", "settings", "logs"):
         view.switch_view(key)
         process_events()
         assert view._active_view == key
         assert view._stack.currentWidget() is view._pages[key]
 
+    assert "library" not in view._pages
+    assert "history" not in view._pages
     assert view.btn_open_files is not None
     assert view.btn_build_index is not None
+    assert view.btn_history_refresh is not None
     assert view.btn_save_settings is not None
     assert view._logs_view is not None
 

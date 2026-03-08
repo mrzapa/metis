@@ -55,6 +55,7 @@ from axiom_app.utils.model_presets import (
     provider_requires_custom_model,
     uses_custom_model_value,
 )
+from axiom_app.views.brain_canvas import BrainPanel
 from axiom_app.views.styles import STYLE_CONFIG, UI_SPACING, apply_theme_to_app, get_palette, resolve_fonts
 from axiom_app.views.widgets import AnimationEngine, CollapsibleFrame, IOSSegmentedToggle, RoundedCard, TooltipManager
 
@@ -71,8 +72,7 @@ _MIN_WINDOW_W = 1180
 _MIN_WINDOW_H = 760
 _NAV_ITEMS = [
     ("chat", "Chat"),
-    ("library", "Library"),
-    ("history", "History"),
+    ("brain", "Brain"),
     ("settings", "Settings"),
     ("logs", "Logs"),
 ]
@@ -303,6 +303,9 @@ class AppView(QMainWindow):
     historySearchRequested = Signal()
     historySelectionRequested = Signal()
     historyProfileFilterRequested = Signal()
+    brainNodeSelected = Signal(str)
+    brainNodeActivated = Signal(str)
+    brainRefreshRequested = Signal()
     loadIndexRequested = Signal()
     addLocalGgufRequested = Signal()
     addLocalSentenceTransformerRequested = Signal()
@@ -490,8 +493,7 @@ class AppView(QMainWindow):
         layout.addWidget(self._stack, 1)
         self._pages: dict[str, QWidget] = {}
         self._pages["chat"] = self._build_chat_page()
-        self._pages["library"] = self._build_library_page()
-        self._pages["history"] = self._build_history_page()
+        self._pages["brain"] = self._build_brain_page()
         self._pages["settings"] = self._build_settings_page()
         self._pages["logs"] = self._build_logs_page()
         for page in self._pages.values():
@@ -711,95 +713,52 @@ class AppView(QMainWindow):
         self.set_chat_response_ui(False, False)
         return page
 
-    def _build_library_page(self) -> QWidget:
+    def _build_brain_page(self) -> QWidget:
         page = QWidget(self)
         root = QVBoxLayout(page)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(UI_SPACING["m"])
 
-        row = QHBoxLayout()
-        self.btn_open_files = QPushButton("Open Files...", page)
-        self.btn_open_files.clicked.connect(self.openFilesRequested.emit)
-        row.addWidget(self.btn_open_files)
-        self.btn_build_index = QPushButton("Build Index", page)
-        self.btn_build_index.clicked.connect(self.buildIndexRequested.emit)
-        row.addWidget(self.btn_build_index)
-        self._index_info_label = QLabel("No index built.", page)
-        row.addWidget(self._index_info_label, 1)
-        root.addLayout(row)
+        self._brain_panel = BrainPanel(page, palette=self._palette, animator=self._animator)
+        self._brain_panel.openFilesRequested.connect(self.openFilesRequested.emit)
+        self._brain_panel.buildIndexRequested.connect(self.buildIndexRequested.emit)
+        self._brain_panel.newChatRequested.connect(self.newChatRequested.emit)
+        self._brain_panel.loadIndexRequested.connect(self.loadIndexRequested.emit)
+        self._brain_panel.historyOpenRequested.connect(self.historyOpenRequested.emit)
+        self._brain_panel.historyDeleteRequested.connect(self.historyDeleteRequested.emit)
+        self._brain_panel.historyRenameRequested.connect(self.historyRenameRequested.emit)
+        self._brain_panel.historyDuplicateRequested.connect(self.historyDuplicateRequested.emit)
+        self._brain_panel.historyExportRequested.connect(self.historyExportRequested.emit)
+        self._brain_panel.historyRefreshRequested.connect(self.historyRefreshRequested.emit)
+        self._brain_panel.historySearchRequested.connect(self.historySearchRequested.emit)
+        self._brain_panel.historySelectionRequested.connect(self.historySelectionRequested.emit)
+        self._brain_panel.historyProfileFilterRequested.connect(self.historyProfileFilterRequested.emit)
+        self._brain_panel.brainNodeSelected.connect(self.brainNodeSelected.emit)
+        self._brain_panel.brainNodeActivated.connect(self.brainNodeActivated.emit)
+        self._brain_panel.brainRefreshRequested.connect(self.brainRefreshRequested.emit)
 
-        saved_row = QHBoxLayout()
-        self._available_index_combo = QComboBox(page)
-        self._available_index_combo.setMinimumWidth(380)
-        saved_row.addWidget(self._available_index_combo, 1)
-        self.btn_library_load_index = QPushButton("Load Selected Index", page)
-        self.btn_library_load_index.clicked.connect(self.loadIndexRequested.emit)
-        saved_row.addWidget(self.btn_library_load_index)
-        root.addLayout(saved_row)
+        self.btn_open_files = self._brain_panel.btn_open_files
+        self.btn_build_index = self._brain_panel.btn_build_index
+        self.btn_new_chat = self._brain_panel.btn_new_chat
+        self.btn_history_new_chat = self._brain_panel.btn_new_chat
+        self.btn_library_load_index = self._brain_panel.btn_library_load_index
+        self.btn_history_refresh = self._brain_panel.btn_history_refresh
+        self.btn_history_open = self._brain_panel.detail_panel.btn_open_session
+        self.btn_history_delete = self._brain_panel.detail_panel.btn_delete_session
+        self.btn_history_rename = self._brain_panel.detail_panel.btn_rename_session
+        self.btn_history_duplicate = self._brain_panel.detail_panel.btn_duplicate_session
+        self.btn_history_export = self._brain_panel.detail_panel.btn_export_session
+        self._index_info_label = self._brain_panel._index_info_label
+        self._available_index_combo = self._brain_panel._available_index_combo
+        self._library_chunk_size = self._brain_panel._library_chunk_size
+        self._library_chunk_overlap = self._brain_panel._library_chunk_overlap
+        self._active_index_summary = self._brain_panel._active_index_summary_label
+        self._file_list = self._brain_panel._file_list
+        self._file_listbox = self._brain_panel._file_listbox
+        self._history_search = self._brain_panel._history_search
+        self._history_profile_filter = self._brain_panel._history_profile_filter
 
-        settings_row = QHBoxLayout()
-        settings_row.addWidget(QLabel("Chunk size", page))
-        self._library_chunk_size = QSpinBox(page)
-        self._library_chunk_size.setRange(1, 500000)
-        settings_row.addWidget(self._library_chunk_size)
-        settings_row.addWidget(QLabel("Chunk overlap", page))
-        self._library_chunk_overlap = QSpinBox(page)
-        self._library_chunk_overlap.setRange(0, 100000)
-        settings_row.addWidget(self._library_chunk_overlap)
-        settings_row.addStretch(1)
-        root.addLayout(settings_row)
-
-        self._active_index_summary = QLabel("No persisted index selected.", page)
-        self._active_index_summary.setWordWrap(True)
-        root.addWidget(self._active_index_summary)
-
-        self._file_list = QListWidget(page)
-        self._file_listbox = self._file_list
-        root.addWidget(self._file_list, 1)
-        return page
-
-    def _build_history_page(self) -> QWidget:
-        page = QWidget(self)
-        root = QVBoxLayout(page)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(UI_SPACING["m"])
-        filters = QHBoxLayout()
-        self._history_search = QLineEdit(page)
-        self._history_search.setPlaceholderText("Search chats")
-        self._history_search.textChanged.connect(self.historySearchRequested.emit)
-        filters.addWidget(self._history_search, 1)
-        self._history_profile_filter = QComboBox(page)
-        self._history_profile_filter.currentTextChanged.connect(self.historyProfileFilterRequested.emit)
-        filters.addWidget(self._history_profile_filter)
-        root.addLayout(filters)
-
-        actions = QHBoxLayout()
-        for attr, label, signal in (
-            ("btn_history_new_chat", "New Chat", self.newChatRequested),
-            ("btn_history_open", "Open", self.historyOpenRequested),
-            ("btn_history_delete", "Delete", self.historyDeleteRequested),
-            ("btn_history_rename", "Rename", self.historyRenameRequested),
-            ("btn_history_duplicate", "Duplicate", self.historyDuplicateRequested),
-            ("btn_history_export", "Export", self.historyExportRequested),
-            ("btn_history_refresh", "Refresh", self.historyRefreshRequested),
-        ):
-            button = QPushButton(label, page)
-            button.clicked.connect(signal.emit)
-            setattr(self, attr, button)
-            actions.addWidget(button)
-        actions.addStretch(1)
-        root.addLayout(actions)
-
-        splitter = QSplitter(Qt.Horizontal, page)
-        self._history_tree = self._make_tree(["Title", "Updated", "Mode", "Profile"], splitter)
-        self._history_tree.itemSelectionChanged.connect(self.historySelectionRequested.emit)
-        self._history_tree.itemDoubleClicked.connect(lambda *_args: self.historyOpenRequested.emit())
-        splitter.addWidget(self._history_tree)
-        self._history_detail_browser = QTextBrowser(splitter)
-        splitter.addWidget(self._history_detail_browser)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        root.addWidget(splitter, 1)
+        root.addWidget(self._brain_panel, 1)
         return page
 
     def _build_settings_page(self) -> QWidget:
@@ -1000,6 +959,8 @@ class AppView(QMainWindow):
         self._brand_mark.update_palette(self._palette)
         self._apply_brand_logo()
         self._rag_toggle.update_palette(self._palette)
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.update_palette(self._palette)
         self._apply_local_styles()
         self.refresh_llm_status_badge()
 
@@ -1393,6 +1354,9 @@ class AppView(QMainWindow):
         self._status_label.setText(str(text or ""))
 
     def set_index_info(self, text: str) -> None:
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.set_index_info(text)
+            return
         self._index_info_label.setText(str(text or ""))
 
     def set_progress(self, current: int, total: int | None = None) -> None:
@@ -1413,6 +1377,9 @@ class AppView(QMainWindow):
         self.btn_cancel_rag.setEnabled(bool(enabled))
 
     def set_file_list(self, paths: list[str]) -> None:
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.set_file_list(paths)
+            return
         self._file_list.clear()
         for path in paths:
             self._file_list.addItem(str(path))
@@ -1476,6 +1443,10 @@ class AppView(QMainWindow):
         self._profile_combo.addItems(labels)
         self._profile_combo.setCurrentText(current if current in labels else labels[0])
         del blocker
+
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.set_profile_filter_options(labels)
+            return
 
         selected = self._history_profile_filter.currentText()
         blocker = QSignalBlocker(self._history_profile_filter)
@@ -1558,10 +1529,15 @@ class AppView(QMainWindow):
         return ""
 
     def get_library_build_settings(self) -> dict[str, Any]:
+        if hasattr(self, "_brain_panel"):
+            return self._brain_panel.get_library_build_settings()
         return {"chunk_size": self._library_chunk_size.value(), "chunk_overlap": self._library_chunk_overlap.value()}
 
     def set_available_indexes(self, rows: list[dict[str, Any]], selected_path: str = "") -> None:
         self._available_index_rows = list(rows or [])
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.set_available_indexes(self._available_index_rows, selected_path)
+            return
         blocker = QSignalBlocker(self._available_index_combo)
         self._available_index_combo.clear()
         for row in self._available_index_rows:
@@ -1573,9 +1549,14 @@ class AppView(QMainWindow):
         del blocker
 
     def get_selected_available_index_path(self) -> str:
+        if hasattr(self, "_brain_panel"):
+            return self._brain_panel.get_selected_available_index_path()
         return str(self._available_index_combo.currentData() or "")
 
     def set_active_index_summary(self, summary: str, index_path: str = "") -> None:
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.set_active_index_summary(summary, index_path)
+            return
         self._active_index_summary.setText(str(summary or ""))
         if index_path:
             index = self._available_index_combo.findData(str(index_path))
@@ -1833,6 +1814,9 @@ class AppView(QMainWindow):
 
     def set_history_rows(self, rows: list[Any]) -> None:
         self._history_rows = list(rows or [])
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.set_history_rows(self._history_rows)
+            return
         self._history_tree.clear()
         for row in self._history_rows:
             item = QTreeWidgetItem([
@@ -1845,10 +1829,15 @@ class AppView(QMainWindow):
             self._history_tree.addTopLevelItem(item)
 
     def get_selected_history_session_id(self) -> str:
+        if hasattr(self, "_brain_panel"):
+            return self._brain_panel.get_selected_history_session_id()
         item = self._history_tree.currentItem()
         return str(item.data(0, Qt.UserRole) if item is not None else "")
 
     def select_history_session(self, session_id: str) -> None:
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.select_history_session(session_id)
+            return
         for row in range(self._history_tree.topLevelItemCount()):
             item = self._history_tree.topLevelItem(row)
             if str(item.data(0, Qt.UserRole) or "") == str(session_id):
@@ -1856,22 +1845,38 @@ class AppView(QMainWindow):
                 break
 
     def get_history_search_query(self) -> str:
+        if hasattr(self, "_brain_panel"):
+            return self._brain_panel.get_history_search_query()
         return self._history_search.text().strip()
 
     def get_history_profile_filter(self) -> str:
+        if hasattr(self, "_brain_panel"):
+            return self._brain_panel.get_history_profile_filter()
         value = self._history_profile_filter.currentText().strip()
         return "" if value == "All Profiles" else value
 
     def bind_history_search(self, callback: Any) -> None:
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.bind_history_search(callback)
+            return
         self._history_search.textChanged.connect(lambda *_args: callback())
 
     def bind_history_selection(self, callback: Any) -> None:
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.bind_history_selection(callback)
+            return
         self._history_tree.itemSelectionChanged.connect(lambda: callback())
 
     def bind_history_profile_filter(self, callback: Any) -> None:
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.bind_history_profile_filter(callback)
+            return
         self._history_profile_filter.currentTextChanged.connect(lambda *_args: callback())
 
     def set_history_detail(self, detail: Any) -> None:
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.set_history_detail(detail)
+            return
         if detail is None:
             self._history_detail_browser.clear()
             return
@@ -1892,6 +1897,19 @@ class AppView(QMainWindow):
             for item in feedback:
                 lines.append(f"- vote={getattr(item, 'vote', 0)} note={getattr(item, 'note', '')}")
         self._history_detail_browser.setPlainText("\n".join(lines))
+
+    def set_brain_graph(self, graph: Any, selected_node_id: str = "") -> None:
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.set_graph(graph, selected_node_id=selected_node_id)
+
+    def select_brain_node(self, node_id: str, *, emit_signal: bool = False) -> None:
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.select_brain_node(node_id, emit_signal=emit_signal)
+
+    def get_selected_brain_node_id(self) -> str:
+        if hasattr(self, "_brain_panel"):
+            return self._brain_panel.get_selected_brain_node_id()
+        return ""
 
     def _populate_tree_from_rows(self, tree: QTreeWidget, rows: list[Any], columns: list[str]) -> None:
         tree.clear()
