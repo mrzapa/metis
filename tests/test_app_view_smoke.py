@@ -160,6 +160,34 @@ def test_app_view_applies_theme_and_updates_runtime_widgets(qapp, process_events
     assert view._mode_combo.currentText() == "Research"
 
 
+def test_app_view_preserves_zero_numeric_settings_in_text_inputs(qapp, process_events) -> None:
+    view = _show(process_events)
+
+    view.populate_settings(
+        {
+            "llm_temperature": 0.0,
+            "local_gguf_gpu_layers": 0,
+            "local_gguf_threads": 0,
+            "hardware_override_total_ram_gb": 0.0,
+            "hardware_override_available_ram_gb": 0.0,
+            "hardware_override_gpu_vram_gb": 0.0,
+            "hardware_override_gpu_count": 0,
+        }
+    )
+    view.apply_theme("light")
+    process_events()
+
+    collected = view.collect_settings()
+
+    assert collected["llm_temperature"] == "0.0"
+    assert collected["local_gguf_gpu_layers"] == "0"
+    assert collected["local_gguf_threads"] == "0"
+    assert collected["hardware_override_total_ram_gb"] == "0.0"
+    assert collected["hardware_override_available_ram_gb"] == "0.0"
+    assert collected["hardware_override_gpu_vram_gb"] == "0.0"
+    assert collected["hardware_override_gpu_count"] == "0"
+
+
 def test_app_view_quick_model_popup_repopulates_presets(qapp, process_events) -> None:
     view = _show(process_events)
 
