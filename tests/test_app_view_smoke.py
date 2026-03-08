@@ -125,6 +125,48 @@ def test_app_view_settings_widgets_are_owned_by_settings_page(qapp, process_even
     assert not [bar for bar in view.findChildren(QScrollBar) if bar.parentWidget() is view]
 
 
+def test_app_view_renders_local_gguf_recommendations(qapp, process_events) -> None:
+    view = _show(process_events)
+    view.switch_view("settings")
+    view.set_local_gguf_recommendations(
+        {
+            "use_case": "chat",
+            "advisory_only": False,
+            "hardware": {
+                "total_ram_gb": 32.0,
+                "available_ram_gb": 24.0,
+                "total_cpu_cores": 12,
+                "backend": "cuda",
+                "has_gpu": True,
+                "gpu_name": "RTX 4090",
+                "gpu_vram_gb": 24.0,
+            },
+            "rows": [
+                {
+                    "model_name": "Qwen/Test-7B-Instruct",
+                    "parameter_count": "7B",
+                    "fit_level": "good",
+                    "run_mode": "gpu",
+                    "best_quant": "Q4_K_M",
+                    "estimated_tps": 42.5,
+                    "memory_required_gb": 4.6,
+                    "memory_available_gb": 24.0,
+                    "recommended_context_length": 8192,
+                    "source_provider": "bartowski",
+                    "notes": ["GPU: model loaded into VRAM."],
+                }
+            ],
+        }
+    )
+    process_events()
+
+    assert view._local_gguf_recommendation_tree.topLevelItemCount() == 1
+    selected = view.get_selected_local_gguf_recommendation()
+    assert selected is not None
+    assert selected["model_name"] == "Qwen/Test-7B-Instruct"
+    assert "RTX 4090" in view._local_gguf_hardware_label.text()
+
+
 def test_app_view_uses_packaged_brand_logo_when_available(qapp, process_events) -> None:
     view = _show(process_events)
 

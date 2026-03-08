@@ -76,6 +76,7 @@ class LocalModelEntry:
     name: str
     value: str
     path: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -84,16 +85,26 @@ class LocalModelEntry:
             "name": self.name,
             "value": self.value,
             "path": self.path,
+            "metadata": dict(self.metadata or {}),
         }
 
     @classmethod
-    def new(cls, model_type: str, name: str, value: str, *, path: str = "") -> "LocalModelEntry":
+    def new(
+        cls,
+        model_type: str,
+        name: str,
+        value: str,
+        *,
+        path: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> "LocalModelEntry":
         return cls(
             entry_id=str(uuid.uuid4()),
             model_type=str(model_type or "").strip(),
             name=str(name or "").strip(),
             value=str(value or "").strip(),
             path=str(path or "").strip(),
+            metadata=dict(metadata or {}),
         )
 
     @classmethod
@@ -111,6 +122,7 @@ class LocalModelEntry:
             name=name,
             value=value,
             path=path if model_type == "gguf" else "",
+            metadata=dict(data.get("metadata") or {}),
         )
 
 

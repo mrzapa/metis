@@ -27,7 +27,7 @@ classifiers = [
 # Runtime dependencies are intentionally minimal; heavy ML libs (LangChain,
 # sentence-transformers, llama-cpp-python) are optional/user-installed unless
 # the installer opts into the pinned runtime-all bundle.
-dependencies = ["PySide6>=6.6"]
+dependencies = ["PySide6>=6.6", "psutil>=6"]
 
 [project.optional-dependencies]
 dev = [
@@ -77,7 +77,7 @@ license-files = ["LICENSE"]
 include = ["axiom_app*"]
 
 [tool.setuptools.package-data]
-"axiom_app.assets" = ["logo.png"]
+"axiom_app.assets" = ["logo.png", "llmfit_gguf_catalog.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

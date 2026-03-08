@@ -41,6 +41,7 @@ from axiom_app.services.index_service import (
     load_index_bundle,
     refresh_index_bundle,
 )
+from axiom_app.services.local_llm_recommender import LocalLlmRecommenderService
 from axiom_app.services.local_model_registry import LocalModelRegistryService
 from axiom_app.services.profile_repository import ProfileRepository
 from axiom_app.services.response_pipeline import (
@@ -149,6 +150,7 @@ class AppController:
         self._log = logging.getLogger(__name__)
         self._pending_task_meta: dict[str, Any] = {}
         self.profile_repository = ProfileRepository(getattr(self.model, "profiles_dir", None))
+        self.local_llm_recommender_service = LocalLlmRecommenderService()
         self.local_model_registry_service = LocalModelRegistryService()
         self.trace_store = TraceStore(getattr(self.model, "trace_dir", None))
         self._test_mode_temp_dir = ""
@@ -274,6 +276,30 @@ class AppController:
         value, accepted = QInputDialog.getText(self._dialog_parent(), title, label, text=text)
         return str(value or "") if accepted else ""
 
+    def _pick_item_from_list(
+        self,
+        title: str,
+        label: str,
+        items: list[str],
+        *,
+        current: str = "",
+        editable: bool = False,
+    ) -> str:
+        from PySide6.QtWidgets import QInputDialog
+
+        if not items:
+            return ""
+        index = items.index(current) if current in items else 0
+        value, accepted = QInputDialog.getItem(
+            self._dialog_parent(),
+            title,
+            label,
+            items,
+            index,
+            editable,
+        )
+        return str(value or "") if accepted else ""
+
     def _selected_history_session_id(self) -> str:
         getter = getattr(self.view, "get_selected_history_session_id", None)
         if callable(getter):
@@ -304,6 +330,50 @@ class AppController:
         if isinstance(bundle, IndexBundle):
             return str(bundle.vector_backend or "json")
         return str(self.model.settings.get("vector_db_type", "json") or "json")
+
+    def _current_local_gguf_use_case(self) -> str:
+        selected_mode = str(self.model.settings.get("selected_mode", "Q&A") or "Q&A")
+        return self.local_llm_recommender_service.wizard_mode_to_use_case(selected_mode)
+
+    def _local_gguf_recommendations(self, *, use_case: str | None = None) -> dict[str, Any]:
+        requested_use_case = str(use_case or self._current_local_gguf_use_case() or "general")
+        return self.local_llm_recommender_service.recommend_models(
+            use_case=requested_use_case,
+            settings=self.model.settings,
+            current_mode=str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
+        )
+
+    def _sync_local_gguf_recommendations(self, *, use_case: str | None = None) -> None:
+        payload = self._local_gguf_recommendations(use_case=use_case)
+        self._safe_view_call("set_local_gguf_recommendations", payload)
+
+    def _apply_detected_hardware_overrides(self, overrides: dict[str, Any]) -> None:
+        def _float(value: Any) -> float:
+            try:
+                return float(value or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        def _int(value: Any) -> int:
+            try:
+                return int(float(value or 0))
+            except (TypeError, ValueError):
+                return 0
+
+        normalized = {
+            "hardware_override_enabled": bool(overrides.get("hardware_override_enabled", False)),
+            "hardware_override_total_ram_gb": _float(overrides.get("hardware_override_total_ram_gb")),
+            "hardware_override_available_ram_gb": _float(overrides.get("hardware_override_available_ram_gb")),
+            "hardware_override_gpu_name": str(overrides.get("hardware_override_gpu_name") or ""),
+            "hardware_override_gpu_vram_gb": _float(overrides.get("hardware_override_gpu_vram_gb")),
+            "hardware_override_gpu_count": _int(overrides.get("hardware_override_gpu_count")),
+            "hardware_override_backend": str(overrides.get("hardware_override_backend") or ""),
+            "hardware_override_unified_memory": bool(overrides.get("hardware_override_unified_memory", False)),
+        }
+        self.model.settings.update(normalized)
+        self.model.save_settings(self.model.settings)
+        self._safe_view_call("populate_settings", self.model.settings)
+        self._sync_local_gguf_recommendations()
 
     def _set_build_index_enabled(self, enabled: bool) -> None:
         if callable(getattr(self.view, "set_build_index_enabled", None)):
@@ -343,6 +413,7 @@ class AppController:
                     "name": entry.name,
                     "value": entry.value,
                     "path": entry.path,
+                    "metadata": dict(entry.metadata or {}),
                     "active_llm": bool(entry.model_type == "gguf" and (entry.path or entry.value) == active_llm_path),
                     "active_embedding": bool(
                         entry.model_type == "sentence_transformers"
@@ -741,6 +812,58 @@ class AppController:
             "startup_mode_setting": "advanced",
             "last_used_mode": "advanced",
             "deepread_mode": bool(result.get("deepread_mode", self.model.settings.get("deepread_mode", False))),
+            "local_gguf_models_dir": str(
+                result.get(
+                    "local_gguf_models_dir",
+                    self.model.settings.get(
+                        "local_gguf_models_dir",
+                        self.local_llm_recommender_service.default_models_dir(self.model.settings),
+                    ),
+                )
+                or ""
+            ),
+            "hardware_override_enabled": bool(
+                result.get("hardware_override_enabled", self.model.settings.get("hardware_override_enabled", False))
+            ),
+            "hardware_override_total_ram_gb": float(
+                result.get(
+                    "hardware_override_total_ram_gb",
+                    self.model.settings.get("hardware_override_total_ram_gb", 0.0),
+                )
+                or 0.0
+            ),
+            "hardware_override_available_ram_gb": float(
+                result.get(
+                    "hardware_override_available_ram_gb",
+                    self.model.settings.get("hardware_override_available_ram_gb", 0.0),
+                )
+                or 0.0
+            ),
+            "hardware_override_gpu_name": str(
+                result.get("hardware_override_gpu_name", self.model.settings.get("hardware_override_gpu_name", ""))
+                or ""
+            ),
+            "hardware_override_gpu_vram_gb": float(
+                result.get(
+                    "hardware_override_gpu_vram_gb",
+                    self.model.settings.get("hardware_override_gpu_vram_gb", 0.0),
+                )
+                or 0.0
+            ),
+            "hardware_override_gpu_count": int(
+                result.get("hardware_override_gpu_count", self.model.settings.get("hardware_override_gpu_count", 0))
+                or 0
+            ),
+            "hardware_override_backend": str(
+                result.get("hardware_override_backend", self.model.settings.get("hardware_override_backend", ""))
+                or ""
+            ),
+            "hardware_override_unified_memory": bool(
+                result.get(
+                    "hardware_override_unified_memory",
+                    self.model.settings.get("hardware_override_unified_memory", False),
+                )
+            ),
         }
         typed_keys = {
             "retrieval_k": int,
@@ -776,9 +899,29 @@ class AppController:
         ):
             if key in result:
                 updates[key] = result[key]
-        self.model.settings.update(updates)
+        working_settings = dict(self.model.settings)
+        working_settings.update(updates)
+        selected_recommendation = result.get("selected_local_gguf_recommendation")
+        if (
+            working_settings.get("llm_provider") == "local_gguf"
+            and bool(result.get("import_local_gguf_recommendation", False))
+            and isinstance(selected_recommendation, dict)
+        ):
+            imported = self._import_local_gguf_recommendation(
+                dict(selected_recommendation),
+                activate=True,
+                settings_snapshot=working_settings,
+            )
+            if imported is not None:
+                working_settings = imported
+            elif not str(working_settings.get("local_gguf_model_path", "") or "").strip():
+                working_settings["llm_provider"] = str(self.model.settings.get("llm_provider", "") or "")
+                working_settings["llm_model"] = str(self._effective_llm_model() or "")
+        self.model.settings = working_settings
         self.model.save_settings(self.model.settings)
         self._safe_view_call("populate_settings", self.model.settings)
+        self._sync_local_model_rows()
+        self._sync_local_gguf_recommendations()
 
         selected_index = str(result.get("selected_index_path", "") or "").strip()
         source_file = str(result.get("file_path", "") or "").strip()
@@ -828,6 +971,22 @@ class AppController:
         self._connect_signal(getattr(self.view, "activateLocalModelRequested", None), self.on_activate_local_model)
         self._connect_signal(getattr(self.view, "openLocalModelFolderRequested", None), self.on_open_local_model_folder)
         self._connect_signal(getattr(self.view, "installLocalDependencyRequested", None), self.on_install_local_dependency)
+        self._connect_signal(
+            getattr(self.view, "refreshLocalGgufRecommendationsRequested", None),
+            self.on_refresh_local_gguf_recommendations,
+        )
+        self._connect_signal(
+            getattr(self.view, "importLocalGgufRecommendationRequested", None),
+            self.on_import_local_gguf_recommendation,
+        )
+        self._connect_signal(
+            getattr(self.view, "applyLocalGgufRecommendationRequested", None),
+            self.on_apply_local_gguf_recommendation,
+        )
+        self._connect_signal(
+            getattr(self.view, "editHardwareAssumptionsRequested", None),
+            self.on_edit_hardware_assumptions,
+        )
 
         self._configure_command(getattr(self.view, "btn_open_files", None), self.on_open_files)
         self._configure_command(getattr(self.view, "btn_build_index", None), self.on_build_index)
@@ -857,6 +1016,22 @@ class AppController:
         self._configure_command(getattr(self.view, "btn_open_local_model_folder", None), self.on_open_local_model_folder)
         self._configure_command(getattr(self.view, "btn_install_local_gguf_dep", None), lambda: self.on_install_local_dependency(["llama-cpp-python"]))
         self._configure_command(getattr(self.view, "btn_install_local_st_dep", None), lambda: self.on_install_local_dependency(["sentence-transformers"]))
+        self._configure_command(
+            getattr(self.view, "btn_refresh_local_gguf_recommendations", None),
+            self.on_refresh_local_gguf_recommendations,
+        )
+        self._configure_command(
+            getattr(self.view, "btn_import_local_gguf_recommendation", None),
+            self.on_import_local_gguf_recommendation,
+        )
+        self._configure_command(
+            getattr(self.view, "btn_apply_local_gguf_recommendation", None),
+            self.on_apply_local_gguf_recommendation,
+        )
+        self._configure_command(
+            getattr(self.view, "btn_edit_hardware_assumptions", None),
+            self.on_edit_hardware_assumptions,
+        )
 
         bind_history_search = getattr(self.view, "bind_history_search", None)
         if callable(bind_history_search):
@@ -870,6 +1045,7 @@ class AppController:
 
         self.view.set_mode_state_callback(self._on_mode_state_changed)
         self.view.populate_settings(self.model.settings)
+        self._sync_local_gguf_recommendations()
         self.refresh_history_rows(update_detail=False)
 
     def _on_mode_state_changed(self, mode_state: dict[str, str]) -> None:
@@ -881,6 +1057,7 @@ class AppController:
         """Synchronize profiles, indexes, local models, and startup mode."""
         self._sync_profile_options()
         self._sync_local_model_rows()
+        self._sync_local_gguf_recommendations()
         self.refresh_available_indexes()
         self.refresh_history_rows(update_detail=False)
         self._restore_index_from_settings()
@@ -978,6 +1155,12 @@ class AppController:
             file_path=self.model.documents[0] if self.model.documents else None,
             index_path=str(self.model.settings.get("selected_index_path", "") or "") or None,
         )
+        local_gguf_use_case = self.local_llm_recommender_service.wizard_mode_to_use_case(current_mode)
+        local_gguf_recommendations = self.local_llm_recommender_service.recommend_models(
+            use_case=local_gguf_use_case,
+            settings=self.model.settings,
+            current_mode=current_mode,
+        )
         return {
             "file_path": self.model.documents[0] if self.model.documents else "",
             "selected_index_path": str(self.model.settings.get("selected_index_path", "") or ""),
@@ -1044,6 +1227,23 @@ class AppController:
                 self.model.settings.get("deepread_mode", recommendation.get("deepread_mode", False))
             ),
             "wizard_recommendation": recommendation,
+            "local_gguf_use_case": local_gguf_use_case,
+            "local_gguf_recommendations": local_gguf_recommendations,
+            "local_gguf_models_dir": str(
+                self.local_llm_recommender_service.default_models_dir(self.model.settings)
+            ),
+            "hardware_override_enabled": bool(self.model.settings.get("hardware_override_enabled", False)),
+            "hardware_override_total_ram_gb": float(self.model.settings.get("hardware_override_total_ram_gb", 0.0) or 0.0),
+            "hardware_override_available_ram_gb": float(
+                self.model.settings.get("hardware_override_available_ram_gb", 0.0) or 0.0
+            ),
+            "hardware_override_gpu_name": str(self.model.settings.get("hardware_override_gpu_name", "") or ""),
+            "hardware_override_gpu_vram_gb": float(self.model.settings.get("hardware_override_gpu_vram_gb", 0.0) or 0.0),
+            "hardware_override_gpu_count": int(self.model.settings.get("hardware_override_gpu_count", 0) or 0),
+            "hardware_override_backend": str(self.model.settings.get("hardware_override_backend", "") or ""),
+            "hardware_override_unified_memory": bool(
+                self.model.settings.get("hardware_override_unified_memory", False)
+            ),
         }
 
     def _ensure_test_mode_environment(self) -> str:
@@ -1978,6 +2178,132 @@ class AppController:
         if bundle is not None:
             self._safe_view_call("set_status", f"Loaded index: {bundle.index_id}")
 
+    def _selected_local_gguf_recommendation(self) -> dict[str, Any] | None:
+        getter = getattr(self.view, "get_selected_local_gguf_recommendation", None)
+        payload = getter() if callable(getter) else None
+        return dict(payload or {}) if isinstance(payload, dict) else None
+
+    def _import_local_gguf_recommendation(
+        self,
+        recommendation: dict[str, Any],
+        *,
+        activate: bool,
+        settings_snapshot: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        model_name = str(recommendation.get("model_name") or "").strip()
+        best_quant = str(recommendation.get("best_quant") or "").strip()
+        fit_level = str(recommendation.get("fit_level") or "").strip()
+        context_length = int(recommendation.get("recommended_context_length") or 2048)
+        working_settings = dict(settings_snapshot or self.model.settings)
+        if not model_name or not best_quant:
+            self._safe_view_call("set_status", "Select a recommended GGUF model first.")
+            return None
+        plan = self.local_llm_recommender_service.plan_import(
+            model_name=model_name,
+            best_quant=best_quant,
+            fit_level=fit_level,
+            recommended_context_length=context_length,
+            settings=working_settings,
+        )
+        if plan.manual_selection_required:
+            selected_name = self._pick_item_from_list(
+                "Choose GGUF File",
+                "Select the GGUF file to import:",
+                plan.candidate_filenames,
+            )
+            if not selected_name:
+                self._safe_view_call("set_status", "GGUF import cancelled.")
+                return None
+            plan = self.local_llm_recommender_service.plan_import(
+                model_name=model_name,
+                best_quant=best_quant,
+                fit_level=fit_level,
+                recommended_context_length=context_length,
+                settings=working_settings,
+                selected_filename=selected_name,
+            )
+        try:
+            imported_path = self.local_llm_recommender_service.download_import(plan)
+        except Exception as exc:
+            self._show_error_dialog("GGUF Import Failed", str(exc))
+            self._safe_view_call("set_status", f"Could not import {model_name}.")
+            return None
+        metadata = dict(plan.registry_metadata or {})
+        metadata["source_filename"] = plan.filename
+        metadata["download_path"] = str(imported_path)
+        registry = self.local_model_registry_service.add_gguf(
+            working_settings.get("local_model_registry", {}),
+            name=imported_path.stem,
+            path=str(imported_path),
+            metadata=metadata,
+        )
+        working_settings["local_model_registry"] = registry
+        working_settings["local_gguf_models_dir"] = str(imported_path.parent)
+        if activate:
+            entry = next(
+                (
+                    item
+                    for item in self.local_model_registry_service.list_entries(registry)
+                    if item.model_type == "gguf" and (item.path or item.value) == str(imported_path)
+                ),
+                None,
+            )
+            if entry is not None:
+                working_settings = self.local_model_registry_service.activate_entry(
+                    working_settings,
+                    entry,
+                    target="llm",
+                )
+        return working_settings
+
+    def on_refresh_local_gguf_recommendations(self, use_case: str = "") -> None:
+        requested = str(use_case or "").strip() or None
+        self._sync_local_gguf_recommendations(use_case=requested)
+        self._safe_view_call("set_status", "Local GGUF recommendations refreshed.")
+
+    def on_import_local_gguf_recommendation(self) -> None:
+        recommendation = self._selected_local_gguf_recommendation()
+        if not recommendation:
+            self._safe_view_call("set_status", "Select a recommended GGUF model first.")
+            return
+        updated = self._import_local_gguf_recommendation(recommendation, activate=False)
+        if updated is None:
+            return
+        self.model.settings = updated
+        self.model.save_settings(self.model.settings)
+        self._safe_view_call("populate_settings", self.model.settings)
+        self._sync_local_model_rows()
+        self._sync_local_gguf_recommendations()
+        self._safe_view_call("set_status", f"Imported {recommendation.get('model_name', 'GGUF model')}.")
+
+    def on_apply_local_gguf_recommendation(self) -> None:
+        recommendation = self._selected_local_gguf_recommendation()
+        if not recommendation:
+            self._safe_view_call("set_status", "Select a recommended GGUF model first.")
+            return
+        updated = self._import_local_gguf_recommendation(recommendation, activate=True)
+        if updated is None:
+            return
+        self.model.settings = updated
+        self.model.save_settings(self.model.settings)
+        self._safe_view_call("populate_settings", self.model.settings)
+        self._sync_local_model_rows()
+        self._sync_local_gguf_recommendations()
+        self._safe_view_call("set_status", f"Applied {recommendation.get('model_name', 'GGUF model')} as the local LLM.")
+
+    def on_edit_hardware_assumptions(self) -> None:
+        base_settings = dict(self.model.settings)
+        base_settings["hardware_override_enabled"] = False
+        detected = self.local_llm_recommender_service.detect_hardware(base_settings).to_payload()
+        editor = getattr(self.view, "show_hardware_override_editor", None)
+        result = editor(self.model.settings, detected) if callable(editor) else None
+        if not isinstance(result, dict):
+            self._safe_view_call("set_status", "Hardware assumptions unchanged.")
+            return
+        self._apply_detected_hardware_overrides(result)
+        self._sync_local_gguf_recommendations()
+        self._safe_view_call("set_status", "Hardware assumptions updated.")
+
     def on_add_local_gguf_model(self) -> None:
         path = self._pick_open_file(
             title="Select GGUF model file",
@@ -1991,8 +2317,10 @@ class AppController:
             path=path,
         )
         self.model.settings["local_model_registry"] = updated
+        self.model.settings["local_gguf_models_dir"] = str(pathlib.Path(path).parent)
         self.model.save_settings(self.model.settings)
         self._sync_local_model_rows()
+        self._sync_local_gguf_recommendations()
         self._safe_view_call("set_status", f"Added GGUF model: {pathlib.Path(path).name}")
 
     def on_add_local_st_model(self) -> None:
@@ -2009,6 +2337,7 @@ class AppController:
         self.model.settings["local_model_registry"] = updated
         self.model.save_settings(self.model.settings)
         self._sync_local_model_rows()
+        self._sync_local_gguf_recommendations()
         self._safe_view_call("set_status", f"Added embedding model: {name}")
 
     def on_remove_local_model(self) -> None:
@@ -2023,6 +2352,7 @@ class AppController:
         self.model.settings["local_model_registry"] = updated
         self.model.save_settings(self.model.settings)
         self._sync_local_model_rows()
+        self._sync_local_gguf_recommendations()
         self._safe_view_call("set_status", "Local model removed.")
 
     def on_activate_local_model(self, target: str) -> None:
@@ -2046,6 +2376,7 @@ class AppController:
         self.model.save_settings(self.model.settings)
         self._safe_view_call("populate_settings", self.model.settings)
         self._sync_local_model_rows()
+        self._sync_local_gguf_recommendations()
         self._safe_view_call("set_status", f"Activated local model for {target}.")
 
     def on_open_local_model_folder(self) -> None:
@@ -2369,6 +2700,7 @@ class AppController:
             ("local_gguf_context_length", int, 128, None),
             ("local_gguf_gpu_layers",     int, 0,   None),
             ("local_gguf_threads",        int, 0,   None),
+            ("hardware_override_gpu_count", int, 0, None),
             ("local_st_batch_size",       int, 1,   None),
             ("agentic_max_iterations",    int, 1,   10),
             ("subquery_max_docs",         int, 1,   None),
@@ -2377,6 +2709,9 @@ class AppController:
         _FLOAT_FIELDS = [
             ("llm_temperature", float, 0.0, 2.0),
             ("mmr_lambda",      float, 0.0, 1.0),
+            ("hardware_override_total_ram_gb", float, 0.0, None),
+            ("hardware_override_available_ram_gb", float, 0.0, None),
+            ("hardware_override_gpu_vram_gb", float, 0.0, None),
         ]
         _BOOL_FIELDS = [
             "verbose_mode", "force_embedding_compat",
@@ -2390,9 +2725,13 @@ class AppController:
             "enable_claim_level_grounding_citefix_lite",
             "agent_lightning_enabled", "prefer_comprehension_index",
             "deepread_mode", "secure_mode", "experimental_override",
+            "hardware_override_enabled", "hardware_override_unified_memory",
         ]
         _STRING_FIELDS = [
             "local_gguf_model_path",
+            "local_gguf_models_dir",
+            "hardware_override_gpu_name",
+            "hardware_override_backend",
         ]
 
         coerced: dict[str, Any] = {}
@@ -2485,6 +2824,7 @@ class AppController:
         self._safe_view_call("refresh_llm_status_badge")
         self._sync_profile_options()
         self._sync_local_model_rows()
+        self._sync_local_gguf_recommendations()
         self.refresh_available_indexes(select_path=str(self.model.settings.get("selected_index_path", "") or ""))
         self._log.info("Settings saved successfully (%d keys).", len(coerced))
 

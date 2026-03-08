@@ -47,9 +47,10 @@ class LocalModelRegistryService:
         *,
         name: str,
         path: str,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
         normalized = self.normalize(self._to_payload(registry))
-        entry = LocalModelEntry.new("gguf", name, path, path=path)
+        entry = LocalModelEntry.new("gguf", name, path, path=path, metadata=metadata)
         normalized["gguf"] = self._upsert(normalized["gguf"], entry)
         return self.serialize(normalized)
 
@@ -58,9 +59,10 @@ class LocalModelRegistryService:
         registry: dict[str, list[LocalModelEntry]] | Any,
         *,
         name: str,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
         normalized = self.normalize(self._to_payload(registry))
-        entry = LocalModelEntry.new("sentence_transformers", name, name)
+        entry = LocalModelEntry.new("sentence_transformers", name, name, metadata=metadata)
         normalized["sentence_transformers"] = self._upsert(
             normalized["sentence_transformers"],
             entry,
@@ -104,6 +106,16 @@ class LocalModelRegistryService:
             updated["local_gguf_model_path"] = entry.path or entry.value
             updated["llm_model"] = entry.name
             updated["llm_model_custom"] = entry.name
+            metadata = dict(entry.metadata or {})
+            context_length = metadata.get("recommended_context_length")
+            try:
+                context_value = int(context_length) if context_length not in (None, "") else None
+            except (TypeError, ValueError):
+                context_value = None
+            if context_value:
+                updated["local_gguf_context_length"] = max(context_value, 2048)
+            updated["local_gguf_gpu_layers"] = 0
+            updated["local_gguf_threads"] = 0
             return updated
 
         if target != "embedding":
@@ -148,7 +160,11 @@ class LocalModelRegistryService:
         filtered = [
             entry
             for entry in entries
-            if not (entry.name.lower() == new_entry.name.lower() and entry.model_type == new_entry.model_type)
+            if not (
+                entry.name.lower() == new_entry.name.lower()
+                and entry.model_type == new_entry.model_type
+                and (entry.path or entry.value).lower() == (new_entry.path or new_entry.value).lower()
+            )
         ]
         filtered.append(new_entry)
         return filtered

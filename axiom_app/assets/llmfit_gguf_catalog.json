@@ -1,0 +1,2389 @@
+{
+  "meta": {
+    "source_repo": "AlexsJones/llmfit",
+    "source_models_url": "https://raw.githubusercontent.com/AlexsJones/llmfit/main/data/hf_models.json",
+    "source_commit": "3cb06f02970ddf360535b6b7ebacbaab7333fdc7",
+    "source_commit_date": "2026-03-07T13:17:52Z",
+    "generated_at": "2026-03-07T23:47:20.197172+00:00",
+    "filters": [
+      "keep rows with gguf_sources",
+      "exclude embedding-only models",
+      "exclude multimodal or vision-required models",
+      "normalize quant aliases and use_case labels"
+    ]
+  },
+  "models": [
+    {
+      "name": "01-ai/Yi-1.5-9B-Chat",
+      "provider": "01.ai",
+      "parameter_count": "8.8B",
+      "parameters_raw": 8829407232,
+      "min_ram_gb": 4.9,
+      "recommended_ram_gb": 8.2,
+      "min_vram_gb": 4.5,
+      "quantization": "Q4_K_M",
+      "context_length": 4096,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "llama",
+      "release_date": "2024-05-10",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Yi-1.5-9B-Chat-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "allenai/OLMo-2-0325-32B-Instruct",
+      "provider": "allenai",
+      "parameter_count": "32.2B",
+      "parameters_raw": 32234279936,
+      "min_ram_gb": 18.0,
+      "recommended_ram_gb": 30.0,
+      "min_vram_gb": 16.5,
+      "quantization": "Q4_K_M",
+      "context_length": 4096,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "olmo2",
+      "release_date": "2025-03-12",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/OLMo-2-0325-32B-Instruct-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "allenai/OLMo-2-0425-1B-Instruct",
+      "provider": "allenai",
+      "parameter_count": "1.5B",
+      "parameters_raw": 1484916736,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.8,
+      "quantization": "Q4_K_M",
+      "context_length": 4096,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "olmo2",
+      "release_date": "2025-04-29",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/OLMo-2-0425-1B-Instruct-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "allenai/Olmo-3-7B-Instruct",
+      "provider": "allenai",
+      "parameter_count": "528K",
+      "parameters_raw": 528384,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.5,
+      "quantization": "Q4_K_M",
+      "context_length": 65536,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "olmo3",
+      "release_date": "2025-11-19",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Olmo-3-7B-Instruct-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "allenai/Olmo-3-7B-Think",
+      "provider": "allenai",
+      "parameter_count": "528K",
+      "parameters_raw": 528384,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.5,
+      "quantization": "Q4_K_M",
+      "context_length": 65536,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "olmo3",
+      "release_date": "2025-11-18",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Olmo-3-7B-Think-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "CohereForAI/c4ai-command-r-v01",
+      "provider": "Cohere",
+      "parameter_count": "35B",
+      "parameters_raw": 35000000000,
+      "min_ram_gb": 19.5,
+      "recommended_ram_gb": 32.6,
+      "min_vram_gb": 17.9,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "cohere",
+      "release_date": "",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/c4ai-command-r-v01-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
+      "provider": "DeepSeek",
+      "parameter_count": "16B",
+      "parameters_raw": 15700000000,
+      "min_ram_gb": 8.8,
+      "recommended_ram_gb": 14.6,
+      "min_vram_gb": 8.0,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "coding",
+      "capabilities": [],
+      "architecture": "deepseek_v2",
+      "release_date": "",
+      "is_moe": true,
+      "num_experts": 64,
+      "active_experts": 6,
+      "active_parameters": 2400000000,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "deepseek-ai/DeepSeek-R1",
+      "provider": "DeepSeek",
+      "parameter_count": "684.5B",
+      "parameters_raw": 684531386000,
+      "min_ram_gb": 382.5,
+      "recommended_ram_gb": 637.5,
+      "min_vram_gb": 350.6,
+      "quantization": "Q4_K_M",
+      "context_length": 163840,
+      "use_case": "reasoning",
+      "capabilities": [],
+      "architecture": "deepseek_v3",
+      "release_date": "2025-01-20",
+      "is_moe": true,
+      "num_experts": 256,
+      "active_experts": 8,
+      "active_parameters": 37000000000,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/DeepSeek-R1-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/DeepSeek-R1-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
+      "provider": "DeepSeek",
+      "parameter_count": "8.2B",
+      "parameters_raw": 8190735360,
+      "min_ram_gb": 4.6,
+      "recommended_ram_gb": 7.6,
+      "min_vram_gb": 4.2,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "reasoning",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen3",
+      "release_date": "2025-05-29",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/DeepSeek-R1-0528-Qwen3-8B-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+      "provider": "DeepSeek",
+      "parameter_count": "14.8B",
+      "parameters_raw": 14770033664,
+      "min_ram_gb": 8.3,
+      "recommended_ram_gb": 13.8,
+      "min_vram_gb": 7.6,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "reasoning",
+      "capabilities": [],
+      "architecture": "qwen2",
+      "release_date": "2025-01-20",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/DeepSeek-R1-Distill-Qwen-14B-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+      "provider": "DeepSeek",
+      "parameter_count": "32.8B",
+      "parameters_raw": 32763876352,
+      "min_ram_gb": 18.3,
+      "recommended_ram_gb": 30.5,
+      "min_vram_gb": 16.8,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "reasoning",
+      "capabilities": [],
+      "architecture": "qwen2",
+      "release_date": "2025-01-20",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/DeepSeek-R1-Distill-Qwen-32B-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+      "provider": "DeepSeek",
+      "parameter_count": "7.6B",
+      "parameters_raw": 7615616512,
+      "min_ram_gb": 4.3,
+      "recommended_ram_gb": 7.1,
+      "min_vram_gb": 3.9,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "reasoning",
+      "capabilities": [],
+      "architecture": "qwen2",
+      "release_date": "2025-01-20",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/DeepSeek-R1-Distill-Qwen-7B-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "deepseek-ai/DeepSeek-V2.5",
+      "provider": "DeepSeek",
+      "parameter_count": "235.7B",
+      "parameters_raw": 235741434880,
+      "min_ram_gb": 131.7,
+      "recommended_ram_gb": 219.6,
+      "min_vram_gb": 120.8,
+      "quantization": "Q4_K_M",
+      "context_length": 163840,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "deepseek_v2",
+      "release_date": "2024-09-05",
+      "is_moe": true,
+      "num_experts": 64,
+      "active_experts": 6,
+      "active_parameters": 32782793288,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/DeepSeek-V2.5-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "dphn/dolphin-2.9.1-yi-1.5-34b",
+      "provider": "dphn",
+      "parameter_count": "34.4B",
+      "parameters_raw": 34388917248,
+      "min_ram_gb": 19.2,
+      "recommended_ram_gb": 32.0,
+      "min_vram_gb": 17.6,
+      "quantization": "Q4_K_M",
+      "context_length": 8192,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "llama",
+      "release_date": "2024-05-18",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/dolphin-2.9.1-yi-1.5-34b-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "dphn/dolphin-2.9.3-mistral-7B-32k",
+      "provider": "dphn",
+      "parameter_count": "7.2B",
+      "parameters_raw": 7248039936,
+      "min_ram_gb": 4.1,
+      "recommended_ram_gb": 6.8,
+      "min_vram_gb": 3.7,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "mistral",
+      "release_date": "2024-06-25",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/dolphin-2.9.3-mistral-7B-32k-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Efficient-Large-Model/gemma-2-2b-it",
+      "provider": "efficient-large-model",
+      "parameter_count": "2.6B",
+      "parameters_raw": 2614341888,
+      "min_ram_gb": 1.5,
+      "recommended_ram_gb": 2.4,
+      "min_vram_gb": 1.3,
+      "quantization": "Q4_K_M",
+      "context_length": 8192,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "gemma2",
+      "release_date": "2024-12-12",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/gemma-2-2b-it-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Gensyn/Qwen2.5-0.5B-Instruct",
+      "provider": "gensyn",
+      "parameter_count": "494M",
+      "parameters_raw": 494032768,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.5,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2025-03-28",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "google/gemma-1.1-2b-it",
+      "provider": "Google",
+      "parameter_count": "2.5B",
+      "parameters_raw": 2506172416,
+      "min_ram_gb": 1.4,
+      "recommended_ram_gb": 2.3,
+      "min_vram_gb": 1.3,
+      "quantization": "Q4_K_M",
+      "context_length": 4096,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "gemma",
+      "release_date": "2024-03-26",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/gemma-1.1-2b-it-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "google/gemma-2-27b-it",
+      "provider": "Google",
+      "parameter_count": "27.2B",
+      "parameters_raw": 27227128320,
+      "min_ram_gb": 15.2,
+      "recommended_ram_gb": 25.4,
+      "min_vram_gb": 13.9,
+      "quantization": "Q4_K_M",
+      "context_length": 4096,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "gemma2",
+      "release_date": "2024-06-24",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/gemma-2-27b-it-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "google/gemma-2-2b-it",
+      "provider": "Google",
+      "parameter_count": "2.6B",
+      "parameters_raw": 2614341376,
+      "min_ram_gb": 1.5,
+      "recommended_ram_gb": 2.4,
+      "min_vram_gb": 1.3,
+      "quantization": "Q4_K_M",
+      "context_length": 8192,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "gemma2",
+      "release_date": "",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/gemma-2-2b-it-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "google/gemma-2-9b-it",
+      "provider": "Google",
+      "parameter_count": "9.2B",
+      "parameters_raw": 9241705984,
+      "min_ram_gb": 5.2,
+      "recommended_ram_gb": 8.6,
+      "min_vram_gb": 4.7,
+      "quantization": "Q4_K_M",
+      "context_length": 4096,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "gemma2",
+      "release_date": "2024-06-24",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/gemma-2-9b-it-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "h2oai/h2o-danube3-500m-chat",
+      "provider": "h2oai",
+      "parameter_count": "514M",
+      "parameters_raw": 513590784,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.5,
+      "quantization": "Q4_K_M",
+      "context_length": 8192,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "llama",
+      "release_date": "2024-07-04",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/h2o-danube3-500m-chat-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "HuggingFaceTB/SmolLM2-135M-Instruct",
+      "provider": "huggingfacetb",
+      "parameter_count": "135M",
+      "parameters_raw": 134515008,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.5,
+      "quantization": "Q4_K_M",
+      "context_length": 8192,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "llama",
+      "release_date": "2024-10-31",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/SmolLM2-135M-Instruct-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/SmolLM2-135M-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "HuggingFaceTB/SmolLM3-3B",
+      "provider": "HuggingFace",
+      "parameter_count": "3B",
+      "parameters_raw": 3000000000,
+      "min_ram_gb": 1.7,
+      "recommended_ram_gb": 2.8,
+      "min_vram_gb": 1.5,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "reasoning",
+      "capabilities": [],
+      "architecture": "smollm",
+      "release_date": "2025-07-08",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/SmolLM3-3B-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "ibm-granite/granite-3.3-8b-instruct",
+      "provider": "ibm-granite",
+      "parameter_count": "8.2B",
+      "parameters_raw": 8170864640,
+      "min_ram_gb": 4.6,
+      "recommended_ram_gb": 7.6,
+      "min_vram_gb": 4.2,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "granite",
+      "release_date": "2025-04-09",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/granite-3.3-8b-instruct-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "LiquidAI/LFM2-350M",
+      "provider": "liquidai",
+      "parameter_count": "354M",
+      "parameters_raw": 354483968,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.5,
+      "quantization": "Q4_K_M",
+      "context_length": 128000,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "lfm2",
+      "release_date": "2025-07-10",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/LFM2-350M-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "LiquidAI/LFM2-8B-A1B",
+      "provider": "liquidai",
+      "parameter_count": "8.3B",
+      "parameters_raw": 8339929856,
+      "min_ram_gb": 4.7,
+      "recommended_ram_gb": 7.8,
+      "min_vram_gb": 4.3,
+      "quantization": "Q4_K_M",
+      "context_length": 128000,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "lfm2_moe",
+      "release_date": "2025-10-07",
+      "is_moe": true,
+      "num_experts": 32,
+      "active_experts": 4,
+      "active_parameters": 1407363160,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/LFM2-8B-A1B-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "LiquidAI/LFM2.5-1.2B-Instruct",
+      "provider": "liquidai",
+      "parameter_count": "1.2B",
+      "parameters_raw": 1170340608,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.6,
+      "quantization": "Q4_K_M",
+      "context_length": 128000,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "lfm2",
+      "release_date": "2026-01-06",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/LFM2.5-1.2B-Instruct-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "meta-llama/Llama-3.3-70B-Instruct",
+      "provider": "Meta",
+      "parameter_count": "70.6B",
+      "parameters_raw": 70553706496,
+      "min_ram_gb": 39.4,
+      "recommended_ram_gb": 65.7,
+      "min_vram_gb": 36.1,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "llama",
+      "release_date": "",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Llama-3.3-70B-Instruct-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/Llama-3.3-70B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "meta-llama/Meta-Llama-3-70B-Instruct",
+      "provider": "Meta",
+      "parameter_count": "70.6B",
+      "parameters_raw": 70553706496,
+      "min_ram_gb": 39.4,
+      "recommended_ram_gb": 65.7,
+      "min_vram_gb": 36.1,
+      "quantization": "Q4_K_M",
+      "context_length": 4096,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "llama",
+      "release_date": "2024-04-17",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Meta-Llama-3-70B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "meta-llama/Meta-Llama-3-8B-Instruct",
+      "provider": "Meta",
+      "parameter_count": "8.0B",
+      "parameters_raw": 8030261248,
+      "min_ram_gb": 4.5,
+      "recommended_ram_gb": 7.5,
+      "min_vram_gb": 4.1,
+      "quantization": "Q4_K_M",
+      "context_length": 4096,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "llama",
+      "release_date": "2024-04-17",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Meta-Llama-3-8B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "microsoft/phi-3-mini-4k-instruct",
+      "provider": "Microsoft",
+      "parameter_count": "3.8B",
+      "parameters_raw": 3821000000,
+      "min_ram_gb": 2.1,
+      "recommended_ram_gb": 3.6,
+      "min_vram_gb": 2.0,
+      "quantization": "Q4_K_M",
+      "context_length": 4096,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "phi3",
+      "release_date": "",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/phi-3-mini-4k-instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "microsoft/Phi-3.5-mini-instruct",
+      "provider": "Microsoft",
+      "parameter_count": "3.8B",
+      "parameters_raw": 3821000000,
+      "min_ram_gb": 2.1,
+      "recommended_ram_gb": 3.6,
+      "min_vram_gb": 2.0,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "phi3",
+      "release_date": "",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Phi-3.5-mini-instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "microsoft/phi-4",
+      "provider": "Microsoft",
+      "parameter_count": "14B",
+      "parameters_raw": 14000000000,
+      "min_ram_gb": 7.8,
+      "recommended_ram_gb": 13.0,
+      "min_vram_gb": 7.2,
+      "quantization": "Q4_K_M",
+      "context_length": 16384,
+      "use_case": "reasoning",
+      "capabilities": [],
+      "architecture": "phi",
+      "release_date": "",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/phi-4-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/phi-4-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "microsoft/Phi-4-mini-reasoning",
+      "provider": "Microsoft",
+      "parameter_count": "3.8B",
+      "parameters_raw": 3800000000,
+      "min_ram_gb": 2.1,
+      "recommended_ram_gb": 3.5,
+      "min_vram_gb": 1.9,
+      "quantization": "Q4_K_M",
+      "context_length": 16384,
+      "use_case": "reasoning",
+      "capabilities": [],
+      "architecture": "phi4",
+      "release_date": "2025-04-01",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Phi-4-mini-reasoning-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "microsoft/Phi-4-reasoning",
+      "provider": "Microsoft",
+      "parameter_count": "14B",
+      "parameters_raw": 14000000000,
+      "min_ram_gb": 7.8,
+      "recommended_ram_gb": 13.0,
+      "min_vram_gb": 7.2,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "reasoning",
+      "capabilities": [],
+      "architecture": "phi4",
+      "release_date": "2025-04-01",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Phi-4-reasoning-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "MiniMaxAI/MiniMax-M2",
+      "provider": "minimaxai",
+      "parameter_count": "228.7B",
+      "parameters_raw": 228703644928,
+      "min_ram_gb": 127.8,
+      "recommended_ram_gb": 213.0,
+      "min_vram_gb": 117.1,
+      "quantization": "Q4_K_M",
+      "context_length": 196608,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "minimax_m2",
+      "release_date": "2025-10-22",
+      "is_moe": true,
+      "num_experts": 256,
+      "active_experts": 8,
+      "active_parameters": 18224821702,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/MiniMax-M2-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "MiniMaxAI/MiniMax-M2.1",
+      "provider": "minimaxai",
+      "parameter_count": "228.7B",
+      "parameters_raw": 228703644928,
+      "min_ram_gb": 127.8,
+      "recommended_ram_gb": 213.0,
+      "min_vram_gb": 117.1,
+      "quantization": "Q4_K_M",
+      "context_length": 196608,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "minimax_m2",
+      "release_date": "2025-12-20",
+      "is_moe": true,
+      "num_experts": 256,
+      "active_experts": 8,
+      "active_parameters": 18224821702,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/MiniMax-M2.1-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "MiniMaxAI/MiniMax-M2.5",
+      "provider": "minimaxai",
+      "parameter_count": "228.7B",
+      "parameters_raw": 228703644928,
+      "min_ram_gb": 127.8,
+      "recommended_ram_gb": 213.0,
+      "min_vram_gb": 117.1,
+      "quantization": "Q4_K_M",
+      "context_length": 196608,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "minimax_m2",
+      "release_date": "2026-02-12",
+      "is_moe": true,
+      "num_experts": 256,
+      "active_experts": 8,
+      "active_parameters": 10000000000,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/MiniMax-M2.5-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "mistralai/Ministral-8B-Instruct-2410",
+      "provider": "Mistral AI",
+      "parameter_count": "8.0B",
+      "parameters_raw": 8030261248,
+      "min_ram_gb": 4.5,
+      "recommended_ram_gb": 7.5,
+      "min_vram_gb": 4.1,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "mistral",
+      "release_date": "",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Ministral-8B-Instruct-2410-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "mistralai/Mistral-7B-Instruct-v0.3",
+      "provider": "Mistral AI",
+      "parameter_count": "7.2B",
+      "parameters_raw": 7248023552,
+      "min_ram_gb": 4.1,
+      "recommended_ram_gb": 6.8,
+      "min_vram_gb": 3.7,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "mistral",
+      "release_date": "2024-05-22",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Mistral-7B-Instruct-v0.3-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "mistralai/Mistral-Nemo-Instruct-2407",
+      "provider": "Mistral AI",
+      "parameter_count": "12.2B",
+      "parameters_raw": 12247076864,
+      "min_ram_gb": 6.8,
+      "recommended_ram_gb": 11.4,
+      "min_vram_gb": 6.3,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "mistral",
+      "release_date": "",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Mistral-Nemo-Instruct-2407-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/Mistral-Nemo-Instruct-2407-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "mistralai/Mistral-Small-24B-Instruct-2501",
+      "provider": "Mistral AI",
+      "parameter_count": "24B",
+      "parameters_raw": 24000000000,
+      "min_ram_gb": 13.4,
+      "recommended_ram_gb": 22.4,
+      "min_vram_gb": 12.3,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "mistral",
+      "release_date": "",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Mistral-Small-24B-Instruct-2501-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/Mistral-Small-24B-Instruct-2501-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "NousResearch/Hermes-3-Llama-3.1-8B",
+      "provider": "NousResearch",
+      "parameter_count": "8.0B",
+      "parameters_raw": 8030261248,
+      "min_ram_gb": 4.5,
+      "recommended_ram_gb": 7.5,
+      "min_vram_gb": 4.1,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "general",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "llama",
+      "release_date": "2024-07-28",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Hermes-3-Llama-3.1-8B-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "NousResearch/Meta-Llama-3.1-8B-Instruct",
+      "provider": "NousResearch",
+      "parameter_count": "8.0B",
+      "parameters_raw": 8030261248,
+      "min_ram_gb": 4.5,
+      "recommended_ram_gb": 7.5,
+      "min_vram_gb": 4.1,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "llama",
+      "release_date": "2024-07-24",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "nvidia/Llama-3_3-Nemotron-Super-49B-v1",
+      "provider": "nvidia",
+      "parameter_count": "49.9B",
+      "parameters_raw": 49867145216,
+      "min_ram_gb": 27.9,
+      "recommended_ram_gb": 46.4,
+      "min_vram_gb": 25.5,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "nemotron-nas",
+      "release_date": "2025-03-16",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Llama-3_3-Nemotron-Super-49B-v1-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "nvidia/Llama-3_3-Nemotron-Super-49B-v1_5",
+      "provider": "nvidia",
+      "parameter_count": "49.9B",
+      "parameters_raw": 49867145216,
+      "min_ram_gb": 27.9,
+      "recommended_ram_gb": 46.4,
+      "min_vram_gb": 25.5,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "nemotron-nas",
+      "release_date": "2025-07-25",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Llama-3_3-Nemotron-Super-49B-v1_5-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "nvidia/Mistral-NeMo-Minitron-8B-Instruct",
+      "provider": "nvidia",
+      "parameter_count": "8.4B",
+      "parameters_raw": 8414105600,
+      "min_ram_gb": 4.7,
+      "recommended_ram_gb": 7.8,
+      "min_vram_gb": 4.3,
+      "quantization": "Q4_K_M",
+      "context_length": 8192,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "mistral",
+      "release_date": "2024-10-02",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Mistral-NeMo-Minitron-8B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "openai/gpt-oss-120b",
+      "provider": "openai",
+      "parameter_count": "120.4B",
+      "parameters_raw": 120412337472,
+      "min_ram_gb": 67.3,
+      "recommended_ram_gb": 112.1,
+      "min_vram_gb": 61.7,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "gpt_oss",
+      "release_date": "2025-08-04",
+      "is_moe": true,
+      "num_experts": 128,
+      "active_experts": 4,
+      "active_parameters": 9595358141,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/gpt-oss-120b-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "openai/gpt-oss-20b",
+      "provider": "openai",
+      "parameter_count": "21.5B",
+      "parameters_raw": 21511953984,
+      "min_ram_gb": 12.0,
+      "recommended_ram_gb": 20.0,
+      "min_vram_gb": 11.0,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "gpt_oss",
+      "release_date": "2025-08-04",
+      "is_moe": true,
+      "num_experts": 32,
+      "active_experts": 4,
+      "active_parameters": 3630142231,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/gpt-oss-20b-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen1.5-32B-Chat",
+      "provider": "Alibaba",
+      "parameter_count": "32.5B",
+      "parameters_raw": 32512218112,
+      "min_ram_gb": 18.2,
+      "recommended_ram_gb": 30.3,
+      "min_vram_gb": 16.7,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "qwen2",
+      "release_date": "2024-04-03",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen1.5-32B-Chat-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2-0.5B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "494M",
+      "parameters_raw": 494032768,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.5,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "qwen2",
+      "release_date": "2024-06-03",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2-0.5B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2-72B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "72.7B",
+      "parameters_raw": 72706203648,
+      "min_ram_gb": 40.6,
+      "recommended_ram_gb": 67.7,
+      "min_vram_gb": 37.2,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "qwen2",
+      "release_date": "2024-05-28",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2-72B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2-7B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "7.6B",
+      "parameters_raw": 7615616512,
+      "min_ram_gb": 4.3,
+      "recommended_ram_gb": 7.1,
+      "min_vram_gb": 3.9,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "qwen2",
+      "release_date": "2024-06-04",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2-7B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-0.5B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "494M",
+      "parameters_raw": 494032768,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.5,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-09-16",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-1.5B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "1.5B",
+      "parameters_raw": 1543714304,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.8,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-09-17",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-1.5B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-14B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "14.8B",
+      "parameters_raw": 14770000000,
+      "min_ram_gb": 8.2,
+      "recommended_ram_gb": 13.7,
+      "min_vram_gb": 7.6,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "qwen2",
+      "release_date": "",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-14B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-14B-Instruct-1M",
+      "provider": "Alibaba",
+      "parameter_count": "14.8B",
+      "parameters_raw": 14770033664,
+      "min_ram_gb": 8.3,
+      "recommended_ram_gb": 13.8,
+      "min_vram_gb": 7.6,
+      "quantization": "Q4_K_M",
+      "context_length": 1010000,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2025-01-23",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-14B-Instruct-1M-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-32B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "32.5B",
+      "parameters_raw": 32510000000,
+      "min_ram_gb": 18.2,
+      "recommended_ram_gb": 30.3,
+      "min_vram_gb": 16.7,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "qwen2",
+      "release_date": "",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-32B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-3B",
+      "provider": "Alibaba",
+      "parameter_count": "3.1B",
+      "parameters_raw": 3085938688,
+      "min_ram_gb": 1.7,
+      "recommended_ram_gb": 2.9,
+      "min_vram_gb": 1.6,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "general",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-09-15",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-3B-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-3B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "3.1B",
+      "parameters_raw": 3085938688,
+      "min_ram_gb": 1.7,
+      "recommended_ram_gb": 2.9,
+      "min_vram_gb": 1.6,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-09-17",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-3B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-72B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "72.7B",
+      "parameters_raw": 72706203648,
+      "min_ram_gb": 40.6,
+      "recommended_ram_gb": 67.7,
+      "min_vram_gb": 37.2,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-09-16",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-72B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-7B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "7.6B",
+      "parameters_raw": 7615616512,
+      "min_ram_gb": 4.3,
+      "recommended_ram_gb": 7.1,
+      "min_vram_gb": 3.9,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-09-16",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-7B-Instruct-1M",
+      "provider": "Alibaba",
+      "parameter_count": "7.6B",
+      "parameters_raw": 7615616512,
+      "min_ram_gb": 4.3,
+      "recommended_ram_gb": 7.1,
+      "min_vram_gb": 3.9,
+      "quantization": "Q4_K_M",
+      "context_length": 1010000,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2025-01-23",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-7B-Instruct-1M-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-Coder-0.5B",
+      "provider": "Alibaba",
+      "parameter_count": "494M",
+      "parameters_raw": 494032768,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.5,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "coding",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-11-08",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-Coder-0.5B-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "494M",
+      "parameters_raw": 494032768,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.5,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "coding",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-11-06",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Qwen2.5-Coder-0.5B-Instruct-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/Qwen2.5-Coder-0.5B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "1.5B",
+      "parameters_raw": 1543714304,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.8,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "coding",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-09-18",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-Coder-14B",
+      "provider": "Alibaba",
+      "parameter_count": "14.8B",
+      "parameters_raw": 14770033664,
+      "min_ram_gb": 8.3,
+      "recommended_ram_gb": 13.8,
+      "min_vram_gb": 7.6,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "coding",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-11-08",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-Coder-14B-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-Coder-14B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "14.8B",
+      "parameters_raw": 14770033664,
+      "min_ram_gb": 8.3,
+      "recommended_ram_gb": 13.8,
+      "min_vram_gb": 7.6,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "coding",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-11-06",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Qwen2.5-Coder-14B-Instruct-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/Qwen2.5-Coder-14B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-Coder-32B",
+      "provider": "Alibaba",
+      "parameter_count": "32.8B",
+      "parameters_raw": 32763876352,
+      "min_ram_gb": 18.3,
+      "recommended_ram_gb": 30.5,
+      "min_vram_gb": 16.8,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "coding",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-11-08",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-Coder-32B-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-Coder-32B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "32.8B",
+      "parameters_raw": 32763876352,
+      "min_ram_gb": 18.3,
+      "recommended_ram_gb": 30.5,
+      "min_vram_gb": 16.8,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "coding",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-11-06",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Qwen2.5-Coder-32B-Instruct-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/Qwen2.5-Coder-32B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-Coder-3B",
+      "provider": "Alibaba",
+      "parameter_count": "3.1B",
+      "parameters_raw": 3085938688,
+      "min_ram_gb": 1.7,
+      "recommended_ram_gb": 2.9,
+      "min_vram_gb": 1.6,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "coding",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-11-08",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-Coder-3B-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-Coder-3B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "3.1B",
+      "parameters_raw": 3085938688,
+      "min_ram_gb": 1.7,
+      "recommended_ram_gb": 2.9,
+      "min_vram_gb": 1.6,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "coding",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-11-06",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Qwen2.5-Coder-3B-Instruct-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/Qwen2.5-Coder-3B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-Coder-7B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "7.6B",
+      "parameters_raw": 7615616512,
+      "min_ram_gb": 4.3,
+      "recommended_ram_gb": 7.1,
+      "min_vram_gb": 3.9,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "coding",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-09-17",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Qwen2.5-Coder-7B-Instruct-GGUF",
+          "provider": "unsloth"
+        },
+        {
+          "repo": "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-Math-1.5B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "1.5B",
+      "parameters_raw": 1543714304,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.8,
+      "quantization": "Q4_K_M",
+      "context_length": 4096,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-09-16",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-Math-1.5B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen2.5-Math-7B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "7.6B",
+      "parameters_raw": 7615616512,
+      "min_ram_gb": 4.3,
+      "recommended_ram_gb": 7.1,
+      "min_vram_gb": 3.9,
+      "quantization": "Q4_K_M",
+      "context_length": 4096,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen2",
+      "release_date": "2024-09-19",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Qwen2.5-Math-7B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen3-0.6B",
+      "provider": "Alibaba",
+      "parameter_count": "752M",
+      "parameters_raw": 751632384,
+      "min_ram_gb": 1.0,
+      "recommended_ram_gb": 2.0,
+      "min_vram_gb": 0.5,
+      "quantization": "Q4_K_M",
+      "context_length": 40960,
+      "use_case": "general",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen3",
+      "release_date": "2025-04-27",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Qwen3-0.6B-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen3-14B",
+      "provider": "Alibaba",
+      "parameter_count": "14.8B",
+      "parameters_raw": 14770000000,
+      "min_ram_gb": 8.2,
+      "recommended_ram_gb": 13.7,
+      "min_vram_gb": 7.6,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "qwen3",
+      "release_date": "",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Qwen3-14B-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen3-235B-A22B",
+      "provider": "Alibaba",
+      "parameter_count": "235.1B",
+      "parameters_raw": 235093634560,
+      "min_ram_gb": 131.4,
+      "recommended_ram_gb": 218.9,
+      "min_vram_gb": 120.4,
+      "quantization": "Q4_K_M",
+      "context_length": 40960,
+      "use_case": "general",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen3_moe",
+      "release_date": "2025-04-27",
+      "is_moe": true,
+      "num_experts": 128,
+      "active_experts": 8,
+      "active_parameters": 22000000000,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Qwen3-235B-A22B-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen3-Coder-Next",
+      "provider": "Alibaba",
+      "parameter_count": "80B",
+      "parameters_raw": 80000000000,
+      "min_ram_gb": 44.8,
+      "recommended_ram_gb": 74.6,
+      "min_vram_gb": 41.0,
+      "quantization": "Q4_K_M",
+      "context_length": 262144,
+      "use_case": "coding",
+      "capabilities": [],
+      "architecture": "qwen3_next",
+      "release_date": "2026-01-30",
+      "is_moe": true,
+      "num_experts": 64,
+      "active_experts": 4,
+      "active_parameters": 3000000000,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Qwen3-Coder-Next-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "Qwen/Qwen3-Next-80B-A3B-Instruct",
+      "provider": "Alibaba",
+      "parameter_count": "81.3B",
+      "parameters_raw": 81324862720,
+      "min_ram_gb": 45.4,
+      "recommended_ram_gb": 75.7,
+      "min_vram_gb": 41.7,
+      "quantization": "Q4_K_M",
+      "context_length": 262144,
+      "use_case": "chat",
+      "capabilities": [
+        "tool_use"
+      ],
+      "architecture": "qwen3_next",
+      "release_date": "2025-09-09",
+      "is_moe": true,
+      "num_experts": 512,
+      "active_experts": 10,
+      "active_parameters": 5575200546,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "RedHatAI/gpt-oss-20b",
+      "provider": "redhatai",
+      "parameter_count": "21.5B",
+      "parameters_raw": 21511953984,
+      "min_ram_gb": 12.0,
+      "recommended_ram_gb": 20.0,
+      "min_vram_gb": 11.0,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "gpt_oss",
+      "release_date": "2025-09-04",
+      "is_moe": true,
+      "num_experts": 32,
+      "active_experts": 4,
+      "active_parameters": 3630142231,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/gpt-oss-20b-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "rednote-hilab/dots.llm1.inst",
+      "provider": "rednote-hilab",
+      "parameter_count": "142.8B",
+      "parameters_raw": 142774381696,
+      "min_ram_gb": 79.8,
+      "recommended_ram_gb": 133.0,
+      "min_vram_gb": 73.1,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "dots1",
+      "release_date": "2025-05-14",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/dots.llm1.inst-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "Salesforce/xLAM-7b-r",
+      "provider": "salesforce",
+      "parameter_count": "7.2B",
+      "parameters_raw": 7241732096,
+      "min_ram_gb": 4.0,
+      "recommended_ram_gb": 6.7,
+      "min_vram_gb": 3.7,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "mistral",
+      "release_date": "2024-08-28",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/xLAM-7b-r-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "Salesforce/xLAM-8x7b-r",
+      "provider": "salesforce",
+      "parameter_count": "46.7B",
+      "parameters_raw": 46702792704,
+      "min_ram_gb": 26.1,
+      "recommended_ram_gb": 43.5,
+      "min_vram_gb": 23.9,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "mixtral",
+      "release_date": "2024-08-28",
+      "is_moe": true,
+      "num_experts": 8,
+      "active_experts": 2,
+      "active_parameters": 13427052901,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/xLAM-8x7b-r-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "THUDM/glm-4-9b-chat",
+      "provider": "thudm",
+      "parameter_count": "9.4B",
+      "parameters_raw": 9399951392,
+      "min_ram_gb": 5.3,
+      "recommended_ram_gb": 8.8,
+      "min_vram_gb": 4.8,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "chatglm",
+      "release_date": "2024-06-04",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/glm-4-9b-chat-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "tiiuae/Falcon3-7B-Instruct",
+      "provider": "TII",
+      "parameter_count": "7.5B",
+      "parameters_raw": 7455550464,
+      "min_ram_gb": 4.2,
+      "recommended_ram_gb": 6.9,
+      "min_vram_gb": 3.8,
+      "quantization": "Q4_K_M",
+      "context_length": 32768,
+      "use_case": "chat",
+      "capabilities": [],
+      "architecture": "llama",
+      "release_date": "2024-11-29",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "bartowski/Falcon3-7B-Instruct-GGUF",
+          "provider": "bartowski"
+        }
+      ]
+    },
+    {
+      "name": "XiaomiMiMo/MiMo-V2-Flash",
+      "provider": "xiaomimimo",
+      "parameter_count": "309.8B",
+      "parameters_raw": 309785318400,
+      "min_ram_gb": 173.1,
+      "recommended_ram_gb": 288.5,
+      "min_vram_gb": 158.7,
+      "quantization": "Q4_K_M",
+      "context_length": 262144,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "mimo_v2_flash",
+      "release_date": "2025-12-16",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/MiMo-V2-Flash-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "zai-org/GLM-4.5",
+      "provider": "zai-org",
+      "parameter_count": "358.3B",
+      "parameters_raw": 358337791296,
+      "min_ram_gb": 200.2,
+      "recommended_ram_gb": 333.7,
+      "min_vram_gb": 183.6,
+      "quantization": "Q4_K_M",
+      "context_length": 131072,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "glm4_moe",
+      "release_date": "2025-07-20",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/GLM-4.5-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    },
+    {
+      "name": "zai-org/GLM-4.6",
+      "provider": "zai-org",
+      "parameter_count": "356.8B",
+      "parameters_raw": 356785898816,
+      "min_ram_gb": 199.4,
+      "recommended_ram_gb": 332.3,
+      "min_vram_gb": 182.8,
+      "quantization": "Q4_K_M",
+      "context_length": 202752,
+      "use_case": "general",
+      "capabilities": [],
+      "architecture": "glm4_moe",
+      "release_date": "2025-09-29",
+      "is_moe": false,
+      "num_experts": null,
+      "active_experts": null,
+      "active_parameters": null,
+      "gguf_sources": [
+        {
+          "repo": "unsloth/GLM-4.6-GGUF",
+          "provider": "unsloth"
+        }
+      ]
+    }
+  ]
+}

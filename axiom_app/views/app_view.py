@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from axiom_app.models.session_types import EvidenceSource
+from axiom_app.services.local_llm_recommender import LocalLlmRecommenderService
 from axiom_app.services.wizard_recommendation import (
     describe_auto_recommendation,
     estimate_setup_cost,
@@ -86,9 +87,20 @@ _SETTINGS_SPEC: list[tuple[str, list[tuple[str, str, str, list[str] | None]]]] =
     ("Local LLM", [
         ("local_llm_url", "LM Studio URL", "entry", None),
         ("local_gguf_model_path", "GGUF Model Path", "file_browse", None),
+        ("local_gguf_models_dir", "GGUF Models Dir", "entry", None),
         ("local_gguf_context_length", "Context Length", "entry", None),
         ("local_gguf_gpu_layers", "GPU Layers", "entry", None),
         ("local_gguf_threads", "CPU Threads", "entry", None),
+    ]),
+    ("Hardware Overrides", [
+        ("hardware_override_enabled", "Enable Overrides", "checkbutton", None),
+        ("hardware_override_total_ram_gb", "Total RAM (GB)", "entry", None),
+        ("hardware_override_available_ram_gb", "Available RAM (GB)", "entry", None),
+        ("hardware_override_gpu_name", "GPU Name", "entry", None),
+        ("hardware_override_gpu_vram_gb", "GPU VRAM (GB)", "entry", None),
+        ("hardware_override_gpu_count", "GPU Count", "entry", None),
+        ("hardware_override_backend", "Backend", "combobox", ["", "cpu_x86", "cpu_arm", "cuda", "metal", "rocm", "vulkan", "sycl", "ascend"]),
+        ("hardware_override_unified_memory", "Unified Memory", "checkbutton", None),
     ]),
     ("System Instructions", [
         ("system_instructions", "System Prompt", "text", None),
@@ -291,6 +303,10 @@ class AppView(QMainWindow):
     activateLocalModelRequested = Signal(str)
     openLocalModelFolderRequested = Signal()
     installLocalDependencyRequested = Signal(object)
+    refreshLocalGgufRecommendationsRequested = Signal(str)
+    importLocalGgufRecommendationRequested = Signal()
+    applyLocalGgufRecommendationRequested = Signal()
+    editHardwareAssumptionsRequested = Signal()
     modeStateChanged = Signal(dict)
 
     def __init__(self, theme_name: str = "space_dust", parent: QWidget | None = None) -> None:
@@ -299,6 +315,7 @@ class AppView(QMainWindow):
         self._palette = get_palette(theme_name)
         self._fonts = resolve_fonts()
         self._animator = AnimationEngine(self)
+        self._local_llm_recommender = LocalLlmRecommenderService()
         self.tooltip_manager = TooltipManager(self, lambda: self._palette)
         self._allow_close = False
         self._chat_has_messages = False
@@ -804,6 +821,62 @@ class AppView(QMainWindow):
         local_layout.addWidget(self._local_model_dependency_label)
         local_models.content_layout.addWidget(local_body)
         holder_layout.addWidget(local_models)
+
+        gguf_recommendations = CollapsibleFrame(holder, "Local GGUF Recommendations", True, self._animator)
+        gguf_body = QWidget(gguf_recommendations.content)
+        gguf_layout = QVBoxLayout(gguf_body)
+        gguf_layout.setContentsMargins(0, 0, 0, 0)
+        gguf_layout.setSpacing(UI_SPACING["s"])
+        self._local_gguf_hardware_label = QLabel("", gguf_body)
+        self._local_gguf_hardware_label.setWordWrap(True)
+        gguf_layout.addWidget(self._local_gguf_hardware_label)
+        self._local_gguf_advisory_label = QLabel("", gguf_body)
+        self._local_gguf_advisory_label.setWordWrap(True)
+        gguf_layout.addWidget(self._local_gguf_advisory_label)
+        gguf_filters = QHBoxLayout()
+        gguf_filters.addWidget(QLabel("Use case", gguf_body))
+        self._local_gguf_use_case_combo = QComboBox(gguf_body)
+        self._local_gguf_use_case_combo.addItems(["general", "chat", "reasoning", "coding"])
+        self._local_gguf_use_case_combo.currentTextChanged.connect(
+            self.refreshLocalGgufRecommendationsRequested.emit
+        )
+        gguf_filters.addWidget(self._local_gguf_use_case_combo)
+        self.btn_refresh_local_gguf_recommendations = QPushButton("Refresh", gguf_body)
+        self.btn_refresh_local_gguf_recommendations.clicked.connect(
+            lambda: self.refreshLocalGgufRecommendationsRequested.emit(self._local_gguf_use_case_combo.currentText())
+        )
+        gguf_filters.addWidget(self.btn_refresh_local_gguf_recommendations)
+        self.btn_edit_hardware_assumptions = QPushButton("Edit Hardware Assumptions", gguf_body)
+        self.btn_edit_hardware_assumptions.clicked.connect(self.editHardwareAssumptionsRequested.emit)
+        gguf_filters.addWidget(self.btn_edit_hardware_assumptions)
+        gguf_filters.addStretch(1)
+        gguf_layout.addLayout(gguf_filters)
+        self._local_gguf_recommendation_tree = self._make_tree(
+            ["Model", "Params", "Fit", "Quant", "Speed", "Context", "Source"],
+            gguf_body,
+        )
+        self._local_gguf_recommendation_tree.itemSelectionChanged.connect(
+            self._update_local_gguf_recommendation_details
+        )
+        gguf_layout.addWidget(self._local_gguf_recommendation_tree)
+        gguf_button_row = QHBoxLayout()
+        self.btn_import_local_gguf_recommendation = QPushButton("Import Selected", gguf_body)
+        self.btn_import_local_gguf_recommendation.clicked.connect(
+            self.importLocalGgufRecommendationRequested.emit
+        )
+        gguf_button_row.addWidget(self.btn_import_local_gguf_recommendation)
+        self.btn_apply_local_gguf_recommendation = QPushButton("Apply as Local LLM", gguf_body)
+        self.btn_apply_local_gguf_recommendation.clicked.connect(
+            self.applyLocalGgufRecommendationRequested.emit
+        )
+        gguf_button_row.addWidget(self.btn_apply_local_gguf_recommendation)
+        gguf_button_row.addStretch(1)
+        gguf_layout.addLayout(gguf_button_row)
+        self._local_gguf_recommendation_notes = QLabel("", gguf_body)
+        self._local_gguf_recommendation_notes.setWordWrap(True)
+        gguf_layout.addWidget(self._local_gguf_recommendation_notes)
+        gguf_recommendations.content_layout.addWidget(gguf_body)
+        holder_layout.addWidget(gguf_recommendations)
         holder_layout.addStretch(1)
 
         self._settings_scroll.setWidget(holder)
@@ -1172,6 +1245,140 @@ class AppView(QMainWindow):
         else:
             self._local_model_dependency_label.setText("")
 
+    def set_local_gguf_recommendations(self, payload: dict[str, Any]) -> None:
+        rows = list(payload.get("rows") or [])
+        hardware = dict(payload.get("hardware") or {})
+        use_case = str(payload.get("use_case", "general") or "general")
+        blocker = QSignalBlocker(self._local_gguf_use_case_combo)
+        self._local_gguf_use_case_combo.setCurrentText(use_case)
+        del blocker
+        summary_bits = [
+            f"RAM {float(hardware.get('available_ram_gb', 0.0) or 0.0):.1f}/{float(hardware.get('total_ram_gb', 0.0) or 0.0):.1f} GB free",
+            f"CPU {int(hardware.get('total_cpu_cores', 0) or 0)} cores",
+            f"backend={str(hardware.get('backend', 'cpu_x86') or 'cpu_x86')}",
+        ]
+        if hardware.get("has_gpu"):
+            if hardware.get("unified_memory"):
+                summary_bits.append(f"GPU {str(hardware.get('gpu_name') or 'Integrated')} (unified memory)")
+            else:
+                summary_bits.append(
+                    f"GPU {str(hardware.get('gpu_name') or 'Detected')} ({float(hardware.get('gpu_vram_gb', 0.0) or 0.0):.1f} GB VRAM)"
+                )
+        else:
+            summary_bits.append("GPU not detected")
+        if hardware.get("override_enabled"):
+            summary_bits.append("overrides active")
+        self._local_gguf_hardware_label.setText("Hardware: " + " | ".join(summary_bits))
+        advisory = "Recommendations are advisory only for this session." if payload.get("advisory_only") else ""
+        self._local_gguf_advisory_label.setText(advisory)
+        self._local_gguf_recommendation_tree.clear()
+        for row in rows:
+            item = QTreeWidgetItem(
+                [
+                    str(row.get("model_name", "")),
+                    str(row.get("parameter_count", "")),
+                    str(row.get("fit_level", "")),
+                    str(row.get("best_quant", "")),
+                    f"{float(row.get('estimated_tps', 0.0) or 0.0):.1f} tok/s",
+                    str(row.get("recommended_context_length", "")),
+                    str(row.get("source_provider", "") or row.get("provider", "")),
+                ]
+            )
+            item.setData(0, Qt.UserRole, dict(row))
+            self._local_gguf_recommendation_tree.addTopLevelItem(item)
+        if self._local_gguf_recommendation_tree.topLevelItemCount() > 0:
+            self._local_gguf_recommendation_tree.setCurrentItem(
+                self._local_gguf_recommendation_tree.topLevelItem(0)
+            )
+        else:
+            self._local_gguf_recommendation_notes.setText("No matching GGUF recommendations for the selected use case.")
+
+    def _update_local_gguf_recommendation_details(self) -> None:
+        payload = self.get_selected_local_gguf_recommendation()
+        if not payload:
+            self._local_gguf_recommendation_notes.setText("")
+            return
+        notes = list(payload.get("notes") or [])
+        summary = (
+            f"Fit {payload.get('fit_level', '')} via {payload.get('run_mode', '')}. "
+            f"Needs {float(payload.get('memory_required_gb', 0.0) or 0.0):.1f} GB "
+            f"from {float(payload.get('memory_available_gb', 0.0) or 0.0):.1f} GB budget."
+        )
+        self._local_gguf_recommendation_notes.setText("\n".join([summary, *notes[:3]]))
+
+    def get_selected_local_gguf_recommendation(self) -> dict[str, Any] | None:
+        item = self._local_gguf_recommendation_tree.currentItem()
+        if item is None:
+            return None
+        payload = item.data(0, Qt.UserRole)
+        return dict(payload or {}) if isinstance(payload, dict) else None
+
+    def show_hardware_override_editor(
+        self,
+        settings: dict[str, Any],
+        detected_hardware: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Hardware Assumptions")
+        dialog.resize(560, 360)
+        root = QVBoxLayout(dialog)
+        summary = QLabel(
+            "Detected: "
+            + str(detected_hardware.get("cpu_name", "CPU"))
+            + " | "
+            + str(detected_hardware.get("gpu_name", "No GPU"))
+            + " | "
+            + f"RAM {float(detected_hardware.get('available_ram_gb', 0.0) or 0.0):.1f}/{float(detected_hardware.get('total_ram_gb', 0.0) or 0.0):.1f} GB",
+            dialog,
+        )
+        summary.setWordWrap(True)
+        root.addWidget(summary)
+        grid = QGridLayout()
+        root.addLayout(grid)
+        enabled = QCheckBox("Enable manual overrides", dialog)
+        enabled.setChecked(bool(settings.get("hardware_override_enabled", False)))
+        grid.addWidget(enabled, 0, 0, 1, 2)
+        total_ram = QLineEdit(str(settings.get("hardware_override_total_ram_gb", 0) or 0), dialog)
+        available_ram = QLineEdit(str(settings.get("hardware_override_available_ram_gb", 0) or 0), dialog)
+        gpu_name = QLineEdit(str(settings.get("hardware_override_gpu_name", "") or ""), dialog)
+        gpu_vram = QLineEdit(str(settings.get("hardware_override_gpu_vram_gb", 0) or 0), dialog)
+        gpu_count = QLineEdit(str(settings.get("hardware_override_gpu_count", 0) or 0), dialog)
+        backend = QComboBox(dialog)
+        backend.addItems(["", "cpu_x86", "cpu_arm", "cuda", "metal", "rocm", "vulkan", "sycl", "ascend"])
+        backend.setCurrentText(str(settings.get("hardware_override_backend", "") or ""))
+        unified = QCheckBox("Unified memory", dialog)
+        unified.setChecked(bool(settings.get("hardware_override_unified_memory", False)))
+        for row, (label, widget) in enumerate(
+            (
+                ("Total RAM (GB)", total_ram),
+                ("Available RAM (GB)", available_ram),
+                ("GPU Name", gpu_name),
+                ("GPU VRAM (GB)", gpu_vram),
+                ("GPU Count", gpu_count),
+                ("Backend", backend),
+            ),
+            start=1,
+        ):
+            grid.addWidget(QLabel(label, dialog), row, 0)
+            grid.addWidget(widget, row, 1)
+        grid.addWidget(unified, 7, 0, 1, 2)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        root.addWidget(buttons)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return {
+            "hardware_override_enabled": enabled.isChecked(),
+            "hardware_override_total_ram_gb": total_ram.text().strip(),
+            "hardware_override_available_ram_gb": available_ram.text().strip(),
+            "hardware_override_gpu_name": gpu_name.text().strip(),
+            "hardware_override_gpu_vram_gb": gpu_vram.text().strip(),
+            "hardware_override_gpu_count": gpu_count.text().strip(),
+            "hardware_override_backend": backend.currentText().strip(),
+            "hardware_override_unified_memory": unified.isChecked(),
+        }
+
     def get_selected_local_model_id(self) -> str:
         item = self._local_model_tree.currentItem()
         return str(item.data(0, Qt.UserRole) if item is not None else "")
@@ -1414,6 +1621,41 @@ class AppView(QMainWindow):
             provider_tab.layout().addWidget(widget, row, 1)
         provider_tab.layout().addWidget(agentic_mode, 7, 2)
 
+        local_gguf_state = {
+            "local_gguf_models_dir": str(initial_state.get("local_gguf_models_dir", "") or ""),
+            "hardware_override_enabled": bool(initial_state.get("hardware_override_enabled", False)),
+            "hardware_override_total_ram_gb": initial_state.get("hardware_override_total_ram_gb", 0),
+            "hardware_override_available_ram_gb": initial_state.get("hardware_override_available_ram_gb", 0),
+            "hardware_override_gpu_name": str(initial_state.get("hardware_override_gpu_name", "") or ""),
+            "hardware_override_gpu_vram_gb": initial_state.get("hardware_override_gpu_vram_gb", 0),
+            "hardware_override_gpu_count": initial_state.get("hardware_override_gpu_count", 0),
+            "hardware_override_backend": str(initial_state.get("hardware_override_backend", "") or ""),
+            "hardware_override_unified_memory": bool(initial_state.get("hardware_override_unified_memory", False)),
+        }
+        local_gguf_hardware_label = QLabel("", dialog)
+        local_gguf_hardware_label.setWordWrap(True)
+        local_gguf_advisory_label = QLabel("", dialog)
+        local_gguf_advisory_label.setWordWrap(True)
+        local_gguf_tree = self._make_tree(
+            ["Model", "Params", "Fit", "Quant", "Speed", "Context", "Source"],
+            dialog,
+        )
+        local_gguf_notes = QLabel("", dialog)
+        local_gguf_notes.setWordWrap(True)
+        refresh_local_gguf = QPushButton("Refresh GGUF Picks", dialog)
+        edit_local_hardware = QPushButton("Edit Hardware Assumptions", dialog)
+        import_local_gguf = QCheckBox("Import selected GGUF on finish", dialog)
+        use_selected_local_gguf = QPushButton("Use Selected Recommendation", dialog)
+        provider_tab.layout().addWidget(QLabel("Local GGUF recommendations", dialog), 12, 0)
+        provider_tab.layout().addWidget(local_gguf_hardware_label, 13, 0, 1, 3)
+        provider_tab.layout().addWidget(local_gguf_advisory_label, 14, 0, 1, 3)
+        provider_tab.layout().addWidget(refresh_local_gguf, 15, 0)
+        provider_tab.layout().addWidget(edit_local_hardware, 15, 1)
+        provider_tab.layout().addWidget(import_local_gguf, 15, 2)
+        provider_tab.layout().addWidget(local_gguf_tree, 16, 0, 1, 3)
+        provider_tab.layout().addWidget(use_selected_local_gguf, 17, 0)
+        provider_tab.layout().addWidget(local_gguf_notes, 18, 0, 1, 3)
+
         openai_key = QLineEdit(str(initial_state.get("api_key_openai", "") or ""), dialog)
         anthropic_key = QLineEdit(str(initial_state.get("api_key_anthropic", "") or ""), dialog)
         google_key = QLineEdit(str(initial_state.get("api_key_google", "") or ""), dialog)
@@ -1452,6 +1694,94 @@ class AppView(QMainWindow):
                 deepread_mode.setChecked(True)
             refresh_summary()
 
+        def current_local_gguf_use_case() -> str:
+            return self._local_llm_recommender.wizard_mode_to_use_case(mode_preset.currentText())
+
+        def selected_local_gguf_recommendation() -> dict[str, Any] | None:
+            item = local_gguf_tree.currentItem()
+            payload = item.data(0, Qt.UserRole) if item is not None else None
+            return dict(payload or {}) if isinstance(payload, dict) else None
+
+        def update_local_gguf_notes() -> None:
+            payload = selected_local_gguf_recommendation()
+            if not payload:
+                local_gguf_notes.setText("")
+                return
+            notes = list(payload.get("notes") or [])
+            summary = (
+                f"Fit {payload.get('fit_level', '')} via {payload.get('run_mode', '')}. "
+                f"Needs {float(payload.get('memory_required_gb', 0.0) or 0.0):.1f} GB "
+                f"from {float(payload.get('memory_available_gb', 0.0) or 0.0):.1f} GB."
+            )
+            local_gguf_notes.setText("\n".join([summary, *notes[:3]]))
+
+        def populate_local_gguf_recommendations(payload: dict[str, Any]) -> None:
+            hardware = dict(payload.get("hardware") or {})
+            summary_bits = [
+                f"RAM {float(hardware.get('available_ram_gb', 0.0) or 0.0):.1f}/{float(hardware.get('total_ram_gb', 0.0) or 0.0):.1f} GB free",
+                f"CPU {int(hardware.get('total_cpu_cores', 0) or 0)} cores",
+                f"backend={str(hardware.get('backend', 'cpu_x86') or 'cpu_x86')}",
+            ]
+            if hardware.get("has_gpu"):
+                if hardware.get("unified_memory"):
+                    summary_bits.append(f"GPU {str(hardware.get('gpu_name') or 'Integrated')} (unified)")
+                else:
+                    summary_bits.append(
+                        f"GPU {str(hardware.get('gpu_name') or 'Detected')} ({float(hardware.get('gpu_vram_gb', 0.0) or 0.0):.1f} GB VRAM)"
+                    )
+            else:
+                summary_bits.append("GPU not detected")
+            local_gguf_hardware_label.setText("Hardware: " + " | ".join(summary_bits))
+            local_gguf_advisory_label.setText(
+                "Recommendations are advisory only for this session."
+                if payload.get("advisory_only")
+                else ""
+            )
+            local_gguf_tree.clear()
+            for row in payload.get("rows") or []:
+                item = QTreeWidgetItem(
+                    [
+                        str(row.get("model_name", "")),
+                        str(row.get("parameter_count", "")),
+                        str(row.get("fit_level", "")),
+                        str(row.get("best_quant", "")),
+                        f"{float(row.get('estimated_tps', 0.0) or 0.0):.1f} tok/s",
+                        str(row.get("recommended_context_length", "")),
+                        str(row.get("source_provider", "") or row.get("provider", "")),
+                    ]
+                )
+                item.setData(0, Qt.UserRole, dict(row))
+                local_gguf_tree.addTopLevelItem(item)
+            if local_gguf_tree.topLevelItemCount() > 0:
+                local_gguf_tree.setCurrentItem(local_gguf_tree.topLevelItem(0))
+            update_local_gguf_notes()
+
+        def refresh_local_gguf_recommendations() -> dict[str, Any]:
+            payload = self._local_llm_recommender.recommend_models(
+                use_case=current_local_gguf_use_case(),
+                settings=local_gguf_state,
+                current_mode=mode_preset.currentText(),
+            )
+            populate_local_gguf_recommendations(payload)
+            return payload
+
+        def use_selected_local_recommendation() -> None:
+            payload = selected_local_gguf_recommendation()
+            if not payload:
+                return
+            llm_provider.setCurrentText("local_gguf")
+            llm_model.setText(str(payload.get("model_name", "") or ""))
+            import_local_gguf.setChecked(True)
+            refresh_summary()
+
+        def edit_local_gguf_hardware() -> None:
+            payload = refresh_local_gguf_recommendations()
+            edited = self.show_hardware_override_editor(local_gguf_state, dict(payload.get("hardware") or {}))
+            if not isinstance(edited, dict):
+                return
+            local_gguf_state.update(edited)
+            refresh_local_gguf_recommendations()
+
         def summary_payload() -> dict[str, Any]:
             recommendation = current_recommendation()
             return {
@@ -1483,6 +1813,20 @@ class AppView(QMainWindow):
                 "deepread_mode": deepread_mode.isChecked(),
                 "vector_db_type": vector_backend.currentText(),
                 "wizard_recommendation": recommendation,
+                "selected_local_gguf_recommendation": selected_local_gguf_recommendation(),
+                "import_local_gguf_recommendation": import_local_gguf.isChecked(),
+                "local_gguf_use_case": current_local_gguf_use_case(),
+                "local_gguf_models_dir": str(local_gguf_state.get("local_gguf_models_dir", "") or ""),
+                "hardware_override_enabled": bool(local_gguf_state.get("hardware_override_enabled", False)),
+                "hardware_override_total_ram_gb": local_gguf_state.get("hardware_override_total_ram_gb", 0),
+                "hardware_override_available_ram_gb": local_gguf_state.get("hardware_override_available_ram_gb", 0),
+                "hardware_override_gpu_name": str(local_gguf_state.get("hardware_override_gpu_name", "") or ""),
+                "hardware_override_gpu_vram_gb": local_gguf_state.get("hardware_override_gpu_vram_gb", 0),
+                "hardware_override_gpu_count": local_gguf_state.get("hardware_override_gpu_count", 0),
+                "hardware_override_backend": str(local_gguf_state.get("hardware_override_backend", "") or ""),
+                "hardware_override_unified_memory": bool(
+                    local_gguf_state.get("hardware_override_unified_memory", False)
+                ),
                 "cost_estimate": estimate_setup_cost(
                     recommendation,
                     llm_provider=llm_provider.currentText(),
@@ -1495,6 +1839,10 @@ class AppView(QMainWindow):
             confirm_browser.setPlainText(json.dumps(summary_payload(), indent=2, ensure_ascii=False))
 
         apply_rec.clicked.connect(apply_recommendation)
+        refresh_local_gguf.clicked.connect(refresh_local_gguf_recommendations)
+        edit_local_hardware.clicked.connect(edit_local_gguf_hardware)
+        use_selected_local_gguf.clicked.connect(use_selected_local_recommendation)
+        local_gguf_tree.itemSelectionChanged.connect(update_local_gguf_notes)
         for signal in (
             file_edit.textChanged,
             index_combo.currentTextChanged,
@@ -1509,11 +1857,15 @@ class AppView(QMainWindow):
             vector_backend.currentTextChanged,
         ):
             signal.connect(refresh_summary)
+        mode_preset.currentTextChanged.connect(lambda *_args: refresh_local_gguf_recommendations())
         for widget in (chunk_size, chunk_overlap, retrieval_k, top_k, agentic_iterations):
             widget.valueChanged.connect(refresh_summary)
         for widget in (build_digest, build_comprehension, prefer_comprehension, deepread_mode, use_reranker, agentic_mode):
             widget.toggled.connect(refresh_summary)
         comprehension_depth.currentTextChanged.connect(refresh_summary)
+        populate_local_gguf_recommendations(dict(initial_state.get("local_gguf_recommendations") or {}))
+        if local_gguf_tree.topLevelItemCount() == 0:
+            refresh_local_gguf_recommendations()
         refresh_summary()
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=dialog)
