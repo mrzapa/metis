@@ -1523,18 +1523,19 @@ class AppView(QMainWindow):
         return collected
 
     def _set_widget_value(self, widget: QWidget, value: Any) -> None:
+        text_value = "" if value is None else str(value)
         if isinstance(widget, QComboBox):
-            widget.setCurrentText(str(value or ""))
+            widget.setCurrentText(text_value)
         elif isinstance(widget, QCheckBox):
             widget.setChecked(bool(value))
         elif isinstance(widget, QTextEdit):
-            widget.setPlainText(str(value or ""))
+            widget.setPlainText(text_value)
         elif isinstance(widget, QLineEdit):
-            widget.setText(str(value or ""))
+            widget.setText(text_value)
         else:
             line_edit = getattr(widget, "_line_edit", None)
             if isinstance(line_edit, QLineEdit):
-                line_edit.setText(str(value or ""))
+                line_edit.setText(text_value)
 
     def _get_widget_value(self, widget: QWidget) -> Any:
         if isinstance(widget, QComboBox):
