@@ -22,9 +22,11 @@
   "hardware_override_gpu_count": 0,
   "hardware_override_backend": "",
   "hardware_override_unified_memory": false,
-  "selected_profile": "Built-in: Default",
   "last_used_mode": "advanced",
   "basic_wizard_completed": false,
+  "skills": {
+    "enabled": {}
+  },
   "system_instructions": "You are a highly capable AI assistant with access to retrieved document context. Think carefully and reason step-by-step about the user's question before answering. When retrieved context is provided, ground your factual claims in it using [S#] citations. If the context does not contain enough information to answer confidently, say so clearly.",
   "verbose_mode": false,
   "embeddings_backend": "mock",

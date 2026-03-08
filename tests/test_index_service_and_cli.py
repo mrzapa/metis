@@ -6,6 +6,7 @@ import sys
 import pytest
 
 from axiom_app.cli import main as cli_main
+import axiom_app.models.app_model as app_model_module
 from axiom_app.services.index_service import (
     build_index_bundle,
     load_index_manifest,
@@ -129,3 +130,72 @@ def test_cli_index_handles_cp1252_stdout(tmp_path, monkeypatch) -> None:
     stdout.flush()
     output = raw.getvalue().decode("cp1252")
     assert "Index written ->" in output
+
+
+def test_cli_skills_commands_and_query_show_skills(tmp_path, monkeypatch, capsys) -> None:
+    defaults = tmp_path / "default_settings.json"
+    user_settings = tmp_path / "settings.json"
+    legacy_settings = tmp_path / "agentic_rag_config.json"
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    research_dir = skills_dir / "research-claims"
+    research_dir.mkdir()
+    (research_dir / "SKILL.md").write_text(
+        "---\n"
+        "id: research-claims\n"
+        "name: Research Claims\n"
+        "description: Map evidence-backed claims.\n"
+        "enabled_by_default: false\n"
+        "priority: 8\n"
+        "triggers:\n"
+        '  keywords: ["claim", "counterclaim"]\n'
+        '  modes: ["Research"]\n'
+        '  file_types: [".txt"]\n'
+        '  output_styles: ["Structured report"]\n'
+        "runtime_overrides:\n"
+        '  selected_mode: "Research"\n'
+        "  retrieval_k: 9\n"
+        "  top_k: 4\n"
+        "---\n"
+        "Focus on claims and counterclaims.\n",
+        encoding="utf-8",
+    )
+    defaults.write_text(
+        io.StringIO(
+            '{"embedding_provider":"mock","embedding_model":"mock-embed","llm_provider":"mock","llm_model":"mock-v1","vector_db_type":"json","chunk_size":120,"chunk_overlap":0,"retrieval_k":3,"top_k":2,"selected_mode":"Q&A","output_style":"Structured report","skills":{"enabled":{}}}'
+        ).getvalue(),
+        encoding="utf-8",
+    )
+    user_settings.write_text("{}", encoding="utf-8")
+    legacy_settings.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(app_model_module, "_DEFAULT_SETTINGS_PATH", defaults)
+    monkeypatch.setattr(app_model_module, "_USER_SETTINGS_PATH", user_settings)
+    monkeypatch.setattr(app_model_module, "_LEGACY_CONFIG_PATH", legacy_settings)
+    monkeypatch.setattr(app_model_module, "_SKILLS_DIR", skills_dir)
+
+    assert cli_main(["skills", "list"]) == 0
+    stdout = capsys.readouterr().out
+    assert "research-claims" in stdout
+
+    assert cli_main(["skills", "enable", "research-claims"]) == 0
+    persisted = user_settings.read_text(encoding="utf-8")
+    assert '"research-claims": true' in persisted
+
+    src = tmp_path / "claims.txt"
+    src.write_text("The document contains a claim and a counterclaim.\n", encoding="utf-8")
+    assert cli_main(
+        [
+            "query",
+            "--file",
+            str(src),
+            "--question",
+            "map the claim and counterclaim",
+            "--show-skills",
+            "--pin-skill",
+            "research-claims",
+        ]
+    ) == 0
+    stdout = capsys.readouterr().out
+    assert "Primary  : research-claims" in stdout
+    assert "research-claims: pinned for session" in stdout

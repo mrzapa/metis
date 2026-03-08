@@ -39,6 +39,7 @@ _LEGACY_CONFIG_PATH    = _REPO_ROOT    / "agentic_rag_config.json"
 _SESSION_DB_PATH       = _REPO_ROOT    / "rag_sessions.db"
 _INDEX_STORAGE_DIR     = _REPO_ROOT    / "indexes"
 _PROFILES_DIR          = _REPO_ROOT    / "profiles"
+_SKILLS_DIR            = _REPO_ROOT    / "skills"
 _TRACE_DIR             = _REPO_ROOT    / "traces"
 
 
@@ -85,13 +86,13 @@ class AppModel:
         self.available_indexes: list[Any] = []
         self.brain_graph: BrainGraph | None = None
         self.selected_brain_node: str = ""
-        self.current_profile_label: str = "Built-in: Default"
+        self.current_skill_id: str = ""
         self.last_run_id: str = ""
         self.rag_blocked_reason: str = ""
         self.bootstrap_complete: bool = False
         self.session_db_path: pathlib.Path = _SESSION_DB_PATH
         self.index_storage_dir: pathlib.Path = _INDEX_STORAGE_DIR
-        self.profiles_dir: pathlib.Path = _PROFILES_DIR
+        self.skills_dir: pathlib.Path = _SKILLS_DIR
         self.trace_dir: pathlib.Path = _TRACE_DIR
         self.legacy_config_path: pathlib.Path = _LEGACY_CONFIG_PATH
 
@@ -156,9 +157,7 @@ class AppModel:
             if key not in user:
                 self.settings[key] = value
         self.settings.update(user)
-        self.current_profile_label = str(
-            self.settings.get("selected_profile", self.current_profile_label) or self.current_profile_label
-        )
+        self.current_skill_id = str(self.settings.get("current_skill_id", self.current_skill_id) or "")
 
         self.logger.debug("Active settings: %s", self.settings)
 
@@ -214,6 +213,6 @@ class AppModel:
             "active_index_id": self.active_index_id,
             "current_session_id": self.current_session_id,
             "selected_brain_node": self.selected_brain_node,
-            "selected_profile": self.current_profile_label,
+            "current_skill_id": self.current_skill_id,
             "bootstrap_complete": self.bootstrap_complete,
         }

@@ -5,6 +5,9 @@ from axiom_app.models.parity_types import (
     IndexManifest,
     LocalModelEntry,
     ResolvedRuntimeSettings,
+    SkillDefinition,
+    SkillMatch,
+    SkillSessionState,
     TraceEvent,
 )
 from axiom_app.models.sht import SHTNode, build_sht_tree
@@ -15,6 +18,9 @@ __all__ = [
     "LocalModelEntry",
     "ResolvedRuntimeSettings",
     "SHTNode",
+    "SkillDefinition",
+    "SkillMatch",
+    "SkillSessionState",
     "TraceEvent",
     "build_sht_tree",
 ]

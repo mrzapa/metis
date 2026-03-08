@@ -1,33 +1,4 @@
-"""axiom_app.cli — Headless command-line interface for Axiom.
-
-Provides ``index`` and ``query`` sub-commands that operate without any
-Tk/GUI dependency, making them usable in headless environments (CI, SSH,
-Docker, no-display servers) while reusing the same shared indexing and
-retrieval backends as the MVC app.
-
-Usage
------
-Index a document::
-
-    python main.py --cli index --file README.md
-    python main.py --cli index --file paper.txt --out paper.axiom-index
-
-Query a document::
-
-    python main.py --cli query --file README.md --question "how to install"
-    python main.py --cli query --file paper.txt --question "neural network"
-
-Or invoke the module directly::
-
-    python -m axiom_app.cli index --file README.md
-    python -m axiom_app.cli query --file paper.txt --question "attention"
-
-Exit codes
-----------
-0 — success
-1 — user error (file not found, missing argument, …)
-2 — unexpected internal error
-"""
+"""axiom_app.cli — Headless command-line interface for Axiom."""
 
 from __future__ import annotations
 
@@ -39,19 +10,18 @@ import textwrap
 from typing import Sequence
 
 from axiom_app.models.app_model import AppModel
+from axiom_app.models.parity_types import SkillSessionState
 from axiom_app.services.index_service import load_index_bundle
+from axiom_app.services.runtime_resolution import infer_file_types, resolve_runtime_settings
+from axiom_app.services.skill_repository import SkillRepository
 from axiom_app.services.vector_store import resolve_vector_store
 
-# ── constants ────────────────────────────────────────────────────────────────
-
 _SEP = "-" * 60
-_MAX_QUERY_HITS = 20          # cap displayed keyword matches
-_CONTEXT_CHARS  = 140         # chars shown per matching line
-_SNIPPET_CHARS  = 300         # chars in index summary snippet
+_MAX_QUERY_HITS = 20
+_CONTEXT_CHARS = 140
 
 
 def _safe_write(text: str, stream) -> None:
-    """Write *text* to *stream*, replacing characters the stream cannot encode."""
     try:
         stream.write(text)
     except UnicodeEncodeError:
@@ -66,16 +36,40 @@ def _safe_write(text: str, stream) -> None:
 
 
 def _safe_print(*values: object, sep: str = " ", end: str = "\n", file=None) -> None:
-    """Print using the target stream's encoding with replacement on failure."""
     stream = file if file is not None else sys.stdout
     _safe_write(sep.join(str(value) for value in values) + end, stream)
 
 
-# ── sub-command implementations ──────────────────────────────────────────────
+def _load_model() -> AppModel:
+    model = AppModel()
+    model.load_settings()
+    return model
+
+
+def _build_session_skill_state(args: argparse.Namespace) -> SkillSessionState:
+    return SkillSessionState(
+        pinned=[str(item).strip() for item in list(getattr(args, "pin_skill", []) or []) if str(item).strip()],
+        muted=[str(item).strip() for item in list(getattr(args, "mute_skill", []) or []) if str(item).strip()],
+    ).normalized()
+
+
+def _resolve_query_runtime(model: AppModel, bundle, question: str, args: argparse.Namespace):
+    skill_repository = SkillRepository(getattr(model, "skills_dir", None))
+    for skill in skill_repository.list_invalid_skills():
+        _safe_print(
+            f"warning: skipping invalid skill {skill.skill_id}: {'; '.join(skill.errors)}",
+            file=sys.stderr,
+        )
+    return resolve_runtime_settings(
+        dict(model.settings),
+        enabled_skills=skill_repository.enabled_skills(model.settings),
+        session_skill_state=_build_session_skill_state(args),
+        query=question,
+        file_types=infer_file_types(list(getattr(bundle, "documents", []) or [])),
+    )
 
 
 def cmd_index(args: argparse.Namespace) -> int:
-    """Build and persist an index using the shared MVC backend."""
     src = pathlib.Path(args.file)
     if not src.exists():
         _safe_print(f"error: file not found: {src}", file=sys.stderr)
@@ -84,8 +78,7 @@ def cmd_index(args: argparse.Namespace) -> int:
         _safe_print(f"error: not a regular file: {src}", file=sys.stderr)
         return 1
 
-    model = AppModel()
-    model.load_settings()
+    model = _load_model()
     model.set_documents([str(src)])
     adapter = resolve_vector_store(model.settings)
     available, reason = adapter.is_available(model.settings)
@@ -99,28 +92,18 @@ def cmd_index(args: argparse.Namespace) -> int:
         _safe_print(f"error reading {src}: {exc}", file=sys.stderr)
         return 1
 
-    out_path: pathlib.Path
-    if args.out:
-        out_path = pathlib.Path(args.out)
-    else:
-        out_path = src.with_name(src.name + ".axiom-index")
-
+    out_path = pathlib.Path(args.out) if args.out else src.with_name(src.name + ".axiom-index")
     try:
         adapter.save(bundle, target_path=out_path)
     except (OSError, ValueError) as exc:
         _safe_print(f"error writing index to {out_path}: {exc}", file=sys.stderr)
         return 1
 
-    char_count  = len(text)
-    word_count  = len(text.split())
-    line_count  = len(text.splitlines())
-    para_count  = len([p for p in text.split("\n\n") if p.strip()])
-
     _safe_print(f"Indexing : {src}")
-    _safe_print(f"  Characters : {char_count:>10,}")
-    _safe_print(f"  Words      : {word_count:>10,}")
-    _safe_print(f"  Lines      : {line_count:>10,}")
-    _safe_print(f"  Paragraphs : {para_count:>10,}")
+    _safe_print(f"  Characters : {len(text):>10,}")
+    _safe_print(f"  Words      : {len(text.split()):>10,}")
+    _safe_print(f"  Lines      : {len(text.splitlines()):>10,}")
+    _safe_print(f"  Paragraphs : {len([p for p in text.split(chr(10) * 2) if p.strip()]):>10,}")
     _safe_print(f"  Chunks     : {len(bundle.chunks):>10,}")
     _safe_print(f"  Index ID   : {bundle.index_id}")
     _safe_print(f"  Backend    : {bundle.vector_backend}")
@@ -129,7 +112,6 @@ def cmd_index(args: argparse.Namespace) -> int:
 
 
 def cmd_query(args: argparse.Namespace) -> int:
-    """Query a saved index or build one in memory from the source file."""
     src = pathlib.Path(args.file)
     if not src.exists():
         _safe_print(f"error: file not found: {src}", file=sys.stderr)
@@ -138,23 +120,21 @@ def cmd_query(args: argparse.Namespace) -> int:
         _safe_print(f"error: not a regular file: {src}", file=sys.stderr)
         return 1
 
-    question = args.question.strip()
+    question = str(args.question or "").strip()
     if not question:
         _safe_print("error: --question must not be empty", file=sys.stderr)
         return 1
 
-    model = AppModel()
-    model.load_settings()
-
+    model = _load_model()
     try:
         if args.index:
             bundle = load_index_bundle(args.index)
-            adapter = resolve_vector_store(
-                {**model.settings, "vector_db_type": str(bundle.vector_backend or model.settings.get("vector_db_type", "json"))}
-            )
-            available, reason = adapter.is_available(
-                {**model.settings, "vector_db_type": str(bundle.vector_backend or model.settings.get("vector_db_type", "json"))}
-            )
+            adapter_settings = {
+                **model.settings,
+                "vector_db_type": str(bundle.vector_backend or model.settings.get("vector_db_type", "json")),
+            }
+            adapter = resolve_vector_store(adapter_settings)
+            available, reason = adapter.is_available(adapter_settings)
             if not available:
                 _safe_print(f"error: vector backend unavailable: {reason}", file=sys.stderr)
                 return 1
@@ -170,8 +150,29 @@ def cmd_query(args: argparse.Namespace) -> int:
                 with tempfile.TemporaryDirectory(prefix="axiom_cli_query_") as temp_dir:
                     manifest_path = adapter.save(bundle, index_dir=temp_dir)
                     bundle = adapter.load(manifest_path)
-                    result = adapter.query(bundle, question, model.settings)
-                    return _print_query_result(src, question, bundle, result)
+                    resolved = _resolve_query_runtime(model, bundle, question, args)
+                    query_settings = dict(model.settings)
+                    query_settings.update(
+                        {
+                            "selected_mode": resolved.mode,
+                            "retrieval_k": resolved.retrieve_k,
+                            "top_k": resolved.final_k,
+                            "mmr_lambda": resolved.mmr_lambda,
+                            "retrieval_mode": resolved.retrieval_mode,
+                            "agentic_mode": resolved.agentic_mode,
+                            "agentic_max_iterations": resolved.agentic_max_iterations,
+                            "output_style": resolved.output_style,
+                        }
+                    )
+                    result = adapter.query(bundle, question, query_settings)
+                    return _print_query_result(
+                        src,
+                        question,
+                        bundle,
+                        result,
+                        resolved=resolved,
+                        show_skills=bool(args.show_skills),
+                    )
     except OSError as exc:
         _safe_print(f"error reading/building index: {exc}", file=sys.stderr)
         return 1
@@ -179,17 +180,46 @@ def cmd_query(args: argparse.Namespace) -> int:
         _safe_print(f"error preparing index: {exc}", file=sys.stderr)
         return 1
 
-    result = adapter.query(bundle, question, model.settings)
-    return _print_query_result(src, question, bundle, result)
+    resolved = _resolve_query_runtime(model, bundle, question, args)
+    query_settings = dict(model.settings)
+    query_settings.update(
+        {
+            "selected_mode": resolved.mode,
+            "retrieval_k": resolved.retrieve_k,
+            "top_k": resolved.final_k,
+            "mmr_lambda": resolved.mmr_lambda,
+            "retrieval_mode": resolved.retrieval_mode,
+            "agentic_mode": resolved.agentic_mode,
+            "agentic_max_iterations": resolved.agentic_max_iterations,
+            "output_style": resolved.output_style,
+        }
+    )
+    result = adapter.query(bundle, question, query_settings)
+    return _print_query_result(
+        src,
+        question,
+        bundle,
+        result,
+        resolved=resolved,
+        show_skills=bool(args.show_skills),
+    )
 
 
-def _print_query_result(src: pathlib.Path, question: str, bundle, result) -> int:
-    """Render a query result consistently for both saved and transient indexes."""
-
+def _print_query_result(src: pathlib.Path, question: str, bundle, result, *, resolved, show_skills: bool) -> int:
     _safe_print()
     _safe_print(f"Question : {question}")
     _safe_print(f"Source   : {src}")
     _safe_print(f"Backend  : shared retrieval ({bundle.vector_backend}:{bundle.index_id})")
+    _safe_print(f"Mode     : {resolved.mode}")
+    if show_skills:
+        _safe_print(f"Primary  : {resolved.primary_skill_id or '(none)'}")
+        selected = list(getattr(resolved, "selected_skills", []) or [])
+        if selected:
+            _safe_print("Skills   :")
+            for skill in selected:
+                _safe_print(f"  - {skill.skill_id}: {skill.reason}")
+        else:
+            _safe_print("Skills   : none")
     _safe_print()
     _safe_print(_SEP)
 
@@ -199,10 +229,7 @@ def _print_query_result(src: pathlib.Path, question: str, bundle, result) -> int
             if len(source.snippet.strip()) > _CONTEXT_CHARS:
                 snippet += " ..."
             score = f"{source.score:.3f}" if source.score is not None else "-"
-            _safe_print(
-                f"  [{source.sid}] {source.source} "
-                f"(score={score})"
-            )
+            _safe_print(f"  [{source.sid}] {source.source} (score={score})")
             _safe_print(f"      {snippet}")
         _safe_print(_SEP)
         _safe_print(f"  {len(result.sources)} evidence item(s) returned.")
@@ -221,74 +248,158 @@ def _print_query_result(src: pathlib.Path, question: str, bundle, result) -> int
     return 0
 
 
-# ── argument parser ───────────────────────────────────────────────────────────
+def cmd_skills_list(_args: argparse.Namespace) -> int:
+    model = _load_model()
+    repository = SkillRepository(getattr(model, "skills_dir", None))
+    valid = repository.list_valid_skills()
+    invalid = repository.list_invalid_skills()
+    if not valid and not invalid:
+        _safe_print("No skills found.")
+        return 0
+    for skill in valid:
+        enabled = "enabled" if repository.is_globally_enabled(skill, model.settings) else "disabled"
+        _safe_print(f"{skill.skill_id}\t{enabled}\tpriority={skill.priority}\t{skill.name}")
+    for skill in invalid:
+        _safe_print(f"{skill.skill_id}\tinvalid\t{'; '.join(skill.errors)}", file=sys.stderr)
+    return 0
+
+
+def cmd_skills_show(args: argparse.Namespace) -> int:
+    model = _load_model()
+    repository = SkillRepository(getattr(model, "skills_dir", None))
+    skill = repository.get_skill(args.skill_id)
+    if skill is None:
+        _safe_print(f"error: skill not found: {args.skill_id}", file=sys.stderr)
+        return 1
+    _safe_print(f"id: {skill.skill_id}")
+    _safe_print(f"name: {skill.name}")
+    _safe_print(f"description: {skill.description}")
+    _safe_print(f"enabled: {repository.is_globally_enabled(skill, model.settings)}")
+    _safe_print(f"enabled_by_default: {skill.enabled_by_default}")
+    _safe_print(f"priority: {skill.priority}")
+    _safe_print(f"path: {skill.path}")
+    _safe_print("triggers:")
+    for key, values in sorted(dict(skill.triggers or {}).items()):
+        _safe_print(f"  {key}: {', '.join(values) if values else '(none)'}")
+    _safe_print("runtime_overrides:")
+    if skill.runtime_overrides:
+        for key, value in sorted(dict(skill.runtime_overrides or {}).items()):
+            _safe_print(f"  {key}: {value}")
+    else:
+        _safe_print("  (none)")
+    _safe_print()
+    _safe_print(skill.body)
+    return 0
+
+
+def _set_skill_enabled(skill_id: str, enabled: bool) -> int:
+    model = _load_model()
+    repository = SkillRepository(getattr(model, "skills_dir", None))
+    if repository.get_skill(skill_id) is None:
+        _safe_print(f"error: skill not found: {skill_id}", file=sys.stderr)
+        return 1
+    model.save_settings(repository.set_global_enabled(model.settings, skill_id, enabled))
+    _safe_print(f"{'enabled' if enabled else 'disabled'}: {skill_id}")
+    return 0
+
+
+def cmd_skills_enable(args: argparse.Namespace) -> int:
+    return _set_skill_enabled(str(args.skill_id or "").strip(), True)
+
+
+def cmd_skills_disable(args: argparse.Namespace) -> int:
+    return _set_skill_enabled(str(args.skill_id or "").strip(), False)
+
+
+def cmd_skills_lint(_args: argparse.Namespace) -> int:
+    model = _load_model()
+    repository = SkillRepository(getattr(model, "skills_dir", None))
+    errors = repository.lint_errors()
+    if not errors:
+        _safe_print("OK")
+        return 0
+    for error in errors:
+        _safe_print(error, file=sys.stderr)
+    return 1
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="axiom",
-        description="Axiom CLI — headless document indexing and querying.",
+        description="Axiom CLI — headless document indexing, querying, and skill management.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
+        epilog=textwrap.dedent(
+            """\
             examples:
               python main.py --cli index --file paper.txt
-              python main.py --cli index --file paper.txt --out paper.axiom-index
-              python main.py --cli query --file paper.txt --question "main contribution"
-              python -m axiom_app.cli query --file README.md --question "install"
-        """),
+              python main.py --cli query --file paper.txt --question "main contribution" --show-skills
+              python -m axiom_app.cli skills list
+              python -m axiom_app.cli skills enable research-claims
+            """
+        ),
     )
     sub = parser.add_subparsers(dest="command", metavar="<command>")
     sub.required = True
 
-    # index
     p_index = sub.add_parser("index", help="Index a document file.")
+    p_index.add_argument("--file", "-f", required=True, metavar="PATH", help="Path to the document to index.")
     p_index.add_argument(
-        "--file", "-f",
-        required=True,
-        metavar="PATH",
-        help="Path to the document to index.",
-    )
-    p_index.add_argument(
-        "--out", "-o",
+        "--out",
+        "-o",
         default=None,
         metavar="PATH",
         help="Output directory or manifest path for the persisted index (default: <file>.axiom-index).",
     )
 
-    # query
     p_query = sub.add_parser("query", help="Query a document.")
-    p_query.add_argument(
-        "--file", "-f",
-        required=True,
-        metavar="PATH",
-        help="Path to the document to search.",
-    )
-    p_query.add_argument(
-        "--question", "-q",
-        required=True,
-        metavar="TEXT",
-        help="Question or keywords to search for.",
-    )
+    p_query.add_argument("--file", "-f", required=True, metavar="PATH", help="Path to the document to search.")
+    p_query.add_argument("--question", "-q", required=True, metavar="TEXT", help="Question or keywords to search for.")
     p_query.add_argument(
         "--index",
         default=None,
         metavar="PATH",
         help="Optional path to a previously built index directory, manifest, or legacy JSON bundle.",
     )
+    p_query.add_argument(
+        "--pin-skill",
+        action="append",
+        default=[],
+        metavar="SKILL_ID",
+        help="Force-include a skill for this query.",
+    )
+    p_query.add_argument(
+        "--mute-skill",
+        action="append",
+        default=[],
+        metavar="SKILL_ID",
+        help="Exclude a skill for this query unless it is pinned.",
+    )
+    p_query.add_argument(
+        "--show-skills",
+        action="store_true",
+        help="Show the selected skills and match reasons before query output.",
+    )
 
+    p_skills = sub.add_parser("skills", help="Manage repo-local skills.")
+    skills_sub = p_skills.add_subparsers(dest="skills_command", metavar="<skills-command>")
+    skills_sub.required = True
+
+    skills_sub.add_parser("list", help="List valid skills and their enable state.")
+
+    p_show = skills_sub.add_parser("show", help="Show a skill definition.")
+    p_show.add_argument("skill_id", metavar="SKILL_ID")
+
+    p_enable = skills_sub.add_parser("enable", help="Enable a skill globally.")
+    p_enable.add_argument("skill_id", metavar="SKILL_ID")
+
+    p_disable = skills_sub.add_parser("disable", help="Disable a skill globally.")
+    p_disable.add_argument("skill_id", metavar="SKILL_ID")
+
+    skills_sub.add_parser("lint", help="Validate all skill files and fail on malformed frontmatter.")
     return parser
 
 
-# ── public entry point ────────────────────────────────────────────────────────
-
-
 def main(argv: Sequence[str] | None = None) -> int:
-    """Parse *argv* (or ``sys.argv[1:]``) and dispatch to the matching command.
-
-    Returns an integer exit code (0 = success, 1 = user error, 2 = internal).
-    main.py passes filtered argv so callers never need to strip ``--cli``
-    before calling here.
-    """
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -297,12 +408,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             return cmd_index(args)
         if args.command == "query":
             return cmd_query(args)
-        # unreachable — argparse enforces sub.required=True
+        if args.command == "skills":
+            if args.skills_command == "list":
+                return cmd_skills_list(args)
+            if args.skills_command == "show":
+                return cmd_skills_show(args)
+            if args.skills_command == "enable":
+                return cmd_skills_enable(args)
+            if args.skills_command == "disable":
+                return cmd_skills_disable(args)
+            if args.skills_command == "lint":
+                return cmd_skills_lint(args)
         parser.print_help()
         return 1
     except Exception as exc:  # noqa: BLE001
         _safe_print(f"internal error: {exc}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 2
 
