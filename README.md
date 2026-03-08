@@ -1,31 +1,37 @@
 <p align="center">
-  <img src="logo.png" alt="Axiom" width="140" />
+  <img src="logo.png" alt="Axiom" width="160" />
 </p>
 
 <h1 align="center">Axiom</h1>
 
 <p align="center">
-  <strong>Personal RAG desktop app with an MVC runtime</strong>
+  Your documents, your machine, your AI — no cloud required.
 </p>
 
 <p align="center">
   <a href="https://github.com/mrzapa/workx/actions/workflows/ci.yml"><img src="https://github.com/mrzapa/workx/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
+  <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+" />
+  <img src="https://img.shields.io/badge/status-alpha-orange" alt="Alpha" />
+</p>
+
+<br />
+
+**Axiom** is a personal RAG (Retrieval-Augmented Generation) desktop app that lets you index local files, ask questions about them, and get grounded answers — all running on your own hardware. It ships with a clean MVC architecture, a headless CLI for scripting, and pluggable backends for LLMs, embeddings, and vector stores.
+
+Think of it as a private research assistant that actually reads your documents.
+
+<br />
+
+<p align="center">
+  <a href="#-quick-start">Quick Start</a> · <a href="#-features">Features</a> · <a href="#-usage">Usage</a> · <a href="#-configuration">Configuration</a> · <a href="#-contributing">Contributing</a>
 </p>
 
 ---
 
-## Features
+## ⚡ Quick Start
 
-- **MVC app** (`axiom_app`) — default runtime with model / controller / view layers
-- **Legacy GUI** (`agentic_rag_gui.py`) — available via `AXIOM_NEW_APP=0`
-- **Headless CLI** — index and query local files without Tk
-
----
-
-## Quick Install
-
-### One-liner (recommended)
+### One-liner install
 
 **macOS / Linux:**
 
@@ -39,123 +45,120 @@ curl -fsSL https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_a
 irm https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.ps1 | iex
 ```
 
-The installer clones the repo, creates a virtual environment, installs the
-pinned `runtime-all` bundle, and generates an `axiom` launcher that auto-pulls
-the latest code on every run.
+That's it. The installer clones the repo, sets up a virtual environment, installs dependencies, and drops an `axiom` launcher on your PATH. It even auto-pulls the latest code every time you run it.
 
-### Installer options
-
-| Flag | Description |
-|------|-------------|
-| `--install` | Fresh install (default) |
-| `--reinstall` | Remove venv and reinstall from scratch |
-| `--uninstall` | Remove Axiom completely |
-| `--update` | Pull latest code and update dependencies |
+### Installer flags
 
 ```bash
-# Reinstall from scratch
-./scripts/install_axiom.sh --reinstall
-
-# Uninstall
-./scripts/install_axiom.sh --uninstall
+./scripts/install_axiom.sh --reinstall   # Nuke the venv and start fresh
+./scripts/install_axiom.sh --uninstall   # Remove Axiom completely
+./scripts/install_axiom.sh --update      # Pull latest + update deps
 ```
 
-> **Environment overrides:** `AXIOM_INSTALL_DIR`, `AXIOM_REPO`, `AXIOM_BRANCH`, `AXIOM_PYTHON`
-
-If a later update changes the pinned runtime bundle, run `axiom update` to
-repair the installation.
-
-### Manual setup
+> You can override the install location, repo URL, branch, and Python binary with `AXIOM_INSTALL_DIR`, `AXIOM_REPO`, `AXIOM_BRANCH`, and `AXIOM_PYTHON`.
 
 <details>
-<summary><strong>Click to expand manual setup steps</strong></summary>
+<summary><strong>Manual setup (for the hands-on types)</strong></summary>
 
-#### 1) Create a virtual environment
+<br />
 
 ```bash
+# 1. Clone and enter the repo
+git clone https://github.com/mrzapa/workx.git && cd workx
+
+# 2. Create a virtual environment
 python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-```
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install --upgrade pip
 
-#### 2) Install a runtime bundle
-
-```bash
-# Full GUI runtime
-pip install -e ".[runtime-all]"
-
-# Dev/test extras
-pip install -e ".[dev]"
-
-# Dev + full GUI runtime
-pip install -e ".[dev,runtime-all]"
-
-# Strict live-backend proof extras
-pip install -e ".[dev,live-backends]"
+# 3. Pick your install flavour
+pip install -e ".[runtime-all]"            # Full GUI + all ML deps
+pip install -e ".[dev]"                    # Dev tools only
+pip install -e ".[dev,runtime-all]"        # Everything
+pip install -e ".[dev,live-backends]"      # Dev + live Weaviate testing
 ```
 
 </details>
 
 ---
 
-## Usage
+## ✨ Features
 
-### MVC GUI (default)
+### Multiple interfaces
+
+| Mode | How to launch | What it does |
+|------|---------------|--------------|
+| **Desktop GUI** | `python main.py` | Full Qt6 app with themes, sessions, and chat modes |
+| **Legacy GUI** | `AXIOM_NEW_APP=0 python main.py` | Original Tkinter interface (still works) |
+| **Headless CLI** | `python main.py --cli ...` | Index and query from the terminal — great for scripts & servers |
+
+### Bring your own LLM
+
+Axiom doesn't lock you into one provider. Swap between them in settings — no code changes needed.
+
+| Category | Supported providers |
+|----------|-------------------|
+| **LLMs** | OpenAI · Anthropic · Google · xAI · Cohere · LM Studio · local GGUF models |
+| **Embeddings** | Voyage · Sentence Transformers · local GGUF |
+| **Vector stores** | In-memory JSON · ChromaDB · Weaviate |
+
+### Built for real work
+
+- **5 chat modes** — Q&A, Summary, Tutor, Research, and Evidence Pack
+- **Persistent sessions** — pick up where you left off (SQLite-backed)
+- **Agent profiles** — save and switch between different configurations
+- **Knowledge graphs** — automatic entity extraction and linking
+- **Structure-aware ingestion** — handles PDFs, DOCX, Markdown, plain text, and more
+- **Background processing** — indexing and queries run in threads, so the UI never freezes
+- **Theming** — ships with Space Dust, Light, and Dark themes
+
+---
+
+## 🚀 Usage
+
+### Desktop app
 
 ```bash
 python main.py
 ```
 
-### Legacy GUI
+Opens the MVC desktop interface. Load a file, build an index, and start asking questions.
+
+### CLI
+
+The CLI shares the same retrieval backend as the GUI — same results, no window required.
 
 ```bash
-AXIOM_NEW_APP=0 python main.py
+# Index a file
+python -m axiom_app.cli index --file docs/my_notes.txt
+
+# Query it
+python -m axiom_app.cli query --file docs/my_notes.txt --question "What are the key takeaways?"
 ```
 
-### CLI (headless)
+You can also run via the main entry point:
 
 ```bash
 python main.py --cli index --file README.md
-python main.py --cli query --file README.md --question "quick start"
-```
-
-Or run the CLI module directly:
-
-```bash
-python -m axiom_app.cli index --file README.md
-python -m axiom_app.cli query --file README.md --question "install"
-```
-
----
-
-## CLI Examples
-
-### Indexing
-
-`index` writes a manifest-backed persisted index to `<file>.axiom-index/manifest.json` by default.
-
-```bash
-python -m axiom_app.cli index --file docs/my_notes.txt
-```
-
-### Querying
-
-`query` uses the same shared retrieval backend as the MVC app and can load previously saved indexes.
-
-```bash
-python -m axiom_app.cli query --file docs/my_notes.txt --question "dependency"
+python main.py --cli query --file README.md --question "how do I install this?"
 ```
 
 ### Parity audit
 
+Axiom includes a built-in audit tool that verifies consistent behavior across all vector store backends:
+
 ```bash
-axiom-parity-audit
+axiom-parity-audit                         # Against mock backends
+axiom-parity-audit --require-live-backends  # Against real Weaviate (needs Docker)
 ```
 
-Run the strict live-backend audit against local Docker Weaviate:
+<details>
+<summary><strong>Setting up Weaviate for live audits</strong></summary>
+
+<br />
 
 ```bash
-pip install -e .[dev,live-backends]
+pip install -e ".[dev,live-backends]"
 docker compose -f docker/weaviate/docker-compose.yml up -d
 
 export AXIOM_TEST_WEAVIATE_URL=http://127.0.0.1:8080
@@ -166,82 +169,97 @@ export AXIOM_TEST_WEAVIATE_GRPC_SECURE=false
 axiom-parity-audit --require-live-backends
 ```
 
+</details>
+
 ---
 
-## Environment Variables
+## 🔧 Configuration
 
-| Variable | Description |
+Axiom ships with sensible defaults in `axiom_app/default_settings.json`. To customize, copy it to `settings.json` in the project root and tweak away — Axiom will pick it up automatically.
+
+### Environment variables
+
+| Variable | What it does |
 |----------|-------------|
-| `AXIOM_NEW_APP` | `1` (default): MVC path. `0`: legacy GUI. `--cli` forces headless mode regardless. |
-| `AXIOM_TEST_WEAVIATE_URL` | Weaviate instance URL for live parity proof |
+| `AXIOM_NEW_APP` | `1` (default) uses the MVC app. `0` falls back to the legacy GUI. The `--cli` flag always forces headless mode. |
+| `AXIOM_TEST_WEAVIATE_URL` | Weaviate endpoint for live parity tests |
 | `AXIOM_TEST_WEAVIATE_API_KEY` | Weaviate API key |
 | `AXIOM_TEST_WEAVIATE_GRPC_HOST` | Weaviate gRPC host |
 | `AXIOM_TEST_WEAVIATE_GRPC_PORT` | Weaviate gRPC port |
 | `AXIOM_TEST_WEAVIATE_GRPC_SECURE` | Enable TLS for gRPC |
-| `AXIOM_PARITY_REQUIRE_LIVE_BACKENDS` | `1`: fail audit unless the live backend proof passes |
+| `AXIOM_PARITY_REQUIRE_LIVE_BACKENDS` | Set to `1` to fail the audit if the live backend proof doesn't pass |
 
 ---
 
-## Testing
+## 🧪 Testing
 
 ```bash
-# Unit tests
+# Run the test suite
 python -m pytest
 
-# With coverage
-python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
+# With coverage reporting
+python -m pytest --cov=axiom_app --cov-report=term
 
-# Live Weaviate proof
-pip install -e ".[dev,live-backends]"
+# Live Weaviate integration tests
 python -m pytest -q tests/test_live_weaviate_proof.py
 ```
 
 <details>
-<summary><strong>Run CI checks locally</strong></summary>
+<summary><strong>Full CI check (run locally)</strong></summary>
+
+<br />
 
 ```bash
 ruff check .
 python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
 axiom-parity-audit --require-live-backends
-python - <<'PY'
-import json
-json.load(open('axiom_app/default_settings.json', encoding='utf-8'))
-print('default_settings.json is valid JSON')
-PY
+python -c "import json; json.load(open('axiom_app/default_settings.json')); print('Settings JSON OK')"
 ```
 
 </details>
 
 ---
 
-## Project Layout
+## 📁 Project Layout
 
-| Path | Description |
-|------|-------------|
-| `axiom_app/` | Default MVC package, CLI, model/controller/view layers |
-| `tests/` | Unit and integration-style tests |
-| `agentic_rag_gui.py` | Legacy monolithic GUI implementation |
-| `main.py` | Canonical entry point with mode switching |
+```
+axiom_app/
+├── models/          # Application state — no UI, no I/O
+├── views/           # PySide6 (Qt6) interface
+├── controllers/     # Business logic, event handling
+├── services/        # Indexing, retrieval, sessions, pipelines
+├── utils/           # LLM/embedding factories, document loaders, helpers
+└── assets/          # Bundled resources
+
+tests/               # pytest suite (unit + integration)
+scripts/             # Installers (bash, PowerShell, Windows EXE builder)
+docker/              # Weaviate compose for integration testing
+main.py              # Entry point — routes to GUI or CLI
+agentic_rag_gui.py   # Legacy Tkinter app (kept for compatibility)
+```
 
 ---
 
-## Optional Dependencies
+## 🤝 Contributing
 
-Heavy ML/runtime dependencies are intentionally optional for manual minimal
-installs. The installers provision the pinned `runtime-all` bundle, while the
-MVC app and CLI surface backend-readiness errors when a selected provider or
-vector backend is unavailable in a custom environment.
+Contributions are welcome! Check out [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, coding standards, and how to submit a pull request.
+
+**The short version:**
+
+```bash
+pip install -e ".[dev]"
+ruff check .
+python -m pytest
+```
+
+Make sure linting and tests pass before opening a PR.
 
 ---
 
-## Contributing
+## 📝 Changelog
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and standards.
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md).
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
+[MIT](LICENSE) — do whatever you want with it.
