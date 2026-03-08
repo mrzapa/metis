@@ -61,6 +61,7 @@ from axiom_app.utils.background import BackgroundRunner, CancelToken
 from axiom_app.utils.dependency_bootstrap import install_packages
 from axiom_app.utils.document_loader import KREUZBERG_EXTENSIONS, is_kreuzberg_available
 from axiom_app.utils.llm_providers import create_llm
+from axiom_app.utils.model_presets import list_llm_providers, provider_requires_custom_model
 
 if TYPE_CHECKING:
     from axiom_app.models.app_model import AppModel
@@ -431,6 +432,12 @@ class AppController:
             self.view.set_cancel_rag_enabled(enabled)
             return
         self._set_widget_enabled(getattr(self.view, "btn_cancel_rag", None), enabled)
+
+    def _set_model_switch_enabled(self, enabled: bool) -> None:
+        if callable(getattr(self.view, "set_model_switch_enabled", None)):
+            self.view.set_model_switch_enabled(enabled)
+            return
+        self._set_widget_enabled(getattr(self.view, "_llm_status_badge", None), enabled)
 
     def _sync_profile_options(self) -> None:
         labels = self.profile_repository.list_labels()
@@ -1055,6 +1062,7 @@ class AppController:
             getattr(self.view, "editHardwareAssumptionsRequested", None),
             self.on_edit_hardware_assumptions,
         )
+        self._connect_signal(getattr(self.view, "quickModelChangeRequested", None), self.on_quick_model_change)
 
         self._configure_command(getattr(self.view, "btn_open_files", None), self.on_open_files)
         self._configure_command(getattr(self.view, "btn_build_index", None), self.on_build_index)
@@ -1348,6 +1356,7 @@ class AppController:
         )
         self._log.info("Task started: %s", task_name)
         self._set_cancel_rag_enabled(True)
+        self._set_model_switch_enabled(False)
 
     def cancel_current_task(self) -> None:
         """Signal the active background task to stop (cooperative)."""
@@ -1377,6 +1386,7 @@ class AppController:
             self._safe_view_call("reset_progress")
             self._set_build_index_enabled(True)
             self._set_cancel_rag_enabled(False)
+            self._set_model_switch_enabled(True)
 
     def _handle_message(self, msg: dict[str, Any]) -> None:
         mtype = msg.get("type")
@@ -2983,6 +2993,26 @@ class AppController:
         }
         return json.dumps(payload, ensure_ascii=False)
 
+    def _sync_current_session_metadata(self) -> None:
+        session_id = str(getattr(self.model, "current_session_id", "") or "").strip()
+        if not session_id:
+            return
+        self.session_repository.upsert_session(
+            session_id,
+            active_profile=self._current_profile_label(),
+            mode=str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
+            index_id=str(getattr(self.model, "active_index_id", "") or ""),
+            vector_backend=self._current_vector_backend(),
+            llm_provider=str(self.model.settings.get("llm_provider", "") or ""),
+            llm_model=self._effective_llm_model(),
+            embed_model=self._effective_embedding_model(),
+            retrieve_k=int(self.model.settings.get("retrieval_k", 0) or 0),
+            final_k=int(self.model.settings.get("top_k", 0) or 0),
+            mmr_lambda=float(self.model.settings.get("mmr_lambda", 0.0) or 0.0),
+            agentic_iterations=int(self.model.settings.get("agentic_max_iterations", 0) or 0),
+            extra_json=self._session_extra_json(),
+        )
+
     @staticmethod
     def _title_from_prompt(prompt: str) -> str:
         text = " ".join(str(prompt or "").split()).strip()
@@ -2996,6 +3026,51 @@ class AppController:
         if not text:
             return ""
         return text[:180] + ("…" if len(text) > 180 else "")
+
+    def on_quick_model_change(self, payload: dict[str, Any] | None = None) -> None:
+        request = dict(payload or {})
+        provider = str(request.get("llm_provider", "") or "").strip()
+        requested_model = str(request.get("llm_model", "") or "").strip()
+        requested_custom = str(request.get("llm_model_custom", "") or "").strip()
+
+        if provider not in set(list_llm_providers()):
+            self._safe_view_call("set_status", "Model switch ignored: unknown provider.")
+            return
+
+        is_custom_value = provider_requires_custom_model(provider) or bool(requested_custom)
+        resolved_model = requested_custom if requested_custom else requested_model
+        resolved_model = str(resolved_model or "").strip()
+        if not resolved_model:
+            self._show_error_dialog("Model Required", "Choose or enter a model before applying the switch.")
+            self._safe_view_call("set_status", "Model switch ignored: no model was provided.")
+            return
+
+        next_settings = dict(self.model.settings)
+        next_settings["llm_provider"] = provider
+        next_settings["llm_model"] = resolved_model
+        next_settings["llm_model_custom"] = resolved_model if is_custom_value else ""
+
+        if provider == "local_gguf" and not self._has_valid_local_gguf_path(next_settings):
+            self._show_error_dialog(
+                "Invalid Local GGUF Model",
+                "Quick switch blocked because no valid GGUF model file is configured in Settings.",
+            )
+            self._safe_view_call("set_status", "Model switch blocked: configure a valid GGUF file first.")
+            return
+
+        try:
+            self.model.save_settings(next_settings)
+        except OSError as exc:
+            self._show_error_dialog("Save Failed", f"Could not write settings.json:\n{exc}")
+            self._log.error("quick model switch save failed: %s", exc)
+            return
+
+        self._safe_view_call("populate_settings", self.model.settings)
+        self._safe_view_call("refresh_llm_status_badge")
+        self._sync_current_session_metadata()
+        self.refresh_history_rows(select_session_id=str(getattr(self.model, "current_session_id", "") or ""), update_detail=False)
+        self._safe_view_call("set_status", f"Model switched to {provider} / {resolved_model}.")
+        self._log.info("Quick model switch applied: provider=%s model=%s", provider, resolved_model)
 
     def on_save_settings(self) -> None:
         """Collect settings from the view, coerce types, and persist via the model.
@@ -3160,18 +3235,4 @@ class AppController:
             self.view.apply_theme(new_theme)
 
         if getattr(self.model, "current_session_id", ""):
-            self.session_repository.upsert_session(
-                self.model.current_session_id,
-                active_profile=self._current_profile_label(),
-                mode=str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
-                index_id=str(getattr(self.model, "active_index_id", "") or ""),
-                vector_backend=self._current_vector_backend(),
-                llm_provider=str(self.model.settings.get("llm_provider", "") or ""),
-                llm_model=self._effective_llm_model(),
-                embed_model=self._effective_embedding_model(),
-                retrieve_k=int(self.model.settings.get("retrieval_k", 0) or 0),
-                final_k=int(self.model.settings.get("top_k", 0) or 0),
-                mmr_lambda=float(self.model.settings.get("mmr_lambda", 0.0) or 0.0),
-                agentic_iterations=int(self.model.settings.get("agentic_max_iterations", 0) or 0),
-                extra_json=self._session_extra_json(),
-            )
+            self._sync_current_session_metadata()

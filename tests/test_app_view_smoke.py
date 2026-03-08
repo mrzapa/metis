@@ -7,6 +7,8 @@ import sys
 
 import pytest
 
+from axiom_app.utils.model_presets import get_llm_model_presets
+
 qt_widgets = pytest.importorskip("PySide6.QtWidgets", reason="Qt runtime unavailable")
 QScrollBar = qt_widgets.QScrollBar
 QDialog = qt_widgets.QDialog
@@ -46,6 +48,10 @@ def _is_descendant(widget, ancestor) -> bool:
     return False
 
 
+def _combo_items(combo) -> list[str]:
+    return [combo.itemText(index) for index in range(combo.count())]
+
+
 def test_app_view_constructs_with_empty_chat_state(qapp, process_events) -> None:
     view = _show(process_events)
 
@@ -63,6 +69,13 @@ def test_app_view_constructs_with_empty_chat_state(qapp, process_events) -> None
     assert view.minimumWidth() == 1180
     assert view.minimumHeight() == 760
     assert view._rag_toggle.get_value() is True
+
+
+def test_app_view_hero_heading_wraps_when_constrained(qapp, process_events) -> None:
+    view = _show(process_events)
+
+    assert view._hero_greeting_label.wordWrap() is True
+    assert view._hero_greeting_label.heightForWidth(320) > view._hero_greeting_label.fontMetrics().lineSpacing()
 
 
 def test_app_view_switches_between_empty_and_conversation_states(qapp, process_events) -> None:
@@ -141,8 +154,58 @@ def test_app_view_applies_theme_and_updates_runtime_widgets(qapp, process_events
 
     assert view._theme_name == "dark"
     assert view._palette["primary"] == view._rag_toggle._palette["primary"]
-    assert "openai" in view._llm_status_badge.text()
+    assert view._llm_status_badge.text() == ""
+    assert not view._llm_status_badge.icon().isNull()
+    assert "openai / gpt-test" in view._llm_status_badge.toolTip()
     assert view._mode_combo.currentText() == "Research"
+
+
+def test_app_view_quick_model_popup_repopulates_presets(qapp, process_events) -> None:
+    view = _show(process_events)
+
+    view.populate_settings({"llm_provider": "anthropic", "llm_model": "claude-opus-4-6"})
+    view._show_quick_model_popup()
+    view._quick_model_provider_combo.setCurrentText("google")
+    process_events()
+
+    assert _combo_items(view._quick_model_model_combo) == get_llm_model_presets("google")
+
+
+def test_app_view_quick_model_popup_reveals_custom_editor(qapp, process_events) -> None:
+    view = _show(process_events)
+    payloads: list[dict[str, str]] = []
+    view.quickModelChangeRequested.connect(lambda payload: payloads.append(dict(payload)))
+
+    view.populate_settings({"llm_provider": "anthropic", "llm_model": "claude-opus-4-6"})
+    view._show_quick_model_popup()
+    view._quick_model_model_combo.setCurrentText("custom")
+    process_events()
+
+    assert view._quick_model_custom_row.isVisible()
+
+    view._quick_model_custom_input.setText("claude-labs-preview")
+    view._emit_quick_model_change_from_popup()
+    process_events()
+
+    assert payloads[-1] == {
+        "llm_provider": "anthropic",
+        "llm_model": "claude-labs-preview",
+        "llm_model_custom": "claude-labs-preview",
+    }
+
+
+def test_app_view_model_switch_busy_state_disables_button_and_hides_popup(qapp, process_events) -> None:
+    view = _show(process_events)
+
+    view._show_quick_model_popup()
+    process_events()
+    assert view._quick_model_popup.isVisible()
+
+    view.set_model_switch_enabled(False)
+    process_events()
+
+    assert not view._llm_status_badge.isEnabled()
+    assert not view._quick_model_popup.isVisible()
 
 
 def test_app_view_settings_widgets_are_owned_by_settings_page(qapp, process_events) -> None:
