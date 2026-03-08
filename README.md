@@ -5,7 +5,9 @@
 <h1 align="center">Axiom</h1>
 
 <p align="center">
-  Your documents, your machine, your AI — no cloud required.
+  <strong>The private, provider-agnostic RAG app that runs entirely on your machine.</strong><br />
+  Index your documents. Ask questions. Get grounded answers.<br />
+  No API keys required — bring a local model and go fully offline.
 </p>
 
 <p align="center">
@@ -17,9 +19,13 @@
 
 <br />
 
-**Axiom** is a personal RAG (Retrieval-Augmented Generation) desktop app that lets you index local files, ask questions about them, and get grounded answers — all running on your own hardware. It ships with a clean MVC architecture, a headless CLI for scripting, and pluggable backends for LLMs, embeddings, and vector stores.
+Most RAG tools are either locked to one provider, trapped behind a SaaS login, or require you to glue together a dozen libraries yourself. Axiom is different:
 
-Think of it as a private research assistant that actually reads your documents.
+- **Fully local.** Your files never leave your machine. Run with a local GGUF model and you don't even need an internet connection.
+- **Swap anything.** LLM, embeddings, vector store — change providers in a config file, not in code. Today it's OpenAI, tomorrow it's a model running on your laptop. Axiom doesn't care.
+- **Desktop-native.** A real Qt6 app with themes, sessions, and keyboard shortcuts — not a web UI pretending to be a desktop app.
+- **Five ways to think.** Q&A, Summary, Tutor, Research, and Evidence Pack modes give you different lenses on the same documents. Most tools only do Q&A.
+- **GUI and CLI share one brain.** Same retrieval engine powers both interfaces. Script it, automate it, or just click around.
 
 <br />
 
@@ -84,33 +90,46 @@ pip install -e ".[dev,live-backends]"      # Dev + live Weaviate testing
 
 ## ✨ Features
 
-### Multiple interfaces
+### Zero lock-in — swap every layer
 
-| Mode | How to launch | What it does |
-|------|---------------|--------------|
-| **Desktop GUI** | `python main.py` | Full Qt6 app with themes, sessions, and chat modes |
-| **Legacy GUI** | `AXIOM_NEW_APP=0 python main.py` | Original Tkinter interface (still works) |
-| **Headless CLI** | `python main.py --cli ...` | Index and query from the terminal — great for scripts & servers |
+Most RAG apps hardcode their stack. Axiom treats every layer as a plug-in. Switch providers in `settings.json` and restart — that's it.
 
-### Bring your own LLM
+| Layer | Options | Go fully offline? |
+|-------|---------|:-----------------:|
+| **LLM** | OpenAI · Anthropic · Google · xAI · Cohere · LM Studio · **local GGUF** | Yes, with GGUF |
+| **Embeddings** | Voyage · Sentence Transformers · **local GGUF** | Yes, with GGUF or ST |
+| **Vector store** | In-memory JSON · ChromaDB · Weaviate | Yes, all run locally |
 
-Axiom doesn't lock you into one provider. Swap between them in settings — no code changes needed.
+### Five ways to read a document
 
-| Category | Supported providers |
-|----------|-------------------|
-| **LLMs** | OpenAI · Anthropic · Google · xAI · Cohere · LM Studio · local GGUF models |
-| **Embeddings** | Voyage · Sentence Transformers · local GGUF |
-| **Vector stores** | In-memory JSON · ChromaDB · Weaviate |
+Q&A is table stakes. Axiom ships with **five distinct chat modes**, each designed for a different workflow:
 
-### Built for real work
+| Mode | What it's for |
+|------|--------------|
+| **Q&A** | Direct, cited answers from your documents |
+| **Summary** | Condensed overviews of long or complex files |
+| **Tutor** | Socratic-style back-and-forth to help you learn the material |
+| **Research** | Deep dives with sub-query expansion and reranking |
+| **Evidence Pack** | Structured claim-level grounding with source citations |
 
-- **5 chat modes** — Q&A, Summary, Tutor, Research, and Evidence Pack
-- **Persistent sessions** — pick up where you left off (SQLite-backed)
-- **Agent profiles** — save and switch between different configurations
-- **Knowledge graphs** — automatic entity extraction and linking
-- **Structure-aware ingestion** — handles PDFs, DOCX, Markdown, plain text, and more
+### Use it how you want
+
+| Interface | Launch command | Best for |
+|-----------|---------------|----------|
+| **Desktop GUI** | `python main.py` | Daily use — themes, sessions, keyboard shortcuts |
+| **Headless CLI** | `python main.py --cli ...` | Automation, scripting, servers, CI pipelines |
+| **Legacy GUI** | `AXIOM_NEW_APP=0 python main.py` | If you prefer the original Tkinter interface |
+
+All three interfaces share the same retrieval engine. Same index, same results.
+
+### Everything else
+
+- **Knowledge graphs** — automatic entity extraction and relationship linking across your documents
+- **Persistent sessions** — pick up any conversation where you left off (SQLite-backed)
+- **Agent profiles** — save different configurations for different projects or tasks
+- **Structure-aware ingestion** — parses PDFs, DOCX, Markdown, HTML, and plain text with layout awareness
 - **Background processing** — indexing and queries run in threads, so the UI never freezes
-- **Theming** — ships with Space Dust, Light, and Dark themes
+- **Theming** — ships with Space Dust, Light, and Dark themes out of the box
 
 ---
 
