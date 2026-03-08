@@ -8,8 +8,8 @@ import sys
 from importlib import resources
 from typing import Any
 
-from PySide6.QtCore import QEvent, QObject, QRectF, QSignalBlocker, QSize, Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QKeyEvent, QPainter, QPainterPath, QPixmap, QTextCursor
+from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, QSignalBlocker, QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QKeyEvent, QPainter, QPainterPath, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTextBrowser,
     QTextEdit,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -47,6 +48,12 @@ from axiom_app.services.wizard_recommendation import (
     describe_auto_recommendation,
     estimate_setup_cost,
     recommend_auto_settings,
+)
+from axiom_app.utils.model_presets import (
+    get_llm_model_presets,
+    list_llm_providers,
+    provider_requires_custom_model,
+    uses_custom_model_value,
 )
 from axiom_app.views.styles import STYLE_CONFIG, UI_SPACING, apply_theme_to_app, get_palette, resolve_fonts
 from axiom_app.views.widgets import AnimationEngine, CollapsibleFrame, IOSSegmentedToggle, RoundedCard, TooltipManager
@@ -308,6 +315,7 @@ class AppView(QMainWindow):
     applyLocalGgufRecommendationRequested = Signal()
     editHardwareAssumptionsRequested = Signal()
     modeStateChanged = Signal(dict)
+    quickModelChangeRequested = Signal(object)
 
     def __init__(self, theme_name: str = "space_dust", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -332,6 +340,7 @@ class AppView(QMainWindow):
         self._chat_has_completed_response = False
         self._chat_feedback_pending = False
         self._chat_splitter_sizes = [820, 360]
+        self._quick_model_popup_syncing = False
 
         self._load_icon()
         self._build()
@@ -534,10 +543,18 @@ class AppView(QMainWindow):
         self._mode_combo.currentTextChanged.connect(self._emit_mode_state)
         mode_row.addWidget(self._mode_combo)
         mode_row.addStretch(1)
-        self._llm_status_badge = QLabel("LLM: not configured", page)
+        self._llm_status_badge = QToolButton(page)
         self._llm_status_badge.setObjectName("llmStatusBadge")
+        self._llm_status_badge.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self._llm_status_badge.setText("")
+        self._llm_status_badge.setCursor(Qt.PointingHandCursor)
+        self._llm_status_badge.setFixedSize(46, 42)
+        self._llm_status_badge.setIconSize(QSize(22, 22))
+        self._llm_status_badge.setIcon(self._create_model_switch_icon())
+        self._llm_status_badge.clicked.connect(self._toggle_quick_model_popup)
         mode_row.addWidget(self._llm_status_badge)
         root.addLayout(mode_row)
+        self._build_quick_model_popup()
 
         splitter = QSplitter(Qt.Horizontal, page)
         self._chat_splitter = splitter
@@ -567,11 +584,14 @@ class AppView(QMainWindow):
         empty_layout.setContentsMargins(UI_SPACING["xl"], UI_SPACING["xl"], UI_SPACING["xl"], UI_SPACING["xl"])
         empty_layout.addStretch(1)
         self._chat_empty_inner = QWidget(self._chat_empty_state)
+        self._chat_empty_inner.setMaximumWidth(460)
+        self._chat_empty_inner.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
         hero_layout = QVBoxLayout(self._chat_empty_inner)
         hero_layout.setContentsMargins(0, 0, 0, 0)
         hero_layout.setSpacing(UI_SPACING["xs"])
         self._hero_greeting_label = QLabel("Ask a document-grounded question", self._chat_empty_inner)
         self._hero_greeting_label.setObjectName("heroGreeting")
+        self._hero_greeting_label.setWordWrap(True)
         self._hero_copy_label = QLabel(
             "Switch between retrieval-grounded RAG and direct chat without leaving the current session.",
             self._chat_empty_inner,
@@ -993,11 +1013,32 @@ class AppView(QMainWindow):
             QLabel#heroCopy {{ color: {muted}; font-size: 14px; }}
             QLabel#brandLogo {{ background: transparent; border: none; }}
             QLabel#chatSectionTitle {{ color: {muted}; font-size: 13px; font-weight: 700; }}
-            QLabel#sidebarBadge, QLabel#llmStatusBadge {{
+            QLabel#sidebarBadge, QToolButton#llmStatusBadge {{
                 background-color: {surface_alt};
                 border: 1px solid {border};
                 border-radius: 12px;
                 padding: 6px 10px;
+            }}
+            QToolButton#llmStatusBadge:hover {{
+                background-color: {nav_bg};
+            }}
+            QToolButton#llmStatusBadge::menu-indicator {{
+                image: none;
+                width: 0px;
+            }}
+            QFrame#quickModelPopup {{
+                background-color: {supporting};
+                border: 1px solid {border};
+                border-radius: 18px;
+            }}
+            QLabel#quickModelPopupTitle {{
+                font-size: 13px;
+                font-weight: 700;
+                color: {text};
+            }}
+            QLabel#quickModelPopupHint {{
+                color: {muted};
+                font-size: 12px;
             }}
             _NavButton {{
                 text-align: left;
@@ -1065,6 +1106,198 @@ class AppView(QMainWindow):
         scaled = self._brand_logo_pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._brand_logo_label.setPixmap(scaled)
         self._brand_icon_stack.setCurrentWidget(self._brand_logo_page)
+
+    @staticmethod
+    def _create_model_switch_icon() -> QIcon:
+        pixmap = QPixmap(28, 28)
+        pixmap.fill(Qt.transparent)
+        try:
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.translate(pixmap.width() / 2, pixmap.height() / 2)
+            pen = QPen(QColor("#F2FAFF"))
+            pen.setWidthF(2.0)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
+            petal = QRectF(-3.2, -11.2, 6.4, 11.0)
+            for angle in range(0, 360, 60):
+                painter.save()
+                painter.rotate(float(angle))
+                painter.drawEllipse(petal)
+                painter.restore()
+            painter.setBrush(QColor("#F2FAFF"))
+            painter.setPen(Qt.NoPen)
+            core = QPainterPath()
+            core.moveTo(0.0, -3.8)
+            core.lineTo(3.3, -1.9)
+            core.lineTo(3.3, 1.9)
+            core.lineTo(0.0, 3.8)
+            core.lineTo(-3.3, 1.9)
+            core.lineTo(-3.3, -1.9)
+            core.closeSubpath()
+            painter.drawPath(core)
+            painter.end()
+        except Exception:
+            fallback = QPainter(pixmap)
+            fallback.setRenderHint(QPainter.Antialiasing, True)
+            fallback.setPen(QPen(QColor("#F2FAFF"), 2.0))
+            fallback.drawEllipse(QRectF(4.0, 4.0, 20.0, 20.0))
+            fallback.end()
+        return QIcon(pixmap)
+
+    def _build_quick_model_popup(self) -> None:
+        self._quick_model_popup = QFrame(self, Qt.Popup | Qt.FramelessWindowHint)
+        self._quick_model_popup.setObjectName("quickModelPopup")
+        self._quick_model_popup.setMinimumWidth(320)
+
+        popup_layout = QVBoxLayout(self._quick_model_popup)
+        popup_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
+        popup_layout.setSpacing(UI_SPACING["s"])
+
+        title = QLabel("Switch model", self._quick_model_popup)
+        title.setObjectName("quickModelPopupTitle")
+        popup_layout.addWidget(title)
+
+        hint = QLabel(
+            "Preset choices apply immediately. Custom and local models use the inline apply action.",
+            self._quick_model_popup,
+        )
+        hint.setObjectName("quickModelPopupHint")
+        hint.setWordWrap(True)
+        popup_layout.addWidget(hint)
+
+        popup_layout.addWidget(QLabel("Provider", self._quick_model_popup))
+        self._quick_model_provider_combo = QComboBox(self._quick_model_popup)
+        self._quick_model_provider_combo.addItems(list_llm_providers())
+        self._quick_model_provider_combo.currentTextChanged.connect(self._on_quick_model_provider_changed)
+        popup_layout.addWidget(self._quick_model_provider_combo)
+
+        popup_layout.addWidget(QLabel("Model", self._quick_model_popup))
+        self._quick_model_model_combo = QComboBox(self._quick_model_popup)
+        self._quick_model_model_combo.currentTextChanged.connect(self._on_quick_model_selection_changed)
+        self._quick_model_model_combo.activated.connect(self._on_quick_model_activated)
+        popup_layout.addWidget(self._quick_model_model_combo)
+
+        self._quick_model_custom_row = QWidget(self._quick_model_popup)
+        custom_row_layout = QHBoxLayout(self._quick_model_custom_row)
+        custom_row_layout.setContentsMargins(0, 0, 0, 0)
+        custom_row_layout.setSpacing(UI_SPACING["xs"])
+        self._quick_model_custom_input = QLineEdit(self._quick_model_custom_row)
+        self._quick_model_custom_input.setPlaceholderText("Enter a model id")
+        self._quick_model_custom_input.returnPressed.connect(self._emit_quick_model_change_from_popup)
+        custom_row_layout.addWidget(self._quick_model_custom_input, 1)
+        self._quick_model_apply_button = QPushButton("Apply", self._quick_model_custom_row)
+        self._quick_model_apply_button.clicked.connect(self._emit_quick_model_change_from_popup)
+        custom_row_layout.addWidget(self._quick_model_apply_button)
+        popup_layout.addWidget(self._quick_model_custom_row)
+
+        self._sync_quick_model_popup_from_settings()
+
+    def _toggle_quick_model_popup(self) -> None:
+        popup = getattr(self, "_quick_model_popup", None)
+        if popup is None or not self._llm_status_badge.isEnabled():
+            return
+        if popup.isVisible():
+            self._hide_quick_model_popup()
+            return
+        self._show_quick_model_popup()
+
+    def _show_quick_model_popup(self) -> None:
+        popup = getattr(self, "_quick_model_popup", None)
+        if popup is None:
+            return
+        self._sync_quick_model_popup_from_settings()
+        popup.adjustSize()
+        anchor = self._llm_status_badge.mapToGlobal(QPoint(0, 0))
+        popup.move(
+            anchor
+            + QPoint(
+                self._llm_status_badge.width() - popup.width(),
+                self._llm_status_badge.height() + UI_SPACING["xs"],
+            )
+        )
+        popup.show()
+        popup.raise_()
+        popup.activateWindow()
+
+    def _hide_quick_model_popup(self) -> None:
+        popup = getattr(self, "_quick_model_popup", None)
+        if popup is not None and popup.isVisible():
+            popup.hide()
+
+    def _sync_quick_model_popup_from_settings(self) -> None:
+        if not hasattr(self, "_quick_model_provider_combo"):
+            return
+        provider = str(self._settings_data.get("llm_provider", "anthropic") or "anthropic").strip() or "anthropic"
+        model = str(self._settings_data.get("llm_model", "") or "").strip()
+        custom_model = str(self._settings_data.get("llm_model_custom", "") or "").strip()
+        self._quick_model_popup_syncing = True
+        provider_blocker = QSignalBlocker(self._quick_model_provider_combo)
+        self._quick_model_provider_combo.setCurrentText(provider)
+        del provider_blocker
+        self._populate_quick_model_presets(provider, model=model, custom_model=custom_model)
+        self._quick_model_popup_syncing = False
+
+    def _populate_quick_model_presets(self, provider: str, *, model: str, custom_model: str) -> None:
+        presets = get_llm_model_presets(provider)
+        effective_model = str(model or "").strip()
+        effective_custom = str(custom_model or "").strip()
+        if provider_requires_custom_model(provider):
+            selected = "custom"
+        elif effective_model in presets:
+            selected = effective_model
+        elif effective_custom or (effective_model and effective_model not in presets):
+            selected = "custom"
+        else:
+            selected = presets[0] if presets else "custom"
+
+        model_blocker = QSignalBlocker(self._quick_model_model_combo)
+        self._quick_model_model_combo.clear()
+        self._quick_model_model_combo.addItems(presets or ["custom"])
+        self._quick_model_model_combo.setCurrentText(selected if selected in presets else (presets[0] if presets else "custom"))
+        del model_blocker
+
+        custom_blocker = QSignalBlocker(self._quick_model_custom_input)
+        self._quick_model_custom_input.setText(effective_custom or effective_model)
+        del custom_blocker
+        self._on_quick_model_selection_changed(self._quick_model_model_combo.currentText())
+
+    def _quick_model_uses_inline_apply(self) -> bool:
+        return uses_custom_model_value(
+            self._quick_model_provider_combo.currentText(),
+            self._quick_model_model_combo.currentText(),
+        )
+
+    def _on_quick_model_provider_changed(self, provider: str) -> None:
+        current_custom = self._quick_model_custom_input.text().strip()
+        self._quick_model_popup_syncing = True
+        self._populate_quick_model_presets(str(provider or "").strip(), model="", custom_model=current_custom)
+        self._quick_model_popup_syncing = False
+
+    def _on_quick_model_selection_changed(self, _value: str) -> None:
+        show_inline = self._quick_model_uses_inline_apply()
+        self._quick_model_custom_row.setVisible(show_inline)
+        placeholder = "Enter a local model id" if provider_requires_custom_model(self._quick_model_provider_combo.currentText()) else "Enter a custom model id"
+        self._quick_model_custom_input.setPlaceholderText(placeholder)
+
+    def _on_quick_model_activated(self, _index: int) -> None:
+        if self._quick_model_popup_syncing or self._quick_model_uses_inline_apply():
+            return
+        self._emit_quick_model_change_from_popup(close_popup=True)
+
+    def _emit_quick_model_change_from_popup(self, *, close_popup: bool = True) -> None:
+        uses_inline = self._quick_model_uses_inline_apply()
+        custom_model = self._quick_model_custom_input.text().strip()
+        selected_model = self._quick_model_model_combo.currentText().strip()
+        payload = {
+            "llm_provider": self._quick_model_provider_combo.currentText().strip(),
+            "llm_model": custom_model if uses_inline else selected_model,
+            "llm_model_custom": custom_model if uses_inline else "",
+        }
+        self.quickModelChangeRequested.emit(payload)
+        if close_popup:
+            self._hide_quick_model_popup()
 
     def _on_toggle_changed(self, value: bool) -> None:
         self._rag_toggle.set_value(value)
@@ -1255,7 +1488,19 @@ class AppView(QMainWindow):
     def refresh_llm_status_badge(self) -> None:
         provider = str(self._settings_data.get("llm_provider", "") or "").strip() or "unset"
         model = str(self._settings_data.get("llm_model", "") or self._settings_data.get("llm_model_custom", "") or "").strip()
-        self._llm_status_badge.setText(f"LLM: {provider}{(' / ' + model) if model else ''}")
+        summary = f"{provider}{(' / ' + model) if model else ''}"
+        tooltip = f"Switch model. Current: {summary}"
+        self._llm_status_badge.setToolTip(tooltip)
+        self._llm_status_badge.setStatusTip(tooltip)
+        self._llm_status_badge.setAccessibleName(f"Models button. Current model: {summary}")
+        self._llm_status_badge.setAccessibleDescription("Open the quick model switcher.")
+        self._llm_status_badge.setProperty("llmSummary", summary)
+        self._sync_quick_model_popup_from_settings()
+
+    def set_model_switch_enabled(self, enabled: bool) -> None:
+        self._llm_status_badge.setEnabled(bool(enabled))
+        if not enabled:
+            self._hide_quick_model_popup()
 
     def populate_settings(self, settings: dict[str, Any]) -> None:
         self._settings_data = dict(settings or {})
