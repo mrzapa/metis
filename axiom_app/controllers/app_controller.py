@@ -41,7 +41,7 @@ from axiom_app.services.index_service import (
     load_index_bundle,
     refresh_index_bundle,
 )
-from axiom_app.services.local_llm_recommender import LocalLlmRecommenderService
+from axiom_app.services.local_llm_recommender import ImportPlan, LocalLlmRecommenderService
 from axiom_app.services.local_model_registry import LocalModelRegistryService
 from axiom_app.services.profile_repository import ProfileRepository
 from axiom_app.services.response_pipeline import (
@@ -74,6 +74,7 @@ _TASK_BUILD_INDEX = "Build index"
 _TASK_RAG_QUERY = "RAG query"
 _TASK_DIRECT_QUERY = "Direct query"
 _TASK_INSTALL_DEPENDENCIES = "Install dependencies"
+_TASK_IMPORT_LOCAL_GGUF = "Import local GGUF"
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +150,7 @@ class AppController:
         self._active_future: Future | None = None
         self._log = logging.getLogger(__name__)
         self._pending_task_meta: dict[str, Any] = {}
+        self._queued_local_gguf_import: dict[str, Any] | None = None
         self.profile_repository = ProfileRepository(getattr(self.model, "profiles_dir", None))
         self.local_llm_recommender_service = LocalLlmRecommenderService()
         self.local_model_registry_service = LocalModelRegistryService()
@@ -899,38 +901,61 @@ class AppController:
         ):
             if key in result:
                 updates[key] = result[key]
+        previous_provider = str(self.model.settings.get("llm_provider", "") or "")
+        previous_model = str(self._effective_llm_model() or "")
+        previous_model_custom = str(self.model.settings.get("llm_model_custom", "") or "")
         working_settings = dict(self.model.settings)
         working_settings.update(updates)
+        import_request: dict[str, Any] | None = None
         selected_recommendation = result.get("selected_local_gguf_recommendation")
         if (
             working_settings.get("llm_provider") == "local_gguf"
             and bool(result.get("import_local_gguf_recommendation", False))
             and isinstance(selected_recommendation, dict)
         ):
-            imported = self._import_local_gguf_recommendation(
+            activation_request = self._resolve_local_gguf_activation_request(
                 dict(selected_recommendation),
-                activate=True,
-                settings_snapshot=working_settings,
+                requested=True,
+                allow_import_only_fallback=True,
             )
-            if imported is not None:
-                working_settings = imported
-            elif not str(working_settings.get("local_gguf_model_path", "") or "").strip():
-                working_settings["llm_provider"] = str(self.model.settings.get("llm_provider", "") or "")
-                working_settings["llm_model"] = str(self._effective_llm_model() or "")
+            if activation_request is not None:
+                import_request = {
+                    "recommendation": dict(selected_recommendation),
+                    "activate": bool(activation_request),
+                    "origin": "wizard",
+                    "settings_snapshot": dict(working_settings),
+                }
+            if not self._has_valid_local_gguf_path(working_settings):
+                working_settings["llm_provider"] = previous_provider
+                working_settings["llm_model"] = previous_model
+                working_settings["llm_model_custom"] = previous_model_custom
+        elif working_settings.get("llm_provider") == "local_gguf" and not self._has_valid_local_gguf_path(working_settings):
+            working_settings["llm_provider"] = previous_provider
+            working_settings["llm_model"] = previous_model
+            working_settings["llm_model_custom"] = previous_model_custom
         self.model.settings = working_settings
         self.model.save_settings(self.model.settings)
         self._safe_view_call("populate_settings", self.model.settings)
         self._sync_local_model_rows()
         self._sync_local_gguf_recommendations()
 
+        self._queued_local_gguf_import = None
         selected_index = str(result.get("selected_index_path", "") or "").strip()
         source_file = str(result.get("file_path", "") or "").strip()
         if selected_index:
             self._load_bundle_from_path(selected_index, persist=True)
-        elif source_file:
+        if source_file:
             self.model.set_documents([source_file])
             self._safe_view_call("set_file_list", [pathlib.Path(source_file).name])
+            self._queued_local_gguf_import = import_request
             self.on_build_index()
+        elif import_request is not None:
+            self._start_local_gguf_import_task(
+                dict(import_request.get("recommendation") or {}),
+                activate=bool(import_request.get("activate", False)),
+                origin=str(import_request.get("origin", "wizard") or "wizard"),
+                settings_snapshot=dict(import_request.get("settings_snapshot") or working_settings),
+            )
         self._safe_view_call("switch_view", "chat")
         self._safe_view_call("set_status", "Setup complete.")
 
@@ -1321,13 +1346,22 @@ class AppController:
         elif mtype == "error":
             text = msg.get("text", "unknown error")
             tb   = msg.get("traceback", "")
-            self._log.error("Task error [%s]: %s", msg.get("task_name", "?"), text)
+            task_name = str(msg.get("task_name", "") or "")
+            self._log.error("Task error [%s]: %s", task_name or "?", text)
             if tb:
                 self._log.debug("Traceback:\n%s", tb.rstrip())
             self._safe_view_call("set_status", f"Error: {text}")
             self._safe_view_call("append_log", f"[error] {text}")
             if tb:
                 self._safe_view_call("append_log", tb)
+            if task_name == _TASK_IMPORT_LOCAL_GGUF:
+                if "cancelled" not in str(text).lower():
+                    self._offer_manual_local_gguf_fallback(
+                        dict(getattr(self, "_pending_task_meta", {})),
+                        reason=str(text or ""),
+                    )
+            elif task_name == _TASK_BUILD_INDEX:
+                self._start_queued_local_gguf_import_if_any()
 
         elif mtype == "done":
             task   = msg.get("task_name", "")
@@ -1346,6 +1380,64 @@ class AppController:
                 self._safe_view_call("set_index_info", info)
                 self._safe_view_call("set_status", info)
                 self._safe_view_call("append_log", f"[done]  {info}")
+                self._start_queued_local_gguf_import_if_any()
+
+            elif task == _TASK_IMPORT_LOCAL_GGUF and isinstance(result, dict):
+                meta = dict(getattr(self, "_pending_task_meta", {}))
+                state = str(result.get("state") or "")
+                if state == "needs_selection":
+                    plan_payload = dict(result.get("plan") or {})
+                    plan = self._import_plan_from_payload(plan_payload)
+                    candidate_rows = list(result.get("candidate_files") or [])
+                    selected_name = ""
+                    picker = getattr(self.view, "pick_local_gguf_repo_file", None)
+                    if callable(picker):
+                        selected_name = str(
+                            picker(
+                                candidate_rows,
+                                "Choose GGUF File",
+                                plan.manual_reason or "Select the GGUF file to import.",
+                            )
+                            or ""
+                        )
+                    if not selected_name:
+                        selected_name = self._pick_item_from_list(
+                            "Choose GGUF File",
+                            plan.manual_reason or "Select the GGUF file to import:",
+                            [str(row.get("filename") or "") for row in candidate_rows] or plan.candidate_filenames,
+                        )
+                    if not selected_name:
+                        self._safe_view_call("set_status", "GGUF import cancelled.")
+                        return
+                    self._start_local_gguf_import_task(
+                        dict(meta.get("recommendation") or {}),
+                        activate=bool(meta.get("activate", False)),
+                        origin=str(meta.get("origin", "settings") or "settings"),
+                        settings_snapshot=dict(meta.get("settings_snapshot") or self.model.settings),
+                        selected_filename=selected_name,
+                    )
+                    return
+                if state == "downloaded":
+                    plan = self._import_plan_from_payload(dict(result.get("plan") or {}))
+                    imported_path = pathlib.Path(str(result.get("downloaded_path") or "")).expanduser()
+                    self._safe_view_call("set_status", "Registering")
+                    if bool(meta.get("activate", False)):
+                        self._safe_view_call("append_log", "[status] Activating")
+                    self._commit_local_gguf_import(
+                        plan,
+                        imported_path,
+                        activate=bool(meta.get("activate", False)),
+                    )
+                    label = str(
+                        (meta.get("recommendation") or {}).get("model_name")
+                        or plan.registry_metadata.get("catalog_name")
+                        or imported_path.stem
+                    )
+                    if bool(meta.get("activate", False)):
+                        self._safe_view_call("set_status", f"Applied {label} as the local LLM.")
+                    else:
+                        self._safe_view_call("set_status", f"Imported {label}.")
+                    return
 
             elif task == _TASK_RAG_QUERY and isinstance(result, dict):
                 response = result.get("response", "")
@@ -2183,51 +2275,160 @@ class AppController:
         payload = getter() if callable(getter) else None
         return dict(payload or {}) if isinstance(payload, dict) else None
 
-    def _import_local_gguf_recommendation(
+    @staticmethod
+    def _import_plan_from_payload(payload: dict[str, Any]) -> ImportPlan:
+        return ImportPlan(
+            source_repo=str(payload.get("source_repo") or ""),
+            source_provider=str(payload.get("source_provider") or ""),
+            filename=str(payload.get("filename") or ""),
+            destination_path=str(payload.get("destination_path") or ""),
+            registry_metadata=dict(payload.get("registry_metadata") or {}),
+            expected_size_bytes=(
+                int(payload["expected_size_bytes"])
+                if payload.get("expected_size_bytes") not in (None, "")
+                else None
+            ),
+            activation_safe=bool(payload.get("activation_safe", False)),
+            manual_reason=str(payload.get("manual_reason") or ""),
+            manual_selection_required=bool(payload.get("manual_selection_required", False)),
+            candidate_filenames=[str(item) for item in (payload.get("candidate_filenames") or [])],
+        )
+
+    def _has_valid_local_gguf_path(self, settings: dict[str, Any] | None = None) -> bool:
+        raw_path = str((settings or self.model.settings).get("local_gguf_model_path", "") or "").strip()
+        if not raw_path:
+            return False
+        try:
+            return pathlib.Path(raw_path).expanduser().is_file()
+        except OSError:
+            return False
+
+    def _resolve_local_gguf_activation_request(
+        self,
+        recommendation: dict[str, Any],
+        *,
+        requested: bool,
+        allow_import_only_fallback: bool,
+    ) -> bool | None:
+        if not requested:
+            return False
+        fit_level = str(recommendation.get("fit_level") or "").strip().lower()
+        model_name = str(recommendation.get("model_name") or "This recommendation").strip()
+        if fit_level in {"perfect", "good"}:
+            return True
+        if fit_level == "marginal":
+            confirmed = self._ask_yes_no(
+                "Marginal GGUF Fit",
+                f"{model_name} is a marginal fit for the detected hardware. Activate it after import?",
+            )
+            if confirmed:
+                return True
+            if allow_import_only_fallback:
+                self._safe_view_call("set_status", f"{model_name} will be imported without activation.")
+                return False
+            self._safe_view_call(
+                "set_status",
+                "Activation cancelled. Use Import Selected if you only want to download the GGUF.",
+            )
+            return None
+        if fit_level == "too_tight":
+            message = (
+                f"{model_name} is too tight for the detected hardware. "
+                "Import is allowed, but activation is blocked."
+            )
+            if allow_import_only_fallback:
+                self._safe_view_call("set_status", message)
+                return False
+            self._show_info_dialog("Activation Blocked", message)
+            self._safe_view_call("set_status", message)
+            return None
+        return True
+
+    def _start_local_gguf_import_task(
         self,
         recommendation: dict[str, Any],
         *,
         activate: bool,
+        origin: str,
         settings_snapshot: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
+        selected_filename: str = "",
+    ) -> None:
+        snapshot = dict(settings_snapshot or self.model.settings)
+        self._pending_task_meta = {
+            "recommendation": dict(recommendation),
+            "activate": bool(activate),
+            "origin": str(origin or "settings"),
+            "settings_snapshot": snapshot,
+        }
+        self.start_task(
+            _TASK_IMPORT_LOCAL_GGUF,
+            self._local_gguf_import_worker,
+            dict(recommendation),
+            snapshot,
+            str(selected_filename or ""),
+        )
+
+    def _local_gguf_import_worker(
+        self,
+        post_message: Callable[[dict[str, Any]], None],
+        cancel_token: CancelToken,
+        recommendation: dict[str, Any],
+        settings_snapshot: dict[str, Any],
+        selected_filename: str,
+    ) -> dict[str, Any]:
         model_name = str(recommendation.get("model_name") or "").strip()
         best_quant = str(recommendation.get("best_quant") or "").strip()
         fit_level = str(recommendation.get("fit_level") or "").strip()
         context_length = int(recommendation.get("recommended_context_length") or 2048)
-        working_settings = dict(settings_snapshot or self.model.settings)
         if not model_name or not best_quant:
-            self._safe_view_call("set_status", "Select a recommended GGUF model first.")
-            return None
+            raise ValueError("Select a recommended GGUF model first.")
+
+        post_message({"type": "status", "text": "Resolving source"})
         plan = self.local_llm_recommender_service.plan_import(
             model_name=model_name,
             best_quant=best_quant,
             fit_level=fit_level,
             recommended_context_length=context_length,
-            settings=working_settings,
+            settings=settings_snapshot,
+            selected_filename=selected_filename,
         )
-        if plan.manual_selection_required:
-            selected_name = self._pick_item_from_list(
-                "Choose GGUF File",
-                "Select the GGUF file to import:",
-                plan.candidate_filenames,
+        if plan.manual_selection_required and not selected_filename:
+            post_message({"type": "status", "text": "Selecting file"})
+            repo_files = self.local_llm_recommender_service.list_repo_files(plan.source_repo)
+            candidate_set = set(plan.candidate_filenames)
+            candidate_rows = self.local_llm_recommender_service.describe_repo_files(
+                [item for item in repo_files if item.filename in candidate_set]
             )
-            if not selected_name:
-                self._safe_view_call("set_status", "GGUF import cancelled.")
-                return None
-            plan = self.local_llm_recommender_service.plan_import(
-                model_name=model_name,
-                best_quant=best_quant,
-                fit_level=fit_level,
-                recommended_context_length=context_length,
-                settings=working_settings,
-                selected_filename=selected_name,
-            )
-        try:
-            imported_path = self.local_llm_recommender_service.download_import(plan)
-        except Exception as exc:
-            self._show_error_dialog("GGUF Import Failed", str(exc))
-            self._safe_view_call("set_status", f"Could not import {model_name}.")
-            return None
+            return {
+                "state": "needs_selection",
+                "plan": plan.to_payload(),
+                "candidate_files": candidate_rows,
+            }
+
+        post_message({"type": "status", "text": "Downloading"})
+
+        def _progress(current: int, total: int | None) -> None:
+            post_message({"type": "progress", "current": int(current), "total": total})
+
+        imported_path = self.local_llm_recommender_service.download_import(
+            plan,
+            progress_callback=_progress,
+            cancel_token=cancel_token,
+        )
+        return {
+            "state": "downloaded",
+            "plan": plan.to_payload(),
+            "downloaded_path": str(imported_path),
+        }
+
+    def _commit_local_gguf_import(
+        self,
+        plan: ImportPlan,
+        imported_path: pathlib.Path,
+        *,
+        activate: bool,
+    ) -> dict[str, Any]:
+        working_settings = dict(self.model.settings)
         metadata = dict(plan.registry_metadata or {})
         metadata["source_filename"] = plan.filename
         metadata["download_path"] = str(imported_path)
@@ -2254,10 +2455,85 @@ class AppController:
                     entry,
                     target="llm",
                 )
+        self.model.settings = working_settings
+        self.model.save_settings(self.model.settings)
+        self._safe_view_call("populate_settings", self.model.settings)
+        self._sync_local_model_rows()
+        self._sync_local_gguf_recommendations()
         return working_settings
+
+    def _register_manual_local_gguf_path(self, path: str, *, activate: bool) -> bool:
+        candidate = pathlib.Path(path).expanduser()
+        if not candidate.is_file():
+            self._show_error_dialog("Invalid GGUF File", "Choose an existing .gguf file.")
+            return False
+        registry = self.local_model_registry_service.add_gguf(
+            self.model.settings.get("local_model_registry", {}),
+            name=candidate.stem,
+            path=str(candidate),
+            metadata={},
+        )
+        working_settings = dict(self.model.settings)
+        working_settings["local_model_registry"] = registry
+        working_settings["local_gguf_models_dir"] = str(candidate.parent)
+        if activate:
+            entry = next(
+                (
+                    item
+                    for item in self.local_model_registry_service.list_entries(registry)
+                    if item.model_type == "gguf" and (item.path or item.value) == str(candidate)
+                ),
+                None,
+            )
+            if entry is not None:
+                working_settings = self.local_model_registry_service.activate_entry(
+                    working_settings,
+                    entry,
+                    target="llm",
+                )
+        self.model.settings = working_settings
+        self.model.save_settings(self.model.settings)
+        self._safe_view_call("populate_settings", self.model.settings)
+        self._sync_local_model_rows()
+        self._sync_local_gguf_recommendations()
+        return True
+
+    def _offer_manual_local_gguf_fallback(self, meta: dict[str, Any], *, reason: str) -> None:
+        recommendation = dict(meta.get("recommendation") or {})
+        model_name = str(recommendation.get("model_name") or "the selected GGUF")
+        prompt = (
+            f"{reason}\n\nChoose an existing local .gguf file instead of {model_name}?"
+            if reason
+            else f"Choose an existing local .gguf file instead of {model_name}?"
+        )
+        if not self._ask_yes_no("Use Existing GGUF", prompt):
+            return
+        path = self._pick_open_file(
+            title="Select GGUF model file",
+            filetypes=[("GGUF files", "*.gguf"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        if self._register_manual_local_gguf_path(path, activate=bool(meta.get("activate", False))):
+            verb = "Applied" if bool(meta.get("activate", False)) else "Imported"
+            self._safe_view_call("set_status", f"{verb} local GGUF from {pathlib.Path(path).name}.")
+
+    def _start_queued_local_gguf_import_if_any(self) -> None:
+        queued = dict(self._queued_local_gguf_import or {})
+        if not queued:
+            return
+        self._queued_local_gguf_import = None
+        self._start_local_gguf_import_task(
+            dict(queued.get("recommendation") or {}),
+            activate=bool(queued.get("activate", False)),
+            origin=str(queued.get("origin", "wizard") or "wizard"),
+            settings_snapshot=dict(queued.get("settings_snapshot") or self.model.settings),
+        )
 
     def on_refresh_local_gguf_recommendations(self, use_case: str = "") -> None:
         requested = str(use_case or "").strip() or None
+        self.local_llm_recommender_service.invalidate_hardware_cache()
+        self.local_llm_recommender_service.invalidate_repo_cache()
         self._sync_local_gguf_recommendations(use_case=requested)
         self._safe_view_call("set_status", "Local GGUF recommendations refreshed.")
 
@@ -2266,32 +2542,28 @@ class AppController:
         if not recommendation:
             self._safe_view_call("set_status", "Select a recommended GGUF model first.")
             return
-        updated = self._import_local_gguf_recommendation(recommendation, activate=False)
-        if updated is None:
-            return
-        self.model.settings = updated
-        self.model.save_settings(self.model.settings)
-        self._safe_view_call("populate_settings", self.model.settings)
-        self._sync_local_model_rows()
-        self._sync_local_gguf_recommendations()
-        self._safe_view_call("set_status", f"Imported {recommendation.get('model_name', 'GGUF model')}.")
+        self._start_local_gguf_import_task(recommendation, activate=False, origin="settings")
 
     def on_apply_local_gguf_recommendation(self) -> None:
         recommendation = self._selected_local_gguf_recommendation()
         if not recommendation:
             self._safe_view_call("set_status", "Select a recommended GGUF model first.")
             return
-        updated = self._import_local_gguf_recommendation(recommendation, activate=True)
-        if updated is None:
+        activation_request = self._resolve_local_gguf_activation_request(
+            recommendation,
+            requested=True,
+            allow_import_only_fallback=False,
+        )
+        if activation_request is None:
             return
-        self.model.settings = updated
-        self.model.save_settings(self.model.settings)
-        self._safe_view_call("populate_settings", self.model.settings)
-        self._sync_local_model_rows()
-        self._sync_local_gguf_recommendations()
-        self._safe_view_call("set_status", f"Applied {recommendation.get('model_name', 'GGUF model')} as the local LLM.")
+        self._start_local_gguf_import_task(
+            recommendation,
+            activate=bool(activation_request),
+            origin="settings",
+        )
 
     def on_edit_hardware_assumptions(self) -> None:
+        self.local_llm_recommender_service.invalidate_hardware_cache()
         base_settings = dict(self.model.settings)
         base_settings["hardware_override_enabled"] = False
         detected = self.local_llm_recommender_service.detect_hardware(base_settings).to_payload()

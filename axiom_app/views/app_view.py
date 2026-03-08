@@ -872,6 +872,8 @@ class AppView(QMainWindow):
         gguf_button_row.addWidget(self.btn_apply_local_gguf_recommendation)
         gguf_button_row.addStretch(1)
         gguf_layout.addLayout(gguf_button_row)
+        self.btn_import_local_gguf_recommendation.setEnabled(False)
+        self.btn_apply_local_gguf_recommendation.setEnabled(False)
         self._local_gguf_recommendation_notes = QLabel("", gguf_body)
         self._local_gguf_recommendation_notes.setWordWrap(True)
         gguf_layout.addWidget(self._local_gguf_recommendation_notes)
@@ -1292,19 +1294,26 @@ class AppView(QMainWindow):
             )
         else:
             self._local_gguf_recommendation_notes.setText("No matching GGUF recommendations for the selected use case.")
+            self._update_local_gguf_recommendation_actions()
 
     def _update_local_gguf_recommendation_details(self) -> None:
         payload = self.get_selected_local_gguf_recommendation()
         if not payload:
             self._local_gguf_recommendation_notes.setText("")
+            self._update_local_gguf_recommendation_actions()
             return
         notes = list(payload.get("notes") or [])
+        action_state = self._local_gguf_recommendation_action_state(payload)
         summary = (
             f"Fit {payload.get('fit_level', '')} via {payload.get('run_mode', '')}. "
             f"Needs {float(payload.get('memory_required_gb', 0.0) or 0.0):.1f} GB "
             f"from {float(payload.get('memory_available_gb', 0.0) or 0.0):.1f} GB budget."
         )
-        self._local_gguf_recommendation_notes.setText("\n".join([summary, *notes[:3]]))
+        detail_lines = [summary, *notes[:3]]
+        if action_state["warning"]:
+            detail_lines.append(str(action_state["warning"]))
+        self._local_gguf_recommendation_notes.setText("\n".join(detail_lines))
+        self._update_local_gguf_recommendation_actions()
 
     def get_selected_local_gguf_recommendation(self) -> dict[str, Any] | None:
         item = self._local_gguf_recommendation_tree.currentItem()
@@ -1312,6 +1321,88 @@ class AppView(QMainWindow):
             return None
         payload = item.data(0, Qt.UserRole)
         return dict(payload or {}) if isinstance(payload, dict) else None
+
+    def _local_gguf_recommendation_action_state(self, payload: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {
+                "can_import": False,
+                "can_apply": False,
+                "apply_label": "Apply as Local LLM",
+                "warning": "",
+            }
+        fit_level = str(payload.get("fit_level") or "").strip().lower()
+        has_source = bool(str(payload.get("source_repo") or payload.get("source_provider") or "").strip())
+        warning = ""
+        apply_label = "Apply as Local LLM"
+        can_apply = has_source and fit_level != "too_tight"
+        if fit_level == "marginal":
+            apply_label = "Apply as Local LLM (Confirm)"
+            warning = "Activation will ask for confirmation before switching to this model."
+        elif fit_level == "too_tight":
+            warning = "Activation is blocked for this recommendation. Import is still allowed."
+        return {
+            "can_import": has_source,
+            "can_apply": can_apply,
+            "apply_label": apply_label,
+            "warning": warning,
+        }
+
+    def _update_local_gguf_recommendation_actions(self) -> None:
+        state = self._local_gguf_recommendation_action_state(self.get_selected_local_gguf_recommendation())
+        self.btn_import_local_gguf_recommendation.setEnabled(bool(state["can_import"]))
+        self.btn_apply_local_gguf_recommendation.setEnabled(bool(state["can_apply"]))
+        self.btn_apply_local_gguf_recommendation.setText(str(state["apply_label"]))
+
+    @staticmethod
+    def _format_byte_size(size_bytes: int) -> str:
+        size = float(max(int(size_bytes or 0), 0))
+        units = ["B", "KB", "MB", "GB", "TB"]
+        unit = units[0]
+        for unit in units:
+            if size < 1024.0 or unit == units[-1]:
+                break
+            size /= 1024.0
+        if unit == "B":
+            return f"{int(size)} {unit}"
+        return f"{size:.1f} {unit}"
+
+    def pick_local_gguf_repo_file(
+        self,
+        candidates: list[dict[str, Any]],
+        title: str = "Choose GGUF File",
+        detail: str = "",
+    ) -> str:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.resize(760, 420)
+        root = QVBoxLayout(dialog)
+        label = QLabel(detail or "Select the GGUF file to import.", dialog)
+        label.setWordWrap(True)
+        root.addWidget(label)
+        tree = self._make_tree(["Filename", "Quant", "Size", "Hint"], dialog)
+        root.addWidget(tree, 1)
+        for row in candidates or []:
+            item = QTreeWidgetItem(
+                [
+                    str(row.get("filename", "")),
+                    str(row.get("quant", "") or ""),
+                    self._format_byte_size(int(row.get("size_bytes", 0) or 0)),
+                    str(row.get("hint", "") or ""),
+                ]
+            )
+            item.setData(0, Qt.UserRole, str(row.get("filename", "") or ""))
+            tree.addTopLevelItem(item)
+        if tree.topLevelItemCount() > 0:
+            tree.setCurrentItem(tree.topLevelItem(0))
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        root.addWidget(buttons)
+        tree.itemDoubleClicked.connect(lambda *_args: dialog.accept())
+        if dialog.exec() != QDialog.Accepted:
+            return ""
+        item = tree.currentItem()
+        return str(item.data(0, Qt.UserRole) if item is not None else "")
 
     def show_hardware_override_editor(
         self,
@@ -1646,6 +1737,8 @@ class AppView(QMainWindow):
         edit_local_hardware = QPushButton("Edit Hardware Assumptions", dialog)
         import_local_gguf = QCheckBox("Import selected GGUF on finish", dialog)
         use_selected_local_gguf = QPushButton("Use Selected Recommendation", dialog)
+        import_local_gguf.setEnabled(False)
+        use_selected_local_gguf.setEnabled(False)
         provider_tab.layout().addWidget(QLabel("Local GGUF recommendations", dialog), 12, 0)
         provider_tab.layout().addWidget(local_gguf_hardware_label, 13, 0, 1, 3)
         provider_tab.layout().addWidget(local_gguf_advisory_label, 14, 0, 1, 3)
@@ -1702,18 +1795,53 @@ class AppView(QMainWindow):
             payload = item.data(0, Qt.UserRole) if item is not None else None
             return dict(payload or {}) if isinstance(payload, dict) else None
 
+        def local_gguf_action_state(payload: dict[str, Any] | None) -> dict[str, Any]:
+            if not isinstance(payload, dict):
+                return {
+                    "can_import": False,
+                    "button_label": "Use Selected Recommendation",
+                    "warning": "",
+                }
+            fit_level = str(payload.get("fit_level") or "").strip().lower()
+            has_source = bool(str(payload.get("source_repo") or payload.get("source_provider") or "").strip())
+            button_label = "Use Selected Recommendation"
+            warning = ""
+            if fit_level == "marginal":
+                button_label = "Use Selected Recommendation (Confirm)"
+                warning = "Activation will ask for confirmation before switching to this model."
+            elif fit_level == "too_tight":
+                button_label = "Import Only on Finish"
+                warning = "Activation is blocked for this recommendation. It can still be imported."
+            return {
+                "can_import": has_source,
+                "button_label": button_label,
+                "warning": warning,
+            }
+
+        def update_local_gguf_actions() -> None:
+            state = local_gguf_action_state(selected_local_gguf_recommendation())
+            import_local_gguf.setEnabled(bool(state["can_import"]))
+            use_selected_local_gguf.setEnabled(bool(state["can_import"]))
+            use_selected_local_gguf.setText(str(state["button_label"]))
+
         def update_local_gguf_notes() -> None:
             payload = selected_local_gguf_recommendation()
             if not payload:
                 local_gguf_notes.setText("")
+                update_local_gguf_actions()
                 return
             notes = list(payload.get("notes") or [])
+            state = local_gguf_action_state(payload)
             summary = (
                 f"Fit {payload.get('fit_level', '')} via {payload.get('run_mode', '')}. "
                 f"Needs {float(payload.get('memory_required_gb', 0.0) or 0.0):.1f} GB "
                 f"from {float(payload.get('memory_available_gb', 0.0) or 0.0):.1f} GB."
             )
-            local_gguf_notes.setText("\n".join([summary, *notes[:3]]))
+            detail_lines = [summary, *notes[:3]]
+            if state["warning"]:
+                detail_lines.append(str(state["warning"]))
+            local_gguf_notes.setText("\n".join(detail_lines))
+            update_local_gguf_actions()
 
         def populate_local_gguf_recommendations(payload: dict[str, Any]) -> None:
             hardware = dict(payload.get("hardware") or {})
@@ -1754,6 +1882,8 @@ class AppView(QMainWindow):
                 local_gguf_tree.addTopLevelItem(item)
             if local_gguf_tree.topLevelItemCount() > 0:
                 local_gguf_tree.setCurrentItem(local_gguf_tree.topLevelItem(0))
+            else:
+                update_local_gguf_actions()
             update_local_gguf_notes()
 
         def refresh_local_gguf_recommendations() -> dict[str, Any]:

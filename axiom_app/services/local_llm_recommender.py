@@ -10,7 +10,7 @@ import platform
 import re
 import subprocess
 from importlib import resources
-from typing import Any
+from typing import Any, Callable
 from urllib import parse, request
 
 try:
@@ -271,6 +271,9 @@ class ImportPlan:
     filename: str
     destination_path: str
     registry_metadata: dict[str, Any]
+    expected_size_bytes: int | None = None
+    activation_safe: bool = False
+    manual_reason: str = ""
     manual_selection_required: bool = False
     candidate_filenames: list[str] = field(default_factory=list)
 
@@ -289,6 +292,8 @@ class LocalLlmRecommenderService:
 
     def __init__(self) -> None:
         self._catalog_cache: tuple[dict[str, Any], list[CatalogModel]] | None = None
+        self._hardware_cache: HardwareProfile | None = None
+        self._repo_tree_cache: dict[str, list[HuggingFaceRepoFile]] = {}
 
     def load_catalog(self) -> tuple[dict[str, Any], list[CatalogModel]]:
         if self._catalog_cache is not None:
@@ -327,8 +332,21 @@ class LocalLlmRecommenderService:
         return mapping.get(str(mode or "").strip(), "general")
 
     def detect_hardware(self, settings: dict[str, Any] | None = None) -> HardwareProfile:
-        detected = self._detect_hardware_profile()
+        detected = self._hardware_cache
+        if detected is None:
+            detected = self._detect_hardware_profile()
+            self._hardware_cache = detected
         return self._apply_overrides(detected, settings or {})
+
+    def invalidate_hardware_cache(self) -> None:
+        self._hardware_cache = None
+
+    def invalidate_repo_cache(self, repo: str | None = None) -> None:
+        target = str(repo or "").strip()
+        if not target:
+            self._repo_tree_cache.clear()
+            return
+        self._repo_tree_cache.pop(target, None)
 
     def recommend_models(
         self,
@@ -438,9 +456,18 @@ class LocalLlmRecommenderService:
         filename = str(selected_filename or "").strip()
         manual_required = False
         candidate_names = [item.filename for item in files]
+        manual_reason = ""
+        selected_file: HuggingFaceRepoFile | None = None
         if not filename:
             chosen, manual_required = self._choose_best_gguf_file(files, best_quant)
+            selected_file = chosen
             filename = chosen.filename if chosen is not None else ""
+            if manual_required:
+                manual_reason = "Multiple GGUF files match this recommendation. Choose one explicitly."
+            elif not filename:
+                manual_reason = "No safe automatic GGUF file choice was available."
+        else:
+            selected_file = next((item for item in files if item.filename == filename), None)
         if filename and not validate_gguf_filename(filename):
             raise ValueError(f"Unsafe GGUF filename: {filename}")
         destination = self.default_models_dir(settings) / filename if filename else self.default_models_dir(settings)
@@ -461,12 +488,21 @@ class LocalLlmRecommenderService:
             filename=filename,
             destination_path=str(destination),
             registry_metadata=metadata,
+            expected_size_bytes=selected_file.size_bytes if selected_file and selected_file.size_bytes > 0 else None,
+            activation_safe=str(fit_level or "").strip().lower() in {"perfect", "good"},
+            manual_reason=manual_reason,
             manual_selection_required=manual_required or not bool(filename),
             candidate_filenames=candidate_names,
         )
 
     def list_repo_files(self, repo: str) -> list[HuggingFaceRepoFile]:
-        encoded_repo = parse.quote(str(repo or "").strip(), safe="")
+        target_repo = str(repo or "").strip()
+        if not target_repo:
+            return []
+        cached = self._repo_tree_cache.get(target_repo)
+        if cached is not None:
+            return [HuggingFaceRepoFile(item.filename, item.size_bytes) for item in cached]
+        encoded_repo = parse.quote(target_repo, safe="")
         url = f"https://huggingface.co/api/models/{encoded_repo}/tree/main?recursive=1"
         payload = self._read_json(url)
         files: list[HuggingFaceRepoFile] = []
@@ -483,23 +519,85 @@ class LocalLlmRecommenderService:
                     size_bytes=max(int(item.get("size") or 0), 0),
                 )
             )
+        self._repo_tree_cache[target_repo] = [
+            HuggingFaceRepoFile(item.filename, item.size_bytes) for item in files
+        ]
         return files
 
-    def download_import(self, plan: ImportPlan) -> pathlib.Path:
+    def describe_repo_files(self, files: list[HuggingFaceRepoFile]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for item in files:
+            rows.append(
+                {
+                    "filename": item.filename,
+                    "quant": quant_from_filename(item.filename),
+                    "size_bytes": item.size_bytes,
+                    "hint": "chat/instruct" if is_instruct_filename(item.filename) else "base",
+                }
+            )
+        rows.sort(
+            key=lambda row: (
+                0 if row["hint"] == "chat/instruct" else 1,
+                quant_rank(str(row["quant"] or "")) if row["quant"] else 999,
+                int(row["size_bytes"] or 0) if row["size_bytes"] else 2**63 - 1,
+                str(row["filename"]).lower(),
+            )
+        )
+        return rows
+
+    def download_import(
+        self,
+        plan: ImportPlan,
+        *,
+        progress_callback: Callable[[int, int | None], None] | None = None,
+        cancel_token: Any | None = None,
+    ) -> pathlib.Path:
         if not plan.filename:
             raise ValueError("No GGUF filename was selected for import.")
         destination = pathlib.Path(plan.destination_path).expanduser()
         destination.parent.mkdir(parents=True, exist_ok=True)
+        if (
+            plan.expected_size_bytes is not None
+            and destination.is_file()
+            and destination.stat().st_size == int(plan.expected_size_bytes)
+        ):
+            if progress_callback is not None:
+                progress_callback(int(plan.expected_size_bytes), int(plan.expected_size_bytes))
+            return destination
+        part_path = destination.with_name(destination.name + ".part")
         encoded_repo = parse.quote(plan.source_repo, safe="")
         encoded_filename = parse.quote(plan.filename)
         url = f"https://huggingface.co/{encoded_repo}/resolve/main/{encoded_filename}?download=true"
         req = request.Request(url, headers={"User-Agent": "Axiom/1.0"})
-        with request.urlopen(req, timeout=120) as response, destination.open("wb") as handle:
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                handle.write(chunk)
+        if part_path.exists():
+            part_path.unlink()
+        downloaded = 0
+        total_bytes = int(plan.expected_size_bytes) if plan.expected_size_bytes is not None else None
+        try:
+            with request.urlopen(req, timeout=120) as response, part_path.open("wb") as handle:
+                if total_bytes is None:
+                    header_total = str(response.headers.get("Content-Length") or "").strip()
+                    if header_total.isdigit():
+                        total_bytes = int(header_total)
+                while True:
+                    if bool(getattr(cancel_token, "cancelled", False)):
+                        raise InterruptedError("GGUF import cancelled.")
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback is not None:
+                        progress_callback(downloaded, total_bytes)
+            if total_bytes is not None and downloaded != total_bytes:
+                raise ValueError(
+                    f"Incomplete GGUF download for {plan.filename}: expected {total_bytes} bytes, got {downloaded}."
+                )
+            os.replace(part_path, destination)
+        except Exception:
+            if part_path.exists():
+                part_path.unlink()
+            raise
         return destination
 
     def _analyze_model(self, model: CatalogModel, hardware: HardwareProfile, use_case: str) -> FitRecommendation:

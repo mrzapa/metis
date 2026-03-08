@@ -9,6 +9,7 @@ import pytest
 
 qt_widgets = pytest.importorskip("PySide6.QtWidgets", reason="Qt runtime unavailable")
 QScrollBar = qt_widgets.QScrollBar
+QDialog = qt_widgets.QDialog
 QTreeWidget = qt_widgets.QTreeWidget
 
 
@@ -165,6 +166,76 @@ def test_app_view_renders_local_gguf_recommendations(qapp, process_events) -> No
     assert selected is not None
     assert selected["model_name"] == "Qwen/Test-7B-Instruct"
     assert "RTX 4090" in view._local_gguf_hardware_label.text()
+    assert view.btn_import_local_gguf_recommendation.isEnabled()
+    assert view.btn_apply_local_gguf_recommendation.isEnabled()
+    assert view.btn_apply_local_gguf_recommendation.text() == "Apply as Local LLM"
+
+
+def test_app_view_disables_apply_for_too_tight_local_gguf(qapp, process_events) -> None:
+    view = _show(process_events)
+    view.switch_view("settings")
+    view.set_local_gguf_recommendations(
+        {
+            "use_case": "reasoning",
+            "advisory_only": False,
+            "hardware": {
+                "total_ram_gb": 16.0,
+                "available_ram_gb": 10.0,
+                "total_cpu_cores": 8,
+                "backend": "cpu_x86",
+                "has_gpu": False,
+            },
+            "rows": [
+                {
+                    "model_name": "Qwen/Test-70B",
+                    "parameter_count": "70B",
+                    "fit_level": "too_tight",
+                    "run_mode": "cpu",
+                    "best_quant": "Q2_K",
+                    "estimated_tps": 2.0,
+                    "memory_required_gb": 48.0,
+                    "memory_available_gb": 10.0,
+                    "recommended_context_length": 2048,
+                    "source_provider": "bartowski",
+                    "source_repo": "bartowski/test",
+                    "notes": ["CPU-only fallback."],
+                }
+            ],
+        }
+    )
+    process_events()
+
+    assert view.btn_import_local_gguf_recommendation.isEnabled()
+    assert not view.btn_apply_local_gguf_recommendation.isEnabled()
+    assert "Activation is blocked" in view._local_gguf_recommendation_notes.text()
+
+
+def test_app_view_repo_file_picker_uses_structured_columns(monkeypatch, qapp, process_events) -> None:
+    view = _show(process_events)
+    seen_headers: list[str] = []
+
+    def _exec(dialog):
+        tree = dialog.findChild(QTreeWidget)
+        assert tree is not None
+        seen_headers.extend(tree.headerItem().text(index) for index in range(tree.columnCount()))
+        return QDialog.Accepted
+
+    monkeypatch.setattr(QDialog, "exec", _exec)
+
+    selected = view.pick_local_gguf_repo_file(
+        [
+            {
+                "filename": "Qwen-Test-Instruct-Q4_K_M.gguf",
+                "quant": "Q4_K_M",
+                "size_bytes": 4_000_000,
+                "hint": "chat/instruct",
+            }
+        ],
+        detail="Choose a file.",
+    )
+
+    assert selected == "Qwen-Test-Instruct-Q4_K_M.gguf"
+    assert seen_headers == ["Filename", "Quant", "Size", "Hint"]
 
 
 def test_app_view_uses_packaged_brand_logo_when_available(qapp, process_events) -> None:
