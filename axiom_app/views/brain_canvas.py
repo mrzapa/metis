@@ -6,7 +6,7 @@ from math import hypot
 from typing import Any
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFontMetrics, QPainter, QPainterPath, QPen, QWheelEvent
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QGraphicsItem,
@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QPushButton,
-    QSizePolicy,
     QSpinBox,
     QSplitter,
     QVBoxLayout,
