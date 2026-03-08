@@ -23,7 +23,7 @@
 .NOTES
     Environment overrides:
       AXIOM_INSTALL_DIR  — where to clone  (default: ~\axiom)
-      AXIOM_REPO         — git clone URL   (default: https://github.com/mrzapa/workx.git)
+      AXIOM_REPO         — git clone URL   (default: https://github.com/mrzapa/axiom.git)
       AXIOM_BRANCH       — branch          (default: main)
       AXIOM_PYTHON       — python binary   (default: python)
 #>
@@ -37,7 +37,7 @@ $ErrorActionPreference = "Stop"
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 $InstallDir  = if ($env:AXIOM_INSTALL_DIR) { $env:AXIOM_INSTALL_DIR } else { Join-Path $HOME "axiom" }
-$RepoUrl     = if ($env:AXIOM_REPO)        { $env:AXIOM_REPO }        else { "https://github.com/mrzapa/workx.git" }
+$RepoUrl     = if ($env:AXIOM_REPO)        { $env:AXIOM_REPO }        else { "https://github.com/mrzapa/axiom.git" }
 $Branch      = if ($env:AXIOM_BRANCH)      { $env:AXIOM_BRANCH }      else { "main" }
 $PythonBin   = if ($env:AXIOM_PYTHON)      { $env:AXIOM_PYTHON }      else { "python" }
 $VenvDir     = Join-Path $InstallDir ".venv"

@@ -10,7 +10,7 @@
 #
 # Configurable via environment:
 #   AXIOM_INSTALL_DIR   — where to clone the repo  (default: ~/axiom)
-#   AXIOM_REPO          — git clone URL             (default: https://github.com/mrzapa/workx.git)
+#   AXIOM_REPO          — git clone URL             (default: https://github.com/mrzapa/axiom.git)
 #   AXIOM_BRANCH        — branch to track           (default: main)
 #   AXIOM_PYTHON        — python binary             (default: python3)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -18,7 +18,7 @@ set -euo pipefail
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 INSTALL_DIR="${AXIOM_INSTALL_DIR:-$HOME/axiom}"
-REPO_URL="${AXIOM_REPO:-https://github.com/mrzapa/workx.git}"
+REPO_URL="${AXIOM_REPO:-https://github.com/mrzapa/axiom.git}"
 BRANCH="${AXIOM_BRANCH:-main}"
 PYTHON="${AXIOM_PYTHON:-python3}"
 VENV_DIR="$INSTALL_DIR/.venv"
@@ -217,7 +217,7 @@ Options:
 
 Environment variables:
   AXIOM_INSTALL_DIR   Install location     (default: ~/axiom)
-  AXIOM_REPO          Git repository URL   (default: https://github.com/mrzapa/workx.git)
+  AXIOM_REPO          Git repository URL   (default: https://github.com/mrzapa/axiom.git)
   AXIOM_BRANCH        Branch to track      (default: main)
   AXIOM_PYTHON        Python binary        (default: python3)
 EOF
