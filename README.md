@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mrzapa/workx/actions/workflows/ci.yml"><img src="https://github.com/mrzapa/workx/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/mrzapa/axiom/actions/workflows/ci.yml"><img src="https://github.com/mrzapa/axiom/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Alpha" />
@@ -42,13 +42,13 @@ Most RAG tools are either locked to one provider, trapped behind a SaaS login, o
 **macOS / Linux:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_axiom.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.ps1 | iex
+irm https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_axiom.ps1 | iex
 ```
 
 That's it. The installer clones the repo, sets up a virtual environment, installs dependencies, and drops an `axiom` launcher on your PATH. It even auto-pulls the latest code every time you run it.
@@ -70,7 +70,7 @@ That's it. The installer clones the repo, sets up a virtual environment, install
 
 ```bash
 # 1. Clone and enter the repo
-git clone https://github.com/mrzapa/workx.git && cd workx
+git clone https://github.com/mrzapa/axiom.git && cd axiom
 
 # 2. Create a virtual environment
 python -m venv .venv

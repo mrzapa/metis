@@ -30,11 +30,11 @@ jobs:
           cat > release-artifacts/install.sh <<'BOOTSTRAP'
           #!/usr/bin/env bash
           # Axiom quick-install bootstrap
-          # Usage: curl -fsSL https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.sh | bash
+          # Usage: curl -fsSL https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_axiom.sh | bash
           set -euo pipefail
           TMPDIR=$(mktemp -d)
           trap 'rm -rf "$TMPDIR"' EXIT
-          curl -fsSL https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.sh -o "$TMPDIR/install_axiom.sh"
+          curl -fsSL https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_axiom.sh -o "$TMPDIR/install_axiom.sh"
           chmod +x "$TMPDIR/install_axiom.sh"
           exec "$TMPDIR/install_axiom.sh" "$@"
           BOOTSTRAP
@@ -61,12 +61,12 @@ jobs:
 
             **macOS / Linux:**
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_axiom.sh | bash
             ```
 
             **Windows (PowerShell):**
             ```powershell
-            irm https://raw.githubusercontent.com/mrzapa/workx/main/scripts/install_axiom.ps1 | iex
+            irm https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_axiom.ps1 | iex
             ```
 
             ### Manual Install
