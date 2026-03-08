@@ -78,6 +78,14 @@ def test_app_view_hero_heading_wraps_when_constrained(qapp, process_events) -> N
     assert view._hero_greeting_label.heightForWidth(320) > view._hero_greeting_label.fontMetrics().lineSpacing()
 
 
+def test_app_view_hero_labels_receive_full_wrapped_height(qapp, process_events) -> None:
+    view = _show(process_events)
+
+    for label in (view._hero_greeting_label, view._hero_copy_label):
+        width = max(1, label.width())
+        assert label.height() >= label.heightForWidth(width)
+
+
 def test_app_view_switches_between_empty_and_conversation_states(qapp, process_events) -> None:
     view = _show(process_events)
 
