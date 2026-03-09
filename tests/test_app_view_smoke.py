@@ -89,6 +89,17 @@ def test_app_view_hero_labels_use_readable_line_length(qapp, process_events) -> 
         assert label.maximumWidth() == 560
 
 
+def test_app_view_hero_inner_in_vbox_for_correct_height_for_width(qapp, process_events) -> None:
+    # _chat_empty_inner must be a direct child of the QVBoxLayout on _chat_empty_state
+    # so that Qt can propagate heightForWidth() from word-wrapped labels up through the
+    # layout chain.  A QHBoxLayout intermediary breaks this chain and causes the preset
+    # buttons at the bottom of the hero pane to be clipped.
+    view = _show(process_events)
+
+    assert view._chat_empty_inner.parent() is view._chat_empty_state
+    assert view._chat_empty_inner.hasHeightForWidth() is True
+
+
 def test_app_view_switches_between_empty_and_conversation_states(qapp, process_events) -> None:
     view = _show(process_events)
 
