@@ -69,6 +69,9 @@ def test_app_view_constructs_with_empty_chat_state(qapp, process_events) -> None
     assert view.minimumWidth() == 1180
     assert view.minimumHeight() == 760
     assert view._rag_toggle.get_value() is True
+    assert not view._conversation_setup_popup.isVisible()
+    assert len(view._chat_preset_buttons) >= 5
+    assert "Q&A" in view._chat_context_summary.text()
 
 
 def test_app_view_hero_heading_wraps_when_constrained(qapp, process_events) -> None:
@@ -78,12 +81,12 @@ def test_app_view_hero_heading_wraps_when_constrained(qapp, process_events) -> N
     assert view._hero_greeting_label.heightForWidth(320) > view._hero_greeting_label.fontMetrics().lineSpacing()
 
 
-def test_app_view_hero_labels_receive_full_wrapped_height(qapp, process_events) -> None:
+def test_app_view_hero_labels_use_readable_line_length(qapp, process_events) -> None:
     view = _show(process_events)
 
     for label in (view._hero_greeting_label, view._hero_copy_label):
-        width = max(1, label.width())
-        assert label.height() >= label.heightForWidth(width)
+        assert label.wordWrap() is True
+        assert label.maximumWidth() == 560
 
 
 def test_app_view_switches_between_empty_and_conversation_states(qapp, process_events) -> None:
@@ -100,6 +103,7 @@ def test_app_view_switches_between_empty_and_conversation_states(qapp, process_e
     assert view._chat_transcript_state.isVisible()
     assert not view._feedback_footer.isVisible()
     assert not view._evidence_tabs.isVisible()
+    assert "Current conversation:" in view._composer_meta.text()
 
     view.clear_chat()
     process_events()
@@ -154,6 +158,7 @@ def test_app_view_switches_between_all_pages(qapp, process_events) -> None:
     assert view.btn_history_refresh is not None
     assert view.btn_save_settings is not None
     assert view._logs_view is not None
+    assert view._brain_panel._surface == "overview"
 
 
 def test_app_view_applies_theme_and_updates_runtime_widgets(qapp, process_events) -> None:
@@ -169,6 +174,8 @@ def test_app_view_applies_theme_and_updates_runtime_widgets(qapp, process_events
     assert not view._llm_status_badge.icon().isNull()
     assert "openai / gpt-test" in view._llm_status_badge.toolTip()
     assert view._mode_combo.currentText() == "Research"
+    assert "Research" in view._chat_context_summary.text()
+    assert "openai / gpt-test" in view._chat_context_summary.text()
 
 
 def test_app_view_preserves_zero_numeric_settings_in_text_inputs(qapp, process_events) -> None:
@@ -203,6 +210,7 @@ def test_app_view_quick_model_popup_repopulates_presets(qapp, process_events) ->
     view = _show(process_events)
 
     view.populate_settings({"llm_provider": "anthropic", "llm_model": "claude-opus-4-6"})
+    view._show_conversation_setup_popup()
     view._show_quick_model_popup()
     view._quick_model_provider_combo.setCurrentText("google")
     process_events()
@@ -216,6 +224,7 @@ def test_app_view_quick_model_popup_reveals_custom_editor(qapp, process_events) 
     view.quickModelChangeRequested.connect(lambda payload: payloads.append(dict(payload)))
 
     view.populate_settings({"llm_provider": "anthropic", "llm_model": "claude-opus-4-6"})
+    view._show_conversation_setup_popup()
     view._show_quick_model_popup()
     view._quick_model_model_combo.setCurrentText("custom")
     process_events()
@@ -236,6 +245,7 @@ def test_app_view_quick_model_popup_reveals_custom_editor(qapp, process_events) 
 def test_app_view_model_switch_busy_state_disables_button_and_hides_popup(qapp, process_events) -> None:
     view = _show(process_events)
 
+    view._show_conversation_setup_popup()
     view._show_quick_model_popup()
     process_events()
     assert view._quick_model_popup.isVisible()
@@ -245,6 +255,48 @@ def test_app_view_model_switch_busy_state_disables_button_and_hides_popup(qapp, 
 
     assert not view._llm_status_badge.isEnabled()
     assert not view._quick_model_popup.isVisible()
+
+
+def test_app_view_chat_preset_starts_direct_mode(qapp, process_events) -> None:
+    view = _show(process_events)
+    payloads: list[dict[str, str]] = []
+    launches: list[str] = []
+    view.modeStateChanged.connect(lambda payload: payloads.append(dict(payload)))
+    view.newChatRequested.connect(lambda: launches.append("new"))
+
+    view._chat_preset_buttons[1].click()
+    process_events()
+
+    assert launches == ["new"]
+    assert payloads[-1]["selected_mode"] == "Q&A"
+    assert payloads[-1]["chat_path"] == "Direct"
+    assert view.get_chat_mode() == "direct"
+
+
+def test_app_view_brain_surface_switches_to_map(qapp, process_events) -> None:
+    view = _show(process_events)
+    view.switch_view("brain")
+    process_events()
+
+    assert view._brain_panel._surface_stack.currentWidget() is view._brain_panel._overview_page
+
+    view._brain_panel._set_surface("map")
+    process_events()
+
+    assert view._brain_panel._surface == "map"
+    assert view._brain_panel._surface_stack.currentWidget() is view._brain_panel._map_page
+
+
+def test_app_view_filters_logs(qapp, process_events) -> None:
+    view = _show(process_events)
+
+    view.append_log("[status] indexed")
+    view.append_log("[error] missing source")
+    view._logs_search.setText("error")
+    process_events()
+
+    assert "missing source" in view._logs_view.toPlainText()
+    assert "indexed" not in view._logs_view.toPlainText()
 
 
 def test_app_view_settings_widgets_are_owned_by_settings_page(qapp, process_events) -> None:

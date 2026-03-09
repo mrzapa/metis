@@ -64,6 +64,44 @@ APP_SUBTITLE = "Personal RAG Assistant"
 MODE_OPTIONS = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"]
 _BRAND_ASSET_PACKAGE = "axiom_app.assets"
 _BRAND_ASSET_NAME = "logo.png"
+_CHAT_PRESETS = [
+    {
+        "title": "Ask Documents",
+        "description": "Ground answers in your indexed files with citations.",
+        "mode": "Q&A",
+        "chat_path": "RAG",
+    },
+    {
+        "title": "Chat Freely",
+        "description": "Talk directly to the model without retrieval.",
+        "mode": "Q&A",
+        "chat_path": "Direct",
+    },
+    {
+        "title": "Summarize",
+        "description": "Condense a source into the most important ideas.",
+        "mode": "Summary",
+        "chat_path": "RAG",
+    },
+    {
+        "title": "Learn",
+        "description": "Use tutor-style prompts to understand the material.",
+        "mode": "Tutor",
+        "chat_path": "RAG",
+    },
+    {
+        "title": "Research",
+        "description": "Fan out across the workspace and compare evidence.",
+        "mode": "Research",
+        "chat_path": "RAG",
+    },
+    {
+        "title": "Evidence Pack",
+        "description": "Build a traceable answer pack with supporting sources.",
+        "mode": "Evidence Pack",
+        "chat_path": "RAG",
+    },
+]
 
 _DEFAULT_WINDOW_W = 1480
 _DEFAULT_WINDOW_H = 960
@@ -77,12 +115,12 @@ _NAV_ITEMS = [
 ]
 
 _SETTINGS_SPEC: list[tuple[str, list[tuple[str, str, str, list[str] | None]]]] = [
-    ("UI & Startup", [
+    ("Appearance & Startup", [
         ("theme", "Theme", "combobox", ["space_dust", "light", "dark"]),
-        ("startup_mode_setting", "Startup Mode", "combobox", ["advanced", "basic", "test"]),
+        ("startup_mode_setting", "Startup Experience", "combobox", ["advanced", "basic", "test"]),
         ("ui_backend", "UI Backend", "combobox", ["pyside6"]),
     ]),
-    ("LLM", [
+    ("Models: LLM", [
         ("llm_provider", "LLM Provider", "combobox", ["anthropic", "openai", "google", "xai", "local_lm_studio", "local_gguf", "mock"]),
         ("llm_model", "LLM Model", "entry", None),
         ("llm_model_custom", "Custom Model", "entry", None),
@@ -90,7 +128,7 @@ _SETTINGS_SPEC: list[tuple[str, list[tuple[str, str, str, list[str] | None]]]] =
         ("llm_max_tokens", "Max Tokens", "entry", None),
         ("verbose_mode", "Verbose Mode", "checkbutton", None),
     ]),
-    ("Local LLM", [
+    ("Models: Local Runtime", [
         ("local_llm_url", "LM Studio URL", "entry", None),
         ("local_gguf_model_path", "GGUF Model Path", "file_browse", None),
         ("local_gguf_models_dir", "GGUF Models Dir", "entry", None),
@@ -98,7 +136,7 @@ _SETTINGS_SPEC: list[tuple[str, list[tuple[str, str, str, list[str] | None]]]] =
         ("local_gguf_gpu_layers", "GPU Layers", "entry", None),
         ("local_gguf_threads", "CPU Threads", "entry", None),
     ]),
-    ("Hardware Overrides", [
+    ("Advanced: Hardware Overrides", [
         ("hardware_override_enabled", "Enable Overrides", "checkbutton", None),
         ("hardware_override_total_ram_gb", "Total RAM (GB)", "entry", None),
         ("hardware_override_available_ram_gb", "Available RAM (GB)", "entry", None),
@@ -108,10 +146,10 @@ _SETTINGS_SPEC: list[tuple[str, list[tuple[str, str, str, list[str] | None]]]] =
         ("hardware_override_backend", "Backend", "combobox", ["", "cpu_x86", "cpu_arm", "cuda", "metal", "rocm", "vulkan", "sycl", "ascend"]),
         ("hardware_override_unified_memory", "Unified Memory", "checkbutton", None),
     ]),
-    ("System Instructions", [
+    ("Conversations: System Prompt", [
         ("system_instructions", "System Prompt", "text", None),
     ]),
-    ("Embeddings", [
+    ("Models: Embeddings", [
         ("embeddings_backend", "Backend", "combobox", ["mock", "sentence_transformers", "voyage", "openai"]),
         ("embedding_provider", "Provider", "combobox", ["voyage", "openai", "google", "local_huggingface", "local_sentence_transformers", "mock"]),
         ("embedding_model", "Model", "entry", None),
@@ -122,12 +160,12 @@ _SETTINGS_SPEC: list[tuple[str, list[tuple[str, str, str, list[str] | None]]]] =
         ("force_embedding_compat", "Force Compat", "checkbutton", None),
         ("cache_dir", "Axiom Cache Dir", "entry", None),
     ]),
-    ("Vector DB", [
+    ("Documents & Retrieval: Storage", [
         ("vector_db_type", "DB Type", "combobox", ["json", "chroma", "weaviate"]),
         ("weaviate_url", "Weaviate URL", "entry", None),
         ("weaviate_api_key", "Weaviate Key", "entry_password", None),
     ]),
-    ("API Keys", [
+    ("Privacy & Storage: API Keys", [
         ("api_key_openai", "OpenAI", "entry_password", None),
         ("api_key_anthropic", "Anthropic", "entry_password", None),
         ("api_key_google", "Google", "entry_password", None),
@@ -142,7 +180,7 @@ _SETTINGS_SPEC: list[tuple[str, list[tuple[str, str, str, list[str] | None]]]] =
         ("api_key_fireworks", "Fireworks", "entry_password", None),
         ("api_key_perplexity", "Perplexity", "entry_password", None),
     ]),
-    ("Ingestion", [
+    ("Documents & Retrieval: Ingestion", [
         ("document_loader", "Document Loader", "combobox", ["auto", "plain"]),
         ("chunk_size", "Chunk Size", "entry", None),
         ("chunk_overlap", "Chunk Overlap", "entry", None),
@@ -152,7 +190,7 @@ _SETTINGS_SPEC: list[tuple[str, list[tuple[str, str, str, list[str] | None]]]] =
         ("build_comprehension_index", "Build Comprehension", "checkbutton", None),
         ("comprehension_extraction_depth", "Extraction Depth", "combobox", ["Standard", "Deep", "Exhaustive"]),
     ]),
-    ("Retrieval", [
+    ("Documents & Retrieval: Querying", [
         ("top_k", "Top-K (final)", "entry", None),
         ("retrieval_k", "Retrieval K", "entry", None),
         ("retrieval_mode", "Retrieval Mode", "combobox", ["flat", "hierarchical"]),
@@ -163,17 +201,17 @@ _SETTINGS_SPEC: list[tuple[str, list[tuple[str, str, str, list[str] | None]]]] =
         ("use_sub_queries", "Sub-Queries", "checkbutton", None),
         ("subquery_max_docs", "Max Sub-Q Docs", "entry", None),
     ]),
-    ("Session", [
+    ("Conversations: Defaults", [
         ("chat_history_max_turns", "History Turns", "entry", None),
         ("output_style", "Output Style", "combobox", ["Default answer", "Detailed answer", "Brief / exec summary", "Script / talk track", "Structured report", "Blinkist-style summary"]),
         ("selected_mode", "Mode", "combobox", MODE_OPTIONS),
     ]),
-    ("Agentic", [
+    ("Conversations: Retrieval Behavior", [
         ("agentic_mode", "Agentic Mode", "checkbutton", None),
         ("agentic_max_iterations", "Max Iterations", "entry", None),
         ("show_retrieved_context", "Show Context", "checkbutton", None),
     ]),
-    ("Frontier / Advanced", [
+    ("Advanced: Experimental", [
         ("enable_summarizer", "Summarizer", "checkbutton", None),
         ("enable_langextract", "LangExtract", "checkbutton", None),
         ("enable_structured_extraction", "Structured Extraction", "checkbutton", None),
@@ -187,13 +225,18 @@ _SETTINGS_SPEC: list[tuple[str, list[tuple[str, str, str, list[str] | None]]]] =
         ("secure_mode", "Secure Mode", "checkbutton", None),
         ("experimental_override", "Experimental Override", "checkbutton", None),
     ]),
-    ("Logging", [
+    ("Privacy & Storage: Logs", [
         ("log_dir", "Log Directory", "entry", None),
         ("log_level", "Log Level", "combobox", ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
     ]),
 ]
 
-_SETTINGS_EXPANDED = {"UI & Startup", "LLM", "Embeddings"}
+_SETTINGS_EXPANDED = {
+    "Appearance & Startup",
+    "Models: LLM",
+    "Models: Embeddings",
+    "Conversations: Defaults",
+}
 
 
 def _crop_transparent_margins(pixmap: QPixmap) -> QPixmap:
@@ -516,53 +559,33 @@ class AppView(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(UI_SPACING["m"])
 
-        top = QHBoxLayout()
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(UI_SPACING["m"])
+        header_copy = QVBoxLayout()
+        header_copy.setContentsMargins(0, 0, 0, 0)
+        header_copy.setSpacing(UI_SPACING["xs"])
+        self._chat_context_summary = QLabel(page)
+        self._chat_context_summary.setObjectName("chatContextSummary")
+        self._chat_context_summary.setWordWrap(True)
+        header_copy.addWidget(self._chat_context_summary)
+        self._chat_context_hint = QLabel(
+            "Choose a starter, then reopen conversation setup only when you need to change mode, source path, skill, or model.",
+            page,
+        )
+        self._chat_context_hint.setObjectName("chatContextHint")
+        self._chat_context_hint.setWordWrap(True)
+        header_copy.addWidget(self._chat_context_hint)
+        header.addLayout(header_copy, 1)
+        self._conversation_setup_button = QPushButton("Conversation Setup", page)
+        self._conversation_setup_button.setObjectName("conversationSetupButton")
+        self._conversation_setup_button.clicked.connect(self._toggle_conversation_setup_popup)
+        header.addWidget(self._conversation_setup_button)
         self.btn_new_chat = QPushButton("New Chat", page)
         self.btn_new_chat.clicked.connect(self.newChatRequested.emit)
-        top.addWidget(self.btn_new_chat)
-        self.btn_reset_test_mode = QPushButton("Reset Test Mode", page)
-        top.addWidget(self.btn_reset_test_mode)
-        self._profile_combo = QComboBox(page)
-        self._profile_combo.setMinimumWidth(220)
-        self._profile_combo.currentTextChanged.connect(lambda *_args: self._update_skill_action_labels())
-        top.addWidget(self._profile_combo)
-        self.btn_profile_load = QPushButton("Toggle Skill", page)
-        self.btn_profile_load.clicked.connect(self.toggleSkillRequested.emit)
-        self.btn_profile_load.clicked.connect(self.loadProfileRequested.emit)
-        top.addWidget(self.btn_profile_load)
-        self.btn_profile_save = QPushButton("Pin Skill", page)
-        self.btn_profile_save.clicked.connect(self.pinSkillRequested.emit)
-        self.btn_profile_save.clicked.connect(self.saveProfileRequested.emit)
-        top.addWidget(self.btn_profile_save)
-        self.btn_profile_duplicate = QPushButton("Mute Skill", page)
-        self.btn_profile_duplicate.clicked.connect(self.muteSkillRequested.emit)
-        self.btn_profile_duplicate.clicked.connect(self.duplicateProfileRequested.emit)
-        top.addWidget(self.btn_profile_duplicate)
-        top.addStretch(1)
-        root.addLayout(top)
-
-        mode_row = QHBoxLayout()
-        mode_row.addWidget(QLabel("Chat Path", page))
-        self._rag_toggle = IOSSegmentedToggle(page, ["RAG", "Direct"], True, self._palette)
-        self._rag_toggle.toggled.connect(self._on_toggle_changed)
-        mode_row.addWidget(self._rag_toggle)
-        mode_row.addWidget(QLabel("Mode", page))
-        self._mode_combo = QComboBox(page)
-        self._mode_combo.addItems(MODE_OPTIONS)
-        self._mode_combo.currentTextChanged.connect(self._emit_mode_state)
-        mode_row.addWidget(self._mode_combo)
-        mode_row.addStretch(1)
-        self._llm_status_badge = QToolButton(page)
-        self._llm_status_badge.setObjectName("llmStatusBadge")
-        self._llm_status_badge.setToolButtonStyle(Qt.ToolButtonIconOnly)
-        self._llm_status_badge.setText("")
-        self._llm_status_badge.setCursor(Qt.PointingHandCursor)
-        self._llm_status_badge.setFixedSize(46, 42)
-        self._llm_status_badge.setIconSize(QSize(22, 22))
-        self._llm_status_badge.setIcon(self._create_model_switch_icon())
-        self._llm_status_badge.clicked.connect(self._toggle_quick_model_popup)
-        mode_row.addWidget(self._llm_status_badge)
-        root.addLayout(mode_row)
+        header.addWidget(self.btn_new_chat)
+        root.addLayout(header)
+        self._build_conversation_setup_popup()
         self._build_quick_model_popup()
 
         splitter = QSplitter(Qt.Horizontal, page)
@@ -591,31 +614,52 @@ class AppView(QMainWindow):
         self._chat_empty_state = QWidget(self._chat_state_stack)
         empty_layout = QVBoxLayout(self._chat_empty_state)
         empty_layout.setContentsMargins(UI_SPACING["xl"], UI_SPACING["xl"], UI_SPACING["xl"], UI_SPACING["xl"])
-        empty_layout.addStretch(1)
         self._chat_empty_inner = QWidget(self._chat_empty_state)
-        self._chat_empty_inner.setMaximumWidth(460)
+        self._chat_empty_inner.setMaximumWidth(760)
         self._chat_empty_inner.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         hero_layout = QVBoxLayout(self._chat_empty_inner)
         hero_layout.setContentsMargins(0, 0, 0, 0)
-        hero_layout.setSpacing(UI_SPACING["xs"])
-        self._hero_greeting_label = QLabel("Ask a document-grounded question", self._chat_empty_inner)
+        hero_layout.setSpacing(UI_SPACING["m"])
+        self._hero_greeting_label = QLabel("Start a conversation in plain language", self._chat_empty_inner)
         self._hero_greeting_label.setObjectName("heroGreeting")
         self._hero_greeting_label.setWordWrap(True)
+        self._hero_greeting_label.setMaximumWidth(560)
         self._hero_copy_label = QLabel(
-            "Switch between retrieval-grounded RAG and direct chat without leaving the current session.",
+            "Choose the kind of help you want. Axiom will keep the advanced retrieval and model controls tucked away until you need them.",
             self._chat_empty_inner,
         )
         self._hero_copy_label.setObjectName("heroCopy")
         self._hero_copy_label.setWordWrap(True)
-        self._hero_copy_label.setMaximumWidth(460)
+        self._hero_copy_label.setMaximumWidth(560)
         hero_layout.addWidget(self._hero_greeting_label)
         hero_layout.addWidget(self._hero_copy_label)
+        preset_grid_host = QWidget(self._chat_empty_inner)
+        preset_grid = QGridLayout(preset_grid_host)
+        preset_grid.setContentsMargins(0, 0, 0, 0)
+        preset_grid.setHorizontalSpacing(UI_SPACING["s"])
+        preset_grid.setVerticalSpacing(UI_SPACING["s"])
+        self._chat_preset_buttons: list[QPushButton] = []
+        for index, preset in enumerate(_CHAT_PRESETS):
+            button = QPushButton(
+                f"{preset['title']}\n{preset['description']}",
+                preset_grid_host,
+            )
+            button.setObjectName("chatPresetButton")
+            button.setCursor(Qt.PointingHandCursor)
+            button.setMinimumHeight(102)
+            button.clicked.connect(
+                lambda _checked=False, selected=dict(preset): self._apply_chat_preset(selected)
+            )
+            self._chat_preset_buttons.append(button)
+            preset_grid.addWidget(button, index // 2, index % 2)
+        hero_layout.addWidget(preset_grid_host)
         hero_row = QHBoxLayout()
         hero_row.setContentsMargins(0, 0, 0, 0)
         hero_row.setSpacing(0)
         hero_row.addStretch(1)
         hero_row.addWidget(self._chat_empty_inner)
         hero_row.addStretch(1)
+        empty_layout.addStretch(1)
         empty_layout.addLayout(hero_row)
         empty_layout.addStretch(1)
         self._chat_state_stack.addWidget(self._chat_empty_state)
@@ -667,6 +711,10 @@ class AppView(QMainWindow):
         self._composer_title = QLabel("Ask Axiom", self._composer_shell)
         self._composer_title.setObjectName("chatSectionTitle")
         composer_layout.addWidget(self._composer_title)
+        self._composer_meta = QLabel(self._composer_shell)
+        self._composer_meta.setObjectName("chatContextHint")
+        self._composer_meta.setWordWrap(True)
+        composer_layout.addWidget(self._composer_meta)
 
         self.txt_input = QPlainTextEdit(self._composer_shell)
         self.txt_input.setObjectName("chatComposerInput")
@@ -694,21 +742,46 @@ class AppView(QMainWindow):
         right = QTabWidget(splitter)
         self._evidence_tabs = right
         right.setObjectName("chatEvidenceTabs")
-        right.setMinimumWidth(320)
+        right.setMinimumWidth(360)
         right.setDocumentMode(True)
-        self._evidence_sources_tree = self._make_tree(["Source", "Score", "Snippet"], right)
-        self._events_tree = self._make_tree(["Time", "Stage", "Event", "Summary"], right)
-        self._regions_tree = self._make_tree(["Document", "Region", "Summary"], right)
-        self._outline_tree = self._make_tree(["Heading", "Meta"], right)
-        self._trace_tree = self._make_tree(["Time", "Stage", "Event", "Payload"], right)
-        self._grounding_browser = QTextBrowser(right)
+
+        evidence_page = QWidget(right)
+        evidence_layout = QVBoxLayout(evidence_page)
+        evidence_layout.setContentsMargins(0, 0, 0, 0)
+        evidence_layout.setSpacing(UI_SPACING["s"])
+        evidence_layout.addWidget(QLabel("Sources", evidence_page))
+        self._evidence_sources_tree = self._make_tree(["Source", "Score", "Snippet"], evidence_page)
+        evidence_layout.addWidget(self._evidence_sources_tree, 1)
+        evidence_layout.addWidget(QLabel("Grounding", evidence_page))
+        self._grounding_browser = QTextBrowser(evidence_page)
         self._grounding_browser.anchorClicked.connect(lambda url: QDesktopServices.openUrl(url))
-        right.addTab(self._evidence_sources_tree, "Sources")
-        right.addTab(self._events_tree, "Events")
-        right.addTab(self._regions_tree, "Semantic Regions")
-        right.addTab(self._outline_tree, "Outline")
-        right.addTab(self._trace_tree, "Trace")
-        right.addTab(self._grounding_browser, "Grounding")
+        evidence_layout.addWidget(self._grounding_browser, 1)
+
+        process_page = QWidget(right)
+        process_layout = QVBoxLayout(process_page)
+        process_layout.setContentsMargins(0, 0, 0, 0)
+        process_layout.setSpacing(UI_SPACING["s"])
+        process_layout.addWidget(QLabel("Events", process_page))
+        self._events_tree = self._make_tree(["Time", "Stage", "Event", "Summary"], process_page)
+        process_layout.addWidget(self._events_tree, 1)
+        process_layout.addWidget(QLabel("Trace", process_page))
+        self._trace_tree = self._make_tree(["Time", "Stage", "Event", "Payload"], process_page)
+        process_layout.addWidget(self._trace_tree, 1)
+
+        structure_page = QWidget(right)
+        structure_layout = QVBoxLayout(structure_page)
+        structure_layout.setContentsMargins(0, 0, 0, 0)
+        structure_layout.setSpacing(UI_SPACING["s"])
+        structure_layout.addWidget(QLabel("Semantic Regions", structure_page))
+        self._regions_tree = self._make_tree(["Document", "Region", "Summary"], structure_page)
+        structure_layout.addWidget(self._regions_tree, 1)
+        structure_layout.addWidget(QLabel("Outline", structure_page))
+        self._outline_tree = self._make_tree(["Heading", "Meta"], structure_page)
+        structure_layout.addWidget(self._outline_tree, 1)
+
+        right.addTab(evidence_page, "Evidence")
+        right.addTab(process_page, "Process")
+        right.addTab(structure_page, "Structure")
         splitter.addWidget(right)
         splitter.setChildrenCollapsible(False)
         splitter.setStretchFactor(0, 3)
@@ -718,7 +791,128 @@ class AppView(QMainWindow):
 
         self._refresh_chat_state()
         self.set_chat_response_ui(False, False)
+        self._refresh_conversation_chrome()
         return page
+
+    def _build_conversation_setup_popup(self) -> None:
+        self._conversation_setup_popup = QFrame(self, Qt.Popup | Qt.FramelessWindowHint)
+        self._conversation_setup_popup.setObjectName("conversationSetupPopup")
+        self._conversation_setup_popup.setMinimumWidth(360)
+
+        popup_layout = QVBoxLayout(self._conversation_setup_popup)
+        popup_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
+        popup_layout.setSpacing(UI_SPACING["s"])
+
+        title = QLabel("Conversation Setup", self._conversation_setup_popup)
+        title.setObjectName("quickModelPopupTitle")
+        popup_layout.addWidget(title)
+
+        hint = QLabel(
+            "Session defaults live here. Use a starter card to begin quickly, then reopen this sheet only when you want to change the mode, source path, skill, or model.",
+            self._conversation_setup_popup,
+        )
+        hint.setObjectName("quickModelPopupHint")
+        hint.setWordWrap(True)
+        popup_layout.addWidget(hint)
+
+        popup_layout.addWidget(QLabel("Conversation mode", self._conversation_setup_popup))
+        self._mode_combo = QComboBox(self._conversation_setup_popup)
+        self._mode_combo.addItems(MODE_OPTIONS)
+        self._mode_combo.currentTextChanged.connect(self._emit_mode_state)
+        popup_layout.addWidget(self._mode_combo)
+
+        popup_layout.addWidget(QLabel("Source path", self._conversation_setup_popup))
+        self._rag_toggle = IOSSegmentedToggle(self._conversation_setup_popup, ["Use Sources", "Direct"], True, self._palette)
+        self._rag_toggle.toggled.connect(self._on_toggle_changed)
+        popup_layout.addWidget(self._rag_toggle)
+
+        popup_layout.addWidget(QLabel("Primary skill", self._conversation_setup_popup))
+        self._profile_combo = QComboBox(self._conversation_setup_popup)
+        self._profile_combo.setMinimumWidth(220)
+        self._profile_combo.currentTextChanged.connect(lambda *_args: self._update_skill_action_labels())
+        popup_layout.addWidget(self._profile_combo)
+
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(UI_SPACING["xs"])
+        self.btn_profile_load = QPushButton("Toggle Skill", self._conversation_setup_popup)
+        self.btn_profile_load.clicked.connect(self.toggleSkillRequested.emit)
+        self.btn_profile_load.clicked.connect(self.loadProfileRequested.emit)
+        actions.addWidget(self.btn_profile_load)
+        self.btn_profile_save = QPushButton("Pin Skill", self._conversation_setup_popup)
+        self.btn_profile_save.clicked.connect(self.pinSkillRequested.emit)
+        self.btn_profile_save.clicked.connect(self.saveProfileRequested.emit)
+        actions.addWidget(self.btn_profile_save)
+        self.btn_profile_duplicate = QPushButton("Mute Skill", self._conversation_setup_popup)
+        self.btn_profile_duplicate.clicked.connect(self.muteSkillRequested.emit)
+        self.btn_profile_duplicate.clicked.connect(self.duplicateProfileRequested.emit)
+        actions.addWidget(self.btn_profile_duplicate)
+        popup_layout.addLayout(actions)
+
+        popup_layout.addWidget(QLabel("Model", self._conversation_setup_popup))
+        self._llm_status_badge = QToolButton(self._conversation_setup_popup)
+        self._llm_status_badge.setObjectName("llmStatusBadge")
+        self._llm_status_badge.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self._llm_status_badge.setText("")
+        self._llm_status_badge.setCursor(Qt.PointingHandCursor)
+        self._llm_status_badge.setFixedSize(46, 42)
+        self._llm_status_badge.setIconSize(QSize(22, 22))
+        self._llm_status_badge.setIcon(self._create_model_switch_icon())
+        self._llm_status_badge.clicked.connect(self._toggle_quick_model_popup)
+        popup_layout.addWidget(self._llm_status_badge, 0, Qt.AlignLeft)
+
+    def _toggle_conversation_setup_popup(self) -> None:
+        popup = getattr(self, "_conversation_setup_popup", None)
+        if popup is None:
+            return
+        if popup.isVisible():
+            self._hide_conversation_setup_popup()
+            return
+        self._show_conversation_setup_popup()
+
+    def _show_conversation_setup_popup(self) -> None:
+        popup = getattr(self, "_conversation_setup_popup", None)
+        if popup is None:
+            return
+        self._refresh_conversation_chrome()
+        popup.adjustSize()
+        anchor = self._conversation_setup_button.mapToGlobal(QPoint(0, 0))
+        popup.move(
+            anchor
+            + QPoint(
+                max(0, self._conversation_setup_button.width() - popup.width()),
+                self._conversation_setup_button.height() + UI_SPACING["xs"],
+            )
+        )
+        popup.show()
+        popup.raise_()
+        popup.activateWindow()
+
+    def _hide_conversation_setup_popup(self) -> None:
+        popup = getattr(self, "_conversation_setup_popup", None)
+        if popup is not None and popup.isVisible():
+            popup.hide()
+
+    def _apply_chat_preset(self, preset: dict[str, str]) -> None:
+        self._mode_combo.setCurrentText(str(preset.get("mode", "Q&A") or "Q&A"))
+        self._rag_toggle.set_value(str(preset.get("chat_path", "RAG")).strip().lower() != "direct")
+        self._emit_mode_state()
+        self.newChatRequested.emit()
+
+    def _refresh_conversation_chrome(self) -> None:
+        mode = self._mode_combo.currentText().strip() or "Q&A"
+        chat_path = "Use sources" if self._rag_toggle.get_value() else "Direct"
+        profile = self._profile_combo.currentText().strip() or "No skill selected"
+        provider = str(self._settings_data.get("llm_provider", "") or "").strip() or "unset"
+        model = str(
+            self._settings_data.get("llm_model", "")
+            or self._settings_data.get("llm_model_custom", "")
+            or ""
+        ).strip()
+        model_summary = f"{provider}{(' / ' + model) if model else ''}"
+        summary = f"{mode} · {chat_path} · {profile} · {model_summary}"
+        self._chat_context_summary.setText(summary)
+        self._composer_meta.setText(f"Current conversation: {summary}")
 
     def _build_brain_page(self) -> QWidget:
         page = QWidget(self)
@@ -900,6 +1094,22 @@ class AppView(QMainWindow):
         gguf_layout.addWidget(self._local_gguf_recommendation_notes)
         gguf_recommendations.content_layout.addWidget(gguf_body)
         holder_layout.addWidget(gguf_recommendations)
+
+        developer_tools = CollapsibleFrame(holder, "Advanced: Developer Tools", False, self._animator)
+        developer_body = QWidget(developer_tools.content)
+        developer_layout = QVBoxLayout(developer_body)
+        developer_layout.setContentsMargins(0, 0, 0, 0)
+        developer_layout.setSpacing(UI_SPACING["s"])
+        developer_note = QLabel(
+            "Developer-only controls stay out of the main workspace so the everyday surfaces remain calm.",
+            developer_body,
+        )
+        developer_note.setWordWrap(True)
+        developer_layout.addWidget(developer_note)
+        self.btn_reset_test_mode = QPushButton("Reset Test Mode", developer_body)
+        developer_layout.addWidget(self.btn_reset_test_mode, 0, Qt.AlignLeft)
+        developer_tools.content_layout.addWidget(developer_body)
+        holder_layout.addWidget(developer_tools)
         holder_layout.addStretch(1)
 
         self._settings_scroll.setWidget(holder)
@@ -917,7 +1127,23 @@ class AppView(QMainWindow):
         page = QWidget(self)
         root = QVBoxLayout(page)
         root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(UI_SPACING["m"])
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(UI_SPACING["s"])
+        self._logs_search = QLineEdit(page)
+        self._logs_search.setPlaceholderText("Filter the activity console")
+        self._logs_search.textChanged.connect(self._render_logs_buffer)
+        header.addWidget(self._logs_search, 1)
+        self._logs_copy_button = QPushButton("Copy", page)
+        self._logs_copy_button.clicked.connect(self._copy_logs)
+        header.addWidget(self._logs_copy_button)
+        self._logs_open_folder_button = QPushButton("Open Folder", page)
+        self._logs_open_folder_button.clicked.connect(self._open_log_dir)
+        header.addWidget(self._logs_open_folder_button)
+        root.addLayout(header)
         self._logs_view = QPlainTextEdit(page)
+        self._logs_view.setObjectName("logsView")
         self._logs_view.setReadOnly(True)
         self._logs_view_text = self._logs_view
         self._logs_view_scrollbar = self._logs_view.verticalScrollBar()
@@ -980,12 +1206,22 @@ class AppView(QMainWindow):
         border = self._palette.get("border", "#17405F")
         surface_alt = self._palette.get("surface_alt", "#13283D")
         supporting = self._palette.get("supporting_bg", surface_alt)
+        surface = self._palette.get("surface", "#091522")
         self.setStyleSheet(
             f"""
             QLabel#brandTitle {{ font-size: 28px; font-weight: 700; }}
-            QLabel#pageTitle {{ font-size: 26px; font-weight: 700; }}
-            QLabel#heroGreeting {{ font-size: 30px; font-weight: 700; }}
+            QLabel#pageTitle {{ font-size: 32px; font-weight: 700; }}
+            QLabel#heroGreeting {{ font-size: 34px; font-weight: 700; }}
             QLabel#heroCopy {{ color: {muted}; font-size: 14px; }}
+            QLabel#chatContextSummary {{
+                font-size: 18px;
+                font-weight: 700;
+                color: {text};
+            }}
+            QLabel#chatContextHint {{
+                color: {muted};
+                font-size: 13px;
+            }}
             QLabel#brandLogo {{ background: transparent; border: none; }}
             QLabel#chatSectionTitle {{ color: {muted}; font-size: 13px; font-weight: 700; }}
             QLabel#sidebarBadge, QToolButton#llmStatusBadge {{
@@ -994,6 +1230,15 @@ class AppView(QMainWindow):
                 border-radius: 12px;
                 padding: 6px 10px;
             }}
+            QPushButton#conversationSetupButton {{
+                background-color: {surface_alt};
+                border: 1px solid {border};
+                border-radius: 14px;
+                padding: 10px 14px;
+            }}
+            QPushButton#conversationSetupButton:hover {{
+                background-color: {nav_bg};
+            }}
             QToolButton#llmStatusBadge:hover {{
                 background-color: {nav_bg};
             }}
@@ -1001,6 +1246,7 @@ class AppView(QMainWindow):
                 image: none;
                 width: 0px;
             }}
+            QFrame#conversationSetupPopup,
             QFrame#quickModelPopup {{
                 background-color: {supporting};
                 border: 1px solid {border};
@@ -1044,6 +1290,19 @@ class AppView(QMainWindow):
             QPlainTextEdit#chatComposerInput {{
                 border-radius: 16px;
             }}
+            QPushButton#chatPresetButton {{
+                text-align: left;
+                padding: 16px 18px;
+                border-radius: 18px;
+                background-color: {surface_alt};
+                border: 1px solid {border};
+                font-size: 14px;
+                font-weight: 600;
+            }}
+            QPushButton#chatPresetButton:hover {{
+                background-color: {nav_bg};
+                border-color: {self._palette.get("focus_ring", self._palette.get("primary", "#2EB7FF"))};
+            }}
             QWidget#chatFeedbackBar {{
                 background: transparent;
                 border: none;
@@ -1056,6 +1315,10 @@ class AppView(QMainWindow):
             }}
             QPushButton#chatFeedbackButton:hover {{
                 background-color: {nav_bg};
+            }}
+            QPlainTextEdit#logsView {{
+                background-color: {surface};
+                padding: 12px;
             }}
             """
         )
@@ -1286,6 +1549,7 @@ class AppView(QMainWindow):
         if callable(self._mode_state_callback):
             self._mode_state_callback(payload)
         self.modeStateChanged.emit(payload)
+        self._refresh_conversation_chrome()
 
     def _refresh_chat_state(self) -> None:
         target = self._chat_transcript_state if self._chat_has_messages else self._chat_empty_state
@@ -1356,6 +1620,9 @@ class AppView(QMainWindow):
         self._active_view = key if key in self._pages else "chat"
         self._stack.setCurrentWidget(self._pages[self._active_view])
         self._page_title.setText(self._active_view.title())
+        if self._active_view != "chat":
+            self._hide_conversation_setup_popup()
+            self._hide_quick_model_popup()
         self._apply_local_styles()
 
     def set_status(self, text: str) -> None:
@@ -1432,11 +1699,30 @@ class AppView(QMainWindow):
     def append_log(self, line: str) -> None:
         text = str(line or "").rstrip("\n")
         self._log_buffer.append(text)
+        self._render_logs_buffer()
+
+    def _render_logs_buffer(self) -> None:
+        if not hasattr(self, "_logs_view"):
+            return
+        query = self._logs_search.text().strip().casefold() if hasattr(self, "_logs_search") else ""
+        rows = [row for row in self._log_buffer if not query or query in row.casefold()]
+        self._logs_view.setPlainText("\n".join(rows))
         cursor = self._logs_view.textCursor()
         cursor.movePosition(QTextCursor.End)
-        cursor.insertText(text + "\n")
         self._logs_view.setTextCursor(cursor)
         self._logs_view.ensureCursorVisible()
+
+    def _copy_logs(self) -> None:
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(self._logs_view.toPlainText())
+
+    def _open_log_dir(self) -> None:
+        target = pathlib.Path(str(self._settings_data.get("log_dir", "logs") or "logs")).expanduser()
+        if not target.is_absolute():
+            target = pathlib.Path.cwd() / target
+        target.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
     def set_mode_state_callback(self, callback: Any) -> None:
         self._mode_state_callback = callback
@@ -1463,6 +1749,7 @@ class AppView(QMainWindow):
         self._history_profile_filter.setCurrentText(selected if selected else "All Skills")
         del blocker
         self._update_skill_action_labels()
+        self._refresh_conversation_chrome()
 
     def set_skill_options(self, labels: list[str], current: str) -> None:
         self.set_profile_options(labels, current)
@@ -1484,6 +1771,7 @@ class AppView(QMainWindow):
     def select_profile_label(self, label: str) -> None:
         if label:
             self._profile_combo.setCurrentText(label)
+        self._refresh_conversation_chrome()
 
     def select_skill_id(self, label: str) -> None:
         self.select_profile_label(label)
@@ -1506,6 +1794,7 @@ class AppView(QMainWindow):
         self.btn_profile_load.setText("Disable Skill" if enabled else "Enable Skill")
         self.btn_profile_save.setText("Unpin Skill" if pinned else "Pin Skill")
         self.btn_profile_duplicate.setText("Unmute Skill" if muted else "Mute Skill")
+        self._refresh_conversation_chrome()
 
     def refresh_llm_status_badge(self) -> None:
         provider = str(self._settings_data.get("llm_provider", "") or "").strip() or "unset"
@@ -1518,6 +1807,7 @@ class AppView(QMainWindow):
         self._llm_status_badge.setAccessibleDescription("Open the quick model switcher.")
         self._llm_status_badge.setProperty("llmSummary", summary)
         self._sync_quick_model_popup_from_settings()
+        self._refresh_conversation_chrome()
 
     def set_model_switch_enabled(self, enabled: bool) -> None:
         self._llm_status_badge.setEnabled(bool(enabled))
@@ -1535,6 +1825,7 @@ class AppView(QMainWindow):
         self._library_chunk_size.setValue(int(self._settings_data.get("chunk_size", 1000) or 1000))
         self._library_chunk_overlap.setValue(int(self._settings_data.get("chunk_overlap", 100) or 100))
         self.refresh_llm_status_badge()
+        self._refresh_conversation_chrome()
 
     def collect_settings(self) -> dict[str, Any]:
         collected = dict(self._settings_data)
@@ -2017,7 +2308,7 @@ class AppView(QMainWindow):
 
     def show_setup_wizard(self, initial_state: dict[str, Any], index_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
         dialog = QDialog(self)
-        dialog.setWindowTitle("Axiom Setup")
+        dialog.setWindowTitle("Axiom Guided Setup")
         dialog.resize(860, 680)
         root = QVBoxLayout(dialog)
 
@@ -2025,17 +2316,17 @@ class AppView(QMainWindow):
         root.addWidget(tabs, 1)
 
         source_tab = QWidget(dialog)
-        ingest_tab = QWidget(dialog)
-        provider_tab = QWidget(dialog)
-        keys_tab = QWidget(dialog)
-        confirm_tab = QWidget(dialog)
+        model_tab = QWidget(dialog)
+        finish_tab = QWidget(dialog)
+        ingest_tab = source_tab
+        provider_tab = model_tab
+        keys_tab = model_tab
+        confirm_tab = finish_tab
         tabs.addTab(source_tab, "Source")
-        tabs.addTab(ingest_tab, "Ingest")
-        tabs.addTab(provider_tab, "Providers")
-        tabs.addTab(keys_tab, "Keys")
-        tabs.addTab(confirm_tab, "Confirm")
+        tabs.addTab(model_tab, "Models")
+        tabs.addTab(finish_tab, "Finish")
 
-        for widget in (source_tab, ingest_tab, provider_tab, keys_tab, confirm_tab):
+        for widget in (source_tab, model_tab, finish_tab):
             widget.setLayout(QGridLayout(widget))
             widget.layout().setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
             widget.layout().setHorizontalSpacing(UI_SPACING["m"])
@@ -2059,6 +2350,7 @@ class AppView(QMainWindow):
         source_tab.layout().addWidget(browse, 0, 2)
         source_tab.layout().addWidget(QLabel("Or restore existing index", dialog), 1, 0)
         source_tab.layout().addWidget(index_combo, 1, 1, 1, 2)
+        source_tab.layout().addWidget(QLabel("Ingestion defaults", dialog), 2, 0, 1, 2)
 
         recommendation_label = QLabel("", dialog)
         recommendation_label.setWordWrap(True)
@@ -2082,19 +2374,19 @@ class AppView(QMainWindow):
         deepread_mode.setChecked(bool(initial_state.get("deepread_mode", False)))
         use_reranker = QCheckBox("Use reranker", dialog)
         use_reranker.setChecked(bool(initial_state.get("use_reranker", False)))
-        ingest_tab.layout().addWidget(recommendation_label, 0, 0, 1, 2)
-        ingest_tab.layout().addWidget(apply_rec, 0, 2)
-        ingest_tab.layout().addWidget(QLabel("Chunk size", dialog), 1, 0)
-        ingest_tab.layout().addWidget(chunk_size, 1, 1)
-        ingest_tab.layout().addWidget(QLabel("Chunk overlap", dialog), 2, 0)
-        ingest_tab.layout().addWidget(chunk_overlap, 2, 1)
-        ingest_tab.layout().addWidget(build_digest, 3, 0, 1, 2)
-        ingest_tab.layout().addWidget(build_comprehension, 4, 0, 1, 2)
-        ingest_tab.layout().addWidget(QLabel("Comprehension depth", dialog), 5, 0)
-        ingest_tab.layout().addWidget(comprehension_depth, 5, 1)
-        ingest_tab.layout().addWidget(prefer_comprehension, 6, 0, 1, 2)
-        ingest_tab.layout().addWidget(deepread_mode, 7, 0, 1, 2)
-        ingest_tab.layout().addWidget(use_reranker, 8, 0, 1, 2)
+        ingest_tab.layout().addWidget(recommendation_label, 3, 0, 1, 2)
+        ingest_tab.layout().addWidget(apply_rec, 3, 2)
+        ingest_tab.layout().addWidget(QLabel("Chunk size", dialog), 4, 0)
+        ingest_tab.layout().addWidget(chunk_size, 4, 1)
+        ingest_tab.layout().addWidget(QLabel("Chunk overlap", dialog), 5, 0)
+        ingest_tab.layout().addWidget(chunk_overlap, 5, 1)
+        ingest_tab.layout().addWidget(build_digest, 6, 0, 1, 2)
+        ingest_tab.layout().addWidget(build_comprehension, 7, 0, 1, 2)
+        ingest_tab.layout().addWidget(QLabel("Comprehension depth", dialog), 8, 0)
+        ingest_tab.layout().addWidget(comprehension_depth, 8, 1)
+        ingest_tab.layout().addWidget(prefer_comprehension, 9, 0, 1, 2)
+        ingest_tab.layout().addWidget(deepread_mode, 10, 0, 1, 2)
+        ingest_tab.layout().addWidget(use_reranker, 11, 0, 1, 2)
 
         llm_provider = QComboBox(dialog)
         llm_provider.addItems(["anthropic", "openai", "google", "xai", "local_lm_studio", "local_gguf", "mock"])
@@ -2191,9 +2483,11 @@ class AppView(QMainWindow):
         xai_key = QLineEdit(str(initial_state.get("api_key_xai", "") or ""), dialog)
         for field in (openai_key, anthropic_key, google_key, xai_key):
             field.setEchoMode(QLineEdit.Password)
+        keys_tab.layout().addWidget(QLabel("Provider keys", dialog), 19, 0, 1, 2)
         for row, (label, widget) in enumerate((("OpenAI key", openai_key), ("Anthropic key", anthropic_key), ("Google key", google_key), ("xAI key", xai_key))):
-            keys_tab.layout().addWidget(QLabel(label, dialog), row, 0)
-            keys_tab.layout().addWidget(widget, row, 1)
+            target_row = 20 + row
+            keys_tab.layout().addWidget(QLabel(label, dialog), target_row, 0)
+            keys_tab.layout().addWidget(widget, target_row, 1)
 
         confirm_browser = QTextBrowser(dialog)
         confirm_tab.layout().addWidget(confirm_browser, 0, 0, 1, 2)

@@ -2,7 +2,7 @@
   "_comment": "Axiom default settings. Copy to settings.json in the repo root to override.",
   "ui_backend": "pyside6",
   "theme": "space_dust",
-  "startup_mode_setting": "advanced",
+  "startup_mode_setting": "basic",
   "llm_provider": "anthropic",
   "llm_model": "claude-opus-4-6",
   "llm_model_custom": "",
@@ -22,7 +22,7 @@
   "hardware_override_gpu_count": 0,
   "hardware_override_backend": "",
   "hardware_override_unified_memory": false,
-  "last_used_mode": "advanced",
+  "last_used_mode": "basic",
   "basic_wizard_completed": false,
   "skills": {
     "enabled": {}
