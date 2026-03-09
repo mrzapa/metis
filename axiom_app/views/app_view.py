@@ -8,7 +8,7 @@ import sys
 from importlib import resources
 from typing import Any
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSignalBlocker, QSize, Qt, QUrl, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSignalBlocker, QSize, QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QKeyEvent, QPainter, QPainterPath, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -361,8 +361,8 @@ class _MetricAwareWrapLabel(QLabel):
 
 class _ChatPresetButton(QPushButton):
     _HORIZONTAL_PADDING = 36
-    _VERTICAL_PADDING = 34
-    _MIN_HEIGHT = 102
+    _VERTICAL_PADDING = 20
+    _MIN_HEIGHT = 72
 
     def __init__(self, title: str, description: str, parent: QWidget | None = None) -> None:
         super().__init__(f"{title}\n{description}", parent)
@@ -473,6 +473,8 @@ class AppView(QMainWindow):
         self._chat_feedback_pending = False
         self._chat_splitter_sizes = [820, 360]
         self._quick_model_popup_syncing = False
+        self._empty_state_relayout_pending = False
+        self._empty_state_relayout_rounds_remaining = 0
 
         self._load_icon()
         self._build()
@@ -506,6 +508,14 @@ class AppView(QMainWindow):
         super().show()
         self.raise_()
         self.activateWindow()
+
+    def showEvent(self, event: Any) -> None:
+        super().showEvent(event)
+        self._schedule_empty_state_relayout()
+
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        self._schedule_empty_state_relayout()
 
     def _build(self) -> None:
         self.setWindowTitle(f"{APP_NAME} - {APP_SUBTITLE}")
@@ -698,7 +708,7 @@ class AppView(QMainWindow):
 
         self._chat_empty_state = QWidget(self._chat_state_stack)
         empty_layout = QVBoxLayout(self._chat_empty_state)
-        empty_layout.setContentsMargins(UI_SPACING["xl"], UI_SPACING["m"], UI_SPACING["xl"], UI_SPACING["m"])
+        empty_layout.setContentsMargins(UI_SPACING["xl"], UI_SPACING["xs"], UI_SPACING["xl"], UI_SPACING["xs"])
         self._chat_empty_scroll = QScrollArea(self._chat_empty_state)
         self._chat_empty_scroll.setObjectName("chatEmptyScroll")
         self._chat_empty_scroll.setWidgetResizable(True)
@@ -713,51 +723,43 @@ class AppView(QMainWindow):
         chat_empty_scroll_layout.setSpacing(0)
         self._chat_empty_scroll.setWidget(chat_empty_scroll_contents)
         self._chat_empty_inner = QWidget(chat_empty_scroll_contents)
-        self._chat_empty_inner.setMaximumWidth(760)
+        self._chat_empty_inner.setMaximumWidth(900)
         self._chat_empty_inner.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         hero_layout = QVBoxLayout(self._chat_empty_inner)
         hero_layout.setContentsMargins(0, 0, 0, 0)
-        hero_layout.setSpacing(UI_SPACING["m"])
+        hero_layout.setSpacing(UI_SPACING["xs"])
         self._hero_greeting_label = _MetricAwareWrapLabel("Start a conversation in plain language", self._chat_empty_inner)
         self._hero_greeting_label.setObjectName("heroGreeting")
         self._hero_greeting_label.setWordWrap(True)
-        self._hero_greeting_label.setMaximumWidth(560)
+        self._hero_greeting_label.setMaximumWidth(760)
         self._hero_copy_label = _MetricAwareWrapLabel(
             "Choose the kind of help you want. Axiom will keep the advanced retrieval and model controls tucked away until you need them.",
             self._chat_empty_inner,
         )
         self._hero_copy_label.setObjectName("heroCopy")
         self._hero_copy_label.setWordWrap(True)
-        self._hero_copy_label.setMaximumWidth(560)
+        self._hero_copy_label.setMaximumWidth(760)
         hero_layout.addWidget(self._hero_greeting_label)
         hero_layout.addWidget(self._hero_copy_label)
         preset_grid_host = QWidget(self._chat_empty_inner)
+        preset_grid_host.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         preset_grid = QGridLayout(preset_grid_host)
+        self._chat_preset_grid_host = preset_grid_host
+        self._chat_preset_grid = preset_grid
+        self._chat_preset_grid_columns = 0
         preset_grid.setContentsMargins(0, 0, 0, 0)
         preset_grid.setHorizontalSpacing(UI_SPACING["s"])
-        preset_grid.setVerticalSpacing(UI_SPACING["s"])
+        preset_grid.setVerticalSpacing(UI_SPACING["xs"])
         self._chat_preset_buttons: list[QPushButton] = []
-        preset_row_heights: dict[int, int] = {}
-        for index, preset in enumerate(_CHAT_PRESETS):
+        for preset in _CHAT_PRESETS:
             button = _ChatPresetButton(preset["title"], preset["description"], preset_grid_host)
             button.setObjectName("chatPresetButton")
             button.clicked.connect(
                 lambda _checked=False, selected=dict(preset): self._apply_chat_preset(selected)
             )
             self._chat_preset_buttons.append(button)
-            row = index // 2
-            preset_grid.addWidget(button, row, index % 2)
-            preset_row_heights[row] = max(
-                preset_row_heights.get(row, 0),
-                button.minimumSizeHint().height(),
-            )
-        for row, minimum_height in preset_row_heights.items():
-            preset_grid.setRowMinimumHeight(row, minimum_height)
-        preset_grid.setColumnStretch(0, 1)
-        preset_grid.setColumnStretch(1, 1)
         hero_layout.addWidget(preset_grid_host)
         chat_empty_scroll_layout.addWidget(self._chat_empty_inner, 0, Qt.AlignTop | Qt.AlignHCenter)
-        chat_empty_scroll_layout.addStretch(1)
         self._chat_state_stack.addWidget(self._chat_empty_state)
 
         self._chat_transcript_state = QWidget(self._chat_state_stack)
@@ -1661,8 +1663,150 @@ class AppView(QMainWindow):
         self._refresh_conversation_chrome()
 
     def _refresh_chat_state(self) -> None:
+        self._set_composer_compact_mode(not self._chat_has_messages)
         target = self._chat_transcript_state if self._chat_has_messages else self._chat_empty_state
         self._chat_state_stack.setCurrentWidget(target)
+        if target is self._chat_empty_state:
+            self._schedule_empty_state_relayout()
+
+    def _set_composer_compact_mode(self, compact: bool) -> None:
+        max_height = 96 if compact else 16_777_215
+        size_policy = self.txt_input.sizePolicy()
+        size_policy.setVerticalPolicy(QSizePolicy.Fixed if compact else QSizePolicy.Expanding)
+        self.txt_input.setSizePolicy(size_policy)
+        self.txt_input.setMaximumHeight(max_height)
+        self.txt_input.updateGeometry()
+        self._composer_shell.updateGeometry()
+
+    def _schedule_empty_state_relayout(self) -> None:
+        if (
+            self._chat_has_messages
+            or not hasattr(self, "_chat_state_stack")
+            or not hasattr(self, "_chat_empty_state")
+            or self._chat_state_stack.currentWidget() is not self._chat_empty_state
+        ):
+            return
+        self._empty_state_relayout_rounds_remaining = max(
+            self._empty_state_relayout_rounds_remaining,
+            2,
+        )
+        if self._empty_state_relayout_pending:
+            return
+        self._empty_state_relayout_pending = True
+        QTimer.singleShot(0, self._run_empty_state_relayout)
+
+    def _run_empty_state_relayout(self) -> None:
+        if (
+            self._chat_has_messages
+            or not hasattr(self, "_chat_empty_scroll")
+            or self._chat_state_stack.currentWidget() is not self._chat_empty_state
+        ):
+            self._empty_state_relayout_pending = False
+            self._empty_state_relayout_rounds_remaining = 0
+            return
+        self._relayout_empty_state()
+        self._empty_state_relayout_rounds_remaining = max(
+            0,
+            self._empty_state_relayout_rounds_remaining - 1,
+        )
+        if self._empty_state_relayout_rounds_remaining > 0:
+            QTimer.singleShot(0, self._run_empty_state_relayout)
+            return
+        self._empty_state_relayout_pending = False
+
+    def _relayout_empty_state(self) -> None:
+        if (
+            self._chat_has_messages
+            or not hasattr(self, "_chat_empty_scroll")
+            or self._chat_state_stack.currentWidget() is not self._chat_empty_state
+        ):
+            return
+
+        self._relayout_chat_preset_grid()
+        for widget in (
+            self._hero_greeting_label,
+            self._hero_copy_label,
+            self._chat_empty_inner,
+            *self._chat_preset_buttons,
+        ):
+            widget.updateGeometry()
+
+        hero_layout = self._chat_empty_inner.layout()
+        if hero_layout is not None:
+            hero_layout.invalidate()
+            hero_layout.activate()
+
+        scroll_contents = self._chat_empty_scroll.widget()
+        scroll_layout = None
+        if scroll_contents is not None:
+            scroll_layout = scroll_contents.layout()
+            if scroll_layout is not None:
+                scroll_layout.invalidate()
+                scroll_layout.activate()
+            scroll_contents.updateGeometry()
+            scroll_contents.adjustSize()
+
+        self._chat_empty_inner.adjustSize()
+        self._relayout_chat_preset_grid()
+        if hero_layout is not None:
+            hero_layout.invalidate()
+            hero_layout.activate()
+        if scroll_layout is not None:
+            scroll_layout.invalidate()
+            scroll_layout.activate()
+            scroll_contents.adjustSize()
+        self._chat_empty_inner.adjustSize()
+        self._chat_empty_scroll.viewport().updateGeometry()
+        self._chat_empty_scroll.updateGeometry()
+        self._chat_empty_scroll.verticalScrollBar().setValue(0)
+
+    def _relayout_chat_preset_grid(self) -> None:
+        grid = getattr(self, "_chat_preset_grid", None)
+        host = getattr(self, "_chat_preset_grid_host", None)
+        if grid is None or host is None:
+            return
+
+        viewport_width = 0
+        if hasattr(self, "_chat_empty_scroll"):
+            viewport_width = self._chat_empty_scroll.viewport().width()
+        available_width = max(
+            1,
+            min(
+                viewport_width or self._chat_empty_inner.width() or self._chat_empty_inner.sizeHint().width(),
+                self._chat_empty_inner.maximumWidth(),
+            ),
+        )
+        columns = 3 if available_width >= 720 else 2
+        spacing = grid.horizontalSpacing()
+        cell_width = max(1, (available_width - spacing * (columns - 1)) // columns)
+
+        while grid.count():
+            grid.takeAt(0)
+
+        max_rows = (len(self._chat_preset_buttons) + 1) // 2 + 1
+        for row in range(max_rows):
+            grid.setRowMinimumHeight(row, 0)
+        for column in range(3):
+            grid.setColumnStretch(column, 0)
+
+        row_heights: dict[int, int] = {}
+        for index, button in enumerate(self._chat_preset_buttons):
+            row = index // columns
+            column = index % columns
+            target_height = button.heightForWidth(cell_width)
+            button.setFixedHeight(target_height)
+            button.updateGeometry()
+            grid.addWidget(button, row, column)
+            row_heights[row] = max(
+                row_heights.get(row, 0),
+                target_height,
+            )
+
+        for row, height in row_heights.items():
+            grid.setRowMinimumHeight(row, height)
+        for column in range(columns):
+            grid.setColumnStretch(column, 1)
+        self._chat_preset_grid_columns = columns
 
     def _remember_chat_splitter_sizes(self, *_args: Any) -> None:
         splitter = getattr(self, "_chat_splitter", None)

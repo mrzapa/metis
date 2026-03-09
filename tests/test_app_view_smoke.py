@@ -9,7 +9,9 @@ import pytest
 
 from axiom_app.utils.model_presets import get_llm_model_presets
 
+qt_core = pytest.importorskip("PySide6.QtCore", reason="Qt runtime unavailable")
 qt_widgets = pytest.importorskip("PySide6.QtWidgets", reason="Qt runtime unavailable")
+QPoint = qt_core.QPoint
 QScrollBar = qt_widgets.QScrollBar
 QDialog = qt_widgets.QDialog
 QTreeWidget = qt_widgets.QTreeWidget
@@ -36,6 +38,7 @@ def _show(process_events):
     view = importlib.import_module("axiom_app.views.app_view").AppView(theme_name="space_dust")
     view.show()
     process_events()
+    process_events()
     return view
 
 
@@ -50,6 +53,11 @@ def _is_descendant(widget, ancestor) -> bool:
 
 def _combo_items(combo) -> list[str]:
     return [combo.itemText(index) for index in range(combo.count())]
+
+
+def _widget_bottom_in(widget, ancestor) -> int:
+    origin = widget.mapTo(ancestor, QPoint(0, 0))
+    return origin.y() + widget.height()
 
 
 def test_app_view_constructs_with_empty_chat_state(qapp, process_events) -> None:
@@ -86,7 +94,7 @@ def test_app_view_hero_labels_use_readable_line_length(qapp, process_events) -> 
 
     for label in (view._hero_greeting_label, view._hero_copy_label):
         assert label.wordWrap() is True
-        assert label.maximumWidth() == 560
+        assert 560 <= label.maximumWidth() <= 760
 
 
 def test_app_view_empty_state_text_blocks_do_not_overlap(qapp, process_events) -> None:
@@ -96,9 +104,9 @@ def test_app_view_empty_state_text_blocks_do_not_overlap(qapp, process_events) -
     assert view._chat_empty_scroll.height() >= (
         view._hero_greeting_label.height() + view._hero_copy_label.height()
     )
-    assert view._chat_preset_buttons[2].y() >= (
-        view._chat_preset_buttons[0].y() + view._chat_preset_buttons[0].height()
-    )
+    for index, button in enumerate(view._chat_preset_buttons):
+        for other in view._chat_preset_buttons[index + 1:]:
+            assert not button.geometry().intersects(other.geometry())
 
 
 def test_app_view_hero_inner_in_scroll_container_for_correct_height_for_width(qapp, process_events) -> None:
@@ -110,6 +118,17 @@ def test_app_view_hero_inner_in_scroll_container_for_correct_height_for_width(qa
     assert view._chat_empty_scroll.widget() is view._chat_empty_inner.parent()
     assert view._chat_empty_scroll.widgetResizable() is True
     assert view._chat_empty_inner.hasHeightForWidth() is True
+
+
+def test_app_view_empty_state_launch_fits_without_scrolling(qapp, process_events) -> None:
+    view = _show(process_events)
+    process_events()
+
+    viewport = view._chat_empty_scroll.viewport()
+    last_button = view._chat_preset_buttons[-1]
+
+    assert view._chat_empty_scroll.verticalScrollBar().maximum() == 0
+    assert _widget_bottom_in(last_button, viewport) <= viewport.height()
 
 
 def test_app_view_switches_between_empty_and_conversation_states(qapp, process_events) -> None:
@@ -138,6 +157,35 @@ def test_app_view_switches_between_empty_and_conversation_states(qapp, process_e
     assert view._chat_state_stack.currentWidget() is view._chat_empty_state
     assert not view._feedback_footer.isVisible()
     assert not view._evidence_tabs.isVisible()
+
+
+def test_app_view_empty_state_relayout_restores_scroll_free_default_after_clear_chat(qapp, process_events) -> None:
+    view = _show(process_events)
+
+    view.append_chat("Hello from a smoke test.\n")
+    process_events()
+
+    view.clear_chat()
+    process_events()
+    process_events()
+
+    viewport = view._chat_empty_scroll.viewport()
+    last_button = view._chat_preset_buttons[-1]
+
+    assert view._chat_state_stack.currentWidget() is view._chat_empty_state
+    assert view._chat_empty_scroll.verticalScrollBar().maximum() == 0
+    assert _widget_bottom_in(last_button, viewport) <= viewport.height()
+
+
+def test_app_view_empty_state_uses_scroll_fallback_when_window_is_shorter(qapp, process_events) -> None:
+    view = _show(process_events)
+
+    view.resize(view.minimumWidth(), view.minimumHeight())
+    process_events()
+    process_events()
+
+    assert view._chat_empty_scroll.widget() is view._chat_empty_inner.parent()
+    assert view._chat_empty_scroll.verticalScrollBar().maximum() > 0
 
 
 def test_app_view_reveals_response_ui_only_for_completed_response(qapp, process_events) -> None:
