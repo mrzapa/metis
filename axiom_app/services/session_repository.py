@@ -413,6 +413,45 @@ class SessionRepository:
             conn.execute("DELETE FROM message_feedback WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
 
+    def prune_sessions_without_user_prompts(self) -> list[str]:
+        """Delete sessions that do not contain at least one user prompt."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT s.session_id
+                FROM sessions AS s
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM messages AS m
+                    WHERE m.session_id = s.session_id
+                      AND lower(trim(coalesce(m.role, ''))) = 'user'
+                )
+                ORDER BY s.updated_at DESC, s.created_at DESC
+                """
+            ).fetchall()
+            session_ids = [
+                str(row["session_id"] or "")
+                for row in rows
+                if str(row["session_id"] or "").strip()
+            ]
+            if not session_ids:
+                return []
+
+            placeholders = ", ".join("?" for _ in session_ids)
+            conn.execute(
+                f"DELETE FROM message_feedback WHERE session_id IN ({placeholders})",
+                session_ids,
+            )
+            conn.execute(
+                f"DELETE FROM messages WHERE session_id IN ({placeholders})",
+                session_ids,
+            )
+            conn.execute(
+                f"DELETE FROM sessions WHERE session_id IN ({placeholders})",
+                session_ids,
+            )
+        return session_ids
+
     def rename_session(self, session_id: str, title: str) -> SessionSummary:
         normalized = str(title or "").strip() or "Untitled"
         with self._connect() as conn:

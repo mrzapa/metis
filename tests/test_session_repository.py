@@ -164,3 +164,74 @@ def test_list_sessions_filters_by_selected_skill(tmp_path) -> None:
 
     assert len(filtered) == 1
     assert filtered[0].primary_skill_id == "research-claims"
+
+
+def test_prune_sessions_without_user_prompts_removes_orphaned_sessions(tmp_path) -> None:
+    db_path = tmp_path / "rag_sessions.db"
+    repo = SessionRepository(db_path)
+    repo.init_db()
+
+    empty_session = repo.create_session(title="Empty session")
+    assistant_only = repo.create_session(title="Assistant only")
+    repo.append_message(
+        assistant_only.session_id,
+        role="assistant",
+        content="Only the assistant spoke.",
+        run_id="assistant-run",
+    )
+    repo.save_feedback(
+        assistant_only.session_id,
+        run_id="assistant-run",
+        vote=1,
+        note="Should be pruned with its parent session.",
+    )
+
+    system_only = repo.create_session(title="System only")
+    repo.append_message(
+        system_only.session_id,
+        role="system",
+        content="System bootstrap message.",
+        run_id="system-run",
+    )
+    repo.save_feedback(
+        system_only.session_id,
+        run_id="system-run",
+        vote=-1,
+        note="Also pruned.",
+    )
+
+    kept = repo.create_session(title="Keep me")
+    repo.append_message(
+        kept.session_id,
+        role="User",
+        content="A real user prompt.",
+        run_id="real-run",
+    )
+    repo.append_message(
+        kept.session_id,
+        role="assistant",
+        content="A real assistant reply.",
+        run_id="real-run",
+    )
+
+    pruned_ids = repo.prune_sessions_without_user_prompts()
+
+    assert set(pruned_ids) == {
+        empty_session.session_id,
+        assistant_only.session_id,
+        system_only.session_id,
+    }
+
+    remaining = repo.list_sessions()
+    assert [summary.session_id for summary in remaining] == [kept.session_id]
+
+    with sqlite3.connect(db_path) as conn:
+        remaining_messages = conn.execute(
+            "SELECT session_id, role FROM messages ORDER BY session_id, ts"
+        ).fetchall()
+        remaining_feedback = conn.execute(
+            "SELECT session_id FROM message_feedback ORDER BY session_id, ts"
+        ).fetchall()
+
+    assert remaining_messages == [(kept.session_id, "User"), (kept.session_id, "assistant")]
+    assert remaining_feedback == []

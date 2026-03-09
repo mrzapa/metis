@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from axiom_app.controllers.app_controller import AppController
 from axiom_app.models.app_model import AppModel
+from axiom_app.services.session_repository import SessionRepository
 
 
 class _FakeSignal:
@@ -106,6 +107,42 @@ def test_direct_prompt_is_persisted_to_session_db(tmp_path, monkeypatch) -> None
     assert detail is not None
     assert [message.role for message in detail.messages] == ["user", "assistant"]
     assert detail.messages[1].content == "Direct response"
+
+
+def test_controller_prunes_sessions_without_user_prompts_on_init(tmp_path) -> None:
+    db_path = tmp_path / "rag_sessions.db"
+    seed_repo = SessionRepository(db_path)
+    seed_repo.init_db()
+
+    empty_session = seed_repo.create_session(title="Empty")
+    assistant_only = seed_repo.create_session(title="Assistant only")
+    seed_repo.append_message(
+        assistant_only.session_id,
+        role="assistant",
+        content="No user prompt here.",
+        run_id="assistant-run",
+    )
+    kept = seed_repo.create_session(title="Keep")
+    seed_repo.append_message(
+        kept.session_id,
+        role="user",
+        content="Real prompt",
+        run_id="user-run",
+    )
+
+    model = AppModel()
+    model.session_db_path = db_path
+    model.settings = {"llm_provider": "mock", "llm_model": "mock-v1"}
+    view = _FakeView(chat_mode="direct")
+
+    controller = AppController(model=model, view=view)
+
+    sessions = controller.session_repository.list_sessions()
+
+    assert [summary.session_id for summary in sessions] == [kept.session_id]
+    assert [summary.session_id for summary in controller.model.session_list] == [kept.session_id]
+    assert controller.session_repository.get_session(empty_session.session_id) is None
+    assert controller.session_repository.get_session(assistant_only.session_id) is None
 
 
 def test_rag_prompt_persists_sources_to_session_db(tmp_path, monkeypatch) -> None:
@@ -360,6 +397,38 @@ def test_feedback_submission_and_reopen_hide_pending_feedback(tmp_path, monkeypa
     assert view_reopen.response_ui_states[-1] == (True, False)
 
 
+def test_new_chat_is_lazy_and_next_prompt_creates_session(tmp_path, monkeypatch) -> None:
+    model = AppModel()
+    model.session_db_path = tmp_path / "rag_sessions.db"
+    model.settings = {"llm_provider": "mock", "llm_model": "mock-v1"}
+    view = _FakeView(chat_mode="direct")
+    controller = AppController(model=model, view=view)
+
+    class _FakeLLM:
+        def invoke(self, _messages):
+            return _FakeMessage(content="Direct response")
+
+    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+
+    controller.on_new_chat()
+
+    assert controller.model.current_session_id == ""
+    assert controller.model.loaded_session is None
+    assert controller.model.selected_brain_node == "category:brain"
+    assert controller.session_repository.list_sessions() == []
+    assert view.response_ui_states[-1] == (False, False)
+
+    controller.on_send_prompt("hello")
+    _drain(controller)
+
+    sessions = controller.session_repository.list_sessions()
+    assert len(sessions) == 1
+    assert controller.model.current_session_id == sessions[0].session_id
+    detail = controller.session_repository.get_session(sessions[0].session_id)
+    assert detail is not None
+    assert [message.role for message in detail.messages] == ["user", "assistant"]
+
+
 def test_new_chat_and_delete_current_session_clear_response_ui(tmp_path, monkeypatch) -> None:
     model = AppModel()
     model.session_db_path = tmp_path / "rag_sessions.db"
@@ -375,17 +444,25 @@ def test_new_chat_and_delete_current_session_clear_response_ui(tmp_path, monkeyp
 
     controller.on_send_prompt("hello")
     _drain(controller)
+    first_sessions = controller.session_repository.list_sessions()
+    assert len(first_sessions) == 1
     controller.on_new_chat()
 
+    assert controller.model.current_session_id == ""
     assert controller.model.last_run_id == ""
+    assert controller.model.selected_brain_node == "category:brain"
+    assert len(controller.session_repository.list_sessions()) == 1
     assert view.response_ui_states[-1] == (False, False)
 
     controller.on_send_prompt("second")
     _drain(controller)
+    second_sessions = controller.session_repository.list_sessions()
+    assert len(second_sessions) == 2
     view.selected_session_id = controller.model.current_session_id
     controller.on_delete_session()
 
     assert controller.model.last_run_id == ""
+    assert len(controller.session_repository.list_sessions()) == 1
     assert view.response_ui_states[-1] == (False, False)
 
 

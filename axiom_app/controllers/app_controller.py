@@ -165,6 +165,12 @@ class AppController:
         db_path = getattr(self.model, "session_db_path", ":memory:")
         self.session_repository = session_repository or SessionRepository(db_path)
         self.session_repository.init_db()
+        pruned_session_ids = self.session_repository.prune_sessions_without_user_prompts()
+        if pruned_session_ids:
+            self._log.info(
+                "Pruned %d session(s) without user prompts at startup",
+                len(pruned_session_ids),
+            )
         self.model.current_skill_id = str(getattr(self.model, "current_skill_id", "") or "")
         self.refresh_history_rows(update_detail=False)
         self._clear_completed_response_state()
@@ -2199,24 +2205,9 @@ class AppController:
         self.cancel_current_task()
 
     def on_new_chat(self) -> None:
-        """Start a persisted chat session and clear transient UI state."""
-        session = self.session_repository.create_session(
-            title="New Chat",
-            active_profile=self._resolved_primary_skill_id(),
-            mode=str(self.model.settings.get("selected_mode", "Q&A") or "Q&A"),
-            index_id=str(getattr(self.model, "active_index_id", "") or ""),
-            vector_backend=self._current_vector_backend(),
-            llm_provider=str(self.model.settings.get("llm_provider", "") or ""),
-            llm_model=self._effective_llm_model(),
-            embed_model=self._effective_embedding_model(),
-            retrieve_k=int(self.model.settings.get("retrieval_k", 0) or 0),
-            final_k=int(self.model.settings.get("top_k", 0) or 0),
-            mmr_lambda=float(self.model.settings.get("mmr_lambda", 0.0) or 0.0),
-            agentic_iterations=int(self.model.settings.get("agentic_max_iterations", 0) or 0),
-            extra_json=self._session_extra_json(),
-        )
-        self.model.current_session_id = session.session_id
-        self.model.selected_brain_node = f"session:{session.session_id}"
+        """Reset the workspace to a fresh transient chat state."""
+        self.model.current_session_id = ""
+        self.model.selected_brain_node = "category:brain"
         self.model.loaded_session = None
         self.model.chat_history = []
         self._clear_completed_response_state()
@@ -2224,7 +2215,7 @@ class AppController:
         self._safe_view_call("render_evidence_sources", [])
         self._safe_view_call("set_status", "New chat started.")
         self._safe_view_call("switch_view", "chat")
-        self.refresh_history_rows(select_session_id=session.session_id, update_detail=True)
+        self.refresh_history_rows(update_detail=False)
 
     def refresh_history_rows(
         self,
