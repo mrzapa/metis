@@ -8,7 +8,7 @@ import sys
 from importlib import resources
 from typing import Any
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, QSignalBlocker, QSize, Qt, QUrl, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSignalBlocker, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QKeyEvent, QPainter, QPainterPath, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -324,6 +324,88 @@ class _NavButton(QPushButton):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
 
+class _MetricAwareWrapLabel(QLabel):
+    _MAX_WIDGET_DIMENSION = 16_777_215
+
+    def event(self, event: QEvent | None) -> bool:
+        if event is not None and event.type() in (
+            QEvent.FontChange,
+            QEvent.Polish,
+            QEvent.PolishRequest,
+            QEvent.StyleChange,
+        ):
+            self.updateGeometry()
+        return super().event(event)
+
+    def minimumSizeHint(self) -> QSize:
+        return self._resolve_wrapped_hint(super().minimumSizeHint())
+
+    def sizeHint(self) -> QSize:
+        return self._resolve_wrapped_hint(super().sizeHint())
+
+    def _resolve_wrapped_hint(self, hint: QSize) -> QSize:
+        if not self.wordWrap():
+            return hint
+        width = self.width()
+        maximum_width = self.maximumWidth()
+        if width <= 0 and 0 < maximum_width < self._MAX_WIDGET_DIMENSION:
+            width = maximum_width
+        if width <= 0:
+            width = max(hint.width(), 1)
+        height = self.heightForWidth(width)
+        if height > 0:
+            hint.setWidth(width)
+            hint.setHeight(max(hint.height(), height))
+        return hint
+
+
+class _ChatPresetButton(QPushButton):
+    _HORIZONTAL_PADDING = 36
+    _VERTICAL_PADDING = 34
+    _MIN_HEIGHT = 102
+
+    def __init__(self, title: str, description: str, parent: QWidget | None = None) -> None:
+        super().__init__(f"{title}\n{description}", parent)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMinimumHeight(self._MIN_HEIGHT)
+
+    def event(self, event: QEvent | None) -> bool:
+        if event is not None and event.type() in (
+            QEvent.FontChange,
+            QEvent.Polish,
+            QEvent.PolishRequest,
+            QEvent.StyleChange,
+        ):
+            self.updateGeometry()
+        return super().event(event)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        target_width = width if width > 0 else max(super().sizeHint().width(), 1)
+        text_width = max(1, target_width - self._HORIZONTAL_PADDING)
+        text_rect = self.fontMetrics().boundingRect(
+            QRect(0, 0, text_width, 4096),
+            int(Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop),
+            self.text(),
+        )
+        return max(self._MIN_HEIGHT, text_rect.height() + self._VERTICAL_PADDING)
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        width = self.width() if self.width() > 0 else max(hint.width(), 1)
+        hint.setHeight(self.heightForWidth(width))
+        return hint
+
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint()
+        width = self.width() if self.width() > 0 else max(hint.width(), 1)
+        hint.setHeight(self.heightForWidth(width))
+        return hint
+
+
 class AppView(QMainWindow):
     closeRequested = Signal()
     sendRequested = Signal()
@@ -601,6 +683,8 @@ class AppView(QMainWindow):
 
         self._conversation_shell = QFrame(left)
         self._conversation_shell.setObjectName("chatConversationCard")
+        # Keep the empty-state hero readable at the minimum window height on Windows.
+        self._conversation_shell.setMinimumHeight(248)
         conversation_layout = QVBoxLayout(self._conversation_shell)
         conversation_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
         conversation_layout.setSpacing(UI_SPACING["s"])
@@ -614,18 +698,31 @@ class AppView(QMainWindow):
 
         self._chat_empty_state = QWidget(self._chat_state_stack)
         empty_layout = QVBoxLayout(self._chat_empty_state)
-        empty_layout.setContentsMargins(UI_SPACING["xl"], UI_SPACING["xl"], UI_SPACING["xl"], UI_SPACING["xl"])
-        self._chat_empty_inner = QWidget(self._chat_empty_state)
+        empty_layout.setContentsMargins(UI_SPACING["xl"], UI_SPACING["m"], UI_SPACING["xl"], UI_SPACING["m"])
+        self._chat_empty_scroll = QScrollArea(self._chat_empty_state)
+        self._chat_empty_scroll.setObjectName("chatEmptyScroll")
+        self._chat_empty_scroll.setWidgetResizable(True)
+        self._chat_empty_scroll.setFrameShape(QFrame.NoFrame)
+        self._chat_empty_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._chat_empty_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._chat_empty_scroll.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        empty_layout.addWidget(self._chat_empty_scroll, 1)
+        chat_empty_scroll_contents = QWidget(self._chat_empty_scroll)
+        chat_empty_scroll_layout = QVBoxLayout(chat_empty_scroll_contents)
+        chat_empty_scroll_layout.setContentsMargins(0, 0, 0, 0)
+        chat_empty_scroll_layout.setSpacing(0)
+        self._chat_empty_scroll.setWidget(chat_empty_scroll_contents)
+        self._chat_empty_inner = QWidget(chat_empty_scroll_contents)
         self._chat_empty_inner.setMaximumWidth(760)
-        self._chat_empty_inner.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self._chat_empty_inner.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         hero_layout = QVBoxLayout(self._chat_empty_inner)
         hero_layout.setContentsMargins(0, 0, 0, 0)
         hero_layout.setSpacing(UI_SPACING["m"])
-        self._hero_greeting_label = QLabel("Start a conversation in plain language", self._chat_empty_inner)
+        self._hero_greeting_label = _MetricAwareWrapLabel("Start a conversation in plain language", self._chat_empty_inner)
         self._hero_greeting_label.setObjectName("heroGreeting")
         self._hero_greeting_label.setWordWrap(True)
         self._hero_greeting_label.setMaximumWidth(560)
-        self._hero_copy_label = QLabel(
+        self._hero_copy_label = _MetricAwareWrapLabel(
             "Choose the kind of help you want. Axiom will keep the advanced retrieval and model controls tucked away until you need them.",
             self._chat_empty_inner,
         )
@@ -640,23 +737,27 @@ class AppView(QMainWindow):
         preset_grid.setHorizontalSpacing(UI_SPACING["s"])
         preset_grid.setVerticalSpacing(UI_SPACING["s"])
         self._chat_preset_buttons: list[QPushButton] = []
+        preset_row_heights: dict[int, int] = {}
         for index, preset in enumerate(_CHAT_PRESETS):
-            button = QPushButton(
-                f"{preset['title']}\n{preset['description']}",
-                preset_grid_host,
-            )
+            button = _ChatPresetButton(preset["title"], preset["description"], preset_grid_host)
             button.setObjectName("chatPresetButton")
-            button.setCursor(Qt.PointingHandCursor)
-            button.setMinimumHeight(102)
             button.clicked.connect(
                 lambda _checked=False, selected=dict(preset): self._apply_chat_preset(selected)
             )
             self._chat_preset_buttons.append(button)
-            preset_grid.addWidget(button, index // 2, index % 2)
+            row = index // 2
+            preset_grid.addWidget(button, row, index % 2)
+            preset_row_heights[row] = max(
+                preset_row_heights.get(row, 0),
+                button.minimumSizeHint().height(),
+            )
+        for row, minimum_height in preset_row_heights.items():
+            preset_grid.setRowMinimumHeight(row, minimum_height)
+        preset_grid.setColumnStretch(0, 1)
+        preset_grid.setColumnStretch(1, 1)
         hero_layout.addWidget(preset_grid_host)
-        empty_layout.addStretch(1)
-        empty_layout.addWidget(self._chat_empty_inner, 0, Qt.AlignHCenter)
-        empty_layout.addStretch(1)
+        chat_empty_scroll_layout.addWidget(self._chat_empty_inner, 0, Qt.AlignTop | Qt.AlignHCenter)
+        chat_empty_scroll_layout.addStretch(1)
         self._chat_state_stack.addWidget(self._chat_empty_state)
 
         self._chat_transcript_state = QWidget(self._chat_state_stack)
@@ -713,7 +814,7 @@ class AppView(QMainWindow):
 
         self.txt_input = QPlainTextEdit(self._composer_shell)
         self.txt_input.setObjectName("chatComposerInput")
-        self.txt_input.setMinimumHeight(120)
+        self.txt_input.setMinimumHeight(72)
         self.txt_input.setPlaceholderText("Type a question. Press Enter to send, Shift+Enter for a newline.")
         self.prompt_entry = self.txt_input
         self.prompt_entry.installEventFilter(self)
