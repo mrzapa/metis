@@ -22,7 +22,7 @@ from axiom_app.views.widgets import AnimationEngine, CollapsibleFrame, RoundedCa
 
 
 class BrainDetailPanel(QWidget):
-    """Right-hand sidebar showing the current Brain selection."""
+    """Contextual inspector for the current Brain selection."""
 
     loadIndexRequested = Signal()
     openSessionRequested = Signal()
@@ -68,7 +68,7 @@ class BrainDetailPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        self._title_label = QLabel("Axiom Brain", self._card.inner)
+        self._title_label = QLabel("Brain Inspector", self._card.inner)
         self._title_label.setObjectName("brainDetailTitle")
         self._title_label.setWordWrap(True)
         layout.addWidget(self._title_label)
@@ -165,7 +165,7 @@ class BrainDetailPanel(QWidget):
     def _render(self) -> None:
         node = self._node
         if node is None:
-            self._title_label.setText("Axiom Brain")
+            self._title_label.setText("Brain Inspector")
             self._subtitle_label.setText("Select a node to inspect it.")
             self._metadata_browser.setHtml(self._workspace_summary_html())
             self._populate_list("Loaded Files", self._loaded_file_items())

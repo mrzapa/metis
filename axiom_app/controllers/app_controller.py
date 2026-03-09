@@ -1172,7 +1172,7 @@ class AppController:
         self.model.settings["basic_wizard_completed"] = True
         if save:
             self.model.save_settings(self.model.settings)
-        self._safe_view_call("set_status", "Advanced mode ready.")
+        self._safe_view_call("set_status", "Workspace ready.")
 
     def run_setup_wizard(self) -> None:
         self.model.settings["startup_mode_setting"] = "basic"
@@ -1184,7 +1184,7 @@ class AppController:
             self._index_option_rows(),
         )
         if not isinstance(result, dict):
-            self._safe_view_call("set_status", "Setup wizard dismissed.")
+            self._safe_view_call("set_status", "Guided setup dismissed.")
             return
         self._apply_wizard_result(result)
 

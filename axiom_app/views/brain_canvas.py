@@ -18,16 +18,19 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QPushButton,
     QSpinBox,
     QSplitter,
+    QStackedWidget,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
 
 from axiom_app.models.brain_graph import BrainEdge, BrainGraph, BrainNode
 from axiom_app.views.brain_detail_panel import BrainDetailPanel
-from axiom_app.views.widgets import AnimationEngine
+from axiom_app.views.widgets import AnimationEngine, RoundedCard
 
 
 def _node_fill(node: BrainNode, palette: dict[str, str]) -> QColor:
@@ -466,17 +469,34 @@ class BrainPanel(QWidget):
         self._loaded_files: list[str] = []
         self._active_index_summary = ""
         self._selected_node_id = ""
+        self._surface = "overview"
+        self._overview_cards: list[RoundedCard] = []
+        self._surface_buttons: dict[str, QPushButton] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
+
+        intro = QVBoxLayout()
+        intro.setContentsMargins(0, 0, 0, 0)
+        intro.setSpacing(4)
+        self._overview_title = QLabel("Workspace overview", self)
+        self._overview_title.setWordWrap(True)
+        intro.addWidget(self._overview_title)
+        self._overview_subtitle = QLabel(
+            "See the active index, recent conversations, and workspace health before diving into the map.",
+            self,
+        )
+        self._overview_subtitle.setWordWrap(True)
+        intro.addWidget(self._overview_subtitle)
+        root.addLayout(intro)
 
         toolbar = QHBoxLayout()
         toolbar.setContentsMargins(0, 0, 0, 0)
         toolbar.setSpacing(8)
         root.addLayout(toolbar)
 
-        self.btn_open_files = QPushButton("Open Files...", self)
+        self.btn_open_files = QPushButton("Add Files", self)
         self.btn_open_files.clicked.connect(self.openFilesRequested.emit)
         toolbar.addWidget(self.btn_open_files)
 
@@ -484,67 +504,139 @@ class BrainPanel(QWidget):
         self.btn_build_index.clicked.connect(self.buildIndexRequested.emit)
         toolbar.addWidget(self.btn_build_index)
 
-        self.btn_new_chat = QPushButton("New Chat", self)
-        self.btn_new_chat.clicked.connect(self.newChatRequested.emit)
-        toolbar.addWidget(self.btn_new_chat)
-
         self._available_index_combo = QComboBox(self)
-        self._available_index_combo.setMinimumWidth(260)
+        self._available_index_combo.setMinimumWidth(240)
         toolbar.addWidget(self._available_index_combo, 1)
 
         self.btn_library_load_index = QPushButton("Load Index", self)
         self.btn_library_load_index.clicked.connect(self.loadIndexRequested.emit)
         toolbar.addWidget(self.btn_library_load_index)
 
-        self._library_chunk_size = QSpinBox(self)
-        self._library_chunk_size.setRange(1, 500000)
-        self._library_chunk_size.setPrefix("Chunk ")
-        self._library_chunk_size.setMaximumWidth(130)
-        toolbar.addWidget(self._library_chunk_size)
+        self.btn_new_chat = QPushButton("New Chat", self)
+        self.btn_new_chat.clicked.connect(self.newChatRequested.emit)
+        toolbar.addWidget(self.btn_new_chat)
 
-        self._library_chunk_overlap = QSpinBox(self)
-        self._library_chunk_overlap.setRange(0, 100000)
-        self._library_chunk_overlap.setPrefix("Overlap ")
-        self._library_chunk_overlap.setMaximumWidth(140)
-        toolbar.addWidget(self._library_chunk_overlap)
+        surface_row = QHBoxLayout()
+        surface_row.setContentsMargins(0, 0, 0, 0)
+        surface_row.setSpacing(8)
+        root.addLayout(surface_row)
 
         self._history_search = QLineEdit(self)
         self._history_search.setPlaceholderText("Search indexes, sessions, or metadata")
         self._history_search.textChanged.connect(self._on_search_changed)
-        toolbar.addWidget(self._history_search, 2)
+        surface_row.addWidget(self._history_search, 1)
 
         self._history_profile_filter = QComboBox(self)
         self._history_profile_filter.currentTextChanged.connect(self._on_profile_filter_changed)
-        toolbar.addWidget(self._history_profile_filter)
+        surface_row.addWidget(self._history_profile_filter)
 
-        self.btn_history_refresh = QPushButton("Refresh Brain", self)
+        for key, label in (("overview", "Overview"), ("map", "Map")):
+            button = QPushButton(label, self)
+            button.setCheckable(True)
+            button.clicked.connect(lambda _checked=False, surface=key: self._set_surface(surface))
+            self._surface_buttons[key] = button
+            surface_row.addWidget(button)
+
+        self.btn_history_refresh = QPushButton("Refresh", self)
         self.btn_history_refresh.clicked.connect(self._emit_refresh_requested)
-        toolbar.addWidget(self.btn_history_refresh)
+        surface_row.addWidget(self.btn_history_refresh)
 
         self.btn_brain_layout = QPushButton("Relayout", self)
         self.btn_brain_layout.clicked.connect(self.refresh_layout)
-        toolbar.addWidget(self.btn_brain_layout)
+        surface_row.addWidget(self.btn_brain_layout)
 
-        status_row = QHBoxLayout()
-        status_row.setContentsMargins(0, 0, 0, 0)
-        status_row.setSpacing(8)
-        root.addLayout(status_row)
+        self._library_chunk_size = QSpinBox(self)
+        self._library_chunk_size.setRange(1, 500000)
+        self._library_chunk_size.setValue(1000)
+        self._library_chunk_size.hide()
 
-        self._index_info_label = QLabel("No index built.", self)
-        self._index_info_label.setWordWrap(True)
-        status_row.addWidget(self._index_info_label, 1)
-
-        self._active_index_summary_label = QLabel("No persisted index selected.", self)
-        self._active_index_summary_label.setWordWrap(True)
-        status_row.addWidget(self._active_index_summary_label, 1)
+        self._library_chunk_overlap = QSpinBox(self)
+        self._library_chunk_overlap.setRange(0, 100000)
+        self._library_chunk_overlap.setValue(100)
+        self._library_chunk_overlap.hide()
 
         self._file_list = QListWidget(self)
         self._file_list.setVisible(False)
         self._file_listbox = self._file_list
 
-        splitter = QSplitter(Qt.Horizontal, self)
+        self._surface_stack = QStackedWidget(self)
+        root.addWidget(self._surface_stack, 1)
+
+        self._overview_page = QWidget(self)
+        overview_layout = QVBoxLayout(self._overview_page)
+        overview_layout.setContentsMargins(0, 0, 0, 0)
+        overview_layout.setSpacing(12)
+
+        overview_cards_row = QHBoxLayout()
+        overview_cards_row.setContentsMargins(0, 0, 0, 0)
+        overview_cards_row.setSpacing(12)
+        self._index_card, index_layout = self._new_overview_card()
+        self._index_info_label = QLabel("No index built.", self._index_card.inner)
+        self._index_info_label.setWordWrap(True)
+        index_layout.addWidget(QLabel("Active index", self._index_card.inner))
+        index_layout.addWidget(self._index_info_label)
+        overview_cards_row.addWidget(self._index_card, 1)
+
+        self._files_card, files_layout = self._new_overview_card()
+        self._files_summary_label = QLabel("No files loaded yet.", self._files_card.inner)
+        self._files_summary_label.setWordWrap(True)
+        files_layout.addWidget(QLabel("Workspace sources", self._files_card.inner))
+        files_layout.addWidget(self._files_summary_label)
+        overview_cards_row.addWidget(self._files_card, 1)
+
+        self._sessions_card, sessions_layout = self._new_overview_card()
+        self._sessions_summary_label = QLabel("No conversations yet.", self._sessions_card.inner)
+        self._sessions_summary_label.setWordWrap(True)
+        sessions_layout.addWidget(QLabel("Recent conversations", self._sessions_card.inner))
+        sessions_layout.addWidget(self._sessions_summary_label)
+        overview_cards_row.addWidget(self._sessions_card, 1)
+
+        self._health_card, health_layout = self._new_overview_card()
+        self._active_index_summary_label = QLabel("No persisted index selected.", self._health_card.inner)
+        self._active_index_summary_label.setWordWrap(True)
+        health_layout.addWidget(QLabel("Workspace status", self._health_card.inner))
+        health_layout.addWidget(self._active_index_summary_label)
+        overview_cards_row.addWidget(self._health_card, 1)
+        overview_layout.addLayout(overview_cards_row)
+
+        overview_body = QSplitter(Qt.Horizontal, self._overview_page)
+        overview_body.setChildrenCollapsible(False)
+        overview_layout.addWidget(overview_body, 1)
+
+        history_host = QWidget(overview_body)
+        history_layout = QVBoxLayout(history_host)
+        history_layout.setContentsMargins(0, 0, 0, 0)
+        history_layout.setSpacing(8)
+        history_layout.addWidget(QLabel("Recent work", history_host))
+        self._history_list = QListWidget(history_host)
+        self._history_list.currentItemChanged.connect(self._on_overview_history_selection)
+        self._history_list.itemDoubleClicked.connect(self._on_overview_history_activated)
+        history_layout.addWidget(self._history_list, 1)
+        overview_body.addWidget(history_host)
+
+        detail_host = QWidget(overview_body)
+        detail_layout = QVBoxLayout(detail_host)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+        detail_layout.setSpacing(8)
+        detail_layout.addWidget(QLabel("Selection details", detail_host))
+        self._overview_detail = QTextBrowser(detail_host)
+        detail_layout.addWidget(self._overview_detail, 1)
+        self._open_map_button = QPushButton("Open Map", detail_host)
+        self._open_map_button.clicked.connect(lambda: self._set_surface("map"))
+        detail_layout.addWidget(self._open_map_button, 0, Qt.AlignLeft)
+        overview_body.addWidget(detail_host)
+        overview_body.setStretchFactor(0, 3)
+        overview_body.setStretchFactor(1, 2)
+        overview_body.setSizes([700, 420])
+        self._surface_stack.addWidget(self._overview_page)
+
+        self._map_page = QWidget(self)
+        map_layout = QVBoxLayout(self._map_page)
+        map_layout.setContentsMargins(0, 0, 0, 0)
+        map_layout.setSpacing(0)
+        splitter = QSplitter(Qt.Horizontal, self._map_page)
         splitter.setChildrenCollapsible(False)
-        root.addWidget(splitter, 1)
+        map_layout.addWidget(splitter, 1)
 
         canvas_host = QWidget(splitter)
         canvas_layout = QVBoxLayout(canvas_host)
@@ -558,7 +650,7 @@ class BrainPanel(QWidget):
         splitter.addWidget(canvas_host)
 
         self.detail_panel = BrainDetailPanel(splitter, palette=self._palette, animator=self._animator)
-        self.detail_panel.setMinimumWidth(300)
+        self.detail_panel.setMinimumWidth(320)
         self.detail_panel.loadIndexRequested.connect(self.loadIndexRequested.emit)
         self.detail_panel.openSessionRequested.connect(self.historyOpenRequested.emit)
         self.detail_panel.renameSessionRequested.connect(self.historyRenameRequested.emit)
@@ -570,22 +662,55 @@ class BrainPanel(QWidget):
         splitter.setStretchFactor(0, 5)
         splitter.setStretchFactor(1, 2)
         splitter.setSizes([920, 340])
+        self._surface_stack.addWidget(self._map_page)
 
         self.update_palette(self._palette)
+        self._set_surface("overview")
+        self._sync_summary_cards()
 
     def update_palette(self, palette: dict[str, str]) -> None:
         self._palette = dict(palette or {})
         muted = self._palette.get("muted_text", "#8AA5BE")
+        text = self._palette.get("text", "#F2FAFF")
+        surface_alt = self._palette.get("surface_alt", "#13283D")
+        border = self._palette.get("border", "#17405F")
+        nav_active = self._palette.get("nav_active_bg", "#113B5C")
+        nav_hover = self._palette.get("nav_hover_bg", "#0E2032")
+        self._overview_title.setStyleSheet(f"font-size: 26px; font-weight: 700; color: {text};")
+        self._overview_subtitle.setStyleSheet(f"color: {muted};")
+        self._history_list.setStyleSheet(
+            f"QListWidget {{ background-color: {surface_alt}; border: 1px solid {border}; border-radius: 16px; }}"
+        )
+        self._overview_detail.setStyleSheet(
+            f"QTextBrowser {{ background-color: {surface_alt}; border: 1px solid {border}; border-radius: 16px; }}"
+        )
+        for card in self._overview_cards:
+            card.configure_colors(
+                bg=self._palette.get("surface", "#091522"),
+                border_color=border,
+                shadow_color=self._palette.get("workspace_shadow", "#010408"),
+            )
+        for key, button in self._surface_buttons.items():
+            button.setStyleSheet(
+                f"QPushButton {{ border: 1px solid {border}; border-radius: 12px; padding: 8px 12px; }}"
+                f"QPushButton:checked {{ background-color: {nav_active}; }}"
+                f"QPushButton:hover:!checked {{ background-color: {nav_hover}; }}"
+            )
+            button.setChecked(key == self._surface)
         self._index_info_label.setStyleSheet(f"color: {muted};")
+        self._files_summary_label.setStyleSheet(f"color: {muted};")
+        self._sessions_summary_label.setStyleSheet(f"color: {muted};")
         self._active_index_summary_label.setStyleSheet(f"color: {muted};")
         self.canvas.update_palette(self._palette)
         self.detail_panel.update_palette(self._palette)
+        self._render_overview_detail()
 
     def set_graph(self, graph: BrainGraph | None, *, selected_node_id: str = "") -> None:
         self._brain_graph = graph
         self.canvas.set_graph(graph, selected_node_id=selected_node_id, animate=True)
         self._selected_node_id = self.canvas.selected_node_id()
         self._sync_detail_panel()
+        self._sync_summary_cards()
 
     def refresh_layout(self) -> None:
         self.canvas.refresh_layout()
@@ -626,6 +751,7 @@ class BrainPanel(QWidget):
             if index >= 0:
                 self._available_index_combo.setCurrentIndex(index)
         self._sync_detail_panel()
+        self._sync_summary_cards()
 
     def set_file_list(self, paths: list[str]) -> None:
         self._loaded_files = [str(path) for path in (paths or [])]
@@ -633,6 +759,7 @@ class BrainPanel(QWidget):
         for path in self._loaded_files:
             self._file_list.addItem(path)
         self._sync_detail_panel()
+        self._sync_summary_cards()
 
     def get_library_build_settings(self) -> dict[str, Any]:
         return {
@@ -644,17 +771,25 @@ class BrainPanel(QWidget):
         self._history_rows = list(rows or [])
         valid_sessions = {str(getattr(row, "session_id", "") or "") for row in self._history_rows}
         self._session_details = {key: value for key, value in self._session_details.items() if key in valid_sessions}
+        self._populate_history_list()
         self._sync_detail_panel()
+        self._sync_summary_cards()
 
     def get_selected_history_session_id(self) -> str:
         node = self._selected_node()
-        if node is None or node.node_type != "session":
-            return ""
-        return str(node.metadata.get("session_id", "") or "")
+        if node is not None and node.node_type == "session":
+            return str(node.metadata.get("session_id", "") or "")
+        item = self._history_list.currentItem()
+        return str(item.data(Qt.UserRole) or "") if item is not None else ""
 
     def select_history_session(self, session_id: str) -> None:
         if not session_id:
             return
+        for index in range(self._history_list.count()):
+            item = self._history_list.item(index)
+            if str(item.data(Qt.UserRole) or "") == str(session_id):
+                self._history_list.setCurrentItem(item)
+                break
         self.select_brain_node(f"session:{session_id}", emit_signal=False)
 
     def get_history_search_query(self) -> str:
@@ -716,6 +851,7 @@ class BrainPanel(QWidget):
 
     def _on_search_changed(self, text: str) -> None:
         self.set_graph_filter(text)
+        self._populate_history_list()
         self.historySearchRequested.emit()
 
     def _on_profile_filter_changed(self, _text: str) -> None:
@@ -764,6 +900,7 @@ class BrainPanel(QWidget):
             loaded_files=self._loaded_files,
             active_index_summary=self._active_index_summary,
         )
+        self._render_overview_detail()
 
     def _index_row_for(self, node: BrainNode | None) -> dict[str, Any] | None:
         if node is None or node.node_type != "index":
@@ -779,3 +916,90 @@ class BrainPanel(QWidget):
             if collection_name and str(row.get("collection_name", "") or "") == collection_name:
                 return dict(row)
         return None
+
+    def _new_overview_card(self) -> tuple[RoundedCard, QVBoxLayout]:
+        card = RoundedCard(
+            self,
+            radius=20,
+            bg=self._palette.get("surface", "#091522"),
+            border_color=self._palette.get("border", "#17405F"),
+            shadow_color=self._palette.get("workspace_shadow", "#010408"),
+            shadow_offset=2,
+            inner_padding=16,
+        )
+        layout = QVBoxLayout(card.inner)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        self._overview_cards.append(card)
+        return card, layout
+
+    def _set_surface(self, surface: str) -> None:
+        self._surface = surface if surface in {"overview", "map"} else "overview"
+        if self._surface == "map":
+            self._surface_stack.setCurrentWidget(self._map_page)
+        else:
+            self._surface_stack.setCurrentWidget(self._overview_page)
+        self.btn_brain_layout.setVisible(self._surface == "map")
+        self.update_palette(self._palette)
+
+    def _populate_history_list(self) -> None:
+        query = self._history_search.text().strip().casefold()
+        self._history_list.clear()
+        for row in self._history_rows:
+            title = str(getattr(row, "title", "") or getattr(row, "session_id", "") or "").strip()
+            summary = str(getattr(row, "summary", "") or "").strip()
+            profile = str(getattr(row, "primary_skill_id", "") or getattr(row, "active_profile", "") or "").strip()
+            mode = str(getattr(row, "mode", "") or "Q&A").strip()
+            haystack = " ".join(bit for bit in (title, summary, profile, mode) if bit).casefold()
+            if query and query not in haystack:
+                continue
+            item = QListWidgetItem(f"{title or 'Untitled'}\n{mode} · {profile or 'No skill'}")
+            item.setData(Qt.UserRole, str(getattr(row, "session_id", "") or ""))
+            self._history_list.addItem(item)
+
+    def _sync_summary_cards(self) -> None:
+        source_count = len(self._loaded_files)
+        session_count = len(self._history_rows)
+        self._files_summary_label.setText(
+            f"{source_count} file{'s' if source_count != 1 else ''} loaded."
+            + (f"\nLatest: {self._loaded_files[-1]}" if self._loaded_files else "")
+        )
+        if session_count:
+            latest = self._history_rows[0]
+            latest_title = str(getattr(latest, "title", "") or getattr(latest, "session_id", "") or "Recent chat")
+            self._sessions_summary_label.setText(
+                f"{session_count} conversation{'s' if session_count != 1 else ''} in this workspace.\nLatest: {latest_title}"
+            )
+        else:
+            self._sessions_summary_label.setText("No conversations yet.")
+
+    def _render_overview_detail(self) -> None:
+        node = self._selected_node()
+        if node is None:
+            files = "<br>".join(str(item) for item in self._loaded_files[:8]) or "No files loaded."
+            summary = self._active_index_summary or "No active index selected."
+            self._overview_detail.setHtml(
+                f"<p><b>Workspace</b></p><p>{summary}</p><p><b>Loaded files</b></p><p>{files}</p>"
+            )
+            return
+        detail = [f"<p><b>{node.label}</b></p>", f"<p>Type: {node.node_type}</p>"]
+        for key, value in list(dict(node.metadata or {}).items())[:8]:
+            if value in ("", None, [], {}, ()):
+                continue
+            detail.append(f"<p><b>{key.replace('_', ' ').title()}</b>: {value}</p>")
+        self._overview_detail.setHtml("".join(detail))
+
+    def _on_overview_history_selection(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None) -> None:
+        session_id = str(current.data(Qt.UserRole) or "") if current is not None else ""
+        if not session_id:
+            self._render_overview_detail()
+            return
+        self.select_history_session(session_id)
+        self.historySelectionRequested.emit()
+
+    def _on_overview_history_activated(self, item: QListWidgetItem) -> None:
+        session_id = str(item.data(Qt.UserRole) or "")
+        if not session_id:
+            return
+        self.select_history_session(session_id)
+        self.historyOpenRequested.emit()
