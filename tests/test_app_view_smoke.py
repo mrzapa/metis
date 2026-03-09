@@ -89,14 +89,26 @@ def test_app_view_hero_labels_use_readable_line_length(qapp, process_events) -> 
         assert label.maximumWidth() == 560
 
 
-def test_app_view_hero_inner_in_vbox_for_correct_height_for_width(qapp, process_events) -> None:
-    # _chat_empty_inner must be a direct child of the QVBoxLayout on _chat_empty_state
-    # so that Qt can propagate heightForWidth() from word-wrapped labels up through the
-    # layout chain.  A QHBoxLayout intermediary breaks this chain and causes the preset
-    # buttons at the bottom of the hero pane to be clipped.
+def test_app_view_empty_state_text_blocks_do_not_overlap(qapp, process_events) -> None:
     view = _show(process_events)
 
-    assert view._chat_empty_inner.parent() is view._chat_empty_state
+    assert view._hero_copy_label.y() >= view._hero_greeting_label.y() + view._hero_greeting_label.height()
+    assert view._chat_empty_scroll.height() >= (
+        view._hero_greeting_label.height() + view._hero_copy_label.height()
+    )
+    assert view._chat_preset_buttons[2].y() >= (
+        view._chat_preset_buttons[0].y() + view._chat_preset_buttons[0].height()
+    )
+
+
+def test_app_view_hero_inner_in_scroll_container_for_correct_height_for_width(qapp, process_events) -> None:
+    # The empty-state hero now lives inside a scroll area so the copy and presets stay
+    # readable at the minimum window height on Windows while preserving heightForWidth
+    # propagation from the wrapped labels.
+    view = _show(process_events)
+
+    assert view._chat_empty_scroll.widget() is view._chat_empty_inner.parent()
+    assert view._chat_empty_scroll.widgetResizable() is True
     assert view._chat_empty_inner.hasHeightForWidth() is True
 
 
