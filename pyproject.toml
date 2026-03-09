@@ -61,6 +61,9 @@ live-backends = [
 kreuzberg = [
     "kreuzberg",
 ]
+heretic = [
+    "heretic-llm>=1.2",
+]
 all = [
     "kreuzberg",
     "weaviate-client>=4,<5",

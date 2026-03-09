@@ -99,5 +99,6 @@
   "prefer_comprehension_index": true,
   "log_dir": "logs",
   "log_level": "DEBUG",
-  "kg_query_mode": "hybrid"
+  "kg_query_mode": "hybrid",
+  "heretic_output_dir": ""
 }

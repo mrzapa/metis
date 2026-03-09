@@ -363,6 +363,7 @@ class AppView(QMainWindow):
     importLocalGgufRecommendationRequested = Signal()
     applyLocalGgufRecommendationRequested = Signal()
     editHardwareAssumptionsRequested = Signal()
+    hereticAbliterateRequested = Signal()
     modeStateChanged = Signal(dict)
     quickModelChangeRequested = Signal(object)
 
@@ -1034,6 +1035,19 @@ class AppView(QMainWindow):
         self._local_model_dependency_label = QLabel("", local_body)
         self._local_model_dependency_label.setWordWrap(True)
         local_layout.addWidget(self._local_model_dependency_label)
+        heretic_row = QHBoxLayout()
+        self.btn_heretic_abliterate = QPushButton("Abliterate Model (Heretic)", local_body)
+        self.btn_heretic_abliterate.setToolTip(
+            "Use Heretic to remove safety alignment from a HuggingFace model, "
+            "then convert the result to a local GGUF file."
+        )
+        self.btn_heretic_abliterate.clicked.connect(self.hereticAbliterateRequested.emit)
+        heretic_row.addWidget(self.btn_heretic_abliterate)
+        self.btn_install_heretic_dep = QPushButton("Install heretic-llm", local_body)
+        self.btn_install_heretic_dep.clicked.connect(lambda: self.installLocalDependencyRequested.emit(["heretic-llm"]))
+        heretic_row.addWidget(self.btn_install_heretic_dep)
+        heretic_row.addStretch(1)
+        local_layout.addLayout(heretic_row)
         local_models.content_layout.addWidget(local_body)
         holder_layout.addWidget(local_models)
 
@@ -2077,6 +2091,48 @@ class AppView(QMainWindow):
             return ""
         item = tree.currentItem()
         return str(item.data(0, Qt.UserRole) if item is not None else "")
+
+    def prompt_heretic_abliteration(self) -> dict[str, Any] | None:
+        """Show a dialog to collect HuggingFace model ID and heretic options.
+
+        Returns a dict with ``hf_model_id`` and ``use_bnb_4bit``, or *None*
+        if the user cancelled.
+        """
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Abliterate Model with Heretic")
+        dialog.resize(520, 220)
+        root = QVBoxLayout(dialog)
+
+        root.addWidget(QLabel(
+            "Enter a HuggingFace model ID to abliterate. The result will be "
+            "converted to GGUF and registered as a local model.",
+            dialog,
+        ))
+
+        form = QGridLayout()
+        form.addWidget(QLabel("HuggingFace Model ID:", dialog), 0, 0)
+        model_input = QLineEdit(dialog)
+        model_input.setPlaceholderText("e.g. meta-llama/Llama-3.1-8B-Instruct")
+        form.addWidget(model_input, 0, 1)
+
+        bnb_checkbox = QCheckBox("Use 4-bit quantization (--bnb-4bit, reduces VRAM ~70%)", dialog)
+        form.addWidget(bnb_checkbox, 1, 0, 1, 2)
+        root.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        root.addWidget(buttons)
+
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        hf_id = model_input.text().strip()
+        if not hf_id:
+            return None
+        return {
+            "hf_model_id": hf_id,
+            "use_bnb_4bit": bnb_checkbox.isChecked(),
+        }
 
     def show_hardware_override_editor(
         self,

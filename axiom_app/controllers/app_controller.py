@@ -42,6 +42,7 @@ from axiom_app.services.index_service import (
     load_index_bundle,
     refresh_index_bundle,
 )
+from axiom_app.services.heretic_service import HereticService
 from axiom_app.services.local_llm_recommender import ImportPlan, LocalLlmRecommenderService
 from axiom_app.services.local_model_registry import LocalModelRegistryService
 from axiom_app.services.response_pipeline import (
@@ -77,6 +78,7 @@ _TASK_RAG_QUERY = "RAG query"
 _TASK_DIRECT_QUERY = "Direct query"
 _TASK_INSTALL_DEPENDENCIES = "Install dependencies"
 _TASK_IMPORT_LOCAL_GGUF = "Import local GGUF"
+_TASK_HERETIC_ABLITERATE = "Heretic abliteration"
 
 
 # ---------------------------------------------------------------------------
@@ -1433,6 +1435,11 @@ class AppController:
                         dict(getattr(self, "_pending_task_meta", {})),
                         reason=str(text or ""),
                     )
+            elif task_name == _TASK_HERETIC_ABLITERATE:
+                if "cancelled" in str(text).lower():
+                    self._safe_view_call("set_status", "Heretic abliteration cancelled.")
+                else:
+                    self._safe_view_call("append_log", f"[heretic] Failed: {text}")
             elif task_name == _TASK_BUILD_INDEX:
                 self._start_queued_local_gguf_import_if_any()
 
@@ -1624,6 +1631,18 @@ class AppController:
                 message = f"Installed {installed}. Restart may be required."
                 self._safe_view_call("append_log", f"[deps] {message}")
                 self._safe_view_call("set_status", message)
+
+            elif task == _TASK_HERETIC_ABLITERATE and isinstance(result, dict):
+                gguf_path = pathlib.Path(str(result.get("gguf_path", "")))
+                hf_id = str(result.get("hf_model_id", gguf_path.stem))
+                if gguf_path.is_file():
+                    self._commit_heretic_abliteration(gguf_path, hf_model_id=hf_id)
+                    self._safe_view_call("set_status", f"Abliterated model ready: {gguf_path.name}")
+                    self._safe_view_call("append_log", f"[heretic] Done — {gguf_path.name}")
+                else:
+                    msg = f"Abliteration completed but GGUF not found at {gguf_path}"
+                    self._safe_view_call("set_status", msg)
+                    self._safe_view_call("append_log", f"[heretic] {msg}")
 
             else:
                 label = f"{task} complete." if task else "Done."
@@ -2740,6 +2759,121 @@ class AppController:
             origin=str(queued.get("origin", "wizard") or "wizard"),
             settings_snapshot=dict(queued.get("settings_snapshot") or self.model.settings),
         )
+
+    # ------------------------------------------------------------------
+    # Heretic abliteration
+    # ------------------------------------------------------------------
+
+    def on_heretic_abliterate(self) -> None:
+        """Handle the *Abliterate Model (Heretic)* button click."""
+        heretic_svc = HereticService(
+            output_root=self.model.settings.get("heretic_output_dir") or None,
+        )
+        check = heretic_svc.preflight()
+        if not check["ready"]:
+            self._show_error_dialog(
+                "Heretic Not Ready",
+                "\n".join(check["errors"]),
+            )
+            return
+
+        picker = getattr(self.view, "prompt_heretic_abliteration", None)
+        if not callable(picker):
+            self._safe_view_call("set_status", "Heretic dialog not available.")
+            return
+        params = picker()
+        if not params:
+            return
+
+        hf_model_id = str(params["hf_model_id"])
+        use_bnb_4bit = bool(params.get("use_bnb_4bit", False))
+        gguf_output_dir = str(
+            self.model.settings.get("local_gguf_models_dir") or ""
+        ) or None
+        heretic_output_dir = str(
+            self.model.settings.get("heretic_output_dir") or ""
+        ) or None
+
+        self._safe_view_call("set_status", f"Starting abliteration of {hf_model_id}…")
+        self._safe_view_call("append_log", f"[heretic] Abliterating {hf_model_id}")
+        self.start_task(
+            _TASK_HERETIC_ABLITERATE,
+            self._heretic_abliterate_worker,
+            hf_model_id,
+            use_bnb_4bit,
+            gguf_output_dir,
+            heretic_output_dir,
+        )
+
+    def _heretic_abliterate_worker(
+        self,
+        post_message: Callable[[dict[str, Any]], None],
+        cancel_token: CancelToken,
+        hf_model_id: str,
+        use_bnb_4bit: bool,
+        gguf_output_dir: str | None,
+        heretic_output_dir: str | None,
+    ) -> dict[str, Any]:
+        """Background worker: run heretic then convert to GGUF."""
+        extra_args: list[str] = []
+        if use_bnb_4bit:
+            extra_args.append("--bnb-4bit")
+
+        heretic_svc = HereticService(output_root=heretic_output_dir)
+        gguf_path = heretic_svc.run_pipeline(
+            hf_model_id,
+            post_message=post_message,
+            cancel_token=cancel_token,
+            gguf_output_dir=gguf_output_dir,
+            extra_heretic_args=extra_args or None,
+        )
+        return {
+            "gguf_path": str(gguf_path),
+            "hf_model_id": hf_model_id,
+        }
+
+    def _commit_heretic_abliteration(
+        self,
+        gguf_path: pathlib.Path,
+        *,
+        hf_model_id: str = "",
+    ) -> None:
+        """Register the abliterated GGUF model in the local model registry."""
+        working_settings = dict(self.model.settings)
+        metadata = {
+            "source": "heretic_abliteration",
+            "hf_model_id": hf_model_id,
+        }
+        registry = self.local_model_registry_service.add_gguf(
+            working_settings.get("local_model_registry", {}),
+            name=gguf_path.stem,
+            path=str(gguf_path),
+            metadata=metadata,
+        )
+        working_settings["local_model_registry"] = registry
+        working_settings["local_gguf_models_dir"] = str(gguf_path.parent)
+
+        entry = next(
+            (
+                item
+                for item in self.local_model_registry_service.list_entries(registry)
+                if item.model_type == "gguf" and (item.path or item.value) == str(gguf_path)
+            ),
+            None,
+        )
+        if entry is not None:
+            working_settings = self.local_model_registry_service.activate_entry(
+                working_settings,
+                entry,
+                target="llm",
+            )
+
+        self.model.settings = working_settings
+        self.model.save_settings(self.model.settings)
+        self._safe_view_call("populate_settings", self.model.settings)
+        self._sync_local_model_rows()
+        self._sync_local_gguf_recommendations()
+        self._safe_view_call("append_log", f"[heretic] Registered {gguf_path.name} as local LLM")
 
     def on_refresh_local_gguf_recommendations(self, use_case: str = "") -> None:
         requested = str(use_case or "").strip() or None
