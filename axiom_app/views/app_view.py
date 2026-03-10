@@ -756,14 +756,20 @@ class AppView(QMainWindow):
         left.setMinimumWidth(640)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(UI_SPACING["m"])
+        left_layout.setSpacing(0)
 
-        self._conversation_shell = QFrame(left)
+        self._chat_main_panel = QFrame(left)
+        self._chat_main_panel.setObjectName("chatMainPanel")
+        chat_panel_layout = QVBoxLayout(self._chat_main_panel)
+        chat_panel_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
+        chat_panel_layout.setSpacing(UI_SPACING["m"])
+
+        self._conversation_shell = QFrame(self._chat_main_panel)
         self._conversation_shell.setObjectName("chatConversationCard")
         # Keep the empty-state hero readable at the minimum window height on Windows.
         self._conversation_shell.setMinimumHeight(248)
         conversation_layout = QVBoxLayout(self._conversation_shell)
-        conversation_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["s"], UI_SPACING["m"], UI_SPACING["s"])
+        conversation_layout.setContentsMargins(0, 0, 0, 0)
         conversation_layout.setSpacing(UI_SPACING["s"])
         self._conversation_title = QLabel("Conversation", self._conversation_shell)
         self._conversation_title.setObjectName("chatSectionTitle")
@@ -868,12 +874,17 @@ class AppView(QMainWindow):
         feedback_layout.addWidget(self.btn_feedback_down)
         conversation_layout.addWidget(self._feedback_footer, 0)
 
-        left_layout.addWidget(self._conversation_shell, 1)
+        chat_panel_layout.addWidget(self._conversation_shell, 1)
 
-        self._composer_shell = QFrame(left)
+        self._composer_divider = QFrame(self._chat_main_panel)
+        self._composer_divider.setObjectName("chatComposerDivider")
+        self._composer_divider.setFixedHeight(1)
+        chat_panel_layout.addWidget(self._composer_divider, 0)
+
+        self._composer_shell = QFrame(self._chat_main_panel)
         self._composer_shell.setObjectName("chatComposerCard")
         composer_layout = QVBoxLayout(self._composer_shell)
-        composer_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
+        composer_layout.setContentsMargins(0, 0, 0, 0)
         composer_layout.setSpacing(UI_SPACING["s"])
         self._composer_title = QLabel("Ask Axiom", self._composer_shell)
         self._composer_title.setObjectName("chatSectionTitle")
@@ -903,7 +914,8 @@ class AppView(QMainWindow):
         self.btn_send.clicked.connect(self.sendRequested.emit)
         action_row.addWidget(self.btn_send)
         composer_layout.addLayout(action_row)
-        left_layout.addWidget(self._composer_shell, 0)
+        chat_panel_layout.addWidget(self._composer_shell, 0)
+        left_layout.addWidget(self._chat_main_panel, 1)
         splitter.addWidget(left)
 
         right = QTabWidget(splitter)
@@ -1454,10 +1466,18 @@ class AppView(QMainWindow):
                 border: 1px solid {border};
                 border-radius: 16px;
             }}
-            QFrame#chatConversationCard, QFrame#chatComposerCard {{
+            QFrame#chatMainPanel {{
                 background-color: {supporting};
                 border: 1px solid {border};
-                border-radius: 20px;
+                border-radius: 24px;
+            }}
+            QFrame#chatConversationCard, QFrame#chatComposerCard {{
+                background: transparent;
+                border: none;
+            }}
+            QFrame#chatComposerDivider {{
+                background-color: {border};
+                border: none;
             }}
             QStackedWidget#chatStateStack {{
                 background: transparent;
@@ -1474,8 +1494,8 @@ class AppView(QMainWindow):
             QPushButton#chatPresetButton {{
                 padding: 0px;
                 border-radius: 18px;
-                background-color: {surface_alt};
-                border: 1px solid {border};
+                background-color: {surface};
+                border: 1px solid transparent;
             }}
             QPushButton#chatPresetButton:hover {{
                 background-color: {nav_bg};

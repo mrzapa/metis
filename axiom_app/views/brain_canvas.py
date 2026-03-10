@@ -6,7 +6,7 @@ from math import hypot
 from typing import Any
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QWheelEvent
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen, QWheelEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QGraphicsItem,
@@ -105,6 +105,15 @@ class BrainNodeItem(QGraphicsObject):
         diameter = self._radius * 2.0
         return QRectF(-self._radius - pad, -self._radius - pad, diameter + pad * 2.0, diameter + pad * 2.0)
 
+    def label_layout(self, base_font: QFont | None = None) -> tuple[str, QFont, QRectF]:
+        label = _truncate(self.node.label, 26 if self.node.node_type == "category" else 22)
+        font = QFont(base_font) if base_font is not None else QFont()
+        font.setBold(True)
+        font.setPointSizeF(10.0 if self.node.node_type == "category" else 9.0)
+        text_rect = self._label_rect()
+        font = self._fit_label_font(label, font, text_rect)
+        return label, font, text_rect
+
     def paint(self, painter: QPainter, _option: Any, _widget: QWidget | None = None) -> None:
         fill = _node_fill(self.node, self._palette)
         border = QColor(self._palette.get("brain_edge", self._palette.get("border", "#17405F")))
@@ -118,13 +127,33 @@ class BrainNodeItem(QGraphicsObject):
         painter.drawEllipse(QPointF(0.0, 0.0), self._radius, self._radius)
 
         painter.setPen(text)
-        label = _truncate(self.node.label, 26 if self.node.node_type == "category" else 22)
-        font = painter.font()
-        font.setBold(True)
-        font.setPointSize(9 if self.node.node_type != "category" else 10)
+        label, font, text_rect = self.label_layout(painter.font())
         painter.setFont(font)
-        text_rect = QRectF(-self._radius + 4.0, -11.0, self._radius * 2.0 - 8.0, 22.0)
         painter.drawText(text_rect, Qt.AlignCenter | Qt.TextWordWrap, label)
+
+    def _label_rect(self) -> QRectF:
+        horizontal_padding = 6.0 if self._radius >= 34.0 else 5.0
+        vertical_padding = 10.0 if self._radius >= 34.0 else 7.0
+        diameter = self._radius * 2.0
+        return QRectF(
+            -self._radius + horizontal_padding,
+            -self._radius + vertical_padding,
+            diameter - horizontal_padding * 2.0,
+            diameter - vertical_padding * 2.0,
+        )
+
+    def _fit_label_font(self, label: str, font: QFont, text_rect: QRectF) -> QFont:
+        fitted = QFont(font)
+        flags = int(Qt.AlignCenter | Qt.TextWordWrap)
+        minimum_size = 7.5 if self.node.node_type == "category" else 7.0
+        metrics = QFontMetricsF(fitted)
+        while fitted.pointSizeF() > minimum_size:
+            bounds = metrics.boundingRect(text_rect, flags, label)
+            if bounds.height() <= text_rect.height() and bounds.width() <= text_rect.width():
+                break
+            fitted.setPointSizeF(max(minimum_size, fitted.pointSizeF() - 0.5))
+            metrics = QFontMetricsF(fitted)
+        return fitted
 
     def mousePressEvent(self, event: Any) -> None:
         self.setCursor(Qt.ClosedHandCursor)
