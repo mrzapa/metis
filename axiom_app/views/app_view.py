@@ -31,8 +31,6 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QStackedWidget,
-    QStyle,
-    QStyleOptionButton,
     QTabWidget,
     QTextBrowser,
     QTextEdit,
@@ -364,12 +362,33 @@ class _MetricAwareWrapLabel(QLabel):
 class _ChatPresetButton(QPushButton):
     _TEXT_MEASURE_HEIGHT = 4096
     _MIN_HEIGHT = 72
+    _H_PADDING = 18
+    _V_PADDING = 16
 
     def __init__(self, title: str, description: str, parent: QWidget | None = None) -> None:
-        super().__init__(f"{title}\n{description}", parent)
+        super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setMinimumHeight(self._MIN_HEIGHT)
+        self.setText("")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(self._H_PADDING, self._V_PADDING, self._H_PADDING, self._V_PADDING)
+        layout.setSpacing(UI_SPACING["xs"] // 2)
+
+        self._title_label = _MetricAwareWrapLabel(title, self)
+        self._title_label.setObjectName("chatPresetTitle")
+        self._title_label.setWordWrap(True)
+        self._title_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self._title_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        layout.addWidget(self._title_label)
+
+        self._description_label = _MetricAwareWrapLabel(description, self)
+        self._description_label.setObjectName("chatPresetDescription")
+        self._description_label.setWordWrap(True)
+        self._description_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self._description_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        layout.addWidget(self._description_label)
 
     def event(self, event: QEvent | None) -> bool:
         if event is not None and event.type() in (
@@ -378,6 +397,7 @@ class _ChatPresetButton(QPushButton):
             QEvent.PolishRequest,
             QEvent.StyleChange,
         ):
+            self._sync_label_widths(self.width())
             self.updateGeometry()
         return super().event(event)
 
@@ -391,37 +411,53 @@ class _ChatPresetButton(QPushButton):
             return self.width()
         return max(QPushButton.sizeHint(self).width(), 1)
 
-    def _style_option_for_width(self, width: int) -> tuple[QStyleOptionButton, int]:
-        target_width = self._resolved_width(width)
-        option = QStyleOptionButton()
-        self.initStyleOption(option)
-        option.rect = QRect(0, 0, target_width, max(self.height(), self._MIN_HEIGHT))
-        return option, target_width
+    def _content_width_for_button_width(self, width: int) -> int:
+        margins = self.layout().contentsMargins()
+        return max(1, self._resolved_width(width) - margins.left() - margins.right())
+
+    def _sync_label_widths(self, width: int) -> int:
+        content_width = self._content_width_for_button_width(width)
+        for label in (self._title_label, self._description_label):
+            label.setMaximumWidth(content_width)
+            label.updateGeometry()
+        return content_width
+
+    def _wrapped_label_height(self, label: QLabel, width: int) -> int:
+        height = label.heightForWidth(width)
+        if height > 0:
+            return height
+        text_rect = label.fontMetrics().boundingRect(
+            QRect(0, 0, width, self._TEXT_MEASURE_HEIGHT),
+            int(Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop),
+            label.text(),
+        )
+        return max(1, text_rect.height())
 
     def heightForWidth(self, width: int) -> int:
-        option, target_width = self._style_option_for_width(width)
-        content_rect = self.style().subElementRect(QStyle.SE_PushButtonContents, option, self)
-        text_width = max(1, content_rect.width() or target_width)
-        text_rect = self.fontMetrics().boundingRect(
-            QRect(0, 0, text_width, self._TEXT_MEASURE_HEIGHT),
-            int(Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop),
-            self.text(),
-        )
-        content_size = QSize(max(1, text_rect.width()), max(1, text_rect.height()))
-        styled_size = self.style().sizeFromContents(QStyle.CT_PushButton, option, content_size, self)
-        return max(self._MIN_HEIGHT, styled_size.height())
+        layout = self.layout()
+        if layout is None:
+            return self._MIN_HEIGHT
+
+        content_width = self._sync_label_widths(width)
+        margins = layout.contentsMargins()
+        spacing = max(layout.spacing(), 0)
+        title_height = self._wrapped_label_height(self._title_label, content_width)
+        description_height = self._wrapped_label_height(self._description_label, content_width)
+        total_height = margins.top() + title_height + spacing + description_height + margins.bottom()
+        return max(self._MIN_HEIGHT, total_height)
 
     def minimumSizeHint(self) -> QSize:
-        hint = QPushButton.minimumSizeHint(self)
-        width = self.width() if self.width() > 0 else max(hint.width(), 1)
-        hint.setHeight(self.heightForWidth(width))
-        return hint
+        return self.sizeHint()
 
     def sizeHint(self) -> QSize:
-        hint = QPushButton.sizeHint(self)
-        width = self.width() if self.width() > 0 else max(hint.width(), 1)
-        hint.setHeight(self.heightForWidth(width))
-        return hint
+        layout = self.layout()
+        margins = layout.contentsMargins() if layout is not None else None
+        title_hint = self._title_label.sizeHint()
+        description_hint = self._description_label.sizeHint()
+        width = max(title_hint.width(), description_hint.width(), QPushButton.sizeHint(self).width(), 1)
+        if margins is not None:
+            width += margins.left() + margins.right()
+        return QSize(width, self.heightForWidth(width))
 
 
 class AppView(QMainWindow):
@@ -768,7 +804,7 @@ class AppView(QMainWindow):
         preset_grid.setContentsMargins(0, 0, 0, 0)
         preset_grid.setHorizontalSpacing(UI_SPACING["s"])
         preset_grid.setVerticalSpacing(UI_SPACING["xs"])
-        self._chat_preset_buttons: list[QPushButton] = []
+        self._chat_preset_buttons: list[_ChatPresetButton] = []
         for preset in _CHAT_PRESETS:
             button = _ChatPresetButton(preset["title"], preset["description"], preset_grid_host)
             button.setObjectName("chatPresetButton")
@@ -1421,17 +1457,25 @@ class AppView(QMainWindow):
                 border-radius: 16px;
             }}
             QPushButton#chatPresetButton {{
-                text-align: left;
-                padding: 16px 18px;
+                padding: 0px;
                 border-radius: 18px;
                 background-color: {surface_alt};
                 border: 1px solid {border};
-                font-size: 14px;
-                font-weight: 600;
             }}
             QPushButton#chatPresetButton:hover {{
                 background-color: {nav_bg};
                 border-color: {self._palette.get("focus_ring", self._palette.get("primary", "#2EB7FF"))};
+            }}
+            QLabel#chatPresetTitle {{
+                color: {text};
+                font-size: 14px;
+                font-weight: 600;
+                background: transparent;
+            }}
+            QLabel#chatPresetDescription {{
+                color: {muted};
+                font-size: 13px;
+                background: transparent;
             }}
             QWidget#chatFeedbackBar {{
                 background: transparent;
@@ -1806,6 +1850,7 @@ class AppView(QMainWindow):
         for row in range(max_rows):
             grid.setRowMinimumHeight(row, 0)
         for column in range(3):
+            grid.setColumnMinimumWidth(column, 0)
             grid.setColumnStretch(column, 0)
 
         row_heights: dict[int, int] = {}
@@ -1813,7 +1858,7 @@ class AppView(QMainWindow):
             row = index // columns
             column = index % columns
             target_height = button.heightForWidth(cell_width)
-            button.setFixedHeight(target_height)
+            button.setFixedSize(cell_width, target_height)
             button.updateGeometry()
             grid.addWidget(button, row, column)
             row_heights[row] = max(
@@ -1824,6 +1869,7 @@ class AppView(QMainWindow):
         for row, height in row_heights.items():
             grid.setRowMinimumHeight(row, height)
         for column in range(columns):
+            grid.setColumnMinimumWidth(column, cell_width)
             grid.setColumnStretch(column, 1)
         self._chat_preset_grid_columns = columns
 

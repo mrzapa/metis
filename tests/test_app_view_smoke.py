@@ -12,12 +12,9 @@ from axiom_app.utils.model_presets import get_llm_model_presets
 qt_core = pytest.importorskip("PySide6.QtCore", reason="Qt runtime unavailable")
 qt_widgets = pytest.importorskip("PySide6.QtWidgets", reason="Qt runtime unavailable")
 QPoint = qt_core.QPoint
-QRect = qt_core.QRect
 Qt = qt_core.Qt
 QScrollBar = qt_widgets.QScrollBar
 QDialog = qt_widgets.QDialog
-QStyle = qt_widgets.QStyle
-QStyleOptionButton = qt_widgets.QStyleOptionButton
 QTreeWidget = qt_widgets.QTreeWidget
 
 
@@ -64,25 +61,16 @@ def _widget_bottom_in(widget, ancestor) -> int:
     return origin.y() + widget.height()
 
 
-def _preset_button_layout_metrics(button) -> tuple:
-    option = QStyleOptionButton()
-    button.initStyleOption(option)
-    option.rect = button.rect()
-    content_rect = button.style().subElementRect(QStyle.SE_PushButtonContents, option, button)
-    text_rect = button.fontMetrics().boundingRect(
-        QRect(0, 0, max(1, content_rect.width()), 4096),
-        int(Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop),
-        button.text(),
-    )
-    required_size = button.style().sizeFromContents(QStyle.CT_PushButton, option, text_rect.size(), button)
-    return content_rect, text_rect, required_size.height()
-
-
 def _assert_preset_buttons_not_clipped(view) -> None:
     for button in view._chat_preset_buttons:
-        content_rect, text_rect, required_height = _preset_button_layout_metrics(button)
-        assert button.height() >= required_height
-        assert text_rect.height() <= content_rect.height()
+        assert button.text() == ""
+        assert button.width() > 0
+        assert button.height() >= button.heightForWidth(button.width())
+        assert button._title_label.wordWrap() is True
+        assert button._description_label.wordWrap() is True
+        assert _widget_bottom_in(button._title_label, button) <= button.height()
+        assert _widget_bottom_in(button._description_label, button) <= button.height()
+        assert button._description_label.y() >= button._title_label.y() + button._title_label.height()
 
 
 def test_app_view_constructs_with_empty_chat_state(qapp, process_events) -> None:
