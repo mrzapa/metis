@@ -31,6 +31,8 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QStackedWidget,
+    QStyle,
+    QStyleOptionButton,
     QTabWidget,
     QTextBrowser,
     QTextEdit,
@@ -360,8 +362,7 @@ class _MetricAwareWrapLabel(QLabel):
 
 
 class _ChatPresetButton(QPushButton):
-    _HORIZONTAL_PADDING = 36
-    _VERTICAL_PADDING = 20
+    _TEXT_MEASURE_HEIGHT = 4096
     _MIN_HEIGHT = 72
 
     def __init__(self, title: str, description: str, parent: QWidget | None = None) -> None:
@@ -383,24 +384,41 @@ class _ChatPresetButton(QPushButton):
     def hasHeightForWidth(self) -> bool:
         return True
 
+    def _resolved_width(self, width: int) -> int:
+        if width > 0:
+            return width
+        if self.width() > 0:
+            return self.width()
+        return max(QPushButton.sizeHint(self).width(), 1)
+
+    def _style_option_for_width(self, width: int) -> tuple[QStyleOptionButton, int]:
+        target_width = self._resolved_width(width)
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.rect = QRect(0, 0, target_width, max(self.height(), self._MIN_HEIGHT))
+        return option, target_width
+
     def heightForWidth(self, width: int) -> int:
-        target_width = width if width > 0 else max(super().sizeHint().width(), 1)
-        text_width = max(1, target_width - self._HORIZONTAL_PADDING)
+        option, target_width = self._style_option_for_width(width)
+        content_rect = self.style().subElementRect(QStyle.SE_PushButtonContents, option, self)
+        text_width = max(1, content_rect.width() or target_width)
         text_rect = self.fontMetrics().boundingRect(
-            QRect(0, 0, text_width, 4096),
+            QRect(0, 0, text_width, self._TEXT_MEASURE_HEIGHT),
             int(Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop),
             self.text(),
         )
-        return max(self._MIN_HEIGHT, text_rect.height() + self._VERTICAL_PADDING)
+        content_size = QSize(max(1, text_rect.width()), max(1, text_rect.height()))
+        styled_size = self.style().sizeFromContents(QStyle.CT_PushButton, option, content_size, self)
+        return max(self._MIN_HEIGHT, styled_size.height())
 
     def minimumSizeHint(self) -> QSize:
-        hint = super().minimumSizeHint()
+        hint = QPushButton.minimumSizeHint(self)
         width = self.width() if self.width() > 0 else max(hint.width(), 1)
         hint.setHeight(self.heightForWidth(width))
         return hint
 
     def sizeHint(self) -> QSize:
-        hint = super().sizeHint()
+        hint = QPushButton.sizeHint(self)
         width = self.width() if self.width() > 0 else max(hint.width(), 1)
         hint.setHeight(self.heightForWidth(width))
         return hint
@@ -696,7 +714,7 @@ class AppView(QMainWindow):
         # Keep the empty-state hero readable at the minimum window height on Windows.
         self._conversation_shell.setMinimumHeight(248)
         conversation_layout = QVBoxLayout(self._conversation_shell)
-        conversation_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
+        conversation_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["s"], UI_SPACING["m"], UI_SPACING["s"])
         conversation_layout.setSpacing(UI_SPACING["s"])
         self._conversation_title = QLabel("Conversation", self._conversation_shell)
         self._conversation_title.setObjectName("chatSectionTitle")
@@ -1308,6 +1326,7 @@ class AppView(QMainWindow):
             self._brain_panel.update_palette(self._palette)
         self._apply_local_styles()
         self.refresh_llm_status_badge()
+        self._schedule_empty_state_relayout()
 
     def _apply_local_styles(self) -> None:
         nav_bg = self._palette.get("nav_hover_bg", "#0E2032")

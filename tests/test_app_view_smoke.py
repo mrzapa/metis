@@ -12,8 +12,12 @@ from axiom_app.utils.model_presets import get_llm_model_presets
 qt_core = pytest.importorskip("PySide6.QtCore", reason="Qt runtime unavailable")
 qt_widgets = pytest.importorskip("PySide6.QtWidgets", reason="Qt runtime unavailable")
 QPoint = qt_core.QPoint
+QRect = qt_core.QRect
+Qt = qt_core.Qt
 QScrollBar = qt_widgets.QScrollBar
 QDialog = qt_widgets.QDialog
+QStyle = qt_widgets.QStyle
+QStyleOptionButton = qt_widgets.QStyleOptionButton
 QTreeWidget = qt_widgets.QTreeWidget
 
 
@@ -58,6 +62,27 @@ def _combo_items(combo) -> list[str]:
 def _widget_bottom_in(widget, ancestor) -> int:
     origin = widget.mapTo(ancestor, QPoint(0, 0))
     return origin.y() + widget.height()
+
+
+def _preset_button_layout_metrics(button) -> tuple:
+    option = QStyleOptionButton()
+    button.initStyleOption(option)
+    option.rect = button.rect()
+    content_rect = button.style().subElementRect(QStyle.SE_PushButtonContents, option, button)
+    text_rect = button.fontMetrics().boundingRect(
+        QRect(0, 0, max(1, content_rect.width()), 4096),
+        int(Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop),
+        button.text(),
+    )
+    required_size = button.style().sizeFromContents(QStyle.CT_PushButton, option, text_rect.size(), button)
+    return content_rect, text_rect, required_size.height()
+
+
+def _assert_preset_buttons_not_clipped(view) -> None:
+    for button in view._chat_preset_buttons:
+        content_rect, text_rect, required_height = _preset_button_layout_metrics(button)
+        assert button.height() >= required_height
+        assert text_rect.height() <= content_rect.height()
 
 
 def test_app_view_constructs_with_empty_chat_state(qapp, process_events) -> None:
@@ -127,6 +152,7 @@ def test_app_view_empty_state_launch_fits_without_scrolling(qapp, process_events
     viewport = view._chat_empty_scroll.viewport()
     last_button = view._chat_preset_buttons[-1]
 
+    _assert_preset_buttons_not_clipped(view)
     assert view._chat_empty_scroll.verticalScrollBar().maximum() == 0
     assert _widget_bottom_in(last_button, viewport) <= viewport.height()
 
@@ -173,8 +199,22 @@ def test_app_view_empty_state_relayout_restores_scroll_free_default_after_clear_
     last_button = view._chat_preset_buttons[-1]
 
     assert view._chat_state_stack.currentWidget() is view._chat_empty_state
+    _assert_preset_buttons_not_clipped(view)
     assert view._chat_empty_scroll.verticalScrollBar().maximum() == 0
     assert _widget_bottom_in(last_button, viewport) <= viewport.height()
+
+
+def test_app_view_empty_state_relayout_keeps_preset_cards_unclipped_in_two_columns(qapp, process_events) -> None:
+    view = _show(process_events)
+
+    view.set_chat_response_ui(True, False)
+    view._chat_splitter.setSizes([680, 520])
+    view._relayout_empty_state()
+    process_events()
+    process_events()
+
+    assert view._chat_preset_grid_columns == 2
+    _assert_preset_buttons_not_clipped(view)
 
 
 def test_app_view_empty_state_uses_scroll_fallback_when_window_is_shorter(qapp, process_events) -> None:
@@ -238,6 +278,7 @@ def test_app_view_applies_theme_and_updates_runtime_widgets(qapp, process_events
     view.populate_settings({"llm_provider": "openai", "llm_model": "gpt-test", "selected_mode": "Research"})
     view.apply_theme("dark")
     process_events()
+    process_events()
 
     assert view._theme_name == "dark"
     assert view._palette["primary"] == view._rag_toggle._palette["primary"]
@@ -247,6 +288,7 @@ def test_app_view_applies_theme_and_updates_runtime_widgets(qapp, process_events
     assert view._mode_combo.currentText() == "Research"
     assert "Research" in view._chat_context_summary.text()
     assert "openai / gpt-test" in view._chat_context_summary.text()
+    _assert_preset_buttons_not_clipped(view)
 
 
 def test_app_view_preserves_zero_numeric_settings_in_text_inputs(qapp, process_events) -> None:
