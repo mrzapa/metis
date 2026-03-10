@@ -86,8 +86,11 @@ def test_app_view_constructs_with_empty_chat_state(qapp, process_events) -> None
     assert view._theme_name == "space_dust"
     assert view._chat_has_messages is False
     assert view._chat_empty_state.isVisible()
+    assert view._chat_main_panel.isVisible()
     assert view._conversation_shell.isVisible()
     assert view._composer_shell.isVisible()
+    assert view._conversation_shell.parentWidget() is view._chat_main_panel
+    assert view._composer_shell.parentWidget() is view._chat_main_panel
     assert view._chat_state_stack.currentWidget() is view._chat_empty_state
     assert not view._chat_transcript_state.isVisible()
     assert not view._feedback_footer.isVisible()
