@@ -62,12 +62,18 @@ def _widget_bottom_in(widget, ancestor) -> int:
 
 
 def _assert_preset_buttons_not_clipped(view) -> None:
+    host = view._chat_preset_grid_host
+    assert host.height() >= host.sizeHint().height()
     for button in view._chat_preset_buttons:
         assert button.text() == ""
         assert button.width() > 0
         assert button.height() >= button.heightForWidth(button.width())
         assert button._title_label.wordWrap() is True
         assert button._description_label.wordWrap() is True
+<<<<<<< HEAD
+        assert _widget_bottom_in(button, host) <= host.height()
+=======
+>>>>>>> origin/main
         assert _widget_bottom_in(button._title_label, button) <= button.height()
         assert _widget_bottom_in(button._description_label, button) <= button.height()
         assert button._description_label.y() >= button._title_label.y() + button._title_label.height()

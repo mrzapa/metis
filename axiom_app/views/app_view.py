@@ -1789,6 +1789,7 @@ class AppView(QMainWindow):
         for widget in (
             self._hero_greeting_label,
             self._hero_copy_label,
+            self._chat_preset_grid_host,
             self._chat_empty_inner,
             *self._chat_preset_buttons,
         ):
@@ -1871,6 +1872,12 @@ class AppView(QMainWindow):
         for column in range(columns):
             grid.setColumnMinimumWidth(column, cell_width)
             grid.setColumnStretch(column, 1)
+        total_rows = max(row_heights.keys(), default=-1) + 1
+        total_height = sum(row_heights.values())
+        if total_rows > 1:
+            total_height += max(grid.verticalSpacing(), 0) * (total_rows - 1)
+        host.setFixedHeight(max(total_height, 0))
+        host.updateGeometry()
         self._chat_preset_grid_columns = columns
 
     def _remember_chat_splitter_sizes(self, *_args: Any) -> None:
