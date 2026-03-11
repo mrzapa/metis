@@ -1118,20 +1118,23 @@ class AppView(QMainWindow):
         self._chat_empty_inner.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         hero_layout = QVBoxLayout(self._chat_empty_inner)
         hero_layout.setContentsMargins(0, 0, 0, 0)
-        hero_layout.setSpacing(UI_SPACING["xs"])
-        self._hero_greeting_label = _MetricAwareWrapLabel("Ask anything about your files", self._chat_empty_inner)
-        self._hero_greeting_label.setObjectName("heroGreeting")
-        self._hero_greeting_label.setWordWrap(True)
-        self._hero_greeting_label.setMaximumWidth(680)
-        self._hero_copy_label = _MetricAwareWrapLabel(
-            "Start with plain language. Sources, models, and evidence stay out of the way until you need them.",
+        hero_layout.setSpacing(UI_SPACING["m"])
+        self._chat_empty_value_label = _MetricAwareWrapLabel(
+            "Start with plain language. Sources and setup stay out of the way until you need them.",
             self._chat_empty_inner,
         )
-        self._hero_copy_label.setObjectName("heroCopy")
-        self._hero_copy_label.setWordWrap(True)
-        self._hero_copy_label.setMaximumWidth(680)
-        hero_layout.addWidget(self._hero_greeting_label)
-        hero_layout.addWidget(self._hero_copy_label)
+        self._chat_empty_value_label.setObjectName("emptyStateValue")
+        self._chat_empty_value_label.setWordWrap(True)
+        self._chat_empty_value_label.setAlignment(Qt.AlignCenter)
+        self._chat_empty_value_label.setMaximumWidth(620)
+        hero_layout.addWidget(self._chat_empty_value_label, 0, Qt.AlignHCenter)
+        self._chat_empty_composer_slot = QWidget(self._chat_empty_inner)
+        self._chat_empty_composer_slot.setObjectName("chatEmptyComposerSlot")
+        self._chat_empty_composer_slot.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        empty_composer_layout = QVBoxLayout(self._chat_empty_composer_slot)
+        empty_composer_layout.setContentsMargins(0, 0, 0, 0)
+        empty_composer_layout.setSpacing(0)
+        hero_layout.addWidget(self._chat_empty_composer_slot)
         preset_grid_host = QWidget(self._chat_empty_inner)
         preset_grid_host.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         preset_grid = QGridLayout(preset_grid_host)
@@ -1204,7 +1207,14 @@ class AppView(QMainWindow):
         self.btn_send.clicked.connect(self.sendRequested.emit)
         action_row.addWidget(self.btn_send)
         composer_layout.addLayout(action_row)
-        chat_panel_layout.addWidget(self._composer_shell, 0)
+        self._chat_footer_composer_slot = QWidget(self._chat_main_panel)
+        self._chat_footer_composer_slot.setObjectName("chatFooterComposerSlot")
+        self._chat_footer_composer_slot.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        footer_composer_layout = QVBoxLayout(self._chat_footer_composer_slot)
+        footer_composer_layout.setContentsMargins(0, 0, 0, 0)
+        footer_composer_layout.setSpacing(0)
+        footer_composer_layout.addWidget(self._composer_shell)
+        chat_panel_layout.addWidget(self._chat_footer_composer_slot, 0)
 
         self._feedback_footer = QWidget(self._chat_main_panel)
         self._feedback_footer.hide()
@@ -2580,6 +2590,10 @@ class AppView(QMainWindow):
                 color: {muted};
                 font-size: 12px;
             }}
+            QLabel#emptyStateValue {{
+                color: {muted};
+                font-size: 14px;
+            }}
             QLabel#chatSectionTitle {{
                 color: {muted};
                 font-size: 12px;
@@ -2931,8 +2945,34 @@ class AppView(QMainWindow):
         self.modeStateChanged.emit(payload)
         self._refresh_conversation_chrome()
 
+    @staticmethod
+    def _move_widget_to_slot(widget: QWidget, slot: QWidget) -> None:
+        slot_layout = slot.layout()
+        if slot_layout is None:
+            return
+        if widget.parentWidget() is slot and slot_layout.indexOf(widget) >= 0:
+            return
+        parent = widget.parentWidget()
+        if parent is not None:
+            parent_layout = parent.layout()
+            if parent_layout is not None:
+                parent_layout.removeWidget(widget)
+        slot_layout.addWidget(widget)
+
+    def _sync_chat_composer_state(self) -> None:
+        empty_state = not self._chat_has_messages
+        self._set_composer_compact_mode(empty_state)
+        target_slot = self._chat_empty_composer_slot if empty_state else self._chat_footer_composer_slot
+        self._move_widget_to_slot(self._composer_shell, target_slot)
+        self._chat_footer_composer_slot.setVisible(not empty_state)
+        self._chat_context_hint.setVisible(not empty_state)
+        self._composer_title.setVisible(not empty_state)
+        self._composer_meta.setVisible(not empty_state)
+        self._composer_shell.show()
+        target_slot.updateGeometry()
+
     def _refresh_chat_state(self) -> None:
-        self._set_composer_compact_mode(not self._chat_has_messages)
+        self._sync_chat_composer_state()
         target = self._chat_transcript_state if self._chat_has_messages else self._chat_empty_state
         self._chat_state_stack.setCurrentWidget(target)
         if target is self._chat_empty_state:
@@ -2996,8 +3036,9 @@ class AppView(QMainWindow):
 
         self._relayout_chat_preset_grid()
         for widget in (
-            self._hero_greeting_label,
-            self._hero_copy_label,
+            self._chat_empty_value_label,
+            self._chat_empty_composer_slot,
+            self._composer_shell,
             self._chat_preset_grid_host,
             self._chat_empty_inner,
             *self._chat_preset_buttons,
@@ -3008,6 +3049,11 @@ class AppView(QMainWindow):
         if hero_layout is not None:
             hero_layout.invalidate()
             hero_layout.activate()
+        empty_composer_layout = self._chat_empty_composer_slot.layout()
+        if empty_composer_layout is not None:
+            empty_composer_layout.invalidate()
+            empty_composer_layout.activate()
+            self._chat_empty_composer_slot.adjustSize()
 
         scroll_contents = self._chat_empty_scroll.widget()
         scroll_layout = None

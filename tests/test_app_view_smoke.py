@@ -62,6 +62,7 @@ def _sample_source() -> EvidenceSource:
 
 def test_app_view_constructs_with_hidden_drawers_and_prompt_first_empty_state(qapp, process_events) -> None:
     _module, view = _show(process_events)
+    empty_inner_layout = view._chat_empty_inner.layout()
 
     assert view._active_view == "chat"
     assert view._theme_name == "space_dust"
@@ -69,11 +70,25 @@ def test_app_view_constructs_with_hidden_drawers_and_prompt_first_empty_state(qa
     assert view._chat_has_messages is False
     assert view.prompt_entry.isVisible()
     assert view.prompt_entry.placeholderText().startswith("Ask a question")
+    assert view._chat_empty_value_label.text() == (
+        "Start with plain language. Sources and setup stay out of the way until you need them."
+    )
+    assert view._chat_empty_value_label.isVisible()
+    assert view._composer_shell.parentWidget() is view._chat_empty_composer_slot
+    assert view._chat_empty_composer_slot.layout().indexOf(view._composer_shell) == 0
+    assert empty_inner_layout.indexOf(view._chat_empty_value_label) < empty_inner_layout.indexOf(
+        view._chat_empty_composer_slot
+    )
+    assert empty_inner_layout.indexOf(view._chat_empty_composer_slot) < empty_inner_layout.indexOf(
+        view._chat_preset_grid_host
+    )
     assert len(view._chat_preset_buttons) >= 5
     assert view._workspace_splitter.sizes()[0] == 0
     assert view._workspace_splitter.sizes()[2] == 0
     assert view._activity_tray.isVisible() is False
     assert view._session_drawer.isVisible() is False
+    assert view._chat_context_hint.isVisible() is False
+    assert view._chat_footer_composer_slot.isVisible() is False
     assert view._rail_buttons["inspect"].isEnabled() is False
     assert view._chat_context_summary.text() == "Q&A · Use Sources · No skill selected · unset"
 
@@ -151,6 +166,8 @@ def test_app_view_switches_between_empty_state_and_timeline_cards(qapp, process_
     assert view._chat_has_messages is True
     assert [card._role_label.text() for card in view._chat_cards] == ["You", "Axiom"]
     assert [card._content_label.text() for card in view._chat_cards] == ["hello", "hi there"]
+    assert view._composer_shell.parentWidget() is view._chat_footer_composer_slot
+    assert view._chat_context_hint.isVisible() is True
 
     view.clear_chat()
     process_events()
@@ -158,6 +175,8 @@ def test_app_view_switches_between_empty_state_and_timeline_cards(qapp, process_
     assert view._chat_state_stack.currentWidget() is view._chat_empty_state
     assert view._chat_has_messages is False
     assert view._chat_cards == []
+    assert view._composer_shell.parentWidget() is view._chat_empty_composer_slot
+    assert view._chat_context_hint.isVisible() is False
     assert view._workspace_splitter.sizes()[2] == 0
 
 
@@ -354,6 +373,7 @@ def test_app_view_set_chat_transcript_compatibility_renders_structured_messages(
     assert view._chat_state_stack.currentWidget() is view._chat_transcript_state
     assert len(view._chat_items) == 2
     assert len(view._chat_cards) == 2
+    assert view._composer_shell.parentWidget() is view._chat_footer_composer_slot
     assert view._chat_cards[-1]._role_label.text() == "Axiom"
     assert view._chat_cards[-1]._sources_button.isVisible() is True
     assert view._chat_cards[-1]._sources_button.text() == "1 source"
