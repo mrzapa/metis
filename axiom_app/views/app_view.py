@@ -655,6 +655,10 @@ class AppView(QMainWindow):
         self._empty_state_relayout_timer = QTimer(self)
         self._empty_state_relayout_timer.setSingleShot(True)
         self._empty_state_relayout_timer.timeout.connect(self._run_empty_state_relayout)
+        self._prompt_focus_restore_pending = False
+        self._prompt_focus_restore_timer = QTimer(self)
+        self._prompt_focus_restore_timer.setSingleShot(True)
+        self._prompt_focus_restore_timer.timeout.connect(self._restore_prompt_focus)
 
         self._load_icon()
         self._build()
@@ -2959,8 +2963,7 @@ class AppView(QMainWindow):
                 parent_layout.removeWidget(widget)
         slot_layout.addWidget(widget)
 
-    def _sync_chat_composer_state(self) -> None:
-        empty_state = not self._chat_has_messages
+    def _apply_chat_composer_state(self, empty_state: bool) -> None:
         self._set_composer_compact_mode(empty_state)
         target_slot = self._chat_empty_composer_slot if empty_state else self._chat_footer_composer_slot
         self._move_widget_to_slot(self._composer_shell, target_slot)
@@ -2972,11 +2975,39 @@ class AppView(QMainWindow):
         target_slot.updateGeometry()
 
     def _refresh_chat_state(self) -> None:
-        self._sync_chat_composer_state()
+        empty_state = not self._chat_has_messages
         target = self._chat_transcript_state if self._chat_has_messages else self._chat_empty_state
+        target_slot = self._chat_empty_composer_slot if empty_state else self._chat_footer_composer_slot
+        prompt_entry = getattr(self, "prompt_entry", None)
+        should_restore_prompt_focus = bool(self._prompt_focus_restore_pending)
+        if prompt_entry is not None and prompt_entry.hasFocus():
+            needs_transition = (
+                self._chat_state_stack.currentWidget() is not target
+                or self._composer_shell.parentWidget() is not target_slot
+            )
+            should_restore_prompt_focus = should_restore_prompt_focus or needs_transition
         self._chat_state_stack.setCurrentWidget(target)
+        self._apply_chat_composer_state(empty_state)
         if target is self._chat_empty_state:
             self._schedule_empty_state_relayout()
+        self._schedule_prompt_focus_restore(should_restore_prompt_focus)
+
+    def _schedule_prompt_focus_restore(self, should_restore: bool) -> None:
+        self._prompt_focus_restore_pending = bool(should_restore)
+        if not should_restore:
+            self._prompt_focus_restore_timer.stop()
+            return
+        self._prompt_focus_restore_timer.start(0)
+
+    def _restore_prompt_focus(self) -> None:
+        if not self._prompt_focus_restore_pending:
+            return
+        self._prompt_focus_restore_pending = False
+        prompt_entry = getattr(self, "prompt_entry", None)
+        if prompt_entry is None or not prompt_entry.isVisible() or not prompt_entry.isEnabled():
+            return
+        prompt_entry.setFocus(Qt.OtherFocusReason)
+        prompt_entry.ensureCursorVisible()
 
     def _set_composer_compact_mode(self, compact: bool) -> None:
         max_height = 156 if compact else 112

@@ -180,6 +180,58 @@ def test_app_view_switches_between_empty_state_and_timeline_cards(qapp, process_
     assert view._workspace_splitter.sizes()[2] == 0
 
 
+def test_app_view_preserves_prompt_focus_and_cursor_during_composer_relocation(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+
+    view.set_prompt_text("hello world")
+    cursor = view.prompt_entry.textCursor()
+    cursor.setPosition(5)
+    view.prompt_entry.setTextCursor(cursor)
+    view.prompt_entry.setFocus()
+    process_events()
+
+    assert QApplication.focusWidget() is view.prompt_entry
+
+    view.append_chat("You: hello\n")
+    process_events()
+    process_events()
+
+    assert view._composer_shell.parentWidget() is view._chat_footer_composer_slot
+    assert QApplication.focusWidget() is view.prompt_entry
+    assert view.prompt_entry.textCursor().position() == 5
+
+    view.clear_chat()
+    process_events()
+    process_events()
+
+    assert view._composer_shell.parentWidget() is view._chat_empty_composer_slot
+    assert QApplication.focusWidget() is view.prompt_entry
+    assert view.prompt_entry.textCursor().position() == 5
+
+
+def test_app_view_composer_relocation_does_not_steal_focus(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+
+    view.btn_new_chat.setFocus()
+    process_events()
+
+    assert QApplication.focusWidget() is view.btn_new_chat
+
+    view.append_chat("You: hello\n")
+    process_events()
+    process_events()
+
+    assert view._composer_shell.parentWidget() is view._chat_footer_composer_slot
+    assert QApplication.focusWidget() is view.btn_new_chat
+
+    view.clear_chat()
+    process_events()
+    process_events()
+
+    assert view._composer_shell.parentWidget() is view._chat_empty_composer_slot
+    assert QApplication.focusWidget() is view.btn_new_chat
+
+
 def test_app_view_completed_response_reveals_inspector_and_feedback_on_latest_assistant_card(qapp, process_events) -> None:
     _module, view = _show(process_events)
 
