@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+from dataclasses import dataclass, field
 from importlib import resources
 from typing import Any
 
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QListWidget,
     QLineEdit,
     QMainWindow,
     QPushButton,
@@ -460,6 +462,120 @@ class _ChatPresetButton(QPushButton):
         return QSize(width, self.heightForWidth(width))
 
 
+class _RailButton(_NavButton):
+    def __init__(self, label: str, caption: str, parent: QWidget | None = None) -> None:
+        super().__init__(label, parent)
+        self._caption = caption
+        self.setToolTip(caption)
+        self.setFixedSize(60, 60)
+
+
+class _SessionChip(QPushButton):
+    def __init__(self, section: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.section = section
+        self.setCursor(Qt.PointingHandCursor)
+        self.setObjectName("sessionChip")
+
+
+@dataclass(slots=True)
+class ChatTimelineItem:
+    role: str
+    content: str
+    status: str = "complete"
+    run_id: str = ""
+    sources: list[EvidenceSource] = field(default_factory=list)
+    feedback_visible: bool = False
+
+
+class _TimelineMessageCard(QFrame):
+    feedbackRequested = Signal(int)
+    inspectRequested = Signal()
+
+    def __init__(self, item: ChatTimelineItem, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._item = item
+        self.setObjectName("chatMessageCard")
+        self.setProperty("messageRole", item.role)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 16, 18, 16)
+        root.setSpacing(UI_SPACING["xs"])
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(UI_SPACING["xs"])
+        self._role_label = QLabel(self)
+        self._role_label.setObjectName("chatMessageRole")
+        header.addWidget(self._role_label)
+        header.addStretch(1)
+        self._status_label = QLabel(self)
+        self._status_label.setObjectName("chatMessageStatus")
+        header.addWidget(self._status_label)
+        root.addLayout(header)
+
+        self._content_label = QLabel(self)
+        self._content_label.setWordWrap(True)
+        self._content_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._content_label.setObjectName("chatMessageContent")
+        root.addWidget(self._content_label)
+
+        footer = QHBoxLayout()
+        footer.setContentsMargins(0, 0, 0, 0)
+        footer.setSpacing(UI_SPACING["xs"])
+        self._sources_button = QPushButton(self)
+        self._sources_button.setObjectName("messageSourceButton")
+        self._sources_button.clicked.connect(self.inspectRequested.emit)
+        footer.addWidget(self._sources_button, 0, Qt.AlignLeft)
+        footer.addStretch(1)
+
+        self._feedback_row = QWidget(self)
+        feedback_layout = QHBoxLayout(self._feedback_row)
+        feedback_layout.setContentsMargins(0, 0, 0, 0)
+        feedback_layout.setSpacing(UI_SPACING["xs"])
+        self._feedback_up = QPushButton("Useful", self._feedback_row)
+        self._feedback_up.setObjectName("messageFeedbackButton")
+        self._feedback_up.clicked.connect(lambda: self.feedbackRequested.emit(1))
+        feedback_layout.addWidget(self._feedback_up)
+        self._feedback_down = QPushButton("Needs work", self._feedback_row)
+        self._feedback_down.setObjectName("messageFeedbackButton")
+        self._feedback_down.clicked.connect(lambda: self.feedbackRequested.emit(-1))
+        feedback_layout.addWidget(self._feedback_down)
+        footer.addWidget(self._feedback_row, 0, Qt.AlignRight)
+        root.addLayout(footer)
+
+        self.update_item(item)
+
+    def update_item(self, item: ChatTimelineItem) -> None:
+        self._item = item
+        self.setProperty("messageRole", item.role)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+        role_label = {
+            "assistant": "Axiom",
+            "user": "You",
+            "system": "System",
+        }.get(item.role, item.role.title())
+        self._role_label.setText(role_label)
+        self._content_label.setText(item.content.strip() or " ")
+        status_text = ""
+        if item.status == "streaming":
+            status_text = "Thinking"
+        elif item.status == "error":
+            status_text = "Issue"
+        self._status_label.setText(status_text)
+
+        source_count = len(item.sources)
+        self._sources_button.setVisible(source_count > 0)
+        self._sources_button.setText(f"{source_count} source{'s' if source_count != 1 else ''}")
+        self._feedback_row.setVisible(bool(item.feedback_visible) and item.role == "assistant")
+
+    @property
+    def item(self) -> ChatTimelineItem:
+        return self._item
+
+
 class AppView(QMainWindow):
     closeRequested = Signal()
     sendRequested = Signal()
@@ -519,16 +635,23 @@ class AppView(QMainWindow):
         self._history_rows: list[Any] = []
         self._available_index_rows: list[dict[str, Any]] = []
         self._log_buffer: list[str] = []
+        self._chat_items: list[ChatTimelineItem] = []
+        self._chat_cards: list[_TimelineMessageCard] = []
         self._cards: list[RoundedCard] = []
         self._nav_buttons: dict[str, _NavButton] = {}
         self._active_view = "chat"
         self._brand_logo_pixmap = QPixmap()
         self._chat_has_completed_response = False
         self._chat_feedback_pending = False
-        self._chat_splitter_sizes = [820, 360]
+        self._drawer_sizes = {"library": 360, "inspector": 380}
+        self._chat_splitter_sizes = [0, 820, 0]
         self._quick_model_popup_syncing = False
         self._empty_state_relayout_pending = False
         self._empty_state_relayout_rounds_remaining = 0
+        self._library_visible = False
+        self._inspector_visible = False
+        self._activity_visible = False
+        self._session_drawer_visible = False
         self._empty_state_relayout_timer = QTimer(self)
         self._empty_state_relayout_timer.setSingleShot(True)
         self._empty_state_relayout_timer.timeout.connect(self._run_empty_state_relayout)
@@ -579,10 +702,14 @@ class AppView(QMainWindow):
     def showEvent(self, event: Any) -> None:
         super().showEvent(event)
         self._schedule_empty_state_relayout()
+        self._position_session_drawer()
+        self._update_workspace_drawers()
 
     def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)
         self._schedule_empty_state_relayout()
+        self._position_session_drawer()
+        self._update_workspace_drawers()
 
     def _build(self) -> None:
         self.setWindowTitle(f"{APP_NAME} - {APP_SUBTITLE}")
@@ -591,24 +718,19 @@ class AppView(QMainWindow):
 
         root = QWidget(self)
         root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(UI_SPACING["l"], UI_SPACING["l"], UI_SPACING["l"], UI_SPACING["l"])
-        root_layout.setSpacing(UI_SPACING["m"])
+        root_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
+        root_layout.setSpacing(UI_SPACING["s"])
         self.setCentralWidget(root)
 
-        shell = QWidget(root)
+        shell = QFrame(root)
+        shell.setObjectName("workspaceShell")
         shell_layout = QHBoxLayout(shell)
         shell_layout.setContentsMargins(0, 0, 0, 0)
-        shell_layout.setSpacing(UI_SPACING["m"])
+        shell_layout.setSpacing(UI_SPACING["s"])
         root_layout.addWidget(shell, 1)
 
-        sidebar_card, sidebar_layout = self._new_card()
-        sidebar_card.setFixedWidth(240)
-        shell_layout.addWidget(sidebar_card)
-        self._build_sidebar(sidebar_layout)
-
-        content_card, content_layout = self._new_card()
-        shell_layout.addWidget(content_card, 1)
-        self._build_pages(content_layout)
+        self._build_utility_rail(shell_layout)
+        self._build_workspace(shell_layout)
 
         footer = QWidget(root)
         footer_layout = QHBoxLayout(footer)
@@ -618,6 +740,733 @@ class AppView(QMainWindow):
         footer_layout.addWidget(self._status_label, 1)
         footer_layout.addWidget(self._footer_label)
         root_layout.addWidget(footer)
+
+        self._build_settings_dialog()
+        self._position_session_drawer()
+        self._update_workspace_drawers()
+
+    def _build_utility_rail(self, parent_layout: QHBoxLayout) -> None:
+        self._utility_rail = QFrame(self)
+        self._utility_rail.setObjectName("utilityRail")
+        self._utility_rail.setFixedWidth(92)
+        layout = QVBoxLayout(self._utility_rail)
+        layout.setContentsMargins(12, 14, 12, 14)
+        layout.setSpacing(UI_SPACING["s"])
+        parent_layout.addWidget(self._utility_rail)
+
+        self._brand_icon_stack = QStackedWidget(self)
+        self._brand_icon_stack.setFixedSize(52, 52)
+        self._brand_icon_stack.setObjectName("brandIconStack")
+        self._brand_logo_label = QLabel(self)
+        self._brand_logo_label.setObjectName("brandLogo")
+        self._brand_logo_label.setAlignment(Qt.AlignCenter)
+        self._brand_logo_label.setFixedSize(48, 48)
+        self._brand_mark = _BrandMark(self._palette, self)
+        self._brand_mark.setFixedSize(44, 44)
+
+        self._brand_logo_page = QWidget(self)
+        logo_layout = QVBoxLayout(self._brand_logo_page)
+        logo_layout.setContentsMargins(0, 0, 0, 0)
+        logo_layout.addWidget(self._brand_logo_label, 0, Qt.AlignCenter)
+
+        self._brand_mark_page = QWidget(self)
+        mark_layout = QVBoxLayout(self._brand_mark_page)
+        mark_layout.setContentsMargins(0, 0, 0, 0)
+        mark_layout.addWidget(self._brand_mark, 0, Qt.AlignCenter)
+
+        self._brand_icon_stack.addWidget(self._brand_logo_page)
+        self._brand_icon_stack.addWidget(self._brand_mark_page)
+        layout.addWidget(self._brand_icon_stack, 0, Qt.AlignHCenter)
+        self._apply_brand_logo()
+
+        self._brand_title = QLabel("AX", self)
+        self._brand_title.setObjectName("brandTitle")
+        self._brand_subtitle = QLabel("Q1 2026", self)
+        self._brand_subtitle.setObjectName("railSubtitle")
+        self._brand_subtitle.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self._brand_title, 0, Qt.AlignHCenter)
+        layout.addWidget(self._brand_subtitle, 0, Qt.AlignHCenter)
+
+        self._rail_buttons: dict[str, _RailButton] = {}
+        for key, label, caption, handler in (
+            ("chat", "AI", "Chat workspace", lambda: self.switch_view("chat")),
+            ("brain", "LIB", "Library drawer", lambda: self.switch_view("brain")),
+            ("inspect", "INS", "Inspector drawer", lambda: self._toggle_inspector()),
+            ("logs", "ACT", "Activity tray", lambda: self.switch_view("logs")),
+            ("settings", "SET", "Settings", lambda: self.switch_view("settings")),
+        ):
+            button = _RailButton(label, caption, self)
+            button.clicked.connect(handler)
+            self._rail_buttons[key] = button
+            layout.addWidget(button, 0, Qt.AlignHCenter)
+            self.tooltip_manager.register(button, caption)
+
+        layout.addStretch(1)
+
+        badge = QLabel("Desktop", self)
+        badge.setObjectName("sidebarBadge")
+        badge.setAlignment(Qt.AlignCenter)
+        layout.addWidget(badge)
+
+    def _build_workspace(self, parent_layout: QHBoxLayout) -> None:
+        self._workspace_frame = QFrame(self)
+        self._workspace_frame.setObjectName("workspaceFrame")
+        parent_layout.addWidget(self._workspace_frame, 1)
+
+        layout = QVBoxLayout(self._workspace_frame)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(UI_SPACING["s"])
+
+        self._build_command_bar(layout)
+
+        self._workspace_splitter = QSplitter(Qt.Horizontal, self._workspace_frame)
+        self._workspace_splitter.setChildrenCollapsible(True)
+        self._workspace_splitter.splitterMoved.connect(self._remember_workspace_drawer_sizes)
+        layout.addWidget(self._workspace_splitter, 1)
+        self._chat_splitter = self._workspace_splitter
+
+        self._build_library_drawer()
+        self._build_center_stage()
+        self._build_inspector_drawer()
+
+        self._pages = {
+            "chat": self._center_stage,
+            "brain": self._library_drawer,
+            "settings": self._workspace_frame,
+            "logs": self._activity_tray,
+        }
+
+    def _build_command_bar(self, parent_layout: QVBoxLayout) -> None:
+        self._command_bar = QFrame(self._workspace_frame)
+        self._command_bar.setObjectName("commandBar")
+        parent_layout.addWidget(self._command_bar)
+
+        layout = QHBoxLayout(self._command_bar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(UI_SPACING["m"])
+
+        copy_layout = QVBoxLayout()
+        copy_layout.setContentsMargins(0, 0, 0, 0)
+        copy_layout.setSpacing(2)
+        self._page_title = QLabel("Ask Axiom", self._command_bar)
+        self._page_title.setObjectName("pageTitle")
+        copy_layout.addWidget(self._page_title)
+        self._chat_context_summary = QLabel(self._command_bar)
+        self._chat_context_summary.setObjectName("chatContextSummary")
+        copy_layout.addWidget(self._chat_context_summary)
+        self._chat_context_hint = QLabel(
+            "Clean by default. Open only the panels you need.",
+            self._command_bar,
+        )
+        self._chat_context_hint.setObjectName("chatContextHint")
+        copy_layout.addWidget(self._chat_context_hint)
+        layout.addLayout(copy_layout, 1)
+
+        self._session_chip_buttons: dict[str, _SessionChip] = {}
+        chip_row = QHBoxLayout()
+        chip_row.setContentsMargins(0, 0, 0, 0)
+        chip_row.setSpacing(UI_SPACING["xs"])
+        for key in ("mode", "sources", "skill", "model"):
+            chip = _SessionChip(key, self._command_bar)
+            chip.clicked.connect(lambda _checked=False, section=key: self._open_session_drawer(section))
+            self._session_chip_buttons[key] = chip
+            chip_row.addWidget(chip)
+        layout.addLayout(chip_row, 0)
+
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(UI_SPACING["xs"])
+        self._conversation_setup_button = QPushButton("Session", self._command_bar)
+        self._conversation_setup_button.setObjectName("conversationSetupButton")
+        self._conversation_setup_button.clicked.connect(lambda: self._open_session_drawer("mode"))
+        actions.addWidget(self._conversation_setup_button)
+        self.btn_new_chat = QPushButton("New Chat", self._command_bar)
+        self.btn_new_chat.clicked.connect(self.newChatRequested.emit)
+        actions.addWidget(self.btn_new_chat)
+        layout.addLayout(actions, 0)
+        self._llm_status_badge = self._session_chip_buttons["model"]
+
+    def _build_library_drawer(self) -> None:
+        self._library_drawer = QFrame(self._workspace_splitter)
+        self._library_drawer.setObjectName("drawerPanel")
+        self._library_drawer.setMinimumWidth(0)
+        self._library_drawer.setMaximumWidth(420)
+
+        root = QVBoxLayout(self._library_drawer)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(UI_SPACING["s"])
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(UI_SPACING["xs"])
+        title = QLabel("Library", self._library_drawer)
+        title.setObjectName("drawerTitle")
+        header.addWidget(title)
+        header.addStretch(1)
+        close_button = QPushButton("Close", self._library_drawer)
+        close_button.clicked.connect(lambda: self._set_library_visible(False))
+        header.addWidget(close_button)
+        root.addLayout(header)
+
+        self._library_tabs = QTabWidget(self._library_drawer)
+        self._library_tabs.setDocumentMode(True)
+        root.addWidget(self._library_tabs, 1)
+
+        self._library_sources_tab = QWidget(self._library_tabs)
+        self._library_sessions_tab = QWidget(self._library_tabs)
+        self._library_graph_tab = QWidget(self._library_tabs)
+        self._library_tabs.addTab(self._library_sources_tab, "Sources")
+        self._library_tabs.addTab(self._library_sessions_tab, "Sessions")
+        self._library_tabs.addTab(self._library_graph_tab, "Graph")
+
+        self._build_library_sources_tab()
+        self._build_library_sessions_tab()
+        self._build_library_graph_tab()
+
+    def _build_library_sources_tab(self) -> None:
+        root = QVBoxLayout(self._library_sources_tab)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(UI_SPACING["s"])
+
+        self._index_info_label = QLabel("No index built.", self._library_sources_tab)
+        self._index_info_label.setWordWrap(True)
+        root.addWidget(self._index_info_label)
+
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(UI_SPACING["xs"])
+        self.btn_open_files = QPushButton("Add Files", self._library_sources_tab)
+        self.btn_open_files.clicked.connect(self.openFilesRequested.emit)
+        action_row.addWidget(self.btn_open_files)
+        self.btn_build_index = QPushButton("Build Index", self._library_sources_tab)
+        self.btn_build_index.clicked.connect(self.buildIndexRequested.emit)
+        action_row.addWidget(self.btn_build_index)
+        root.addLayout(action_row)
+
+        self._available_index_combo = QComboBox(self._library_sources_tab)
+        self._available_index_combo.setMinimumWidth(220)
+        root.addWidget(self._available_index_combo)
+
+        self.btn_library_load_index = QPushButton("Load Selected Index", self._library_sources_tab)
+        self.btn_library_load_index.clicked.connect(self.loadIndexRequested.emit)
+        root.addWidget(self.btn_library_load_index)
+
+        build_settings = QGridLayout()
+        build_settings.setContentsMargins(0, 0, 0, 0)
+        build_settings.setHorizontalSpacing(UI_SPACING["xs"])
+        build_settings.setVerticalSpacing(UI_SPACING["xs"])
+        build_settings.addWidget(QLabel("Chunk size", self._library_sources_tab), 0, 0)
+        self._library_chunk_size = QSpinBox(self._library_sources_tab)
+        self._library_chunk_size.setRange(1, 500000)
+        self._library_chunk_size.setValue(1000)
+        build_settings.addWidget(self._library_chunk_size, 0, 1)
+        build_settings.addWidget(QLabel("Chunk overlap", self._library_sources_tab), 1, 0)
+        self._library_chunk_overlap = QSpinBox(self._library_sources_tab)
+        self._library_chunk_overlap.setRange(0, 100000)
+        self._library_chunk_overlap.setValue(100)
+        build_settings.addWidget(self._library_chunk_overlap, 1, 1)
+        root.addLayout(build_settings)
+
+        self._active_index_summary = QLabel("No persisted index selected.", self._library_sources_tab)
+        self._active_index_summary.setWordWrap(True)
+        self._active_index_summary.setObjectName("drawerHint")
+        root.addWidget(self._active_index_summary)
+
+        root.addWidget(QLabel("Loaded files", self._library_sources_tab))
+        self._file_list = QListWidget(self._library_sources_tab)
+        self._file_listbox = self._file_list
+        root.addWidget(self._file_list, 1)
+
+    def _build_library_sessions_tab(self) -> None:
+        root = QVBoxLayout(self._library_sessions_tab)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(UI_SPACING["s"])
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(UI_SPACING["xs"])
+        self._history_search = QLineEdit(self._library_sessions_tab)
+        self._history_search.setPlaceholderText("Search conversations")
+        self._history_search.textChanged.connect(self.historySearchRequested.emit)
+        header.addWidget(self._history_search, 1)
+        self._history_profile_filter = QComboBox(self._library_sessions_tab)
+        self._history_profile_filter.currentTextChanged.connect(self.historyProfileFilterRequested.emit)
+        header.addWidget(self._history_profile_filter)
+        root.addLayout(header)
+
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(UI_SPACING["xs"])
+        self.btn_history_refresh = QPushButton("Refresh", self._library_sessions_tab)
+        self.btn_history_refresh.clicked.connect(self.historyRefreshRequested.emit)
+        action_row.addWidget(self.btn_history_refresh)
+        self.btn_history_new_chat = QPushButton("New Chat", self._library_sessions_tab)
+        self.btn_history_new_chat.clicked.connect(self.newChatRequested.emit)
+        action_row.addWidget(self.btn_history_new_chat)
+        root.addLayout(action_row)
+
+        self._history_tree = self._make_tree(["Title", "Updated", "Mode", "Skill"], self._library_sessions_tab)
+        self._history_tree.itemSelectionChanged.connect(self.historySelectionRequested.emit)
+        self._history_tree.itemDoubleClicked.connect(lambda *_args: self.historyOpenRequested.emit())
+        root.addWidget(self._history_tree, 1)
+
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.setSpacing(UI_SPACING["xs"])
+        self.btn_history_open = QPushButton("Open", self._library_sessions_tab)
+        self.btn_history_open.clicked.connect(self.historyOpenRequested.emit)
+        buttons.addWidget(self.btn_history_open)
+        self.btn_history_rename = QPushButton("Rename", self._library_sessions_tab)
+        self.btn_history_rename.clicked.connect(self.historyRenameRequested.emit)
+        buttons.addWidget(self.btn_history_rename)
+        self.btn_history_duplicate = QPushButton("Duplicate", self._library_sessions_tab)
+        self.btn_history_duplicate.clicked.connect(self.historyDuplicateRequested.emit)
+        buttons.addWidget(self.btn_history_duplicate)
+        self.btn_history_export = QPushButton("Export", self._library_sessions_tab)
+        self.btn_history_export.clicked.connect(self.historyExportRequested.emit)
+        buttons.addWidget(self.btn_history_export)
+        self.btn_history_delete = QPushButton("Delete", self._library_sessions_tab)
+        self.btn_history_delete.clicked.connect(self.historyDeleteRequested.emit)
+        buttons.addWidget(self.btn_history_delete)
+        root.addLayout(buttons)
+
+        self._history_detail_browser = QPlainTextEdit(self._library_sessions_tab)
+        self._history_detail_browser.setReadOnly(True)
+        self._history_detail_browser.setObjectName("historyDetail")
+        root.addWidget(self._history_detail_browser, 1)
+
+    def _build_library_graph_tab(self) -> None:
+        root = QVBoxLayout(self._library_graph_tab)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(UI_SPACING["xs"])
+
+        hint = QLabel(
+            "Use the graph when you want to explore connections across the workspace.",
+            self._library_graph_tab,
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("drawerHint")
+        root.addWidget(hint)
+
+        self._brain_panel = BrainPanel(self._library_graph_tab, palette=self._palette, animator=self._animator)
+        self._brain_panel.openFilesRequested.connect(self.openFilesRequested.emit)
+        self._brain_panel.buildIndexRequested.connect(self.buildIndexRequested.emit)
+        self._brain_panel.newChatRequested.connect(self.newChatRequested.emit)
+        self._brain_panel.loadIndexRequested.connect(self.loadIndexRequested.emit)
+        self._brain_panel.historyOpenRequested.connect(self.historyOpenRequested.emit)
+        self._brain_panel.historyDeleteRequested.connect(self.historyDeleteRequested.emit)
+        self._brain_panel.historyRenameRequested.connect(self.historyRenameRequested.emit)
+        self._brain_panel.historyDuplicateRequested.connect(self.historyDuplicateRequested.emit)
+        self._brain_panel.historyExportRequested.connect(self.historyExportRequested.emit)
+        self._brain_panel.historyRefreshRequested.connect(self.historyRefreshRequested.emit)
+        self._brain_panel.historySearchRequested.connect(self.historySearchRequested.emit)
+        self._brain_panel.historySelectionRequested.connect(self.historySelectionRequested.emit)
+        self._brain_panel.historySkillFilterRequested.connect(self.historySkillFilterRequested.emit)
+        self._brain_panel.historyProfileFilterRequested.connect(self.historyProfileFilterRequested.emit)
+        self._brain_panel.brainNodeSelected.connect(self.brainNodeSelected.emit)
+        self._brain_panel.brainNodeActivated.connect(self.brainNodeActivated.emit)
+        self._brain_panel.brainRefreshRequested.connect(self.brainRefreshRequested.emit)
+        self._brain_panel._set_surface("map")
+        root.addWidget(self._brain_panel, 1)
+
+    def _build_center_stage(self) -> None:
+        self._center_stage = QWidget(self._workspace_splitter)
+        layout = QVBoxLayout(self._center_stage)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(UI_SPACING["s"])
+
+        self._chat_main_panel = QFrame(self._center_stage)
+        self._chat_main_panel.setObjectName("chatMainPanel")
+        chat_panel_layout = QVBoxLayout(self._chat_main_panel)
+        chat_panel_layout.setContentsMargins(22, 22, 22, 22)
+        chat_panel_layout.setSpacing(UI_SPACING["m"])
+        layout.addWidget(self._chat_main_panel, 1)
+
+        self._conversation_shell = QFrame(self._chat_main_panel)
+        self._conversation_shell.setObjectName("chatConversationCard")
+        conversation_layout = QVBoxLayout(self._conversation_shell)
+        conversation_layout.setContentsMargins(0, 0, 0, 0)
+        conversation_layout.setSpacing(UI_SPACING["s"])
+        chat_panel_layout.addWidget(self._conversation_shell, 1)
+
+        self._chat_state_stack = QStackedWidget(self._conversation_shell)
+        self._chat_state_stack.setObjectName("chatStateStack")
+        conversation_layout.addWidget(self._chat_state_stack, 1)
+
+        self._chat_empty_state = QWidget(self._chat_state_stack)
+        empty_layout = QVBoxLayout(self._chat_empty_state)
+        empty_layout.setContentsMargins(0, 0, 0, 0)
+        empty_layout.setSpacing(0)
+        empty_layout.addStretch(1)
+        self._chat_empty_scroll = QScrollArea(self._chat_empty_state)
+        self._chat_empty_scroll.setObjectName("chatEmptyScroll")
+        self._chat_empty_scroll.setWidgetResizable(True)
+        self._chat_empty_scroll.setFrameShape(QFrame.NoFrame)
+        self._chat_empty_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._chat_empty_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._chat_empty_scroll.installEventFilter(self)
+        self._chat_empty_scroll.viewport().installEventFilter(self)
+        empty_layout.addWidget(self._chat_empty_scroll, 0, Qt.AlignHCenter)
+        empty_layout.addStretch(1)
+        chat_empty_scroll_contents = QWidget(self._chat_empty_scroll)
+        chat_empty_scroll_layout = QVBoxLayout(chat_empty_scroll_contents)
+        chat_empty_scroll_layout.setContentsMargins(0, 0, 0, 0)
+        chat_empty_scroll_layout.setSpacing(0)
+        self._chat_empty_scroll.setWidget(chat_empty_scroll_contents)
+        self._chat_empty_inner = QWidget(chat_empty_scroll_contents)
+        self._chat_empty_inner.setMaximumWidth(880)
+        self._chat_empty_inner.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        hero_layout = QVBoxLayout(self._chat_empty_inner)
+        hero_layout.setContentsMargins(0, 0, 0, 0)
+        hero_layout.setSpacing(UI_SPACING["xs"])
+        self._hero_greeting_label = _MetricAwareWrapLabel("Ask anything about your files", self._chat_empty_inner)
+        self._hero_greeting_label.setObjectName("heroGreeting")
+        self._hero_greeting_label.setWordWrap(True)
+        self._hero_greeting_label.setMaximumWidth(680)
+        self._hero_copy_label = _MetricAwareWrapLabel(
+            "Start with plain language. Sources, models, and evidence stay out of the way until you need them.",
+            self._chat_empty_inner,
+        )
+        self._hero_copy_label.setObjectName("heroCopy")
+        self._hero_copy_label.setWordWrap(True)
+        self._hero_copy_label.setMaximumWidth(680)
+        hero_layout.addWidget(self._hero_greeting_label)
+        hero_layout.addWidget(self._hero_copy_label)
+        preset_grid_host = QWidget(self._chat_empty_inner)
+        preset_grid_host.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        preset_grid = QGridLayout(preset_grid_host)
+        self._chat_preset_grid_host = preset_grid_host
+        self._chat_preset_grid = preset_grid
+        self._chat_preset_grid_columns = 0
+        preset_grid.setContentsMargins(0, 0, 0, 0)
+        preset_grid.setHorizontalSpacing(UI_SPACING["s"])
+        preset_grid.setVerticalSpacing(UI_SPACING["xs"])
+        self._chat_preset_buttons = []
+        for preset in _CHAT_PRESETS:
+            button = _ChatPresetButton(preset["title"], preset["description"], preset_grid_host)
+            button.setObjectName("chatPresetButton")
+            button.clicked.connect(
+                lambda _checked=False, selected=dict(preset): self._apply_chat_preset(selected)
+            )
+            self._chat_preset_buttons.append(button)
+        hero_layout.addWidget(preset_grid_host)
+        chat_empty_scroll_layout.addWidget(self._chat_empty_inner, 0, Qt.AlignTop | Qt.AlignHCenter)
+        self._chat_state_stack.addWidget(self._chat_empty_state)
+
+        self._chat_transcript_state = QWidget(self._chat_state_stack)
+        transcript_layout = QVBoxLayout(self._chat_transcript_state)
+        transcript_layout.setContentsMargins(0, 0, 0, 0)
+        transcript_layout.setSpacing(0)
+        self._chat_timeline_scroll = QScrollArea(self._chat_transcript_state)
+        self._chat_timeline_scroll.setWidgetResizable(True)
+        self._chat_timeline_scroll.setFrameShape(QFrame.NoFrame)
+        self._chat_timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        transcript_layout.addWidget(self._chat_timeline_scroll, 1)
+        self._chat_timeline_host = QWidget(self._chat_timeline_scroll)
+        self._chat_timeline_layout = QVBoxLayout(self._chat_timeline_host)
+        self._chat_timeline_layout.setContentsMargins(0, 0, 0, 0)
+        self._chat_timeline_layout.setSpacing(UI_SPACING["s"])
+        self._chat_timeline_layout.addStretch(1)
+        self._chat_timeline_scroll.setWidget(self._chat_timeline_host)
+        self._chat_state_stack.addWidget(self._chat_transcript_state)
+
+        self._composer_shell = QFrame(self._chat_main_panel)
+        self._composer_shell.setObjectName("chatComposerCard")
+        composer_layout = QVBoxLayout(self._composer_shell)
+        composer_layout.setContentsMargins(0, 0, 0, 0)
+        composer_layout.setSpacing(UI_SPACING["xs"])
+        self._composer_title = QLabel("Prompt", self._composer_shell)
+        self._composer_title.setObjectName("chatSectionTitle")
+        composer_layout.addWidget(self._composer_title)
+        self._composer_meta = QLabel(self._composer_shell)
+        self._composer_meta.setObjectName("chatContextHint")
+        self._composer_meta.setWordWrap(True)
+        composer_layout.addWidget(self._composer_meta)
+        self.txt_input = QPlainTextEdit(self._composer_shell)
+        self.txt_input.setObjectName("chatComposerInput")
+        self.txt_input.setMinimumHeight(92)
+        self.txt_input.setPlaceholderText("Ask a question, summarize a source, or start a research thread.")
+        self.prompt_entry = self.txt_input
+        self.prompt_entry.installEventFilter(self)
+        composer_layout.addWidget(self.txt_input)
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(UI_SPACING["xs"])
+        self._progress = QProgressBar(self._composer_shell)
+        self._progress.setRange(0, 100)
+        action_row.addWidget(self._progress, 1)
+        self.btn_cancel_rag = QPushButton("Cancel", self._composer_shell)
+        self.btn_cancel_rag.clicked.connect(self.cancelRequested.emit)
+        self.btn_cancel_rag.setEnabled(False)
+        action_row.addWidget(self.btn_cancel_rag)
+        self.btn_send = QPushButton("Send", self._composer_shell)
+        self.btn_send.setProperty("cssClass", "primary")
+        self.btn_send.clicked.connect(self.sendRequested.emit)
+        action_row.addWidget(self.btn_send)
+        composer_layout.addLayout(action_row)
+        chat_panel_layout.addWidget(self._composer_shell, 0)
+
+        self._feedback_footer = QWidget(self._chat_main_panel)
+        self._feedback_footer.hide()
+        self.btn_feedback_up = QPushButton("Useful", self._chat_main_panel)
+        self.btn_feedback_up.hide()
+        self.btn_feedback_down = QPushButton("Needs work", self._chat_main_panel)
+        self.btn_feedback_down.hide()
+
+        self._build_activity_tray(layout)
+        self._build_session_drawer()
+        self._refresh_chat_state()
+        self.set_chat_response_ui(False, False)
+        self._refresh_conversation_chrome()
+
+    def _build_activity_tray(self, parent_layout: QVBoxLayout) -> None:
+        self._activity_tray = QFrame(self._center_stage)
+        self._activity_tray.setObjectName("activityTray")
+        self._activity_tray.setVisible(False)
+        parent_layout.addWidget(self._activity_tray, 0)
+
+        root = QVBoxLayout(self._activity_tray)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(UI_SPACING["s"])
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(UI_SPACING["xs"])
+        title = QLabel("Activity", self._activity_tray)
+        title.setObjectName("drawerTitle")
+        header.addWidget(title)
+        header.addStretch(1)
+        close = QPushButton("Close", self._activity_tray)
+        close.clicked.connect(lambda: self._set_activity_visible(False))
+        header.addWidget(close)
+        root.addLayout(header)
+
+        filters = QHBoxLayout()
+        filters.setContentsMargins(0, 0, 0, 0)
+        filters.setSpacing(UI_SPACING["xs"])
+        self._logs_search = QLineEdit(self._activity_tray)
+        self._logs_search.setPlaceholderText("Filter the activity console")
+        self._logs_search.textChanged.connect(self._render_logs_buffer)
+        filters.addWidget(self._logs_search, 1)
+        self._logs_copy_button = QPushButton("Copy", self._activity_tray)
+        self._logs_copy_button.clicked.connect(self._copy_logs)
+        filters.addWidget(self._logs_copy_button)
+        self._logs_open_folder_button = QPushButton("Open Folder", self._activity_tray)
+        self._logs_open_folder_button.clicked.connect(self._open_log_dir)
+        filters.addWidget(self._logs_open_folder_button)
+        root.addLayout(filters)
+
+        self._logs_view = QPlainTextEdit(self._activity_tray)
+        self._logs_view.setObjectName("logsView")
+        self._logs_view.setReadOnly(True)
+        self._logs_view_text = self._logs_view
+        self._logs_view_scrollbar = self._logs_view.verticalScrollBar()
+        root.addWidget(self._logs_view, 1)
+
+    def _build_inspector_drawer(self) -> None:
+        self._inspector_drawer = QFrame(self._workspace_splitter)
+        self._inspector_drawer.setObjectName("drawerPanel")
+        self._inspector_drawer.setMinimumWidth(0)
+        self._inspector_drawer.setMaximumWidth(440)
+
+        root = QVBoxLayout(self._inspector_drawer)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(UI_SPACING["s"])
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(UI_SPACING["xs"])
+        title = QLabel("Inspector", self._inspector_drawer)
+        title.setObjectName("drawerTitle")
+        header.addWidget(title)
+        header.addStretch(1)
+        self._inspector_pin_button = QPushButton("Pin", self._inspector_drawer)
+        self._inspector_pin_button.setCheckable(True)
+        self._inspector_pin_button.clicked.connect(self._update_workspace_drawers)
+        header.addWidget(self._inspector_pin_button)
+        close = QPushButton("Close", self._inspector_drawer)
+        close.clicked.connect(lambda: self._set_inspector_visible(False))
+        header.addWidget(close)
+        root.addLayout(header)
+
+        self._evidence_tabs = QTabWidget(self._inspector_drawer)
+        self._evidence_tabs.setObjectName("chatEvidenceTabs")
+        self._evidence_tabs.setDocumentMode(True)
+        root.addWidget(self._evidence_tabs, 1)
+
+        evidence_page = QWidget(self._evidence_tabs)
+        evidence_layout = QVBoxLayout(evidence_page)
+        evidence_layout.setContentsMargins(0, 0, 0, 0)
+        evidence_layout.setSpacing(UI_SPACING["s"])
+        evidence_layout.addWidget(QLabel("Sources", evidence_page))
+        self._evidence_sources_tree = self._make_tree(["Source", "Score", "Snippet"], evidence_page)
+        evidence_layout.addWidget(self._evidence_sources_tree, 1)
+        evidence_layout.addWidget(QLabel("Grounding", evidence_page))
+        self._grounding_browser = QTextBrowser(evidence_page)
+        self._grounding_browser.anchorClicked.connect(lambda url: QDesktopServices.openUrl(url))
+        evidence_layout.addWidget(self._grounding_browser, 1)
+
+        process_page = QWidget(self._evidence_tabs)
+        process_layout = QVBoxLayout(process_page)
+        process_layout.setContentsMargins(0, 0, 0, 0)
+        process_layout.setSpacing(UI_SPACING["s"])
+        process_layout.addWidget(QLabel("Events", process_page))
+        self._events_tree = self._make_tree(["Time", "Stage", "Event", "Summary"], process_page)
+        process_layout.addWidget(self._events_tree, 1)
+        process_layout.addWidget(QLabel("Trace", process_page))
+        self._trace_tree = self._make_tree(["Time", "Stage", "Event", "Payload"], process_page)
+        process_layout.addWidget(self._trace_tree, 1)
+
+        structure_page = QWidget(self._evidence_tabs)
+        structure_layout = QVBoxLayout(structure_page)
+        structure_layout.setContentsMargins(0, 0, 0, 0)
+        structure_layout.setSpacing(UI_SPACING["s"])
+        structure_layout.addWidget(QLabel("Semantic Regions", structure_page))
+        self._regions_tree = self._make_tree(["Document", "Region", "Summary"], structure_page)
+        structure_layout.addWidget(self._regions_tree, 1)
+        structure_layout.addWidget(QLabel("Outline", structure_page))
+        self._outline_tree = self._make_tree(["Heading", "Meta"], structure_page)
+        structure_layout.addWidget(self._outline_tree, 1)
+
+        self._evidence_tabs.addTab(evidence_page, "Evidence")
+        self._evidence_tabs.addTab(process_page, "Process")
+        self._evidence_tabs.addTab(structure_page, "Structure")
+
+    def _build_session_drawer(self) -> None:
+        self._session_drawer = QFrame(self._center_stage)
+        self._session_drawer.setObjectName("sessionDrawer")
+        self._session_drawer.setVisible(False)
+        self._session_drawer.raise_()
+
+        root = QVBoxLayout(self._session_drawer)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(UI_SPACING["s"])
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(UI_SPACING["xs"])
+        title = QLabel("Session", self._session_drawer)
+        title.setObjectName("drawerTitle")
+        header.addWidget(title)
+        header.addStretch(1)
+        close = QPushButton("Close", self._session_drawer)
+        close.clicked.connect(self._hide_session_drawer)
+        header.addWidget(close)
+        root.addLayout(header)
+
+        self._session_summary_label = QLabel(self._session_drawer)
+        self._session_summary_label.setObjectName("drawerHint")
+        self._session_summary_label.setWordWrap(True)
+        root.addWidget(self._session_summary_label)
+
+        self._session_tabs = QTabWidget(self._session_drawer)
+        self._session_tabs.setDocumentMode(True)
+        root.addWidget(self._session_tabs, 1)
+
+        self._session_tab_index = {"mode": 0, "sources": 1, "skill": 2, "model": 3}
+
+        mode_tab = QWidget(self._session_tabs)
+        mode_layout = QVBoxLayout(mode_tab)
+        mode_layout.setContentsMargins(0, 0, 0, 0)
+        mode_layout.setSpacing(UI_SPACING["s"])
+        mode_layout.addWidget(QLabel("Conversation mode", mode_tab))
+        self._mode_combo = QComboBox(mode_tab)
+        self._mode_combo.addItems(MODE_OPTIONS)
+        self._mode_combo.currentTextChanged.connect(self._emit_mode_state)
+        mode_layout.addWidget(self._mode_combo)
+        mode_note = QLabel(
+            "Choose the help shape first. Retrieval depth and evidence stay secondary until the answer lands.",
+            mode_tab,
+        )
+        mode_note.setWordWrap(True)
+        mode_note.setObjectName("drawerHint")
+        mode_layout.addWidget(mode_note)
+        mode_layout.addStretch(1)
+        self._session_tabs.addTab(mode_tab, "Mode")
+
+        source_tab = QWidget(self._session_tabs)
+        source_layout = QVBoxLayout(source_tab)
+        source_layout.setContentsMargins(0, 0, 0, 0)
+        source_layout.setSpacing(UI_SPACING["s"])
+        source_layout.addWidget(QLabel("Use sources or chat directly", source_tab))
+        self._rag_toggle = IOSSegmentedToggle(source_tab, ["Use Sources", "Direct"], True, self._palette)
+        self._rag_toggle.toggled.connect(self._on_toggle_changed)
+        source_layout.addWidget(self._rag_toggle, 0, Qt.AlignLeft)
+        self._session_source_status = QLabel("No index selected yet.", source_tab)
+        self._session_source_status.setObjectName("drawerHint")
+        self._session_source_status.setWordWrap(True)
+        source_layout.addWidget(self._session_source_status)
+        open_library = QPushButton("Open Library", source_tab)
+        open_library.clicked.connect(lambda: self.switch_view("brain"))
+        source_layout.addWidget(open_library, 0, Qt.AlignLeft)
+        source_layout.addStretch(1)
+        self._session_tabs.addTab(source_tab, "Sources")
+
+        skill_tab = QWidget(self._session_tabs)
+        skill_layout = QVBoxLayout(skill_tab)
+        skill_layout.setContentsMargins(0, 0, 0, 0)
+        skill_layout.setSpacing(UI_SPACING["s"])
+        skill_layout.addWidget(QLabel("Primary skill", skill_tab))
+        self._profile_combo = QComboBox(skill_tab)
+        self._profile_combo.setMinimumWidth(220)
+        self._profile_combo.currentTextChanged.connect(lambda *_args: self._update_skill_action_labels())
+        skill_layout.addWidget(self._profile_combo)
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(UI_SPACING["xs"])
+        self.btn_profile_load = QPushButton("Toggle Skill", skill_tab)
+        self.btn_profile_load.clicked.connect(self.toggleSkillRequested.emit)
+        self.btn_profile_load.clicked.connect(self.loadProfileRequested.emit)
+        actions.addWidget(self.btn_profile_load)
+        self.btn_profile_save = QPushButton("Pin Skill", skill_tab)
+        self.btn_profile_save.clicked.connect(self.pinSkillRequested.emit)
+        self.btn_profile_save.clicked.connect(self.saveProfileRequested.emit)
+        actions.addWidget(self.btn_profile_save)
+        self.btn_profile_duplicate = QPushButton("Mute Skill", skill_tab)
+        self.btn_profile_duplicate.clicked.connect(self.muteSkillRequested.emit)
+        self.btn_profile_duplicate.clicked.connect(self.duplicateProfileRequested.emit)
+        actions.addWidget(self.btn_profile_duplicate)
+        skill_layout.addLayout(actions)
+        skill_layout.addStretch(1)
+        self._session_tabs.addTab(skill_tab, "Skill")
+
+        model_tab = QWidget(self._session_tabs)
+        model_layout = QVBoxLayout(model_tab)
+        model_layout.setContentsMargins(0, 0, 0, 0)
+        model_layout.setSpacing(UI_SPACING["s"])
+        model_layout.addWidget(QLabel("Provider", model_tab))
+        self._quick_model_provider_combo = QComboBox(model_tab)
+        self._quick_model_provider_combo.addItems(list_llm_providers())
+        self._quick_model_provider_combo.currentTextChanged.connect(self._on_quick_model_provider_changed)
+        model_layout.addWidget(self._quick_model_provider_combo)
+        model_layout.addWidget(QLabel("Model", model_tab))
+        self._quick_model_model_combo = QComboBox(model_tab)
+        self._quick_model_model_combo.currentTextChanged.connect(self._on_quick_model_selection_changed)
+        self._quick_model_model_combo.activated.connect(self._on_quick_model_activated)
+        model_layout.addWidget(self._quick_model_model_combo)
+        self._quick_model_custom_row = QWidget(model_tab)
+        custom_row_layout = QHBoxLayout(self._quick_model_custom_row)
+        custom_row_layout.setContentsMargins(0, 0, 0, 0)
+        custom_row_layout.setSpacing(UI_SPACING["xs"])
+        self._quick_model_custom_input = QLineEdit(self._quick_model_custom_row)
+        self._quick_model_custom_input.setPlaceholderText("Enter a model id")
+        self._quick_model_custom_input.returnPressed.connect(self._emit_quick_model_change_from_popup)
+        custom_row_layout.addWidget(self._quick_model_custom_input, 1)
+        self._quick_model_apply_button = QPushButton("Apply", self._quick_model_custom_row)
+        self._quick_model_apply_button.clicked.connect(self._emit_quick_model_change_from_popup)
+        custom_row_layout.addWidget(self._quick_model_apply_button)
+        model_layout.addWidget(self._quick_model_custom_row)
+        self._quick_model_hint = QLabel(
+            "Preset switches apply immediately. Custom and local models use the inline Apply button.",
+            model_tab,
+        )
+        self._quick_model_hint.setObjectName("drawerHint")
+        self._quick_model_hint.setWordWrap(True)
+        model_layout.addWidget(self._quick_model_hint)
+        model_layout.addStretch(1)
+        self._session_tabs.addTab(model_tab, "Model")
+
+        self._sync_quick_model_popup_from_settings()
 
     def _new_card(self) -> tuple[RoundedCard, QVBoxLayout]:
         card = RoundedCard(
@@ -634,6 +1483,291 @@ class AppView(QMainWindow):
         layout.setSpacing(UI_SPACING["m"])
         self._cards.append(card)
         return card, layout
+
+    def _build_settings_dialog(self) -> None:
+        self._settings_dialog = QDialog(self)
+        self._settings_dialog.setWindowTitle("Axiom Settings")
+        self._settings_dialog.resize(1040, 760)
+        self._settings_dialog.setModal(True)
+
+        root = QVBoxLayout(self._settings_dialog)
+        tabs = QTabWidget(self._settings_dialog)
+        tabs.setDocumentMode(True)
+        root.addWidget(tabs, 1)
+
+        tab_groups = {
+            "General": {"Appearance & Startup", "Conversations: System Prompt", "Conversations: Defaults"},
+            "Models": {"Models: LLM", "Models: Embeddings", "Models: Local Runtime"},
+            "Retrieval": {
+                "Documents & Retrieval: Storage",
+                "Documents & Retrieval: Ingestion",
+                "Documents & Retrieval: Querying",
+                "Conversations: Retrieval Behavior",
+            },
+            "Privacy": {"Privacy & Storage: API Keys", "Privacy & Storage: Logs"},
+            "Developer": {"Advanced: Hardware Overrides", "Advanced: Experimental"},
+        }
+
+        for tab_name, titles in tab_groups.items():
+            page = QWidget(self._settings_dialog)
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(0, 0, 0, 0)
+            scroll = QScrollArea(page)
+            scroll.setWidgetResizable(True)
+            holder = QWidget(scroll)
+            holder_layout = QVBoxLayout(holder)
+            holder_layout.setContentsMargins(0, 0, 0, 0)
+            holder_layout.setSpacing(UI_SPACING["m"])
+            for title, rows in _SETTINGS_SPEC:
+                if title not in titles:
+                    continue
+                section = CollapsibleFrame(holder, title, title in _SETTINGS_EXPANDED, self._animator)
+                section_body = QWidget(section.content)
+                form = QGridLayout(section_body)
+                form.setContentsMargins(0, 0, 0, 0)
+                form.setHorizontalSpacing(UI_SPACING["m"])
+                form.setVerticalSpacing(UI_SPACING["s"])
+                form.setColumnStretch(1, 1)
+                for row_index, (key, label, widget_type, options) in enumerate(rows):
+                    widget = self._build_settings_widget(widget_type, options, section_body)
+                    self._settings_widgets[key] = widget
+                    form.addWidget(QLabel(label, section_body), row_index, 0, Qt.AlignTop)
+                    form.addWidget(widget, row_index, 1)
+                section.content_layout.addWidget(section_body)
+                holder_layout.addWidget(section)
+            if tab_name == "Developer":
+                developer_tools = CollapsibleFrame(holder, "Advanced: Developer Tools", False, self._animator)
+                developer_body = QWidget(developer_tools.content)
+                developer_layout = QVBoxLayout(developer_body)
+                developer_layout.setContentsMargins(0, 0, 0, 0)
+                developer_layout.setSpacing(UI_SPACING["s"])
+                developer_note = QLabel(
+                    "Developer-only controls stay out of the main workspace so the everyday surfaces remain calm.",
+                    developer_body,
+                )
+                developer_note.setWordWrap(True)
+                developer_layout.addWidget(developer_note)
+                self.btn_reset_test_mode = QPushButton("Reset Test Mode", developer_body)
+                developer_layout.addWidget(self.btn_reset_test_mode, 0, Qt.AlignLeft)
+                developer_tools.content_layout.addWidget(developer_body)
+                holder_layout.addWidget(developer_tools)
+            holder_layout.addStretch(1)
+            scroll.setWidget(holder)
+            page_layout.addWidget(scroll, 1)
+            tabs.addTab(page, tab_name)
+
+        local_models_page = QWidget(self._settings_dialog)
+        local_models_layout = QVBoxLayout(local_models_page)
+        local_models_layout.setContentsMargins(0, 0, 0, 0)
+        local_models_layout.setSpacing(UI_SPACING["m"])
+
+        local_models = CollapsibleFrame(local_models_page, "Local Models", True, self._animator)
+        local_body = QWidget(local_models.content)
+        local_layout = QVBoxLayout(local_body)
+        local_layout.setContentsMargins(0, 0, 0, 0)
+        local_layout.setSpacing(UI_SPACING["s"])
+        self._local_model_tree = self._make_tree(["Name", "Type", "Value", "State"], local_body)
+        local_layout.addWidget(self._local_model_tree)
+        button_row = QHBoxLayout()
+        for attr, label, slot in (
+            ("btn_add_local_gguf_model", "Add GGUF", self.addLocalGgufRequested.emit),
+            ("btn_add_local_st_model", "Add Sentence Transformer", self.addLocalSentenceTransformerRequested.emit),
+            ("btn_remove_local_model", "Remove", self.removeLocalModelRequested.emit),
+        ):
+            button = QPushButton(label, local_body)
+            button.clicked.connect(slot)
+            setattr(self, attr, button)
+            button_row.addWidget(button)
+        self.btn_activate_local_model_llm = QPushButton("Activate for LLM", local_body)
+        self.btn_activate_local_model_llm.clicked.connect(lambda: self.activateLocalModelRequested.emit("llm"))
+        button_row.addWidget(self.btn_activate_local_model_llm)
+        self.btn_activate_local_model_embedding = QPushButton("Activate for Embedding", local_body)
+        self.btn_activate_local_model_embedding.clicked.connect(lambda: self.activateLocalModelRequested.emit("embedding"))
+        button_row.addWidget(self.btn_activate_local_model_embedding)
+        self.btn_open_local_model_folder = QPushButton("Open Folder", local_body)
+        self.btn_open_local_model_folder.clicked.connect(self.openLocalModelFolderRequested.emit)
+        button_row.addWidget(self.btn_open_local_model_folder)
+        local_layout.addLayout(button_row)
+        install_row = QHBoxLayout()
+        self.btn_install_local_gguf_dep = QPushButton("Install llama-cpp-python", local_body)
+        self.btn_install_local_gguf_dep.clicked.connect(lambda: self.installLocalDependencyRequested.emit(["llama-cpp-python"]))
+        install_row.addWidget(self.btn_install_local_gguf_dep)
+        self.btn_install_local_st_dep = QPushButton("Install sentence-transformers", local_body)
+        self.btn_install_local_st_dep.clicked.connect(lambda: self.installLocalDependencyRequested.emit(["sentence-transformers"]))
+        install_row.addWidget(self.btn_install_local_st_dep)
+        install_row.addStretch(1)
+        local_layout.addLayout(install_row)
+        self._local_model_dependency_label = QLabel("", local_body)
+        self._local_model_dependency_label.setWordWrap(True)
+        local_layout.addWidget(self._local_model_dependency_label)
+        heretic_row = QHBoxLayout()
+        self.btn_heretic_abliterate = QPushButton("Abliterate Model (Heretic)", local_body)
+        self.btn_heretic_abliterate.clicked.connect(self.hereticAbliterateRequested.emit)
+        heretic_row.addWidget(self.btn_heretic_abliterate)
+        self.btn_install_heretic_dep = QPushButton("Install heretic-llm", local_body)
+        self.btn_install_heretic_dep.clicked.connect(lambda: self.installLocalDependencyRequested.emit(["heretic-llm"]))
+        heretic_row.addWidget(self.btn_install_heretic_dep)
+        heretic_row.addStretch(1)
+        local_layout.addLayout(heretic_row)
+        local_models.content_layout.addWidget(local_body)
+        local_models_layout.addWidget(local_models)
+
+        gguf_recommendations = CollapsibleFrame(local_models_page, "Local GGUF Recommendations", True, self._animator)
+        gguf_body = QWidget(gguf_recommendations.content)
+        gguf_layout = QVBoxLayout(gguf_body)
+        gguf_layout.setContentsMargins(0, 0, 0, 0)
+        gguf_layout.setSpacing(UI_SPACING["s"])
+        self._local_gguf_hardware_label = QLabel("", gguf_body)
+        self._local_gguf_hardware_label.setWordWrap(True)
+        gguf_layout.addWidget(self._local_gguf_hardware_label)
+        self._local_gguf_advisory_label = QLabel("", gguf_body)
+        self._local_gguf_advisory_label.setWordWrap(True)
+        gguf_layout.addWidget(self._local_gguf_advisory_label)
+        gguf_filters = QHBoxLayout()
+        gguf_filters.addWidget(QLabel("Use case", gguf_body))
+        self._local_gguf_use_case_combo = QComboBox(gguf_body)
+        self._local_gguf_use_case_combo.addItems(["general", "chat", "reasoning", "coding"])
+        self._local_gguf_use_case_combo.currentTextChanged.connect(
+            self.refreshLocalGgufRecommendationsRequested.emit
+        )
+        gguf_filters.addWidget(self._local_gguf_use_case_combo)
+        self.btn_refresh_local_gguf_recommendations = QPushButton("Refresh", gguf_body)
+        self.btn_refresh_local_gguf_recommendations.clicked.connect(
+            lambda: self.refreshLocalGgufRecommendationsRequested.emit(self._local_gguf_use_case_combo.currentText())
+        )
+        gguf_filters.addWidget(self.btn_refresh_local_gguf_recommendations)
+        self.btn_edit_hardware_assumptions = QPushButton("Edit Hardware Assumptions", gguf_body)
+        self.btn_edit_hardware_assumptions.clicked.connect(self.editHardwareAssumptionsRequested.emit)
+        gguf_filters.addWidget(self.btn_edit_hardware_assumptions)
+        gguf_filters.addStretch(1)
+        gguf_layout.addLayout(gguf_filters)
+        self._local_gguf_recommendation_tree = self._make_tree(
+            ["Model", "Params", "Fit", "Quant", "Speed", "Context", "Source"],
+            gguf_body,
+        )
+        self._local_gguf_recommendation_tree.itemSelectionChanged.connect(
+            self._update_local_gguf_recommendation_details
+        )
+        gguf_layout.addWidget(self._local_gguf_recommendation_tree)
+        gguf_button_row = QHBoxLayout()
+        self.btn_import_local_gguf_recommendation = QPushButton("Import Selected", gguf_body)
+        self.btn_import_local_gguf_recommendation.clicked.connect(
+            self.importLocalGgufRecommendationRequested.emit
+        )
+        gguf_button_row.addWidget(self.btn_import_local_gguf_recommendation)
+        self.btn_apply_local_gguf_recommendation = QPushButton("Apply as Local LLM", gguf_body)
+        self.btn_apply_local_gguf_recommendation.clicked.connect(
+            self.applyLocalGgufRecommendationRequested.emit
+        )
+        gguf_button_row.addWidget(self.btn_apply_local_gguf_recommendation)
+        gguf_button_row.addStretch(1)
+        gguf_layout.addLayout(gguf_button_row)
+        self.btn_import_local_gguf_recommendation.setEnabled(False)
+        self.btn_apply_local_gguf_recommendation.setEnabled(False)
+        self._local_gguf_recommendation_notes = QLabel("", gguf_body)
+        self._local_gguf_recommendation_notes.setWordWrap(True)
+        gguf_layout.addWidget(self._local_gguf_recommendation_notes)
+        gguf_recommendations.content_layout.addWidget(gguf_body)
+        local_models_layout.addWidget(gguf_recommendations)
+        local_models_layout.addStretch(1)
+        tabs.addTab(local_models_page, "Local Models")
+
+        footer = QHBoxLayout()
+        footer.addStretch(1)
+        self.btn_save_settings = QPushButton("Save Settings", self._settings_dialog)
+        self.btn_save_settings.clicked.connect(self.saveSettingsRequested.emit)
+        footer.addWidget(self.btn_save_settings)
+        close = QPushButton("Close", self._settings_dialog)
+        close.clicked.connect(self._settings_dialog.hide)
+        footer.addWidget(close)
+        root.addLayout(footer)
+
+    def _remember_workspace_drawer_sizes(self, *_args: Any) -> None:
+        splitter = getattr(self, "_workspace_splitter", None)
+        if splitter is None:
+            return
+        sizes = list(splitter.sizes())
+        if len(sizes) >= 3:
+            if sizes[0] > 0:
+                self._drawer_sizes["library"] = sizes[0]
+            if sizes[2] > 0:
+                self._drawer_sizes["inspector"] = sizes[2]
+
+    def _refresh_rail_buttons(self) -> None:
+        for button in getattr(self, "_rail_buttons", {}).values():
+            button.setChecked(False)
+        if hasattr(self, "_rail_buttons"):
+            self._rail_buttons.get("chat") and self._rail_buttons["chat"].setChecked(
+                not self._library_visible and not self._activity_visible and not self._session_drawer_visible
+            )
+            self._rail_buttons.get("brain") and self._rail_buttons["brain"].setChecked(self._library_visible)
+            self._rail_buttons.get("inspect") and self._rail_buttons["inspect"].setChecked(self._inspector_visible)
+            self._rail_buttons.get("logs") and self._rail_buttons["logs"].setChecked(self._activity_visible)
+
+    def _update_workspace_drawers(self) -> None:
+        splitter = getattr(self, "_workspace_splitter", None)
+        if splitter is None:
+            return
+        total = max(splitter.width(), self.width() - 180, _MIN_WINDOW_W - 120)
+        library_width = self._drawer_sizes.get("library", 360) if self._library_visible else 0
+        inspector_allowed = self._chat_has_completed_response and self._inspector_visible
+        inspector_width = self._drawer_sizes.get("inspector", 380) if inspector_allowed else 0
+        if total < 1420 and library_width and inspector_width:
+            library_width = 0
+        center_width = max(520, total - library_width - inspector_width)
+        splitter.setSizes([library_width, center_width, inspector_width])
+        if hasattr(self, "_rail_buttons") and "inspect" in self._rail_buttons:
+            self._rail_buttons["inspect"].setEnabled(self._chat_has_completed_response)
+        self._refresh_rail_buttons()
+
+    def _set_library_visible(self, visible: bool) -> None:
+        self._library_visible = bool(visible)
+        self._update_workspace_drawers()
+
+    def _set_inspector_visible(self, visible: bool, *, tab_index: int | None = None) -> None:
+        if tab_index is not None and hasattr(self, "_evidence_tabs"):
+            self._evidence_tabs.setCurrentIndex(tab_index)
+        self._inspector_visible = bool(visible)
+        self._update_workspace_drawers()
+
+    def _toggle_inspector(self) -> None:
+        if not self._chat_has_completed_response:
+            return
+        self._set_inspector_visible(not self._inspector_visible)
+
+    def _set_activity_visible(self, visible: bool) -> None:
+        self._activity_visible = bool(visible)
+        if hasattr(self, "_activity_tray"):
+            self._activity_tray.setVisible(self._activity_visible)
+        self._refresh_rail_buttons()
+
+    def _open_session_drawer(self, section: str = "mode") -> None:
+        if not hasattr(self, "_session_drawer"):
+            return
+        index = self._session_tab_index.get(str(section or "mode"), 0)
+        self._session_tabs.setCurrentIndex(index)
+        self._session_drawer_visible = True
+        self._session_drawer.show()
+        self._position_session_drawer()
+        self._session_drawer.raise_()
+        self._session_drawer.activateWindow()
+        self._refresh_rail_buttons()
+
+    def _hide_session_drawer(self) -> None:
+        if hasattr(self, "_session_drawer"):
+            self._session_drawer.hide()
+        self._session_drawer_visible = False
+        self._refresh_rail_buttons()
+
+    def _position_session_drawer(self) -> None:
+        drawer = getattr(self, "_session_drawer", None)
+        stage = getattr(self, "_center_stage", None)
+        if drawer is None or stage is None or not drawer.isVisible():
+            return
+        stage_rect = stage.rect()
+        width = min(380, max(300, stage_rect.width() - 36))
+        height = min(max(360, stage_rect.height() - 28), 560)
+        drawer.setGeometry(stage_rect.width() - width - 16, 14, width, height)
 
     def _build_sidebar(self, layout: QVBoxLayout) -> None:
         brand_row = QHBoxLayout()
@@ -1041,36 +2175,16 @@ class AppView(QMainWindow):
         popup_layout.addWidget(self._llm_status_badge, 0, Qt.AlignLeft)
 
     def _toggle_conversation_setup_popup(self) -> None:
-        popup = getattr(self, "_conversation_setup_popup", None)
-        if popup is None:
+        if self._session_drawer_visible:
+            self._hide_session_drawer()
             return
-        if popup.isVisible():
-            self._hide_conversation_setup_popup()
-            return
-        self._show_conversation_setup_popup()
+        self._open_session_drawer("mode")
 
     def _show_conversation_setup_popup(self) -> None:
-        popup = getattr(self, "_conversation_setup_popup", None)
-        if popup is None:
-            return
-        self._refresh_conversation_chrome()
-        popup.adjustSize()
-        anchor = self._conversation_setup_button.mapToGlobal(QPoint(0, 0))
-        popup.move(
-            anchor
-            + QPoint(
-                max(0, self._conversation_setup_button.width() - popup.width()),
-                self._conversation_setup_button.height() + UI_SPACING["xs"],
-            )
-        )
-        popup.show()
-        popup.raise_()
-        popup.activateWindow()
+        self._open_session_drawer("mode")
 
     def _hide_conversation_setup_popup(self) -> None:
-        popup = getattr(self, "_conversation_setup_popup", None)
-        if popup is not None and popup.isVisible():
-            popup.hide()
+        self._hide_session_drawer()
 
     def _apply_chat_preset(self, preset: dict[str, str]) -> None:
         self._mode_combo.setCurrentText(str(preset.get("mode", "Q&A") or "Q&A"))
@@ -1080,7 +2194,7 @@ class AppView(QMainWindow):
 
     def _refresh_conversation_chrome(self) -> None:
         mode = self._mode_combo.currentText().strip() or "Q&A"
-        chat_path = "Use sources" if self._rag_toggle.get_value() else "Direct"
+        chat_path = "Use Sources" if self._rag_toggle.get_value() else "Direct"
         profile = self._profile_combo.currentText().strip() or "No skill selected"
         provider = str(self._settings_data.get("llm_provider", "") or "").strip() or "unset"
         model = str(
@@ -1091,7 +2205,24 @@ class AppView(QMainWindow):
         model_summary = f"{provider}{(' / ' + model) if model else ''}"
         summary = f"{mode} · {chat_path} · {profile} · {model_summary}"
         self._chat_context_summary.setText(summary)
-        self._composer_meta.setText(f"Current conversation: {summary}")
+        self._composer_meta.setText(f"Current session: {summary}")
+        if hasattr(self, "_session_summary_label"):
+            self._session_summary_label.setText(summary)
+        if hasattr(self, "_session_source_status"):
+            source_summary = str(getattr(self, "_active_index_summary", QLabel()).text() if hasattr(self, "_active_index_summary") else "")
+            self._session_source_status.setText(
+                source_summary or ("Responses will use the active workspace index." if self._rag_toggle.get_value() else "This session will skip retrieval.")
+            )
+        chip_labels = {
+            "mode": f"Mode · {mode}",
+            "sources": f"Sources · {chat_path}",
+            "skill": f"Skill · {profile}",
+            "model": f"Model · {model_summary}",
+        }
+        for key, text in chip_labels.items():
+            button = self._session_chip_buttons.get(key)
+            if button is not None:
+                button.setText(text)
 
     def _build_brain_page(self) -> QWidget:
         page = QWidget(self)
@@ -1392,36 +2523,113 @@ class AppView(QMainWindow):
         self._schedule_empty_state_relayout()
 
     def _apply_local_styles(self) -> None:
-        nav_bg = self._palette.get("nav_hover_bg", "#0E2032")
-        nav_active = self._palette.get("nav_active_bg", "#113B5C")
-        text = self._palette.get("text", "#F2FAFF")
-        muted = self._palette.get("muted_text", "#8AA5BE")
-        border = self._palette.get("border", "#17405F")
-        surface_alt = self._palette.get("surface_alt", "#13283D")
+        nav_bg = self._palette.get("nav_hover_bg", "#1D2632")
+        nav_active = self._palette.get("nav_active_bg", "#202D3D")
+        text = self._palette.get("text", "#F6FAFD")
+        muted = self._palette.get("muted_text", "#95A2B3")
+        border = self._palette.get("border", "#2B3542")
+        surface_alt = self._palette.get("surface_alt", "#171F29")
         supporting = self._palette.get("supporting_bg", surface_alt)
-        surface = self._palette.get("surface", "#091522")
+        surface = self._palette.get("surface", "#10161F")
+        primary = self._palette.get("primary", "#45C2FF")
         self.setStyleSheet(
             f"""
-            QLabel#brandTitle {{ font-size: 28px; font-weight: 700; }}
-            QLabel#pageTitle {{ font-size: 32px; font-weight: 700; }}
-            QLabel#heroGreeting {{ font-size: 34px; font-weight: 700; }}
-            QLabel#heroCopy {{ color: {muted}; font-size: 14px; }}
-            QLabel#chatContextSummary {{
-                font-size: 18px;
+            QFrame#workspaceShell {{
+                background: transparent;
+            }}
+            QFrame#utilityRail {{
+                background-color: {surface};
+                border: 1px solid {border};
+                border-radius: 24px;
+            }}
+            QFrame#workspaceFrame {{
+                background-color: {supporting};
+                border: 1px solid {border};
+                border-radius: 28px;
+            }}
+            QFrame#commandBar {{
+                background: transparent;
+                border: none;
+            }}
+            QLabel#brandTitle {{
+                font-size: 20px;
                 font-weight: 700;
+            }}
+            QLabel#railSubtitle {{
+                color: {muted};
+                font-size: 11px;
+            }}
+            QLabel#pageTitle {{
+                font-size: 26px;
+                font-weight: 700;
+            }}
+            QLabel#heroGreeting {{
+                font-size: 32px;
+                font-weight: 700;
+            }}
+            QLabel#heroCopy {{
+                color: {muted};
+                font-size: 14px;
+            }}
+            QLabel#chatContextSummary {{
+                font-size: 14px;
+                font-weight: 600;
                 color: {text};
             }}
-            QLabel#chatContextHint {{
+            QLabel#chatContextHint, QLabel#drawerHint {{
                 color: {muted};
-                font-size: 13px;
+                font-size: 12px;
             }}
-            QLabel#brandLogo {{ background: transparent; border: none; }}
-            QLabel#chatSectionTitle {{ color: {muted}; font-size: 13px; font-weight: 700; }}
-            QLabel#sidebarBadge, QToolButton#llmStatusBadge {{
+            QLabel#chatSectionTitle {{
+                color: {muted};
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+            }}
+            QLabel#drawerTitle {{
+                font-size: 18px;
+                font-weight: 700;
+            }}
+            QLabel#sidebarBadge {{
                 background-color: {surface_alt};
                 border: 1px solid {border};
                 border-radius: 12px;
                 padding: 6px 10px;
+                color: {muted};
+            }}
+            QLabel#brandLogo {{
+                background: transparent;
+                border: none;
+            }}
+            _RailButton {{
+                background-color: transparent;
+                color: {muted};
+                border: none;
+                border-radius: 18px;
+                font-size: 11px;
+                font-weight: 700;
+                padding: 10px 6px;
+            }}
+            _RailButton:hover {{
+                background-color: {nav_bg};
+                color: {text};
+            }}
+            _RailButton:checked {{
+                background-color: {nav_active};
+                color: {primary};
+            }}
+            QPushButton#sessionChip {{
+                background-color: {surface};
+                border: 1px solid {border};
+                border-radius: 14px;
+                padding: 10px 14px;
+                color: {text};
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            QPushButton#sessionChip:hover, QPushButton#conversationSetupButton:hover {{
+                background-color: {nav_bg};
+                border-color: {primary};
             }}
             QPushButton#conversationSetupButton {{
                 background-color: {surface_alt};
@@ -1429,77 +2637,39 @@ class AppView(QMainWindow):
                 border-radius: 14px;
                 padding: 10px 14px;
             }}
-            QPushButton#conversationSetupButton:hover {{
-                background-color: {nav_bg};
-            }}
-            QToolButton#llmStatusBadge:hover {{
-                background-color: {nav_bg};
-            }}
-            QToolButton#llmStatusBadge::menu-indicator {{
-                image: none;
-                width: 0px;
-            }}
-            QFrame#conversationSetupPopup,
-            QFrame#quickModelPopup {{
-                background-color: {supporting};
-                border: 1px solid {border};
-                border-radius: 18px;
-            }}
-            QLabel#quickModelPopupTitle {{
-                font-size: 13px;
-                font-weight: 700;
-                color: {text};
-            }}
-            QLabel#quickModelPopupHint {{
-                color: {muted};
-                font-size: 12px;
-            }}
-            _NavButton {{
-                text-align: left;
-                padding: 12px 14px;
-                border-radius: 14px;
-                color: {text};
-            }}
-            _NavButton:checked {{ background-color: {nav_active}; }}
-            _NavButton:hover:!checked {{ background-color: {nav_bg}; }}
-            QTextBrowser, QPlainTextEdit, QTextEdit, QTreeWidget, QListWidget {{
-                border: 1px solid {border};
-                border-radius: 16px;
-            }}
             QFrame#chatMainPanel {{
-                background-color: {supporting};
-                border: 1px solid {border};
-                border-radius: 24px;
+                background-color: {surface};
+                border: none;
+                border-radius: 22px;
             }}
             QFrame#chatConversationCard, QFrame#chatComposerCard {{
                 background: transparent;
-                border: none;
-            }}
-            QFrame#chatComposerDivider {{
-                background-color: {border};
                 border: none;
             }}
             QStackedWidget#chatStateStack {{
                 background: transparent;
                 border: none;
             }}
-            QPlainTextEdit#chatTranscript {{
-                background: transparent;
-                border: none;
-                padding: 0px;
+            QFrame#drawerPanel, QFrame#sessionDrawer, QFrame#activityTray {{
+                background-color: {surface};
+                border: 1px solid {border};
+                border-radius: 22px;
             }}
             QPlainTextEdit#chatComposerInput {{
-                border-radius: 16px;
+                background-color: {surface_alt};
+                border: 1px solid {border};
+                border-radius: 18px;
+                padding: 12px 14px;
             }}
             QPushButton#chatPresetButton {{
                 padding: 0px;
                 border-radius: 18px;
-                background-color: {surface};
+                background-color: {surface_alt};
                 border: 1px solid transparent;
             }}
             QPushButton#chatPresetButton:hover {{
                 background-color: {nav_bg};
-                border-color: {self._palette.get("focus_ring", self._palette.get("primary", "#2EB7FF"))};
+                border-color: {primary};
             }}
             QLabel#chatPresetTitle {{
                 color: {text};
@@ -1512,27 +2682,49 @@ class AppView(QMainWindow):
                 font-size: 13px;
                 background: transparent;
             }}
-            QWidget#chatFeedbackBar {{
-                background: transparent;
-                border: none;
-            }}
-            QPushButton#chatFeedbackButton {{
+            QPlainTextEdit#logsView, QPlainTextEdit#historyDetail, QTextBrowser, QTreeWidget, QListWidget {{
                 background-color: {surface_alt};
                 border: 1px solid {border};
-                border-radius: 14px;
-                padding: 0px;
+                border-radius: 16px;
+                padding: 10px;
             }}
-            QPushButton#chatFeedbackButton:hover {{
-                background-color: {nav_bg};
+            QFrame#chatMessageCard {{
+                border: 1px solid {border};
+                border-radius: 20px;
             }}
-            QPlainTextEdit#logsView {{
+            QFrame#chatMessageCard[messageRole="assistant"] {{
+                background-color: {surface_alt};
+            }}
+            QFrame#chatMessageCard[messageRole="user"] {{
+                background-color: {self._palette.get("chat_user_bg", nav_active)};
+            }}
+            QFrame#chatMessageCard[messageRole="system"] {{
+                background-color: {self._palette.get("chat_system_bg", surface_alt)};
+            }}
+            QLabel#chatMessageRole {{
+                color: {muted};
+                font-size: 12px;
+                font-weight: 700;
+                text-transform: uppercase;
+            }}
+            QLabel#chatMessageStatus {{
+                color: {muted};
+                font-size: 11px;
+            }}
+            QPushButton#messageSourceButton, QPushButton#messageFeedbackButton {{
                 background-color: {surface};
-                padding: 12px;
+                border: 1px solid {border};
+                border-radius: 12px;
+                padding: 7px 10px;
+                font-size: 12px;
+            }}
+            QPushButton#messageSourceButton:hover, QPushButton#messageFeedbackButton:hover {{
+                background-color: {nav_bg};
+                border-color: {primary};
             }}
             """
         )
-        for key, button in self._nav_buttons.items():
-            button.setChecked(key == self._active_view)
+        self._refresh_rail_buttons()
         self._brand_subtitle.setStyleSheet(f"color: {muted};")
         self._footer_label.setStyleSheet(f"color: {muted};")
 
@@ -1642,36 +2834,15 @@ class AppView(QMainWindow):
         self._sync_quick_model_popup_from_settings()
 
     def _toggle_quick_model_popup(self) -> None:
-        popup = getattr(self, "_quick_model_popup", None)
-        if popup is None or not self._llm_status_badge.isEnabled():
+        if not self._llm_status_badge.isEnabled():
             return
-        if popup.isVisible():
-            self._hide_quick_model_popup()
-            return
-        self._show_quick_model_popup()
+        self._open_session_drawer("model")
 
     def _show_quick_model_popup(self) -> None:
-        popup = getattr(self, "_quick_model_popup", None)
-        if popup is None:
-            return
-        self._sync_quick_model_popup_from_settings()
-        popup.adjustSize()
-        anchor = self._llm_status_badge.mapToGlobal(QPoint(0, 0))
-        popup.move(
-            anchor
-            + QPoint(
-                self._llm_status_badge.width() - popup.width(),
-                self._llm_status_badge.height() + UI_SPACING["xs"],
-            )
-        )
-        popup.show()
-        popup.raise_()
-        popup.activateWindow()
+        self._open_session_drawer("model")
 
     def _hide_quick_model_popup(self) -> None:
-        popup = getattr(self, "_quick_model_popup", None)
-        if popup is not None and popup.isVisible():
-            popup.hide()
+        self._hide_session_drawer()
 
     def _sync_quick_model_popup_from_settings(self) -> None:
         if not hasattr(self, "_quick_model_provider_combo"):
@@ -1768,11 +2939,12 @@ class AppView(QMainWindow):
             self._schedule_empty_state_relayout()
 
     def _set_composer_compact_mode(self, compact: bool) -> None:
-        max_height = 96 if compact else 16_777_215
+        max_height = 156 if compact else 112
         size_policy = self.txt_input.sizePolicy()
-        size_policy.setVerticalPolicy(QSizePolicy.Fixed if compact else QSizePolicy.Expanding)
+        size_policy.setVerticalPolicy(QSizePolicy.Fixed)
         self.txt_input.setSizePolicy(size_policy)
         self.txt_input.setMaximumHeight(max_height)
+        self.txt_input.setMinimumHeight(max_height)
         self.txt_input.updateGeometry()
         self._composer_shell.updateGeometry()
 
@@ -1970,38 +3142,59 @@ class AppView(QMainWindow):
     def set_chat_response_ui(self, has_completed_response: bool, feedback_pending: bool) -> None:
         self._chat_has_completed_response = bool(has_completed_response)
         self._chat_feedback_pending = bool(feedback_pending) and self._chat_has_completed_response
-        self._feedback_footer.setVisible(self._chat_feedback_pending)
+        for card in self._chat_cards:
+            updated = ChatTimelineItem(
+                role=card.item.role,
+                content=card.item.content,
+                status=card.item.status,
+                run_id=card.item.run_id,
+                sources=list(card.item.sources),
+                feedback_visible=False,
+            )
+            card.update_item(updated)
+        latest = self._latest_assistant_card()
+        if latest is not None:
+            updated = ChatTimelineItem(
+                role=latest.item.role,
+                content=latest.item.content,
+                status=latest.item.status,
+                run_id=latest.item.run_id,
+                sources=list(latest.item.sources),
+                feedback_visible=self._chat_feedback_pending,
+            )
+            latest.update_item(updated)
         if self._chat_has_completed_response:
-            self._evidence_tabs.setVisible(True)
-            sizes = list(self._chat_splitter_sizes)
-            if len(sizes) < 2 or sizes[1] <= 0:
-                sizes = [820, 360]
-            self._chat_splitter.setSizes(sizes)
-            return
-        sizes = list(self._chat_splitter.sizes())
-        if len(sizes) >= 2 and sizes[1] > 0:
-            self._chat_splitter_sizes = sizes[:2]
-        total = max(sum(sizes) or self.width() or _MIN_WINDOW_W, _MIN_WINDOW_W)
-        self._evidence_tabs.setVisible(False)
-        self._chat_splitter.setSizes([total, 0])
+            self._set_inspector_visible(True)
+        else:
+            self._set_inspector_visible(False)
 
     def switch_view(self, key: str) -> None:
-        self._active_view = key if key in self._pages else "chat"
-        self._stack.setCurrentWidget(self._pages[self._active_view])
-        self._page_title.setText(self._active_view.title())
-        if self._active_view != "chat":
-            self._hide_conversation_setup_popup()
-            self._hide_quick_model_popup()
+        target = key if key in {"chat", "brain", "settings", "logs"} else "chat"
+        self._active_view = target
+        if target != "chat":
+            self._hide_session_drawer()
+        if target == "chat":
+            self._set_library_visible(False)
+            self._set_activity_visible(False)
+        elif target == "brain":
+            self._set_library_visible(True)
+            self._library_tabs.setCurrentWidget(self._library_graph_tab)
+        elif target == "logs":
+            self._set_activity_visible(True)
+        elif target == "settings":
+            self._settings_dialog.show()
+            self._settings_dialog.raise_()
+            self._settings_dialog.activateWindow()
+        self._refresh_rail_buttons()
         self._apply_local_styles()
 
     def set_status(self, text: str) -> None:
         self._status_label.setText(str(text or ""))
 
     def set_index_info(self, text: str) -> None:
+        self._index_info_label.setText(str(text or ""))
         if hasattr(self, "_brain_panel"):
             self._brain_panel.set_index_info(text)
-            return
-        self._index_info_label.setText(str(text or ""))
 
     def set_progress(self, current: int, total: int | None = None) -> None:
         if total is None:
@@ -2021,12 +3214,11 @@ class AppView(QMainWindow):
         self.btn_cancel_rag.setEnabled(bool(enabled))
 
     def set_file_list(self, paths: list[str]) -> None:
-        if hasattr(self, "_brain_panel"):
-            self._brain_panel.set_file_list(paths)
-            return
         self._file_list.clear()
         for path in paths:
             self._file_list.addItem(str(path))
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.set_file_list(paths)
 
     def get_prompt_text(self) -> str:
         return self.prompt_entry.toPlainText()
@@ -2037,32 +3229,108 @@ class AppView(QMainWindow):
     def clear_prompt(self) -> None:
         self.prompt_entry.clear()
 
+    def _clear_timeline(self) -> None:
+        while self._chat_timeline_layout.count() > 1:
+            item = self._chat_timeline_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._chat_cards = []
+
+    def _latest_assistant_card(self) -> _TimelineMessageCard | None:
+        for card in reversed(self._chat_cards):
+            if card.item.role == "assistant":
+                return card
+        return None
+
+    def _append_timeline_item(self, item: ChatTimelineItem) -> None:
+        card = _TimelineMessageCard(item, self._chat_timeline_host)
+        card.feedbackRequested.connect(self.feedbackRequested.emit)
+        card.inspectRequested.connect(lambda: self._set_inspector_visible(True, tab_index=0))
+        self._chat_timeline_layout.insertWidget(max(0, self._chat_timeline_layout.count() - 1), card)
+        self._chat_cards.append(card)
+
+    def _scroll_timeline_to_end(self) -> None:
+        scrollbar = self._chat_timeline_scroll.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    @staticmethod
+    def _normalize_chat_append(text: str, tag: str) -> ChatTimelineItem:
+        content = str(text or "").strip()
+        role = {
+            "agent": "assistant",
+            "assistant": "assistant",
+            "user": "user",
+            "system": "system",
+        }.get(str(tag or "").strip().lower(), "assistant")
+        status = "complete"
+        lines = [line for line in content.splitlines()]
+        if lines:
+            prefix, sep, remainder = lines[0].partition(":")
+            normalized_prefix = prefix.strip().lower()
+            if sep and normalized_prefix in {"you", "axiom", "system"}:
+                role = {"you": "user", "axiom": "assistant", "system": "system"}[normalized_prefix]
+                lines[0] = remainder.strip()
+                content = "\n".join(lines).strip()
+        if content.startswith("⚠"):
+            role = "system"
+            status = "error"
+        return ChatTimelineItem(role=role, content=content, status=status)
+
     def append_chat(self, text: str, tag: str = "agent") -> None:
-        _ = tag
+        item = self._normalize_chat_append(str(text or ""), tag)
+        self._chat_items.append(item)
         self._chat_has_messages = True
+        self._append_timeline_item(item)
         self._refresh_chat_state()
-        cursor = self._chat_transcript.textCursor()
-        cursor.movePosition(QTextCursor.End)
-        cursor.insertText(str(text))
-        self._chat_transcript.setTextCursor(cursor)
-        self._chat_transcript.ensureCursorVisible()
+        self._scroll_timeline_to_end()
 
     def clear_chat(self) -> None:
-        self._chat_transcript.clear()
+        self._chat_items = []
+        self._clear_timeline()
         self._chat_has_messages = False
         self._refresh_chat_state()
+        self._set_inspector_visible(False)
         self.set_chat_response_ui(False, False)
 
     def set_chat_transcript(self, messages: list[Any]) -> None:
-        lines: list[str] = []
+        self._chat_items = []
+        self._clear_timeline()
         for message in messages or []:
-            role = str(getattr(message, "role", None) or getattr(message, "get", lambda *_args: "")("role") or "assistant").title()
-            content = str(getattr(message, "content", None) or getattr(message, "get", lambda *_args: "")("content") or "")
-            lines.append(f"{role}: {content}")
-        self._chat_transcript.setPlainText("\n\n".join(lines))
-        self._chat_has_messages = bool(lines)
+            role = str(
+                getattr(message, "role", None)
+                or getattr(message, "get", lambda *_args: "")("role")
+                or "assistant"
+            ).strip().lower()
+            content = str(
+                getattr(message, "content", None)
+                or getattr(message, "get", lambda *_args: "")("content")
+                or ""
+            )
+            run_id = str(
+                getattr(message, "run_id", None)
+                or getattr(message, "get", lambda *_args: "")("run_id")
+                or ""
+            )
+            raw_sources = getattr(message, "sources", None)
+            if raw_sources is None and hasattr(message, "get"):
+                raw_sources = message.get("sources", [])
+            sources = [
+                item if isinstance(item, EvidenceSource) else EvidenceSource.from_dict(item)
+                for item in (raw_sources or [])
+            ]
+            item = ChatTimelineItem(
+                role=role or "assistant",
+                content=content,
+                run_id=run_id,
+                sources=sources,
+            )
+            self._chat_items.append(item)
+            self._append_timeline_item(item)
+        self._chat_has_messages = bool(self._chat_items)
         self._refresh_chat_state()
-        if not lines:
+        self._scroll_timeline_to_end()
+        if not self._chat_items:
             self.set_chat_response_ui(False, False)
 
     def append_log(self, line: str) -> None:
@@ -2109,7 +3377,6 @@ class AppView(QMainWindow):
 
         if hasattr(self, "_brain_panel"):
             self._brain_panel.set_profile_filter_options(labels)
-            return
 
         selected = self._history_profile_filter.currentText()
         blocker = QSignalBlocker(self._history_profile_filter)
@@ -2128,7 +3395,6 @@ class AppView(QMainWindow):
             setter = getattr(self._brain_panel, "set_skill_filter_options", None)
             if callable(setter):
                 setter(labels, current)
-                return
         self.set_profile_options(labels, current)
 
     def get_selected_profile_label(self) -> str:
@@ -2180,8 +3446,14 @@ class AppView(QMainWindow):
 
     def set_model_switch_enabled(self, enabled: bool) -> None:
         self._llm_status_badge.setEnabled(bool(enabled))
-        if not enabled:
-            self._hide_quick_model_popup()
+        for widget in (
+            getattr(self, "_quick_model_provider_combo", None),
+            getattr(self, "_quick_model_model_combo", None),
+            getattr(self, "_quick_model_custom_input", None),
+            getattr(self, "_quick_model_apply_button", None),
+        ):
+            if widget is not None and hasattr(widget, "setEnabled"):
+                widget.setEnabled(bool(enabled))
 
     def populate_settings(self, settings: dict[str, Any]) -> None:
         self._settings_data = dict(settings or {})
@@ -2234,15 +3506,10 @@ class AppView(QMainWindow):
         return ""
 
     def get_library_build_settings(self) -> dict[str, Any]:
-        if hasattr(self, "_brain_panel"):
-            return self._brain_panel.get_library_build_settings()
         return {"chunk_size": self._library_chunk_size.value(), "chunk_overlap": self._library_chunk_overlap.value()}
 
     def set_available_indexes(self, rows: list[dict[str, Any]], selected_path: str = "") -> None:
         self._available_index_rows = list(rows or [])
-        if hasattr(self, "_brain_panel"):
-            self._brain_panel.set_available_indexes(self._available_index_rows, selected_path)
-            return
         blocker = QSignalBlocker(self._available_index_combo)
         self._available_index_combo.clear()
         for row in self._available_index_rows:
@@ -2252,21 +3519,21 @@ class AppView(QMainWindow):
             if index >= 0:
                 self._available_index_combo.setCurrentIndex(index)
         del blocker
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.set_available_indexes(self._available_index_rows, selected_path)
 
     def get_selected_available_index_path(self) -> str:
-        if hasattr(self, "_brain_panel"):
-            return self._brain_panel.get_selected_available_index_path()
         return str(self._available_index_combo.currentData() or "")
 
     def set_active_index_summary(self, summary: str, index_path: str = "") -> None:
-        if hasattr(self, "_brain_panel"):
-            self._brain_panel.set_active_index_summary(summary, index_path)
-            return
         self._active_index_summary.setText(str(summary or ""))
         if index_path:
             index = self._available_index_combo.findData(str(index_path))
             if index >= 0:
                 self._available_index_combo.setCurrentIndex(index)
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.set_active_index_summary(summary, index_path)
+        self._refresh_conversation_chrome()
 
     def set_local_model_rows(self, rows: list[dict[str, Any]], dependency_status: dict[str, Any] | None = None) -> None:
         self._local_model_tree.clear()
@@ -2561,9 +3828,6 @@ class AppView(QMainWindow):
 
     def set_history_rows(self, rows: list[Any]) -> None:
         self._history_rows = list(rows or [])
-        if hasattr(self, "_brain_panel"):
-            self._brain_panel.set_history_rows(self._history_rows)
-            return
         self._history_tree.clear()
         for row in self._history_rows:
             item = QTreeWidgetItem([
@@ -2574,31 +3838,31 @@ class AppView(QMainWindow):
             ])
             item.setData(0, Qt.UserRole, str(getattr(row, "session_id", "")))
             self._history_tree.addTopLevelItem(item)
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.set_history_rows(self._history_rows)
 
     def get_selected_history_session_id(self) -> str:
+        item = self._history_tree.currentItem()
+        selected = str(item.data(0, Qt.UserRole) if item is not None else "")
+        if selected:
+            return selected
         if hasattr(self, "_brain_panel"):
             return self._brain_panel.get_selected_history_session_id()
-        item = self._history_tree.currentItem()
-        return str(item.data(0, Qt.UserRole) if item is not None else "")
+        return ""
 
     def select_history_session(self, session_id: str) -> None:
-        if hasattr(self, "_brain_panel"):
-            self._brain_panel.select_history_session(session_id)
-            return
         for row in range(self._history_tree.topLevelItemCount()):
             item = self._history_tree.topLevelItem(row)
             if str(item.data(0, Qt.UserRole) or "") == str(session_id):
                 self._history_tree.setCurrentItem(item)
                 break
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.select_history_session(session_id)
 
     def get_history_search_query(self) -> str:
-        if hasattr(self, "_brain_panel"):
-            return self._brain_panel.get_history_search_query()
         return self._history_search.text().strip()
 
     def get_history_profile_filter(self) -> str:
-        if hasattr(self, "_brain_panel"):
-            return self._brain_panel.get_history_profile_filter()
         value = self._history_profile_filter.currentText().strip()
         return "" if value == "All Skills" else value
 
@@ -2610,22 +3874,19 @@ class AppView(QMainWindow):
         return self.get_history_profile_filter()
 
     def bind_history_search(self, callback: Any) -> None:
+        self._history_search.textChanged.connect(lambda *_args: callback())
         if hasattr(self, "_brain_panel"):
             self._brain_panel.bind_history_search(callback)
-            return
-        self._history_search.textChanged.connect(lambda *_args: callback())
 
     def bind_history_selection(self, callback: Any) -> None:
+        self._history_tree.itemSelectionChanged.connect(lambda: callback())
         if hasattr(self, "_brain_panel"):
             self._brain_panel.bind_history_selection(callback)
-            return
-        self._history_tree.itemSelectionChanged.connect(lambda: callback())
 
     def bind_history_profile_filter(self, callback: Any) -> None:
+        self._history_profile_filter.currentTextChanged.connect(lambda *_args: callback())
         if hasattr(self, "_brain_panel"):
             self._brain_panel.bind_history_profile_filter(callback)
-            return
-        self._history_profile_filter.currentTextChanged.connect(lambda *_args: callback())
 
     def bind_history_skill_filter(self, callback: Any) -> None:
         if hasattr(self, "_brain_panel"):
@@ -2636,30 +3897,29 @@ class AppView(QMainWindow):
         self.bind_history_profile_filter(callback)
 
     def set_history_detail(self, detail: Any) -> None:
-        if hasattr(self, "_brain_panel"):
-            self._brain_panel.set_history_detail(detail)
-            return
         if detail is None:
             self._history_detail_browser.clear()
-            return
-        summary = getattr(detail, "summary", detail)
-        lines = [
-            f"Title: {getattr(summary, 'title', '')}",
-            f"Primary Skill: {getattr(summary, 'primary_skill_id', '') or getattr(summary, 'active_profile', '')}",
-            f"Skills: {', '.join(getattr(summary, 'skill_ids', []) or [])}",
-            f"Mode: {getattr(summary, 'mode', '')}",
-            f"Provider: {getattr(summary, 'llm_provider', '')}",
-            "",
-            "Messages:",
-        ]
-        for message in getattr(detail, "messages", []) or []:
-            lines.append(f"- {getattr(message, 'role', '').title()}: {getattr(message, 'content', '')}")
-        feedback = list(getattr(detail, "feedback", []) or [])
-        if feedback:
-            lines.extend(["", "Feedback:"])
-            for item in feedback:
-                lines.append(f"- vote={getattr(item, 'vote', 0)} note={getattr(item, 'note', '')}")
-        self._history_detail_browser.setPlainText("\n".join(lines))
+        else:
+            summary = getattr(detail, "summary", detail)
+            lines = [
+                f"Title: {getattr(summary, 'title', '')}",
+                f"Primary Skill: {getattr(summary, 'primary_skill_id', '') or getattr(summary, 'active_profile', '')}",
+                f"Skills: {', '.join(getattr(summary, 'skill_ids', []) or [])}",
+                f"Mode: {getattr(summary, 'mode', '')}",
+                f"Provider: {getattr(summary, 'llm_provider', '')}",
+                "",
+                "Messages:",
+            ]
+            for message in getattr(detail, "messages", []) or []:
+                lines.append(f"- {getattr(message, 'role', '').title()}: {getattr(message, 'content', '')}")
+            feedback = list(getattr(detail, "feedback", []) or [])
+            if feedback:
+                lines.extend(["", "Feedback:"])
+                for item in feedback:
+                    lines.append(f"- vote={getattr(item, 'vote', 0)} note={getattr(item, 'note', '')}")
+            self._history_detail_browser.setPlainText("\n".join(lines))
+        if hasattr(self, "_brain_panel"):
+            self._brain_panel.set_history_detail(detail)
 
     def set_brain_graph(self, graph: Any, selected_node_id: str = "") -> None:
         if hasattr(self, "_brain_panel"):
@@ -2684,12 +3944,26 @@ class AppView(QMainWindow):
 
     def render_evidence_sources(self, sources: list[EvidenceSource | dict[str, Any]]) -> None:
         self._evidence_sources_tree.clear()
+        normalized_sources: list[EvidenceSource] = []
         for raw in sources or []:
             source = raw if isinstance(raw, EvidenceSource) else EvidenceSource.from_dict(raw)
+            normalized_sources.append(source)
             score = f"{source.score:.3f}" if source.score is not None else ""
             item = QTreeWidgetItem([source.label or source.source, score, source.excerpt or source.snippet])
             item.setData(0, Qt.UserRole, source.to_dict())
             self._evidence_sources_tree.addTopLevelItem(item)
+        latest = self._latest_assistant_card()
+        if latest is not None:
+            latest.update_item(
+                ChatTimelineItem(
+                    role=latest.item.role,
+                    content=latest.item.content,
+                    status=latest.item.status,
+                    run_id=latest.item.run_id,
+                    sources=normalized_sources,
+                    feedback_visible=latest.item.feedback_visible,
+                )
+            )
 
     def render_events(self, rows: list[dict[str, Any]]) -> None:
         normalized = [{"timestamp": row.get("timestamp") or row.get("ts") or row.get("time") or "", "stage": row.get("stage") or "", "event_type": row.get("event_type") or row.get("type") or "", "summary": json.dumps(row, ensure_ascii=False)[:240]} for row in rows or []]
