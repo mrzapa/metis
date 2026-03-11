@@ -78,6 +78,23 @@ def test_app_view_constructs_with_hidden_drawers_and_prompt_first_empty_state(qa
     assert view._chat_context_summary.text() == "Q&A · Use Sources · No skill selected · unset"
 
 
+def test_app_view_empty_state_scroll_area_expands_horizontally(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+
+    view.resize(1400, 960)
+    for _ in range(6):
+        process_events()
+
+    empty_layout = view._chat_empty_state.layout()
+    scroll_item = empty_layout.itemAt(1)
+
+    assert scroll_item is not None
+    assert scroll_item.widget() is view._chat_empty_scroll
+    assert int(scroll_item.alignment()) == 0
+    assert view._chat_empty_scroll.width() > view._chat_empty_state.width() * 0.75
+    assert view._chat_empty_inner.width() > view._chat_empty_scroll.viewport().width() * 0.55
+
+
 def test_app_view_session_chips_reflect_context_and_open_the_session_drawer(qapp, process_events) -> None:
     _module, view = _show(process_events)
 
