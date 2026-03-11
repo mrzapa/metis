@@ -5,7 +5,9 @@ Classes
 AnimationEngine      — QVariantAnimation-based smooth value interpolation with easing
 IOSSegmentedToggle   — QPainter-rendered iOS-style two-option pill toggle
 CollapsibleFrame     — animated accordion section with height transitions
+MetricAwareWrapLabel — QLabel with better wrapped size hints
 RoundedCard          — QFrame with border-radius + QGraphicsDropShadowEffect
+ActionCard          — Clickable card button with hover and pressed states
 TooltipManager       — hover tooltips with fade-in animation
 """
 
@@ -16,9 +18,12 @@ from typing import Any, Callable
 
 from PySide6.QtCore import (
     QEasingCurve,
+    QEvent,
     QObject,
+    QRect,
     QPropertyAnimation,
     QRectF,
+    QSize,
     Qt,
     QTimer,
     QVariantAnimation,
@@ -37,6 +42,7 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -342,6 +348,48 @@ class CollapsibleFrame(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# MetricAwareWrapLabel
+# ---------------------------------------------------------------------------
+
+
+class MetricAwareWrapLabel(QLabel):
+    """QLabel that reports wrapped size hints using the best available width."""
+
+    _MAX_WIDGET_DIMENSION = 16_777_215
+
+    def event(self, event: QEvent | None) -> bool:
+        if event is not None and event.type() in (
+            QEvent.FontChange,
+            QEvent.Polish,
+            QEvent.PolishRequest,
+            QEvent.StyleChange,
+        ):
+            self.updateGeometry()
+        return super().event(event)
+
+    def minimumSizeHint(self) -> QSize:
+        return self._resolve_wrapped_hint(super().minimumSizeHint())
+
+    def sizeHint(self) -> QSize:
+        return self._resolve_wrapped_hint(super().sizeHint())
+
+    def _resolve_wrapped_hint(self, hint: QSize) -> QSize:
+        if not self.wordWrap():
+            return hint
+        width = self.width()
+        maximum_width = self.maximumWidth()
+        if width <= 0 and 0 < maximum_width < self._MAX_WIDGET_DIMENSION:
+            width = maximum_width
+        if width <= 0:
+            width = max(hint.width(), 1)
+        height = self.heightForWidth(width)
+        if height > 0:
+            hint.setWidth(width)
+            hint.setHeight(max(hint.height(), height))
+        return hint
+
+
+# ---------------------------------------------------------------------------
 # RoundedCard
 # ---------------------------------------------------------------------------
 
@@ -412,6 +460,275 @@ class RoundedCard(QFrame):
         if border_color is not None:
             self._border_color = border_color
         self._apply_card_style()
+
+
+# ---------------------------------------------------------------------------
+# ActionCard
+# ---------------------------------------------------------------------------
+
+
+class ActionCard(QPushButton):
+    """Reusable clickable starter card with consistent spacing and theme states."""
+
+    _TEXT_MEASURE_HEIGHT = 4096
+    _MIN_HEIGHT = 72
+    _H_PADDING = 18
+    _V_PADDING = 16
+    _ROW_SPACING = UI_SPACING["xs"]
+    _SECTION_SPACING = UI_SPACING["xs"] // 2
+    _AFFORDANCE_WIDTH = 18
+    _RADIUS = 18
+
+    def __init__(
+        self,
+        title: str,
+        description: str,
+        parent: QWidget | None = None,
+        *,
+        palette: dict,
+        affordance_text: str = "▸",
+    ) -> None:
+        super().__init__(parent)
+        self._palette = dict(palette)
+        self._visual_state = "idle"
+
+        self.setCursor(Qt.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMinimumHeight(self._MIN_HEIGHT)
+        self.setText("")
+        self.setStyleSheet(
+            "QPushButton { background: transparent; border: none; padding: 0px; }"
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self._surface = RoundedCard(
+            self,
+            radius=self._RADIUS,
+            bg=self._palette.get("surface_alt", "#171F29"),
+            border_color=self._palette.get("border", "#2B3542"),
+            inner_padding=0,
+        )
+        self._surface.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._surface.inner.setAttribute(Qt.WA_TransparentForMouseEvents)
+        root.addWidget(self._surface)
+
+        content = QVBoxLayout(self._surface.inner)
+        content.setContentsMargins(
+            self._H_PADDING,
+            self._V_PADDING,
+            self._H_PADDING,
+            self._V_PADDING,
+        )
+        content.setSpacing(self._SECTION_SPACING)
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(self._ROW_SPACING)
+        content.addLayout(title_row)
+
+        self._title_label = MetricAwareWrapLabel(title, self._surface.inner)
+        self._title_label.setObjectName("actionCardTitle")
+        self._title_label.setWordWrap(True)
+        self._title_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self._title_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        title_row.addWidget(self._title_label, 1)
+
+        self._affordance_label = QLabel(affordance_text, self._surface.inner)
+        self._affordance_label.setObjectName("actionCardAffordance")
+        self._affordance_label.setFixedWidth(self._AFFORDANCE_WIDTH)
+        self._affordance_label.setAlignment(Qt.AlignCenter)
+        self._affordance_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        title_row.addWidget(self._affordance_label, 0, Qt.AlignTop)
+
+        self._description_label = MetricAwareWrapLabel(description, self._surface.inner)
+        self._description_label.setObjectName("actionCardDescription")
+        self._description_label.setWordWrap(True)
+        self._description_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self._description_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        content.addWidget(self._description_label)
+
+        self._apply_type_styles()
+        self.update_palette(self._palette)
+
+    def event(self, event: QEvent | None) -> bool:
+        if event is not None and event.type() in (
+            QEvent.FontChange,
+            QEvent.Polish,
+            QEvent.PolishRequest,
+            QEvent.StyleChange,
+        ) and hasattr(self, "_title_label"):
+            self._sync_label_widths(self.width())
+            self.updateGeometry()
+        return super().event(event)
+
+    def resizeEvent(self, event: Any) -> None:
+        if hasattr(self, "_title_label"):
+            self._sync_label_widths(self.width())
+        super().resizeEvent(event)
+
+    def enterEvent(self, event: Any) -> None:
+        if self.isEnabled() and self._visual_state != "pressed":
+            self._apply_visual_state("hover")
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: Any) -> None:
+        if self.isEnabled():
+            self._apply_visual_state("idle")
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.LeftButton and self.isEnabled():
+            self._apply_visual_state("pressed")
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        super().mouseReleaseEvent(event)
+        if not self.isEnabled():
+            self._apply_visual_state("idle")
+            return
+        local_pos = event.position().toPoint()
+        if self.rect().contains(local_pos):
+            self._apply_visual_state("hover")
+        else:
+            self._apply_visual_state("idle")
+
+    def update_palette(self, palette: dict) -> None:
+        self._palette = dict(palette)
+        self._apply_visual_state(self._visual_state)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        content_width, title_width = self._sync_label_widths(width)
+        spacing = max(self._SECTION_SPACING, 0)
+        title_height = self._wrapped_label_height(self._title_label, title_width)
+        title_row_height = max(title_height, self._affordance_label.sizeHint().height())
+        description_height = self._wrapped_label_height(
+            self._description_label,
+            content_width,
+        )
+        total_height = (
+            self._V_PADDING
+            + title_row_height
+            + spacing
+            + description_height
+            + self._V_PADDING
+        )
+        return max(self._MIN_HEIGHT, total_height)
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def sizeHint(self) -> QSize:
+        title_hint = self._title_label.sizeHint()
+        description_hint = self._description_label.sizeHint()
+        content_width = max(
+            title_hint.width() + self._AFFORDANCE_WIDTH + self._ROW_SPACING,
+            description_hint.width(),
+            1,
+        )
+        width = content_width + self._H_PADDING * 2
+        return QSize(width, self.heightForWidth(width))
+
+    def _apply_type_styles(self) -> None:
+        self._title_label.setStyleSheet(
+            "background: transparent; font-size: 14px; font-weight: 600;"
+        )
+        self._description_label.setStyleSheet(
+            "background: transparent; font-size: 13px;"
+        )
+        self._affordance_label.setStyleSheet(
+            "background: transparent; font-size: 14px; font-weight: 700;"
+        )
+
+    def _resolved_width(self, width: int) -> int:
+        if width > 0:
+            return width
+        if self.width() > 0:
+            return self.width()
+        return max(QPushButton.sizeHint(self).width(), 1)
+
+    def _content_width_for_button_width(self, width: int) -> int:
+        return max(1, self._resolved_width(width) - self._H_PADDING * 2)
+
+    def _title_width_for_content_width(self, content_width: int) -> int:
+        return max(1, content_width - self._AFFORDANCE_WIDTH - self._ROW_SPACING)
+
+    def _sync_label_widths(self, width: int) -> tuple[int, int]:
+        content_width = self._content_width_for_button_width(width)
+        title_width = self._title_width_for_content_width(content_width)
+        self._title_label.setMaximumWidth(title_width)
+        self._description_label.setMaximumWidth(content_width)
+        self._title_label.updateGeometry()
+        self._description_label.updateGeometry()
+        return content_width, title_width
+
+    def _wrapped_label_height(self, label: QLabel, width: int) -> int:
+        height = label.heightForWidth(width)
+        if height > 0:
+            return height
+        text_rect = label.fontMetrics().boundingRect(
+            QRect(0, 0, width, self._TEXT_MEASURE_HEIGHT),
+            int(Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop),
+            label.text(),
+        )
+        return max(1, text_rect.height())
+
+    def _apply_visual_state(self, state: str) -> None:
+        self._visual_state = state
+        state_colors = self._colors_for_state(state)
+        self._surface.configure_colors(
+            bg=state_colors["bg"],
+            border_color=state_colors["border"],
+        )
+        self._title_label.setStyleSheet(
+            "background: transparent; "
+            f"color: {state_colors['title']}; "
+            "font-size: 14px; font-weight: 600;"
+        )
+        self._description_label.setStyleSheet(
+            "background: transparent; "
+            f"color: {state_colors['description']}; "
+            "font-size: 13px;"
+        )
+        self._affordance_label.setStyleSheet(
+            "background: transparent; "
+            f"color: {state_colors['affordance']}; "
+            "font-size: 14px; font-weight: 700;"
+        )
+
+    def _colors_for_state(self, state: str) -> dict[str, str]:
+        palette = self._palette
+        primary = palette.get("primary", "#45C2FF")
+        pressed_border = palette.get("primary_pressed", primary)
+        colors = {
+            "idle": {
+                "bg": palette.get("surface_alt", "#171F29"),
+                "border": palette.get("border", "#2B3542"),
+                "title": palette.get("text", "#F6FAFD"),
+                "description": palette.get("muted_text", "#95A2B3"),
+                "affordance": palette.get("muted_text", "#95A2B3"),
+            },
+            "hover": {
+                "bg": palette.get("nav_hover_bg", "#1D2632"),
+                "border": primary,
+                "title": palette.get("text", "#F6FAFD"),
+                "description": palette.get("muted_text", "#95A2B3"),
+                "affordance": primary,
+            },
+            "pressed": {
+                "bg": palette.get("nav_active_bg", "#202D3D"),
+                "border": pressed_border,
+                "title": palette.get("text", "#F6FAFD"),
+                "description": palette.get("muted_text", "#95A2B3"),
+                "affordance": primary,
+            },
+        }
+        return colors.get(state, colors["idle"])
 
 
 # ---------------------------------------------------------------------------

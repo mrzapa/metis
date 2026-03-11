@@ -43,6 +43,14 @@ def _show(process_events):
     return module, view
 
 
+def _widget_top_in(widget, ancestor) -> int:
+    return widget.mapTo(ancestor, widget.rect().topLeft()).y()
+
+
+def _widget_center_y_in(widget, ancestor) -> int:
+    return widget.mapTo(ancestor, widget.rect().center()).y()
+
+
 def _settings_tabs(view) -> QTabWidget:
     tabs = view._settings_dialog.findChildren(QTabWidget)
     assert tabs
@@ -61,7 +69,7 @@ def _sample_source() -> EvidenceSource:
 
 
 def test_app_view_constructs_with_hidden_drawers_and_prompt_first_empty_state(qapp, process_events) -> None:
-    _module, view = _show(process_events)
+    module, view = _show(process_events)
     empty_inner_layout = view._chat_empty_inner.layout()
 
     assert view._active_view == "chat"
@@ -76,13 +84,17 @@ def test_app_view_constructs_with_hidden_drawers_and_prompt_first_empty_state(qa
     assert view._chat_empty_value_label.isVisible()
     assert view._composer_shell.parentWidget() is view._chat_empty_composer_slot
     assert view._chat_empty_composer_slot.layout().indexOf(view._composer_shell) == 0
-    assert empty_inner_layout.indexOf(view._chat_empty_value_label) < empty_inner_layout.indexOf(
+    assert view._chat_empty_value_label.parentWidget() is view._chat_empty_text_column
+    assert view._chat_empty_text_column.layout().indexOf(view._chat_empty_value_label) == 0
+    assert empty_inner_layout.count() == 6
+    assert empty_inner_layout.indexOf(view._chat_empty_text_row) < empty_inner_layout.indexOf(
         view._chat_empty_composer_slot
     )
     assert empty_inner_layout.indexOf(view._chat_empty_composer_slot) < empty_inner_layout.indexOf(
         view._chat_preset_grid_host
     )
-    assert len(view._chat_preset_buttons) >= 5
+    assert len(view._chat_preset_buttons) == len(module._CHAT_PRESETS)
+    assert all(isinstance(button, module.ActionCard) for button in view._chat_preset_buttons)
     assert view._workspace_splitter.sizes()[0] == 0
     assert view._workspace_splitter.sizes()[2] == 0
     assert view._activity_tray.isVisible() is False
@@ -94,20 +106,120 @@ def test_app_view_constructs_with_hidden_drawers_and_prompt_first_empty_state(qa
 
 
 def test_app_view_empty_state_scroll_area_expands_horizontally(qapp, process_events) -> None:
-    _module, view = _show(process_events)
+    module, view = _show(process_events)
 
     view.resize(1400, 960)
     for _ in range(6):
         process_events()
 
     empty_layout = view._chat_empty_state.layout()
-    scroll_item = empty_layout.itemAt(1)
+    scroll_item = empty_layout.itemAt(0)
 
     assert scroll_item is not None
     assert scroll_item.widget() is view._chat_empty_scroll
     assert int(scroll_item.alignment()) == 0
-    assert view._chat_empty_scroll.width() > view._chat_empty_state.width() * 0.75
-    assert view._chat_empty_inner.width() > view._chat_empty_scroll.viewport().width() * 0.55
+    assert empty_layout.count() == 1
+    assert view._chat_empty_body_row.height() == view._chat_empty_scroll.viewport().height()
+    assert view._chat_empty_scroll.width() > view._chat_empty_state.width() * 0.85
+    assert view._chat_empty_scroll.height() > view._chat_empty_state.height() * 0.85
+    assert view._chat_empty_inner.width() <= 880
+    assert view._chat_empty_inner.width() >= 860
+    assert abs(
+        view._chat_empty_inner.geometry().center().x() - view._chat_empty_body_row.rect().center().x()
+    ) <= 2
+    assert view._chat_empty_text_column.width() <= 720
+    assert view._chat_empty_text_column.width() >= 680
+    assert view._chat_empty_value_label.width() >= view._chat_empty_text_column.width() - 2
+    assert (
+        abs(
+            _widget_center_y_in(view._chat_empty_composer_slot, view._chat_empty_scroll.viewport())
+            - view._chat_empty_scroll.viewport().rect().center().y()
+        )
+        <= module.UI_SPACING["xl"]
+    )
+    assert 0 <= _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport())
+    assert (
+        _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport())
+        <= module.UI_SPACING["xl"] + module.UI_SPACING["m"]
+    )
+
+
+def test_app_view_empty_state_text_column_rewraps_when_center_stage_narrows(qapp, process_events) -> None:
+    module, view = _show(process_events)
+
+    view.resize(1400, 960)
+    for _ in range(6):
+        process_events()
+
+    wide_text_width = view._chat_empty_text_column.width()
+    wide_label_height = view._chat_empty_value_label.height()
+    wide_inner_width = view._chat_empty_inner.width()
+
+    view.resize(1180, 760)
+    view._set_library_visible(True)
+    for _ in range(6):
+        process_events()
+
+    narrow_text_width = view._chat_empty_text_column.width()
+    narrow_label_height = view._chat_empty_value_label.height()
+    narrow_inner_width = view._chat_empty_inner.width()
+
+    assert narrow_inner_width < wide_inner_width
+    assert narrow_text_width < wide_text_width
+    assert narrow_text_width >= 400
+    assert narrow_label_height > wide_label_height
+    assert abs(
+        view._chat_empty_inner.geometry().center().x() - view._chat_empty_body_row.rect().center().x()
+    ) <= 2
+    assert view._chat_empty_scroll.verticalScrollBar().value() == 0
+    assert _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport()) <= module.UI_SPACING["m"]
+    assert (
+        _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport())
+        < _widget_top_in(view._chat_empty_composer_slot, view._chat_empty_scroll.viewport())
+        < _widget_top_in(view._chat_preset_grid_host, view._chat_empty_scroll.viewport())
+    )
+    assert (
+        _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport())
+        + view._chat_empty_text_row.height()
+        <= _widget_top_in(view._chat_empty_composer_slot, view._chat_empty_scroll.viewport())
+    )
+    assert (
+        _widget_top_in(view._chat_empty_composer_slot, view._chat_empty_scroll.viewport())
+        + view._chat_empty_composer_slot.height()
+        <= _widget_top_in(view._chat_preset_grid_host, view._chat_empty_scroll.viewport())
+    )
+
+
+def test_app_view_starter_cards_click_through_existing_preset_handler(qapp, process_events) -> None:
+    module, view = _show(process_events)
+    emitted: list[str] = []
+    target_preset = module._CHAT_PRESETS[2]
+
+    view.newChatRequested.connect(lambda: emitted.append("new-chat"))
+    view._chat_preset_buttons[2].click()
+    process_events()
+
+    assert view._mode_combo.currentText() == target_preset["mode"]
+    assert view._rag_toggle.get_value() is True
+    assert emitted == ["new-chat"]
+
+
+def test_app_view_starter_cards_retheme_without_breaking_empty_state_layout(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+    first_card = view._chat_preset_buttons[0]
+    dark_surface_style = first_card._surface.styleSheet()
+    dark_affordance_style = first_card._affordance_label.styleSheet()
+
+    view.apply_theme("light")
+    for _ in range(4):
+        process_events()
+
+    assert view._theme_name == "light"
+    assert first_card._surface.styleSheet() != dark_surface_style
+    assert first_card._affordance_label.styleSheet() != dark_affordance_style
+    assert view._chat_state_stack.currentWidget() is view._chat_empty_state
+    assert view._chat_empty_inner.width() <= 880
+    assert len(view._chat_preset_buttons) > 0
 
 
 def test_app_view_session_chips_reflect_context_and_open_the_session_drawer(qapp, process_events) -> None:
