@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from importlib import resources
 from typing import Any
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSignalBlocker, QSize, QTimer, Qt, QUrl, Signal
+from PySide6.QtCore import QEvent, QObject, QRect, QRectF, QSignalBlocker, QSize, QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QKeyEvent, QPainter, QPainterPath, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -1095,7 +1095,7 @@ class AppView(QMainWindow):
 
         self._chat_empty_state = QWidget(self._chat_state_stack)
         empty_layout = QVBoxLayout(self._chat_empty_state)
-        empty_layout.setContentsMargins(0, 0, 0, 0)
+        empty_layout.setContentsMargins(UI_SPACING["xl"], 0, UI_SPACING["xl"], 0)
         empty_layout.setSpacing(0)
         empty_layout.addStretch(1)
         self._chat_empty_scroll = QScrollArea(self._chat_empty_state)
@@ -1106,7 +1106,7 @@ class AppView(QMainWindow):
         self._chat_empty_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._chat_empty_scroll.installEventFilter(self)
         self._chat_empty_scroll.viewport().installEventFilter(self)
-        empty_layout.addWidget(self._chat_empty_scroll, 0, Qt.AlignHCenter)
+        empty_layout.addWidget(self._chat_empty_scroll)
         empty_layout.addStretch(1)
         chat_empty_scroll_contents = QWidget(self._chat_empty_scroll)
         chat_empty_scroll_layout = QVBoxLayout(chat_empty_scroll_contents)
@@ -4166,8 +4166,8 @@ class AppView(QMainWindow):
         anthropic_key = QLineEdit(str(initial_state.get("api_key_anthropic", "") or ""), dialog)
         google_key = QLineEdit(str(initial_state.get("api_key_google", "") or ""), dialog)
         xai_key = QLineEdit(str(initial_state.get("api_key_xai", "") or ""), dialog)
-        for field in (openai_key, anthropic_key, google_key, xai_key):
-            field.setEchoMode(QLineEdit.Password)
+        for key_input in (openai_key, anthropic_key, google_key, xai_key):
+            key_input.setEchoMode(QLineEdit.Password)
         keys_tab.layout().addWidget(QLabel("Provider keys", dialog), 19, 0, 1, 2)
         for row, (label, widget) in enumerate((("OpenAI key", openai_key), ("Anthropic key", anthropic_key), ("Google key", google_key), ("xAI key", xai_key))):
             target_row = 20 + row
