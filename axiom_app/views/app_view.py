@@ -7,7 +7,7 @@ import pathlib
 import sys
 from dataclasses import dataclass, field
 from importlib import resources
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 from PySide6.QtCore import QEvent, QObject, QRectF, QSignalBlocker, QSize, QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFontMetrics, QIcon, QKeyEvent, QPainter, QPainterPath, QPen, QPixmap, QTextCursor
@@ -801,7 +801,7 @@ class AppView(QMainWindow):
         chip_row.setSpacing(UI_SPACING["xs"])
         for key in ("mode", "sources", "skill", "model"):
             chip = _SessionChip(key, self._command_bar)
-            chip.clicked.connect(lambda _checked=False, section=key: self._open_session_drawer(section))
+            chip.clicked.connect(lambda _checked=False, section=key: self.open_session_drawer(section))
             self._session_chip_buttons[key] = chip
             chip_row.addWidget(chip)
         session_row.addLayout(chip_row, 0)
@@ -811,7 +811,7 @@ class AppView(QMainWindow):
         actions.setSpacing(UI_SPACING["xs"])
         self._conversation_setup_button = QPushButton("Session", self._command_bar)
         self._conversation_setup_button.setObjectName("conversationSetupButton")
-        self._conversation_setup_button.clicked.connect(lambda: self._open_session_drawer("mode"))
+        self._conversation_setup_button.clicked.connect(lambda: self.open_session_drawer("mode"))
         actions.addWidget(self._conversation_setup_button)
         self.btn_new_chat = QPushButton("New Chat", self._command_bar)
         self.btn_new_chat.clicked.connect(self.newChatRequested.emit)
@@ -1746,10 +1746,10 @@ class AppView(QMainWindow):
             self._activity_tray.setVisible(self._activity_visible)
         self._refresh_rail_buttons()
 
-    def _open_session_drawer(self, section: str = "mode") -> None:
+    def open_session_drawer(self, section: Literal["mode", "sources", "skill", "model"] = "mode") -> None:
         if not hasattr(self, "_session_drawer"):
             return
-        index = self._session_tab_index.get(str(section or "mode"), 0)
+        index = self._session_tab_index.get(section, 0)
         self._session_tabs.setCurrentIndex(index)
         self._session_drawer_visible = True
         self._session_drawer.show()
@@ -1757,6 +1757,12 @@ class AppView(QMainWindow):
         self._session_drawer.raise_()
         self._session_drawer.activateWindow()
         self._refresh_rail_buttons()
+
+    def _open_session_drawer(self, section: str = "mode") -> None:
+        normalized = str(section or "mode")
+        if normalized not in self._session_tab_index:
+            normalized = "mode"
+        self.open_session_drawer(normalized)
 
     def _hide_session_drawer(self) -> None:
         if hasattr(self, "_session_drawer"):
@@ -2099,16 +2105,16 @@ class AppView(QMainWindow):
 
     def _build_conversation_setup_popup(self) -> None:
         # Compatibility shim: conversation setup now lives in the session drawer.
-        self._open_session_drawer("mode")
+        self.open_session_drawer("mode")
 
     def _toggle_conversation_setup_popup(self) -> None:
         if self._session_drawer_visible:
             self._hide_session_drawer()
             return
-        self._open_session_drawer("mode")
+        self.open_session_drawer("mode")
 
     def _show_conversation_setup_popup(self) -> None:
-        self._open_session_drawer("mode")
+        self.open_session_drawer("mode")
 
     def _hide_conversation_setup_popup(self) -> None:
         self._hide_session_drawer()
@@ -2699,15 +2705,15 @@ class AppView(QMainWindow):
 
     def _build_quick_model_popup(self) -> None:
         # Compatibility shim: quick model setup now lives in the session drawer.
-        self._open_session_drawer("model")
+        self.open_session_drawer("model")
 
     def _toggle_quick_model_popup(self) -> None:
         if not self._llm_status_badge.isEnabled():
             return
-        self._open_session_drawer("model")
+        self.open_session_drawer("model")
 
     def _show_quick_model_popup(self) -> None:
-        self._open_session_drawer("model")
+        self.open_session_drawer("model")
 
     def _hide_quick_model_popup(self) -> None:
         self._hide_session_drawer()
