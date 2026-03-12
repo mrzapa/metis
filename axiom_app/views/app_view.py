@@ -37,7 +37,6 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTextBrowser,
     QTextEdit,
-    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -1853,8 +1852,6 @@ class AppView(QMainWindow):
         self.btn_new_chat.clicked.connect(self.newChatRequested.emit)
         header.addWidget(self.btn_new_chat)
         root.addLayout(header)
-        self._build_conversation_setup_popup()
-        self._build_quick_model_popup()
 
         splitter = QSplitter(Qt.Horizontal, page)
         self._chat_splitter = splitter
@@ -2069,71 +2066,8 @@ class AppView(QMainWindow):
         return page
 
     def _build_conversation_setup_popup(self) -> None:
-        self._conversation_setup_popup = QFrame(self, Qt.Popup | Qt.FramelessWindowHint)
-        self._conversation_setup_popup.setObjectName("conversationSetupPopup")
-        self._conversation_setup_popup.setMinimumWidth(360)
-
-        popup_layout = QVBoxLayout(self._conversation_setup_popup)
-        popup_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
-        popup_layout.setSpacing(UI_SPACING["s"])
-
-        title = QLabel("Conversation Setup", self._conversation_setup_popup)
-        title.setObjectName("quickModelPopupTitle")
-        popup_layout.addWidget(title)
-
-        hint = QLabel(
-            "Session defaults live here. Use a starter card to begin quickly, then reopen this sheet only when you want to change the mode, source path, skill, or model.",
-            self._conversation_setup_popup,
-        )
-        hint.setObjectName("quickModelPopupHint")
-        hint.setWordWrap(True)
-        popup_layout.addWidget(hint)
-
-        popup_layout.addWidget(QLabel("Conversation mode", self._conversation_setup_popup))
-        self._mode_combo = QComboBox(self._conversation_setup_popup)
-        self._mode_combo.addItems(MODE_OPTIONS)
-        self._mode_combo.currentTextChanged.connect(self._emit_mode_state)
-        popup_layout.addWidget(self._mode_combo)
-
-        popup_layout.addWidget(QLabel("Source path", self._conversation_setup_popup))
-        self._rag_toggle = IOSSegmentedToggle(self._conversation_setup_popup, ["Use Sources", "Direct"], True, self._palette)
-        self._rag_toggle.toggled.connect(self._on_toggle_changed)
-        popup_layout.addWidget(self._rag_toggle)
-
-        popup_layout.addWidget(QLabel("Primary skill", self._conversation_setup_popup))
-        self._profile_combo = QComboBox(self._conversation_setup_popup)
-        self._profile_combo.setMinimumWidth(220)
-        self._profile_combo.currentTextChanged.connect(lambda *_args: self._update_skill_action_labels())
-        popup_layout.addWidget(self._profile_combo)
-
-        actions = QHBoxLayout()
-        actions.setContentsMargins(0, 0, 0, 0)
-        actions.setSpacing(UI_SPACING["xs"])
-        self.btn_profile_load = QPushButton("Toggle Skill", self._conversation_setup_popup)
-        self.btn_profile_load.clicked.connect(self.toggleSkillRequested.emit)
-        self.btn_profile_load.clicked.connect(self.loadProfileRequested.emit)
-        actions.addWidget(self.btn_profile_load)
-        self.btn_profile_save = QPushButton("Pin Skill", self._conversation_setup_popup)
-        self.btn_profile_save.clicked.connect(self.pinSkillRequested.emit)
-        self.btn_profile_save.clicked.connect(self.saveProfileRequested.emit)
-        actions.addWidget(self.btn_profile_save)
-        self.btn_profile_duplicate = QPushButton("Mute Skill", self._conversation_setup_popup)
-        self.btn_profile_duplicate.clicked.connect(self.muteSkillRequested.emit)
-        self.btn_profile_duplicate.clicked.connect(self.duplicateProfileRequested.emit)
-        actions.addWidget(self.btn_profile_duplicate)
-        popup_layout.addLayout(actions)
-
-        popup_layout.addWidget(QLabel("Model", self._conversation_setup_popup))
-        self._llm_status_badge = QToolButton(self._conversation_setup_popup)
-        self._llm_status_badge.setObjectName("llmStatusBadge")
-        self._llm_status_badge.setToolButtonStyle(Qt.ToolButtonIconOnly)
-        self._llm_status_badge.setText("")
-        self._llm_status_badge.setCursor(Qt.PointingHandCursor)
-        self._llm_status_badge.setFixedSize(46, 42)
-        self._llm_status_badge.setIconSize(QSize(22, 22))
-        self._llm_status_badge.setIcon(self._create_model_switch_icon())
-        self._llm_status_badge.clicked.connect(self._toggle_quick_model_popup)
-        popup_layout.addWidget(self._llm_status_badge, 0, Qt.AlignLeft)
+        # Compatibility shim: conversation setup now lives in the session drawer.
+        self._open_session_drawer("mode")
 
     def _toggle_conversation_setup_popup(self) -> None:
         if self._session_drawer_visible:
@@ -2732,52 +2666,8 @@ class AppView(QMainWindow):
         return QIcon(pixmap)
 
     def _build_quick_model_popup(self) -> None:
-        self._quick_model_popup = QFrame(self, Qt.Popup | Qt.FramelessWindowHint)
-        self._quick_model_popup.setObjectName("quickModelPopup")
-        self._quick_model_popup.setMinimumWidth(320)
-
-        popup_layout = QVBoxLayout(self._quick_model_popup)
-        popup_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
-        popup_layout.setSpacing(UI_SPACING["s"])
-
-        title = QLabel("Switch model", self._quick_model_popup)
-        title.setObjectName("quickModelPopupTitle")
-        popup_layout.addWidget(title)
-
-        hint = QLabel(
-            "Preset choices apply immediately. Custom and local models use the inline apply action.",
-            self._quick_model_popup,
-        )
-        hint.setObjectName("quickModelPopupHint")
-        hint.setWordWrap(True)
-        popup_layout.addWidget(hint)
-
-        popup_layout.addWidget(QLabel("Provider", self._quick_model_popup))
-        self._quick_model_provider_combo = QComboBox(self._quick_model_popup)
-        self._quick_model_provider_combo.addItems(list_llm_providers())
-        self._quick_model_provider_combo.currentTextChanged.connect(self._on_quick_model_provider_changed)
-        popup_layout.addWidget(self._quick_model_provider_combo)
-
-        popup_layout.addWidget(QLabel("Model", self._quick_model_popup))
-        self._quick_model_model_combo = QComboBox(self._quick_model_popup)
-        self._quick_model_model_combo.currentTextChanged.connect(self._on_quick_model_selection_changed)
-        self._quick_model_model_combo.activated.connect(self._on_quick_model_activated)
-        popup_layout.addWidget(self._quick_model_model_combo)
-
-        self._quick_model_custom_row = QWidget(self._quick_model_popup)
-        custom_row_layout = QHBoxLayout(self._quick_model_custom_row)
-        custom_row_layout.setContentsMargins(0, 0, 0, 0)
-        custom_row_layout.setSpacing(UI_SPACING["xs"])
-        self._quick_model_custom_input = QLineEdit(self._quick_model_custom_row)
-        self._quick_model_custom_input.setPlaceholderText("Enter a model id")
-        self._quick_model_custom_input.returnPressed.connect(self._emit_quick_model_change_from_popup)
-        custom_row_layout.addWidget(self._quick_model_custom_input, 1)
-        self._quick_model_apply_button = QPushButton("Apply", self._quick_model_custom_row)
-        self._quick_model_apply_button.clicked.connect(self._emit_quick_model_change_from_popup)
-        custom_row_layout.addWidget(self._quick_model_apply_button)
-        popup_layout.addWidget(self._quick_model_custom_row)
-
-        self._sync_quick_model_popup_from_settings()
+        # Compatibility shim: quick model setup now lives in the session drawer.
+        self._open_session_drawer("model")
 
     def _toggle_quick_model_popup(self) -> None:
         if not self._llm_status_badge.isEnabled():
@@ -2791,6 +2681,9 @@ class AppView(QMainWindow):
         self._hide_session_drawer()
 
     def _sync_quick_model_popup_from_settings(self) -> None:
+        self._sync_quick_model_drawer_from_settings()
+
+    def _sync_quick_model_drawer_from_settings(self) -> None:
         if not hasattr(self, "_quick_model_provider_combo"):
             return
         provider = str(self._settings_data.get("llm_provider", "anthropic") or "anthropic").strip() or "anthropic"
@@ -2848,9 +2741,12 @@ class AppView(QMainWindow):
     def _on_quick_model_activated(self, _index: int) -> None:
         if self._quick_model_popup_syncing or self._quick_model_uses_inline_apply():
             return
-        self._emit_quick_model_change_from_popup(close_popup=True)
+        self._emit_quick_model_change_from_drawer(close_drawer=False)
 
     def _emit_quick_model_change_from_popup(self, *, close_popup: bool = True) -> None:
+        self._emit_quick_model_change_from_drawer(close_drawer=close_popup)
+
+    def _emit_quick_model_change_from_drawer(self, *, close_drawer: bool = True) -> None:
         uses_inline = self._quick_model_uses_inline_apply()
         custom_model = self._quick_model_custom_input.text().strip()
         selected_model = self._quick_model_model_combo.currentText().strip()
@@ -2860,7 +2756,7 @@ class AppView(QMainWindow):
             "llm_model_custom": custom_model if uses_inline else "",
         }
         self.quickModelChangeRequested.emit(payload)
-        if close_popup:
+        if close_drawer:
             self._hide_quick_model_popup()
 
     def _on_toggle_changed(self, value: bool) -> None:
