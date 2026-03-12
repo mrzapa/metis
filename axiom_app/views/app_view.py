@@ -747,9 +747,6 @@ class AppView(QMainWindow):
         self._page_title = QLabel("Ask Axiom", self._command_bar)
         self._page_title.setObjectName("pageTitle")
         copy_layout.addWidget(self._page_title)
-        self._chat_context_summary = QLabel(self._command_bar)
-        self._chat_context_summary.setObjectName("chatContextSummary")
-        copy_layout.addWidget(self._chat_context_summary)
         self._chat_context_hint = QLabel(
             "Clean by default. Open only the panels you need.",
             self._command_bar,
@@ -757,6 +754,15 @@ class AppView(QMainWindow):
         self._chat_context_hint.setObjectName("chatContextHint")
         copy_layout.addWidget(self._chat_context_hint)
         layout.addLayout(copy_layout, 1)
+
+        session_cluster = QWidget(self._command_bar)
+        session_cluster_layout = QVBoxLayout(session_cluster)
+        session_cluster_layout.setContentsMargins(0, 0, 0, 0)
+        session_cluster_layout.setSpacing(4)
+
+        session_row = QHBoxLayout()
+        session_row.setContentsMargins(0, 0, 0, 0)
+        session_row.setSpacing(UI_SPACING["xs"])
 
         self._session_chip_buttons: dict[str, _SessionChip] = {}
         chip_row = QHBoxLayout()
@@ -767,7 +773,7 @@ class AppView(QMainWindow):
             chip.clicked.connect(lambda _checked=False, section=key: self._open_session_drawer(section))
             self._session_chip_buttons[key] = chip
             chip_row.addWidget(chip)
-        layout.addLayout(chip_row, 0)
+        session_row.addLayout(chip_row, 0)
 
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
@@ -779,7 +785,16 @@ class AppView(QMainWindow):
         self.btn_new_chat = QPushButton("New Chat", self._command_bar)
         self.btn_new_chat.clicked.connect(self.newChatRequested.emit)
         actions.addWidget(self.btn_new_chat)
-        layout.addLayout(actions, 0)
+        session_row.addLayout(actions, 0)
+        session_cluster_layout.addLayout(session_row)
+
+        self._chat_context_summary = QLabel(session_cluster)
+        self._chat_context_summary.setObjectName("chatContextSummary")
+        self._chat_context_summary.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._chat_context_summary.setWordWrap(True)
+        session_cluster_layout.addWidget(self._chat_context_summary, 0, Qt.AlignRight)
+
+        layout.addWidget(session_cluster, 0, Qt.AlignRight | Qt.AlignTop)
         self._llm_status_badge = self._session_chip_buttons["model"]
 
     def _build_library_drawer(self) -> None:
@@ -2520,9 +2535,9 @@ class AppView(QMainWindow):
                 font-size: 14px;
             }}
             QLabel#chatContextSummary {{
-                font-size: 14px;
-                font-weight: 600;
-                color: {text};
+                font-size: 12px;
+                font-weight: 500;
+                color: {muted};
             }}
             QLabel#chatContextHint, QLabel#drawerHint {{
                 color: {muted};
@@ -2881,6 +2896,7 @@ class AppView(QMainWindow):
         target_slot = self._chat_empty_composer_slot if empty_state else self._chat_footer_composer_slot
         self._move_widget_to_slot(self._composer_shell, target_slot)
         self._chat_footer_composer_slot.setVisible(not empty_state)
+        self._chat_context_summary.setVisible(not empty_state)
         self._chat_context_hint.setVisible(not empty_state)
         self._composer_title.setVisible(not empty_state)
         self._composer_meta.setVisible(not empty_state)

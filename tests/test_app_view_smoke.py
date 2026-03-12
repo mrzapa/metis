@@ -116,6 +116,7 @@ def test_app_view_constructs_with_hidden_drawers_and_prompt_first_empty_state(qa
     assert view._activity_tray.isVisible() is False
     assert view._session_drawer.isVisible() is False
     assert view._chat_context_hint.isVisible() is False
+    assert view._chat_context_summary.isVisible() is False
     assert view._chat_footer_composer_slot.isVisible() is False
     assert view._rail_buttons["inspect"].isEnabled() is False
     assert view._chat_context_summary.text() == "Q&A · Use Sources · No skill selected · unset"
@@ -307,6 +308,7 @@ def test_app_view_session_chips_reflect_context_and_open_the_session_drawer(qapp
         "model": "Model · openai / gpt-5.4-mini",
     }
     assert view._chat_context_summary.text() == "Research · Direct · evidence-pack-timeline · openai / gpt-5.4-mini"
+    assert view._chat_context_summary.isVisible() is False
 
     view._session_chip_buttons["model"].click()
     process_events()
@@ -343,6 +345,7 @@ def test_app_view_switches_between_empty_state_and_timeline_cards(qapp, process_
     assert [card._content_label.text() for card in view._chat_cards] == ["hello", "hi there"]
     assert view._composer_shell.parentWidget() is view._chat_footer_composer_slot
     assert view._chat_context_hint.isVisible() is True
+    assert view._chat_context_summary.isVisible() is True
 
     view.clear_chat()
     process_events()
@@ -352,6 +355,7 @@ def test_app_view_switches_between_empty_state_and_timeline_cards(qapp, process_
     assert view._chat_cards == []
     assert view._composer_shell.parentWidget() is view._chat_empty_composer_slot
     assert view._chat_context_hint.isVisible() is False
+    assert view._chat_context_summary.isVisible() is False
     assert view._workspace_splitter.sizes()[2] == 0
 
 
