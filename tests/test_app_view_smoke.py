@@ -300,13 +300,15 @@ def test_app_view_session_chips_reflect_context_and_open_the_session_drawer(qapp
     )
     process_events()
 
-    chips = {key: button.text() for key, button in view._session_chip_buttons.items()}
-    assert chips == {
-        "mode": "Mode · Research",
-        "sources": "Sources · Direct",
-        "skill": "Skill · evidence-pack-timeline",
-        "model": "Model · openai / gpt-5.4-mini",
-    }
+    chips = view._session_chip_buttons
+    assert chips["mode"].text() == "Mode · Research"
+    assert chips["sources"].text() == "Sources · Direct"
+    assert chips["skill"].text().startswith("Skill · evidence-pack")
+    assert chips["skill"].toolTip() == "Skill · evidence-pack-timeline"
+    assert chips["model"].text().startswith("Model · openai")
+    assert chips["model"].toolTip() == "Model · openai / gpt-5.4-mini"
+    assert len({button.width() for button in chips.values()}) == 1
+    assert len({button.height() for button in chips.values()}) == 1
     assert view._chat_context_summary.text() == "Research · Direct · evidence-pack-timeline · openai / gpt-5.4-mini"
     assert view._chat_context_summary.isVisible() is False
 

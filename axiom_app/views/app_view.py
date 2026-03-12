@@ -10,7 +10,7 @@ from importlib import resources
 from typing import Any, TypedDict
 
 from PySide6.QtCore import QEvent, QObject, QRectF, QSignalBlocker, QSize, QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QKeyEvent, QPainter, QPainterPath, QPen, QPixmap, QTextCursor
+from PySide6.QtGui import QColor, QDesktopServices, QFontMetrics, QIcon, QKeyEvent, QPainter, QPainterPath, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -361,11 +361,43 @@ class _RailButton(_NavButton):
 
 
 class _SessionChip(QPushButton):
+    _CHIP_WIDTH = 200
+    _CHIP_HEIGHT = 38
+
     def __init__(self, section: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.section = section
+        self._label = ""
+        self._value = ""
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("sessionChip")
+        self.setFixedSize(self._CHIP_WIDTH, self._CHIP_HEIGHT)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+    def set_content(self, label: str, value: str) -> None:
+        self._label = (label or "").strip()
+        self._value = (value or "").strip()
+        full_text = f"{self._label} · {self._value}" if self._value else self._label
+        self.setToolTip(full_text)
+        self._refresh_display_text()
+
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        self._refresh_display_text()
+
+    def _refresh_display_text(self) -> None:
+        if not self._label:
+            return
+        prefix = f"{self._label} · " if self._value else self._label
+        if not self._value:
+            self.setText(prefix)
+            return
+        metrics = QFontMetrics(self.font())
+        content_width = max(64, self.width() - 34)
+        prefix_width = metrics.horizontalAdvance(prefix)
+        available_value_width = max(12, content_width - prefix_width)
+        elided_value = metrics.elidedText(self._value, Qt.ElideRight, available_value_width)
+        self.setText(f"{prefix}{elided_value}")
 
 
 @dataclass(slots=True)
@@ -2109,15 +2141,15 @@ class AppView(QMainWindow):
                 source_summary or ("Responses will use the active workspace index." if self._rag_toggle.get_value() else "This session will skip retrieval.")
             )
         chip_labels = {
-            "mode": f"Mode · {mode}",
-            "sources": f"Sources · {chat_path}",
-            "skill": f"Skill · {profile}",
-            "model": f"Model · {model_summary}",
+            "mode": ("Mode", mode),
+            "sources": ("Sources", chat_path),
+            "skill": ("Skill", profile),
+            "model": ("Model", model_summary),
         }
-        for key, text in chip_labels.items():
+        for key, (label, value) in chip_labels.items():
             button = self._session_chip_buttons.get(key)
             if button is not None:
-                button.setText(text)
+                button.set_content(label, value)
 
     def _build_brain_page(self) -> QWidget:
         page = QWidget(self)
@@ -2523,7 +2555,7 @@ class AppView(QMainWindow):
                 background-color: {surface};
                 border: 1px solid {border};
                 border-radius: 14px;
-                padding: 10px 14px;
+                padding: 8px 12px;
                 color: {text};
                 font-size: 12px;
                 font-weight: 600;
