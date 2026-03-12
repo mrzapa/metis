@@ -1242,10 +1242,6 @@ class AppView(QMainWindow):
         evidence_layout.addWidget(QLabel("Sources", evidence_page))
         self._evidence_sources_tree = self._make_tree(["Source", "Score", "Snippet"], evidence_page)
         evidence_layout.addWidget(self._evidence_sources_tree, 1)
-        evidence_layout.addWidget(QLabel("Grounding", evidence_page))
-        self._grounding_browser = QTextBrowser(evidence_page)
-        self._grounding_browser.anchorClicked.connect(lambda url: QDesktopServices.openUrl(url))
-        evidence_layout.addWidget(self._grounding_browser, 1)
 
         process_page = QWidget(self._evidence_tabs)
         process_layout = QVBoxLayout(process_page)
@@ -1262,12 +1258,13 @@ class AppView(QMainWindow):
         structure_layout = QVBoxLayout(structure_page)
         structure_layout.setContentsMargins(0, 0, 0, 0)
         structure_layout.setSpacing(UI_SPACING["s"])
-        structure_layout.addWidget(QLabel("Semantic Regions", structure_page))
-        self._regions_tree = self._make_tree(["Document", "Region", "Summary"], structure_page)
-        structure_layout.addWidget(self._regions_tree, 1)
         structure_layout.addWidget(QLabel("Outline", structure_page))
         self._outline_tree = self._make_tree(["Heading", "Meta"], structure_page)
         structure_layout.addWidget(self._outline_tree, 1)
+        structure_layout.addWidget(QLabel("Grounding", structure_page))
+        self._grounding_browser = QTextBrowser(structure_page)
+        self._grounding_browser.anchorClicked.connect(lambda url: QDesktopServices.openUrl(url))
+        structure_layout.addWidget(self._grounding_browser, 1)
 
         self._evidence_tabs.addTab(evidence_page, "Evidence")
         self._evidence_tabs.addTab(process_page, "Process")
@@ -4156,6 +4153,8 @@ class AppView(QMainWindow):
         self._populate_tree_from_rows(self._events_tree, normalized, ["timestamp", "stage", "event_type", "summary"])
 
     def render_semantic_regions(self, rows: list[dict[str, Any]]) -> None:
+        if not hasattr(self, "_regions_tree"):
+            return
         normalized = [{"document": row.get("document") or row.get("source") or "", "region": row.get("region") or row.get("header_path") or row.get("label") or "", "summary": row.get("summary") or row.get("snippet") or json.dumps(row, ensure_ascii=False)[:240]} for row in rows or []]
         self._populate_tree_from_rows(self._regions_tree, normalized, ["document", "region", "summary"])
 
