@@ -7,10 +7,10 @@ import pathlib
 import sys
 from dataclasses import dataclass, field
 from importlib import resources
-from typing import Any, Literal, TypedDict
+from typing import Any, TypedDict
 
 from PySide6.QtCore import QEvent, QObject, QRectF, QSignalBlocker, QSize, QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QFontMetrics, QIcon, QKeyEvent, QPainter, QPainterPath, QPen, QPixmap, QTextCursor
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QKeyEvent, QPainter, QPainterPath, QPen, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTextBrowser,
     QTextEdit,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -361,43 +362,11 @@ class _RailButton(_NavButton):
 
 
 class _SessionChip(QPushButton):
-    _CHIP_WIDTH = 200
-    _CHIP_HEIGHT = 38
-
     def __init__(self, section: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.section = section
-        self._label = ""
-        self._value = ""
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("sessionChip")
-        self.setFixedSize(self._CHIP_WIDTH, self._CHIP_HEIGHT)
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-
-    def set_content(self, label: str, value: str) -> None:
-        self._label = (label or "").strip()
-        self._value = (value or "").strip()
-        full_text = f"{self._label} · {self._value}" if self._value else self._label
-        self.setToolTip(full_text)
-        self._refresh_display_text()
-
-    def resizeEvent(self, event: Any) -> None:
-        super().resizeEvent(event)
-        self._refresh_display_text()
-
-    def _refresh_display_text(self) -> None:
-        if not self._label:
-            return
-        prefix = f"{self._label} · " if self._value else self._label
-        if not self._value:
-            self.setText(prefix)
-            return
-        metrics = QFontMetrics(self.font())
-        content_width = max(64, self.width() - 34)
-        prefix_width = metrics.horizontalAdvance(prefix)
-        available_value_width = max(12, content_width - prefix_width)
-        elided_value = metrics.elidedText(self._value, Qt.ElideRight, available_value_width)
-        self.setText(f"{prefix}{elided_value}")
 
 
 @dataclass(slots=True)
@@ -572,6 +541,7 @@ class AppView(QMainWindow):
         self._empty_state_relayout_rounds_remaining = 0
         self._library_visible = False
         self._inspector_visible = False
+        self._user_closed_since_last_completion = False
         self._activity_visible = False
         self._session_drawer_visible = False
         self._empty_state_relayout_timer = QTimer(self)
@@ -801,7 +771,7 @@ class AppView(QMainWindow):
         chip_row.setSpacing(UI_SPACING["xs"])
         for key in ("mode", "sources", "skill", "model"):
             chip = _SessionChip(key, self._command_bar)
-            chip.clicked.connect(lambda _checked=False, section=key: self.open_session_drawer(section))
+            chip.clicked.connect(lambda _checked=False, section=key: self._open_session_drawer(section))
             self._session_chip_buttons[key] = chip
             chip_row.addWidget(chip)
         session_row.addLayout(chip_row, 0)
@@ -811,7 +781,7 @@ class AppView(QMainWindow):
         actions.setSpacing(UI_SPACING["xs"])
         self._conversation_setup_button = QPushButton("Session", self._command_bar)
         self._conversation_setup_button.setObjectName("conversationSetupButton")
-        self._conversation_setup_button.clicked.connect(lambda: self.open_session_drawer("mode"))
+        self._conversation_setup_button.clicked.connect(lambda: self._open_session_drawer("mode"))
         actions.addWidget(self._conversation_setup_button)
         self.btn_new_chat = QPushButton("New Chat", self._command_bar)
         self.btn_new_chat.clicked.connect(self.newChatRequested.emit)
@@ -1256,7 +1226,7 @@ class AppView(QMainWindow):
         self._inspector_pin_button.clicked.connect(self._update_workspace_drawers)
         header.addWidget(self._inspector_pin_button)
         close = QPushButton("Close", self._inspector_drawer)
-        close.clicked.connect(lambda: self._set_inspector_visible(False))
+        close.clicked.connect(lambda: self._set_inspector_visible(False, user_initiated=True))
         header.addWidget(close)
         root.addLayout(header)
 
@@ -1272,10 +1242,6 @@ class AppView(QMainWindow):
         evidence_layout.addWidget(QLabel("Sources", evidence_page))
         self._evidence_sources_tree = self._make_tree(["Source", "Score", "Snippet"], evidence_page)
         evidence_layout.addWidget(self._evidence_sources_tree, 1)
-        evidence_layout.addWidget(QLabel("Grounding", evidence_page))
-        self._grounding_browser = QTextBrowser(evidence_page)
-        self._grounding_browser.anchorClicked.connect(lambda url: QDesktopServices.openUrl(url))
-        evidence_layout.addWidget(self._grounding_browser, 1)
 
         process_page = QWidget(self._evidence_tabs)
         process_layout = QVBoxLayout(process_page)
@@ -1292,12 +1258,13 @@ class AppView(QMainWindow):
         structure_layout = QVBoxLayout(structure_page)
         structure_layout.setContentsMargins(0, 0, 0, 0)
         structure_layout.setSpacing(UI_SPACING["s"])
-        structure_layout.addWidget(QLabel("Semantic Regions", structure_page))
-        self._regions_tree = self._make_tree(["Document", "Region", "Summary"], structure_page)
-        structure_layout.addWidget(self._regions_tree, 1)
         structure_layout.addWidget(QLabel("Outline", structure_page))
         self._outline_tree = self._make_tree(["Heading", "Meta"], structure_page)
         structure_layout.addWidget(self._outline_tree, 1)
+        structure_layout.addWidget(QLabel("Grounding", structure_page))
+        self._grounding_browser = QTextBrowser(structure_page)
+        self._grounding_browser.anchorClicked.connect(lambda url: QDesktopServices.openUrl(url))
+        structure_layout.addWidget(self._grounding_browser, 1)
 
         self._evidence_tabs.addTab(evidence_page, "Evidence")
         self._evidence_tabs.addTab(process_page, "Process")
@@ -1729,28 +1696,28 @@ class AppView(QMainWindow):
         self._library_visible = bool(visible)
         self._update_workspace_drawers()
 
-    def _set_inspector_visible(self, visible: bool, *, tab_index: int | None = None) -> None:
+    def _reset_inspector_auto_open_state(self) -> None:
+        self._user_closed_since_last_completion = False
+
+    def _set_inspector_visible(
+        self,
+        visible: bool,
+        *,
+        tab_index: int | None = None,
+        user_initiated: bool = False,
+    ) -> None:
         if tab_index is not None and hasattr(self, "_evidence_tabs"):
             self._evidence_tabs.setCurrentIndex(tab_index)
-        self._inspector_visible = bool(visible)
+        visible = bool(visible)
+        if not visible and user_initiated and self._chat_has_completed_response:
+            self._user_closed_since_last_completion = True
+        self._inspector_visible = visible
         self._update_workspace_drawers()
-
-    def _open_inspector_evidence(self) -> None:
-        self._set_inspector_visible(True, tab_index=0)
-
-        evidence_tree = getattr(self, "_evidence_sources_tree", None)
-        if evidence_tree is not None:
-            evidence_tree.scrollToTop()
-            evidence_tree.clearSelection()
-
-        grounding_browser = getattr(self, "_grounding_browser", None)
-        if grounding_browser is not None:
-            grounding_browser.verticalScrollBar().setValue(0)
 
     def _toggle_inspector(self) -> None:
         if not self._chat_has_completed_response:
             return
-        self._set_inspector_visible(not self._inspector_visible)
+        self._set_inspector_visible(not self._inspector_visible, user_initiated=True)
 
     def _set_activity_visible(self, visible: bool) -> None:
         self._activity_visible = bool(visible)
@@ -1758,10 +1725,10 @@ class AppView(QMainWindow):
             self._activity_tray.setVisible(self._activity_visible)
         self._refresh_rail_buttons()
 
-    def open_session_drawer(self, section: Literal["mode", "sources", "skill", "model"] = "mode") -> None:
+    def _open_session_drawer(self, section: str = "mode") -> None:
         if not hasattr(self, "_session_drawer"):
             return
-        index = self._session_tab_index.get(section, 0)
+        index = self._session_tab_index.get(str(section or "mode"), 0)
         self._session_tabs.setCurrentIndex(index)
         self._session_drawer_visible = True
         self._session_drawer.show()
@@ -1769,12 +1736,6 @@ class AppView(QMainWindow):
         self._session_drawer.raise_()
         self._session_drawer.activateWindow()
         self._refresh_rail_buttons()
-
-    def _open_session_drawer(self, section: str = "mode") -> None:
-        normalized = str(section or "mode")
-        if normalized not in self._session_tab_index:
-            normalized = "mode"
-        self.open_session_drawer(normalized)
 
     def _hide_session_drawer(self) -> None:
         if hasattr(self, "_session_drawer"):
@@ -1902,6 +1863,8 @@ class AppView(QMainWindow):
         self.btn_new_chat.clicked.connect(self.newChatRequested.emit)
         header.addWidget(self.btn_new_chat)
         root.addLayout(header)
+        self._build_conversation_setup_popup()
+        self._build_quick_model_popup()
 
         splitter = QSplitter(Qt.Horizontal, page)
         self._chat_splitter = splitter
@@ -2116,17 +2079,80 @@ class AppView(QMainWindow):
         return page
 
     def _build_conversation_setup_popup(self) -> None:
-        # Compatibility shim: conversation setup now lives in the session drawer.
-        self.open_session_drawer("mode")
+        self._conversation_setup_popup = QFrame(self, Qt.Popup | Qt.FramelessWindowHint)
+        self._conversation_setup_popup.setObjectName("conversationSetupPopup")
+        self._conversation_setup_popup.setMinimumWidth(360)
+
+        popup_layout = QVBoxLayout(self._conversation_setup_popup)
+        popup_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
+        popup_layout.setSpacing(UI_SPACING["s"])
+
+        title = QLabel("Conversation Setup", self._conversation_setup_popup)
+        title.setObjectName("quickModelPopupTitle")
+        popup_layout.addWidget(title)
+
+        hint = QLabel(
+            "Session defaults live here. Use a starter card to begin quickly, then reopen this sheet only when you want to change the mode, source path, skill, or model.",
+            self._conversation_setup_popup,
+        )
+        hint.setObjectName("quickModelPopupHint")
+        hint.setWordWrap(True)
+        popup_layout.addWidget(hint)
+
+        popup_layout.addWidget(QLabel("Conversation mode", self._conversation_setup_popup))
+        self._mode_combo = QComboBox(self._conversation_setup_popup)
+        self._mode_combo.addItems(MODE_OPTIONS)
+        self._mode_combo.currentTextChanged.connect(self._emit_mode_state)
+        popup_layout.addWidget(self._mode_combo)
+
+        popup_layout.addWidget(QLabel("Source path", self._conversation_setup_popup))
+        self._rag_toggle = IOSSegmentedToggle(self._conversation_setup_popup, ["Use Sources", "Direct"], True, self._palette)
+        self._rag_toggle.toggled.connect(self._on_toggle_changed)
+        popup_layout.addWidget(self._rag_toggle)
+
+        popup_layout.addWidget(QLabel("Primary skill", self._conversation_setup_popup))
+        self._profile_combo = QComboBox(self._conversation_setup_popup)
+        self._profile_combo.setMinimumWidth(220)
+        self._profile_combo.currentTextChanged.connect(lambda *_args: self._update_skill_action_labels())
+        popup_layout.addWidget(self._profile_combo)
+
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(UI_SPACING["xs"])
+        self.btn_profile_load = QPushButton("Toggle Skill", self._conversation_setup_popup)
+        self.btn_profile_load.clicked.connect(self.toggleSkillRequested.emit)
+        self.btn_profile_load.clicked.connect(self.loadProfileRequested.emit)
+        actions.addWidget(self.btn_profile_load)
+        self.btn_profile_save = QPushButton("Pin Skill", self._conversation_setup_popup)
+        self.btn_profile_save.clicked.connect(self.pinSkillRequested.emit)
+        self.btn_profile_save.clicked.connect(self.saveProfileRequested.emit)
+        actions.addWidget(self.btn_profile_save)
+        self.btn_profile_duplicate = QPushButton("Mute Skill", self._conversation_setup_popup)
+        self.btn_profile_duplicate.clicked.connect(self.muteSkillRequested.emit)
+        self.btn_profile_duplicate.clicked.connect(self.duplicateProfileRequested.emit)
+        actions.addWidget(self.btn_profile_duplicate)
+        popup_layout.addLayout(actions)
+
+        popup_layout.addWidget(QLabel("Model", self._conversation_setup_popup))
+        self._llm_status_badge = QToolButton(self._conversation_setup_popup)
+        self._llm_status_badge.setObjectName("llmStatusBadge")
+        self._llm_status_badge.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self._llm_status_badge.setText("")
+        self._llm_status_badge.setCursor(Qt.PointingHandCursor)
+        self._llm_status_badge.setFixedSize(46, 42)
+        self._llm_status_badge.setIconSize(QSize(22, 22))
+        self._llm_status_badge.setIcon(self._create_model_switch_icon())
+        self._llm_status_badge.clicked.connect(self._toggle_quick_model_popup)
+        popup_layout.addWidget(self._llm_status_badge, 0, Qt.AlignLeft)
 
     def _toggle_conversation_setup_popup(self) -> None:
         if self._session_drawer_visible:
             self._hide_session_drawer()
             return
-        self.open_session_drawer("mode")
+        self._open_session_drawer("mode")
 
     def _show_conversation_setup_popup(self) -> None:
-        self.open_session_drawer("mode")
+        self._open_session_drawer("mode")
 
     def _hide_conversation_setup_popup(self) -> None:
         self._hide_session_drawer()
@@ -2159,15 +2185,15 @@ class AppView(QMainWindow):
                 source_summary or ("Responses will use the active workspace index." if self._rag_toggle.get_value() else "This session will skip retrieval.")
             )
         chip_labels = {
-            "mode": ("Mode", mode),
-            "sources": ("Sources", chat_path),
-            "skill": ("Skill", profile),
-            "model": ("Model", model_summary),
+            "mode": f"Mode · {mode}",
+            "sources": f"Sources · {chat_path}",
+            "skill": f"Skill · {profile}",
+            "model": f"Model · {model_summary}",
         }
-        for key, (label, value) in chip_labels.items():
+        for key, text in chip_labels.items():
             button = self._session_chip_buttons.get(key)
             if button is not None:
-                button.set_content(label, value)
+                button.setText(text)
 
     def _build_brain_page(self) -> QWidget:
         page = QWidget(self)
@@ -2573,7 +2599,7 @@ class AppView(QMainWindow):
                 background-color: {surface};
                 border: 1px solid {border};
                 border-radius: 14px;
-                padding: 8px 12px;
+                padding: 10px 14px;
                 color: {text};
                 font-size: 12px;
                 font-weight: 600;
@@ -2716,24 +2742,65 @@ class AppView(QMainWindow):
         return QIcon(pixmap)
 
     def _build_quick_model_popup(self) -> None:
-        # Compatibility shim: quick model setup now lives in the session drawer.
-        self.open_session_drawer("model")
+        self._quick_model_popup = QFrame(self, Qt.Popup | Qt.FramelessWindowHint)
+        self._quick_model_popup.setObjectName("quickModelPopup")
+        self._quick_model_popup.setMinimumWidth(320)
+
+        popup_layout = QVBoxLayout(self._quick_model_popup)
+        popup_layout.setContentsMargins(UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"], UI_SPACING["m"])
+        popup_layout.setSpacing(UI_SPACING["s"])
+
+        title = QLabel("Switch model", self._quick_model_popup)
+        title.setObjectName("quickModelPopupTitle")
+        popup_layout.addWidget(title)
+
+        hint = QLabel(
+            "Preset choices apply immediately. Custom and local models use the inline apply action.",
+            self._quick_model_popup,
+        )
+        hint.setObjectName("quickModelPopupHint")
+        hint.setWordWrap(True)
+        popup_layout.addWidget(hint)
+
+        popup_layout.addWidget(QLabel("Provider", self._quick_model_popup))
+        self._quick_model_provider_combo = QComboBox(self._quick_model_popup)
+        self._quick_model_provider_combo.addItems(list_llm_providers())
+        self._quick_model_provider_combo.currentTextChanged.connect(self._on_quick_model_provider_changed)
+        popup_layout.addWidget(self._quick_model_provider_combo)
+
+        popup_layout.addWidget(QLabel("Model", self._quick_model_popup))
+        self._quick_model_model_combo = QComboBox(self._quick_model_popup)
+        self._quick_model_model_combo.currentTextChanged.connect(self._on_quick_model_selection_changed)
+        self._quick_model_model_combo.activated.connect(self._on_quick_model_activated)
+        popup_layout.addWidget(self._quick_model_model_combo)
+
+        self._quick_model_custom_row = QWidget(self._quick_model_popup)
+        custom_row_layout = QHBoxLayout(self._quick_model_custom_row)
+        custom_row_layout.setContentsMargins(0, 0, 0, 0)
+        custom_row_layout.setSpacing(UI_SPACING["xs"])
+        self._quick_model_custom_input = QLineEdit(self._quick_model_custom_row)
+        self._quick_model_custom_input.setPlaceholderText("Enter a model id")
+        self._quick_model_custom_input.returnPressed.connect(self._emit_quick_model_change_from_popup)
+        custom_row_layout.addWidget(self._quick_model_custom_input, 1)
+        self._quick_model_apply_button = QPushButton("Apply", self._quick_model_custom_row)
+        self._quick_model_apply_button.clicked.connect(self._emit_quick_model_change_from_popup)
+        custom_row_layout.addWidget(self._quick_model_apply_button)
+        popup_layout.addWidget(self._quick_model_custom_row)
+
+        self._sync_quick_model_popup_from_settings()
 
     def _toggle_quick_model_popup(self) -> None:
         if not self._llm_status_badge.isEnabled():
             return
-        self.open_session_drawer("model")
+        self._open_session_drawer("model")
 
     def _show_quick_model_popup(self) -> None:
-        self.open_session_drawer("model")
+        self._open_session_drawer("model")
 
     def _hide_quick_model_popup(self) -> None:
         self._hide_session_drawer()
 
     def _sync_quick_model_popup_from_settings(self) -> None:
-        self._sync_quick_model_drawer_from_settings()
-
-    def _sync_quick_model_drawer_from_settings(self) -> None:
         if not hasattr(self, "_quick_model_provider_combo"):
             return
         provider = str(self._settings_data.get("llm_provider", "anthropic") or "anthropic").strip() or "anthropic"
@@ -2791,12 +2858,9 @@ class AppView(QMainWindow):
     def _on_quick_model_activated(self, _index: int) -> None:
         if self._quick_model_popup_syncing or self._quick_model_uses_inline_apply():
             return
-        self._emit_quick_model_change_from_drawer(close_drawer=False)
+        self._emit_quick_model_change_from_popup(close_popup=True)
 
     def _emit_quick_model_change_from_popup(self, *, close_popup: bool = True) -> None:
-        self._emit_quick_model_change_from_drawer(close_drawer=close_popup)
-
-    def _emit_quick_model_change_from_drawer(self, *, close_drawer: bool = True) -> None:
         uses_inline = self._quick_model_uses_inline_apply()
         custom_model = self._quick_model_custom_input.text().strip()
         selected_model = self._quick_model_model_combo.currentText().strip()
@@ -2806,7 +2870,7 @@ class AppView(QMainWindow):
             "llm_model_custom": custom_model if uses_inline else "",
         }
         self.quickModelChangeRequested.emit(payload)
-        if close_drawer:
+        if close_popup:
             self._hide_quick_model_popup()
 
     def _on_toggle_changed(self, value: bool) -> None:
@@ -3277,10 +3341,13 @@ class AppView(QMainWindow):
                 feedback_visible=self._chat_feedback_pending,
             )
             latest.update_item(updated)
-        if self._chat_has_completed_response:
+        if not self._chat_has_completed_response:
+            self._reset_inspector_auto_open_state()
+            self._set_inspector_visible(False)
+        elif not self._inspector_visible and not self._user_closed_since_last_completion:
             self._set_inspector_visible(True)
         else:
-            self._set_inspector_visible(False)
+            self._update_workspace_drawers()
 
     def switch_view(self, key: str) -> None:
         target = key if key in {"chat", "brain", "settings", "logs"} else "chat"
@@ -3360,7 +3427,7 @@ class AppView(QMainWindow):
     def _append_timeline_item(self, item: ChatTimelineItem) -> None:
         card = _TimelineMessageCard(item, self._chat_timeline_host)
         card.feedbackRequested.connect(self.feedbackRequested.emit)
-        card.inspectRequested.connect(self._open_inspector_evidence)
+        card.inspectRequested.connect(lambda: self._set_inspector_visible(True, tab_index=0, user_initiated=True))
         self._chat_timeline_layout.insertWidget(max(0, self._chat_timeline_layout.count() - 1), card)
         self._chat_cards.append(card)
 
@@ -3409,6 +3476,8 @@ class AppView(QMainWindow):
 
     def set_chat_transcript(self, messages: list[Any]) -> None:
         self._chat_items = []
+        self._reset_inspector_auto_open_state()
+        self._set_inspector_visible(False)
         self._clear_timeline()
         for message in messages or []:
             role = str(
@@ -4084,6 +4153,8 @@ class AppView(QMainWindow):
         self._populate_tree_from_rows(self._events_tree, normalized, ["timestamp", "stage", "event_type", "summary"])
 
     def render_semantic_regions(self, rows: list[dict[str, Any]]) -> None:
+        if not hasattr(self, "_regions_tree"):
+            return
         normalized = [{"document": row.get("document") or row.get("source") or "", "region": row.get("region") or row.get("header_path") or row.get("label") or "", "summary": row.get("summary") or row.get("snippet") or json.dumps(row, ensure_ascii=False)[:240]} for row in rows or []]
         self._populate_tree_from_rows(self._regions_tree, normalized, ["document", "region", "summary"])
 

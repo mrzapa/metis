@@ -80,6 +80,14 @@ def _sample_source() -> EvidenceSource:
     )
 
 
+def _complete_chat_response(view, process_events, *, feedback_pending: bool = True) -> None:
+    view.append_chat("You: hello\n")
+    view.append_chat("Axiom: here is the evidence\n")
+    view.render_evidence_sources([_sample_source()])
+    view.set_chat_response_ui(True, feedback_pending)
+    process_events()
+
+
 def test_app_view_constructs_with_hidden_drawers_and_prompt_first_empty_state(qapp, process_events) -> None:
     module, view = _show(process_events)
     empty_inner_layout = view._chat_empty_inner.layout()
@@ -416,11 +424,7 @@ def test_app_view_composer_relocation_does_not_steal_focus(qapp, process_events)
 def test_app_view_completed_response_reveals_inspector_and_feedback_on_latest_assistant_card(qapp, process_events) -> None:
     _module, view = _show(process_events)
 
-    view.append_chat("You: hello\n")
-    view.append_chat("Axiom: here is the evidence\n")
-    view.render_evidence_sources([_sample_source()])
-    view.set_chat_response_ui(True, True)
-    process_events()
+    _complete_chat_response(view, process_events, feedback_pending=True)
 
     latest = view._chat_cards[-1]
 
@@ -433,6 +437,150 @@ def test_app_view_completed_response_reveals_inspector_and_feedback_on_latest_as
     assert latest._feedback_up.text() == "Useful"
     assert latest._feedback_down.text() == "Needs work"
     assert view._evidence_sources_tree.topLevelItemCount() == 1
+
+
+def test_app_view_inspector_has_exactly_three_expected_tabs(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+
+    assert [view._evidence_tabs.tabText(index) for index in range(view._evidence_tabs.count())] == [
+        "Evidence",
+        "Process",
+        "Structure",
+    ]
+
+
+def test_app_view_sources_button_opens_evidence_tab_in_inspector(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+
+    _complete_chat_response(view, process_events, feedback_pending=True)
+    latest = view._chat_cards[-1]
+    view._evidence_tabs.setCurrentIndex(2)
+
+    latest._sources_button.click()
+    process_events()
+
+    assert view._inspector_visible is True
+    assert view._workspace_splitter.sizes()[2] > 0
+    assert view._evidence_tabs.tabText(view._evidence_tabs.currentIndex()) == "Evidence"
+
+
+def test_app_view_inspector_renderers_map_to_expected_widgets(qapp, process_events, tmp_path) -> None:
+    _module, view = _show(process_events)
+    grounding_html_path = tmp_path / "grounding.html"
+    grounding_html_path.write_text("<html><body>Grounded</body></html>", encoding="utf-8")
+
+    view.render_evidence_sources([_sample_source()])
+    view.render_events([{"timestamp": "10:00", "stage": "retrieve", "event_type": "search", "detail": "ok"}])
+    view.render_trace_events([{"timestamp": "10:01", "stage": "answer", "event_type": "emit", "payload": {"ok": True}}])
+    view.render_grounding_info("Inline grounding note")
+    view.render_document_outline([{"heading": "Introduction", "path": "1"}], str(grounding_html_path))
+    view.render_semantic_regions([{"document": "doc.txt", "region": "Intro", "summary": "Summary"}])
+    process_events()
+
+    assert not hasattr(view, "_regions_tree")
+    assert view._evidence_sources_tree.topLevelItemCount() == 1
+    assert view._events_tree.topLevelItemCount() == 1
+    assert view._trace_tree.topLevelItemCount() == 1
+    assert view._outline_tree.topLevelItemCount() == 1
+    assert view._grounding_browser.toPlainText() == str(grounding_html_path)
+    assert "href=" in view._grounding_browser.toHtml()
+
+
+def test_app_view_user_closed_inspector_stays_closed_on_later_completions(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+
+    _complete_chat_response(view, process_events, feedback_pending=True)
+
+    view._toggle_inspector()
+    process_events()
+
+    assert view._inspector_visible is False
+    assert view._user_closed_since_last_completion is True
+    assert view._workspace_splitter.sizes()[2] == 0
+
+    view.set_chat_response_ui(True, False)
+    process_events()
+
+    assert view._inspector_visible is False
+    assert view._user_closed_since_last_completion is True
+    assert view._workspace_splitter.sizes()[2] == 0
+    assert view._rail_buttons["inspect"].isEnabled() is True
+
+
+def test_app_view_manual_inspector_open_does_not_reenable_auto_open(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+
+    _complete_chat_response(view, process_events, feedback_pending=True)
+    latest = view._chat_cards[-1]
+
+    view._toggle_inspector()
+    process_events()
+    latest._sources_button.click()
+    process_events()
+
+    assert view._inspector_visible is True
+    assert view._user_closed_since_last_completion is True
+
+    view._toggle_inspector()
+    process_events()
+    view.set_chat_response_ui(True, False)
+    process_events()
+
+    assert view._inspector_visible is False
+    assert view._user_closed_since_last_completion is True
+
+
+def test_app_view_clearing_chat_resets_inspector_auto_open_suppression(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+
+    _complete_chat_response(view, process_events, feedback_pending=True)
+    view._toggle_inspector()
+    process_events()
+
+    assert view._user_closed_since_last_completion is True
+
+    view.clear_chat()
+    process_events()
+
+    assert view._inspector_visible is False
+    assert view._user_closed_since_last_completion is False
+    assert view._rail_buttons["inspect"].isEnabled() is False
+
+    _complete_chat_response(view, process_events, feedback_pending=False)
+
+    assert view._inspector_visible is True
+    assert view._workspace_splitter.sizes()[2] > 0
+
+
+def test_app_view_loading_transcript_resets_inspector_auto_open_suppression(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+
+    _complete_chat_response(view, process_events, feedback_pending=True)
+    view._toggle_inspector()
+    process_events()
+
+    assert view._user_closed_since_last_completion is True
+
+    messages = [
+        {"role": "user", "content": "Where is the evidence?"},
+        SimpleNamespace(
+            role="assistant",
+            content="In the appendix.",
+            run_id="run-42",
+            sources=[_sample_source()],
+        ),
+    ]
+    view.set_chat_transcript(messages)
+    process_events()
+
+    assert view._inspector_visible is False
+    assert view._user_closed_since_last_completion is False
+
+    view.set_chat_response_ui(True, False)
+    process_events()
+
+    assert view._inspector_visible is True
+    assert view._workspace_splitter.sizes()[2] > 0
 
 
 def test_app_view_library_drawer_switches_between_sources_sessions_and_graph(qapp, process_events) -> None:
