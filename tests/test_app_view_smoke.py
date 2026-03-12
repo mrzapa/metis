@@ -47,8 +47,20 @@ def _widget_top_in(widget, ancestor) -> int:
     return widget.mapTo(ancestor, widget.rect().topLeft()).y()
 
 
+def _widget_bottom_in(widget, ancestor) -> int:
+    return _widget_top_in(widget, ancestor) + widget.height()
+
+
 def _widget_center_y_in(widget, ancestor) -> int:
     return widget.mapTo(ancestor, widget.rect().center()).y()
+
+
+def _vertical_gap_in(upper, lower, ancestor) -> int:
+    return _widget_top_in(lower, ancestor) - _widget_bottom_in(upper, ancestor)
+
+
+def _bottom_gap_in(widget, ancestor) -> int:
+    return ancestor.rect().height() - _widget_bottom_in(widget, ancestor)
 
 
 def _settings_tabs(view) -> QTabWidget:
@@ -86,7 +98,7 @@ def test_app_view_constructs_with_hidden_drawers_and_prompt_first_empty_state(qa
     assert view._chat_empty_composer_slot.layout().indexOf(view._composer_shell) == 0
     assert view._chat_empty_value_label.parentWidget() is view._chat_empty_text_column
     assert view._chat_empty_text_column.layout().indexOf(view._chat_empty_value_label) == 0
-    assert empty_inner_layout.count() == 6
+    assert empty_inner_layout.count() == 7
     assert empty_inner_layout.indexOf(view._chat_empty_text_row) < empty_inner_layout.indexOf(
         view._chat_empty_composer_slot
     )
@@ -95,6 +107,10 @@ def test_app_view_constructs_with_hidden_drawers_and_prompt_first_empty_state(qa
     )
     assert len(view._chat_preset_buttons) == len(module._CHAT_PRESETS)
     assert all(isinstance(button, module.ActionCard) for button in view._chat_preset_buttons)
+    assert all(button._icon_widget is not None for button in view._chat_preset_buttons)
+    assert [button._icon_widget._icon_key for button in view._chat_preset_buttons] == [
+        preset["icon_key"] for preset in module._CHAT_PRESETS
+    ]
     assert view._workspace_splitter.sizes()[0] == 0
     assert view._workspace_splitter.sizes()[2] == 0
     assert view._activity_tray.isVisible() is False
@@ -137,11 +153,47 @@ def test_app_view_empty_state_scroll_area_expands_horizontally(qapp, process_eve
         )
         <= module.UI_SPACING["xl"]
     )
-    assert 0 <= _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport())
+    assert _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport()) >= module.UI_SPACING["l"]
     assert (
-        _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport())
-        <= module.UI_SPACING["xl"] + module.UI_SPACING["m"]
+        _vertical_gap_in(
+            view._chat_empty_text_row,
+            view._chat_empty_composer_slot,
+            view._chat_empty_scroll.viewport(),
+        )
+        <= module.UI_SPACING["xxl"] + module.UI_SPACING["xl"]
     )
+    assert (
+        _vertical_gap_in(
+            view._chat_empty_composer_slot,
+            view._chat_preset_grid_host,
+            view._chat_empty_scroll.viewport(),
+        )
+        > 0
+    )
+    assert _bottom_gap_in(view._chat_preset_grid_host, view._chat_empty_scroll.viewport()) >= 0
+
+
+def test_app_view_empty_state_balances_tall_windows_without_dead_space_bands(qapp, process_events) -> None:
+    module, view = _show(process_events)
+
+    view.resize(1480, 1200)
+    for _ in range(6):
+        process_events()
+
+    viewport = view._chat_empty_scroll.viewport()
+    top_gap = _widget_top_in(view._chat_empty_text_row, viewport)
+    intro_gap = _vertical_gap_in(view._chat_empty_text_row, view._chat_empty_composer_slot, viewport)
+    composer_gap = _vertical_gap_in(view._chat_empty_composer_slot, view._chat_preset_grid_host, viewport)
+    bottom_gap = _bottom_gap_in(view._chat_preset_grid_host, viewport)
+
+    assert top_gap >= module.UI_SPACING["xxl"]
+    assert intro_gap <= module.UI_SPACING["xxl"] + module.UI_SPACING["xl"]
+    assert abs(_widget_center_y_in(view._chat_empty_composer_slot, viewport) - viewport.rect().center().y()) <= (
+        module.UI_SPACING["l"]
+    )
+    assert composer_gap > 0
+    assert bottom_gap > 0
+    assert view._chat_empty_scroll.verticalScrollBar().value() == 0
 
 
 def test_app_view_empty_state_text_column_rewraps_when_center_stage_narrows(qapp, process_events) -> None:
@@ -172,7 +224,7 @@ def test_app_view_empty_state_text_column_rewraps_when_center_stage_narrows(qapp
         view._chat_empty_inner.geometry().center().x() - view._chat_empty_body_row.rect().center().x()
     ) <= 2
     assert view._chat_empty_scroll.verticalScrollBar().value() == 0
-    assert _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport()) <= module.UI_SPACING["m"]
+    assert _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport()) <= module.UI_SPACING["xl"]
     assert (
         _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport())
         < _widget_top_in(view._chat_empty_composer_slot, view._chat_empty_scroll.viewport())
@@ -182,6 +234,14 @@ def test_app_view_empty_state_text_column_rewraps_when_center_stage_narrows(qapp
         _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport())
         + view._chat_empty_text_row.height()
         <= _widget_top_in(view._chat_empty_composer_slot, view._chat_empty_scroll.viewport())
+    )
+    assert (
+        _vertical_gap_in(
+            view._chat_empty_composer_slot,
+            view._chat_preset_grid_host,
+            view._chat_empty_scroll.viewport(),
+        )
+        >= 0
     )
     assert (
         _widget_top_in(view._chat_empty_composer_slot, view._chat_empty_scroll.viewport())
@@ -208,7 +268,9 @@ def test_app_view_starter_cards_retheme_without_breaking_empty_state_layout(qapp
     _module, view = _show(process_events)
     first_card = view._chat_preset_buttons[0]
     dark_surface_style = first_card._surface.styleSheet()
-    dark_affordance_style = first_card._affordance_label.styleSheet()
+    assert first_card._icon_widget is not None
+    dark_icon_color = first_card._icon_widget._icon_color
+    dark_badge_background = first_card._icon_widget._badge_background_color
 
     view.apply_theme("light")
     for _ in range(4):
@@ -216,7 +278,8 @@ def test_app_view_starter_cards_retheme_without_breaking_empty_state_layout(qapp
 
     assert view._theme_name == "light"
     assert first_card._surface.styleSheet() != dark_surface_style
-    assert first_card._affordance_label.styleSheet() != dark_affordance_style
+    assert first_card._icon_widget._icon_color != dark_icon_color
+    assert first_card._icon_widget._badge_background_color != dark_badge_background
     assert view._chat_state_stack.currentWidget() is view._chat_empty_state
     assert view._chat_empty_inner.width() <= 880
     assert len(view._chat_preset_buttons) > 0

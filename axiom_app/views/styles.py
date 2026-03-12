@@ -23,6 +23,16 @@ STYLE_CONFIG: dict = {
     "radius": 18,
     "radius_sm": 10,
     "radius_lg": 28,
+    "action_card": {
+        "min_height": 72,
+        "radius": 18,
+        "padding_x": 16,
+        "padding_y": 14,
+        "title_row_spacing": 10,
+        "section_spacing": 4,
+        "icon_size": 16,
+        "icon_container_size": 32,
+    },
     "padding": {"sm": 12, "md": 20, "lg": 32},
     "type_scale": {
         "h1": {"size": 34, "weight": "bold"},
