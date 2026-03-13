@@ -10,6 +10,7 @@ from axiom_app.engine.querying import (
     query_direct,
     query_rag,
 )
+from axiom_app.engine.streaming import stream_rag_answer
 
 __all__ = [
     "DirectQueryRequest",
@@ -23,4 +24,5 @@ __all__ = [
     "list_indexes",
     "query_direct",
     "query_rag",
+    "stream_rag_answer",
 ]
