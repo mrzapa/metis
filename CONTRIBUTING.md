@@ -28,6 +28,18 @@ python -m pytest
 python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
 ```
 
+## Developer check script
+
+Use the helper scripts to run linting, the test suite, and a quick settings JSON validation from the repo root:
+
+```bash
+./scripts/dev_check.sh
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev_check.ps1
+```
+
 ## Pull requests
 
 - Keep PRs focused and small when possible.
