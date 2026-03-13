@@ -650,6 +650,7 @@ class AppView(QMainWindow):
         self._empty_state_relayout_rounds_remaining = 0
         self._library_visible = False
         self._inspector_visible = False
+        self._user_closed_since_last_completion = False
         self._activity_visible = False
         self._session_drawer_visible = False
         self._empty_state_relayout_timer = QTimer(self)
@@ -1285,7 +1286,7 @@ class AppView(QMainWindow):
         self._inspector_pin_button.clicked.connect(self._update_workspace_drawers)
         header.addWidget(self._inspector_pin_button)
         close = QPushButton("Close", self._inspector_drawer)
-        close.clicked.connect(lambda: self._set_inspector_visible(False))
+        close.clicked.connect(lambda: self._set_inspector_visible(False, user_initiated=True))
         header.addWidget(close)
         root.addLayout(header)
 
@@ -1724,16 +1725,28 @@ class AppView(QMainWindow):
         self._library_visible = bool(visible)
         self._update_workspace_drawers()
 
-    def _set_inspector_visible(self, visible: bool, *, tab_index: int | None = None) -> None:
+    def _reset_inspector_auto_open_state(self) -> None:
+        self._user_closed_since_last_completion = False
+
+    def _set_inspector_visible(
+        self,
+        visible: bool,
+        *,
+        tab_index: int | None = None,
+        user_initiated: bool = False,
+    ) -> None:
         if tab_index is not None and hasattr(self, "_evidence_tabs"):
             self._evidence_tabs.setCurrentIndex(tab_index)
-        self._inspector_visible = bool(visible)
+        visible = bool(visible)
+        if not visible and user_initiated and self._chat_has_completed_response:
+            self._user_closed_since_last_completion = True
+        self._inspector_visible = visible
         self._update_workspace_drawers()
 
     def _toggle_inspector(self) -> None:
         if not self._chat_has_completed_response:
             return
-        self._set_inspector_visible(not self._inspector_visible)
+        self._set_inspector_visible(not self._inspector_visible, user_initiated=True)
 
     def _set_activity_visible(self, visible: bool) -> None:
         self._activity_visible = bool(visible)
@@ -3163,10 +3176,13 @@ class AppView(QMainWindow):
                 feedback_visible=self._chat_feedback_pending,
             )
             latest.update_item(updated)
-        if self._chat_has_completed_response:
+        if not self._chat_has_completed_response:
+            self._reset_inspector_auto_open_state()
+            self._set_inspector_visible(False)
+        elif not self._inspector_visible and not self._user_closed_since_last_completion:
             self._set_inspector_visible(True)
         else:
-            self._set_inspector_visible(False)
+            self._update_workspace_drawers()
 
     def switch_view(self, key: str) -> None:
         target = key if key in {"chat", "brain", "settings", "logs"} else "chat"
@@ -3246,7 +3262,7 @@ class AppView(QMainWindow):
     def _append_timeline_item(self, item: ChatTimelineItem) -> None:
         card = _TimelineMessageCard(item, self._chat_timeline_host)
         card.feedbackRequested.connect(self.feedbackRequested.emit)
-        card.inspectRequested.connect(lambda: self._set_inspector_visible(True, tab_index=0))
+        card.inspectRequested.connect(lambda: self._set_inspector_visible(True, tab_index=0, user_initiated=True))
         self._chat_timeline_layout.insertWidget(max(0, self._chat_timeline_layout.count() - 1), card)
         self._chat_cards.append(card)
 
@@ -3295,6 +3311,8 @@ class AppView(QMainWindow):
 
     def set_chat_transcript(self, messages: list[Any]) -> None:
         self._chat_items = []
+        self._reset_inspector_auto_open_state()
+        self._set_inspector_visible(False)
         self._clear_timeline()
         for message in messages or []:
             role = str(

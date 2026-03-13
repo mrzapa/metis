@@ -60,6 +60,14 @@ def _sample_source() -> EvidenceSource:
     )
 
 
+def _complete_chat_response(view, process_events, *, feedback_pending: bool = True) -> None:
+    view.append_chat("You: hello\n")
+    view.append_chat("Axiom: here is the evidence\n")
+    view.render_evidence_sources([_sample_source()])
+    view.set_chat_response_ui(True, feedback_pending)
+    process_events()
+
+
 def test_app_view_constructs_with_hidden_drawers_and_prompt_first_empty_state(qapp, process_events) -> None:
     _module, view = _show(process_events)
 
@@ -164,11 +172,7 @@ def test_app_view_switches_between_empty_state_and_timeline_cards(qapp, process_
 def test_app_view_completed_response_reveals_inspector_and_feedback_on_latest_assistant_card(qapp, process_events) -> None:
     _module, view = _show(process_events)
 
-    view.append_chat("You: hello\n")
-    view.append_chat("Axiom: here is the evidence\n")
-    view.render_evidence_sources([_sample_source()])
-    view.set_chat_response_ui(True, True)
-    process_events()
+    _complete_chat_response(view, process_events, feedback_pending=True)
 
     latest = view._chat_cards[-1]
 
@@ -181,6 +185,103 @@ def test_app_view_completed_response_reveals_inspector_and_feedback_on_latest_as
     assert latest._feedback_up.text() == "Useful"
     assert latest._feedback_down.text() == "Needs work"
     assert view._evidence_sources_tree.topLevelItemCount() == 1
+
+
+def test_app_view_user_closed_inspector_stays_closed_on_later_completions(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+
+    _complete_chat_response(view, process_events, feedback_pending=True)
+
+    view._toggle_inspector()
+    process_events()
+
+    assert view._inspector_visible is False
+    assert view._user_closed_since_last_completion is True
+    assert view._workspace_splitter.sizes()[2] == 0
+
+    view.set_chat_response_ui(True, False)
+    process_events()
+
+    assert view._inspector_visible is False
+    assert view._user_closed_since_last_completion is True
+    assert view._workspace_splitter.sizes()[2] == 0
+    assert view._rail_buttons["inspect"].isEnabled() is True
+
+
+def test_app_view_manual_inspector_open_does_not_reenable_auto_open(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+
+    _complete_chat_response(view, process_events, feedback_pending=True)
+    latest = view._chat_cards[-1]
+
+    view._toggle_inspector()
+    process_events()
+    latest._sources_button.click()
+    process_events()
+
+    assert view._inspector_visible is True
+    assert view._user_closed_since_last_completion is True
+
+    view._toggle_inspector()
+    process_events()
+    view.set_chat_response_ui(True, False)
+    process_events()
+
+    assert view._inspector_visible is False
+    assert view._user_closed_since_last_completion is True
+
+
+def test_app_view_clearing_chat_resets_inspector_auto_open_suppression(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+
+    _complete_chat_response(view, process_events, feedback_pending=True)
+    view._toggle_inspector()
+    process_events()
+
+    assert view._user_closed_since_last_completion is True
+
+    view.clear_chat()
+    process_events()
+
+    assert view._inspector_visible is False
+    assert view._user_closed_since_last_completion is False
+    assert view._rail_buttons["inspect"].isEnabled() is False
+
+    _complete_chat_response(view, process_events, feedback_pending=False)
+
+    assert view._inspector_visible is True
+    assert view._workspace_splitter.sizes()[2] > 0
+
+
+def test_app_view_loading_transcript_resets_inspector_auto_open_suppression(qapp, process_events) -> None:
+    _module, view = _show(process_events)
+
+    _complete_chat_response(view, process_events, feedback_pending=True)
+    view._toggle_inspector()
+    process_events()
+
+    assert view._user_closed_since_last_completion is True
+
+    messages = [
+        {"role": "user", "content": "Where is the evidence?"},
+        SimpleNamespace(
+            role="assistant",
+            content="In the appendix.",
+            run_id="run-42",
+            sources=[_sample_source()],
+        ),
+    ]
+    view.set_chat_transcript(messages)
+    process_events()
+
+    assert view._inspector_visible is False
+    assert view._user_closed_since_last_completion is False
+
+    view.set_chat_response_ui(True, False)
+    process_events()
+
+    assert view._inspector_visible is True
+    assert view._workspace_splitter.sizes()[2] > 0
 
 
 def test_app_view_library_drawer_switches_between_sources_sessions_and_graph(qapp, process_events) -> None:
