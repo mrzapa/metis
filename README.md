@@ -259,6 +259,18 @@ agentic_rag_gui.py   # Legacy Tkinter app (kept for compatibility)
 
 ---
 
+## Roadmap: Next big leap
+
+> Planned/experimental: this is a possible next-step architecture, not the current default runtime.
+
+- Add a local API server layer that reuses `axiom_app/services` for indexing, retrieval, sessions, and response pipelines.
+- Add a web UI in a React meta-framework on top of that local API layer.
+- Package the web UI and local API together inside a local desktop container for desktop distribution.
+
+If pursued, this would complement the current PySide6 app and CLI entrypoints rather than replace them immediately.
+
+---
+
 ## 🤝 Contributing
 
 Contributions are welcome! Check out [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, coding standards, and how to submit a pull request.
