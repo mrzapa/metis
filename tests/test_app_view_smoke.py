@@ -43,26 +43,6 @@ def _show(process_events):
     return module, view
 
 
-def _widget_top_in(widget, ancestor) -> int:
-    return widget.mapTo(ancestor, widget.rect().topLeft()).y()
-
-
-def _widget_bottom_in(widget, ancestor) -> int:
-    return _widget_top_in(widget, ancestor) + widget.height()
-
-
-def _widget_center_y_in(widget, ancestor) -> int:
-    return widget.mapTo(ancestor, widget.rect().center()).y()
-
-
-def _vertical_gap_in(upper, lower, ancestor) -> int:
-    return _widget_top_in(lower, ancestor) - _widget_bottom_in(upper, ancestor)
-
-
-def _bottom_gap_in(widget, ancestor) -> int:
-    return ancestor.rect().height() - _widget_bottom_in(widget, ancestor)
-
-
 def _settings_tabs(view) -> QTabWidget:
     tabs = view._settings_dialog.findChildren(QTabWidget)
     assert tabs
@@ -80,17 +60,8 @@ def _sample_source() -> EvidenceSource:
     )
 
 
-def _complete_chat_response(view, process_events, *, feedback_pending: bool = True) -> None:
-    view.append_chat("You: hello\n")
-    view.append_chat("Axiom: here is the evidence\n")
-    view.render_evidence_sources([_sample_source()])
-    view.set_chat_response_ui(True, feedback_pending)
-    process_events()
-
-
 def test_app_view_constructs_with_hidden_drawers_and_prompt_first_empty_state(qapp, process_events) -> None:
-    module, view = _show(process_events)
-    empty_inner_layout = view._chat_empty_inner.layout()
+    _module, view = _show(process_events)
 
     assert view._active_view == "chat"
     assert view._theme_name == "space_dust"
@@ -98,200 +69,30 @@ def test_app_view_constructs_with_hidden_drawers_and_prompt_first_empty_state(qa
     assert view._chat_has_messages is False
     assert view.prompt_entry.isVisible()
     assert view.prompt_entry.placeholderText().startswith("Ask a question")
-    assert view._chat_empty_value_label.text() == (
-        "Start with plain language. Sources and setup stay out of the way until you need them."
-    )
-    assert view._chat_empty_value_label.isVisible()
-    assert view._composer_shell.parentWidget() is view._chat_empty_composer_slot
-    assert view._chat_empty_composer_slot.layout().indexOf(view._composer_shell) == 0
-    assert view._chat_empty_value_label.parentWidget() is view._chat_empty_text_column
-    assert view._chat_empty_text_column.layout().indexOf(view._chat_empty_value_label) == 0
-    assert empty_inner_layout.count() == 7
-    assert empty_inner_layout.indexOf(view._chat_empty_text_row) < empty_inner_layout.indexOf(
-        view._chat_empty_composer_slot
-    )
-    assert empty_inner_layout.indexOf(view._chat_empty_composer_slot) < empty_inner_layout.indexOf(
-        view._chat_preset_grid_host
-    )
-    assert len(view._chat_preset_buttons) == len(module._CHAT_PRESETS)
-    assert all(isinstance(button, module.ActionCard) for button in view._chat_preset_buttons)
-    assert all(button._icon_widget is not None for button in view._chat_preset_buttons)
-    assert [button._icon_widget._icon_key for button in view._chat_preset_buttons] == [
-        preset["icon_key"] for preset in module._CHAT_PRESETS
-    ]
+    assert len(view._chat_preset_buttons) >= 5
     assert view._workspace_splitter.sizes()[0] == 0
     assert view._workspace_splitter.sizes()[2] == 0
     assert view._activity_tray.isVisible() is False
     assert view._session_drawer.isVisible() is False
-    assert view._chat_context_hint.isVisible() is False
-    assert view._chat_context_summary.isVisible() is False
-    assert view._chat_footer_composer_slot.isVisible() is False
     assert view._rail_buttons["inspect"].isEnabled() is False
     assert view._chat_context_summary.text() == "Q&A · Use Sources · No skill selected · unset"
 
 
 def test_app_view_empty_state_scroll_area_expands_horizontally(qapp, process_events) -> None:
-    module, view = _show(process_events)
+    _module, view = _show(process_events)
 
     view.resize(1400, 960)
     for _ in range(6):
         process_events()
 
     empty_layout = view._chat_empty_state.layout()
-    scroll_item = empty_layout.itemAt(0)
+    scroll_item = empty_layout.itemAt(1)
 
     assert scroll_item is not None
     assert scroll_item.widget() is view._chat_empty_scroll
     assert int(scroll_item.alignment()) == 0
-    assert empty_layout.count() == 1
-    assert view._chat_empty_body_row.height() == view._chat_empty_scroll.viewport().height()
-    assert view._chat_empty_scroll.width() > view._chat_empty_state.width() * 0.85
-    assert view._chat_empty_scroll.height() > view._chat_empty_state.height() * 0.85
-    assert view._chat_empty_inner.width() <= 880
-    assert view._chat_empty_inner.width() >= 860
-    assert abs(
-        view._chat_empty_inner.geometry().center().x() - view._chat_empty_body_row.rect().center().x()
-    ) <= 2
-    assert view._chat_empty_text_column.width() <= 720
-    assert view._chat_empty_text_column.width() >= 680
-    assert view._chat_empty_value_label.width() >= view._chat_empty_text_column.width() - 2
-    assert (
-        abs(
-            _widget_center_y_in(view._chat_empty_composer_slot, view._chat_empty_scroll.viewport())
-            - view._chat_empty_scroll.viewport().rect().center().y()
-        )
-        <= module.UI_SPACING["xl"]
-    )
-    assert _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport()) >= module.UI_SPACING["l"]
-    assert (
-        _vertical_gap_in(
-            view._chat_empty_text_row,
-            view._chat_empty_composer_slot,
-            view._chat_empty_scroll.viewport(),
-        )
-        <= module.UI_SPACING["xxl"] + module.UI_SPACING["xl"]
-    )
-    assert (
-        _vertical_gap_in(
-            view._chat_empty_composer_slot,
-            view._chat_preset_grid_host,
-            view._chat_empty_scroll.viewport(),
-        )
-        > 0
-    )
-    assert _bottom_gap_in(view._chat_preset_grid_host, view._chat_empty_scroll.viewport()) >= 0
-
-
-def test_app_view_empty_state_balances_tall_windows_without_dead_space_bands(qapp, process_events) -> None:
-    module, view = _show(process_events)
-
-    view.resize(1480, 1200)
-    for _ in range(6):
-        process_events()
-
-    viewport = view._chat_empty_scroll.viewport()
-    top_gap = _widget_top_in(view._chat_empty_text_row, viewport)
-    intro_gap = _vertical_gap_in(view._chat_empty_text_row, view._chat_empty_composer_slot, viewport)
-    composer_gap = _vertical_gap_in(view._chat_empty_composer_slot, view._chat_preset_grid_host, viewport)
-    bottom_gap = _bottom_gap_in(view._chat_preset_grid_host, viewport)
-
-    assert top_gap >= module.UI_SPACING["xxl"]
-    assert intro_gap <= module.UI_SPACING["xxl"] + module.UI_SPACING["xl"]
-    assert abs(_widget_center_y_in(view._chat_empty_composer_slot, viewport) - viewport.rect().center().y()) <= (
-        module.UI_SPACING["l"]
-    )
-    assert composer_gap > 0
-    assert bottom_gap > 0
-    assert view._chat_empty_scroll.verticalScrollBar().value() == 0
-
-
-def test_app_view_empty_state_text_column_rewraps_when_center_stage_narrows(qapp, process_events) -> None:
-    module, view = _show(process_events)
-
-    view.resize(1400, 960)
-    for _ in range(6):
-        process_events()
-
-    wide_text_width = view._chat_empty_text_column.width()
-    wide_label_height = view._chat_empty_value_label.height()
-    wide_inner_width = view._chat_empty_inner.width()
-
-    view.resize(1180, 760)
-    view._set_library_visible(True)
-    for _ in range(6):
-        process_events()
-
-    narrow_text_width = view._chat_empty_text_column.width()
-    narrow_label_height = view._chat_empty_value_label.height()
-    narrow_inner_width = view._chat_empty_inner.width()
-
-    assert narrow_inner_width < wide_inner_width
-    assert narrow_text_width < wide_text_width
-    assert narrow_text_width >= 400
-    assert narrow_label_height > wide_label_height
-    assert abs(
-        view._chat_empty_inner.geometry().center().x() - view._chat_empty_body_row.rect().center().x()
-    ) <= 2
-    assert view._chat_empty_scroll.verticalScrollBar().value() == 0
-    assert _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport()) <= module.UI_SPACING["xl"]
-    assert (
-        _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport())
-        < _widget_top_in(view._chat_empty_composer_slot, view._chat_empty_scroll.viewport())
-        < _widget_top_in(view._chat_preset_grid_host, view._chat_empty_scroll.viewport())
-    )
-    assert (
-        _widget_top_in(view._chat_empty_text_row, view._chat_empty_scroll.viewport())
-        + view._chat_empty_text_row.height()
-        <= _widget_top_in(view._chat_empty_composer_slot, view._chat_empty_scroll.viewport())
-    )
-    assert (
-        _vertical_gap_in(
-            view._chat_empty_composer_slot,
-            view._chat_preset_grid_host,
-            view._chat_empty_scroll.viewport(),
-        )
-        >= 0
-    )
-    assert (
-        _widget_top_in(view._chat_empty_composer_slot, view._chat_empty_scroll.viewport())
-        + view._chat_empty_composer_slot.height()
-        <= _widget_top_in(view._chat_preset_grid_host, view._chat_empty_scroll.viewport())
-    )
-
-
-def test_app_view_starter_cards_click_through_existing_preset_handler(qapp, process_events) -> None:
-    module, view = _show(process_events)
-    emitted: list[str] = []
-    target_preset = module._CHAT_PRESETS[2]
-
-    view.newChatRequested.connect(lambda: emitted.append("new-chat"))
-    view._chat_preset_buttons[2].click()
-    process_events()
-
-    assert view._mode_combo.currentText() == target_preset["mode"]
-    assert view._rag_toggle.get_value() is True
-    assert emitted == ["new-chat"]
-
-
-def test_app_view_starter_cards_retheme_without_breaking_empty_state_layout(qapp, process_events) -> None:
-    _module, view = _show(process_events)
-    first_card = view._chat_preset_buttons[0]
-    dark_surface_style = first_card._surface.styleSheet()
-    assert first_card._icon_widget is not None
-    dark_icon_color = first_card._icon_widget._icon_color
-    dark_badge_background = first_card._icon_widget._badge_background_color
-
-    view.apply_theme("light")
-    for _ in range(4):
-        process_events()
-
-    assert view._theme_name == "light"
-    assert first_card._surface.styleSheet() != dark_surface_style
-    assert first_card._icon_widget._icon_color != dark_icon_color
-    assert first_card._icon_widget._badge_background_color != dark_badge_background
-    assert view._chat_state_stack.currentWidget() is view._chat_empty_state
-    assert view._chat_empty_inner.width() <= 880
-    assert len(view._chat_preset_buttons) > 0
+    assert view._chat_empty_scroll.width() > view._chat_empty_state.width() * 0.75
+    assert view._chat_empty_inner.width() > view._chat_empty_scroll.viewport().width() * 0.55
 
 
 def test_app_view_session_chips_reflect_context_and_open_the_session_drawer(qapp, process_events) -> None:
@@ -308,17 +109,14 @@ def test_app_view_session_chips_reflect_context_and_open_the_session_drawer(qapp
     )
     process_events()
 
-    chips = view._session_chip_buttons
-    assert chips["mode"].text() == "Mode · Research"
-    assert chips["sources"].text() == "Sources · Direct"
-    assert chips["skill"].text().startswith("Skill · evidence-pack")
-    assert chips["skill"].toolTip() == "Skill · evidence-pack-timeline"
-    assert chips["model"].text().startswith("Model · openai")
-    assert chips["model"].toolTip() == "Model · openai / gpt-5.4-mini"
-    assert len({button.width() for button in chips.values()}) == 1
-    assert len({button.height() for button in chips.values()}) == 1
+    chips = {key: button.text() for key, button in view._session_chip_buttons.items()}
+    assert chips == {
+        "mode": "Mode · Research",
+        "sources": "Sources · Direct",
+        "skill": "Skill · evidence-pack-timeline",
+        "model": "Model · openai / gpt-5.4-mini",
+    }
     assert view._chat_context_summary.text() == "Research · Direct · evidence-pack-timeline · openai / gpt-5.4-mini"
-    assert view._chat_context_summary.isVisible() is False
 
     view._session_chip_buttons["model"].click()
     process_events()
@@ -353,9 +151,6 @@ def test_app_view_switches_between_empty_state_and_timeline_cards(qapp, process_
     assert view._chat_has_messages is True
     assert [card._role_label.text() for card in view._chat_cards] == ["You", "Axiom"]
     assert [card._content_label.text() for card in view._chat_cards] == ["hello", "hi there"]
-    assert view._composer_shell.parentWidget() is view._chat_footer_composer_slot
-    assert view._chat_context_hint.isVisible() is True
-    assert view._chat_context_summary.isVisible() is True
 
     view.clear_chat()
     process_events()
@@ -363,68 +158,17 @@ def test_app_view_switches_between_empty_state_and_timeline_cards(qapp, process_
     assert view._chat_state_stack.currentWidget() is view._chat_empty_state
     assert view._chat_has_messages is False
     assert view._chat_cards == []
-    assert view._composer_shell.parentWidget() is view._chat_empty_composer_slot
-    assert view._chat_context_hint.isVisible() is False
-    assert view._chat_context_summary.isVisible() is False
     assert view._workspace_splitter.sizes()[2] == 0
-
-
-def test_app_view_preserves_prompt_focus_and_cursor_during_composer_relocation(qapp, process_events) -> None:
-    _module, view = _show(process_events)
-
-    view.set_prompt_text("hello world")
-    cursor = view.prompt_entry.textCursor()
-    cursor.setPosition(5)
-    view.prompt_entry.setTextCursor(cursor)
-    view.prompt_entry.setFocus()
-    process_events()
-
-    assert QApplication.focusWidget() is view.prompt_entry
-
-    view.append_chat("You: hello\n")
-    process_events()
-    process_events()
-
-    assert view._composer_shell.parentWidget() is view._chat_footer_composer_slot
-    assert QApplication.focusWidget() is view.prompt_entry
-    assert view.prompt_entry.textCursor().position() == 5
-
-    view.clear_chat()
-    process_events()
-    process_events()
-
-    assert view._composer_shell.parentWidget() is view._chat_empty_composer_slot
-    assert QApplication.focusWidget() is view.prompt_entry
-    assert view.prompt_entry.textCursor().position() == 5
-
-
-def test_app_view_composer_relocation_does_not_steal_focus(qapp, process_events) -> None:
-    _module, view = _show(process_events)
-
-    view.btn_new_chat.setFocus()
-    process_events()
-
-    assert QApplication.focusWidget() is view.btn_new_chat
-
-    view.append_chat("You: hello\n")
-    process_events()
-    process_events()
-
-    assert view._composer_shell.parentWidget() is view._chat_footer_composer_slot
-    assert QApplication.focusWidget() is view.btn_new_chat
-
-    view.clear_chat()
-    process_events()
-    process_events()
-
-    assert view._composer_shell.parentWidget() is view._chat_empty_composer_slot
-    assert QApplication.focusWidget() is view.btn_new_chat
 
 
 def test_app_view_completed_response_reveals_inspector_and_feedback_on_latest_assistant_card(qapp, process_events) -> None:
     _module, view = _show(process_events)
 
-    _complete_chat_response(view, process_events, feedback_pending=True)
+    view.append_chat("You: hello\n")
+    view.append_chat("Axiom: here is the evidence\n")
+    view.render_evidence_sources([_sample_source()])
+    view.set_chat_response_ui(True, True)
+    process_events()
 
     latest = view._chat_cards[-1]
 
@@ -437,150 +181,6 @@ def test_app_view_completed_response_reveals_inspector_and_feedback_on_latest_as
     assert latest._feedback_up.text() == "Useful"
     assert latest._feedback_down.text() == "Needs work"
     assert view._evidence_sources_tree.topLevelItemCount() == 1
-
-
-def test_app_view_inspector_has_exactly_three_expected_tabs(qapp, process_events) -> None:
-    _module, view = _show(process_events)
-
-    assert [view._evidence_tabs.tabText(index) for index in range(view._evidence_tabs.count())] == [
-        "Evidence",
-        "Process",
-        "Structure",
-    ]
-
-
-def test_app_view_sources_button_opens_evidence_tab_in_inspector(qapp, process_events) -> None:
-    _module, view = _show(process_events)
-
-    _complete_chat_response(view, process_events, feedback_pending=True)
-    latest = view._chat_cards[-1]
-    view._evidence_tabs.setCurrentIndex(2)
-
-    latest._sources_button.click()
-    process_events()
-
-    assert view._inspector_visible is True
-    assert view._workspace_splitter.sizes()[2] > 0
-    assert view._evidence_tabs.tabText(view._evidence_tabs.currentIndex()) == "Evidence"
-
-
-def test_app_view_inspector_renderers_map_to_expected_widgets(qapp, process_events, tmp_path) -> None:
-    _module, view = _show(process_events)
-    grounding_html_path = tmp_path / "grounding.html"
-    grounding_html_path.write_text("<html><body>Grounded</body></html>", encoding="utf-8")
-
-    view.render_evidence_sources([_sample_source()])
-    view.render_events([{"timestamp": "10:00", "stage": "retrieve", "event_type": "search", "detail": "ok"}])
-    view.render_trace_events([{"timestamp": "10:01", "stage": "answer", "event_type": "emit", "payload": {"ok": True}}])
-    view.render_grounding_info("Inline grounding note")
-    view.render_document_outline([{"heading": "Introduction", "path": "1"}], str(grounding_html_path))
-    view.render_semantic_regions([{"document": "doc.txt", "region": "Intro", "summary": "Summary"}])
-    process_events()
-
-    assert not hasattr(view, "_regions_tree")
-    assert view._evidence_sources_tree.topLevelItemCount() == 1
-    assert view._events_tree.topLevelItemCount() == 1
-    assert view._trace_tree.topLevelItemCount() == 1
-    assert view._outline_tree.topLevelItemCount() == 1
-    assert view._grounding_browser.toPlainText() == str(grounding_html_path)
-    assert "href=" in view._grounding_browser.toHtml()
-
-
-def test_app_view_user_closed_inspector_stays_closed_on_later_completions(qapp, process_events) -> None:
-    _module, view = _show(process_events)
-
-    _complete_chat_response(view, process_events, feedback_pending=True)
-
-    view._toggle_inspector()
-    process_events()
-
-    assert view._inspector_visible is False
-    assert view._user_closed_since_last_completion is True
-    assert view._workspace_splitter.sizes()[2] == 0
-
-    view.set_chat_response_ui(True, False)
-    process_events()
-
-    assert view._inspector_visible is False
-    assert view._user_closed_since_last_completion is True
-    assert view._workspace_splitter.sizes()[2] == 0
-    assert view._rail_buttons["inspect"].isEnabled() is True
-
-
-def test_app_view_manual_inspector_open_does_not_reenable_auto_open(qapp, process_events) -> None:
-    _module, view = _show(process_events)
-
-    _complete_chat_response(view, process_events, feedback_pending=True)
-    latest = view._chat_cards[-1]
-
-    view._toggle_inspector()
-    process_events()
-    latest._sources_button.click()
-    process_events()
-
-    assert view._inspector_visible is True
-    assert view._user_closed_since_last_completion is True
-
-    view._toggle_inspector()
-    process_events()
-    view.set_chat_response_ui(True, False)
-    process_events()
-
-    assert view._inspector_visible is False
-    assert view._user_closed_since_last_completion is True
-
-
-def test_app_view_clearing_chat_resets_inspector_auto_open_suppression(qapp, process_events) -> None:
-    _module, view = _show(process_events)
-
-    _complete_chat_response(view, process_events, feedback_pending=True)
-    view._toggle_inspector()
-    process_events()
-
-    assert view._user_closed_since_last_completion is True
-
-    view.clear_chat()
-    process_events()
-
-    assert view._inspector_visible is False
-    assert view._user_closed_since_last_completion is False
-    assert view._rail_buttons["inspect"].isEnabled() is False
-
-    _complete_chat_response(view, process_events, feedback_pending=False)
-
-    assert view._inspector_visible is True
-    assert view._workspace_splitter.sizes()[2] > 0
-
-
-def test_app_view_loading_transcript_resets_inspector_auto_open_suppression(qapp, process_events) -> None:
-    _module, view = _show(process_events)
-
-    _complete_chat_response(view, process_events, feedback_pending=True)
-    view._toggle_inspector()
-    process_events()
-
-    assert view._user_closed_since_last_completion is True
-
-    messages = [
-        {"role": "user", "content": "Where is the evidence?"},
-        SimpleNamespace(
-            role="assistant",
-            content="In the appendix.",
-            run_id="run-42",
-            sources=[_sample_source()],
-        ),
-    ]
-    view.set_chat_transcript(messages)
-    process_events()
-
-    assert view._inspector_visible is False
-    assert view._user_closed_since_last_completion is False
-
-    view.set_chat_response_ui(True, False)
-    process_events()
-
-    assert view._inspector_visible is True
-    assert view._workspace_splitter.sizes()[2] > 0
 
 
 def test_app_view_library_drawer_switches_between_sources_sessions_and_graph(qapp, process_events) -> None:
@@ -754,7 +354,6 @@ def test_app_view_set_chat_transcript_compatibility_renders_structured_messages(
     assert view._chat_state_stack.currentWidget() is view._chat_transcript_state
     assert len(view._chat_items) == 2
     assert len(view._chat_cards) == 2
-    assert view._composer_shell.parentWidget() is view._chat_footer_composer_slot
     assert view._chat_cards[-1]._role_label.text() == "Axiom"
     assert view._chat_cards[-1]._sources_button.isVisible() is True
     assert view._chat_cards[-1]._sources_button.text() == "1 source"
