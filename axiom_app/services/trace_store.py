@@ -35,6 +35,25 @@ class TraceStore:
         event = TraceEvent.create(**kwargs)
         return self.append(event)
 
+    @staticmethod
+    def _serialize_run_event_row(row: dict[str, Any], fallback_run_id: str) -> dict[str, Any]:
+        payload = row.get("payload")
+        citations = row.get("citations_chosen")
+        if citations is None:
+            citations_chosen: list[str] | None = None
+        elif isinstance(citations, (list, tuple, set)):
+            citations_chosen = [str(item) for item in citations]
+        else:
+            citations_chosen = [str(citations)]
+        return {
+            "run_id": str(row.get("run_id") or fallback_run_id or ""),
+            "timestamp": str(row.get("timestamp") or ""),
+            "stage": str(row.get("stage") or ""),
+            "event_type": str(row.get("event_type") or ""),
+            "payload": dict(payload) if isinstance(payload, dict) else {},
+            "citations_chosen": citations_chosen,
+        }
+
     def read_run(self, run_id: str) -> list[dict[str, Any]]:
         path = self.runs_dir / f"{run_id}.jsonl"
         if not path.exists():
@@ -51,6 +70,13 @@ class TraceStore:
             if isinstance(payload, dict):
                 rows.append(payload)
         return rows
+
+    def read_run_events(self, run_id: str) -> list[dict[str, Any]]:
+        normalized_run_id = str(run_id or "").strip()
+        return [
+            self._serialize_run_event_row(row, normalized_run_id)
+            for row in self.read_run(normalized_run_id)
+        ]
 
     def read_runs(self, run_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
         result: dict[str, list[dict[str, Any]]] = {}
