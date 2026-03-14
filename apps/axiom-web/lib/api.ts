@@ -94,12 +94,25 @@ export interface RagStreamErrorEvent {
   message: string;
 }
 
+export interface ActionRequiredAction {
+  kind: string;
+  summary: string;
+  payload: Record<string, unknown>;
+}
+
+export interface RagStreamActionRequiredEvent {
+  type: "action_required";
+  run_id: string;
+  action: ActionRequiredAction;
+}
+
 export type RagStreamEvent =
   | RagStreamRunStartedEvent
   | RagStreamRetrievalCompleteEvent
   | RagStreamTokenEvent
   | RagStreamFinalEvent
-  | RagStreamErrorEvent;
+  | RagStreamErrorEvent
+  | RagStreamActionRequiredEvent;
 
 export interface TraceEvent {
   run_id: string;
@@ -319,6 +332,25 @@ export async function buildIndexStream(
   });
   if (buildResult) return buildResult;
   throw new Error("Build stream ended without completion");
+}
+
+export async function submitRunAction(
+  runId: string,
+  body: { approved: boolean; payload?: Record<string, unknown> },
+): Promise<void> {
+  const res = await apiFetch(
+    `${API_BASE}/v1/runs/${encodeURIComponent(runId)}/actions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  // 501 is expected for the stub — don't throw
+  if (!res.ok && res.status !== 501) {
+    const detail = await res.text();
+    throw new Error(`Action submit failed (${res.status}): ${detail}`);
+  }
 }
 
 export async function queryDirect(

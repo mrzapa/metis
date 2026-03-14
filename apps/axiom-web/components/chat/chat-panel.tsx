@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { SessionMessage, SessionSummary } from "@/lib/api";
+import type { ActionRequiredAction, SessionMessage, SessionSummary } from "@/lib/api";
+import { ActionCard, type ActionCardStatus } from "@/components/chat/action-card";
 import { AlertCircle, Loader2, SendHorizontal, Square } from "lucide-react";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
 import { ModelStatusDialog } from "@/components/chat/model-status-dialog";
@@ -15,6 +16,10 @@ export type ChatMessageStatus = "streaming" | "complete" | "aborted" | "error";
 export interface ChatMessage extends SessionMessage {
   client_id: string;
   status?: ChatMessageStatus;
+  actionRequired?: {
+    action: ActionRequiredAction;
+    status: ActionCardStatus;
+  };
 }
 
 interface ChatPanelProps {
@@ -37,6 +42,8 @@ interface ChatPanelProps {
   composerRef?: RefObject<HTMLTextAreaElement | null>;
   selectedMode?: string;
   onModeChange?: (mode: string) => void;
+  onActionApprove?: (clientId: string) => void;
+  onActionDeny?: (clientId: string) => void;
 }
 
 export function ChatPanel({
@@ -57,6 +64,8 @@ export function ChatPanel({
   modelName,
   onModelChange,
   composerRef,
+  onActionApprove,
+  onActionDeny,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [queryMode, setQueryMode] = useState<"direct" | "rag">(initialQueryMode ?? "direct");
@@ -218,48 +227,60 @@ export function ChatPanel({
                 msg.role === "user" ? "justify-end" : "justify-start"
               )}
             >
-              <div
-                className={cn(
-                  "max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed",
-                  msg.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted"
-                )}
-              >
-                <p className="whitespace-pre-wrap">
-                  {msg.content || (msg.status === "aborted" ? "Stopped." : "")}
-                </p>
-                {msg.role === "assistant" && msg.status === "streaming" && (
-                  <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
-                    <span className="size-1.5 animate-pulse rounded-full bg-current/70" />
-                    Streaming
-                  </div>
-                )}
-                {msg.role === "assistant" && msg.status === "error" && (
-                  <div className="mt-1.5 text-[10px] text-destructive">
-                    Response interrupted
-                  </div>
-                )}
-                {msg.sources.length > 0 && (
-                  <p className="mt-1 text-xs opacity-70">
-                    {msg.sources.length} source{msg.sources.length > 1 ? "s" : ""}
+              {msg.actionRequired ? (
+                <div className="max-w-[80%]">
+                  <ActionCard
+                    runId={msg.run_id}
+                    action={msg.actionRequired.action}
+                    status={msg.actionRequired.status}
+                    onApprove={() => onActionApprove?.(msg.client_id)}
+                    onDeny={() => onActionDeny?.(msg.client_id)}
+                  />
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    "max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed",
+                    msg.role === "user"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted"
+                  )}
+                >
+                  <p className="whitespace-pre-wrap">
+                    {msg.content || (msg.status === "aborted" ? "Stopped." : "")}
                   </p>
-                )}
-                {msg.role === "assistant" && (msg.llm_provider || msg.llm_model) && (
-                  <div className="mt-1.5 flex gap-1">
-                    {msg.llm_provider && (
-                      <span className="rounded bg-background/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        {msg.llm_provider}
-                      </span>
-                    )}
-                    {msg.llm_model && (
-                      <span className="rounded bg-background/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        {msg.llm_model}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
+                  {msg.role === "assistant" && msg.status === "streaming" && (
+                    <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <span className="size-1.5 animate-pulse rounded-full bg-current/70" />
+                      Streaming
+                    </div>
+                  )}
+                  {msg.role === "assistant" && msg.status === "error" && (
+                    <div className="mt-1.5 text-[10px] text-destructive">
+                      Response interrupted
+                    </div>
+                  )}
+                  {msg.sources.length > 0 && (
+                    <p className="mt-1 text-xs opacity-70">
+                      {msg.sources.length} source{msg.sources.length > 1 ? "s" : ""}
+                    </p>
+                  )}
+                  {msg.role === "assistant" && (msg.llm_provider || msg.llm_model) && (
+                    <div className="mt-1.5 flex gap-1">
+                      {msg.llm_provider && (
+                        <span className="rounded bg-background/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          {msg.llm_provider}
+                        </span>
+                      )}
+                      {msg.llm_model && (
+                        <span className="rounded bg-background/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          {msg.llm_model}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))}
 

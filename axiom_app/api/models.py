@@ -64,6 +64,7 @@ class RagQueryRequestModel(BaseModel):
     question: str
     settings: dict[str, Any]
     run_id: str | None = None
+    require_action: bool = False
 
     model_config = ConfigDict(extra="forbid")
 
@@ -73,6 +74,7 @@ class RagQueryRequestModel(BaseModel):
             question=self.question,
             settings=dict(self.settings),
             run_id=self.run_id,
+            require_action=self.require_action,
         )
 
 
@@ -270,6 +272,13 @@ class SessionDetailModel(BaseModel):
             feedback=[SessionFeedbackModel.from_dataclass(f) for f in d.feedback],
             traces=dict(d.traces or {}),
         )
+
+
+class RunActionRequestModel(BaseModel):
+    approved: bool
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="allow")
 
 
 class FeedbackRequestModel(BaseModel):
