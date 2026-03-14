@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, type KeyboardEvent } from "react";
+import { useState, useRef, useEffect, type KeyboardEvent, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,6 +25,7 @@ interface ChatPanelProps {
   modelProvider?: string | null;
   modelName?: string | null;
   onModelChange?: (provider: string, model: string) => void;
+  composerRef?: RefObject<HTMLTextAreaElement>;
 }
 
 export function ChatPanel({
@@ -42,6 +43,7 @@ export function ChatPanel({
   modelProvider,
   modelName,
   onModelChange,
+  composerRef,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [queryMode, setQueryMode] = useState<"direct" | "rag">(initialQueryMode ?? "direct");
@@ -57,9 +59,15 @@ export function ChatPanel({
   }, [messages]);
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    // Don't intercept keys while IME composition is active (CJK input, etc.)
+    if (e.nativeEvent.isComposing) return;
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+    if (e.key === "Escape") {
+      setDraft("");
     }
   }
 
@@ -272,6 +280,7 @@ export function ChatPanel({
 
           <div className="flex items-end gap-2">
             <Textarea
+              ref={composerRef}
               placeholder={
                 ragInputDisabled
                   ? "Select an index first…"
@@ -301,6 +310,9 @@ export function ChatPanel({
               )}
             </Button>
           </div>
+          <p className="select-none text-[11px] text-muted-foreground/60">
+            Enter to send · Shift+Enter for new line · Esc to clear · Ctrl/⌘+K to focus
+          </p>
         </div>
       </div>
 
