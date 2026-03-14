@@ -15,6 +15,13 @@ from axiom_app.engine import (
     RagQueryRequest,
     RagQueryResult,
 )
+from axiom_app.models.session_types import (
+    EvidenceSource,
+    SessionDetail,
+    SessionFeedback as _SessionFeedback,
+    SessionMessage,
+    SessionSummary,
+)
 
 
 class IndexBuildRequestModel(BaseModel):
@@ -116,3 +123,158 @@ class DirectQueryResultModel(BaseModel):
             answer_text=result.answer_text,
             selected_mode=result.selected_mode,
         )
+
+
+# ---------------------------------------------------------------------------
+# Session & feedback models
+# ---------------------------------------------------------------------------
+
+
+class EvidenceSourceModel(BaseModel):
+    """Evidence source — file_path omitted; use sid as stable ID."""
+
+    sid: str
+    source: str
+    snippet: str
+    chunk_id: str = ""
+    chunk_idx: int | None = None
+    score: float | None = None
+    title: str = ""
+    breadcrumb: str = ""
+    section_hint: str = ""
+    anchor: str = ""
+    date: str = ""
+    timestamp: str = ""
+    speaker: str = ""
+    actor: str = ""
+    entry_type: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_dataclass(cls, src: EvidenceSource) -> "EvidenceSourceModel":
+        return cls(
+            sid=src.sid,
+            source=src.source,
+            snippet=src.snippet,
+            chunk_id=src.chunk_id,
+            chunk_idx=src.chunk_idx,
+            score=src.score,
+            title=src.title,
+            breadcrumb=src.breadcrumb,
+            section_hint=src.section_hint,
+            anchor=src.anchor,
+            date=src.date,
+            timestamp=src.timestamp,
+            speaker=src.speaker,
+            actor=src.actor,
+            entry_type=src.entry_type,
+            metadata=dict(src.metadata or {}),
+        )
+
+
+class SessionSummaryModel(BaseModel):
+    session_id: str
+    created_at: str
+    updated_at: str
+    title: str
+    summary: str
+    active_profile: str
+    mode: str
+    index_id: str
+    vector_backend: str
+    llm_provider: str
+    llm_model: str
+    embed_model: str
+    retrieve_k: int
+    final_k: int
+    mmr_lambda: float
+    agentic_iterations: int
+    extra: dict[str, Any]  # parsed extra_json; raw JSON string not exposed
+
+    @classmethod
+    def from_dataclass(cls, s: SessionSummary) -> "SessionSummaryModel":
+        return cls(
+            session_id=s.session_id,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+            title=s.title,
+            summary=s.summary,
+            active_profile=s.active_profile,
+            mode=s.mode,
+            index_id=s.index_id,
+            vector_backend=s.vector_backend,
+            llm_provider=s.llm_provider,
+            llm_model=s.llm_model,
+            embed_model=s.embed_model,
+            retrieve_k=s.retrieve_k,
+            final_k=s.final_k,
+            mmr_lambda=s.mmr_lambda,
+            agentic_iterations=s.agentic_iterations,
+            extra=s.extra,
+        )
+
+
+class SessionMessageModel(BaseModel):
+    role: str
+    content: str
+    ts: str
+    run_id: str = ""
+    sources: list[EvidenceSourceModel] = Field(default_factory=list)
+
+    @classmethod
+    def from_dataclass(cls, m: SessionMessage) -> "SessionMessageModel":
+        return cls(
+            role=m.role,
+            content=m.content,
+            ts=m.ts,
+            run_id=m.run_id,
+            sources=[EvidenceSourceModel.from_dataclass(s) for s in m.sources],
+        )
+
+
+class SessionFeedbackModel(BaseModel):
+    feedback_id: str
+    session_id: str
+    run_id: str
+    vote: int
+    note: str
+    ts: str
+
+    @classmethod
+    def from_dataclass(cls, f: _SessionFeedback) -> "SessionFeedbackModel":
+        return cls(
+            feedback_id=f.feedback_id,
+            session_id=f.session_id,
+            run_id=f.run_id,
+            vote=f.vote,
+            note=f.note,
+            ts=f.ts,
+        )
+
+
+class SessionDetailModel(BaseModel):
+    summary: SessionSummaryModel
+    messages: list[SessionMessageModel] = Field(default_factory=list)
+    feedback: list[SessionFeedbackModel] = Field(default_factory=list)
+    traces: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_dataclass(cls, d: SessionDetail) -> "SessionDetailModel":
+        return cls(
+            summary=SessionSummaryModel.from_dataclass(d.summary),
+            messages=[SessionMessageModel.from_dataclass(m) for m in d.messages],
+            feedback=[SessionFeedbackModel.from_dataclass(f) for f in d.feedback],
+            traces=dict(d.traces or {}),
+        )
+
+
+class FeedbackRequestModel(BaseModel):
+    run_id: str
+    vote: int  # -1 or 1; repo accepts any int
+    note: str = ""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FeedbackResponseModel(BaseModel):
+    ok: bool
