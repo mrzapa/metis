@@ -118,6 +118,7 @@ Q&A is table stakes. Axiom ships with **five distinct chat modes**, each designe
 |-----------|---------------|----------|
 | **Desktop GUI** | `python main.py` | Daily use — themes, sessions, keyboard shortcuts |
 | **Headless CLI** | `python main.py --cli ...` | Automation, scripting, servers, CI pipelines |
+| **API server** | `bash scripts/run_api_dev.sh` | HTTP clients, front-end development |
 | **Legacy GUI** | `AXIOM_NEW_APP=0 python main.py` | If you prefer the original Tkinter interface |
 
 All three interfaces share the same retrieval engine. Same index, same results.
@@ -161,6 +162,24 @@ You can also run via the main entry point:
 python main.py --cli index --file README.md
 python main.py --cli query --file README.md --question "how do I install this?"
 ```
+
+### Run local API
+
+Start a hot-reloading FastAPI server on `http://127.0.0.1:8000`. The script creates `.venv/` and installs `.[dev,api]` automatically on first run.
+
+**macOS / Linux:**
+
+```bash
+bash scripts/run_api_dev.sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+.\scripts\run_api_dev.ps1
+```
+
+Override the Python binary with `AXIOM_PYTHON` if needed. Once running, check `GET /healthz` or browse the auto-generated docs at `http://127.0.0.1:8000/docs`.
 
 ### Parity audit
 
