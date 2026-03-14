@@ -65,6 +65,24 @@ def stream_rag_answer(
             "top_score": float(query_result.top_score),
         }
 
+        if req.require_action:
+            yield {
+                "type": "action_required",
+                "run_id": run_id,
+                "action": {
+                    "kind": "confirm_settings",
+                    "summary": (
+                        f"Ready to synthesize an answer from {len(sources)} source(s). "
+                        "Approve to continue."
+                    ),
+                    "payload": {
+                        "source_count": len(sources),
+                        "top_score": float(query_result.top_score),
+                    },
+                },
+            }
+            return
+
         system_prompt = (
             f"{_system_instructions(settings)}\n\n"
             "Answer the user's question using ONLY the CONTEXT below. "

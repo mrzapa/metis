@@ -24,6 +24,7 @@ class RagQueryRequest:
     question: str
     settings: dict[str, Any]
     run_id: str | None = None
+    require_action: bool = False
 
 
 @dataclass(slots=True)

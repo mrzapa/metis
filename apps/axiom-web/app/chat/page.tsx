@@ -5,7 +5,7 @@ import { ResizablePanels } from "@/components/chat/resizable-panels";
 import { SessionsPanel } from "@/components/chat/sessions-panel";
 import { ChatPanel, type ChatMessage } from "@/components/chat/chat-panel";
 import { EvidencePanel } from "@/components/chat/evidence-panel";
-import { fetchSession, fetchSettings, queryDirect, queryRagStream } from "@/lib/api";
+import { fetchSession, fetchSettings, queryDirect, queryRagStream, submitRunAction } from "@/lib/api";
 import type { SessionMessage, EvidenceSource, SessionSummary, TraceEvent } from "@/lib/api";
 
 type StopStreamReason = "user" | "navigation";
@@ -315,6 +315,37 @@ export default function ChatPage() {
               setLatestRunId(event.run_id);
               break;
             }
+            case "action_required": {
+              const actionMsgId = `action-${messageIdRef.current++}`;
+              activeRagStreamRef.current = null;
+              setIsStreamingRag(false);
+              updateMessage(assistantId, (message) => ({
+                ...message,
+                content: message.content.trim()
+                  ? message.content
+                  : "Action required — see below.",
+                status: "complete",
+              }));
+              startTransition(() => {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    role: "assistant" as const,
+                    content: "",
+                    ts: new Date().toISOString(),
+                    run_id: event.run_id,
+                    sources: [],
+                    client_id: actionMsgId,
+                    status: "complete" as const,
+                    actionRequired: {
+                      action: event.action,
+                      status: "pending" as const,
+                    },
+                  },
+                ]);
+              });
+              break;
+            }
             case "error":
               setLiveTraceEvents((prev) => [...prev, {
                 run_id: event.run_id,
@@ -385,6 +416,75 @@ export default function ChatPage() {
     setLiveTraceEvents([]);
   }, [stopRagStream]);
 
+  const handleActionApprove = useCallback(
+    async (clientId: string) => {
+      const msg = messages.find((m) => m.client_id === clientId);
+      if (!msg?.actionRequired) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.client_id === clientId && m.actionRequired
+            ? { ...m, actionRequired: { ...m.actionRequired, status: "submitting" as const } }
+            : m,
+        ),
+      );
+      try {
+        await submitRunAction(msg.run_id, {
+          approved: true,
+          payload: msg.actionRequired.action.payload,
+        });
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.client_id === clientId && m.actionRequired
+              ? { ...m, actionRequired: { ...m.actionRequired, status: "approved" as const } }
+              : m,
+          ),
+        );
+      } catch {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.client_id === clientId && m.actionRequired
+              ? { ...m, actionRequired: { ...m.actionRequired, status: "pending" as const } }
+              : m,
+          ),
+        );
+      }
+    },
+    [messages],
+  );
+
+  const handleActionDeny = useCallback(
+    async (clientId: string) => {
+      const msg = messages.find((m) => m.client_id === clientId);
+      if (!msg?.actionRequired) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.client_id === clientId && m.actionRequired
+            ? { ...m, actionRequired: { ...m.actionRequired, status: "submitting" as const } }
+            : m,
+        ),
+      );
+      try {
+        await submitRunAction(msg.run_id, { approved: false });
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.client_id === clientId && m.actionRequired
+              ? { ...m, actionRequired: { ...m.actionRequired, status: "denied" as const } }
+              : m,
+          ),
+        );
+      } catch {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.client_id === clientId && m.actionRequired
+              ? { ...m, actionRequired: { ...m.actionRequired, status: "pending" as const } }
+              : m,
+          ),
+        );
+      }
+    },
+    [messages],
+  );
+
   // Keyboard shortcut: Cmd/Ctrl+K focuses the composer
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -437,6 +537,8 @@ export default function ChatPage() {
                 modelName={modelName}
                 onModelChange={handleModelChange}
                 composerRef={composerRef}
+                onActionApprove={handleActionApprove}
+                onActionDeny={handleActionDeny}
               />
             ),
           },
