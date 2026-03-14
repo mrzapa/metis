@@ -20,6 +20,28 @@ export default function ChatPage() {
   const [activeIndexLabel, setActiveIndexLabel] = useState<string | null>(null);
   const [queryModeOverride, setQueryModeOverride] = useState<"rag" | null>(null);
   const settingsRef = useRef<Record<string, unknown> | null>(null);
+  const [modelProvider, setModelProvider] = useState<string | null>(null);
+  const [modelName, setModelName] = useState<string | null>(null);
+
+  // Load current model info for the badge
+  useEffect(() => {
+    fetchSettings().then((s) => {
+      const provider = String(s.llm_provider ?? "");
+      const raw = String(s.llm_model ?? "");
+      const model = raw === "custom" ? String(s.llm_model_custom ?? raw) : raw;
+      setModelProvider(provider);
+      setModelName(model);
+      settingsRef.current = s;
+    }).catch(() => {
+      // badge stays empty on fetch error
+    });
+  }, []);
+
+  const handleModelChange = useCallback((provider: string, model: string) => {
+    setModelProvider(provider);
+    setModelName(model);
+    settingsRef.current = null; // force re-fetch on next query
+  }, []);
 
   // Pre-select index from library page
   useEffect(() => {
@@ -208,6 +230,9 @@ export default function ChatPage() {
                   setActiveIndexPath(path);
                   setActiveIndexLabel(label);
                 }}
+                modelProvider={modelProvider}
+                modelName={modelName}
+                onModelChange={handleModelChange}
               />
             ),
           },

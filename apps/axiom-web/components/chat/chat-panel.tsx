@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { SessionMessage, SessionSummary } from "@/lib/api";
 import { AlertCircle, Loader2, SendHorizontal } from "lucide-react";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
+import { ModelStatusDialog } from "@/components/chat/model-status-dialog";
 
 interface ChatPanelProps {
   messages: SessionMessage[];
@@ -21,6 +22,9 @@ interface ChatPanelProps {
   activeIndexLabel?: string | null;
   initialQueryMode?: "direct" | "rag";
   onIndexChange?: (manifestPath: string, label: string) => void;
+  modelProvider?: string | null;
+  modelName?: string | null;
+  onModelChange?: (provider: string, model: string) => void;
 }
 
 export function ChatPanel({
@@ -35,10 +39,14 @@ export function ChatPanel({
   activeIndexLabel,
   initialQueryMode,
   onIndexChange,
+  modelProvider,
+  modelName,
+  onModelChange,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [queryMode, setQueryMode] = useState<"direct" | "rag">(initialQueryMode ?? "direct");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll when messages change
@@ -98,6 +106,21 @@ export function ChatPanel({
                 {formatDate(sessionMeta.updated_at)}
               </span>
             )}
+          </div>
+        )}
+        {/* Model status badge */}
+        {(modelProvider || modelName) && (
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <span className="rounded bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+              {[modelProvider, modelName].filter(Boolean).join(" / ")}
+            </span>
+            <button
+              type="button"
+              onClick={() => setModelDialogOpen(true)}
+              className="rounded px-1.5 py-0.5 text-[10px] font-medium text-primary hover:underline"
+            >
+              Change
+            </button>
           </div>
         )}
       </div>
@@ -286,6 +309,16 @@ export function ChatPanel({
         onOpenChange={setPickerOpen}
         onSelect={(path, label) => {
           onIndexChange?.(path, label);
+        }}
+      />
+
+      <ModelStatusDialog
+        open={modelDialogOpen}
+        onOpenChange={setModelDialogOpen}
+        provider={modelProvider ?? ""}
+        model={modelName ?? ""}
+        onSaved={(provider, model) => {
+          onModelChange?.(provider, model);
         }}
       />
     </div>
