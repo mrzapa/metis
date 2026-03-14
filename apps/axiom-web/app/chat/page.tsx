@@ -18,7 +18,26 @@ export default function ChatPage() {
   const [isSending, setIsSending] = useState(false);
   const [activeIndexPath, setActiveIndexPath] = useState<string | null>(null);
   const [activeIndexLabel, setActiveIndexLabel] = useState<string | null>(null);
+  const [queryModeOverride, setQueryModeOverride] = useState<"rag" | null>(null);
   const settingsRef = useRef<Record<string, unknown> | null>(null);
+
+  // Pre-select index from library page
+  useEffect(() => {
+    const raw = localStorage.getItem("axiom_active_index");
+    if (!raw) return;
+    try {
+      const { manifest_path, label } = JSON.parse(raw) as {
+        manifest_path: string;
+        label: string;
+      };
+      setActiveIndexPath(manifest_path);
+      setActiveIndexLabel(label);
+      setQueryModeOverride("rag");
+    } catch {
+      // ignore malformed entry
+    }
+    localStorage.removeItem("axiom_active_index");
+  }, []);
 
   const loadSession = useCallback(async (id: string) => {
     setLoadingSession(true);
@@ -184,6 +203,7 @@ export default function ChatPage() {
                 isSending={isSending}
                 activeIndexPath={activeIndexPath}
                 activeIndexLabel={activeIndexLabel}
+                initialQueryMode={queryModeOverride ?? undefined}
                 onIndexChange={(path, label) => {
                   setActiveIndexPath(path);
                   setActiveIndexLabel(label);

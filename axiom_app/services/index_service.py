@@ -679,6 +679,8 @@ def build_index_bundle(
                 }
             )
 
+    if callable(post_message):
+        post_message({"type": "status", "text": "Computing embeddings…"})
     embeddings = emb.embed_documents([chunk["text"] for chunk in all_chunks])
     graph, entity_to_chunks = build_knowledge_graph([chunk["text"] for chunk in all_chunks])
     digest = hashlib.sha1(

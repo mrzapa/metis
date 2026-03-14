@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
-from collections.abc import Generator
+import pathlib
+import tempfile
+import uuid
+from collections.abc import AsyncGenerator, Generator
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -65,6 +69,54 @@ def create_app() -> FastAPI:
     @app.get("/v1/index/list")
     def api_list_indexes() -> list[dict[str, Any]]:
         return _run_engine(list_indexes)
+
+    @app.post("/v1/files/upload")
+    async def api_upload_files(files: list[UploadFile] = File(...)) -> dict[str, list[str]]:
+        upload_dir = pathlib.Path(tempfile.gettempdir()) / "axiom_uploads"
+        upload_dir.mkdir(exist_ok=True)
+        saved: list[str] = []
+        for file in files:
+            suffix = pathlib.Path(file.filename or "file").suffix
+            dest = upload_dir / f"{uuid.uuid4().hex}{suffix}"
+            content = await file.read()
+            dest.write_bytes(content)
+            saved.append(str(dest))
+        return {"paths": saved}
+
+    @app.post("/v1/index/build/stream")
+    async def api_build_index_stream(payload: IndexBuildRequestModel) -> StreamingResponse:
+        req = payload.to_engine()
+        loop = asyncio.get_event_loop()
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        def _progress_cb(event: dict[str, Any]) -> None:
+            asyncio.run_coroutine_threadsafe(queue.put(event), loop)
+
+        future = loop.run_in_executor(None, lambda: build_index(req, progress_cb=_progress_cb))
+
+        async def _event_gen() -> AsyncGenerator[str, None]:
+            yield f"event: message\ndata: {json.dumps({'type': 'build_started'})}\n\n"
+            while not future.done():
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=0.05)
+                    yield f"event: message\ndata: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    pass
+            # Drain any remaining queued events
+            while not queue.empty():
+                event = queue.get_nowait()
+                yield f"event: message\ndata: {json.dumps(event)}\n\n"
+            try:
+                result = future.result()
+                yield f"event: message\ndata: {json.dumps({'type': 'build_complete', 'index_id': result.index_id, 'manifest_path': str(result.manifest_path), 'document_count': result.document_count, 'chunk_count': result.chunk_count, 'embedding_signature': result.embedding_signature, 'vector_backend': result.vector_backend})}\n\n"
+            except (ValueError, RuntimeError) as exc:
+                yield f"event: message\ndata: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+
+        return StreamingResponse(
+            _event_gen(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.post("/v1/query/rag", response_model=RagQueryResultModel)
     def api_query_rag(payload: RagQueryRequestModel) -> RagQueryResultModel:

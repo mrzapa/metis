@@ -19,6 +19,7 @@ interface ChatPanelProps {
   isSending?: boolean;
   activeIndexPath?: string | null;
   activeIndexLabel?: string | null;
+  initialQueryMode?: "direct" | "rag";
   onIndexChange?: (manifestPath: string, label: string) => void;
 }
 
@@ -32,10 +33,11 @@ export function ChatPanel({
   isSending,
   activeIndexPath,
   activeIndexLabel,
+  initialQueryMode,
   onIndexChange,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
-  const [queryMode, setQueryMode] = useState<"direct" | "rag">("direct");
+  const [queryMode, setQueryMode] = useState<"direct" | "rag">(initialQueryMode ?? "direct");
   const [pickerOpen, setPickerOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 

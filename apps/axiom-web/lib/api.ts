@@ -125,6 +125,60 @@ export async function queryRag(
   return res.json();
 }
 
+export interface IndexBuildResult {
+  index_id: string;
+  manifest_path: string;
+  document_count: number;
+  chunk_count: number;
+  embedding_signature: string;
+  vector_backend: string;
+}
+
+export async function uploadFiles(files: File[]): Promise<{ paths: string[] }> {
+  const form = new FormData();
+  for (const file of files) form.append("files", file);
+  const res = await apiFetch(`${API_BASE}/v1/files/upload`, { method: "POST", body: form });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Upload failed (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function buildIndexStream(
+  documentPaths: string[],
+  settings: Record<string, unknown>,
+  onEvent: (event: Record<string, unknown>) => void,
+): Promise<IndexBuildResult> {
+  const res = await apiFetch(`${API_BASE}/v1/index/build/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ document_paths: documentPaths, settings }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Build stream failed (${res.status}): ${detail}`);
+  }
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const event = JSON.parse(line.slice(6)) as Record<string, unknown>;
+      onEvent(event);
+      if (event.type === "error") throw new Error(String(event.message ?? "Build error"));
+      if (event.type === "build_complete") return event as unknown as IndexBuildResult;
+    }
+  }
+  throw new Error("Build stream ended without completion");
+}
+
 export async function queryDirect(
   prompt: string,
   settings: Record<string, unknown>,
