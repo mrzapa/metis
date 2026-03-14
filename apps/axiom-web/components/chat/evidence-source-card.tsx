@@ -59,19 +59,21 @@ export function EvidenceSourceCard({ source: src }: EvidenceSourceCardProps) {
                 </Badge>
               )}
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label={`Copy citation ${citation}`}
-                    onClick={handleCopy}
-                  >
-                    {copied ? (
-                      <Check className="size-3 text-green-500" />
-                    ) : (
-                      <Copy className="size-3" />
-                    )}
-                  </Button>
+                <TooltipTrigger
+                  render={(
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`Copy citation ${citation}`}
+                    />
+                  )}
+                  onClick={handleCopy}
+                >
+                  {copied ? (
+                    <Check className="size-3 text-green-500" />
+                  ) : (
+                    <Copy className="size-3" />
+                  )}
                 </TooltipTrigger>
                 <TooltipContent>
                   {copied ? "Copied!" : `Copy citation ${citation}`}

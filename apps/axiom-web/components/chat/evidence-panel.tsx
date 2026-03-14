@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { EvidenceSource, TraceEvent } from "@/lib/api";
@@ -19,49 +19,57 @@ interface EvidencePanelProps {
 }
 
 export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, latestAnswer }: EvidencePanelProps) {
-  const [selectedRunId, setSelectedRunId] = useState<string>("");
+  const [selectedRunId, setSelectedRunId] = useState<string>(latestRunId ?? "");
+  const [syncedLatestRunId, setSyncedLatestRunId] = useState<string | null>(latestRunId);
   const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
-  const [traceLoading, setTraceLoading] = useState(false);
+  const [traceLoading, setTraceLoading] = useState(Boolean(latestRunId));
   const [traceError, setTraceError] = useState<string | null>(null);
+  const [traceStateRunId, setTraceStateRunId] = useState<string>(latestRunId ?? "");
   const [activeTab, setActiveTab] = useState("sources");
+  const [syncedMode, setSyncedMode] = useState(selectedMode);
 
-  // Auto-switch to Sources tab when Evidence Pack mode is selected
-  useEffect(() => {
+  if (selectedMode !== syncedMode) {
+    setSyncedMode(selectedMode);
     if (selectedMode === "Evidence Pack") {
       setActiveTab("sources");
     }
-  }, [selectedMode]);
+  }
 
-  // Deduplicated, non-empty run IDs (most-recent first as they appear in the array)
-  const availableRunIds = [...new Set(runIds.filter(Boolean))];
-
-  // Auto-select the latest run when it changes
-  useEffect(() => {
-    if (latestRunId && latestRunId !== selectedRunId) {
+  if (latestRunId !== syncedLatestRunId) {
+    setSyncedLatestRunId(latestRunId);
+    if (latestRunId) {
       setSelectedRunId(latestRunId);
     }
-  }, [latestRunId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }
+
+  if (selectedRunId !== traceStateRunId) {
+    setTraceStateRunId(selectedRunId);
+    setTraceEvents([]);
+    setTraceError(null);
+    setTraceLoading(Boolean(selectedRunId));
+  }
+
+  // Deduplicated, non-empty run IDs (most-recent first as they appear in the array)
+  const availableRunIds = useMemo(() => [...new Set(runIds.filter(Boolean))], [runIds]);
 
   // Fetch trace events whenever selectedRunId changes
   useEffect(() => {
     if (!selectedRunId) {
-      setTraceEvents([]);
-      setTraceError(null);
       return;
     }
     let cancelled = false;
-    setTraceLoading(true);
-    setTraceError(null);
     fetchTraceEvents(selectedRunId)
       .then((events) => {
-        if (!cancelled) setTraceEvents(events);
+        if (!cancelled) {
+          setTraceEvents(events);
+          setTraceLoading(false);
+        }
       })
       .catch((err) => {
-        if (!cancelled)
+        if (!cancelled) {
           setTraceError(err instanceof Error ? err.message : "Failed to load trace");
-      })
-      .finally(() => {
-        if (!cancelled) setTraceLoading(false);
+          setTraceLoading(false);
+        }
       });
     return () => {
       cancelled = true;

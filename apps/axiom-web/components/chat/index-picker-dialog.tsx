@@ -24,20 +24,39 @@ export function IndexPickerDialog({
   onOpenChange,
   onSelect,
 }: IndexPickerDialogProps) {
-  const [indexes, setIndexes] = useState<IndexSummary[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [indexes, setIndexes] = useState<IndexSummary[] | null>(open ? null : []);
   const [error, setError] = useState<string | null>(null);
+  const [syncedOpen, setSyncedOpen] = useState(open);
+
+  if (open !== syncedOpen) {
+    setSyncedOpen(open);
+    if (open) {
+      setIndexes(null);
+      setError(null);
+    }
+  }
+
+  const loading = open && indexes === null && error === null;
+  const indexList = indexes ?? [];
 
   useEffect(() => {
     if (!open) return;
-    setLoading(true);
-    setError(null);
+    let cancelled = false;
     fetchIndexes()
-      .then(setIndexes)
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : "Failed to load indexes")
-      )
-      .finally(() => setLoading(false));
+      .then((nextIndexes) => {
+        if (!cancelled) {
+          setIndexes(nextIndexes);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load indexes");
+          setIndexes([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
   function handleSelect(idx: IndexSummary) {
@@ -65,7 +84,7 @@ export function IndexPickerDialog({
           </div>
         )}
 
-        {!loading && !error && indexes.length === 0 && (
+        {!loading && !error && indexList.length === 0 && (
           <div className="flex flex-col items-center gap-2 py-8 text-center">
             <Database className="size-5 text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
@@ -74,10 +93,10 @@ export function IndexPickerDialog({
           </div>
         )}
 
-        {!loading && !error && indexes.length > 0 && (
+        {!loading && !error && indexList.length > 0 && (
           <ScrollArea className="max-h-80">
             <div className="space-y-1.5 pr-1">
-              {indexes.map((idx) => (
+              {indexList.map((idx) => (
                 <button
                   key={idx.index_id}
                   type="button"
