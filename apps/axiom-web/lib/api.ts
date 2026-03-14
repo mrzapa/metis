@@ -62,6 +62,45 @@ export interface RagQueryResult {
   selected_mode: string;
 }
 
+export interface RagStreamRunStartedEvent {
+  type: "run_started";
+  run_id: string;
+}
+
+export interface RagStreamRetrievalCompleteEvent {
+  type: "retrieval_complete";
+  run_id: string;
+  sources: EvidenceSource[];
+  context_block: string;
+  top_score: number;
+}
+
+export interface RagStreamTokenEvent {
+  type: "token";
+  run_id: string;
+  text: string;
+}
+
+export interface RagStreamFinalEvent {
+  type: "final";
+  run_id: string;
+  answer_text: string;
+  sources: EvidenceSource[];
+}
+
+export interface RagStreamErrorEvent {
+  type: "error";
+  run_id: string;
+  message: string;
+}
+
+export type RagStreamEvent =
+  | RagStreamRunStartedEvent
+  | RagStreamRetrievalCompleteEvent
+  | RagStreamTokenEvent
+  | RagStreamFinalEvent
+  | RagStreamErrorEvent;
+
 export interface TraceEvent {
   run_id: string;
   event_id?: string;
@@ -84,8 +123,55 @@ export interface SessionDetail {
 async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(url, init);
-  } catch {
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "name" in error &&
+      error.name === "AbortError"
+    ) {
+      throw error;
+    }
     throw new Error("Connection error: server unreachable");
+  }
+}
+
+async function readSseEvents<T>(
+  res: Response,
+  onEvent: (event: T) => void,
+): Promise<void> {
+  if (!res.body) {
+    throw new Error("Streaming response missing body");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      buffer += decoder.decode();
+    } else if (value) {
+      buffer += decoder.decode(value, { stream: true });
+    }
+
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? "";
+
+    for (const rawLine of lines) {
+      const line = rawLine.trimEnd();
+      if (!line.startsWith("data: ")) continue;
+      onEvent(JSON.parse(line.slice(6)) as T);
+    }
+
+    if (done) {
+      const finalLine = buffer.trim();
+      if (finalLine.startsWith("data: ")) {
+        onEvent(JSON.parse(finalLine.slice(6)) as T);
+      }
+      return;
+    }
   }
 }
 
@@ -165,6 +251,28 @@ export async function queryRag(
   return res.json();
 }
 
+export async function queryRagStream(
+  manifest_path: string,
+  question: string,
+  settings: Record<string, unknown>,
+  options: {
+    signal?: AbortSignal;
+    onEvent: (event: RagStreamEvent) => void;
+  },
+): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/v1/query/rag/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ manifest_path, question, settings }),
+    signal: options.signal,
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`RAG stream failed (${res.status}): ${detail}`);
+  }
+  await readSseEvents<RagStreamEvent>(res, options.onEvent);
+}
+
 export interface IndexBuildResult {
   index_id: string;
   manifest_path: string;
@@ -199,23 +307,17 @@ export async function buildIndexStream(
     const detail = await res.text();
     throw new Error(`Build stream failed (${res.status}): ${detail}`);
   }
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      const event = JSON.parse(line.slice(6)) as Record<string, unknown>;
-      onEvent(event);
-      if (event.type === "error") throw new Error(String(event.message ?? "Build error"));
-      if (event.type === "build_complete") return event as unknown as IndexBuildResult;
+  let buildResult: IndexBuildResult | null = null;
+  await readSseEvents<Record<string, unknown>>(res, (event) => {
+    onEvent(event);
+    if (event.type === "error") {
+      throw new Error(String(event.message ?? "Build error"));
     }
-  }
+    if (event.type === "build_complete") {
+      buildResult = event as unknown as IndexBuildResult;
+    }
+  });
+  if (buildResult) return buildResult;
   throw new Error("Build stream ended without completion");
 }
 

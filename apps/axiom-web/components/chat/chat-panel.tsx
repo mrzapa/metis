@@ -6,20 +6,27 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { SessionMessage, SessionSummary } from "@/lib/api";
-import { AlertCircle, Loader2, SendHorizontal } from "lucide-react";
+import { AlertCircle, Loader2, SendHorizontal, Square } from "lucide-react";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
 import { ModelStatusDialog } from "@/components/chat/model-status-dialog";
 
-const MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"] as const;
+export type ChatMessageStatus = "streaming" | "complete" | "aborted" | "error";
+
+export interface ChatMessage extends SessionMessage {
+  client_id: string;
+  status?: ChatMessageStatus;
+}
 
 interface ChatPanelProps {
-  messages: SessionMessage[];
+  messages: ChatMessage[];
   sessionMeta: SessionSummary | null;
   loading?: boolean;
   error?: string | null;
   onDirectSend?: (prompt: string) => Promise<void>;
   onRagSend?: (question: string) => Promise<void>;
   isSending?: boolean;
+  isStreamingRag?: boolean;
+  onStopStreaming?: () => void;
   activeIndexPath?: string | null;
   activeIndexLabel?: string | null;
   initialQueryMode?: "direct" | "rag";
@@ -40,6 +47,8 @@ export function ChatPanel({
   onDirectSend,
   onRagSend,
   isSending,
+  isStreamingRag,
+  onStopStreaming,
   activeIndexPath,
   activeIndexLabel,
   initialQueryMode,
@@ -48,8 +57,6 @@ export function ChatPanel({
   modelName,
   onModelChange,
   composerRef,
-  selectedMode,
-  onModeChange,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [queryMode, setQueryMode] = useState<"direct" | "rag">(initialQueryMode ?? "direct");
@@ -78,7 +85,7 @@ export function ChatPanel({
   }
 
   function handleSend() {
-    if (!draft.trim() || isSending) return;
+    if (!draft.trim() || isSending || isStreamingRag) return;
     const text = draft.trim();
     setDraft("");
     if (queryMode === "direct" && onDirectSend) {
@@ -91,6 +98,7 @@ export function ChatPanel({
   const canSend =
     !!draft.trim() &&
     !isSending &&
+    !isStreamingRag &&
     ((queryMode === "direct" && !!onDirectSend) ||
       (queryMode === "rag" && !!activeIndexPath && !!onRagSend));
 
@@ -122,25 +130,6 @@ export function ChatPanel({
             )}
           </div>
         )}
-        {/* Mode selector */}
-        <div className="flex items-center gap-1 ml-2">
-          {MODES.map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => onModeChange?.(m)}
-              className={cn(
-                "rounded px-2 py-0.5 text-[11px] font-medium transition-colors",
-                selectedMode === m
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
-              )}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-
         {/* Model status badge */}
         {(modelProvider || modelName) && (
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
@@ -221,9 +210,9 @@ export function ChatPanel({
             </div>
           )}
 
-          {!loading && !error && messages.map((msg, i) => (
+          {!loading && !error && messages.map((msg) => (
             <div
-              key={`${msg.run_id}-${i}`}
+              key={msg.client_id}
               className={cn(
                 "flex",
                 msg.role === "user" ? "justify-end" : "justify-start"
@@ -237,7 +226,20 @@ export function ChatPanel({
                     : "bg-muted"
                 )}
               >
-                <p className="whitespace-pre-wrap">{msg.content}</p>
+                <p className="whitespace-pre-wrap">
+                  {msg.content || (msg.status === "aborted" ? "Stopped." : "")}
+                </p>
+                {msg.role === "assistant" && msg.status === "streaming" && (
+                  <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <span className="size-1.5 animate-pulse rounded-full bg-current/70" />
+                    Streaming
+                  </div>
+                )}
+                {msg.role === "assistant" && msg.status === "error" && (
+                  <div className="mt-1.5 text-[10px] text-destructive">
+                    Response interrupted
+                  </div>
+                )}
                 {msg.sources.length > 0 && (
                   <p className="mt-1 text-xs opacity-70">
                     {msg.sources.length} source{msg.sources.length > 1 ? "s" : ""}
@@ -261,30 +263,7 @@ export function ChatPanel({
             </div>
           ))}
 
-          {selectedMode === "Tutor" &&
-            !isSending &&
-            messages.length > 0 &&
-            messages.at(-1)?.role === "assistant" && (
-              <div className="flex justify-start">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const prompt =
-                      "Ask me a question to test my understanding of your last answer.";
-                    if (queryMode === "rag" && activeIndexPath && onRagSend) {
-                      onRagSend(prompt);
-                    } else if (onDirectSend) {
-                      onDirectSend(prompt);
-                    }
-                  }}
-                  className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
-                >
-                  Next question →
-                </button>
-              </div>
-            )}
-
-          {isSending && (
+          {isSending && !isStreamingRag && (
             <div className="flex justify-start">
               <div className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
                 <Loader2 className="size-3.5 animate-spin" />
@@ -344,19 +323,31 @@ export function ChatPanel({
               aria-label="Message input"
               disabled={ragInputDisabled}
             />
-            <Button
-              size="icon"
-              className="size-9 shrink-0"
-              onClick={handleSend}
-              disabled={!canSend}
-              aria-label="Send message"
-            >
-              {isSending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <SendHorizontal className="size-4" />
-              )}
-            </Button>
+            {isStreamingRag ? (
+              <Button
+                variant="outline"
+                className="h-9 shrink-0 px-3"
+                onClick={onStopStreaming}
+                aria-label="Stop streaming response"
+              >
+                <Square className="size-3.5 fill-current" />
+                Stop
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                className="size-9 shrink-0"
+                onClick={handleSend}
+                disabled={!canSend}
+                aria-label="Send message"
+              >
+                {isSending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <SendHorizontal className="size-4" />
+                )}
+              </Button>
+            )}
           </div>
           <p className="select-none text-[11px] text-muted-foreground/60">
             Enter to send · Shift+Enter for new line · Esc to clear · Ctrl/⌘+K to focus
