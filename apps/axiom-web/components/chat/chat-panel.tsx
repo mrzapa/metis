@@ -27,7 +27,7 @@ interface ChatPanelProps {
   modelProvider?: string | null;
   modelName?: string | null;
   onModelChange?: (provider: string, model: string) => void;
-  composerRef?: RefObject<HTMLTextAreaElement>;
+  composerRef?: RefObject<HTMLTextAreaElement | null>;
   selectedMode?: string;
   onModeChange?: (mode: string) => void;
 }
