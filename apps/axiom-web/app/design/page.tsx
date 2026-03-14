@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -56,17 +56,34 @@ function Section({
 
 const scrollItems = Array.from({ length: 20 }, (_, i) => `Item ${i + 1}`);
 
+const statusColors = [
+  { label: "Success", bg: "bg-success", fg: "text-success-foreground" },
+  { label: "Warning", bg: "bg-warning", fg: "text-warning-foreground" },
+  { label: "Info", bg: "bg-info", fg: "text-info-foreground" },
+  { label: "Destructive", bg: "bg-destructive", fg: "text-destructive-foreground" },
+] as const;
+
 export default function DesignPage() {
   const [inputValue, setInputValue] = useState("");
   const [textareaValue, setTextareaValue] = useState("");
+  const [dark, setDark] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+  }, [dark]);
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-12 space-y-10">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Design System</h1>
-        <p className="mt-1 text-muted-foreground">
-          Kitchen-sink preview of shadcn/ui primitives.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Design System</h1>
+          <p className="mt-1 text-muted-foreground">
+            Kitchen-sink preview of shadcn/ui primitives.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setDark((d) => !d)}>
+          {dark ? "Light mode" : "Dark mode"}
+        </Button>
       </div>
 
       <Separator />
@@ -90,6 +107,20 @@ export default function DesignPage() {
         <Badge variant="secondary">Secondary</Badge>
         <Badge variant="outline">Outline</Badge>
         <Badge variant="destructive">Destructive</Badge>
+      </Section>
+
+      <Separator />
+
+      {/* Status Colors */}
+      <Section title="Status Colors">
+        {statusColors.map(({ label, bg, fg }) => (
+          <div
+            key={label}
+            className={`${bg} ${fg} rounded-md px-4 py-2 text-sm font-medium`}
+          >
+            {label}
+          </div>
+        ))}
       </Section>
 
       <Separator />
