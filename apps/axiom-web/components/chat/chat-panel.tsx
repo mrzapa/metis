@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { SessionMessage, SessionSummary } from "@/lib/api";
 import { AlertCircle, Loader2, SendHorizontal } from "lucide-react";
+import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
 
 interface ChatPanelProps {
   messages: SessionMessage[];
@@ -14,7 +15,11 @@ interface ChatPanelProps {
   loading?: boolean;
   error?: string | null;
   onDirectSend?: (prompt: string) => Promise<void>;
+  onRagSend?: (question: string) => Promise<void>;
   isSending?: boolean;
+  activeIndexPath?: string | null;
+  activeIndexLabel?: string | null;
+  onIndexChange?: (manifestPath: string, label: string) => void;
 }
 
 export function ChatPanel({
@@ -23,10 +28,15 @@ export function ChatPanel({
   loading,
   error,
   onDirectSend,
+  onRagSend,
   isSending,
+  activeIndexPath,
+  activeIndexLabel,
+  onIndexChange,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [queryMode, setQueryMode] = useState<"direct" | "rag">("direct");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll when messages change
@@ -45,15 +55,22 @@ export function ChatPanel({
 
   function handleSend() {
     if (!draft.trim() || isSending) return;
+    const text = draft.trim();
+    setDraft("");
     if (queryMode === "direct" && onDirectSend) {
-      const prompt = draft.trim();
-      setDraft("");
-      onDirectSend(prompt);
+      onDirectSend(text);
+    } else if (queryMode === "rag" && activeIndexPath && onRagSend) {
+      onRagSend(text);
     }
-    // RAG mode: no-op (requires an indexed document)
   }
 
-  const canSend = !!draft.trim() && !isSending && queryMode === "direct" && !!onDirectSend;
+  const canSend =
+    !!draft.trim() &&
+    !isSending &&
+    ((queryMode === "direct" && !!onDirectSend) ||
+      (queryMode === "rag" && !!activeIndexPath && !!onRagSend));
+
+  const ragInputDisabled = queryMode === "rag" && !activeIndexPath;
 
   return (
     <div className="flex h-full flex-col">
@@ -82,6 +99,40 @@ export function ChatPanel({
           </div>
         )}
       </div>
+
+      {/* Index banner (RAG mode only) */}
+      {queryMode === "rag" && (
+        <div className="flex shrink-0 items-center justify-between border-b bg-muted/40 px-4 py-1.5 text-xs">
+          {activeIndexPath ? (
+            <>
+              <span className="text-muted-foreground">
+                Index:{" "}
+                <span className="font-medium text-foreground">
+                  {activeIndexLabel}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setPickerOpen(true)}
+                className="text-primary hover:underline"
+              >
+                Change
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="text-muted-foreground">No index selected</span>
+              <button
+                type="button"
+                onClick={() => setPickerOpen(true)}
+                className="font-medium text-primary hover:underline"
+              >
+                Select an index →
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Transcript */}
       <ScrollArea className="flex-1" ref={scrollRef as React.Ref<HTMLDivElement>}>
@@ -192,23 +243,24 @@ export function ChatPanel({
             >
               RAG
             </button>
-            {queryMode === "rag" && (
-              <span className="text-[11px] text-muted-foreground">
-                — requires an indexed document
-              </span>
-            )}
           </div>
 
           <div className="flex items-end gap-2">
             <Textarea
-              placeholder={queryMode === "direct" ? "Ask anything…" : "RAG requires an indexed document"}
+              placeholder={
+                ragInputDisabled
+                  ? "Select an index first…"
+                  : queryMode === "rag"
+                  ? "Ask about your documents…"
+                  : "Ask anything…"
+              }
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={1}
               className="min-h-[40px] max-h-[160px] resize-none text-sm"
               aria-label="Message input"
-              disabled={queryMode === "rag"}
+              disabled={ragInputDisabled}
             />
             <Button
               size="icon"
@@ -226,6 +278,14 @@ export function ChatPanel({
           </div>
         </div>
       </div>
+
+      <IndexPickerDialog
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onSelect={(path, label) => {
+          onIndexChange?.(path, label);
+        }}
+      />
     </div>
   );
 }
