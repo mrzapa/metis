@@ -6,7 +6,7 @@ import { SessionsPanel } from "@/components/chat/sessions-panel";
 import { ChatPanel, type ChatMessage } from "@/components/chat/chat-panel";
 import { EvidencePanel } from "@/components/chat/evidence-panel";
 import { fetchSession, fetchSettings, queryDirect, queryRagStream } from "@/lib/api";
-import type { SessionMessage, EvidenceSource, SessionSummary } from "@/lib/api";
+import type { SessionMessage, EvidenceSource, SessionSummary, TraceEvent } from "@/lib/api";
 
 type StopStreamReason = "user" | "navigation";
 
@@ -23,6 +23,7 @@ export default function ChatPage() {
   const [activeIndexLabel, setActiveIndexLabel] = useState<string | null>(null);
   const [queryModeOverride, setQueryModeOverride] = useState<"rag" | null>(null);
   const [latestRunId, setLatestRunId] = useState<string | null>(null);
+  const [liveTraceEvents, setLiveTraceEvents] = useState<TraceEvent[]>([]);
   const settingsRef = useRef<Record<string, unknown> | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const messageIdRef = useRef(0);
@@ -228,6 +229,7 @@ export default function ChatPage() {
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setSources([]);
+    setLiveTraceEvents([]);
     setIsStreamingRag(true);
 
     const controller = new AbortController();
@@ -253,6 +255,13 @@ export default function ChatPage() {
           switch (event.type) {
             case "run_started":
               setLatestRunId(event.run_id);
+              setLiveTraceEvents([{
+                run_id: event.run_id,
+                stage: "retrieval",
+                event_type: "run_started",
+                timestamp: new Date().toISOString(),
+                payload: {},
+              }]);
               updateMessage(assistantId, (message) => ({
                 ...message,
                 run_id: event.run_id,
@@ -260,6 +269,13 @@ export default function ChatPage() {
               break;
             case "retrieval_complete":
               activeStream.pendingSources = event.sources;
+              setLiveTraceEvents((prev) => [...prev, {
+                run_id: event.run_id,
+                stage: "retrieval",
+                event_type: "retrieval_complete",
+                timestamp: new Date().toISOString(),
+                payload: { sources_count: event.sources.length, top_score: event.top_score },
+              }]);
               break;
             case "token":
               updateMessage(assistantId, (message) => ({
@@ -271,6 +287,13 @@ export default function ChatPage() {
             case "final": {
               const finalSources =
                 event.sources.length > 0 ? event.sources : activeStream.pendingSources;
+              setLiveTraceEvents((prev) => [...prev, {
+                run_id: event.run_id,
+                stage: "synthesis",
+                event_type: "final",
+                timestamp: new Date().toISOString(),
+                payload: { answer_length: event.answer_text.length, sources_count: finalSources.length },
+              }]);
               activeRagStreamRef.current = null;
               setIsStreamingRag(false);
               startTransition(() => {
@@ -293,6 +316,13 @@ export default function ChatPage() {
               break;
             }
             case "error":
+              setLiveTraceEvents((prev) => [...prev, {
+                run_id: event.run_id,
+                stage: "error",
+                event_type: "error",
+                timestamp: new Date().toISOString(),
+                payload: { message: event.message },
+              }]);
               activeRagStreamRef.current = null;
               setIsStreamingRag(false);
               updateMessage(assistantId, (message) => ({
@@ -352,6 +382,7 @@ export default function ChatPage() {
     setLoadingSession(false);
     setSessionError(null);
     setLatestRunId(null);
+    setLiveTraceEvents([]);
   }, [stopRagStream]);
 
   // Keyboard shortcut: Cmd/Ctrl+K focuses the composer
@@ -420,6 +451,8 @@ export default function ChatPage() {
                   .map((m) => m.run_id)
                   .reverse()}
                 latestRunId={latestRunId}
+                liveTraceEvents={liveTraceEvents}
+                isStreaming={isStreamingRag}
               />
             ),
           },
