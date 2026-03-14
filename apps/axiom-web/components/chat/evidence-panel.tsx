@@ -2,10 +2,9 @@
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import type { EvidenceSource } from "@/lib/api";
 import { FileText, List, Activity } from "lucide-react";
+import { EvidenceSourceCard } from "@/components/chat/evidence-source-card";
 
 interface EvidencePanelProps {
   sources: EvidenceSource[];
@@ -45,30 +44,7 @@ export function EvidencePanel({ sources }: EvidencePanelProps) {
               )}
 
               {sources.map((src) => (
-                <Card key={src.sid} className="gap-0 py-0">
-                  <CardHeader className="px-3 py-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <CardTitle className="text-xs font-medium leading-snug">
-                        {src.title || src.source}
-                      </CardTitle>
-                      {src.score != null && (
-                        <Badge variant="secondary" className="shrink-0 text-[10px]">
-                          {(src.score * 100).toFixed(0)}%
-                        </Badge>
-                      )}
-                    </div>
-                  </CardHeader>
-                  <CardContent className="px-3 pb-2">
-                    <p className="line-clamp-3 text-xs text-muted-foreground">
-                      {src.snippet}
-                    </p>
-                    {src.breadcrumb && (
-                      <p className="mt-1 truncate text-[10px] text-muted-foreground/70">
-                        {src.breadcrumb}
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
+                <EvidenceSourceCard key={src.sid} source={src} />
               ))}
             </div>
           </ScrollArea>
