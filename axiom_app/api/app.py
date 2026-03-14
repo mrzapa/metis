@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from axiom_app.engine import build_index, list_indexes, query_direct, query_rag, stream_rag_answer
 from axiom_app.services.trace_store import TraceStore
@@ -27,6 +27,7 @@ from .models import (
     IndexBuildResultModel,
     RagQueryRequestModel,
     RagQueryResultModel,
+    RunActionRequestModel,
 )
 
 _DEFAULT_LOCAL_ORIGINS = [
@@ -130,6 +131,14 @@ def create_app() -> FastAPI:
     @app.get("/v1/traces/{run_id}")
     def api_get_trace(run_id: str) -> list[dict[str, Any]]:
         return TraceStore().read_run_events(run_id)
+
+    @app.post("/v1/runs/{run_id}/actions")
+    def api_run_action(run_id: str, payload: RunActionRequestModel) -> Response:  # noqa: ARG001
+        return Response(
+            content='{"detail": "Action handling not yet implemented"}',
+            status_code=501,
+            media_type="application/json",
+        )
 
     @app.post("/v1/query/rag/stream")
     def api_stream_rag(payload: RagQueryRequestModel) -> StreamingResponse:
