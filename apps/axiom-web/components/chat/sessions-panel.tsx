@@ -11,9 +11,10 @@ import { MessageSquarePlus, Search, WifiOff } from "lucide-react";
 interface SessionsPanelProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onNewChat: () => void;
 }
 
-export function SessionsPanel({ selectedId, onSelect }: SessionsPanelProps) {
+export function SessionsPanel({ selectedId, onSelect, onNewChat }: SessionsPanelProps) {
   const [search, setSearch] = useState("");
   const { sessions, loading, error } = useSessions(search);
 
@@ -24,7 +25,7 @@ export function SessionsPanel({ selectedId, onSelect }: SessionsPanelProps) {
       {/* Header */}
       <div className="flex items-center justify-between border-b px-3 py-2">
         <h2 className="text-sm font-semibold">Sessions</h2>
-        <Button variant="ghost" size="icon" className="size-7" aria-label="New session">
+        <Button variant="ghost" size="icon" className="size-7" aria-label="New chat" onClick={onNewChat}>
           <MessageSquarePlus className="size-4" />
         </Button>
       </div>

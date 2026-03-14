@@ -45,6 +45,15 @@ export default function ChatPage() {
     [loadSession],
   );
 
+  const handleNewChat = useCallback(() => {
+    setSelectedId(null);
+    setMessages([]);
+    setSources([]);
+    setSessionMeta(null);
+    setLoadingSession(false);
+    setSessionError(null);
+  }, []);
+
   // Keyboard shortcut: Cmd/Ctrl+K focuses search
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -71,6 +80,7 @@ export default function ChatPage() {
               <SessionsPanel
                 selectedId={selectedId}
                 onSelect={handleSelect}
+                onNewChat={handleNewChat}
               />
             ),
           },
