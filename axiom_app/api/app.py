@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from axiom_app.engine import build_index, list_indexes, query_direct, query_rag, stream_rag_answer
 
 from . import sessions as _sessions
+from . import settings as _settings
 from .models import (
     DirectQueryRequestModel,
     DirectQueryResultModel,
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(_sessions.router)
+    app.include_router(_settings.router)
 
     @app.get("/healthz")
     def healthz() -> dict[str, bool]:
