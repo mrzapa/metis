@@ -1,16 +1,62 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { EvidenceSource } from "@/lib/api";
+import type { EvidenceSource, TraceEvent } from "@/lib/api";
+import { fetchTraceEvents } from "@/lib/api";
 import { FileText, List, Activity } from "lucide-react";
 import { EvidenceSourceCard } from "@/components/chat/evidence-source-card";
+import { TraceTimeline } from "@/components/chat/trace-timeline";
 
 interface EvidencePanelProps {
   sources: EvidenceSource[];
+  runIds: string[];
+  latestRunId: string | null;
 }
 
-export function EvidencePanel({ sources }: EvidencePanelProps) {
+export function EvidencePanel({ sources, runIds, latestRunId }: EvidencePanelProps) {
+  const [selectedRunId, setSelectedRunId] = useState<string>("");
+  const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
+  const [traceLoading, setTraceLoading] = useState(false);
+  const [traceError, setTraceError] = useState<string | null>(null);
+
+  // Deduplicated, non-empty run IDs (most-recent first as they appear in the array)
+  const availableRunIds = [...new Set(runIds.filter(Boolean))];
+
+  // Auto-select the latest run when it changes
+  useEffect(() => {
+    if (latestRunId && latestRunId !== selectedRunId) {
+      setSelectedRunId(latestRunId);
+    }
+  }, [latestRunId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch trace events whenever selectedRunId changes
+  useEffect(() => {
+    if (!selectedRunId) {
+      setTraceEvents([]);
+      setTraceError(null);
+      return;
+    }
+    let cancelled = false;
+    setTraceLoading(true);
+    setTraceError(null);
+    fetchTraceEvents(selectedRunId)
+      .then((events) => {
+        if (!cancelled) setTraceEvents(events);
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setTraceError(err instanceof Error ? err.message : "Failed to load trace");
+      })
+      .finally(() => {
+        if (!cancelled) setTraceLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRunId]);
+
   return (
     <div className="flex h-full flex-col">
       <Tabs defaultValue="sources" className="flex h-full flex-col">
@@ -62,14 +108,57 @@ export function EvidencePanel({ sources }: EvidencePanelProps) {
         </TabsContent>
 
         {/* Trace tab */}
-        <TabsContent value="trace" className="flex-1 overflow-hidden">
-          <ScrollArea className="h-full">
-            <div className="p-3">
-              <p className="py-8 text-center text-xs text-muted-foreground">
-                Trace will show retrieval and reasoning steps.
-              </p>
+        <TabsContent value="trace" className="flex h-full flex-col overflow-hidden">
+          {/* Run selector */}
+          <div className="shrink-0 border-b px-3 py-2">
+            <div className="flex items-center gap-2">
+              <label htmlFor="run-selector" className="text-xs text-muted-foreground whitespace-nowrap">
+                Run
+              </label>
+              {availableRunIds.length === 0 ? (
+                <span className="text-xs text-muted-foreground italic">No runs yet</span>
+              ) : (
+                <select
+                  id="run-selector"
+                  value={selectedRunId}
+                  onChange={(e) => setSelectedRunId(e.target.value)}
+                  className="flex-1 text-xs rounded border bg-background px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="">Select a run…</option>
+                  {availableRunIds.map((id, idx) => (
+                    <option key={id} value={id}>
+                      {id === latestRunId
+                        ? `Latest — ${id.slice(0, 8)}…`
+                        : `Run ${availableRunIds.length - idx} — ${id.slice(0, 8)}…`}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
-          </ScrollArea>
+          </div>
+
+          {/* Timeline content */}
+          <div className="flex-1 overflow-hidden">
+            <ScrollArea className="h-full">
+              <div className="p-3">
+                {!selectedRunId ? (
+                  <p className="py-8 text-center text-xs text-muted-foreground">
+                    Select a run above to view its trace.
+                  </p>
+                ) : traceLoading ? (
+                  <p className="py-8 text-center text-xs text-muted-foreground animate-pulse">
+                    Loading trace…
+                  </p>
+                ) : traceError ? (
+                  <p className="py-8 text-center text-xs text-destructive">
+                    {traceError}
+                  </p>
+                ) : (
+                  <TraceTimeline events={traceEvents} />
+                )}
+              </div>
+            </ScrollArea>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

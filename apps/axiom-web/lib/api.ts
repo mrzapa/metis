@@ -62,6 +62,18 @@ export interface RagQueryResult {
   selected_mode: string;
 }
 
+export interface TraceEvent {
+  run_id: string;
+  event_id?: string;
+  stage: string;
+  event_type: string;
+  timestamp: string;
+  iteration?: number;
+  latency_ms?: number | null;
+  payload: Record<string, unknown>;
+  citations_chosen?: string[] | null;
+}
+
 export interface SessionDetail {
   summary: SessionSummary;
   messages: SessionMessage[];
@@ -93,6 +105,12 @@ export async function fetchSession(
 ): Promise<SessionDetail> {
   const res = await apiFetch(`${API_BASE}/v1/sessions/${sessionId}`);
   if (!res.ok) throw new Error(`Failed to fetch session: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchTraceEvents(runId: string): Promise<TraceEvent[]> {
+  const res = await apiFetch(`${API_BASE}/v1/traces/${encodeURIComponent(runId)}`);
+  if (!res.ok) throw new Error(`Failed to fetch trace: ${res.status}`);
   return res.json();
 }
 

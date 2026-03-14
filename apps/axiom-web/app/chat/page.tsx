@@ -19,6 +19,7 @@ export default function ChatPage() {
   const [activeIndexPath, setActiveIndexPath] = useState<string | null>(null);
   const [activeIndexLabel, setActiveIndexLabel] = useState<string | null>(null);
   const [queryModeOverride, setQueryModeOverride] = useState<"rag" | null>(null);
+  const [latestRunId, setLatestRunId] = useState<string | null>(null);
   const settingsRef = useRef<Record<string, unknown> | null>(null);
   const [modelProvider, setModelProvider] = useState<string | null>(null);
   const [modelName, setModelName] = useState<string | null>(null);
@@ -116,6 +117,7 @@ export default function ChatPage() {
         query_mode: "direct",
       };
       setMessages((prev) => [...prev, assistantMsg]);
+      if (result.run_id) setLatestRunId(result.run_id);
     } catch (err) {
       const errorMsg: SessionMessage = {
         role: "assistant",
@@ -157,6 +159,7 @@ export default function ChatPage() {
       };
       setMessages((prev) => [...prev, assistantMsg]);
       setSources(result.sources);
+      if (result.run_id) setLatestRunId(result.run_id);
     } catch (err) {
       const errorMsg: SessionMessage = {
         role: "assistant",
@@ -179,6 +182,7 @@ export default function ChatPage() {
     setSessionMeta(null);
     setLoadingSession(false);
     setSessionError(null);
+    setLatestRunId(null);
   }, []);
 
   // Keyboard shortcut: Cmd/Ctrl+K focuses search
@@ -239,7 +243,16 @@ export default function ChatPage() {
           {
             default: 1.5,
             min: 240,
-            children: <EvidencePanel sources={sources} />,
+            children: (
+              <EvidencePanel
+                sources={sources}
+                runIds={messages
+                  .filter((m) => m.role === "assistant" && m.run_id)
+                  .map((m) => m.run_id)
+                  .reverse()}
+                latestRunId={latestRunId}
+              />
+            ),
           },
         ]}
       />

@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from axiom_app.engine import build_index, list_indexes, query_direct, query_rag, stream_rag_answer
+from axiom_app.services.trace_store import TraceStore
 
 from . import sessions as _sessions
 from . import settings as _settings
@@ -125,6 +126,10 @@ def create_app() -> FastAPI:
     @app.post("/v1/query/direct", response_model=DirectQueryResultModel)
     def api_query_direct(payload: DirectQueryRequestModel) -> DirectQueryResultModel:
         return DirectQueryResultModel.from_engine(_run_engine(query_direct, payload.to_engine()))
+
+    @app.get("/v1/traces/{run_id}")
+    def api_get_trace(run_id: str) -> list[dict[str, Any]]:
+        return TraceStore().read_run_events(run_id)
 
     @app.post("/v1/query/rag/stream")
     def api_stream_rag(payload: RagQueryRequestModel) -> StreamingResponse:
