@@ -111,8 +111,15 @@ export async function updateSettings(
     body: JSON.stringify({ updates }),
   });
   if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Failed to save settings (${res.status}): ${detail}`);
+    const text = await res.text();
+    let message = text;
+    try {
+      const json = JSON.parse(text) as { detail?: string };
+      if (json.detail) message = json.detail;
+    } catch {
+      // use raw text
+    }
+    throw new Error(message);
   }
   return res.json();
 }
