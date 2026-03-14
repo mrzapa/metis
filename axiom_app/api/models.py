@@ -115,6 +115,8 @@ class DirectQueryResultModel(BaseModel):
     run_id: str
     answer_text: str
     selected_mode: str
+    llm_provider: str = ""
+    llm_model: str = ""
 
     @classmethod
     def from_engine(cls, result: DirectQueryResult) -> "DirectQueryResultModel":
@@ -122,6 +124,8 @@ class DirectQueryResultModel(BaseModel):
             run_id=result.run_id,
             answer_text=result.answer_text,
             selected_mode=result.selected_mode,
+            llm_provider=result.llm_provider,
+            llm_model=result.llm_model,
         )
 
 

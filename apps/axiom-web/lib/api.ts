@@ -20,6 +20,17 @@ export interface SessionMessage {
   ts: string;
   run_id: string;
   sources: EvidenceSource[];
+  llm_provider?: string;
+  llm_model?: string;
+  query_mode?: string;
+}
+
+export interface DirectQueryResult {
+  run_id: string;
+  answer_text: string;
+  selected_mode: string;
+  llm_provider: string;
+  llm_model: string;
 }
 
 export interface EvidenceSource {
@@ -39,9 +50,9 @@ export interface SessionDetail {
   traces: Record<string, unknown>;
 }
 
-async function apiFetch(url: string): Promise<Response> {
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(url);
+    return await fetch(url, init);
   } catch {
     throw new Error("Connection error: server unreachable");
   }
@@ -63,5 +74,27 @@ export async function fetchSession(
 ): Promise<SessionDetail> {
   const res = await apiFetch(`${API_BASE}/v1/sessions/${sessionId}`);
   if (!res.ok) throw new Error(`Failed to fetch session: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchSettings(): Promise<Record<string, unknown>> {
+  const res = await apiFetch(`${API_BASE}/v1/settings`);
+  if (!res.ok) throw new Error(`Failed to fetch settings: ${res.status}`);
+  return res.json();
+}
+
+export async function queryDirect(
+  prompt: string,
+  settings: Record<string, unknown>,
+): Promise<DirectQueryResult> {
+  const res = await apiFetch(`${API_BASE}/v1/query/direct`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, settings }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Direct query failed (${res.status}): ${detail}`);
+  }
   return res.json();
 }

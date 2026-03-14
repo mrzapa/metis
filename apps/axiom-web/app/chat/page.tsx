@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ResizablePanels } from "@/components/chat/resizable-panels";
 import { SessionsPanel } from "@/components/chat/sessions-panel";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { EvidencePanel } from "@/components/chat/evidence-panel";
-import { fetchSession } from "@/lib/api";
+import { fetchSession, fetchSettings, queryDirect } from "@/lib/api";
 import type { SessionMessage, EvidenceSource, SessionSummary } from "@/lib/api";
 
 export default function ChatPage() {
@@ -15,6 +15,8 @@ export default function ChatPage() {
   const [sessionMeta, setSessionMeta] = useState<SessionSummary | null>(null);
   const [loadingSession, setLoadingSession] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const settingsRef = useRef<Record<string, unknown> | null>(null);
 
   const loadSession = useCallback(async (id: string) => {
     setLoadingSession(true);
@@ -44,6 +46,47 @@ export default function ChatPage() {
     },
     [loadSession],
   );
+
+  const handleDirectSend = useCallback(async (prompt: string) => {
+    setIsSending(true);
+    const userMsg: SessionMessage = {
+      role: "user",
+      content: prompt,
+      ts: new Date().toISOString(),
+      run_id: "",
+      sources: [],
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    try {
+      if (!settingsRef.current) {
+        settingsRef.current = await fetchSettings();
+      }
+      const result = await queryDirect(prompt, settingsRef.current);
+      const assistantMsg: SessionMessage = {
+        role: "assistant",
+        content: result.answer_text,
+        ts: new Date().toISOString(),
+        run_id: result.run_id,
+        sources: [],
+        llm_provider: result.llm_provider,
+        llm_model: result.llm_model,
+        query_mode: "direct",
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (err) {
+      const errorMsg: SessionMessage = {
+        role: "assistant",
+        content: err instanceof Error ? err.message : "An error occurred.",
+        ts: new Date().toISOString(),
+        run_id: "",
+        sources: [],
+        query_mode: "direct",
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+    } finally {
+      setIsSending(false);
+    }
+  }, []);
 
   const handleNewChat = useCallback(() => {
     setSelectedId(null);
@@ -93,6 +136,8 @@ export default function ChatPage() {
                 sessionMeta={sessionMeta}
                 loading={loadingSession}
                 error={sessionError}
+                onDirectSend={handleDirectSend}
+                isSending={isSending}
               />
             ),
           },
