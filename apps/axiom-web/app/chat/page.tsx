@@ -5,7 +5,7 @@ import { ResizablePanels } from "@/components/chat/resizable-panels";
 import { SessionsPanel } from "@/components/chat/sessions-panel";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { EvidencePanel } from "@/components/chat/evidence-panel";
-import { fetchSession, fetchSettings, queryDirect } from "@/lib/api";
+import { fetchSession, fetchSettings, queryDirect, queryRag } from "@/lib/api";
 import type { SessionMessage, EvidenceSource, SessionSummary } from "@/lib/api";
 
 export default function ChatPage() {
@@ -16,6 +16,8 @@ export default function ChatPage() {
   const [loadingSession, setLoadingSession] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [activeIndexPath, setActiveIndexPath] = useState<string | null>(null);
+  const [activeIndexLabel, setActiveIndexLabel] = useState<string | null>(null);
   const settingsRef = useRef<Record<string, unknown> | null>(null);
 
   const loadSession = useCallback(async (id: string) => {
@@ -88,6 +90,47 @@ export default function ChatPage() {
     }
   }, []);
 
+  const handleRagSend = useCallback(async (question: string) => {
+    if (!activeIndexPath) return;
+    setIsSending(true);
+    const userMsg: SessionMessage = {
+      role: "user",
+      content: question,
+      ts: new Date().toISOString(),
+      run_id: "",
+      sources: [],
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    try {
+      if (!settingsRef.current) {
+        settingsRef.current = await fetchSettings();
+      }
+      const result = await queryRag(activeIndexPath, question, settingsRef.current);
+      const assistantMsg: SessionMessage = {
+        role: "assistant",
+        content: result.answer_text,
+        ts: new Date().toISOString(),
+        run_id: result.run_id,
+        sources: result.sources,
+        query_mode: "rag",
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+      setSources(result.sources);
+    } catch (err) {
+      const errorMsg: SessionMessage = {
+        role: "assistant",
+        content: err instanceof Error ? err.message : "An error occurred.",
+        ts: new Date().toISOString(),
+        run_id: "",
+        sources: [],
+        query_mode: "rag",
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+    } finally {
+      setIsSending(false);
+    }
+  }, [activeIndexPath]);
+
   const handleNewChat = useCallback(() => {
     setSelectedId(null);
     setMessages([]);
@@ -137,7 +180,14 @@ export default function ChatPage() {
                 loading={loadingSession}
                 error={sessionError}
                 onDirectSend={handleDirectSend}
+                onRagSend={handleRagSend}
                 isSending={isSending}
+                activeIndexPath={activeIndexPath}
+                activeIndexLabel={activeIndexLabel}
+                onIndexChange={(path, label) => {
+                  setActiveIndexPath(path);
+                  setActiveIndexLabel(label);
+                }}
               />
             ),
           },

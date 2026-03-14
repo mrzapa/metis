@@ -43,6 +43,25 @@ export interface EvidenceSource {
   section_hint: string;
 }
 
+export interface IndexSummary {
+  index_id: string;
+  manifest_path: string;
+  document_count: number;
+  chunk_count: number;
+  backend: string;
+  created_at: string;
+  embedding_signature: string;
+}
+
+export interface RagQueryResult {
+  run_id: string;
+  answer_text: string;
+  sources: EvidenceSource[];
+  context_block: string;
+  top_score: number;
+  selected_mode: string;
+}
+
 export interface SessionDetail {
   summary: SessionSummary;
   messages: SessionMessage[];
@@ -80,6 +99,29 @@ export async function fetchSession(
 export async function fetchSettings(): Promise<Record<string, unknown>> {
   const res = await apiFetch(`${API_BASE}/v1/settings`);
   if (!res.ok) throw new Error(`Failed to fetch settings: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchIndexes(): Promise<IndexSummary[]> {
+  const res = await apiFetch(`${API_BASE}/v1/index/list`);
+  if (!res.ok) throw new Error(`Failed to fetch indexes: ${res.status}`);
+  return res.json();
+}
+
+export async function queryRag(
+  manifest_path: string,
+  question: string,
+  settings: Record<string, unknown>,
+): Promise<RagQueryResult> {
+  const res = await apiFetch(`${API_BASE}/v1/query/rag`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ manifest_path, question, settings }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`RAG query failed (${res.status}): ${detail}`);
+  }
   return res.json();
 }
 
