@@ -8,6 +8,9 @@ import { EvidencePanel } from "@/components/chat/evidence-panel";
 import { fetchSession, fetchSettings, queryDirect, queryRag } from "@/lib/api";
 import type { SessionMessage, EvidenceSource, SessionSummary } from "@/lib/api";
 
+const MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"] as const;
+type ChatMode = (typeof MODES)[number];
+
 export default function ChatPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
@@ -24,6 +27,7 @@ export default function ChatPage() {
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const [modelProvider, setModelProvider] = useState<string | null>(null);
   const [modelName, setModelName] = useState<string | null>(null);
+  const [selectedMode, setSelectedMode] = useState<ChatMode>("Q&A");
 
   // Load current model info for the badge
   useEffect(() => {
@@ -106,7 +110,8 @@ export default function ChatPage() {
       if (!settingsRef.current) {
         settingsRef.current = await fetchSettings();
       }
-      const result = await queryDirect(prompt, settingsRef.current);
+      const settings = { ...settingsRef.current, selected_mode: selectedMode };
+      const result = await queryDirect(prompt, settings);
       const assistantMsg: SessionMessage = {
         role: "assistant",
         content: result.answer_text,
@@ -149,7 +154,8 @@ export default function ChatPage() {
       if (!settingsRef.current) {
         settingsRef.current = await fetchSettings();
       }
-      const result = await queryRag(activeIndexPath, question, settingsRef.current);
+      const settings = { ...settingsRef.current, selected_mode: selectedMode };
+      const result = await queryRag(activeIndexPath, question, settings);
       const assistantMsg: SessionMessage = {
         role: "assistant",
         content: result.answer_text,
@@ -236,6 +242,8 @@ export default function ChatPage() {
                 modelName={modelName}
                 onModelChange={handleModelChange}
                 composerRef={composerRef}
+                selectedMode={selectedMode}
+                onModeChange={(m) => setSelectedMode(m as ChatMode)}
               />
             ),
           },
@@ -250,6 +258,8 @@ export default function ChatPage() {
                   .map((m) => m.run_id)
                   .reverse()}
                 latestRunId={latestRunId}
+                selectedMode={selectedMode}
+                latestAnswer={messages.filter((m) => m.role === "assistant").at(-1)?.content ?? ""}
               />
             ),
           },

@@ -10,6 +10,8 @@ import { AlertCircle, Loader2, SendHorizontal } from "lucide-react";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
 import { ModelStatusDialog } from "@/components/chat/model-status-dialog";
 
+const MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"] as const;
+
 interface ChatPanelProps {
   messages: SessionMessage[];
   sessionMeta: SessionSummary | null;
@@ -26,6 +28,8 @@ interface ChatPanelProps {
   modelName?: string | null;
   onModelChange?: (provider: string, model: string) => void;
   composerRef?: RefObject<HTMLTextAreaElement>;
+  selectedMode?: string;
+  onModeChange?: (mode: string) => void;
 }
 
 export function ChatPanel({
@@ -44,6 +48,8 @@ export function ChatPanel({
   modelName,
   onModelChange,
   composerRef,
+  selectedMode,
+  onModeChange,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [queryMode, setQueryMode] = useState<"direct" | "rag">(initialQueryMode ?? "direct");
@@ -116,6 +122,25 @@ export function ChatPanel({
             )}
           </div>
         )}
+        {/* Mode selector */}
+        <div className="flex items-center gap-1 ml-2">
+          {MODES.map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => onModeChange?.(m)}
+              className={cn(
+                "rounded px-2 py-0.5 text-[11px] font-medium transition-colors",
+                selectedMode === m
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              )}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+
         {/* Model status badge */}
         {(modelProvider || modelName) && (
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
@@ -235,6 +260,29 @@ export function ChatPanel({
               </div>
             </div>
           ))}
+
+          {selectedMode === "Tutor" &&
+            !isSending &&
+            messages.length > 0 &&
+            messages.at(-1)?.role === "assistant" && (
+              <div className="flex justify-start">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const prompt =
+                      "Ask me a question to test my understanding of your last answer.";
+                    if (queryMode === "rag" && activeIndexPath && onRagSend) {
+                      onRagSend(prompt);
+                    } else if (onDirectSend) {
+                      onDirectSend(prompt);
+                    }
+                  }}
+                  className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+                >
+                  Next question →
+                </button>
+              </div>
+            )}
 
           {isSending && (
             <div className="flex justify-start">

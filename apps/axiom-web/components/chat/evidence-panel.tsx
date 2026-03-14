@@ -8,18 +8,29 @@ import { fetchTraceEvents } from "@/lib/api";
 import { FileText, List, Activity } from "lucide-react";
 import { EvidenceSourceCard } from "@/components/chat/evidence-source-card";
 import { TraceTimeline } from "@/components/chat/trace-timeline";
+import { cn } from "@/lib/utils";
 
 interface EvidencePanelProps {
   sources: EvidenceSource[];
   runIds: string[];
   latestRunId: string | null;
+  selectedMode?: string;
+  latestAnswer?: string;
 }
 
-export function EvidencePanel({ sources, runIds, latestRunId }: EvidencePanelProps) {
+export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, latestAnswer }: EvidencePanelProps) {
   const [selectedRunId, setSelectedRunId] = useState<string>("");
   const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
   const [traceLoading, setTraceLoading] = useState(false);
   const [traceError, setTraceError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("sources");
+
+  // Auto-switch to Sources tab when Evidence Pack mode is selected
+  useEffect(() => {
+    if (selectedMode === "Evidence Pack") {
+      setActiveTab("sources");
+    }
+  }, [selectedMode]);
 
   // Deduplicated, non-empty run IDs (most-recent first as they appear in the array)
   const availableRunIds = [...new Set(runIds.filter(Boolean))];
@@ -59,11 +70,17 @@ export function EvidencePanel({ sources, runIds, latestRunId }: EvidencePanelPro
 
   return (
     <div className="flex h-full flex-col">
-      <Tabs defaultValue="sources" className="flex h-full flex-col">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex h-full flex-col">
         {/* Tab bar */}
         <div className="shrink-0 border-b px-3 pt-2">
           <TabsList variant="line" className="h-8">
-            <TabsTrigger value="sources" className="gap-1 text-xs">
+            <TabsTrigger
+              value="sources"
+              className={cn(
+                "gap-1 text-xs",
+                selectedMode === "Evidence Pack" && "font-semibold text-primary"
+              )}
+            >
               <FileText className="size-3" />
               Sources
             </TabsTrigger>
@@ -82,6 +99,29 @@ export function EvidencePanel({ sources, runIds, latestRunId }: EvidencePanelPro
         <TabsContent value="sources" className="flex-1 overflow-hidden">
           <ScrollArea className="h-full">
             <div className="space-y-2 p-3">
+              {selectedMode === "Evidence Pack" && sources.length > 0 && (
+                <div className="flex justify-end pb-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const data = { answer: latestAnswer ?? "", sources };
+                      const blob = new Blob([JSON.stringify(data, null, 2)], {
+                        type: "application/json",
+                      });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = "evidence-pack.json";
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="rounded border px-2 py-1 text-[11px] font-medium hover:bg-muted transition-colors"
+                  >
+                    Download JSON
+                  </button>
+                </div>
+              )}
+
               {sources.length === 0 && (
                 <p className="py-8 text-center text-xs text-muted-foreground">
                   No sources yet. Sources will appear here when the assistant
