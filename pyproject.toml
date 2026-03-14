@@ -30,11 +30,16 @@ classifiers = [
 dependencies = ["PySide6>=6.6", "psutil>=6", "PyYAML>=6"]
 
 [project.optional-dependencies]
+api = [
+    "fastapi",
+    "uvicorn[standard]",
+]
 dev = [
     "pytest>=8",
     "pytest-cov>=5",
     "ruff>=0.6",
     "pre-commit>=3.8",
+    "httpx>=0.28",
 ]
 runtime-all = [
     "langchain==0.3.28",
@@ -71,6 +76,7 @@ all = [
 
 [project.scripts]
 axiom-parity-audit = "axiom_app.audit:main"
+axiom-api = "axiom_app.api.__main__:main"
 
 [tool.setuptools]
 license-files = ["LICENSE"]
