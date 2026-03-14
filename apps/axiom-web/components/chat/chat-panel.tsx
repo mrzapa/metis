@@ -5,15 +5,17 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { SessionMessage } from "@/lib/api";
-import { SendHorizontal } from "lucide-react";
+import type { SessionMessage, SessionSummary } from "@/lib/api";
+import { AlertCircle, Loader2, SendHorizontal } from "lucide-react";
 
 interface ChatPanelProps {
   messages: SessionMessage[];
-  sessionTitle: string | null;
+  sessionMeta: SessionSummary | null;
+  loading?: boolean;
+  error?: string | null;
 }
 
-export function ChatPanel({ messages, sessionTitle }: ChatPanelProps) {
+export function ChatPanel({ messages, sessionMeta, loading, error }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -40,16 +42,52 @@ export function ChatPanel({ messages, sessionTitle }: ChatPanelProps) {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex h-10 shrink-0 items-center border-b px-4">
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b px-4">
         <h2 className="truncate text-sm font-semibold">
-          {sessionTitle ?? "New Chat"}
+          {sessionMeta?.title ?? "New Chat"}
         </h2>
+        {sessionMeta && (
+          <div className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+            {sessionMeta.mode && (
+              <span className="rounded bg-muted px-1.5 py-0.5">
+                {sessionMeta.mode}
+              </span>
+            )}
+            {sessionMeta.llm_provider && (
+              <span className="rounded bg-muted px-1.5 py-0.5">
+                {sessionMeta.llm_provider}
+              </span>
+            )}
+            {sessionMeta.updated_at && (
+              <span className="rounded bg-muted px-1.5 py-0.5">
+                {formatDate(sessionMeta.updated_at)}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Transcript */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1" ref={scrollRef as React.Ref<HTMLDivElement>}>
         <div className="mx-auto max-w-3xl space-y-4 p-4">
-          {messages.length === 0 && (
+          {loading && (
+            <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
+              <Loader2 className="size-6 animate-spin" />
+              <p className="mt-2 text-sm">Loading session…</p>
+            </div>
+          )}
+
+          {!loading && error && (
+            <div className="flex flex-col items-center justify-center gap-2 py-20 text-center">
+              <AlertCircle className="size-6 text-destructive" />
+              <p className="text-sm font-medium text-destructive">
+                Failed to load session
+              </p>
+              <p className="text-xs text-muted-foreground">{error}</p>
+            </div>
+          )}
+
+          {!loading && !error && messages.length === 0 && (
             <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
               <p className="text-lg font-medium">Start a conversation</p>
               <p className="mt-1 text-sm">
@@ -58,7 +96,7 @@ export function ChatPanel({ messages, sessionTitle }: ChatPanelProps) {
             </div>
           )}
 
-          {messages.map((msg, i) => (
+          {!loading && !error && messages.map((msg, i) => (
             <div
               key={`${msg.run_id}-${i}`}
               className={cn(
@@ -111,4 +149,17 @@ export function ChatPanel({ messages, sessionTitle }: ChatPanelProps) {
       </div>
     </div>
   );
+}
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
 }

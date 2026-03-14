@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSessions } from "@/hooks/use-sessions";
 import { cn } from "@/lib/utils";
-import { MessageSquarePlus, Search } from "lucide-react";
+import { MessageSquarePlus, Search, WifiOff } from "lucide-react";
 
 interface SessionsPanelProps {
   selectedId: string | null;
@@ -16,6 +16,8 @@ interface SessionsPanelProps {
 export function SessionsPanel({ selectedId, onSelect }: SessionsPanelProps) {
   const [search, setSearch] = useState("");
   const { sessions, loading, error } = useSessions(search);
+
+  const isConnectionError = error?.toLowerCase().includes("connection error");
 
   return (
     <div className="flex h-full flex-col">
@@ -49,9 +51,16 @@ export function SessionsPanel({ selectedId, onSelect }: SessionsPanelProps) {
           )}
 
           {error && (
-            <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-              No sessions available
-            </p>
+            <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
+              {isConnectionError && (
+                <WifiOff className="size-5 text-muted-foreground" />
+              )}
+              <p className="text-xs text-muted-foreground">
+                {isConnectionError
+                  ? "Server unreachable"
+                  : "Could not load sessions"}
+              </p>
+            </div>
           )}
 
           {!loading && !error && sessions.length === 0 && (
@@ -77,6 +86,20 @@ export function SessionsPanel({ selectedId, onSelect }: SessionsPanelProps) {
               <span className="truncate text-xs text-muted-foreground">
                 {s.summary || formatDate(s.updated_at)}
               </span>
+              {(s.mode || s.llm_provider) && (
+                <div className="mt-0.5 flex gap-1">
+                  {s.mode && (
+                    <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                      {s.mode}
+                    </span>
+                  )}
+                  {s.llm_provider && (
+                    <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                      {s.llm_provider}
+                    </span>
+                  )}
+                </div>
+              )}
             </button>
           ))}
         </div>

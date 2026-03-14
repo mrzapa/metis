@@ -6,26 +6,34 @@ import { SessionsPanel } from "@/components/chat/sessions-panel";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { EvidencePanel } from "@/components/chat/evidence-panel";
 import { fetchSession } from "@/lib/api";
-import type { SessionMessage, EvidenceSource } from "@/lib/api";
+import type { SessionMessage, EvidenceSource, SessionSummary } from "@/lib/api";
 
 export default function ChatPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [sources, setSources] = useState<EvidenceSource[]>([]);
-  const [sessionTitle, setSessionTitle] = useState<string | null>(null);
+  const [sessionMeta, setSessionMeta] = useState<SessionSummary | null>(null);
+  const [loadingSession, setLoadingSession] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   const loadSession = useCallback(async (id: string) => {
+    setLoadingSession(true);
+    setSessionError(null);
     try {
       const detail = await fetchSession(id);
       setMessages(detail.messages);
-      setSessionTitle(detail.summary.title || null);
-      // Aggregate all sources from assistant messages
+      setSessionMeta(detail.summary);
       const allSources = detail.messages.flatMap((m) => m.sources);
       setSources(allSources);
-    } catch {
+    } catch (err) {
+      setSessionError(
+        err instanceof Error ? err.message : "Failed to load session"
+      );
       setMessages([]);
       setSources([]);
-      setSessionTitle(null);
+      setSessionMeta(null);
+    } finally {
+      setLoadingSession(false);
     }
   }, []);
 
@@ -70,7 +78,12 @@ export default function ChatPage() {
             default: 3,
             min: 400,
             children: (
-              <ChatPanel messages={messages} sessionTitle={sessionTitle} />
+              <ChatPanel
+                messages={messages}
+                sessionMeta={sessionMeta}
+                loading={loadingSession}
+                error={sessionError}
+              />
             ),
           },
           {
