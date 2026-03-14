@@ -13,10 +13,20 @@ interface ChatPanelProps {
   sessionMeta: SessionSummary | null;
   loading?: boolean;
   error?: string | null;
+  onDirectSend?: (prompt: string) => Promise<void>;
+  isSending?: boolean;
 }
 
-export function ChatPanel({ messages, sessionMeta, loading, error }: ChatPanelProps) {
+export function ChatPanel({
+  messages,
+  sessionMeta,
+  loading,
+  error,
+  onDirectSend,
+  isSending,
+}: ChatPanelProps) {
   const [draft, setDraft] = useState("");
+  const [queryMode, setQueryMode] = useState<"direct" | "rag">("direct");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll when messages change
@@ -34,10 +44,16 @@ export function ChatPanel({ messages, sessionMeta, loading, error }: ChatPanelPr
   }
 
   function handleSend() {
-    if (!draft.trim()) return;
-    // Sending not wired yet — placeholder for future implementation
-    setDraft("");
+    if (!draft.trim() || isSending) return;
+    if (queryMode === "direct" && onDirectSend) {
+      const prompt = draft.trim();
+      setDraft("");
+      onDirectSend(prompt);
+    }
+    // RAG mode: no-op (requires an indexed document)
   }
+
+  const canSend = !!draft.trim() && !isSending && queryMode === "direct" && !!onDirectSend;
 
   return (
     <div className="flex h-full flex-col">
@@ -118,33 +134,96 @@ export function ChatPanel({ messages, sessionMeta, loading, error }: ChatPanelPr
                     {msg.sources.length} source{msg.sources.length > 1 ? "s" : ""}
                   </p>
                 )}
+                {msg.role === "assistant" && (msg.llm_provider || msg.llm_model) && (
+                  <div className="mt-1.5 flex gap-1">
+                    {msg.llm_provider && (
+                      <span className="rounded bg-background/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                        {msg.llm_provider}
+                      </span>
+                    )}
+                    {msg.llm_model && (
+                      <span className="rounded bg-background/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                        {msg.llm_model}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ))}
+
+          {isSending && (
+            <div className="flex justify-start">
+              <div className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" />
+              </div>
+            </div>
+          )}
         </div>
       </ScrollArea>
 
       {/* Composer */}
       <div className="border-t p-3">
-        <div className="mx-auto flex max-w-3xl items-end gap-2">
-          <Textarea
-            placeholder="Ask a question…"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={1}
-            className="min-h-[40px] max-h-[160px] resize-none text-sm"
-            aria-label="Message input"
-          />
-          <Button
-            size="icon"
-            className="size-9 shrink-0"
-            onClick={handleSend}
-            disabled={!draft.trim()}
-            aria-label="Send message"
-          >
-            <SendHorizontal className="size-4" />
-          </Button>
+        <div className="mx-auto max-w-3xl space-y-2">
+          {/* Mode selector */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-muted-foreground">Path:</span>
+            <button
+              type="button"
+              onClick={() => setQueryMode("direct")}
+              className={cn(
+                "rounded px-2 py-0.5 text-[11px] font-medium transition-colors",
+                queryMode === "direct"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              )}
+            >
+              Direct
+            </button>
+            <button
+              type="button"
+              onClick={() => setQueryMode("rag")}
+              className={cn(
+                "rounded px-2 py-0.5 text-[11px] font-medium transition-colors",
+                queryMode === "rag"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              )}
+            >
+              RAG
+            </button>
+            {queryMode === "rag" && (
+              <span className="text-[11px] text-muted-foreground">
+                — requires an indexed document
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-end gap-2">
+            <Textarea
+              placeholder={queryMode === "direct" ? "Ask anything…" : "RAG requires an indexed document"}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={1}
+              className="min-h-[40px] max-h-[160px] resize-none text-sm"
+              aria-label="Message input"
+              disabled={queryMode === "rag"}
+            />
+            <Button
+              size="icon"
+              className="size-9 shrink-0"
+              onClick={handleSend}
+              disabled={!canSend}
+              aria-label="Send message"
+            >
+              {isSending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <SendHorizontal className="size-4" />
+              )}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

@@ -48,6 +48,8 @@ class DirectQueryResult:
     run_id: str
     answer_text: str
     selected_mode: str
+    llm_provider: str = ""
+    llm_model: str = ""
 
 
 def _normalize_run_id(run_id: str | None) -> str:
@@ -143,6 +145,8 @@ def query_direct(req: DirectQueryRequest) -> DirectQueryResult:
         run_id=_normalize_run_id(req.run_id),
         answer_text=answer,
         selected_mode=_selected_mode(settings),
+        llm_provider=str(settings.get("llm_provider", "") or ""),
+        llm_model=str(settings.get("llm_model", "") or ""),
     )
 
 
