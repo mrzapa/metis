@@ -21,6 +21,7 @@ export default function ChatPage() {
   const [queryModeOverride, setQueryModeOverride] = useState<"rag" | null>(null);
   const [latestRunId, setLatestRunId] = useState<string | null>(null);
   const settingsRef = useRef<Record<string, unknown> | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const [modelProvider, setModelProvider] = useState<string | null>(null);
   const [modelName, setModelName] = useState<string | null>(null);
 
@@ -185,15 +186,12 @@ export default function ChatPage() {
     setLatestRunId(null);
   }, []);
 
-  // Keyboard shortcut: Cmd/Ctrl+K focuses search
+  // Keyboard shortcut: Cmd/Ctrl+K focuses the composer
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        const searchInput = document.querySelector<HTMLInputElement>(
-          'input[aria-label="Search sessions"]',
-        );
-        searchInput?.focus();
+        composerRef.current?.focus();
       }
     }
     window.addEventListener("keydown", onKeyDown);
@@ -237,6 +235,7 @@ export default function ChatPage() {
                 modelProvider={modelProvider}
                 modelName={modelName}
                 onModelChange={handleModelChange}
+                composerRef={composerRef}
               />
             ),
           },
