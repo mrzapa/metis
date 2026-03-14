@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
+from collections.abc import Generator
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
-from axiom_app.engine import build_index, list_indexes, query_direct, query_rag
+from axiom_app.engine import build_index, list_indexes, query_direct, query_rag, stream_rag_answer
 
 from .models import (
     DirectQueryRequestModel,
@@ -65,6 +68,23 @@ def create_app() -> FastAPI:
     @app.post("/v1/query/direct", response_model=DirectQueryResultModel)
     def api_query_direct(payload: DirectQueryRequestModel) -> DirectQueryResultModel:
         return DirectQueryResultModel.from_engine(_run_engine(query_direct, payload.to_engine()))
+
+    @app.post("/v1/query/rag/stream")
+    def api_stream_rag(payload: RagQueryRequestModel) -> StreamingResponse:
+        req = payload.to_engine()
+
+        def _event_generator() -> Generator[str, None, None]:
+            for event in stream_rag_answer(req):
+                yield f"event: message\ndata: {json.dumps(event)}\n\n"
+
+        return StreamingResponse(
+            _event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     return app
 
