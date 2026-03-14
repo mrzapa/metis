@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSessions } from "@/hooks/use-sessions";
 import { cn } from "@/lib/utils";
-import { MessageSquarePlus, Search, WifiOff } from "lucide-react";
+import { MessageSquarePlus, Search, Settings, WifiOff } from "lucide-react";
 
 interface SessionsPanelProps {
   selectedId: string | null;
@@ -105,6 +106,17 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat }: SessionsPanel
           ))}
         </div>
       </ScrollArea>
+
+      {/* Footer nav */}
+      <div className="border-t px-3 py-2">
+        <Link
+          href="/settings"
+          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <Settings className="size-3.5" />
+          Settings
+        </Link>
+      </div>
     </div>
   );
 }

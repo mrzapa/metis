@@ -164,7 +164,13 @@ export default function LibraryPage() {
         </Link>
         <ChevronRight className="size-3.5 text-muted-foreground" />
         <span className="text-sm text-muted-foreground">Library</span>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-4">
+          <Link
+            href="/settings"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Settings
+          </Link>
           <Link
             href="/chat"
             className="text-sm text-muted-foreground hover:text-foreground"

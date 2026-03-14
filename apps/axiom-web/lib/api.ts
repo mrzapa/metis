@@ -102,6 +102,21 @@ export async function fetchSettings(): Promise<Record<string, unknown>> {
   return res.json();
 }
 
+export async function updateSettings(
+  updates: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const res = await apiFetch(`${API_BASE}/v1/settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ updates }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to save settings (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
 export async function fetchIndexes(): Promise<IndexSummary[]> {
   const res = await apiFetch(`${API_BASE}/v1/index/list`);
   if (!res.ok) throw new Error(`Failed to fetch indexes: ${res.status}`);
