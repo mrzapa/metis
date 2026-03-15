@@ -41,3 +41,6 @@ profiles/
 # Node / Next.js
 node_modules/
 .next/
+
+# Tauri desktop — generated sidecar binaries (see scripts/build_api_sidecar.sh)
+apps/axiom-desktop/src-tauri/binaries/
