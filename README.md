@@ -118,6 +118,7 @@ Q&A is table stakes. Axiom ships with **five distinct chat modes**, each designe
 | Interface | Launch command | Best for |
 |-----------|---------------|----------|
 | **Desktop GUI** | `python main.py` | Daily use — themes, sessions, keyboard shortcuts |
+| **Web + API dev** | `bash scripts/run_nextgen_dev.sh` | Running the next-gen web UI and local API together |
 | **Web UI** | `pnpm dev` (in `apps/axiom-web`) | Browser-based access; requires API server |
 | **Headless CLI** | `python main.py --cli ...` | Automation, scripting, servers, CI pipelines |
 | **API server** | `bash scripts/run_api_dev.sh` | Powers the web UI; exposes HTTP endpoints |
@@ -200,6 +201,24 @@ pnpm dev
 ```
 
 Then open [http://localhost:3000](http://localhost:3000). The web UI provides chat, document library management, and settings — all powered by the same local API.
+
+### Run the next-gen web UI and API together
+
+Start the local API and `apps/axiom-web` in one command. The launcher keeps everything on localhost, prints both URLs, and stops both child processes on `Ctrl-C`.
+
+**macOS / Linux:**
+
+```bash
+bash scripts/run_nextgen_dev.sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+.\scripts\run_nextgen_dev.ps1
+```
+
+If the script reports missing web dependencies, install them in `apps/axiom-web` first. If it reports an occupied port, stop the process already bound to `127.0.0.1:8000` or `127.0.0.1:3000` and rerun the launcher.
 
 ### Parity audit
 
