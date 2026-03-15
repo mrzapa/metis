@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "ui:diff": "npx shadcn diff",
+    "ui:add": "npx shadcn add"
   },
   "dependencies": {
     "@tauri-apps/plugin-dialog": "^2",
