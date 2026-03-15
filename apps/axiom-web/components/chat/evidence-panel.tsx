@@ -18,30 +18,49 @@ interface EvidencePanelProps {
   latestAnswer?: string;
   liveTraceEvents?: TraceEvent[];
   isStreaming?: boolean;
+  preferredTab?: "sources" | "trace";
+  postureToken?: number;
 }
 
-export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, latestAnswer, liveTraceEvents, isStreaming }: EvidencePanelProps) {
+export function EvidencePanel({
+  sources,
+  runIds,
+  latestRunId,
+  selectedMode,
+  latestAnswer,
+  liveTraceEvents,
+  isStreaming,
+  preferredTab = "sources",
+  postureToken = 0,
+}: EvidencePanelProps) {
   const [selectedRunId, setSelectedRunId] = useState<string>(latestRunId ?? "");
-  const [syncedLatestRunId, setSyncedLatestRunId] = useState<string | null>(latestRunId);
+  const [selectedRunSyncValue, setSelectedRunSyncValue] = useState<string | null>(latestRunId);
   const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
   const [traceLoading, setTraceLoading] = useState(Boolean(latestRunId));
   const [traceError, setTraceError] = useState<string | null>(null);
+  const desiredActiveTab =
+    selectedMode === "Evidence Pack" ? "sources" : preferredTab;
+  const [activeTab, setActiveTab] = useState<"sources" | "outline" | "trace">(desiredActiveTab);
+  const [activeTabSyncKey, setActiveTabSyncKey] = useState(
+    `${postureToken}:${desiredActiveTab}`,
+  );
   const [traceStateRunId, setTraceStateRunId] = useState<string>(latestRunId ?? "");
-  const [activeTab, setActiveTab] = useState("sources");
-  const [syncedMode, setSyncedMode] = useState(selectedMode);
 
-  if (selectedMode !== syncedMode) {
-    setSyncedMode(selectedMode);
-    if (selectedMode === "Evidence Pack") {
-      setActiveTab("sources");
-    }
-  }
+  // Deduplicated, non-empty run IDs (most-recent first as they appear in the array)
+  const availableRunIds = useMemo(() => [...new Set(runIds.filter(Boolean))], [runIds]);
+  const showLiveTrace = Boolean(isStreaming && selectedRunId === latestRunId);
 
-  if (latestRunId !== syncedLatestRunId) {
-    setSyncedLatestRunId(latestRunId);
+  if (latestRunId !== selectedRunSyncValue) {
+    setSelectedRunSyncValue(latestRunId);
     if (latestRunId) {
       setSelectedRunId(latestRunId);
     }
+  }
+
+  const nextActiveTabSyncKey = `${postureToken}:${desiredActiveTab}`;
+  if (activeTabSyncKey !== nextActiveTabSyncKey) {
+    setActiveTabSyncKey(nextActiveTabSyncKey);
+    setActiveTab(desiredActiveTab);
   }
 
   if (selectedRunId !== traceStateRunId) {
@@ -50,10 +69,6 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
     setTraceError(null);
     setTraceLoading(Boolean(selectedRunId));
   }
-
-  // Deduplicated, non-empty run IDs (most-recent first as they appear in the array)
-  const availableRunIds = useMemo(() => [...new Set(runIds.filter(Boolean))], [runIds]);
-  const showLiveTrace = Boolean(isStreaming && selectedRunId === latestRunId);
 
   // Fetch trace events whenever selectedRunId changes (skip while streaming the active run)
   useEffect(() => {

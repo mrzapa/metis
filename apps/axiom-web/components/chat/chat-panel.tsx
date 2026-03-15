@@ -1,15 +1,17 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useRef, useEffect, type KeyboardEvent, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { SessionSummary } from "@/lib/api";
+import type { SessionSummary, TraceEvent } from "@/lib/api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { ActionCard } from "@/components/chat/action-card";
+import { AgenticStepIndicator } from "@/components/chat/agentic-step-indicator";
 import { AssistantMarkdown } from "@/components/chat/assistant-markdown";
-import { AlertCircle, Loader2, SendHorizontal, Square } from "lucide-react";
+import { AlertCircle, Bot, Loader2, SendHorizontal, Square } from "lucide-react";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
 import { ModelStatusDialog } from "@/components/chat/model-status-dialog";
 
@@ -35,6 +37,11 @@ interface ChatPanelProps {
   onModeChange?: (mode: string) => void;
   onActionApprove?: (messageId: string) => void;
   onActionDeny?: (messageId: string) => void;
+  agenticMode?: boolean;
+  agenticModeSaving?: boolean;
+  agenticModeError?: string | null;
+  liveTraceEvents?: TraceEvent[];
+  onAgenticModeChange?: (enabled: boolean) => void;
   reconnectState?: {
     question: string;
     lastEventId: number;
@@ -63,6 +70,11 @@ export function ChatPanel({
   composerRef,
   onActionApprove,
   onActionDeny,
+  agenticMode = false,
+  agenticModeSaving = false,
+  agenticModeError,
+  liveTraceEvents = [],
+  onAgenticModeChange,
   reconnectState,
   onReconnectRun,
   onDiscardReconnect,
@@ -112,11 +124,16 @@ export function ChatPanel({
       (queryMode === "rag" && !!activeIndexPath && !!onRagSend));
 
   const ragInputDisabled = queryMode === "rag" && !activeIndexPath;
+  const activeStreamingAssistantMessageId =
+    [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant" && message.status === "streaming")
+      ?.id ?? null;
 
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b px-4">
+      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
         <h2 className="truncate text-sm font-semibold">
           {sessionMeta?.title ?? "New Chat"}
         </h2>
@@ -139,12 +156,36 @@ export function ChatPanel({
             )}
           </div>
         )}
-        {/* Model status badge */}
-        {(modelProvider || modelName) && (
-          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            size="xs"
+            variant={agenticMode ? "default" : "outline"}
+            className="gap-1.5"
+            onClick={() => onAgenticModeChange?.(!agenticMode)}
+            disabled={agenticModeSaving || !onAgenticModeChange}
+            aria-pressed={agenticMode}
+          >
+            {agenticModeSaving ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <Bot className="size-3" />
+            )}
+            {agenticMode ? "Agentic on" : "Agentic off"}
+          </Button>
+          <Link
+            href="/settings"
+            className="rounded px-1.5 py-0.5 text-[10px] font-medium text-primary hover:underline"
+          >
+            Settings
+          </Link>
+          {/* Model status badge */}
+          {(modelProvider || modelName) && (
             <span className="rounded bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
               {[modelProvider, modelName].filter(Boolean).join(" / ")}
             </span>
+          )}
+          {(modelProvider || modelName) && (
             <button
               type="button"
               onClick={() => setModelDialogOpen(true)}
@@ -152,9 +193,15 @@ export function ChatPanel({
             >
               Change
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
+
+      {agenticModeError && (
+        <div className="border-b bg-destructive/5 px-4 py-2 text-[11px] text-destructive">
+          {agenticModeError}
+        </div>
+      )}
 
       {reconnectState && (
         <div className="border-b bg-amber-50/60 px-4 py-3">
@@ -292,6 +339,15 @@ export function ChatPanel({
                       Streaming
                     </div>
                   )}
+                  {msg.role === "assistant" &&
+                    msg.status === "streaming" &&
+                    agenticMode &&
+                    msg.id === activeStreamingAssistantMessageId && (
+                      <AgenticStepIndicator
+                        assistantHasContent={msg.content.trim().length > 0}
+                        events={liveTraceEvents}
+                      />
+                    )}
                   {msg.role === "assistant" && msg.status === "error" && (
                     <div className="mt-1.5 text-[10px] text-destructive">
                       Response interrupted

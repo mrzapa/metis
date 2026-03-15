@@ -21,19 +21,28 @@ interface PanelConfig {
 interface ResizablePanelsProps {
   panels: [PanelConfig, PanelConfig, PanelConfig];
   className?: string;
+  resetToken?: number;
 }
 
 /**
  * Three-panel resizable layout using CSS grid + pointer-drag dividers.
  * Falls back gracefully — panels can be collapsed below min width on small screens.
  */
-export function ResizablePanels({ panels, className }: ResizablePanelsProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [sizes, setSizes] = useState<[number, number, number]>([
+export function ResizablePanels({
+  panels,
+  className,
+  resetToken,
+}: ResizablePanelsProps) {
+  const defaultSizes: [number, number, number] = [
     panels[0].default,
     panels[1].default,
     panels[2].default,
-  ]);
+  ];
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [sizes, setSizes] = useState<[number, number, number]>(defaultSizes);
+  const [sizeSyncKey, setSizeSyncKey] = useState(
+    `${defaultSizes.join(":")}:${resetToken ?? ""}`,
+  );
 
   // Which divider is being dragged: 0 = left|center, 1 = center|right
   const draggingRef = useRef<number | null>(null);
@@ -88,6 +97,12 @@ export function ResizablePanels({ panels, className }: ResizablePanelsProps) {
       document.removeEventListener("pointerup", handlePointerUp);
     };
   }, [handlePointerMove, handlePointerUp]);
+
+  const nextSizeSyncKey = `${defaultSizes.join(":")}:${resetToken ?? ""}`;
+  if (sizeSyncKey !== nextSizeSyncKey) {
+    setSizeSyncKey(nextSizeSyncKey);
+    setSizes(defaultSizes);
+  }
 
   return (
     <div
