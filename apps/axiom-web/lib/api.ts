@@ -4,8 +4,35 @@ import type {
   EvidenceSource,
 } from "@/lib/chat-types";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_AXIOM_API_BASE ?? "http://127.0.0.1:8000";
+// Resolves the API base URL once and caches the result.
+// In a Tauri desktop build the sidecar negotiates a dynamic port and exposes
+// it via the `get_api_base_url` command.  In web / dev mode we fall back to
+// the environment variable (or the default development address).
+let _apiBaseCache: Promise<string> | null = null;
+
+export function getApiBase(): Promise<string> {
+  if (!_apiBaseCache) {
+    _apiBaseCache = _resolveApiBase();
+  }
+  return _apiBaseCache;
+}
+
+async function _resolveApiBase(): Promise<string> {
+  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      // The sidecar reads the free port asynchronously; poll up to 15 s.
+      for (let i = 0; i < 30; i++) {
+        const url = await invoke<string | null>("get_api_base_url");
+        if (url) return url;
+        await new Promise<void>((r) => setTimeout(r, 500));
+      }
+    } catch {
+      // Fall through to the default below.
+    }
+  }
+  return process.env.NEXT_PUBLIC_AXIOM_API_BASE ?? "http://127.0.0.1:8000";
+}
 
 export interface SessionSummary {
   session_id: string;
@@ -237,7 +264,7 @@ export async function fetchSessions(
 ): Promise<SessionSummary[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
-  const url = `${API_BASE}/v1/sessions${params.toString() ? `?${params}` : ""}`;
+  const url = `${await getApiBase()}/v1/sessions${params.toString() ? `?${params}` : ""}`;
   const res = await apiFetch(url);
   if (!res.ok) throw new Error(`Failed to fetch sessions: ${res.status}`);
   return res.json();
@@ -246,19 +273,19 @@ export async function fetchSessions(
 export async function fetchSession(
   sessionId: string,
 ): Promise<SessionDetail> {
-  const res = await apiFetch(`${API_BASE}/v1/sessions/${sessionId}`);
+  const res = await apiFetch(`${await getApiBase()}/v1/sessions/${sessionId}`);
   if (!res.ok) throw new Error(`Failed to fetch session: ${res.status}`);
   return res.json();
 }
 
 export async function fetchTraceEvents(runId: string): Promise<TraceEvent[]> {
-  const res = await apiFetch(`${API_BASE}/v1/traces/${encodeURIComponent(runId)}`);
+  const res = await apiFetch(`${await getApiBase()}/v1/traces/${encodeURIComponent(runId)}`);
   if (!res.ok) throw new Error(`Failed to fetch trace: ${res.status}`);
   return res.json();
 }
 
 export async function fetchSettings(): Promise<Record<string, unknown>> {
-  const res = await apiFetch(`${API_BASE}/v1/settings`);
+  const res = await apiFetch(`${await getApiBase()}/v1/settings`);
   if (!res.ok) throw new Error(`Failed to fetch settings: ${res.status}`);
   return res.json();
 }
@@ -266,7 +293,7 @@ export async function fetchSettings(): Promise<Record<string, unknown>> {
 export async function updateSettings(
   updates: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const res = await apiFetch(`${API_BASE}/v1/settings`, {
+  const res = await apiFetch(`${await getApiBase()}/v1/settings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ updates }),
@@ -286,7 +313,7 @@ export async function updateSettings(
 }
 
 export async function fetchIndexes(): Promise<IndexSummary[]> {
-  const res = await apiFetch(`${API_BASE}/v1/index/list`);
+  const res = await apiFetch(`${await getApiBase()}/v1/index/list`);
   if (!res.ok) throw new Error(`Failed to fetch indexes: ${res.status}`);
   return res.json();
 }
@@ -296,7 +323,7 @@ export async function queryRag(
   question: string,
   settings: Record<string, unknown>,
 ): Promise<RagQueryResult> {
-  const res = await apiFetch(`${API_BASE}/v1/query/rag`, {
+  const res = await apiFetch(`${await getApiBase()}/v1/query/rag`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ manifest_path, question, settings }),
@@ -330,7 +357,7 @@ export async function queryRagStream(
     headers["Last-Event-ID"] = String(options.lastEventId);
   }
 
-  const res = await apiFetch(`${API_BASE}/v1/query/rag/stream`, {
+  const res = await apiFetch(`${await getApiBase()}/v1/query/rag/stream`, {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -368,7 +395,7 @@ export interface IndexBuildResult {
 export async function uploadFiles(files: File[]): Promise<{ paths: string[] }> {
   const form = new FormData();
   for (const file of files) form.append("files", file);
-  const res = await apiFetch(`${API_BASE}/v1/files/upload`, { method: "POST", body: form });
+  const res = await apiFetch(`${await getApiBase()}/v1/files/upload`, { method: "POST", body: form });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Upload failed (${res.status}): ${detail}`);
@@ -381,7 +408,7 @@ export async function buildIndexStream(
   settings: Record<string, unknown>,
   onEvent: (event: Record<string, unknown>) => void,
 ): Promise<IndexBuildResult> {
-  const res = await apiFetch(`${API_BASE}/v1/index/build/stream`, {
+  const res = await apiFetch(`${await getApiBase()}/v1/index/build/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ document_paths: documentPaths, settings }),
@@ -409,7 +436,7 @@ export async function submitRunAction(
   body: { approved: boolean; payload?: Record<string, unknown> },
 ): Promise<void> {
   const res = await apiFetch(
-    `${API_BASE}/v1/runs/${encodeURIComponent(runId)}/actions`,
+    `${await getApiBase()}/v1/runs/${encodeURIComponent(runId)}/actions`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -427,7 +454,7 @@ export async function queryDirect(
   prompt: string,
   settings: Record<string, unknown>,
 ): Promise<DirectQueryResult> {
-  const res = await apiFetch(`${API_BASE}/v1/query/direct`, {
+  const res = await apiFetch(`${await getApiBase()}/v1/query/direct`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt, settings }),
