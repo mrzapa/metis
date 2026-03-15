@@ -135,7 +135,6 @@ def test_cli_index_handles_cp1252_stdout(tmp_path, monkeypatch) -> None:
 def test_cli_skills_commands_and_query_show_skills(tmp_path, monkeypatch, capsys) -> None:
     defaults = tmp_path / "default_settings.json"
     user_settings = tmp_path / "settings.json"
-    legacy_settings = tmp_path / "agentic_rag_config.json"
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
     research_dir = skills_dir / "research-claims"
@@ -167,11 +166,9 @@ def test_cli_skills_commands_and_query_show_skills(tmp_path, monkeypatch, capsys
         encoding="utf-8",
     )
     user_settings.write_text("{}", encoding="utf-8")
-    legacy_settings.write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr(app_model_module, "_DEFAULT_SETTINGS_PATH", defaults)
     monkeypatch.setattr(app_model_module, "_USER_SETTINGS_PATH", user_settings)
-    monkeypatch.setattr(app_model_module, "_LEGACY_CONFIG_PATH", legacy_settings)
     monkeypatch.setattr(app_model_module, "_SKILLS_DIR", skills_dir)
 
     assert cli_main(["skills", "list"]) == 0

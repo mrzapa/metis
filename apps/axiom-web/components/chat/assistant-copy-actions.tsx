@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Copy, FileText, MoreHorizontal, NotebookText } from "lucide-react";
+import { Copy, FileText, MoreHorizontal, NotebookText, ThumbsUp, ThumbsDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -15,11 +15,12 @@ import {
   markdownToPlainText,
   normalizeMarkdownForCopy,
 } from "@/lib/chat-copy";
+import { submitFeedback } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type CopyVariant = "plain" | "markdown" | "answer-and-sources";
 
-type CopyFeedback =
+type ActionFeedback =
   | {
       tone: "success" | "error";
       message: string;
@@ -28,6 +29,7 @@ type CopyFeedback =
 
 interface AssistantCopyActionsProps {
   message: Pick<ChatMessage, "content" | "run_id" | "sources" | "status">;
+  sessionId?: string;
 }
 
 const COPY_VARIANTS: Array<{
@@ -40,8 +42,9 @@ const COPY_VARIANTS: Array<{
   { icon: NotebookText, key: "answer-and-sources", label: "Copy Answer + Sources" },
 ];
 
-export function AssistantCopyActions({ message }: AssistantCopyActionsProps) {
-  const [feedback, setFeedback] = useState<CopyFeedback>(null);
+export function AssistantCopyActions({ message, sessionId }: AssistantCopyActionsProps) {
+  const [feedback, setFeedback] = useState<ActionFeedback>(null);
+  const [vote, setVote] = useState<1 | -1 | null>(null);
   const resetTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -56,7 +59,7 @@ export function AssistantCopyActions({ message }: AssistantCopyActionsProps) {
     return null;
   }
 
-  const setTransientFeedback = (nextFeedback: Exclude<CopyFeedback, null>) => {
+  const setTransientFeedback = (nextFeedback: Exclude<ActionFeedback, null>) => {
     setFeedback(nextFeedback);
 
     if (resetTimerRef.current !== null) {
@@ -104,39 +107,83 @@ export function AssistantCopyActions({ message }: AssistantCopyActionsProps) {
     }
   };
 
+  const handleVote = async (direction: 1 | -1) => {
+    if (!sessionId || !message.run_id) return;
+    try {
+      await submitFeedback(sessionId, message.run_id, direction);
+      setVote(direction);
+      setTransientFeedback({
+        tone: "success",
+        message: direction === 1 ? "Upvoted" : "Downvoted",
+      });
+    } catch {
+      setTransientFeedback({ tone: "error", message: "Feedback failed" });
+    }
+  };
+
   return (
     <div className="ml-2 flex shrink-0 flex-col items-end gap-1">
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
+      <div className="flex items-center gap-0.5">
+        {sessionId && (
+          <>
             <Button
               variant="ghost"
               size="icon-xs"
-              className="text-muted-foreground/70 hover:text-foreground"
-              aria-label="Open answer copy actions"
-            />
-          }
-        >
-          <MoreHorizontal className="size-3.5" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" sideOffset={6} className="w-48">
-          {COPY_VARIANTS.map((variant) => {
-            const Icon = variant.icon;
+              className={cn(
+                "text-muted-foreground/70 hover:text-foreground",
+                vote === 1 && "text-foreground",
+              )}
+              aria-label="Upvote response"
+              onClick={() => void handleVote(1)}
+            >
+              <ThumbsUp className="size-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className={cn(
+                "text-muted-foreground/70 hover:text-foreground",
+                vote === -1 && "text-foreground",
+              )}
+              aria-label="Downvote response"
+              onClick={() => void handleVote(-1)}
+            >
+              <ThumbsDown className="size-3" />
+            </Button>
+          </>
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground/70 hover:text-foreground"
+                aria-label="Open answer copy actions"
+              />
+            }
+          >
+            <MoreHorizontal className="size-3.5" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" sideOffset={6} className="w-48">
+            {COPY_VARIANTS.map((variant) => {
+              const Icon = variant.icon;
 
-            return (
-              <DropdownMenuItem
-                key={variant.key}
-                onClick={() => {
-                  void handleCopy(variant.key);
-                }}
-              >
-                <Icon className="size-3.5" />
-                {variant.label}
-              </DropdownMenuItem>
-            );
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
+              return (
+                <DropdownMenuItem
+                  key={variant.key}
+                  onClick={() => {
+                    void handleCopy(variant.key);
+                  }}
+                >
+                  <Icon className="size-3.5" />
+                  {variant.label}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       <p
         aria-live="polite"

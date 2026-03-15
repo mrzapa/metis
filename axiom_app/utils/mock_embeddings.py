@@ -8,8 +8,6 @@ The class exposes the same ``embed_documents`` / ``embed_query`` interface
 used by the LangChain embedding adapters, so it is a drop-in replacement
 during development.
 
-Migrated from the top of ``agentic_rag_gui.py``; that module now imports
-from here so the single source of truth lives in the testable package.
 """
 
 from __future__ import annotations

@@ -112,7 +112,6 @@ jobs:
             --onefile \
             --icon logo.png \
             --add-data "axiom_app/default_settings.json;axiom_app" \
-            --hidden-import tkinter \
             --collect-submodules axiom_app \
             release/axiom_mvc_entry.py
 

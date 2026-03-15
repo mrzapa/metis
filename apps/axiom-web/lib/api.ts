@@ -278,6 +278,26 @@ export async function fetchSession(
   return res.json();
 }
 
+export async function submitFeedback(
+  sessionId: string,
+  runId: string,
+  vote: 1 | -1,
+  note = "",
+): Promise<void> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/sessions/${encodeURIComponent(sessionId)}/feedback`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id: runId, vote, note }),
+    },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Feedback submit failed (${res.status}): ${detail}`);
+  }
+}
+
 export async function fetchTraceEvents(runId: string): Promise<TraceEvent[]> {
   const res = await apiFetch(`${await getApiBase()}/v1/traces/${encodeURIComponent(runId)}`);
   if (!res.ok) throw new Error(`Failed to fetch trace: ${res.status}`);
@@ -443,8 +463,7 @@ export async function submitRunAction(
       body: JSON.stringify(body),
     },
   );
-  // 501 is expected for the stub — don't throw
-  if (!res.ok && res.status !== 501) {
+  if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Action submit failed (${res.status}): ${detail}`);
   }
