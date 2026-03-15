@@ -148,7 +148,7 @@ function normalizeTraceEvents(value: unknown): TraceEvent[] {
       const event = entry as Record<string, unknown>;
       return {
         run_id: String(event.run_id ?? ""),
-        event_id: normalizeOptionalString(event.event_id),
+        event_id: normalizeOptionalString(event.event_id) ?? undefined,
         stage: String(event.stage ?? ""),
         event_type: String(event.event_type ?? ""),
         timestamp: String(event.timestamp ?? new Date().toISOString()),
@@ -168,7 +168,7 @@ function normalizeTraceEvents(value: unknown): TraceEvent[] {
       } satisfies TraceEvent;
     })
     .filter(
-      (entry): entry is TraceEvent =>
-        Boolean(entry?.run_id && entry.stage && entry.event_type),
-    );
+      (entry): entry is NonNullable<typeof entry> =>
+        entry !== null && Boolean(entry.run_id && entry.stage && entry.event_type),
+    ) as TraceEvent[];
 }
