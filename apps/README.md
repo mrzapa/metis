@@ -29,3 +29,12 @@ On Windows use:
 ```powershell
 .\scripts\run_nextgen_dev.ps1
 ```
+
+---
+
+## axiom-desktop (experimental)
+
+> **Experimental.** A [Tauri v2](https://tauri.app) desktop shell that hosts `axiom-web` in a
+> native window. Not production-ready. The primary Qt desktop app (`python main.py`) is unaffected.
+
+See [`apps/axiom-desktop/README.md`](axiom-desktop/README.md) for setup and usage.
