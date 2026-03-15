@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { SessionSummary } from "@/lib/api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { ActionCard } from "@/components/chat/action-card";
+import { AssistantCopyActions } from "@/components/chat/assistant-copy-actions";
 import { AssistantMarkdown } from "@/components/chat/assistant-markdown";
 import { AlertCircle, Loader2, SendHorizontal, Square } from "lucide-react";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
@@ -278,9 +279,13 @@ export function ChatPanel({
                   )}
                 >
                   {msg.role === "assistant" ? (
-                    <AssistantMarkdown
-                      content={msg.content || (msg.status === "aborted" ? "Stopped." : "")}
-                    />
+                    <div className="flex items-start">
+                      <AssistantMarkdown
+                        className="min-w-0 flex-1"
+                        content={msg.content || (msg.status === "aborted" ? "Stopped." : "")}
+                      />
+                      <AssistantCopyActions message={msg} />
+                    </div>
                   ) : (
                     <p className="whitespace-pre-wrap">
                       {msg.content || (msg.status === "aborted" ? "Stopped." : "")}
