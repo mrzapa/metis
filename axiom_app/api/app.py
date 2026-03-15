@@ -11,11 +11,13 @@ import uuid
 from collections.abc import AsyncGenerator, Generator
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Header, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 
 from axiom_app.engine import build_index, list_indexes, query_direct, query_rag, stream_rag_answer
+from axiom_app.engine.querying import _normalize_run_id
+from axiom_app.services.stream_replay import ReplayableRunStreamManager
 from axiom_app.services.trace_store import TraceStore
 
 from . import sessions as _sessions
@@ -36,6 +38,8 @@ _DEFAULT_LOCAL_ORIGINS = [
     "https://localhost",
     "https://127.0.0.1",
 ]
+
+_RAG_STREAM_MANAGER = ReplayableRunStreamManager()
 
 
 def _cors_origins_from_env() -> list[str]:
@@ -141,12 +145,22 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/v1/query/rag/stream")
-    def api_stream_rag(payload: RagQueryRequestModel) -> StreamingResponse:
+    def api_stream_rag(
+        payload: RagQueryRequestModel,
+        last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    ) -> StreamingResponse:
         req = payload.to_engine()
+        run_id = _normalize_run_id(req.run_id)
+        req.run_id = run_id
+        replay_after = _parse_last_event_id(last_event_id)
+
+        if replay_after is None:
+            _RAG_STREAM_MANAGER.ensure_run(run_id, lambda: stream_rag_answer(req))
 
         def _event_generator() -> Generator[str, None, None]:
-            for event in stream_rag_answer(req):
-                yield f"event: message\ndata: {json.dumps(event)}\n\n"
+            after_event_id = 0 if replay_after is None else replay_after
+            for event in _RAG_STREAM_MANAGER.subscribe(run_id, after_event_id=after_event_id):
+                yield _encode_sse(event.payload, event_id=event.event_id)
 
         return StreamingResponse(
             _event_generator(),
@@ -158,6 +172,25 @@ def create_app() -> FastAPI:
         )
 
     return app
+
+
+def _parse_last_event_id(raw_value: str | None) -> int | None:
+    candidate = str(raw_value or "").strip()
+    if not candidate:
+        return None
+    try:
+        return max(int(candidate), 0)
+    except ValueError:
+        return None
+
+
+def _encode_sse(payload: dict[str, Any], event_id: int | None = None) -> str:
+    lines: list[str] = []
+    if event_id is not None:
+        lines.append(f"id: {event_id}")
+    lines.append("event: message")
+    lines.append(f"data: {json.dumps(payload, ensure_ascii=False)}")
+    return "\n".join(lines) + "\n\n"
 
 
 def _run_engine(func: Any, *args: Any) -> Any:
