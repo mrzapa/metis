@@ -20,6 +20,7 @@ from axiom_app.engine.querying import _normalize_run_id
 from axiom_app.services.stream_replay import ReplayableRunStreamManager
 from axiom_app.services.trace_store import TraceStore
 
+from . import logs as _logs
 from . import sessions as _sessions
 from . import settings as _settings
 from .models import (
@@ -63,6 +64,12 @@ def create_app() -> FastAPI:
 
     app.include_router(_sessions.router)
     app.include_router(_settings.router)
+    app.include_router(_logs.router)
+
+    @app.get("/v1/version")
+    def api_version() -> dict[str, str]:
+        from axiom_app.config import APP_VERSION
+        return {"version": APP_VERSION}
 
     @app.get("/healthz")
     def healthz() -> dict[str, bool]:
