@@ -16,6 +16,7 @@ export interface ResumableRagRunSnapshot {
   pendingSources: EvidenceSource[];
   sources: EvidenceSource[];
   liveTraceEvents: TraceEvent[];
+  subQueries?: string[];
 }
 
 export function loadResumableRagRun(): ResumableRagRunSnapshot | null {
@@ -92,6 +93,9 @@ function normalizeResumableRagRun(
     pendingSources: normalizeEvidenceSources(candidate.pendingSources),
     sources: normalizeEvidenceSources(candidate.sources),
     liveTraceEvents: normalizeTraceEvents(candidate.liveTraceEvents),
+    subQueries: Array.isArray(candidate.subQueries)
+      ? candidate.subQueries.map(String).filter(Boolean)
+      : undefined,
   };
 }
 

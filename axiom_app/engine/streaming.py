@@ -9,10 +9,51 @@ from axiom_app.engine.querying import (
     _normalize_run_id,
     _prepare_rag_settings,
     _response_text,
+    _selected_mode,
     _system_instructions,
 )
 from axiom_app.services.vector_store import resolve_vector_store
 from axiom_app.utils.llm_providers import create_llm
+
+
+def _generate_sub_queries(question: str, llm: Any) -> list[str]:
+    """Call the LLM to produce 3-5 search sub-queries for *question*.
+
+    Returns an empty list on any failure so callers always treat the result
+    as optional.
+    """
+    import json as _json
+
+    system = (
+        "You generate search sub-queries for retrieval. "
+        "Return 3-5 concise sub-queries as a JSON array of strings. "
+        "Do not include any extra text."
+    )
+    try:
+        raw = _response_text(
+            llm.invoke([
+                {"type": "system", "content": system},
+                {"type": "human", "content": question},
+            ])
+        )
+        start, end = raw.find("["), raw.rfind("]") + 1
+        if start == -1 or end == 0:
+            return []
+        candidates = _json.loads(raw[start:end])
+        if not isinstance(candidates, list):
+            return []
+        seen: set[str] = set()
+        result: list[str] = []
+        q_lower = question.strip().lower()
+        for c in candidates:
+            s = str(c).strip()
+            if not s or s.lower() == q_lower or s.lower() in seen:
+                continue
+            seen.add(s.lower())
+            result.append(s)
+        return result[:5]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def stream_rag_answer(
@@ -25,6 +66,7 @@ def stream_rag_answer(
       {"type": "run_started",        "run_id": str}
       {"type": "retrieval_complete", "run_id": str, "sources": [...],
                                      "context_block": str, "top_score": float}
+      {"type": "subqueries",        "run_id": str, "queries": [str, ...]}  # Research mode only
       {"type": "token",              "run_id": str, "text": str}  # 1..N
       {"type": "final",              "run_id": str, "answer_text": str, "sources": [...]}
       {"type": "error",              "run_id": str, "message": str}
@@ -53,6 +95,8 @@ def stream_rag_answer(
             }
             return
 
+        llm = create_llm(settings)
+
         bundle = adapter.load(manifest_path)
         query_result = adapter.query(bundle, question, settings)
         sources = [s.to_dict() for s in query_result.sources]
@@ -64,6 +108,12 @@ def stream_rag_answer(
             "context_block": query_result.context_block,
             "top_score": float(query_result.top_score),
         }
+
+        mode = _selected_mode(settings)
+        if mode == "Research" and settings.get("use_sub_queries", False):
+            sub_queries = _generate_sub_queries(question, llm)
+            if sub_queries:
+                yield {"type": "subqueries", "run_id": run_id, "queries": sub_queries}
 
         if req.require_action:
             yield {
@@ -93,7 +143,6 @@ def stream_rag_answer(
             {"type": "system", "content": system_prompt},
             {"type": "human", "content": question},
         ]
-        llm = create_llm(settings)
 
         answer_parts: list[str] = []
         if hasattr(llm, "stream"):

@@ -316,6 +316,19 @@ export function useChatTranscript() {
     });
   }, []);
 
+  const setRunSubqueries = useCallback((runId: string, queries: string[]) => {
+    setState((previousState) => {
+      const run = previousState.runsById[runId];
+      if (!run) {
+        return previousState;
+      }
+
+      const nextState = cloneTranscriptState(previousState);
+      nextState.runsById[runId] = { ...run, sub_queries: queries };
+      return nextState;
+    });
+  }, []);
+
   const appendRunToken = useCallback((runId: string, token: string) => {
     pendingRunTokensRef.current[runId] = `${pendingRunTokensRef.current[runId] ?? ""}${token}`;
     schedulePendingRunTokenFlush();
@@ -562,6 +575,7 @@ export function useChatTranscript() {
     appendCompletedRunMessage,
     bindRunToAssistantMessage,
     setRunPendingSources,
+    setRunSubqueries,
     appendRunToken,
     finalizeRun,
     markRunActionRequired,

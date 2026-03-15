@@ -43,6 +43,7 @@ interface ChatPanelProps {
   } | null;
   onReconnectRun?: () => void;
   onDiscardReconnect?: () => void;
+  getRunSubqueries?: (runId: string) => string[] | undefined;
   agenticMode?: boolean;
   agenticModeSaving?: boolean;
   agenticModeError?: string | null;
@@ -73,6 +74,7 @@ export function ChatPanel({
   reconnectState,
   onReconnectRun,
   onDiscardReconnect,
+  getRunSubqueries,
   agenticMode,
   agenticModeSaving,
   agenticModeError,
@@ -322,10 +324,26 @@ export function ChatPanel({
                 >
                   {msg.role === "assistant" ? (
                     <div className="flex items-start">
-                      <AssistantMarkdown
-                        className="min-w-0 flex-1"
-                        content={msg.content || (msg.status === "aborted" ? "Stopped." : "")}
-                      />
+                      <div className="min-w-0 flex-1">
+                        {msg.run_id && (() => {
+                          const sq = getRunSubqueries?.(msg.run_id);
+                          return sq && sq.length > 0 ? (
+                            <div className="mb-2 flex flex-wrap gap-1">
+                              {sq.map((q) => (
+                                <span
+                                  key={q}
+                                  className="rounded-full bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground ring-1 ring-border"
+                                >
+                                  {q}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null;
+                        })()}
+                        <AssistantMarkdown
+                          content={msg.content || (msg.status === "aborted" ? "Stopped." : "")}
+                        />
+                      </div>
                       <AssistantCopyActions message={msg} />
                     </div>
                   ) : (

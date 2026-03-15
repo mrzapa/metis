@@ -87,13 +87,20 @@ export interface RagStreamActionRequiredEvent {
   action: ActionRequiredAction;
 }
 
+export interface RagStreamSubqueriesEvent {
+  type: "subqueries";
+  run_id: string;
+  queries: string[];
+}
+
 export type RagStreamEvent =
   | RagStreamRunStartedEvent
   | RagStreamRetrievalCompleteEvent
   | RagStreamTokenEvent
   | RagStreamFinalEvent
   | RagStreamErrorEvent
-  | RagStreamActionRequiredEvent;
+  | RagStreamActionRequiredEvent
+  | RagStreamSubqueriesEvent;
 
 export interface TraceEvent {
   run_id: string;

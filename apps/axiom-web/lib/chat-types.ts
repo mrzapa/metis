@@ -52,4 +52,5 @@ export interface ChatRun {
   status: ChatRunStatus;
   sources: EvidenceSource[];
   pending_sources: EvidenceSource[];
+  sub_queries?: string[];
 }

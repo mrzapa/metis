@@ -36,6 +36,7 @@ interface ActiveRagStream {
   liveTraceEvents: TraceEvent[];
   hasBoundRun: boolean;
   seenEventSignatures: Set<string>;
+  subQueries?: string[];
 }
 
 interface ResumableRagRunState extends ResumableRagRunSnapshot {
@@ -94,6 +95,7 @@ function buildResumableRagRunState(
     pendingSources: [...stream.pendingSources],
     sources: [...stream.pendingSources],
     liveTraceEvents: [...stream.liveTraceEvents],
+    subQueries: stream.subQueries ? [...stream.subQueries] : undefined,
     assistantMessageId: stream.assistantMessageId,
     hasBoundRun: stream.hasBoundRun,
   };
@@ -115,6 +117,7 @@ function toStoredResumableRagRun(
     pendingSources: [...state.pendingSources],
     sources: [...state.sources],
     liveTraceEvents: [...state.liveTraceEvents],
+    subQueries: state.subQueries ? [...state.subQueries] : undefined,
   };
 }
 
@@ -151,6 +154,7 @@ export default function ChatPage() {
     appendCompletedRunMessage,
     bindRunToAssistantMessage,
     setRunPendingSources,
+    setRunSubqueries,
     appendRunToken,
     finalizeRun,
     markRunActionRequired,
@@ -161,11 +165,17 @@ export default function ChatPage() {
     setMessageStatus,
     setActionStatus,
     getMessage,
+    getRun,
     messages,
     latestRunId,
     latestSources,
     runIdsNewestFirst,
   } = useChatTranscript();
+
+  const getRunSubqueries = useCallback(
+    (runId: string) => getRun(runId)?.sub_queries,
+    [getRun],
+  );
 
   const publishResumableRun = useCallback((snapshot: ResumableRagRunState | null) => {
     setResumableRun(snapshot);
@@ -576,6 +586,18 @@ export default function ChatPage() {
                     },
                   });
                   break;
+                case "subqueries":
+                  currentStream.subQueries = event.queries;
+                  setRunSubqueries(resolvedRunId, event.queries);
+                  appendTraceEvent(currentStream, {
+                    run_id: resolvedRunId,
+                    event_id: eventId !== null ? String(eventId) : undefined,
+                    stage: "retrieval",
+                    event_type: "subqueries",
+                    timestamp: new Date().toISOString(),
+                    payload: { queries: event.queries },
+                  });
+                  break;
                 case "token":
                   currentStream.assistantContent = `${currentStream.assistantContent}${event.text}`;
                   appendRunToken(resolvedRunId, event.text);
@@ -700,6 +722,7 @@ export default function ChatPage() {
       publishResumableRun,
       setMessageStatus,
       setRunPendingSources,
+      setRunSubqueries,
     ],
   );
 
@@ -913,6 +936,7 @@ export default function ChatPage() {
                 }
                 onReconnectRun={handleReconnectRag}
                 onDiscardReconnect={handleDiscardResumableRun}
+                getRunSubqueries={getRunSubqueries}
                 modelProvider={modelProvider}
                 modelName={modelName}
                 onModelChange={handleModelChange}

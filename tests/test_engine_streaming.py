@@ -6,6 +6,7 @@ import json
 import uuid
 
 import axiom_app.engine.indexing as engine_indexing
+import axiom_app.engine.streaming as engine_streaming
 from axiom_app.engine.querying import RagQueryRequest
 from axiom_app.engine.streaming import stream_rag_answer
 
@@ -108,6 +109,95 @@ def test_stream_rag_answer_auto_run_id(tmp_path, monkeypatch) -> None:
     assert "error" not in [e["type"] for e in events]
     run_id = events[0]["run_id"]
     uuid.UUID(run_id)  # raises if not a valid UUID
+
+
+def test_stream_rag_answer_research_mode_emits_subqueries(tmp_path, monkeypatch) -> None:
+    """Research mode + use_sub_queries=True emits a subqueries event after retrieval_complete."""
+    build_result = _build_test_index(tmp_path, monkeypatch)
+
+    # Patch _generate_sub_queries to return a deterministic list
+    monkeypatch.setattr(
+        engine_streaming,
+        "_generate_sub_queries",
+        lambda question, llm: ["sub-query A", "sub-query B"],
+    )
+
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who wrote the first algorithm?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "selected_mode": "Research",
+            "use_sub_queries": True,
+            "top_k": 2,
+            "retrieval_k": 2,
+        },
+        run_id="research-run-1",
+    )
+
+    events = list(stream_rag_answer(req))
+    event_types = [e["type"] for e in events]
+
+    assert "error" not in event_types, f"Unexpected error event: {events}"
+
+    # subqueries event must be present and come after retrieval_complete
+    assert "subqueries" in event_types
+    rc_idx = event_types.index("retrieval_complete")
+    sq_idx = event_types.index("subqueries")
+    assert sq_idx == rc_idx + 1, "subqueries must immediately follow retrieval_complete"
+
+    sq_event = next(e for e in events if e["type"] == "subqueries")
+    assert sq_event["run_id"] == "research-run-1"
+    assert sq_event["queries"] == ["sub-query A", "sub-query B"]
+    json.dumps(sq_event)  # must be JSON-serialisable
+
+
+def test_stream_rag_answer_non_research_no_subqueries(tmp_path, monkeypatch) -> None:
+    """Non-Research runs must never emit a subqueries event."""
+    build_result = _build_test_index(tmp_path, monkeypatch)
+
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who popularized compilers?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "selected_mode": "Q&A",
+            "use_sub_queries": True,  # even if enabled, mode guards it
+            "top_k": 2,
+            "retrieval_k": 2,
+        },
+    )
+
+    events = list(stream_rag_answer(req))
+    event_types = [e["type"] for e in events]
+    assert "subqueries" not in event_types
+
+
+def test_stream_rag_answer_research_use_sub_queries_false_no_event(tmp_path, monkeypatch) -> None:
+    """Research mode with use_sub_queries=False must not emit a subqueries event."""
+    build_result = _build_test_index(tmp_path, monkeypatch)
+
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who wrote the first algorithm?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "selected_mode": "Research",
+            "use_sub_queries": False,
+            "top_k": 2,
+            "retrieval_k": 2,
+        },
+    )
+
+    events = list(stream_rag_answer(req))
+    event_types = [e["type"] for e in events]
+    assert "subqueries" not in event_types
 
 
 def test_stream_rag_answer_empty_question_yields_error() -> None:
