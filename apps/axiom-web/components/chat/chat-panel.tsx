@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { SessionSummary } from "@/lib/api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { ActionCard } from "@/components/chat/action-card";
+import { AssistantMarkdown } from "@/components/chat/assistant-markdown";
 import { AlertCircle, Loader2, SendHorizontal, Square } from "lucide-react";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
 import { ModelStatusDialog } from "@/components/chat/model-status-dialog";
@@ -236,9 +237,15 @@ export function ChatPanel({
                       : "bg-muted"
                   )}
                 >
-                  <p className="whitespace-pre-wrap">
-                    {msg.content || (msg.status === "aborted" ? "Stopped." : "")}
-                  </p>
+                  {msg.role === "assistant" ? (
+                    <AssistantMarkdown
+                      content={msg.content || (msg.status === "aborted" ? "Stopped." : "")}
+                    />
+                  ) : (
+                    <p className="whitespace-pre-wrap">
+                      {msg.content || (msg.status === "aborted" ? "Stopped." : "")}
+                    </p>
+                  )}
                   {msg.role === "assistant" && msg.status === "streaming" && (
                     <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
                       <span className="size-1.5 animate-pulse rounded-full bg-current/70" />
