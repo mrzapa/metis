@@ -5,6 +5,9 @@ from importlib import import_module
 
 from fastapi.testclient import TestClient
 
+from axiom_app.services.stream_replay import ReplayableRunStreamManager, StreamReplayStore
+from axiom_app.services.trace_store import TraceStore
+
 api_app_module = import_module("axiom_app.api.app")
 
 
@@ -25,6 +28,8 @@ def test_query_direct_happy_path(monkeypatch) -> None:
             run_id = req.run_id or "run-xyz"
             answer_text = "Mock/Test Backend: hello"
             selected_mode = "Q&A"
+            llm_provider = "mock"
+            llm_model = "stub-model"
 
         return _Result()
 
@@ -45,7 +50,31 @@ def test_query_direct_happy_path(monkeypatch) -> None:
     assert payload["run_id"] == "run-xyz"
 
 
-def test_stream_rag_happy_path(monkeypatch) -> None:
+def _set_stream_manager(monkeypatch, tmp_path) -> None:
+    manager = ReplayableRunStreamManager(StreamReplayStore(tmp_path / "traces"))
+    monkeypatch.setattr(api_app_module, "_RAG_STREAM_MANAGER", manager)
+
+
+def _parse_sse_frames(body: str) -> list[tuple[int | None, dict[str, object]]]:
+    frames: list[tuple[int | None, dict[str, object]]] = []
+    current_id: int | None = None
+    current_payload: dict[str, object] | None = None
+    for line in body.splitlines():
+        if line.startswith("id: "):
+            current_id = int(line[len("id: "):])
+        elif line.startswith("data: "):
+            current_payload = json.loads(line[len("data: "):])
+        elif not line.strip() and current_payload is not None:
+            frames.append((current_id, current_payload))
+            current_id = None
+            current_payload = None
+    if current_payload is not None:
+        frames.append((current_id, current_payload))
+    return frames
+
+
+def test_stream_rag_happy_path_includes_sse_ids(monkeypatch, tmp_path) -> None:
+    _set_stream_manager(monkeypatch, tmp_path)
     client = TestClient(api_app_module.create_app())
 
     def _fake_stream(req, cancel_token=None):
@@ -70,34 +99,85 @@ def test_stream_rag_happy_path(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert "text/event-stream" in response.headers["content-type"]
+    frames = _parse_sse_frames(response.text)
 
-    event_types = []
-    for line in response.text.splitlines():
-        if line.startswith("data: "):
-            event = json.loads(line[len("data: "):])
-            event_types.append(event["type"])
-
-    assert "run_started" in event_types
-    assert "final" in event_types
+    assert [frame_id for frame_id, _ in frames] == [1, 2, 3]
+    assert [payload["type"] for _, payload in frames] == ["run_started", "token", "final"]
 
 
-def test_stream_rag_error_event(monkeypatch) -> None:
+def test_stream_rag_replays_only_events_after_last_event_id(monkeypatch, tmp_path) -> None:
+    _set_stream_manager(monkeypatch, tmp_path)
     client = TestClient(api_app_module.create_app())
 
     def _fake_stream(req, cancel_token=None):
-        yield {"type": "error", "run_id": "r0", "message": "question must not be empty."}
+        yield {"type": "run_started", "run_id": "r1"}
+        yield {"type": "token", "run_id": "r1", "text": "hello"}
+        yield {"type": "final", "run_id": "r1", "answer_text": "hello", "sources": []}
 
     monkeypatch.setattr(api_app_module, "stream_rag_answer", _fake_stream)
 
-    response = client.post(
+    first = client.post(
         "/v1/query/rag/stream",
         json={
             "manifest_path": "/tmp/fake/manifest.json",
-            "question": "",
-            "settings": {},
+            "question": "What is Axiom?",
+            "run_id": "r1",
+            "settings": {
+                "llm_provider": "mock",
+                "embedding_provider": "mock",
+                "vector_db_type": "json",
+            },
+        },
+    )
+    assert first.status_code == 200
+
+    replay = client.post(
+        "/v1/query/rag/stream",
+        headers={"Last-Event-ID": "1"},
+        json={
+            "manifest_path": "/tmp/fake/manifest.json",
+            "question": "What is Axiom?",
+            "run_id": "r1",
+            "settings": {
+                "llm_provider": "mock",
+                "embedding_provider": "mock",
+                "vector_db_type": "json",
+            },
+        },
+    )
+
+    assert replay.status_code == 200
+    replay_frames = _parse_sse_frames(replay.text)
+
+    assert [frame_id for frame_id, _ in replay_frames] == [2, 3]
+    assert [payload["type"] for _, payload in replay_frames] == ["token", "final"]
+
+
+def test_stream_rag_reconnect_ignores_unrelated_trace_rows(monkeypatch, tmp_path) -> None:
+    _set_stream_manager(monkeypatch, tmp_path)
+    client = TestClient(api_app_module.create_app())
+
+    TraceStore(tmp_path / "traces").append_event(
+        run_id="run-with-trace-only",
+        stage="synthesis",
+        event_type="llm_response",
+        payload={"response_preview": "trace-only"},
+    )
+
+    response = client.post(
+        "/v1/query/rag/stream",
+        headers={"Last-Event-ID": "1"},
+        json={
+            "manifest_path": "/tmp/fake/manifest.json",
+            "question": "What is Axiom?",
+            "run_id": "run-with-trace-only",
+            "settings": {
+                "llm_provider": "mock",
+                "embedding_provider": "mock",
+                "vector_db_type": "json",
+            },
         },
     )
 
     assert response.status_code == 200
-    data_lines = [l for l in response.text.splitlines() if l.startswith("data: ")]
-    assert any(json.loads(l[6:])["type"] == "error" for l in data_lines)
+    assert response.text == ""

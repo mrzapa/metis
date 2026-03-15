@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from importlib import import_module
-
-import pytest
 from fastapi.testclient import TestClient
 
 api_app_module = import_module("axiom_app.api.app")
