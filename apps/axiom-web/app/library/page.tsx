@@ -20,6 +20,7 @@ import {
   ChevronRight,
   Circle,
   Database,
+  FolderOpen,
   Loader2,
   UploadCloud,
   X,
@@ -45,8 +46,17 @@ const INITIAL_PROGRESS: ProgressState = {
 export default function LibraryPage() {
   const router = useRouter();
 
+  // --- desktop detection (SSR-safe; Tauri v2 injects __TAURI_INTERNALS__) ---
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      setIsDesktop(true);
+      setTab("desktop");
+    }
+  }, []);
+
   // --- tab state ---
-  const [tab, setTab] = useState<"upload" | "paths">("upload");
+  const [tab, setTab] = useState<"upload" | "paths" | "desktop">("upload");
   const [pathsConsent, setPathsConsent] = useState(false);
 
   // --- upload tab ---
@@ -59,14 +69,20 @@ export default function LibraryPage() {
   // --- paths tab ---
   const [rawPaths, setRawPaths] = useState("");
 
+  // --- desktop tab ---
+  const [desktopPaths, setDesktopPaths] = useState<string[]>([]);
+  const [pickError, setPickError] = useState<string | null>(null);
+
   // --- ready paths (for building) ---
   const readyPaths =
     tab === "upload"
       ? uploadedPaths
-      : rawPaths
-          .split("\n")
-          .map((p) => p.trim())
-          .filter(Boolean);
+      : tab === "desktop"
+        ? desktopPaths
+        : rawPaths
+            .split("\n")
+            .map((p) => p.trim())
+            .filter(Boolean);
 
   // --- build state ---
   const [building, setBuilding] = useState(false);
@@ -93,6 +109,20 @@ export default function LibraryPage() {
   useEffect(() => {
     loadIndexes();
   }, [loadIndexes]);
+
+  // --- desktop file-picker handler ---
+  async function handlePickFiles() {
+    setPickError(null);
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({ multiple: true });
+      if (selected === null) return; // user cancelled
+      const paths = Array.isArray(selected) ? selected : [selected];
+      setDesktopPaths(paths);
+    } catch (err) {
+      setPickError(err instanceof Error ? err.message : "File picker failed");
+    }
+  }
 
   // --- upload handler ---
   async function handleUpload() {
@@ -187,6 +217,20 @@ export default function LibraryPage() {
 
           {/* Tab selector */}
           <div className="flex gap-1 rounded-lg border p-1 w-fit">
+            {isDesktop && (
+              <button
+                type="button"
+                onClick={() => setTab("desktop")}
+                className={cn(
+                  "rounded px-3 py-1 text-sm font-medium transition-colors",
+                  tab === "desktop"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Choose files
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setTab("upload")}
@@ -212,6 +256,48 @@ export default function LibraryPage() {
               Local paths
             </button>
           </div>
+
+          {/* Desktop tab — native file picker (Tauri only) */}
+          {tab === "desktop" && (
+            <div className="space-y-3">
+              <Button
+                variant="outline"
+                onClick={handlePickFiles}
+                className="gap-1.5"
+              >
+                <FolderOpen className="size-4" />
+                Choose files…
+              </Button>
+
+              {pickError && (
+                <p className="flex items-center gap-1.5 text-sm text-destructive">
+                  <AlertCircle className="size-3.5" />
+                  {pickError}
+                </p>
+              )}
+
+              {desktopPaths.length > 0 && (
+                <div className="space-y-1">
+                  {desktopPaths.map((p, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between rounded border px-3 py-1.5 text-sm font-mono"
+                    >
+                      <span className="truncate text-xs">{p}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDesktopPaths((prev) => prev.filter((_, j) => j !== i))
+                        }
+                      >
+                        <X className="size-3.5 text-muted-foreground hover:text-foreground" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Upload tab */}
           {tab === "upload" && (
