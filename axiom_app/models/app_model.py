@@ -35,7 +35,6 @@ _REPO_ROOT    = _PACKAGE_ROOT.parent                              # <repo root>
 
 _DEFAULT_SETTINGS_PATH = _PACKAGE_ROOT / "default_settings.json"
 _USER_SETTINGS_PATH    = _REPO_ROOT    / "settings.json"
-_LEGACY_CONFIG_PATH    = _REPO_ROOT    / "agentic_rag_config.json"
 _SESSION_DB_PATH       = _REPO_ROOT    / "rag_sessions.db"
 _INDEX_STORAGE_DIR     = _REPO_ROOT    / "indexes"
 _PROFILES_DIR          = _REPO_ROOT    / "profiles"
@@ -94,7 +93,6 @@ class AppModel:
         self.index_storage_dir: pathlib.Path = _INDEX_STORAGE_DIR
         self.skills_dir: pathlib.Path = _SKILLS_DIR
         self.trace_dir: pathlib.Path = _TRACE_DIR
-        self.legacy_config_path: pathlib.Path = _LEGACY_CONFIG_PATH
 
     # ------------------------------------------------------------------
     # Settings
@@ -125,16 +123,6 @@ class AppModel:
 
         self.settings = dict(defaults)
 
-        # ── compatibility import from legacy config ─────────────────
-        legacy: dict[str, Any] = {}
-        if _LEGACY_CONFIG_PATH.exists():
-            try:
-                legacy = json.loads(_LEGACY_CONFIG_PATH.read_text(encoding="utf-8"))
-                legacy.pop("_comment", None)
-                self.logger.info("Legacy config import available at %s", _LEGACY_CONFIG_PATH)
-            except Exception as exc:
-                self.logger.warning("Could not read legacy config (%s): %s", _LEGACY_CONFIG_PATH, exc)
-
         # ── overlay user overrides ───────────────────────────────────
         user: dict[str, Any] = {}
         if _USER_SETTINGS_PATH.exists():
@@ -153,9 +141,6 @@ class AppModel:
                 "No user settings.json at %s — using defaults only.", _USER_SETTINGS_PATH
             )
 
-        for key, value in legacy.items():
-            if key not in user:
-                self.settings[key] = value
         self.settings.update(user)
         self.current_skill_id = str(self.settings.get("current_skill_id", self.current_skill_id) or "")
 

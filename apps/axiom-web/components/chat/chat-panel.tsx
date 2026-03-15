@@ -351,7 +351,7 @@ export function ChatPanel({
                           content={msg.content || (msg.status === "aborted" ? "Stopped." : "")}
                         />
                       </div>
-                      <AssistantCopyActions message={msg} />
+                      <AssistantCopyActions message={msg} sessionId={sessionMeta?.session_id} />
                     </div>
                   ) : (
                     <p className="whitespace-pre-wrap">

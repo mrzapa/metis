@@ -14,8 +14,10 @@ The following workflow is **supported and stable** today:
 ```
 python main.py           # PySide6/Qt MVC desktop app (default)
 python main.py --cli     # Headless CLI mode
-AXIOM_NEW_APP=0 python main.py  # Legacy Tkinter fallback (agentic_rag_gui.py)
 ```
+
+> **Note:** The legacy Tkinter fallback (`agentic_rag_gui.py`) has been removed.
+> The `AXIOM_NEW_APP` environment variable is no longer supported.
 
 Support commitment: `python main.py` and the Qt-backed workflow remain the
 production-recommended path until the web-plus-desktop-container stack explicitly
@@ -51,7 +53,7 @@ separate database or index store** for the next-gen surfaces.
 | **Session database** | `rag_sessions.db` (repo root) | `SessionRepository` (`axiom_app/services/session_repository.py`) | Read/write | Read/write via `/v1/sessions` |
 | **Index bundles** | `indexes/` (repo root) | `IndexService` (`axiom_app/services/index_service.py`) | Read/write | Read/write via `/v1/index/*` |
 | **Settings file** | `settings.json` (repo root) | `settings_store.py` (`axiom_app/settings_store.py`) | Read/write | Read via `/v1/settings`; write restricted by `AXIOM_ALLOW_API_KEY_WRITE` |
-| **Legacy config** | `agentic_rag_config.json` | `settings_store.py` (auto-merge) | Read-only (merged into `settings.json`) | Not accessed directly |
+| ~~**Legacy config**~~ | ~~`agentic_rag_config.json`~~ | Removed | — | — |
 
 The `Config` dataclass in `axiom_app/config.py` is the authoritative source of
 runtime defaults and path resolution for all three assets.
@@ -157,10 +159,10 @@ as dates.
 
 ### Stage 4 — Qt removed
 
-- `agentic_rag_gui.py`, `axiom_app/views/`, `axiom_app/controllers/`, and
-  Qt-specific model code are removed from the main branch.
-- The `AXIOM_NEW_APP` environment variable and legacy fallback logic in `main.py` are
-  removed.
+- `axiom_app/views/`, `axiom_app/controllers/`, and Qt-specific model code are
+  removed from the main branch.
+- **Already completed:** `agentic_rag_gui.py` (legacy Tkinter) and the
+  `AXIOM_NEW_APP` environment variable have been removed ahead of this stage.
 - **Entry criterion:** Stage 3 exit criterion met.
 
 ---

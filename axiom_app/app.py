@@ -1,13 +1,13 @@
 """axiom_app.app — MVC application bootstrap.
 
-Entry point for the opt-in MVC Axiom application.  Initialises logging
+Entry point for the Axiom desktop application.  Initialises logging
 first (so even Qt startup errors land in the log), then instantiates
 model/view/controller, wires events, starts an always-on message-poll
 loop, and hands off to the Qt event loop.
 
-Usage (via env-var switch in main.py)::
+Usage::
 
-    AXIOM_NEW_APP=1 python main.py
+    python main.py
 
 Or directly::
 
@@ -63,7 +63,7 @@ def run_app() -> None:
     logger = setup_logging(_default_log_dir, level="DEBUG")
     logger.info("Log file: %s", (_default_log_dir / "axiom.log").resolve())
     logger.info("=" * 60)
-    logger.info("Axiom MVC starting up  (AXIOM_NEW_APP=1)")
+    logger.info("Axiom MVC starting up")
 
     try:
         from PySide6.QtCore import QTimer
@@ -134,7 +134,7 @@ def run_app() -> None:
         index_state = "built" if model.index_state.get("built") else "not built"
         base_status = f"Documents: {len(model.documents)}  |  Index: {index_state}"
         view.set_status(base_status)
-        view.append_log("Axiom MVC started (AXIOM_NEW_APP=1).\n")
+        view.append_log("Axiom MVC started.\n")
         view.show()
 
         logger.info("Entering Qt event loop")

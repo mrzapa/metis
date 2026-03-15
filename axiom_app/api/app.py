@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import pathlib
 import tempfile
@@ -48,6 +49,9 @@ def _cors_origins_from_env() -> list[str]:
     if not raw.strip():
         return _DEFAULT_LOCAL_ORIGINS
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+log = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -144,12 +148,16 @@ def create_app() -> FastAPI:
         return TraceStore().read_run_events(run_id)
 
     @app.post("/v1/runs/{run_id}/actions")
-    def api_run_action(run_id: str, payload: RunActionRequestModel) -> Response:  # noqa: ARG001
-        return Response(
-            content='{"detail": "Action handling not yet implemented"}',
-            status_code=501,
-            media_type="application/json",
+    def api_run_action(run_id: str, payload: RunActionRequestModel) -> dict[str, Any]:
+        log.info(
+            "Run action received: run_id=%s approved=%s payload=%s",
+            run_id, payload.approved, payload.payload,
         )
+        return {
+            "run_id": run_id,
+            "approved": payload.approved,
+            "status": "accepted",
+        }
 
     @app.post("/v1/query/rag/stream")
     def api_stream_rag(

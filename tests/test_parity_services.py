@@ -49,10 +49,9 @@ def _write_skill(
     (skill_dir / "SKILL.md").write_text(payload, encoding="utf-8")
 
 
-def test_app_model_imports_legacy_config_without_overriding_user_settings(tmp_path, monkeypatch) -> None:
+def test_app_model_merges_defaults_and_user_settings(tmp_path, monkeypatch) -> None:
     defaults = tmp_path / "default_settings.json"
     user_settings = tmp_path / "settings.json"
-    legacy_settings = tmp_path / "agentic_rag_config.json"
 
     defaults.write_text(
         json.dumps(
@@ -62,16 +61,6 @@ def test_app_model_imports_legacy_config_without_overriding_user_settings(tmp_pa
                 "chunk_size": 1000,
                 "current_skill_id": "qa-core",
                 "skills": {"enabled": {}},
-            }
-        ),
-        encoding="utf-8",
-    )
-    legacy_settings.write_text(
-        json.dumps(
-            {
-                "theme": "dark",
-                "llm_provider": "openai",
-                "chunk_size": 222,
             }
         ),
         encoding="utf-8",
@@ -88,15 +77,16 @@ def test_app_model_imports_legacy_config_without_overriding_user_settings(tmp_pa
 
     monkeypatch.setattr(app_model_module, "_DEFAULT_SETTINGS_PATH", defaults)
     monkeypatch.setattr(app_model_module, "_USER_SETTINGS_PATH", user_settings)
-    monkeypatch.setattr(app_model_module, "_LEGACY_CONFIG_PATH", legacy_settings)
 
     model = AppModel()
     model.load_settings()
 
+    # User overrides win
     assert model.settings["theme"] == "space_dust"
-    assert model.settings["llm_provider"] == "openai"
-    assert model.settings["chunk_size"] == 222
     assert model.current_skill_id == "research-claims"
+    # Defaults preserved for keys absent from user
+    assert model.settings["llm_provider"] == "anthropic"
+    assert model.settings["chunk_size"] == 1000
 
 
 def test_skill_repository_parses_and_toggles_skills(tmp_path) -> None:

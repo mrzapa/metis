@@ -25,6 +25,7 @@ const schema = z.object({
   chat_history_max_turns: z.number().int().min(1, "Min 1").max(50, "Max 50"),
   output_style: z.string().min(1),
   chat_path: z.enum(["RAG", "Direct"]),
+  selected_mode: z.string().min(1),
   show_retrieved_context: z.boolean(),
   // Feature toggles
   use_reranker: z.boolean(),
@@ -42,6 +43,7 @@ type FormValues = z.infer<typeof schema>;
 const RETRIEVAL_MODES = ["flat", "mmr", "hybrid"];
 const SEARCH_TYPES = ["similarity", "mmr"];
 const OUTPUT_STYLES = ["Default answer", "Concise", "Detailed", "Bullet points"];
+const SKILL_MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"];
 
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
@@ -109,6 +111,7 @@ export default function SettingsPage() {
       chat_history_max_turns: 6,
       output_style: "Default answer",
       chat_path: "RAG",
+      selected_mode: "Q&A",
       show_retrieved_context: false,
       use_reranker: true,
       use_sub_queries: true,
@@ -136,6 +139,7 @@ export default function SettingsPage() {
           chat_history_max_turns: (raw.chat_history_max_turns as number) ?? 6,
           output_style: (raw.output_style as string) ?? "Default answer",
           chat_path: ((raw.chat_path as string) === "Direct" ? "Direct" : "RAG"),
+          selected_mode: (raw.selected_mode as string) ?? "Q&A",
           show_retrieved_context: (raw.show_retrieved_context as boolean) ?? false,
           use_reranker: (raw.use_reranker as boolean) ?? true,
           use_sub_queries: (raw.use_sub_queries as boolean) ?? true,
@@ -395,6 +399,27 @@ export default function SettingsPage() {
                     </label>
                   ))}
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <FieldLabel htmlFor="selected_mode">Skill mode</FieldLabel>
+                <div className="flex flex-wrap gap-3">
+                  {SKILL_MODES.map((mode) => (
+                    <label key={mode} htmlFor={`mode_${mode}`} className="flex cursor-pointer items-center gap-2 text-sm">
+                      <input
+                        id={`mode_${mode}`}
+                        type="radio"
+                        value={mode}
+                        {...register("selected_mode")}
+                        className="accent-primary"
+                      />
+                      {mode}
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Controls how the assistant approaches your questions.
+                </p>
               </div>
 
               <ToggleRow

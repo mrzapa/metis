@@ -3,9 +3,8 @@
 This module intentionally avoids importing Qt or any UI toolkit so that
 it can be used safely from the API layer and other non-GUI contexts.
 
-The merge priority is identical to ``AppModel.load_settings``:
+The merge priority is:
   defaults (axiom_app/default_settings.json)
-  → legacy  (agentic_rag_config.json, backward-compat only)
   → user    (settings.json in repo root)
 """
 
@@ -21,7 +20,6 @@ _REPO_ROOT    = _HERE.parent                              # <repo root>
 
 _DEFAULT_PATH = _HERE / "default_settings.json"
 _USER_PATH    = _REPO_ROOT / "settings.json"
-_LEGACY_PATH  = _REPO_ROOT / "agentic_rag_config.json"
 
 _API_KEY_PREFIX = "api_key_"
 
@@ -29,7 +27,7 @@ log = logging.getLogger(__name__)
 
 
 def load_settings() -> dict[str, Any]:
-    """Return fully-merged settings (defaults → legacy → user overrides).
+    """Return fully-merged settings (defaults → user overrides).
 
     Keys whose name is ``_comment`` are stripped.  Missing files are silently
     skipped so callers always receive a usable dict.
@@ -42,14 +40,6 @@ def load_settings() -> dict[str, Any]:
         except Exception as exc:
             log.warning("Could not read default settings (%s): %s", _DEFAULT_PATH, exc)
 
-    legacy: dict[str, Any] = {}
-    if _LEGACY_PATH.exists():
-        try:
-            legacy = json.loads(_LEGACY_PATH.read_text(encoding="utf-8"))
-            legacy.pop("_comment", None)
-        except Exception as exc:
-            log.warning("Could not read legacy config (%s): %s", _LEGACY_PATH, exc)
-
     user: dict[str, Any] = {}
     if _USER_PATH.exists():
         try:
@@ -59,9 +49,6 @@ def load_settings() -> dict[str, Any]:
             log.warning("Could not read user settings (%s): %s", _USER_PATH, exc)
 
     merged = dict(defaults)
-    for key, value in legacy.items():
-        if key not in user:
-            merged[key] = value
     merged.update(user)
     return merged
 
