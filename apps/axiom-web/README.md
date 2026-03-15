@@ -42,6 +42,21 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+### Alternative: start both from the repo root
+
+If you are iterating on the browser UI and API together, use the combined
+launcher from the repo root instead of two terminals:
+
+```bash
+bash scripts/run_nextgen_dev.sh
+```
+
+On Windows (PowerShell):
+
+```powershell
+.\scripts\run_nextgen_dev.ps1
+```
+
 ## Available scripts
 
 | Command | Description |
@@ -62,11 +77,11 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Configuration
 
-The web UI connects to the API at `http://127.0.0.1:8000` by default. To point it at a different host, set `NEXT_PUBLIC_API_URL` in a `.env.local` file:
+The web UI connects to the API at `http://127.0.0.1:8000` by default. To point it at a different host, set `NEXT_PUBLIC_AXIOM_API_BASE` in a `.env.local` file:
 
 ```bash
 # apps/axiom-web/.env.local
-NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+NEXT_PUBLIC_AXIOM_API_BASE=http://127.0.0.1:8000
 ```
 
 ## Development tips

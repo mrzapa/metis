@@ -17,3 +17,15 @@ The web UI expects the Axiom API server at `http://127.0.0.1:8000`. Start it wit
 ```bash
 python -m axiom_app.api
 ```
+
+From the repo root you can launch both the API and the web UI together:
+
+```bash
+bash scripts/run_nextgen_dev.sh
+```
+
+On Windows use:
+
+```powershell
+.\scripts\run_nextgen_dev.ps1
+```
