@@ -21,6 +21,15 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "PLACEHOLDER — replace with output of `tauri signer generate` before shipping",
+      "endpoints": [
+        "https://PLACEHOLDER/updates/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "dialog": false
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
