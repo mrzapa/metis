@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { EvidenceSource, TraceEvent } from "@/lib/api";
-import { fetchTraceEvents } from "@/lib/api";
+import { fetchTraceEvents, type TraceEvent } from "@/lib/api";
+import type { EvidenceSource } from "@/lib/chat-types";
 import { FileText, List, Activity } from "lucide-react";
 import { EvidenceSourceCard } from "@/components/chat/evidence-source-card";
 import { TraceTimeline } from "@/components/chat/trace-timeline";
@@ -53,18 +53,24 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
 
   // Deduplicated, non-empty run IDs (most-recent first as they appear in the array)
   const availableRunIds = useMemo(() => [...new Set(runIds.filter(Boolean))], [runIds]);
+  const showLiveTrace = Boolean(isStreaming && selectedRunId === latestRunId);
 
   // Fetch trace events whenever selectedRunId changes (skip while streaming the active run)
   useEffect(() => {
-    if (!selectedRunId) {
+    if (!selectedRunId || showLiveTrace) {
       return;
     }
-    if (isStreaming && selectedRunId === latestRunId) {
-      // Live events are shown directly; fetch after streaming ends
-      setTraceLoading(false);
-      return;
-    }
+
     let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) {
+        return;
+      }
+      setTraceEvents([]);
+      setTraceError(null);
+      setTraceLoading(true);
+    });
+
     fetchTraceEvents(selectedRunId)
       .then((events) => {
         if (!cancelled) {
@@ -81,36 +87,7 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
     return () => {
       cancelled = true;
     };
-  }, [selectedRunId, isStreaming, latestRunId]);
-
-  // Re-fetch persisted trace once streaming ends
-  const prevIsStreamingRef = useRef(isStreaming);
-  useEffect(() => {
-    const wasStreaming = prevIsStreamingRef.current;
-    prevIsStreamingRef.current = isStreaming;
-    if (wasStreaming && !isStreaming && selectedRunId) {
-      setTraceEvents([]);
-      setTraceError(null);
-      setTraceLoading(true);
-      let cancelled = false;
-      fetchTraceEvents(selectedRunId)
-        .then((events) => {
-          if (!cancelled) {
-            setTraceEvents(events);
-            setTraceLoading(false);
-          }
-        })
-        .catch((err) => {
-          if (!cancelled) {
-            setTraceError(err instanceof Error ? err.message : "Failed to load trace");
-            setTraceLoading(false);
-          }
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-  }, [isStreaming, selectedRunId]);
+  }, [selectedRunId, showLiveTrace]);
 
   return (
     <div className="flex h-full flex-col">
@@ -229,7 +206,7 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
                   <p className="py-8 text-center text-xs text-muted-foreground">
                     Select a run above to view its trace.
                   </p>
-                ) : isStreaming && selectedRunId === latestRunId ? (
+                ) : showLiveTrace ? (
                   <>
                     <div className="flex items-center gap-1.5 mb-3">
                       <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />

@@ -12,7 +12,7 @@ import {
   TooltipProvider,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import type { EvidenceSource } from "@/lib/api";
+import type { EvidenceSource } from "@/lib/chat-types";
 
 const SNIPPET_COLLAPSE_THRESHOLD = 160;
 

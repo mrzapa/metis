@@ -2,16 +2,39 @@ from __future__ import annotations
 
 import pytest
 
-from axiom_app.views.styles import get_palette
-from axiom_app.views.widgets import ActionCard
+qt_core = pytest.importorskip(
+    "PySide6.QtCore",
+    reason="Qt runtime unavailable",
+    exc_type=ImportError,
+)
+qt_test = pytest.importorskip(
+    "PySide6.QtTest",
+    reason="Qt runtime unavailable",
+    exc_type=ImportError,
+)
+qt_widgets = pytest.importorskip(
+    "PySide6.QtWidgets",
+    reason="Qt runtime unavailable",
+    exc_type=ImportError,
+)
+styles_module = pytest.importorskip(
+    "axiom_app.views.styles",
+    reason="Qt runtime unavailable",
+    exc_type=ImportError,
+)
+widgets_module = pytest.importorskip(
+    "axiom_app.views.widgets",
+    reason="Qt runtime unavailable",
+    exc_type=ImportError,
+)
 
-qt_core = pytest.importorskip("PySide6.QtCore", reason="Qt runtime unavailable")
-qt_test = pytest.importorskip("PySide6.QtTest", reason="Qt runtime unavailable")
+get_palette = styles_module.get_palette
+ActionCard = widgets_module.ActionCard
 
 QEvent = qt_core.QEvent
 QPoint = qt_core.QPoint
 Qt = qt_core.Qt
-QApplication = pytest.importorskip("PySide6.QtWidgets", reason="Qt runtime unavailable").QApplication
+QApplication = qt_widgets.QApplication
 QTest = qt_test.QTest
 
 

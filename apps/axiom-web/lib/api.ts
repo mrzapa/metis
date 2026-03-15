@@ -1,3 +1,9 @@
+import type {
+  ActionRequiredAction,
+  ChatMessageContent,
+  EvidenceSource,
+} from "@/lib/chat-types";
+
 const API_BASE =
   process.env.NEXT_PUBLIC_AXIOM_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -14,16 +20,7 @@ export interface SessionSummary {
   llm_model: string;
 }
 
-export interface SessionMessage {
-  role: string;
-  content: string;
-  ts: string;
-  run_id: string;
-  sources: EvidenceSource[];
-  llm_provider?: string;
-  llm_model?: string;
-  query_mode?: string;
-}
+export type SessionMessage = ChatMessageContent;
 
 export interface DirectQueryResult {
   run_id: string;
@@ -31,16 +28,6 @@ export interface DirectQueryResult {
   selected_mode: string;
   llm_provider: string;
   llm_model: string;
-}
-
-export interface EvidenceSource {
-  sid: string;
-  source: string;
-  snippet: string;
-  title: string;
-  score: number | null;
-  breadcrumb: string;
-  section_hint: string;
 }
 
 export interface IndexSummary {
@@ -92,12 +79,6 @@ export interface RagStreamErrorEvent {
   type: "error";
   run_id: string;
   message: string;
-}
-
-export interface ActionRequiredAction {
-  kind: string;
-  summary: string;
-  payload: Record<string, unknown>;
 }
 
 export interface RagStreamActionRequiredEvent {

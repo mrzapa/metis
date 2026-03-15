@@ -104,8 +104,8 @@ transparent sourcing and predictable outputs.
 from axiom_app.utils.mock_embeddings import MockEmbeddings  # noqa: E402
 
 
-# SHTNode and build_sht_tree have been moved to axiom_app.models.sht
-from axiom_app.models.sht import SHTNode, build_sht_tree  # noqa: E402
+# build_sht_tree has been moved to axiom_app.models.sht
+from axiom_app.models.sht import build_sht_tree  # noqa: E402
 
 class LocalSentenceTransformerEmbeddings:
     """Optional local sentence-transformers embedding backend with batched encode."""
@@ -438,7 +438,7 @@ def _lazy_import_langchain():
 
 def _lazy_import_langchain_core():
     try:
-        module = importlib.import_module("langchain_core")
+        importlib.import_module("langchain_core")
         documents = importlib.import_module("langchain_core.documents")
         messages = importlib.import_module("langchain_core.messages")
     except ImportError as err:
@@ -468,6 +468,19 @@ def _lazy_import_chroma():
         raise ImportError(
             "Chroma integration is not installed. Install required dependencies "
             "(e.g. 'langchain-chroma' and 'chromadb') and run dependency "
+            "check/install from the app."
+        ) from err
+
+
+def _lazy_import_weaviate_stack():
+    try:
+        weaviate = importlib.import_module("weaviate")
+        module = importlib.import_module("langchain_weaviate")
+        return weaviate, module.WeaviateVectorStore
+    except ImportError as err:
+        raise ImportError(
+            "Weaviate integration is not installed. Install required dependencies "
+            "(e.g. 'langchain-weaviate' and 'weaviate-client') and run dependency "
             "check/install from the app."
         ) from err
 
@@ -2807,7 +2820,10 @@ class AgenticRAGApp:
             try:
                 indexes = self._list_existing_indexes()
             except Exception as exc:
-                self.root.after(0, lambda: self._startup_error("apply_existing_indexes", exc))
+                self.root.after(
+                    0,
+                    lambda err=exc: self._startup_error("apply_existing_indexes", err),
+                )
                 return
             self.root.after(0, lambda: self._apply_scan_and_continue(indexes))
 
@@ -2829,7 +2845,10 @@ class AgenticRAGApp:
             try:
                 self.check_dependencies()
             except Exception as exc:
-                self.root.after(0, lambda: self._startup_error("check_dependencies", exc))
+                self.root.after(
+                    0,
+                    lambda err=exc: self._startup_error("check_dependencies", err),
+                )
                 return
             self.root.after(0, self._finish_startup_pipeline)
 
@@ -8915,7 +8934,7 @@ class AgenticRAGApp:
     @staticmethod
     def _doc_group_key(doc):
         metadata = getattr(doc, "metadata", {}) or {}
-        for field in (
+        for metadata_field in (
             "section",
             "section_title",
             "heading",
@@ -8923,9 +8942,9 @@ class AgenticRAGApp:
             "title",
             "doc_title",
         ):
-            value = metadata.get(field)
+            value = metadata.get(metadata_field)
             if value:
-                return f"{field}:{value}"
+                return f"{metadata_field}:{value}"
         digest_window = metadata.get("digest_window") or metadata.get("digest_id")
         if digest_window:
             return f"digest_window:{digest_window}"
@@ -17517,8 +17536,6 @@ class AgenticRAGApp:
                     self.log(
                         f"Mini-digest routing enabled; boosted retrieval pool to {routing_candidate_k}."
                     )
-
-            recursive_expansion_cache = {}
 
             def _extract_json_payload(text):
                 cleaned = text.strip()

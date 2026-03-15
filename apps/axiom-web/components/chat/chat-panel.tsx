@@ -5,22 +5,12 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { ActionRequiredAction, SessionMessage, SessionSummary } from "@/lib/api";
-import { ActionCard, type ActionCardStatus } from "@/components/chat/action-card";
+import type { SessionSummary } from "@/lib/api";
+import type { ChatMessage } from "@/lib/chat-types";
+import { ActionCard } from "@/components/chat/action-card";
 import { AlertCircle, Loader2, SendHorizontal, Square } from "lucide-react";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
 import { ModelStatusDialog } from "@/components/chat/model-status-dialog";
-
-export type ChatMessageStatus = "streaming" | "complete" | "aborted" | "error";
-
-export interface ChatMessage extends SessionMessage {
-  client_id: string;
-  status?: ChatMessageStatus;
-  actionRequired?: {
-    action: ActionRequiredAction;
-    status: ActionCardStatus;
-  };
-}
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -42,8 +32,8 @@ interface ChatPanelProps {
   composerRef?: RefObject<HTMLTextAreaElement | null>;
   selectedMode?: string;
   onModeChange?: (mode: string) => void;
-  onActionApprove?: (clientId: string) => void;
-  onActionDeny?: (clientId: string) => void;
+  onActionApprove?: (messageId: string) => void;
+  onActionDeny?: (messageId: string) => void;
 }
 
 export function ChatPanel({
@@ -221,7 +211,7 @@ export function ChatPanel({
 
           {!loading && !error && messages.map((msg) => (
             <div
-              key={msg.client_id}
+              key={msg.id}
               className={cn(
                 "flex",
                 msg.role === "user" ? "justify-end" : "justify-start"
@@ -233,8 +223,8 @@ export function ChatPanel({
                     runId={msg.run_id}
                     action={msg.actionRequired.action}
                     status={msg.actionRequired.status}
-                    onApprove={() => onActionApprove?.(msg.client_id)}
-                    onDeny={() => onActionDeny?.(msg.client_id)}
+                    onApprove={() => onActionApprove?.(msg.id)}
+                    onDeny={() => onActionDeny?.(msg.id)}
                   />
                 </div>
               ) : (

@@ -3,25 +3,24 @@
 import { AlertTriangle, CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { ActionRequiredAction } from "@/lib/api";
-
-export type ActionCardStatus = "pending" | "submitting" | "approved" | "denied";
+import type { ActionRequiredAction, ChatActionStatus } from "@/lib/chat-types";
 
 interface ActionCardProps {
   runId: string;
   action: ActionRequiredAction;
-  status: ActionCardStatus;
+  status: ChatActionStatus;
   onApprove?: () => void;
   onDeny?: () => void;
 }
 
 export function ActionCard({
-  runId: _runId,
+  runId,
   action,
   status,
   onApprove,
   onDeny,
 }: ActionCardProps) {
+  void runId;
   const isPending = status === "pending";
   const isSubmitting = status === "submitting";
 

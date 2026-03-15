@@ -2,13 +2,12 @@
 
 import { CheckCircle2, Clock, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ActionCardStatus } from "./action-card";
-import type { ActionRequiredAction } from "@/lib/api";
+import type { ActionRequiredAction, ChatActionStatus } from "@/lib/chat-types";
 
 export interface ActionLogEntry {
   id: string;
   action: ActionRequiredAction;
-  status: ActionCardStatus;
+  status: ChatActionStatus;
 }
 
 interface ActionLogProps {
