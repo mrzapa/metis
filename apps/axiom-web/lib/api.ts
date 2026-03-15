@@ -450,6 +450,30 @@ export async function submitRunAction(
   }
 }
 
+export interface LogTailResult {
+  lines: string[];
+  missing: boolean;
+  log_path: string;
+  total_lines?: number;
+}
+
+export async function fetchLogTail(): Promise<LogTailResult> {
+  const res = await apiFetch(`${await getApiBase()}/v1/logs/tail`);
+  if (!res.ok) throw new Error(`Failed to fetch log tail: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchApiVersion(): Promise<string> {
+  try {
+    const res = await apiFetch(`${await getApiBase()}/v1/version`);
+    if (!res.ok) return "unknown";
+    const data = (await res.json()) as { version: string };
+    return data.version;
+  } catch {
+    return "unknown";
+  }
+}
+
 export async function queryDirect(
   prompt: string,
   settings: Record<string, unknown>,

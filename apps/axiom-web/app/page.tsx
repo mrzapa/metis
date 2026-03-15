@@ -100,6 +100,12 @@ export default function Home() {
         >
           Settings
         </Link>
+        <Link
+          href="/diagnostics"
+          className="rounded-full border border-foreground/20 px-6 py-2 text-sm font-medium transition-colors hover:bg-foreground/5"
+        >
+          Diagnostics
+        </Link>
       </div>
     </div>
   );
