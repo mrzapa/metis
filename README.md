@@ -23,14 +23,15 @@ Most RAG tools are either locked to one provider, trapped behind a SaaS login, o
 
 - **Fully local.** Your files never leave your machine. Run with a local GGUF model and you don't even need an internet connection.
 - **Swap anything.** LLM, embeddings, vector store — change providers in a config file, not in code. Today it's OpenAI, tomorrow it's a model running on your laptop. Axiom doesn't care.
-- **Desktop-native.** A real Qt6 app with themes, sessions, and keyboard shortcuts — not a web UI pretending to be a desktop app.
+- **Desktop-native.** A real Qt6 app with themes, sessions, and keyboard shortcuts.
+- **Web UI included.** A Next.js browser interface ships alongside the desktop app — same backend, different window.
 - **Five ways to think.** Q&A, Summary, Tutor, Research, and Evidence Pack modes give you different lenses on the same documents. Most tools only do Q&A.
 - **GUI and CLI share one brain.** Same retrieval engine powers both interfaces. Script it, automate it, or just click around.
 
 <br />
 
 <p align="center">
-  <a href="#-quick-start">Quick Start</a> · <a href="#-features">Features</a> · <a href="#-usage">Usage</a> · <a href="#-configuration">Configuration</a> · <a href="#-contributing">Contributing</a>
+  <a href="#-quick-start">Quick Start</a> · <a href="#-features">Features</a> · <a href="#-usage">Usage</a> · <a href="#web-ui">Web UI</a> · <a href="#-configuration">Configuration</a> · <a href="#-contributing">Contributing</a>
 </p>
 
 ---
@@ -117,11 +118,12 @@ Q&A is table stakes. Axiom ships with **five distinct chat modes**, each designe
 | Interface | Launch command | Best for |
 |-----------|---------------|----------|
 | **Desktop GUI** | `python main.py` | Daily use — themes, sessions, keyboard shortcuts |
+| **Web UI** | `pnpm dev` (in `apps/axiom-web`) | Browser-based access; requires API server |
 | **Headless CLI** | `python main.py --cli ...` | Automation, scripting, servers, CI pipelines |
-| **API server** | `bash scripts/run_api_dev.sh` | HTTP clients, front-end development |
+| **API server** | `bash scripts/run_api_dev.sh` | Powers the web UI; exposes HTTP endpoints |
 | **Legacy GUI** | `AXIOM_NEW_APP=0 python main.py` | If you prefer the original Tkinter interface |
 
-All three interfaces share the same retrieval engine. Same index, same results.
+All interfaces share the same retrieval engine. Same index, same results.
 
 ### Everything else
 
@@ -180,6 +182,24 @@ bash scripts/run_api_dev.sh
 ```
 
 Override the Python binary with `AXIOM_PYTHON` if needed. Once running, check `GET /healthz` or browse the auto-generated docs at `http://127.0.0.1:8000/docs`.
+
+### Web UI
+
+The web UI is a Next.js app located in `apps/axiom-web`. It requires the API server to be running first.
+
+**Prerequisites:** Node.js 18+ and [pnpm](https://pnpm.io/installation)
+
+```bash
+# 1. Start the API server (in one terminal)
+bash scripts/run_api_dev.sh
+
+# 2. Start the web UI (in another terminal)
+cd apps/axiom-web
+pnpm install
+pnpm dev
+```
+
+Then open [http://localhost:3000](http://localhost:3000). The web UI provides chat, document library management, and settings — all powered by the same local API.
 
 ### Parity audit
 
@@ -269,6 +289,14 @@ axiom_app/
 ├── utils/           # LLM/embedding factories, document loaders, helpers
 └── assets/          # Bundled resources
 
+apps/
+└── axiom-web/       # Next.js web UI (TypeScript + Tailwind)
+    ├── app/
+    │   ├── chat/    # Chat interface
+    │   ├── library/ # Document library management
+    │   └── settings/# Provider and model configuration
+    └── components/  # Shared UI components
+
 tests/               # pytest suite (unit + integration)
 scripts/             # Installers (bash, PowerShell, Windows EXE builder)
 docker/              # Weaviate compose for integration testing
@@ -278,15 +306,13 @@ agentic_rag_gui.py   # Legacy Tkinter app (kept for compatibility)
 
 ---
 
-## Roadmap: Next big leap
+## Roadmap
 
-> Planned/experimental: this is a possible next-step architecture, not the current default runtime.
+The web UI and local API server are now shipping alongside the desktop app and CLI. Here's what's next:
 
-- Add a local API server layer that reuses `axiom_app/services` for indexing, retrieval, sessions, and response pipelines.
-- Add a web UI in a React meta-framework on top of that local API layer.
-- Package the web UI and local API together inside a local desktop container for desktop distribution.
-
-If pursued, this would complement the current PySide6 app and CLI entrypoints rather than replace them immediately.
+- **Desktop packaging** — bundle the web UI and API server into a self-contained desktop app (no terminal required).
+- **Streaming responses** — stream tokens from the API to the web UI for snappier chat.
+- **Collaborative sessions** — share a running Axiom instance across devices on a local network.
 
 ---
 
