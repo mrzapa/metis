@@ -9,7 +9,7 @@ We were commissioned a "Review of the Proposed Stack with 2026 Insights" report 
 
 ## Decision
 
-We audited the codebase against each recommendation. Four of five are complete; one is partially addressed.
+We audited the codebase against each recommendation. All five are now complete.
 
 ## Assessment
 
@@ -25,11 +25,13 @@ We audited the codebase against each recommendation. Four of five are complete; 
 - React 19.2.3 with TypeScript 5.
 - Static export (`output: 'export'`) configured for Tauri desktop bundling.
 
-### 3. Leverage ShadCN Registry 2.0 and design tokens — Partial
+### 3. Leverage ShadCN Registry 2.0 and design tokens — Complete
 
 - shadcn/ui v4.0.6 is adopted with `base-nova` style using `@base-ui/react` (replacing Radix).
-- Design tokens exist as CSS variables in `globals.css` using OKLch color space with dark mode.
-- **Gap**: Registry 2.0 is not configured (`"registries": {}` in `components.json`). Smart versioning, design-token synchronization, and cross-framework Web Component export are not set up.
+- Design tokens extracted to a dedicated `app/tokens.css` (CSS variables, OKLch color space, light + dark) and `app/tokens.json` (W3C DTCG format for tooling and cross-project synchronization).
+- Registry 2.0 configured in `components.json` with upstream shadcn registry URL. Smart versioning enabled via `npm run ui:diff` (`npx shadcn diff`).
+- Local component manifest at `registry.json` catalogs all 11 UI components with their dependencies and base shadcn version.
+- Cross-framework Web Component export deferred by design: axiom-web (React) is the only production frontend; axiom-web-lite (Astro) consumes React natively; axiom-reflex (Python) generates its own UI. The shared `tokens.css`/`tokens.json` files provide the real cross-project shared layer.
 
 ### 4. Build for streaming and agentic AI interactions — Complete
 
@@ -53,16 +55,12 @@ We audited the codebase against each recommendation. Four of five are complete; 
 |---|---------------|--------|
 | 1 | FastAPI + consider Reflex/Litestar | Complete |
 | 2 | Meta-framework (Next.js/Remix) | Complete |
-| 3 | ShadCN Registry 2.0 + design tokens | Partial |
+| 3 | ShadCN Registry 2.0 + design tokens | Complete |
 | 4 | Streaming + agentic UI | Complete |
 | 5 | Tauri + evaluate Rust GUI | Complete |
 
-## Open Questions
-
-- Should we prioritize ShadCN Registry 2.0 configuration, or is the current inline CSS variable approach sufficient for our needs?
-- Is cross-framework Web Component export needed given that all frontends currently use React?
-
 ## Consequences
 
-- The stack is ~90% aligned with the 2026 report recommendations.
-- The remaining gap (Registry 2.0) is a configuration/tooling concern, not an architectural one. Design tokens already exist; it is a matter of migrating their management to the registry system.
+- The stack is fully aligned with all five 2026 report recommendations.
+- Design tokens are now managed in a dedicated file (`tokens.css`) with a machine-readable DTCG representation (`tokens.json`) for tooling integration.
+- Upstream component drift is detectable via `npm run ui:diff`.
