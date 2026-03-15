@@ -6,6 +6,7 @@ import type {
   ChatActionStatus,
   ChatMessage,
   ChatMessageContent,
+  ChatMessageStatus,
   ChatRun,
   EvidenceSource,
 } from "@/lib/chat-types";
@@ -25,6 +26,14 @@ const EMPTY_CHAT_TRANSCRIPT_STATE: ChatTranscriptState = {
 };
 
 const STREAM_RENDER_DEBOUNCE_MS = 50;
+
+interface RestorableStreamingRun {
+  userMessage: ChatMessage;
+  assistantMessage: ChatMessage;
+  runId: string;
+  sources: EvidenceSource[];
+  pendingSources: EvidenceSource[];
+}
 
 function cloneTranscriptState(state: ChatTranscriptState): ChatTranscriptState {
   return {
@@ -169,6 +178,31 @@ export function useChatTranscript() {
       ...overrides,
     }),
     [nextMessageId],
+  );
+
+  const restoreStreamingRun = useCallback(
+    ({
+      userMessage,
+      assistantMessage,
+      runId,
+      sources,
+      pendingSources,
+    }: RestorableStreamingRun) => {
+      setState(() => {
+        const nextState = cloneTranscriptState(EMPTY_CHAT_TRANSCRIPT_STATE);
+        appendMessage(nextState, userMessage);
+        appendMessage(nextState, assistantMessage);
+        upsertRun(nextState, runId, () => ({
+          run_id: runId,
+          assistant_message_id: assistantMessage.id,
+          status: "streaming",
+          sources,
+          pending_sources: pendingSources,
+        }));
+        return nextState;
+      });
+    },
+    [],
   );
 
   const setSessionMessages = useCallback(
@@ -416,6 +450,25 @@ export function useChatTranscript() {
     });
   }, []);
 
+  const setMessageStatus = useCallback(
+    (messageId: string, status: ChatMessageStatus) => {
+      setState((previousState) => {
+        const message = previousState.messagesById[messageId];
+        if (!message) {
+          return previousState;
+        }
+
+        const nextState = cloneTranscriptState(previousState);
+        nextState.messagesById[messageId] = {
+          ...message,
+          status,
+        };
+        return nextState;
+      });
+    },
+    [],
+  );
+
   const markRunAborted = useCallback((runId: string) => {
     const pendingText = drainPendingRunTokens([runId])[runId] ?? "";
     setState((previousState) => {
@@ -502,6 +555,7 @@ export function useChatTranscript() {
 
   return {
     createMessage,
+    restoreStreamingRun,
     setSessionMessages,
     reset,
     appendMessages,
@@ -513,6 +567,7 @@ export function useChatTranscript() {
     markRunActionRequired,
     markRunError,
     markMessageError,
+    setMessageStatus,
     markRunAborted,
     markMessageAborted,
     setActionStatus,
