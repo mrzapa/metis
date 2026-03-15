@@ -114,6 +114,12 @@ export interface SessionDetail {
   traces: Record<string, unknown>;
 }
 
+interface SseMessage<T> {
+  id: string | null;
+  event: string | null;
+  data: T;
+}
+
 async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(url, init);
@@ -132,7 +138,7 @@ async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
 
 async function readSseEvents<T>(
   res: Response,
-  onEvent: (event: T) => void,
+  onEvent: (event: SseMessage<T>) => void,
 ): Promise<void> {
   if (!res.body) {
     throw new Error("Streaming response missing body");
@@ -142,6 +148,28 @@ async function readSseEvents<T>(
   const decoder = new TextDecoder();
   let buffer = "";
 
+  const flushBuffer = (rawBuffer: string, forceFlush = false): string => {
+    const normalized = rawBuffer.replace(/\r\n/g, "\n");
+    const frames = normalized.split("\n\n");
+    const remainder = forceFlush ? "" : (frames.pop() ?? "");
+
+    for (const frame of forceFlush ? frames.filter(Boolean) : frames) {
+      const message = parseSseMessage<T>(frame);
+      if (message) {
+        onEvent(message);
+      }
+    }
+
+    if (forceFlush) {
+      const trailing = parseSseMessage<T>(remainder);
+      if (trailing) {
+        onEvent(trailing);
+      }
+    }
+
+    return remainder;
+  };
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) {
@@ -150,23 +178,51 @@ async function readSseEvents<T>(
       buffer += decoder.decode(value, { stream: true });
     }
 
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() ?? "";
-
-    for (const rawLine of lines) {
-      const line = rawLine.trimEnd();
-      if (!line.startsWith("data: ")) continue;
-      onEvent(JSON.parse(line.slice(6)) as T);
-    }
+    buffer = flushBuffer(buffer, done);
 
     if (done) {
-      const finalLine = buffer.trim();
-      if (finalLine.startsWith("data: ")) {
-        onEvent(JSON.parse(finalLine.slice(6)) as T);
-      }
       return;
     }
   }
+}
+
+function parseSseMessage<T>(frame: string): SseMessage<T> | null {
+  const trimmedFrame = frame.trim();
+  if (!trimmedFrame) {
+    return null;
+  }
+
+  let id: string | null = null;
+  let event: string | null = null;
+  const dataLines: string[] = [];
+
+  for (const rawLine of trimmedFrame.split("\n")) {
+    const line = rawLine.trimEnd();
+    if (!line || line.startsWith(":")) {
+      continue;
+    }
+    if (line.startsWith("id:")) {
+      id = line.slice(3).trim();
+      continue;
+    }
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim();
+      continue;
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+
+  if (dataLines.length === 0) {
+    return null;
+  }
+
+  return {
+    id,
+    event,
+    data: JSON.parse(dataLines.join("\n")) as T,
+  };
 }
 
 export async function fetchSessions(
@@ -251,20 +307,46 @@ export async function queryRagStream(
   settings: Record<string, unknown>,
   options: {
     signal?: AbortSignal;
-    onEvent: (event: RagStreamEvent) => void;
+    runId?: string;
+    lastEventId?: number | null;
+    onEvent: (event: RagStreamEvent, meta: { eventId: number | null }) => void;
   },
 ): Promise<void> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (
+    typeof options.lastEventId === "number" &&
+    Number.isFinite(options.lastEventId) &&
+    options.lastEventId > 0
+  ) {
+    headers["Last-Event-ID"] = String(options.lastEventId);
+  }
+
   const res = await apiFetch(`${API_BASE}/v1/query/rag/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ manifest_path, question, settings }),
+    headers,
+    body: JSON.stringify({
+      manifest_path,
+      question,
+      settings,
+      run_id: options.runId,
+    }),
     signal: options.signal,
   });
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`RAG stream failed (${res.status}): ${detail}`);
   }
-  await readSseEvents<RagStreamEvent>(res, options.onEvent);
+  await readSseEvents<RagStreamEvent>(res, (message) => {
+    const parsedEventId =
+      message.id && /^-?\d+$/.test(message.id)
+        ? Number.parseInt(message.id, 10)
+        : Number.NaN;
+    options.onEvent(message.data, {
+      eventId: Number.isFinite(parsedEventId) ? parsedEventId : null,
+    });
+  });
 }
 
 export interface IndexBuildResult {
@@ -302,7 +384,7 @@ export async function buildIndexStream(
     throw new Error(`Build stream failed (${res.status}): ${detail}`);
   }
   let buildResult: IndexBuildResult | null = null;
-  await readSseEvents<Record<string, unknown>>(res, (event) => {
+  await readSseEvents<Record<string, unknown>>(res, ({ data: event }) => {
     onEvent(event);
     if (event.type === "error") {
       throw new Error(String(event.message ?? "Build error"));
