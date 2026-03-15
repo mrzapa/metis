@@ -2,7 +2,7 @@
 
 > **Status: Experimental.** This is a minimal scaffold for a Tauri v2 desktop container that
 > hosts the `axiom-web` Next.js frontend in a native window. It is not production-ready and
-> is independent of the primary Qt desktop app (`python main.py`). See WOR-13.
+> is independent of the primary Qt desktop app (`python main.py`). See WOR-13 / WOR-14.
 
 ---
 
@@ -56,24 +56,37 @@ python -m axiom_app.api
 
 ## Production build
 
-Before bundling, generate app icons from the repo logo:
+### 1. Sidecar (Python API binary)
+
+Build the standalone `axiom-api` sidecar binary before bundling. This packages
+`axiom_app.api` as a one-file console executable that Tauri embeds and spawns at launch.
+
+```bash
+# From repo root — requires PyInstaller and Rust toolchain in PATH:
+bash scripts/build_api_sidecar.sh
+```
+
+This writes `apps/axiom-desktop/src-tauri/binaries/axiom-api-{target-triple}`.
+The Tauri build picks it up automatically via `bundle.externalBin`.
+
+The sidecar starts the API on `http://127.0.0.1:8000` (fixed port, same default as
+the dev workflow). Dynamic port selection is deferred to WOR-15.
+
+### 2. App icons
 
 ```bash
 # From apps/axiom-desktop (after pnpm install):
 pnpm tauri icon ../../logo.png
 ```
 
-Then build:
+### 3. Bundle
 
 ```bash
 pnpm tauri build
 ```
 
 This runs `pnpm build` in `apps/axiom-web` (producing a static export in `apps/axiom-web/out`)
-and then compiles the Tauri app with that output bundled.
-
-> **Note:** The production bundle hosts only the static frontend shell. It does not embed the
-> Python API server. API sidecar packaging is deferred to follow-up tickets (WOR-14, WOR-15).
+and then compiles the Tauri app with the frontend and sidecar binary bundled.
 
 ---
 
