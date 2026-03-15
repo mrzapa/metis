@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ActionRequiredAction,
   ChatActionStatus,
@@ -23,6 +23,8 @@ const EMPTY_CHAT_TRANSCRIPT_STATE: ChatTranscriptState = {
   runsById: {},
   runOrder: [],
 };
+
+const STREAM_RENDER_DEBOUNCE_MS = 50;
 
 function cloneTranscriptState(state: ChatTranscriptState): ChatTranscriptState {
   return {
@@ -53,8 +55,108 @@ function upsertRun(
 export function useChatTranscript() {
   const [state, setState] = useState<ChatTranscriptState>(EMPTY_CHAT_TRANSCRIPT_STATE);
   const messageIdRef = useRef(0);
+  const pendingRunTokensRef = useRef<Record<string, string>>({});
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const nextMessageId = useCallback(() => `message-${messageIdRef.current++}`, []);
+
+  const clearScheduledTokenFlush = useCallback(() => {
+    if (flushTimerRef.current !== null) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+  }, []);
+
+  const drainPendingRunTokens = useCallback(
+    (runIds?: string[]) => {
+      const pendingRunTokens = pendingRunTokensRef.current;
+      const idsToDrain = runIds ?? Object.keys(pendingRunTokens);
+      const drainedTokens: Record<string, string> = {};
+
+      for (const runId of idsToDrain) {
+        const pendingText = pendingRunTokens[runId];
+        if (!pendingText) {
+          continue;
+        }
+
+        drainedTokens[runId] = pendingText;
+        delete pendingRunTokens[runId];
+      }
+
+      if (Object.keys(pendingRunTokens).length === 0) {
+        clearScheduledTokenFlush();
+      }
+
+      return drainedTokens;
+    },
+    [clearScheduledTokenFlush],
+  );
+
+  const discardPendingRunTokens = useCallback(
+    (runIds?: string[]) => {
+      drainPendingRunTokens(runIds);
+    },
+    [drainPendingRunTokens],
+  );
+
+  const flushPendingRunTokens = useCallback(
+    (runIds?: string[]) => {
+      const tokenEntries = Object.entries(drainPendingRunTokens(runIds));
+      if (tokenEntries.length === 0) {
+        return;
+      }
+
+      setState((previousState) => {
+        let hasChanges = false;
+        const nextState = cloneTranscriptState(previousState);
+
+        for (const [runId, pendingText] of tokenEntries) {
+          const run = previousState.runsById[runId];
+          if (!run || run.status !== "streaming") {
+            continue;
+          }
+
+          const assistantMessage = previousState.messagesById[run.assistant_message_id];
+          if (!assistantMessage) {
+            continue;
+          }
+
+          hasChanges = true;
+          nextState.messagesById[assistantMessage.id] = {
+            ...assistantMessage,
+            content: `${assistantMessage.content}${pendingText}`,
+            run_id: runId,
+            status: "streaming",
+          };
+          nextState.runsById[runId] = {
+            ...run,
+            status: "streaming",
+          };
+        }
+
+        return hasChanges ? nextState : previousState;
+      });
+    },
+    [drainPendingRunTokens],
+  );
+
+  const schedulePendingRunTokenFlush = useCallback(() => {
+    if (flushTimerRef.current !== null) {
+      return;
+    }
+
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null;
+      flushPendingRunTokens();
+    }, STREAM_RENDER_DEBOUNCE_MS);
+  }, [flushPendingRunTokens]);
+
+  useEffect(() => {
+    return () => {
+      pendingRunTokensRef.current = {};
+      clearScheduledTokenFlush();
+    };
+  }, [clearScheduledTokenFlush]);
 
   const createMessage = useCallback(
     (
@@ -71,6 +173,7 @@ export function useChatTranscript() {
 
   const setSessionMessages = useCallback(
     (messages: ChatMessageContent[]) => {
+      discardPendingRunTokens();
       setState(() => {
         const nextState = cloneTranscriptState(EMPTY_CHAT_TRANSCRIPT_STATE);
 
@@ -94,12 +197,13 @@ export function useChatTranscript() {
         return nextState;
       });
     },
-    [createMessage],
+    [createMessage, discardPendingRunTokens],
   );
 
   const reset = useCallback(() => {
+    discardPendingRunTokens();
     setState(cloneTranscriptState(EMPTY_CHAT_TRANSCRIPT_STATE));
-  }, []);
+  }, [discardPendingRunTokens]);
 
   const appendMessages = useCallback((messages: ChatMessage[]) => {
     setState((previousState) => {
@@ -179,33 +283,12 @@ export function useChatTranscript() {
   }, []);
 
   const appendRunToken = useCallback((runId: string, token: string) => {
-    setState((previousState) => {
-      const run = previousState.runsById[runId];
-      if (!run) {
-        return previousState;
-      }
-
-      const assistantMessage = previousState.messagesById[run.assistant_message_id];
-      if (!assistantMessage) {
-        return previousState;
-      }
-
-      const nextState = cloneTranscriptState(previousState);
-      nextState.messagesById[assistantMessage.id] = {
-        ...assistantMessage,
-        content: `${assistantMessage.content}${token}`,
-        run_id: runId,
-        status: "streaming",
-      };
-      nextState.runsById[runId] = {
-        ...run,
-        status: "streaming",
-      };
-      return nextState;
-    });
-  }, []);
+    pendingRunTokensRef.current[runId] = `${pendingRunTokensRef.current[runId] ?? ""}${token}`;
+    schedulePendingRunTokenFlush();
+  }, [schedulePendingRunTokenFlush]);
 
   const finalizeRun = useCallback((runId: string, answerText: string, sources: EvidenceSource[]) => {
+    const pendingText = drainPendingRunTokens([runId])[runId] ?? "";
     setState((previousState) => {
       const run = previousState.runsById[runId];
       if (!run) {
@@ -222,7 +305,7 @@ export function useChatTranscript() {
       const nextState = cloneTranscriptState(previousState);
       nextState.messagesById[assistantMessage.id] = {
         ...assistantMessage,
-        content: answerText,
+        content: answerText || `${assistantMessage.content}${pendingText}`,
         run_id: runId,
         sources: finalSources,
         status: "complete",
@@ -235,10 +318,11 @@ export function useChatTranscript() {
       };
       return nextState;
     });
-  }, []);
+  }, [drainPendingRunTokens]);
 
   const markRunActionRequired = useCallback(
     (runId: string, action: ActionRequiredAction, timestamp: string) => {
+      const pendingText = drainPendingRunTokens([runId])[runId] ?? "";
       setState((previousState) => {
         const run = previousState.runsById[runId];
         if (!run) {
@@ -253,8 +337,8 @@ export function useChatTranscript() {
         const nextState = cloneTranscriptState(previousState);
         nextState.messagesById[assistantMessage.id] = {
           ...assistantMessage,
-          content: assistantMessage.content.trim()
-            ? assistantMessage.content
+          content: `${assistantMessage.content}${pendingText}`.trim()
+            ? `${assistantMessage.content}${pendingText}`
             : "Action required — see below.",
           status: "complete",
         };
@@ -282,10 +366,11 @@ export function useChatTranscript() {
         return nextState;
       });
     },
-    [nextMessageId],
+    [drainPendingRunTokens, nextMessageId],
   );
 
   const markRunError = useCallback((runId: string, message: string) => {
+    const pendingText = drainPendingRunTokens([runId])[runId] ?? "";
     setState((previousState) => {
       const run = previousState.runsById[runId];
       if (!run) {
@@ -300,7 +385,9 @@ export function useChatTranscript() {
       const nextState = cloneTranscriptState(previousState);
       nextState.messagesById[assistantMessage.id] = {
         ...assistantMessage,
-        content: assistantMessage.content.trim() ? assistantMessage.content : message,
+        content: `${assistantMessage.content}${pendingText}`.trim()
+          ? `${assistantMessage.content}${pendingText}`
+          : message,
         run_id: runId,
         status: "error",
       };
@@ -310,7 +397,7 @@ export function useChatTranscript() {
       };
       return nextState;
     });
-  }, []);
+  }, [drainPendingRunTokens]);
 
   const markMessageError = useCallback((messageId: string, message: string) => {
     setState((previousState) => {
@@ -330,6 +417,7 @@ export function useChatTranscript() {
   }, []);
 
   const markRunAborted = useCallback((runId: string) => {
+    const pendingText = drainPendingRunTokens([runId])[runId] ?? "";
     setState((previousState) => {
       const run = previousState.runsById[runId];
       if (!run) {
@@ -344,6 +432,7 @@ export function useChatTranscript() {
       const nextState = cloneTranscriptState(previousState);
       nextState.messagesById[assistantMessage.id] = {
         ...assistantMessage,
+        content: `${assistantMessage.content}${pendingText}`,
         status: assistantMessage.status === "streaming" ? "aborted" : assistantMessage.status,
       };
       nextState.runsById[runId] = {
@@ -352,7 +441,7 @@ export function useChatTranscript() {
       };
       return nextState;
     });
-  }, []);
+  }, [drainPendingRunTokens]);
 
   const markMessageAborted = useCallback((messageId: string) => {
     setState((previousState) => {
