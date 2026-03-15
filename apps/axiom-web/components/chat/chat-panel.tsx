@@ -94,6 +94,13 @@ export function ChatPanel({
     }
   }, [messages]);
 
+  // Sync queryMode when parent preloads an override (e.g. from localStorage on boot)
+  useEffect(() => {
+    if (initialQueryMode != null) {
+      setQueryMode(initialQueryMode);
+    }
+  }, [initialQueryMode]);
+
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     // Don't intercept keys while IME composition is active (CJK input, etc.)
     if (e.nativeEvent.isComposing) return;
