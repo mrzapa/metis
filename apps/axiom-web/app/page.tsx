@@ -2,18 +2,39 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { getApiBase } from "@/lib/api";
 
 type Status = "connected" | "disconnected" | "checking";
 
 export default function Home() {
   const [status, setStatus] = useState<Status>("checking");
+  const [sidecarError, setSidecarError] = useState<string | null>(null);
+
+  // Listen for the sidecar-timeout event emitted by the Tauri host so we can
+  // show a user-friendly message when the local API never becomes available.
+  useEffect(() => {
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+      return;
+    }
+    let unlisten: (() => void) | undefined;
+    import("@tauri-apps/api/event").then(({ listen }) => {
+      listen<string>("sidecar-timeout", (event) => {
+        setSidecarError(event.payload);
+        setStatus("disconnected");
+      }).then((fn) => {
+        unlisten = fn;
+      });
+    });
+    return () => unlisten?.();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     async function check() {
       try {
-        const res = await fetch("http://127.0.0.1:8000/healthz");
+        const base = await getApiBase();
+        const res = await fetch(`${base}/healthz`);
         const data = await res.json();
         if (!cancelled) setStatus(data.ok ? "connected" : "disconnected");
       } catch {
@@ -34,6 +55,12 @@ export default function Home() {
       <h1 className="text-4xl font-bold tracking-tight">
         Axiom <span className="text-lg font-normal text-zinc-500">(Local-first)</span>
       </h1>
+
+      {sidecarError && (
+        <div className="max-w-sm rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+          {sidecarError}
+        </div>
+      )}
 
       <div className="flex items-center gap-2 text-sm">
         <span
