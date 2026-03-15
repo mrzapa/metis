@@ -34,6 +34,12 @@ interface ChatPanelProps {
   onModeChange?: (mode: string) => void;
   onActionApprove?: (messageId: string) => void;
   onActionDeny?: (messageId: string) => void;
+  reconnectState?: {
+    question: string;
+    lastEventId: number;
+  } | null;
+  onReconnectRun?: () => void;
+  onDiscardReconnect?: () => void;
 }
 
 export function ChatPanel({
@@ -56,6 +62,9 @@ export function ChatPanel({
   composerRef,
   onActionApprove,
   onActionDeny,
+  reconnectState,
+  onReconnectRun,
+  onDiscardReconnect,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [queryMode, setQueryMode] = useState<"direct" | "rag">(initialQueryMode ?? "direct");
@@ -145,6 +154,37 @@ export function ChatPanel({
           </div>
         )}
       </div>
+
+      {reconnectState && (
+        <div className="border-b bg-amber-50/60 px-4 py-3">
+          <div className="mx-auto flex max-w-3xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">
+                Interrupted RAG Run
+              </p>
+              <p className="mt-1 text-sm text-foreground">
+                Reconnect to continue the response for &quot;{truncateMiddle(reconnectState.question, 120)}&quot;.
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Last acknowledged event: {Math.max(reconnectState.lastEventId, 0)}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button size="sm" className="h-8 px-3" onClick={onReconnectRun}>
+                Reconnect
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 px-3"
+                onClick={onDiscardReconnect}
+              >
+                Discard
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Index banner (RAG mode only) */}
       {queryMode === "rag" && (
@@ -398,4 +438,12 @@ function formatDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+function truncateMiddle(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  const edgeLength = Math.max(Math.floor((maxLength - 1) / 2), 1);
+  return `${value.slice(0, edgeLength)}…${value.slice(-edgeLength)}`;
 }
