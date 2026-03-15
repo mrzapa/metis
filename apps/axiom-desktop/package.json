@@ -1,0 +1,15 @@
+{
+  "name": "axiom-desktop",
+  "version": "0.0.1",
+  "private": true,
+  "description": "EXPERIMENTAL — Tauri v2 desktop container for axiom-web (WOR-13)",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
