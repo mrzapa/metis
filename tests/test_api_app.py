@@ -25,6 +25,8 @@ def test_query_direct_happy_path(monkeypatch) -> None:
             run_id = req.run_id or "run-xyz"
             answer_text = "Mock/Test Backend: hello"
             selected_mode = "Q&A"
+            llm_provider = "mock"
+            llm_model = "mock-model"
 
         return _Result()
 
@@ -99,5 +101,7 @@ def test_stream_rag_error_event(monkeypatch) -> None:
     )
 
     assert response.status_code == 200
-    data_lines = [l for l in response.text.splitlines() if l.startswith("data: ")]
-    assert any(json.loads(l[6:])["type"] == "error" for l in data_lines)
+    data_lines = [
+        line for line in response.text.splitlines() if line.startswith("data: ")
+    ]
+    assert any(json.loads(line[6:])["type"] == "error" for line in data_lines)
