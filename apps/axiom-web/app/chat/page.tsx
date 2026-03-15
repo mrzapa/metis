@@ -7,10 +7,116 @@ import { ChatPanel } from "@/components/chat/chat-panel";
 import { EvidencePanel } from "@/components/chat/evidence-panel";
 import { fetchSession, fetchSettings, queryDirect, queryRagStream, submitRunAction } from "@/lib/api";
 import type { SessionSummary, TraceEvent } from "@/lib/api";
+import type { RagStreamEvent } from "@/lib/api";
 import type { EvidenceSource } from "@/lib/chat-types";
 import { useChatTranscript } from "@/app/chat/use-chat-transcript";
+import {
+  clearResumableRagRun,
+  loadResumableRagRun,
+  saveResumableRagRun,
+  type ResumableRagRunSnapshot,
+} from "@/app/chat/rag-stream-resume";
 
 type StopStreamReason = "user" | "navigation";
+
+interface ActiveRagStream {
+  assistantMessageId: string;
+  controller: AbortController;
+  pendingSources: EvidenceSource[];
+  requestId: number;
+  runId: string;
+  question: string;
+  manifestPath: string;
+  indexLabel: string | null;
+  userMessageTs: string;
+  assistantMessageTs: string;
+  assistantContent: string;
+  lastEventId: number;
+  dedupeFloorEventId: number;
+  liveTraceEvents: TraceEvent[];
+  hasBoundRun: boolean;
+  seenEventSignatures: Set<string>;
+}
+
+interface ResumableRagRunState extends ResumableRagRunSnapshot {
+  assistantMessageId: string;
+  hasBoundRun: boolean;
+}
+
+interface StartRagStreamOptions {
+  assistantMessageId: string;
+  assistantMessageTs: string;
+  assistantSeedContent: string;
+  dedupeFloorEventId?: number;
+  hasBoundRun: boolean;
+  indexLabel: string | null;
+  lastEventId: number;
+  liveTraceEvents: TraceEvent[];
+  manifestPath: string;
+  pendingSources: EvidenceSource[];
+  question: string;
+  runId: string;
+  userMessageTs: string;
+}
+
+function buildEventSignature(
+  event: RagStreamEvent,
+  fallbackRunId: string,
+  eventId: number | null,
+): string {
+  const runId = String(event.run_id || fallbackRunId || "").trim();
+  if (eventId !== null) {
+    return `${runId}:${eventId}`;
+  }
+  return `${runId}:${event.type}:${JSON.stringify(event)}`;
+}
+
+function createClientRunId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `rag-run-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function buildResumableRagRunState(
+  stream: ActiveRagStream,
+): ResumableRagRunState {
+  return {
+    version: 1,
+    manifestPath: stream.manifestPath,
+    indexLabel: stream.indexLabel,
+    question: stream.question,
+    runId: stream.runId,
+    lastEventId: stream.lastEventId,
+    userMessageTs: stream.userMessageTs,
+    assistantMessageTs: stream.assistantMessageTs,
+    assistantContent: stream.assistantContent,
+    pendingSources: [...stream.pendingSources],
+    sources: [...stream.pendingSources],
+    liveTraceEvents: [...stream.liveTraceEvents],
+    assistantMessageId: stream.assistantMessageId,
+    hasBoundRun: stream.hasBoundRun,
+  };
+}
+
+function toStoredResumableRagRun(
+  state: ResumableRagRunState,
+): ResumableRagRunSnapshot {
+  return {
+    version: state.version,
+    manifestPath: state.manifestPath,
+    indexLabel: state.indexLabel,
+    question: state.question,
+    runId: state.runId,
+    lastEventId: state.lastEventId,
+    userMessageTs: state.userMessageTs,
+    assistantMessageTs: state.assistantMessageTs,
+    assistantContent: state.assistantContent,
+    pendingSources: [...state.pendingSources],
+    sources: [...state.sources],
+    liveTraceEvents: [...state.liveTraceEvents],
+  };
+}
 
 export default function ChatPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -23,20 +129,16 @@ export default function ChatPage() {
   const [activeIndexLabel, setActiveIndexLabel] = useState<string | null>(null);
   const [queryModeOverride, setQueryModeOverride] = useState<"rag" | null>(null);
   const [liveTraceEvents, setLiveTraceEvents] = useState<TraceEvent[]>([]);
+  const [resumableRun, setResumableRun] = useState<ResumableRagRunState | null>(null);
   const settingsRef = useRef<Record<string, unknown> | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const ragRequestIdRef = useRef(0);
-  const activeRagStreamRef = useRef<{
-    assistantMessageId: string;
-    controller: AbortController;
-    pendingSources: EvidenceSource[];
-    requestId: number;
-    runId: string | null;
-  } | null>(null);
+  const activeRagStreamRef = useRef<ActiveRagStream | null>(null);
   const [modelProvider, setModelProvider] = useState<string | null>(null);
   const [modelName, setModelName] = useState<string | null>(null);
   const {
     createMessage,
+    restoreStreamingRun,
     setSessionMessages,
     reset,
     appendMessages,
@@ -50,6 +152,7 @@ export default function ChatPage() {
     markMessageError,
     markRunAborted,
     markMessageAborted,
+    setMessageStatus,
     setActionStatus,
     getMessage,
     messages,
@@ -57,6 +160,15 @@ export default function ChatPage() {
     latestSources,
     runIdsNewestFirst,
   } = useChatTranscript();
+
+  const publishResumableRun = useCallback((snapshot: ResumableRagRunState | null) => {
+    setResumableRun(snapshot);
+    if (snapshot) {
+      saveResumableRagRun(toStoredResumableRagRun(snapshot));
+      return;
+    }
+    clearResumableRagRun();
+  }, []);
 
   const stopRagStream = useCallback(
     (reason: StopStreamReason = "user") => {
@@ -66,17 +178,18 @@ export default function ChatPage() {
       activeRagStreamRef.current = null;
       activeStream.controller.abort();
       setIsStreamingRag(false);
+      publishResumableRun(null);
 
       if (reason !== "user") return;
 
-      if (activeStream.runId) {
+      if (activeStream.hasBoundRun) {
         markRunAborted(activeStream.runId);
         return;
       }
 
       markMessageAborted(activeStream.assistantMessageId);
     },
-    [markMessageAborted, markRunAborted],
+    [markMessageAborted, markRunAborted, publishResumableRun],
   );
 
   useEffect(() => {
@@ -124,7 +237,67 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    const snapshot = loadResumableRagRun();
+    if (!snapshot) {
+      return;
+    }
+
+    const visibleSources =
+      snapshot.sources.length > 0 ? snapshot.sources : snapshot.pendingSources;
+    const userMessage = createMessage({
+      role: "user",
+      content: snapshot.question,
+      ts: snapshot.userMessageTs,
+      run_id: "",
+      sources: [],
+      query_mode: "rag",
+    });
+    const assistantMessage = createMessage(
+      {
+        role: "assistant",
+        content: snapshot.assistantContent,
+        ts: snapshot.assistantMessageTs,
+        run_id: snapshot.runId,
+        sources: visibleSources,
+        query_mode: "rag",
+      },
+      { status: "error" },
+    );
+
+    restoreStreamingRun({
+      userMessage,
+      assistantMessage,
+      runId: snapshot.runId,
+      sources: visibleSources,
+      pendingSources: snapshot.pendingSources,
+    });
+    setLiveTraceEvents(snapshot.liveTraceEvents);
+    setActiveIndexPath(snapshot.manifestPath);
+    setActiveIndexLabel(snapshot.indexLabel);
+    setQueryModeOverride("rag");
+    setResumableRun({
+      ...snapshot,
+      assistantMessageId: assistantMessage.id,
+      hasBoundRun: true,
+    });
+  }, [createMessage, restoreStreamingRun]);
+
+  useEffect(() => {
+    function persistInterruptedRun() {
+      const activeStream = activeRagStreamRef.current;
+      if (!activeStream) {
+        return;
+      }
+      saveResumableRagRun(
+        toStoredResumableRagRun(buildResumableRagRunState(activeStream)),
+      );
+    }
+
+    window.addEventListener("pagehide", persistInterruptedRun);
+
     return () => {
+      window.removeEventListener("pagehide", persistInterruptedRun);
+      persistInterruptedRun();
       const activeStream = activeRagStreamRef.current;
       activeRagStreamRef.current = null;
       activeStream?.controller.abort();
@@ -157,10 +330,11 @@ export default function ChatPage() {
   const handleSelect = useCallback(
     (id: string) => {
       stopRagStream("navigation");
+      publishResumableRun(null);
       setSelectedId(id);
       loadSession(id);
     },
-    [loadSession, stopRagStream],
+    [loadSession, publishResumableRun, stopRagStream],
   );
 
   const handleDirectSend = useCallback(
@@ -217,17 +391,298 @@ export default function ChatPage() {
     [appendCompletedRunMessage, appendMessages, createMessage],
   );
 
+  const startRagStream = useCallback(
+    async ({
+      assistantMessageId,
+      assistantMessageTs,
+      assistantSeedContent,
+      dedupeFloorEventId = 0,
+      hasBoundRun,
+      indexLabel,
+      lastEventId,
+      liveTraceEvents: initialLiveTraceEvents,
+      manifestPath,
+      pendingSources: initialPendingSources,
+      question,
+      runId,
+      userMessageTs,
+    }: StartRagStreamOptions) => {
+      const appendTraceEvent = (
+        activeStream: ActiveRagStream,
+        traceEvent: TraceEvent,
+      ) => {
+        activeStream.liveTraceEvents = [
+          ...activeStream.liveTraceEvents,
+          traceEvent,
+        ];
+        setLiveTraceEvents(activeStream.liveTraceEvents);
+      };
+
+      const handleInterruption = (
+        activeStream: ActiveRagStream,
+        message: string,
+      ) => {
+        if (activeStream.hasBoundRun) {
+          markRunError(activeStream.runId, message);
+        } else {
+          markMessageError(activeStream.assistantMessageId, message);
+        }
+        publishResumableRun(buildResumableRagRunState(activeStream));
+      };
+
+      const runAttempt = async (
+        attemptLastEventId: number | null,
+        attemptDedupeFloor: number,
+        allowRestartFallback: boolean,
+      ): Promise<void> => {
+        const controller = new AbortController();
+        const requestId = ++ragRequestIdRef.current;
+        const activeStream: ActiveRagStream = {
+          assistantMessageId,
+          controller,
+          pendingSources: [...initialPendingSources],
+          requestId,
+          runId,
+          question,
+          manifestPath,
+          indexLabel,
+          userMessageTs,
+          assistantMessageTs,
+          assistantContent: assistantSeedContent,
+          lastEventId,
+          dedupeFloorEventId: attemptDedupeFloor,
+          liveTraceEvents: [...initialLiveTraceEvents],
+          hasBoundRun,
+          seenEventSignatures: new Set<string>(),
+        };
+
+        activeRagStreamRef.current = activeStream;
+        setIsStreamingRag(true);
+        setLiveTraceEvents(activeStream.liveTraceEvents);
+
+        let appliedEventCount = 0;
+
+        try {
+          if (!settingsRef.current) {
+            settingsRef.current = await fetchSettings();
+          }
+
+          await queryRagStream(manifestPath, question, settingsRef.current, {
+            signal: controller.signal,
+            runId,
+            lastEventId: attemptLastEventId,
+            onEvent: (event, meta) => {
+              const currentStream = activeRagStreamRef.current;
+              if (!currentStream || currentStream.requestId !== requestId) {
+                return;
+              }
+
+              const eventId = meta.eventId;
+              if (
+                eventId !== null &&
+                event.run_id === currentStream.runId &&
+                eventId <= currentStream.dedupeFloorEventId
+              ) {
+                return;
+              }
+
+              const signature = buildEventSignature(
+                event,
+                currentStream.runId,
+                eventId,
+              );
+              if (currentStream.seenEventSignatures.has(signature)) {
+                return;
+              }
+              currentStream.seenEventSignatures.add(signature);
+              appliedEventCount += 1;
+
+              if (
+                eventId !== null &&
+                Number.isFinite(eventId) &&
+                eventId > currentStream.lastEventId
+              ) {
+                currentStream.lastEventId = eventId;
+              }
+
+              const resolvedRunId = event.run_id || currentStream.runId;
+
+              switch (event.type) {
+                case "run_started":
+                  currentStream.runId = event.run_id;
+                  currentStream.hasBoundRun = true;
+                  bindRunToAssistantMessage(
+                    event.run_id,
+                    currentStream.assistantMessageId,
+                  );
+                  appendTraceEvent(currentStream, {
+                    run_id: event.run_id,
+                    event_id: eventId !== null ? String(eventId) : undefined,
+                    stage: "retrieval",
+                    event_type: "run_started",
+                    timestamp: new Date().toISOString(),
+                    payload: {},
+                  });
+                  break;
+                case "retrieval_complete":
+                  currentStream.pendingSources = event.sources;
+                  setRunPendingSources(resolvedRunId, event.sources);
+                  appendTraceEvent(currentStream, {
+                    run_id: resolvedRunId,
+                    event_id: eventId !== null ? String(eventId) : undefined,
+                    stage: "retrieval",
+                    event_type: "retrieval_complete",
+                    timestamp: new Date().toISOString(),
+                    payload: {
+                      sources_count: event.sources.length,
+                      top_score: event.top_score,
+                    },
+                  });
+                  break;
+                case "token":
+                  currentStream.assistantContent = `${currentStream.assistantContent}${event.text}`;
+                  appendRunToken(resolvedRunId, event.text);
+                  setMessageStatus(currentStream.assistantMessageId, "streaming");
+                  break;
+                case "final": {
+                  const finalSources =
+                    event.sources.length > 0
+                      ? event.sources
+                      : currentStream.pendingSources;
+                  currentStream.assistantContent = event.answer_text;
+                  appendTraceEvent(currentStream, {
+                    run_id: resolvedRunId,
+                    event_id: eventId !== null ? String(eventId) : undefined,
+                    stage: "synthesis",
+                    event_type: "final",
+                    timestamp: new Date().toISOString(),
+                    payload: {
+                      answer_length: event.answer_text.length,
+                      sources_count: finalSources.length,
+                    },
+                  });
+                  activeRagStreamRef.current = null;
+                  setIsStreamingRag(false);
+                  publishResumableRun(null);
+                  finalizeRun(resolvedRunId, event.answer_text, finalSources);
+                  break;
+                }
+                case "action_required":
+                  activeRagStreamRef.current = null;
+                  setIsStreamingRag(false);
+                  publishResumableRun(null);
+                  markRunActionRequired(
+                    resolvedRunId,
+                    event.action,
+                    new Date().toISOString(),
+                  );
+                  break;
+                case "error":
+                  appendTraceEvent(currentStream, {
+                    run_id: resolvedRunId,
+                    event_id: eventId !== null ? String(eventId) : undefined,
+                    stage: "error",
+                    event_type: "error",
+                    timestamp: new Date().toISOString(),
+                    payload: { message: event.message },
+                  });
+                  activeRagStreamRef.current = null;
+                  setIsStreamingRag(false);
+                  publishResumableRun(null);
+                  if (currentStream.hasBoundRun) {
+                    markRunError(resolvedRunId, event.message);
+                  } else {
+                    markMessageError(
+                      currentStream.assistantMessageId,
+                      event.message,
+                    );
+                  }
+                  break;
+              }
+            },
+          });
+
+          const currentStream = activeRagStreamRef.current;
+          if (!currentStream || currentStream.requestId !== requestId) {
+            return;
+          }
+
+          if (
+            allowRestartFallback &&
+            attemptLastEventId !== null &&
+            attemptLastEventId > 0 &&
+            appliedEventCount === 0
+          ) {
+            await runAttempt(null, currentStream.lastEventId, false);
+            return;
+          }
+
+          activeRagStreamRef.current = null;
+          setIsStreamingRag(false);
+          handleInterruption(
+            currentStream,
+            "Streaming response ended unexpectedly.",
+          );
+        } catch (error) {
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            "name" in error &&
+            error.name === "AbortError"
+          ) {
+            return;
+          }
+
+          const currentStream = activeRagStreamRef.current;
+          if (!currentStream || currentStream.requestId !== requestId) {
+            return;
+          }
+
+          activeRagStreamRef.current = null;
+          setIsStreamingRag(false);
+          handleInterruption(
+            currentStream,
+            error instanceof Error ? error.message : "An error occurred.",
+          );
+        }
+      };
+
+      await runAttempt(
+        lastEventId > 0 ? lastEventId : null,
+        dedupeFloorEventId,
+        lastEventId > 0,
+      );
+    },
+    [
+      appendRunToken,
+      bindRunToAssistantMessage,
+      finalizeRun,
+      markMessageError,
+      markRunActionRequired,
+      markRunError,
+      publishResumableRun,
+      setMessageStatus,
+      setRunPendingSources,
+    ],
+  );
+
   const handleRagSend = useCallback(
     async (question: string) => {
-      if (!activeIndexPath || isStreamingRag) return;
+      if (!activeIndexPath || isStreamingRag) {
+        return;
+      }
 
       stopRagStream("navigation");
+      publishResumableRun(null);
 
+      const userMessageTs = new Date().toISOString();
+      const assistantMessageTs = new Date().toISOString();
+      const runId = createClientRunId();
       const assistantMessage = createMessage(
         {
           role: "assistant",
           content: "",
-          ts: new Date().toISOString(),
+          ts: assistantMessageTs,
           run_id: "",
           sources: [],
           query_mode: "rag",
@@ -239,197 +694,90 @@ export default function ChatPage() {
         createMessage({
           role: "user",
           content: question,
-          ts: new Date().toISOString(),
+          ts: userMessageTs,
           run_id: "",
           sources: [],
+          query_mode: "rag",
         }),
         assistantMessage,
       ]);
       setLiveTraceEvents([]);
-      setIsStreamingRag(true);
 
-      const controller = new AbortController();
-      const requestId = ++ragRequestIdRef.current;
-      activeRagStreamRef.current = {
+      await startRagStream({
         assistantMessageId: assistantMessage.id,
-        controller,
+        assistantMessageTs,
+        assistantSeedContent: "",
+        hasBoundRun: false,
+        indexLabel: activeIndexLabel,
+        lastEventId: 0,
+        liveTraceEvents: [],
+        manifestPath: activeIndexPath,
         pendingSources: [],
-        requestId,
-        runId: null,
-      };
-
-      try {
-        if (!settingsRef.current) {
-          settingsRef.current = await fetchSettings();
-        }
-
-        await queryRagStream(activeIndexPath, question, settingsRef.current, {
-          signal: controller.signal,
-          onEvent: (event) => {
-            const activeStream = activeRagStreamRef.current;
-            if (!activeStream || activeStream.requestId !== requestId) return;
-
-            switch (event.type) {
-              case "run_started":
-                activeStream.runId = event.run_id;
-                setLiveTraceEvents([
-                  {
-                    run_id: event.run_id,
-                    stage: "retrieval",
-                    event_type: "run_started",
-                    timestamp: new Date().toISOString(),
-                    payload: {},
-                  },
-                ]);
-                bindRunToAssistantMessage(event.run_id, activeStream.assistantMessageId);
-                break;
-              case "retrieval_complete":
-                activeStream.pendingSources = event.sources;
-                setRunPendingSources(event.run_id, event.sources);
-                setLiveTraceEvents((previousEvents) => [
-                  ...previousEvents,
-                  {
-                    run_id: event.run_id,
-                    stage: "retrieval",
-                    event_type: "retrieval_complete",
-                    timestamp: new Date().toISOString(),
-                    payload: {
-                      sources_count: event.sources.length,
-                      top_score: event.top_score,
-                    },
-                  },
-                ]);
-                break;
-              case "token": {
-                const runId = event.run_id || activeStream.runId;
-                if (!runId) {
-                  return;
-                }
-                appendRunToken(runId, event.text);
-                break;
-              }
-              case "final": {
-                const finalSources =
-                  event.sources.length > 0
-                    ? event.sources
-                    : activeStream.pendingSources;
-                setLiveTraceEvents((previousEvents) => [
-                  ...previousEvents,
-                  {
-                    run_id: event.run_id,
-                    stage: "synthesis",
-                    event_type: "final",
-                    timestamp: new Date().toISOString(),
-                    payload: {
-                      answer_length: event.answer_text.length,
-                      sources_count: finalSources.length,
-                    },
-                  },
-                ]);
-                activeRagStreamRef.current = null;
-                setIsStreamingRag(false);
-                finalizeRun(event.run_id, event.answer_text, finalSources);
-                break;
-              }
-              case "action_required":
-                activeRagStreamRef.current = null;
-                setIsStreamingRag(false);
-                markRunActionRequired(
-                  event.run_id,
-                  event.action,
-                  new Date().toISOString(),
-                );
-                break;
-              case "error": {
-                const runId = event.run_id || activeStream.runId;
-                setLiveTraceEvents((previousEvents) => [
-                  ...previousEvents,
-                  {
-                    run_id: runId ?? "",
-                    stage: "error",
-                    event_type: "error",
-                    timestamp: new Date().toISOString(),
-                    payload: { message: event.message },
-                  },
-                ]);
-                activeRagStreamRef.current = null;
-                setIsStreamingRag(false);
-                if (runId) {
-                  markRunError(runId, event.message);
-                } else {
-                  markMessageError(activeStream.assistantMessageId, event.message);
-                }
-                break;
-              }
-            }
-          },
-        });
-
-        const activeStream = activeRagStreamRef.current;
-        if (activeStream?.requestId === requestId) {
-          activeRagStreamRef.current = null;
-          setIsStreamingRag(false);
-          if (activeStream.runId) {
-            markRunError(activeStream.runId, "Streaming response ended unexpectedly.");
-          } else {
-            markMessageError(
-              activeStream.assistantMessageId,
-              "Streaming response ended unexpectedly.",
-            );
-          }
-        }
-      } catch (error) {
-        if (
-          typeof error === "object" &&
-          error !== null &&
-          "name" in error &&
-          error.name === "AbortError"
-        ) {
-          return;
-        }
-
-        const activeStream = activeRagStreamRef.current;
-        if (!activeStream || activeStream.requestId !== requestId) {
-          return;
-        }
-
-        activeRagStreamRef.current = null;
-        setIsStreamingRag(false);
-
-        const message =
-          error instanceof Error ? error.message : "An error occurred.";
-        if (activeStream.runId) {
-          markRunError(activeStream.runId, message);
-        } else {
-          markMessageError(activeStream.assistantMessageId, message);
-        }
-      }
+        question,
+        runId,
+        userMessageTs,
+      });
     },
     [
+      activeIndexLabel,
       activeIndexPath,
       appendMessages,
-      appendRunToken,
-      bindRunToAssistantMessage,
       createMessage,
-      finalizeRun,
       isStreamingRag,
-      markMessageError,
-      markRunActionRequired,
-      markRunError,
-      setRunPendingSources,
+      publishResumableRun,
+      startRagStream,
       stopRagStream,
     ],
   );
 
+  const handleReconnectRag = useCallback(async () => {
+    if (!resumableRun || isStreamingRag) {
+      return;
+    }
+
+    setMessageStatus(resumableRun.assistantMessageId, "streaming");
+    setLiveTraceEvents(resumableRun.liveTraceEvents);
+
+    await startRagStream({
+      assistantMessageId: resumableRun.assistantMessageId,
+      assistantMessageTs: resumableRun.assistantMessageTs,
+      assistantSeedContent: resumableRun.assistantContent,
+      dedupeFloorEventId: 0,
+      hasBoundRun: resumableRun.hasBoundRun,
+      indexLabel: resumableRun.indexLabel,
+      lastEventId: resumableRun.lastEventId,
+      liveTraceEvents: resumableRun.liveTraceEvents,
+      manifestPath: resumableRun.manifestPath,
+      pendingSources: resumableRun.pendingSources,
+      question: resumableRun.question,
+      runId: resumableRun.runId,
+      userMessageTs: resumableRun.userMessageTs,
+    });
+  }, [isStreamingRag, resumableRun, setMessageStatus, startRagStream]);
+
+  const handleDiscardResumableRun = useCallback(() => {
+    if (!resumableRun) {
+      return;
+    }
+
+    publishResumableRun(null);
+    if (resumableRun.hasBoundRun) {
+      markRunAborted(resumableRun.runId);
+      return;
+    }
+    markMessageAborted(resumableRun.assistantMessageId);
+  }, [markMessageAborted, markRunAborted, publishResumableRun, resumableRun]);
+
   const handleNewChat = useCallback(() => {
     stopRagStream("navigation");
+    publishResumableRun(null);
     setSelectedId(null);
     reset();
     setSessionMeta(null);
     setLoadingSession(false);
     setSessionError(null);
     setLiveTraceEvents([]);
-  }, [reset, stopRagStream]);
+  }, [publishResumableRun, reset, stopRagStream]);
 
   const handleActionApprove = useCallback(
     async (messageId: string) => {
@@ -516,6 +864,16 @@ export default function ChatPage() {
                   setActiveIndexPath(path);
                   setActiveIndexLabel(label);
                 }}
+                reconnectState={
+                  resumableRun && !isStreamingRag
+                    ? {
+                        question: resumableRun.question,
+                        lastEventId: resumableRun.lastEventId,
+                      }
+                    : null
+                }
+                onReconnectRun={handleReconnectRag}
+                onDiscardReconnect={handleDiscardResumableRun}
                 modelProvider={modelProvider}
                 modelName={modelName}
                 onModelChange={handleModelChange}
