@@ -158,3 +158,10 @@ Run both paths in parallel for one sprint. Collect real TTFT measurements from t
 - Should `SessionRepository` be app-scoped or request-scoped under Litestar? App-scoped reduces per-request SQLite overhead, but thread-safety of the connection must be verified.
 - What is the minimum Python version required by current Litestar releases? Verify against `pyproject.toml` before adding the dependency.
 - Is there a Litestar equivalent for `allow_origin_regex` that is not currently documented? Check the Litestar changelog and issue tracker before finalizing the enumerated-origins workaround.
+
+---
+
+**See also:** [API Benchmark Harness Guide](api_bench.md) — reproducible `wrk`/`hey`
+commands, a results table template, and Axiom-specific metric definitions (SSE
+stability, request overhead, serialization overhead) for capturing the FastAPI
+baseline required by Stage 2 of this experiment.
