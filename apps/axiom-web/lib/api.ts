@@ -24,7 +24,17 @@ async function _resolveApiBase(): Promise<string> {
       // The sidecar reads the free port asynchronously; poll up to 15 s.
       for (let i = 0; i < 30; i++) {
         const url = await invoke<string | null>("get_api_base_url");
-        if (url) return url;
+        if (url) {
+          // Verify the API is healthy before returning the URL
+          try {
+            const healthRes = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(5000) });
+            if (healthRes.ok) {
+              return url;
+            }
+          } catch {
+            // Health check failed, continue polling or fall through
+          }
+        }
         await new Promise<void>((r) => setTimeout(r, 500));
       }
     } catch {
@@ -505,6 +515,135 @@ export async function queryDirect(
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Direct query failed (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export interface GgufCatalogEntry {
+  model_name: string;
+  provider: string;
+  parameter_count: string;
+  architecture: string;
+  use_case: string;
+  fit_level: string;
+  run_mode: string;
+  best_quant: string;
+  estimated_tps: number;
+  memory_required_gb: number;
+  memory_available_gb: number;
+  recommended_context_length: number;
+  source_repo: string;
+  source_provider: string;
+}
+
+export interface GgufHardwareProfile {
+  total_ram_gb: number;
+  available_ram_gb: number;
+  total_cpu_cores: number;
+  cpu_name: string;
+  has_gpu: boolean;
+  gpu_vram_gb: number | null;
+  total_gpu_vram_gb: number | null;
+  gpu_name: string;
+  gpu_count: number;
+  unified_memory: boolean;
+  backend: string;
+  detected: boolean;
+  override_enabled: boolean;
+  notes: string[];
+}
+
+export interface GgufInstalledEntry {
+  id: string;
+  name: string;
+  path: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface GgufValidateResult {
+  valid: boolean;
+  path: string;
+  filename: string;
+  file_size_bytes: number;
+  quant: string;
+  is_instruct: boolean;
+}
+
+export async function fetchGgufCatalog(useCase = "general"): Promise<GgufCatalogEntry[]> {
+  const res = await apiFetch(`${await getApiBase()}/v1/gguf/catalog?use_case=${encodeURIComponent(useCase)}`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch GGUF catalog (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function fetchGgufHardware(): Promise<GgufHardwareProfile> {
+  const res = await apiFetch(`${await getApiBase()}/v1/gguf/hardware`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch GGUF hardware (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function fetchGgufInstalled(): Promise<GgufInstalledEntry[]> {
+  const res = await apiFetch(`${await getApiBase()}/v1/gguf/installed`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch installed GGUF models (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function validateGgufModel(modelPath: string): Promise<GgufValidateResult> {
+  const res = await apiFetch(`${await getApiBase()}/v1/gguf/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model_path: modelPath }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`GGUF validation failed (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function refreshGgufCatalog(useCase = "general"): Promise<{ status: string; use_case: string; advisory_only: boolean }> {
+  const res = await apiFetch(`${await getApiBase()}/v1/gguf/refresh?use_case=${encodeURIComponent(useCase)}`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to refresh GGUF catalog (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function registerGgufModel(
+  name: string,
+  path: string,
+  metadata?: Record<string, unknown>,
+): Promise<{ status: string; id: string; name: string; path: string }> {
+  const res = await apiFetch(`${await getApiBase()}/v1/gguf/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, path, metadata: metadata || {} }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to register GGUF model (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function unregisterGgufModel(id: string): Promise<{ status: string; id: string }> {
+  const res = await apiFetch(`${await getApiBase()}/v1/gguf/installed/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to unregister GGUF model (${res.status}): ${detail}`);
   }
   return res.json();
 }

@@ -69,8 +69,9 @@ bash scripts/build_api_sidecar.sh
 This writes `apps/axiom-desktop/src-tauri/binaries/axiom-api-{target-triple}`.
 The Tauri build picks it up automatically via `bundle.externalBin`.
 
-The sidecar starts the API on `http://127.0.0.1:8000` (fixed port, same default as
-the dev workflow). Dynamic port selection is deferred to WOR-15.
+The sidecar starts the API on a dynamically selected free port (or port 8000 if
+`AXIOM_API_PORT` is set). The selected URL is printed to stdout as
+`AXIOM_API_LISTENING=http://host:port` which the Tauri host reads for the frontend.
 
 ### 2. App icons
 

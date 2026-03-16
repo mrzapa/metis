@@ -291,3 +291,45 @@ class FeedbackRequestModel(BaseModel):
 
 class FeedbackResponseModel(BaseModel):
     ok: bool
+
+
+class GgufCatalogEntryModel(BaseModel):
+    model_name: str
+    provider: str
+    parameter_count: str
+    architecture: str
+    use_case: str
+    fit_level: str
+    run_mode: str
+    best_quant: str
+    estimated_tps: float
+    memory_required_gb: float
+    memory_available_gb: float
+    recommended_context_length: int
+    source_repo: str
+    source_provider: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GgufInstalledEntryModel(BaseModel):
+    id: str
+    name: str
+    path: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GgufValidateRequestModel(BaseModel):
+    model_path: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GgufRegisterRequestModel(BaseModel):
+    name: str
+    path: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")

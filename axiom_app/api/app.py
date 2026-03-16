@@ -16,11 +16,18 @@ from fastapi import FastAPI, File, HTTPException, Header, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 
-from axiom_app.engine import build_index, list_indexes, query_direct, query_rag, stream_rag_answer
+from axiom_app.engine import (
+    build_index,
+    list_indexes,
+    query_direct,
+    query_rag,
+    stream_rag_answer,
+)
 from axiom_app.engine.querying import _normalize_run_id
 from axiom_app.services.stream_replay import ReplayableRunStreamManager
 from axiom_app.services.trace_store import TraceStore
 
+from . import gguf as _gguf
 from . import logs as _logs
 from . import sessions as _sessions
 from . import settings as _settings
@@ -69,10 +76,12 @@ def create_app() -> FastAPI:
     app.include_router(_sessions.router)
     app.include_router(_settings.router)
     app.include_router(_logs.router)
+    app.include_router(_gguf.router)
 
     @app.get("/v1/version")
     def api_version() -> dict[str, str]:
         from axiom_app.config import APP_VERSION
+
         return {"version": APP_VERSION}
 
     @app.get("/healthz")
@@ -81,14 +90,18 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/index/build", response_model=IndexBuildResultModel)
     def api_build_index(payload: IndexBuildRequestModel) -> IndexBuildResultModel:
-        return IndexBuildResultModel.from_engine(_run_engine(build_index, payload.to_engine()))
+        return IndexBuildResultModel.from_engine(
+            _run_engine(build_index, payload.to_engine())
+        )
 
     @app.get("/v1/index/list")
     def api_list_indexes() -> list[dict[str, Any]]:
         return _run_engine(list_indexes)
 
     @app.post("/v1/files/upload")
-    async def api_upload_files(files: list[UploadFile] = File(...)) -> dict[str, list[str]]:
+    async def api_upload_files(
+        files: list[UploadFile] = File(...),
+    ) -> dict[str, list[str]]:
         upload_dir = pathlib.Path(tempfile.gettempdir()) / "axiom_uploads"
         upload_dir.mkdir(exist_ok=True)
         saved: list[str] = []
@@ -101,7 +114,9 @@ def create_app() -> FastAPI:
         return {"paths": saved}
 
     @app.post("/v1/index/build/stream")
-    async def api_build_index_stream(payload: IndexBuildRequestModel) -> StreamingResponse:
+    async def api_build_index_stream(
+        payload: IndexBuildRequestModel,
+    ) -> StreamingResponse:
         req = payload.to_engine()
         loop = asyncio.get_event_loop()
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -109,7 +124,9 @@ def create_app() -> FastAPI:
         def _progress_cb(event: dict[str, Any]) -> None:
             asyncio.run_coroutine_threadsafe(queue.put(event), loop)
 
-        future = loop.run_in_executor(None, lambda: build_index(req, progress_cb=_progress_cb))
+        future = loop.run_in_executor(
+            None, lambda: build_index(req, progress_cb=_progress_cb)
+        )
 
         async def _event_gen() -> AsyncGenerator[str, None]:
             yield f"event: message\ndata: {json.dumps({'type': 'build_started'})}\n\n"
@@ -137,11 +154,15 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/query/rag", response_model=RagQueryResultModel)
     def api_query_rag(payload: RagQueryRequestModel) -> RagQueryResultModel:
-        return RagQueryResultModel.from_engine(_run_engine(query_rag, payload.to_engine()))
+        return RagQueryResultModel.from_engine(
+            _run_engine(query_rag, payload.to_engine())
+        )
 
     @app.post("/v1/query/direct", response_model=DirectQueryResultModel)
     def api_query_direct(payload: DirectQueryRequestModel) -> DirectQueryResultModel:
-        return DirectQueryResultModel.from_engine(_run_engine(query_direct, payload.to_engine()))
+        return DirectQueryResultModel.from_engine(
+            _run_engine(query_direct, payload.to_engine())
+        )
 
     @app.get("/v1/traces/{run_id}")
     def api_get_trace(run_id: str) -> list[dict[str, Any]]:
@@ -151,7 +172,9 @@ def create_app() -> FastAPI:
     def api_run_action(run_id: str, payload: RunActionRequestModel) -> dict[str, Any]:
         log.info(
             "Run action received: run_id=%s approved=%s payload=%s",
-            run_id, payload.approved, payload.payload,
+            run_id,
+            payload.approved,
+            payload.payload,
         )
         return {
             "run_id": run_id,
@@ -174,7 +197,9 @@ def create_app() -> FastAPI:
 
         def _event_generator() -> Generator[str, None, None]:
             after_event_id = 0 if replay_after is None else replay_after
-            for event in _RAG_STREAM_MANAGER.subscribe(run_id, after_event_id=after_event_id):
+            for event in _RAG_STREAM_MANAGER.subscribe(
+                run_id, after_event_id=after_event_id
+            ):
                 yield _encode_sse(event.payload, event_id=event.event_id)
 
         return StreamingResponse(

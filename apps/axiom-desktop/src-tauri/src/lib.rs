@@ -16,6 +16,11 @@ fn get_api_base_url(state: tauri::State<'_, ApiState>) -> Option<String> {
     state.base_url.lock().unwrap().clone()
 }
 
+fn emit_sidecar_error(app_handle: &tauri::AppHandle, message: &str) {
+    let _ = app_handle.emit("sidecar-error", message);
+    eprintln!("[axiom-desktop] {}", message);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -35,6 +40,8 @@ pub fn run() {
                         let app_handle = app.handle().clone();
                         tauri::async_runtime::spawn(async move {
                             let mut found = false;
+                            let mut stdout_buf = String::new();
+                            let mut stderr_buf = String::new();
                             let timeout =
                                 tokio::time::sleep(std::time::Duration::from_secs(15));
                             tokio::pin!(timeout);
@@ -45,6 +52,7 @@ pub fn run() {
                                     event = rx.recv() => match event {
                                         Some(CommandEvent::Stdout(bytes)) => {
                                             let line = String::from_utf8_lossy(&bytes);
+                                            stdout_buf.push_str(&line);
                                             if let Some(url) = line
                                                 .trim()
                                                 .strip_prefix("AXIOM_API_LISTENING=")
@@ -58,24 +66,55 @@ pub fn run() {
                                                 break;
                                             }
                                         }
-                                        Some(CommandEvent::Terminated(_)) | None => break,
+                                        Some(CommandEvent::Stderr(bytes)) => {
+                                            let line = String::from_utf8_lossy(&bytes);
+                                            stderr_buf.push_str(&line);
+                                        }
+                                        Some(CommandEvent::Terminated(status)) => {
+                                            if !found {
+                                                let msg = if !stderr_buf.is_empty() {
+                                                    format!(
+                                                        "API sidecar terminated unexpectedly (exit code: {:?}). stderr: {}",
+                                                        status.code, stderr_buf.trim()
+                                                    )
+                                                } else {
+                                                    format!(
+                                                        "API sidecar terminated unexpectedly (exit code: {:?})",
+                                                        status.code
+                                                    )
+                                                };
+                                                emit_sidecar_error(&app_handle, &msg);
+                                            }
+                                            break;
+                                        }
+                                        None => break,
                                         _ => {}
                                     }
                                 }
                             }
 
                             if !found {
-                                let _ = app_handle.emit(
-                                    "sidecar-timeout",
-                                    "The local API did not start in time. \
-                                     Please quit and restart the application.",
-                                );
+                                let msg = if !stdout_buf.is_empty() {
+                                    format!(
+                                        "API did not start in time. stdout: {}",
+                                        stdout_buf.trim()
+                                    )
+                                } else {
+                                    "The local API did not start in time. Please quit and restart the application.".to_string()
+                                };
+                                emit_sidecar_error(&app_handle, &msg);
                             }
                         });
                     }
-                    Err(e) => eprintln!("[axiom-desktop] sidecar spawn failed: {e}"),
+                    Err(e) => {
+                        let msg = format!("Failed to start API sidecar: {}", e);
+                        emit_sidecar_error(&app_handle, &msg);
+                    }
                 },
-                Err(e) => eprintln!("[axiom-desktop] sidecar not available: {e}"),
+                Err(e) => {
+                    let msg = format!("Sidecar binary not found: {}. Make sure the sidecar was built.", e);
+                    emit_sidecar_error(&app_handle, &msg);
+                }
             }
             Ok(())
         })

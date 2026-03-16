@@ -6,15 +6,20 @@
     "beforeDevCommand": "cd ../axiom-web && pnpm dev",
     "devUrl": "http://localhost:3000",
     "beforeBuildCommand": "cd ../axiom-web && pnpm build",
-    "frontendDist": "../axiom-web/out"
+    "frontendDist": "../axiom-web/out",
+    "devtools": true
   },
   "app": {
     "windows": [
       {
-        "title": "Axiom Desktop (Experimental)",
+        "title": "Axiom",
+        "label": "main",
         "width": 1280,
         "height": 800,
-        "resizable": true
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "center": true
       }
     ],
     "security": {

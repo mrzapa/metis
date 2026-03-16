@@ -17,7 +17,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $OutDir   = Join-Path $RepoRoot "apps" "axiom-desktop" "src-tauri" "binaries"
 
-# ── Detect Rust target triple ────────────────────────────────────────────────
+# ── Detect Rust target triple ───────────────────────────────────────────────
 try {
     $rustcOutput = rustc -Vv 2>&1
 } catch {
@@ -42,14 +42,32 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# ── Clean previous build artifacts ─────────────────────────────────────────
+$DistDir = Join-Path $RepoRoot "dist"
+$BuildDir = Join-Path $RepoRoot "build"
+
+if (Test-Path $DistDir) {
+    Write-Host "[build_api_sidecar] Cleaning previous dist folder..."
+    Remove-Item -Path $DistDir -Recurse -Force
+}
+if (Test-Path $BuildDir) {
+    Write-Host "[build_api_sidecar] Cleaning previous build folder..."
+    Remove-Item -Path $BuildDir -Recurse -Force
+}
+
 # ── Build sidecar binary ────────────────────────────────────────────────────
 $AssetsData       = "${RepoRoot}\axiom_app\assets;axiom_app/assets"
 $SettingsData     = "${RepoRoot}\axiom_app\default_settings.json;axiom_app"
 $EntryPoint       = Join-Path $RepoRoot "axiom_app" "api" "__main__.py"
 
+if (-not (Test-Path $EntryPoint)) {
+    Write-Error "Entry point not found: $EntryPoint"
+    exit 1
+}
+
+Write-Host "[build_api_sidecar] Building sidecar binary..."
 pyinstaller `
     --noconfirm `
-    --clean `
     --name axiom-api `
     --onefile `
     --console `
@@ -63,14 +81,21 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# ── Validate output ─────────────────────────────────────────────────────────
+$SourceBinary = Join-Path $DistDir "axiom-api.exe"
+if (-not (Test-Path $SourceBinary)) {
+    Write-Error "PyInstaller did not produce expected output: $SourceBinary"
+    exit 1
+}
+
 # ── Copy to Tauri binaries directory ─────────────────────────────────────────
 if (-not (Test-Path $OutDir)) {
     New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 }
 
-$SourceBinary = Join-Path "dist" "axiom-api.exe"
-$DestBinary   = Join-Path $OutDir "axiom-api-${TargetTriple}.exe"
+$DestBinary = Join-Path $OutDir "axiom-api-${TargetTriple}.exe"
 
 Copy-Item -Path $SourceBinary -Destination $DestBinary -Force
 
 Write-Host "[build_api_sidecar] Sidecar written to: $DestBinary"
+Write-Host "[build_api_sidecar] Build complete!"
