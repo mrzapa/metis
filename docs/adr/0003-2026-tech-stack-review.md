@@ -1,7 +1,10 @@
 # 0003 — 2026 Tech Stack Review
 
-- **Status**: Accepted
+- **Status**: Superseded
 - **Date**: 2026-03-15
+- **Superseded by**: 0004-one-interface-tauri-next-fastapi.md
+
+> **Note:** This ADR is historical. The architecture has evolved. See ADR 0004 for the current product architecture.
 
 ## Context
 
@@ -42,12 +45,11 @@ We audited the codebase against each recommendation. All five are now complete.
 - Backend SSE streaming (`engine/streaming.py`) with structured events and replay support (`services/stream_replay.py`).
 - Astro present minimally at `apps/axiom-web-lite/`; Qwik not adopted (both optional).
 
-### 5. Retain Tauri; evaluate Rust native GUI — Complete
+### 5. Retain Tauri — Complete
 
-- Tauri v2 configured at `apps/axiom-desktop/src-tauri/` (experimental).
-- PySide6/Qt remains the production desktop app.
-- Rust GUI spike documented at `docs/experiments/rust_gui_spike.md` (iced recommended for future, deferred by design).
+- Tauri v2 is the canonical desktop shell (`apps/axiom-desktop/`).
 - Electron is not used.
+- PySide6/Qt is no longer part of the product surface (historical only).
 
 ## Summary
 
@@ -57,7 +59,7 @@ We audited the codebase against each recommendation. All five are now complete.
 | 2 | Meta-framework (Next.js/Remix) | Complete |
 | 3 | ShadCN Registry 2.0 + design tokens | Complete |
 | 4 | Streaming + agentic UI | Complete |
-| 5 | Tauri + evaluate Rust GUI | Complete |
+| 5 | Tauri desktop shell | Complete |
 
 ## Consequences
 

@@ -3,18 +3,40 @@
 This module holds shared app identity and baseline runtime defaults used by the
 MVC app while the legacy runtime remains available behind the default entry
 path.
+
+Version: Read from VERSION file at repo root. All consumers (config.py, API,
+Tauri, frontend) should derive from this single source.
 """
 
 from __future__ import annotations
 
+import pathlib
 from dataclasses import dataclass, field
+
+# ---------------------------------------------------------------------------
+# Version - read from shared VERSION file
+# ---------------------------------------------------------------------------
+
+_HERE = pathlib.Path(__file__).resolve().parent
+_REPO_ROOT = _HERE.parent
+_VERSION_FILE = _REPO_ROOT / "VERSION"
+
+
+def _load_version() -> str:
+    """Load version from VERSION file, fallback to '0.0.0' if missing."""
+    try:
+        return _VERSION_FILE.read_text(encoding="utf-8").strip() or "0.0.0"
+    except OSError:
+        return "0.0.0"
+
+
+APP_VERSION: str = _load_version()
 
 # ---------------------------------------------------------------------------
 # App identity
 # ---------------------------------------------------------------------------
 
 APP_NAME: str = "Axiom"
-APP_VERSION: str = "1.0"
 APP_SUBTITLE: str = "Personal RAG Assistant"
 
 # ---------------------------------------------------------------------------

@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertCircle, CheckCircle2, ChevronRight, ClipboardCopy, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronRight, ClipboardCopy, Loader2, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { fetchSettings, fetchLogTail, fetchApiVersion, type LogTailResult } from "@/lib/api";
+import { fetchSettings, fetchLogTail, fetchApiVersion, checkApiCompatibility, type LogTailResult } from "@/lib/api";
 
 const WEB_VERSION = "1.0";
 
@@ -27,10 +27,16 @@ interface Versions {
   api: string;
 }
 
+interface CompatibilityStatus {
+  compatible: boolean;
+  warning: string | null;
+}
+
 export default function DiagnosticsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
+  const [compatibility, setCompatibility] = useState<CompatibilityStatus | null>(null);
   const [settings, setSettings] = useState<Record<string, unknown> | null>(null);
   const [logTail, setLogTail] = useState<LogTailResult | null>(null);
   const [copied, setCopied] = useState(false);
@@ -41,11 +47,13 @@ export default function DiagnosticsPage() {
       fetchLogTail(),
       fetchApiVersion(),
       resolveDesktopVersion(),
+      checkApiCompatibility(),
     ])
-      .then(([s, lt, apiVer, desktopVer]) => {
+      .then(([s, lt, apiVer, desktopVer, compat]) => {
         setSettings(s);
         setLogTail(lt);
         setVersions({ web: WEB_VERSION, api: apiVer, desktop: desktopVer });
+        setCompatibility(compat);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load diagnostics"))
       .finally(() => setLoading(false));
@@ -113,6 +121,13 @@ export default function DiagnosticsPage() {
           <div className="flex items-center gap-1.5 text-sm text-destructive">
             <AlertCircle className="size-4" />
             {error}
+          </div>
+        )}
+
+        {compatibility && !compatibility.compatible && compatibility.warning && (
+          <div className="flex items-start gap-2 rounded-md border border-yellow-500/50 bg-yellow-500/10 p-3 text-sm text-yellow-700 dark:text-yellow-400">
+            <TriangleAlert className="size-4 mt-0.5 shrink-0" />
+            <span>{compatibility.warning}</span>
           </div>
         )}
 

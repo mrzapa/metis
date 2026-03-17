@@ -1,8 +1,6 @@
-# axiom-desktop — EXPERIMENTAL
+# axiom-desktop
 
-> **Status: Experimental.** This is a minimal scaffold for a Tauri v2 desktop container that
-> hosts the `axiom-web` Next.js frontend in a native window. It is not production-ready and
-> is independent of the primary Qt desktop app (`python main.py`). See WOR-13 / WOR-14.
+The canonical Tauri desktop shell that wraps `axiom-web` in a native window.
 
 ---
 
@@ -12,8 +10,6 @@
 
 - **Development mode** — loads the `axiom-web` dev server at `http://localhost:3000`
 - **Production build** — bundles the pre-built static export from `apps/axiom-web/out`
-
-The existing Python/Qt desktop app (`python main.py`) is completely unaffected.
 
 ---
 
@@ -91,8 +87,8 @@ and then compiles the Tauri app with the frontend and sidecar binary bundled.
 
 ---
 
-## What is NOT changed
+## Architecture
 
-- `main.py` and the Qt desktop app are untouched
-- `axiom_app/` Python code is untouched
-- CI workflows remain Python-only
+- `axiom-web/` — Next.js frontend
+- `axiom_app.api` — FastAPI backend
+- Tauri — native desktop container

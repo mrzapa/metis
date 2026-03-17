@@ -1,5 +1,13 @@
 # Rust-Native GUI Feasibility Spike
 
+> **⚠️ DEPRECATED — HISTORICAL DOCUMENT ONLY**
+> 
+> This document is a historical experiment. It is not part of the current product direction.
+> 
+> **Axiom's product direction is Tauri + Next.js + FastAPI.**
+> 
+> Qt/PySide6 is no longer part of the product surface.
+
 - **Status:** Draft
 - **Date:** 2026-03-15
 - **Scope:** Evaluate whether a Rust-native GUI toolkit (egui or iced) is a viable
@@ -27,10 +35,8 @@ Python-integration architecture best fits Axiom's constraints. **This memo does 
 require a prototype to exist; its conclusions are assumption-driven and should be
 revisited once a prototype is built.**
 
-**Relationship to prior work:** WOR-19 committed to keeping `python main.py`
-(PySide6/Qt) as the supported production path until a next-gen surface reaches full
-parity. A Rust-native GUI is a *possible* future for the experimental desktop
-container — it does not alter the Qt commitment.
+**Relationship to prior work:** This was a feasibility study from the migration era.
+Axiom now ships as Tauri + Next.js + FastAPI (see ADR 0004).
 
 ---
 
@@ -282,6 +288,5 @@ success criteria above are measured empirically.
 ---
 
 *See also:*
-- [`docs/migration/qt_to_web_container.md`](../migration/qt_to_web_container.md) — WOR-19: Qt support commitment and next-gen surface staging
-- [`docs/desktop_updates.md`](../desktop_updates.md) — WOR-18: desktop versioning and updater placeholders
+- [`docs/desktop_updates.md`](../desktop_updates.md) — desktop versioning and updater placeholders
 - [`docs/experiments/litestar_api.md`](litestar_api.md) — companion experiment doc (API layer)

@@ -38,3 +38,4 @@ Use one of these statuses:
 - [0001-local-api-and-web-ui.md](0001-local-api-and-web-ui.md)
 - [0002-streaming-protocol.md](0002-streaming-protocol.md)
 - [0003-2026-tech-stack-review.md](0003-2026-tech-stack-review.md)
+- [0004-one-interface-tauri-next-fastapi.md](0004-one-interface-tauri-next-fastapi.md)

@@ -1,6 +1,6 @@
 {
-  "productName": "axiom-desktop",
-  "version": "0.0.1",
+  "productName": "Axiom",
+  "version": "1.0.0",
   "identifier": "app.axiom.desktop",
   "build": {
     "beforeDevCommand": "cd ../axiom-web && pnpm dev",

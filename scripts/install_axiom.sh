@@ -54,40 +54,46 @@ BRANCH="$BRANCH"
 VENV_PYTHON="$VENV_DIR/bin/python"
 
 # Pull latest code silently
-if [ -d "\$AXIOM_DIR/.git" ]; then
-    git -C "\$AXIOM_DIR" pull origin "\$BRANCH" --ff-only 2>/dev/null || true
+if [ -d "$AXIOM_DIR/.git" ]; then
+    git -C "$AXIOM_DIR" pull origin "$BRANCH" --ff-only 2>/dev/null || true
 fi
 
-# Check for --web flag
-WEB_MODE=false
-FILTERED_ARGS=()
-for arg in "\$@"; do
-    if [ "\$arg" = "--web" ]; then
-        WEB_MODE=true
-    else
-        FILTERED_ARGS+=("\$arg")
+# Start API server and open Axiom
+TEMP_OUTPUT=$(mktemp)
+"$VENV_PYTHON" -m axiom_app.api > "$TEMP_OUTPUT" 2>&1 &
+API_PID=$!
+
+# Wait for API to start and print its listening URL
+API_URL=""
+for i in {1..30}; do
+    if [ -s "$TEMP_OUTPUT" ]; then
+        API_URL=$(grep "AXIOM_API_LISTENING=" "$TEMP_OUTPUT" | head -1 | sed 's/AXIOM_API_LISTENING=//' | tr -d '[:space:]')
+        if [ -n "$API_URL" ]; then
+            break
+        fi
     fi
+    sleep 0.5
 done
 
-if [ "\$WEB_MODE" = "true" ]; then
-    # Start API dev server in the background and open the web UI
-    "\$VENV_PYTHON" -m axiom_app.api &
-    API_PID=\$!
-    sleep 2
-    # Open browser (cross-platform)
-    if command -v xdg-open &>/dev/null; then
-        xdg-open "http://localhost:3000"
-    elif command -v open &>/dev/null; then
-        open "http://localhost:3000"
-    else
-        echo "Open http://localhost:3000 in your browser."
-    fi
-    echo "Axiom API server running (PID \$API_PID). Press Ctrl+C to stop."
-    trap "kill \$API_PID 2>/dev/null" EXIT INT TERM
-    wait \$API_PID
-else
-    exec "\$VENV_PYTHON" "\$AXIOM_DIR/main.py" "\${FILTERED_ARGS[@]}"
+# Fallback if we couldn't detect the port
+if [ -z "$API_URL" ]; then
+    echo "Warning: Could not detect API port, using default localhost:3000"
+    API_URL="http://localhost:3000"
 fi
+
+rm -f "$TEMP_OUTPUT"
+
+# Open browser (cross-platform)
+if command -v xdg-open &>/dev/null; then
+    xdg-open "$API_URL"
+elif command -v open &>/dev/null; then
+    open "$API_URL"
+else
+    echo "Open $API_URL in your browser."
+fi
+echo "Axiom running (PID $API_PID) at $API_URL. Press Ctrl+C to stop."
+trap "kill $API_PID 2>/dev/null" EXIT INT TERM
+wait $API_PID
 LAUNCHER_EOF
 
     chmod +x "$LAUNCHER"
@@ -212,8 +218,7 @@ do_install() {
     info "Launcher          : $LAUNCHER"
     echo ""
     info "Run Axiom:"
-    printf "  ${BOLD}axiom${NC}                          # GUI mode\n"
-    printf "  ${BOLD}axiom --web${NC}                     # Web UI mode\n"
+    printf "  ${BOLD}axiom${NC}                          # Launch Axiom\n"
     printf "  ${BOLD}axiom --cli index --file f.txt${NC}  # CLI mode\n"
     echo ""
     if [[ ":$PATH:" != *":$LAUNCHER_DIR:"* ]]; then

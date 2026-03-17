@@ -1,8 +1,8 @@
 {
   "name": "axiom-desktop",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
-  "description": "EXPERIMENTAL — Tauri v2 desktop container for axiom-web (WOR-13)",
+  "description": "Tauri v2 desktop shell for axiom-web",
   "scripts": {
     "tauri": "tauri"
   },

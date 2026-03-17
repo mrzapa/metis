@@ -34,9 +34,13 @@ class SessionRepository:
     """Store and retrieve chat sessions using the monolith's SQLite schema."""
 
     def __init__(self, db_path: str | pathlib.Path | None = None) -> None:
-        self.db_path = pathlib.Path(db_path) if db_path not in (None, ":memory:") else db_path
+        self.db_path = (
+            pathlib.Path(db_path) if db_path not in (None, ":memory:") else db_path
+        )
         self._db_target = (
-            ":memory:" if db_path == ":memory:" else str(self.db_path or _DEFAULT_DB_PATH)
+            ":memory:"
+            if db_path == ":memory:"
+            else str(self.db_path or _DEFAULT_DB_PATH)
         )
         self._shared_conn: sqlite3.Connection | None = None
         self._uri = self._db_target.startswith("file:")
@@ -57,13 +61,41 @@ class SessionRepository:
 
         target = pathlib.Path(self._db_target)
         target.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(target))
+        conn = sqlite3.connect(str(target), timeout=30.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
         try:
             yield conn
             conn.commit()
         finally:
             conn.close()
+
+    @contextmanager
+    def _transaction(self) -> Iterator[sqlite3.Connection]:
+        """Explicit transaction context manager for multi-statement operations."""
+        conn: sqlite3.Connection | None = None
+        try:
+            if self._shared_conn is not None and self._db_target != ":memory:":
+                conn = self._shared_conn
+            elif self._db_target == ":memory:":
+                conn = sqlite3.connect(":memory:")
+                conn.row_factory = sqlite3.Row
+            else:
+                conn = sqlite3.connect(str(self._db_target), timeout=30.0)
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("BEGIN IMMEDIATE")
+            yield conn
+            conn.commit()
+        except Exception:
+            if conn:
+                conn.rollback()
+            raise
+        finally:
+            if conn and conn != self._shared_conn and self._db_target != ":memory:":
+                conn.close()
 
     def init_db(self) -> None:
         with self._connect() as conn:
@@ -227,18 +259,26 @@ class SessionRepository:
             "updated_at": _now_iso(),
             "title": title if title is not None else current.title,
             "summary": summary if summary is not None else current.summary,
-            "active_profile": active_profile if active_profile is not None else current.active_profile,
+            "active_profile": active_profile
+            if active_profile is not None
+            else current.active_profile,
             "mode": mode if mode is not None else current.mode,
             "index_id": index_id if index_id is not None else current.index_id,
             "vector_backend": (
                 vector_backend if vector_backend is not None else current.vector_backend
             ),
-            "llm_provider": llm_provider if llm_provider is not None else current.llm_provider,
+            "llm_provider": llm_provider
+            if llm_provider is not None
+            else current.llm_provider,
             "llm_model": llm_model if llm_model is not None else current.llm_model,
-            "embed_model": embed_model if embed_model is not None else current.embed_model,
+            "embed_model": embed_model
+            if embed_model is not None
+            else current.embed_model,
             "retrieve_k": current.retrieve_k if retrieve_k is None else int(retrieve_k),
             "final_k": current.final_k if final_k is None else int(final_k),
-            "mmr_lambda": current.mmr_lambda if mmr_lambda is None else float(mmr_lambda),
+            "mmr_lambda": current.mmr_lambda
+            if mmr_lambda is None
+            else float(mmr_lambda),
             "agentic_iterations": (
                 current.agentic_iterations
                 if agentic_iterations is None
@@ -369,7 +409,7 @@ class SessionRepository:
             elif isinstance(item, dict):
                 serialized_sources.append(EvidenceSource.from_dict(item).to_dict())
 
-        with self._connect() as conn:
+        with self._transaction() as conn:
             conn.execute(
                 """
                 INSERT INTO messages(message_id, session_id, ts, role, content, run_id, sources_json)
@@ -390,7 +430,9 @@ class SessionRepository:
                 (_now_iso(), session_id),
             )
 
-    def save_feedback(self, session_id: str, *, run_id: str, vote: int, note: str = "") -> None:
+    def save_feedback(
+        self, session_id: str, *, run_id: str, vote: int, note: str = ""
+    ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
@@ -410,7 +452,9 @@ class SessionRepository:
     def delete_session(self, session_id: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-            conn.execute("DELETE FROM message_feedback WHERE session_id = ?", (session_id,))
+            conn.execute(
+                "DELETE FROM message_feedback WHERE session_id = ?", (session_id,)
+            )
             conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
 
     def prune_sessions_without_user_prompts(self) -> list[str]:
@@ -497,7 +541,9 @@ class SessionRepository:
             )
         return self.get_session(clone.session_id).summary  # type: ignore[union-attr]
 
-    def export_session(self, session_id: str, save_dir: str | pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    def export_session(
+        self, session_id: str, save_dir: str | pathlib.Path
+    ) -> tuple[pathlib.Path, pathlib.Path]:
         detail = self.get_session(session_id)
         if detail is None:
             raise FileNotFoundError(f"Session not found: {session_id}")
@@ -597,7 +643,9 @@ class SessionRepository:
 
         grouped: dict[str, list[dict[str, Any]]] = {}
         for item in normalized:
-            grouped.setdefault(self._header_path_label(str(item.get("header_path") or "")), []).append(item)
+            grouped.setdefault(
+                self._header_path_label(str(item.get("header_path") or "")), []
+            ).append(item)
         for header_label, items in grouped.items():
             lines.append(f"- {header_label}")
             for source in items:
@@ -612,9 +660,13 @@ class SessionRepository:
     def _normalize_export_source_item(source: EvidenceSource) -> dict[str, Any]:
         item = source.to_dict()
         item["header_path"] = str(item.get("header_path") or "").strip()
-        breadcrumb = str(item.get("breadcrumb") or item.get("header_path") or "").strip()
+        breadcrumb = str(
+            item.get("breadcrumb") or item.get("header_path") or ""
+        ).strip()
         item["breadcrumb"] = breadcrumb
-        item["breadcrumb_tokens"] = [token.strip() for token in breadcrumb.split(">") if token.strip()]
+        item["breadcrumb_tokens"] = [
+            token.strip() for token in breadcrumb.split(">") if token.strip()
+        ]
         return item
 
     @staticmethod

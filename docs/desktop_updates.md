@@ -7,6 +7,35 @@
 
 ---
 
+## Current Versioning Model
+
+### Single Source of Truth
+
+The canonical version lives in `VERSION` at the repo root. All consumers derive from this:
+
+| Component | Version Source |
+|----------|---------------|
+| Python config | `axiom_app/config.py` reads from `VERSION` |
+| FastAPI | `GET /v1/version` returns `APP_VERSION` |
+| Tauri shell | `apps/axiom-desktop/src-tauri/tauri.conf.json` |
+| Frontend | `apps/axiom-web/app/diagnostics/page.tsx` (hardcoded `WEB_VERSION`) |
+
+> **Note:** The frontend version is currently hardcoded. Future: derive from build process or `VERSION`.
+
+### Schema Versioning
+
+**Settings schema:** Integer `schema_version` in `settings.json` (defaults to 1).
+- Migration hook exists in `axiom_app/settings_store.py`
+- Migrations run automatically on load
+- See `_run_migrations()` for available migrations
+
+**Session schema:** Currently **NOT versioned**. This is a gap that should be addressed:
+- `SessionRepository` creates tables without version tracking
+- Schema changes require manual migration or data loss
+- **Recommendation:** Add `schema_version` to session tables before production release
+
+---
+
 ## Overview
 
 The Axiom desktop distribution packages three components together:
@@ -94,6 +123,28 @@ The manifest format is defined by the Tauri updater spec:
 
 **This URL is not live.** No manifests are published. Hosting and CDN
 choices are undecided.
+
+---
+
+## Known Limitations
+
+### Before Production Desktop Release
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Signed update manifests | Not implemented | Placeholder config exists |
+| Version locking (shell ↔ sidecar) | Not implemented | No runtime compatibility check |
+| Rollback on failed update | Not implemented | Not wired |
+| CI/CD release pipeline | Out of scope | Needs separate work |
+| Session schema versioning | Not implemented | Gap - should add before prod |
+| Frontend version derivation | Hardcoded | Should derive from VERSION |
+
+### What Works
+
+- Version is now synchronized across Python config, API, and Tauri shell
+- Settings have schema versioning with migration hooks
+- API exposes `min_compatible` for frontend compatibility checks
+- Frontend shows compatibility warning in diagnostics
 
 ---
 

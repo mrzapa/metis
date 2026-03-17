@@ -492,14 +492,48 @@ export async function fetchLogTail(): Promise<LogTailResult> {
   return res.json();
 }
 
+export interface ApiVersion {
+  version: string;
+  min_compatible: string;
+}
+
 export async function fetchApiVersion(): Promise<string> {
   try {
     const res = await apiFetch(`${await getApiBase()}/v1/version`);
     if (!res.ok) return "unknown";
-    const data = (await res.json()) as { version: string };
+    const data = (await res.json()) as ApiVersion;
     return data.version;
   } catch {
     return "unknown";
+  }
+}
+
+export async function checkApiCompatibility(): Promise<{
+  compatible: boolean;
+  warning: string | null;
+}> {
+  try {
+    const res = await apiFetch(`${await getApiBase()}/v1/version`);
+    if (!res.ok) {
+      return { compatible: false, warning: "Could not connect to API" };
+    }
+    const data = (await res.json()) as ApiVersion;
+    const apiVersion = data.version;
+    const minCompatible = data.min_compatible || apiVersion;
+
+    const apiMajor = parseInt(apiVersion.split(".")[0] || "0", 10);
+    const minMajor = parseInt(minCompatible.split(".")[0] || "0", 10);
+
+    if (apiMajor !== minMajor) {
+      return {
+        compatible: false,
+        warning: `API version ${apiVersion} is incompatible with frontend. Minimum compatible: ${minCompatible}`,
+      };
+    }
+
+    return { compatible: true, warning: null };
+  } catch {
+    return { compatible: false, warning: "Could not connect to API for compatibility check" };
   }
 }
 

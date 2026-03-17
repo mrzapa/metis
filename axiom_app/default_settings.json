@@ -1,5 +1,6 @@
 {
   "_comment": "Axiom default settings. Copy to settings.json in the repo root to override.",
+  "schema_version": 1,
   "ui_backend": "pyside6",
   "theme": "space_dust",
   "startup_mode_setting": "basic",

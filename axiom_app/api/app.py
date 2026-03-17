@@ -82,7 +82,10 @@ def create_app() -> FastAPI:
     def api_version() -> dict[str, str]:
         from axiom_app.config import APP_VERSION
 
-        return {"version": APP_VERSION}
+        return {
+            "version": APP_VERSION,
+            "min_compatible": APP_VERSION,
+        }
 
     @app.get("/healthz")
     def healthz() -> dict[str, bool]:

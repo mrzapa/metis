@@ -60,8 +60,6 @@ function Write-Launchers {
     }
 
     # PowerShell launcher
-    # --desktop/--gui: override to run Qt GUI instead of web UI (default).
-    # Legacy --web flag is ignored (treated as default web behavior).
     @"
 # Auto-generated Axiom launcher - do not edit.
 `$ErrorActionPreference = "Stop"
@@ -73,24 +71,38 @@ if (Test-Path (Join-Path `$axiomDir ".git")) {
     try { git -C `$axiomDir pull origin `$branch --ff-only 2>`$null } catch {}
 }
 
-# --desktop or --gui flag to run Qt GUI instead of web UI (default)
-`$desktopMode = (`$args -contains "--desktop") -or (`$args -contains "--gui")
+# Start API server and open Axiom
+`$tempFile = [System.IO.Path]::GetTempFileName()
+`$apiProcess = Start-Process -FilePath "$VenvPython" `
+    -ArgumentList "-m", "axiom_app.api" `
+    -WorkingDirectory `$axiomDir `
+    -PassThru -WindowStyle Minimized `
+    -RedirectStandardOutput `$tempFile -RedirectStandardError `$tempFile
 
-if (`$desktopMode) {
-    # Filter out --desktop/--gui flags and run Qt GUI
-    `$launchArgs = `$args | Where-Object { `$_ -ne "--desktop" -and `$_ -ne "--gui" }
-    & "$VenvPython" (Join-Path `$axiomDir "main.py") @`$launchArgs
-} else {
-    # Default: start API dev server in the background and open the web UI
-    `$apiProcess = Start-Process -FilePath "$VenvPython" `
-        -ArgumentList "-m", "axiom_app.api" `
-        -WorkingDirectory `$axiomDir `
-        -PassThru -WindowStyle Minimized
-    Start-Sleep -Seconds 2
-    Start-Process "http://localhost:3000"
-    Write-Host "Axiom API server running (PID `$(`$apiProcess.Id)). Press Ctrl+C to stop."
-    try { Wait-Process -Id `$apiProcess.Id } catch {}
+# Wait for API to start and print its listening URL (up to 15 seconds)
+`$apiUrl = ""
+for (`$i = 0; `$i -lt 30; `$i++) {
+    Start-Sleep -Milliseconds 500
+    if (Test-Path `$tempFile) {
+        `$content = Get-Content `$tempFile -Raw -ErrorAction SilentlyContinue
+        if (`$content -match "AXIOM_API_LISTENING=(.+)") {
+            `$apiUrl = `$matches[1].Trim()
+            break
+        }
+    }
 }
+
+# Fallback if we couldn't detect the port
+if ([string]::IsNullOrEmpty(`$apiUrl)) {
+    Write-Host "Warning: Could not detect API port, using default localhost:3000"
+    `$apiUrl = "http://localhost:3000"
+}
+
+Remove-Item `$tempFile -ErrorAction SilentlyContinue
+
+Start-Process `$apiUrl
+Write-Host "Axiom running (PID `$(`$apiProcess.Id)) at `$apiUrl. Press Ctrl+C to stop."
+try { Wait-Process -Id `$apiProcess.Id } catch {}
 "@ | Set-Content -Path $LauncherPs1 -Encoding UTF8
 
     # CMD wrapper so `axiom` works from cmd.exe too
@@ -99,31 +111,13 @@ if (`$desktopMode) {
     @"
 @echo off
 REM Auto-generated Axiom launcher - do not edit.
-cd /d "$InstallDir"
-git pull origin $Branch --ff-only >nul 2>&1
-
-REM Check for --desktop or --gui flag to run Qt GUI
-set "DESKTOP_MODE="
-for %%a in (%*) do (
-    if "%%a"=="--desktop" set "DESKTOP_MODE=1"
-    if "%%a"=="--gui" set "DESKTOP_MODE=1"
-)
-
-if defined DESKTOP_MODE (
-    REM Filter out --desktop/--gui flags and run Qt GUI
-    set "CMD_ARGS=%*"
-    set "CMD_ARGS=!CMD_ARGS:--desktop=!"
-    set "CMD_ARGS=!CMD_ARGS:--gui=!"
-    "$VenvPython" "$InstallDir\main.py" !CMD_ARGS!
-) else (
-    REM Default: start API server and open web UI
-    start /min "" "$VenvPython" -m axiom_app.api
-    timeout /t 2 /nobreak >nul
-    start http://localhost:3000
-    echo Axiom API server running. Close this window to stop.
-    REM Keep console open - wait for API process (started minimized)
-    ping -n 10 127.0.0.1 >nul
-)
+cd /d "%InstallDir%"
+git pull origin %Branch% --ff-only >nul 2>&1
+start /min "" "%VenvPython%" -m axiom_app.api
+timeout /t 2 /nobreak >nul
+start http://localhost:3000
+echo Axiom running. Close this window to stop.
+ping -n 10 127.0.0.1 >nul
 "@ | Set-Content -Path $LauncherCmd -Encoding ASCII
 }
 
@@ -269,8 +263,7 @@ function Invoke-Install {
     Write-Info "Virtual env       : $VenvDir"
     Write-Host ""
     Write-Info "Run Axiom:"
-    Write-Host "  axiom                            # Web UI mode (default)"
-    Write-Host "  axiom --desktop                  # Qt GUI mode"
+    Write-Host "  axiom                            # Launch Axiom"
     Write-Host "  axiom --cli index --file f.txt   # CLI mode"
     Write-Host ""
 

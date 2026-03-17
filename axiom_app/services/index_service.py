@@ -1,4 +1,11 @@
-"""Shared index build, persistence, and retrieval helpers."""
+"""Shared index build, persistence, and retrieval helpers.
+
+Concurrency notes:
+  - Index bundles are written atomically using temp directory staging + rename.
+  - This ensures readers never see partial/corrupted index state.
+  - Concurrent index builds to the same location are not supported - the last
+    writer wins. Use unique index IDs to avoid conflicts.
+"""
 
 from __future__ import annotations
 
@@ -7,9 +14,11 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+import os
 import pathlib
 import re
 import shutil
+import tempfile
 from typing import Any, Callable
 
 from axiom_app.models.parity_types import IndexManifest
@@ -79,8 +88,7 @@ class IndexBundle:
         if self.knowledge_graph is not None:
             for src, targets in self.knowledge_graph.edges.items():
                 edges[src] = {
-                    tgt: sorted(relations)
-                    for tgt, relations in targets.items()
+                    tgt: sorted(relations) for tgt, relations in targets.items()
                 }
         return {
             "index_id": self.index_id,
@@ -89,7 +97,9 @@ class IndexBundle:
             "chunks": list(self.chunks),
             "embeddings": list(self.embeddings),
             "knowledge_graph": {
-                "nodes": dict(self.knowledge_graph.nodes if self.knowledge_graph else {}),
+                "nodes": dict(
+                    self.knowledge_graph.nodes if self.knowledge_graph else {}
+                ),
                 "edges": edges,
             },
             "entity_to_chunks": {
@@ -175,9 +185,7 @@ class QueryResult:
 
 def _embedding_signature(settings: dict[str, Any]) -> str:
     provider = str(
-        settings.get("embedding_provider")
-        or settings.get("embeddings_backend")
-        or ""
+        settings.get("embedding_provider") or settings.get("embeddings_backend") or ""
     ).strip()
     model = str(
         settings.get("embedding_model")
@@ -192,7 +200,9 @@ def _embedding_signature(settings: dict[str, Any]) -> str:
 def _extract_outline_nodes(text: str, source_path: str) -> list[dict[str, Any]]:
     nodes: list[dict[str, Any]] = []
     stack: list[dict[str, Any]] = []
-    for idx, match in enumerate(re.finditer(r"^(#{1,6})\s+(.+)$", text, flags=re.MULTILINE), start=1):
+    for idx, match in enumerate(
+        re.finditer(r"^(#{1,6})\s+(.+)$", text, flags=re.MULTILINE), start=1
+    ):
         level = len(match.group(1))
         title = match.group(2).strip()
         while stack and int(stack[-1]["level"]) >= level:
@@ -228,7 +238,9 @@ def _extract_outline_nodes(text: str, source_path: str) -> list[dict[str, Any]]:
     ]
 
 
-def _heading_for_offset(outline_nodes: list[dict[str, Any]], offset: int) -> dict[str, Any]:
+def _heading_for_offset(
+    outline_nodes: list[dict[str, Any]], offset: int
+) -> dict[str, Any]:
     selected = outline_nodes[0] if outline_nodes else {}
     for node in outline_nodes:
         span = node.get("char_span") or [0, 0]
@@ -243,7 +255,10 @@ def _heading_for_offset(outline_nodes: list[dict[str, Any]], offset: int) -> dic
 def _extract_events(text: str, source_name: str) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     sentences = re.split(r"(?<=[.!?])\s+", text)
-    date_pattern = re.compile(r"\b(?:\d{4}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b", re.IGNORECASE)
+    date_pattern = re.compile(
+        r"\b(?:\d{4}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b",
+        re.IGNORECASE,
+    )
     for sentence in sentences:
         snippet = " ".join(sentence.split()).strip()
         if len(snippet) < 24 or not date_pattern.search(snippet):
@@ -316,7 +331,9 @@ def _resolve_from_manifest_root(root: pathlib.Path, path_value: str) -> pathlib.
     return path if path.is_absolute() else root / path
 
 
-def _legacy_manifest_for_bundle(path: pathlib.Path, bundle: IndexBundle) -> IndexManifest:
+def _legacy_manifest_for_bundle(
+    path: pathlib.Path, bundle: IndexBundle
+) -> IndexManifest:
     return IndexManifest(
         index_id=bundle.index_id or path.stem,
         backend=str(bundle.vector_backend or "json"),
@@ -326,7 +343,9 @@ def _legacy_manifest_for_bundle(path: pathlib.Path, bundle: IndexBundle) -> Inde
         manifest_path=str(path),
         bundle_path=str(path),
         vector_store_path="",
-        collection_name=str(bundle.metadata.get("collection_name") or bundle.index_id or ""),
+        collection_name=str(
+            bundle.metadata.get("collection_name") or bundle.index_id or ""
+        ),
         document_count=len(bundle.documents),
         chunk_count=len(bundle.chunks),
         outline_path="",
@@ -337,6 +356,52 @@ def _legacy_manifest_for_bundle(path: pathlib.Path, bundle: IndexBundle) -> Inde
         metadata=dict(bundle.metadata or {}),
         legacy_compat=True,
     )
+
+
+def _atomic_dir_stage(
+    target_dir: pathlib.Path,
+    stage_files: dict[pathlib.Path, Any],
+    artifacts: dict[pathlib.Path, pathlib.Path] | None = None,
+) -> None:
+    """Atomically stage files to target_dir using temp dir + rename.
+
+    Writes all files to a temporary directory in the same parent as target,
+    then atomically renames it to the final name.
+
+    Args:
+        target_dir: The final directory path (will be replaced)
+        stage_files: Dict of relative_path -> content (dict or list for JSON)
+        artifacts: Dict of relative_path -> source_path for file copies
+    """
+    parent = target_dir.parent
+    parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_dir = tempfile.mkdtemp(prefix=".index_stage_", dir=parent)
+    try:
+        tmp_path = pathlib.Path(tmp_dir)
+
+        for rel_path, content in stage_files.items():
+            file_path = tmp_path / rel_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_json(file_path, content)
+
+        if artifacts:
+            artifacts_dir = tmp_path / _ARTIFACTS_DIR
+            artifacts_dir.mkdir(parents=True, exist_ok=True)
+            for rel_path, src_path in artifacts.items():
+                dst = tmp_path / rel_path
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_path, dst)
+
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        os.replace(tmp_path, target_dir)
+    except Exception:
+        try:
+            shutil.rmtree(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def resolve_manifest_storage_dir(
@@ -374,43 +439,47 @@ def persist_index_bundle(
         else resolve_manifest_storage_dir(bundle, index_dir=index_dir)
     )
     root.mkdir(parents=True, exist_ok=True)
-    artifacts_dir = root / _ARTIFACTS_DIR
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     manifest_path = root / _MANIFEST_FILE
     bundle_path = root / _BUNDLE_FILE
-    outline_path = artifacts_dir / "document_outline.json"
-    semantic_regions_path = artifacts_dir / "semantic_regions.json"
-    events_path = artifacts_dir / "events.json"
-
-    _write_json(outline_path, list(bundle.document_outline))
-    _write_json(semantic_regions_path, list(bundle.semantic_regions))
-    _write_json(events_path, list(bundle.events))
+    outline_path = pathlib.Path(_ARTIFACTS_DIR) / "document_outline.json"
+    semantic_regions_path = pathlib.Path(_ARTIFACTS_DIR) / "semantic_regions.json"
+    events_path = pathlib.Path(_ARTIFACTS_DIR) / "events.json"
 
     grounding_artifact_path = ""
+    artifacts: dict[pathlib.Path, pathlib.Path] = {}
     grounding_source = str(bundle.grounding_html_path or "").strip()
     if grounding_source:
         source_path = pathlib.Path(grounding_source)
         if source_path.exists() and source_path.is_file():
-            target_grounding = artifacts_dir / source_path.name
-            if source_path.resolve() != target_grounding.resolve():
-                shutil.copy2(source_path, target_grounding)
-            grounding_artifact_path = _relative_to(root, target_grounding)
+            grounding_artifact_rel = pathlib.Path(_ARTIFACTS_DIR) / source_path.name
+            artifacts[grounding_artifact_rel] = source_path
+            grounding_artifact_path = str(grounding_artifact_rel)
         else:
             grounding_artifact_path = grounding_source
 
     merged_metadata = {
         **dict(bundle.metadata or {}),
         **dict(manifest_metadata or {}),
-        "collection_name": str(collection_name or bundle.metadata.get("collection_name") or ""),
-        "vector_store_path": _relative_to(root, vector_store_path),
+        "collection_name": str(
+            collection_name or bundle.metadata.get("collection_name") or ""
+        ),
+        "vector_store_path": str(vector_store_path) if vector_store_path else "",
         "restore_requirements": dict(restore_requirements or {}),
     }
     bundle.vector_backend = backend_name
     bundle.index_path = str(manifest_path)
     bundle.grounding_html_path = grounding_artifact_path
     bundle.metadata = merged_metadata
-    _write_json(bundle_path, bundle.to_payload())
+
+    stage_files = {
+        bundle_path.relative_to(root): bundle.to_payload(),
+        outline_path: list(bundle.document_outline),
+        semantic_regions_path: list(bundle.semantic_regions),
+        events_path: list(bundle.events),
+    }
+
+    _atomic_dir_stage(root, stage_files, artifacts)
 
     manifest = IndexManifest(
         index_id=str(bundle.index_id or root.name),
@@ -419,18 +488,24 @@ def persist_index_bundle(
         embedding_signature=str(bundle.embedding_signature or ""),
         source_files=list(bundle.documents),
         manifest_path=str(manifest_path),
-        bundle_path=_relative_to(root, bundle_path),
-        vector_store_path=_relative_to(root, vector_store_path),
-        collection_name=str(collection_name or merged_metadata.get("collection_name") or bundle.index_id or ""),
+        bundle_path=str(bundle_path),
+        vector_store_path=str(vector_store_path) if vector_store_path else "",
+        collection_name=str(
+            collection_name
+            or merged_metadata.get("collection_name")
+            or bundle.index_id
+            or ""
+        ),
         document_count=len(bundle.documents),
         chunk_count=len(bundle.chunks),
-        outline_path=_relative_to(root, outline_path),
-        semantic_regions_path=_relative_to(root, semantic_regions_path),
-        events_path=_relative_to(root, events_path),
+        outline_path=str(outline_path),
+        semantic_regions_path=str(semantic_regions_path),
+        events_path=str(events_path),
         grounding_artifact_path=grounding_artifact_path,
         restore_requirements=dict(restore_requirements or {}),
         metadata=merged_metadata,
     )
+
     _write_json(manifest_path, manifest.to_payload())
     return manifest
 
@@ -535,7 +610,9 @@ def load_index_bundle(path: str | pathlib.Path) -> IndexBundle:
         manifest = load_index_manifest(candidate)
         if manifest.legacy_compat and manifest.bundle_path == str(candidate):
             payload = _load_json(candidate)
-            bundle = IndexBundle.from_payload(payload if isinstance(payload, dict) else {})
+            bundle = IndexBundle.from_payload(
+                payload if isinstance(payload, dict) else {}
+            )
             bundle.index_path = str(candidate)
             return bundle
 
@@ -558,7 +635,9 @@ def load_index_bundle(path: str | pathlib.Path) -> IndexBundle:
                         dict(item) for item in outline_payload if isinstance(item, dict)
                     ]
         if not bundle.semantic_regions and manifest.semantic_regions_path:
-            regions_path = _resolve_from_manifest_root(root, manifest.semantic_regions_path)
+            regions_path = _resolve_from_manifest_root(
+                root, manifest.semantic_regions_path
+            )
             if regions_path.exists():
                 regions_payload = _load_json(regions_path)
                 if isinstance(regions_payload, list):
@@ -574,7 +653,9 @@ def load_index_bundle(path: str | pathlib.Path) -> IndexBundle:
                         dict(item) for item in events_payload if isinstance(item, dict)
                     ]
         if manifest.grounding_artifact_path:
-            grounding_path = _resolve_from_manifest_root(root, manifest.grounding_artifact_path)
+            grounding_path = _resolve_from_manifest_root(
+                root, manifest.grounding_artifact_path
+            )
             bundle.grounding_html_path = (
                 str(grounding_path)
                 if grounding_path.exists()
@@ -638,7 +719,9 @@ def build_index_bundle(
             search_cursor = max(char_end - overlap, char_start)
             heading = _heading_for_offset(outline_nodes, char_start)
             header_tokens = list(heading.get("header_path") or [])
-            header_path = " > ".join([str(item).strip() for item in header_tokens if str(item).strip()])
+            header_path = " > ".join(
+                [str(item).strip() for item in header_tokens if str(item).strip()]
+            )
             all_chunks.append(
                 {
                     "id": f"{source}::chunk{idx}",
@@ -682,9 +765,13 @@ def build_index_bundle(
     if callable(post_message):
         post_message({"type": "status", "text": "Computing embeddings…"})
     embeddings = emb.embed_documents([chunk["text"] for chunk in all_chunks])
-    graph, entity_to_chunks = build_knowledge_graph([chunk["text"] for chunk in all_chunks])
+    graph, entity_to_chunks = build_knowledge_graph(
+        [chunk["text"] for chunk in all_chunks]
+    )
     digest = hashlib.sha1(
-        "||".join(sorted(str(path) for path in documents)).encode("utf-8", errors="ignore")
+        "||".join(sorted(str(path) for path in documents)).encode(
+            "utf-8", errors="ignore"
+        )
     ).hexdigest()[:12]
     return IndexBundle(
         index_id=f"axiom-{digest}",
@@ -787,7 +874,9 @@ def build_query_result(
         top_score = _score_for_index(score_lookup, hit_indices[0])
     return QueryResult(
         prompt=question,
-        context_block="\n\n".join(context_parts) if context_parts else "(no relevant passages found)",
+        context_block="\n\n".join(context_parts)
+        if context_parts
+        else "(no relevant passages found)",
         sources=sources,
         hit_indices=[idx for idx in hit_indices if 0 <= idx < len(bundle.chunks)],
         top_score=top_score,

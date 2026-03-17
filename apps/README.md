@@ -1,6 +1,6 @@
 # apps/
 
-Web frontends for Axiom. The Python backend and Qt desktop app live at the repository root (`axiom_app/`).
+Frontend applications for Axiom.
 
 ## axiom-web
 
@@ -32,9 +32,8 @@ On Windows use:
 
 ---
 
-## axiom-desktop (experimental)
+## axiom-desktop
 
-> **Experimental.** A [Tauri v2](https://tauri.app) desktop shell that hosts `axiom-web` in a
-> native window. Not production-ready. The primary Qt desktop app (`python main.py`) is unaffected.
+The canonical Tauri desktop shell that wraps `axiom-web` in a native window.
 
 See [`apps/axiom-desktop/README.md`](axiom-desktop/README.md) for setup and usage.
