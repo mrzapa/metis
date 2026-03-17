@@ -62,6 +62,12 @@ function Write-Launchers {
     # PowerShell launcher
     @"
 # Auto-generated Axiom launcher - do not edit.
+# Usage:
+#   axiom                  -- Web UI (default)
+#   axiom --desktop        -- Qt desktop GUI
+#   axiom --gui            -- Qt desktop GUI (alias)
+#   axiom --web            -- Web UI (legacy no-op, same as default)
+#   axiom --cli <args>     -- CLI mode (args forwarded)
 `$ErrorActionPreference = "Stop"
 `$axiomDir = "$InstallDir"
 `$branch   = "$Branch"
@@ -71,12 +77,22 @@ if (Test-Path (Join-Path `$axiomDir ".git")) {
     try { git -C `$axiomDir pull origin `$branch --ff-only 2>`$null } catch {}
 }
 
-# Start API server and open Axiom
+# Parse flags -- detect --desktop/--gui; collect remaining args into launchArgs
+`$desktopMode = (`$args -contains "--desktop") -or (`$args -contains "--gui")
+`$launchArgs  = `$args | Where-Object { `$_ -ne "--desktop" -and `$_ -ne "--gui" -and `$_ -ne "--web" }
+
+# Route to Qt desktop GUI when requested
+if (`$desktopMode) {
+    & "$VenvPython" "`$axiomDir\main.py" @launchArgs
+    exit `$LASTEXITCODE
+}
+
+# Default: start API server and open browser (Web UI)
 `$tempFile = [System.IO.Path]::GetTempFileName()
-`$apiProcess = Start-Process -FilePath "$VenvPython" `
-    -ArgumentList "-m", "axiom_app.api" `
-    -WorkingDirectory `$axiomDir `
-    -PassThru -WindowStyle Minimized `
+`$apiProcess = Start-Process -FilePath "$VenvPython" ``
+    -ArgumentList "-m", "axiom_app.api" ``
+    -WorkingDirectory `$axiomDir ``
+    -PassThru -WindowStyle Minimized ``
     -RedirectStandardOutput `$tempFile -RedirectStandardError `$tempFile
 
 # Wait for API to start and print its listening URL (up to 15 seconds)
@@ -111,9 +127,36 @@ try { Wait-Process -Id `$apiProcess.Id } catch {}
     @"
 @echo off
 REM Auto-generated Axiom launcher - do not edit.
-cd /d "%InstallDir%"
-git pull origin %Branch% --ff-only >nul 2>&1
-start /min "" "%VenvPython%" -m axiom_app.api
+REM Usage:
+REM   axiom              -- Web UI (default)
+REM   axiom --desktop    -- Qt desktop GUI
+REM   axiom --gui        -- Qt desktop GUI (alias)
+REM   axiom --web        -- Web UI (legacy no-op)
+REM   axiom --cli ...    -- CLI mode (args forwarded)
+cd /d "$InstallDir"
+git pull origin $Branch --ff-only >nul 2>&1
+
+REM Collect all non-mode args into CMD_ARGS
+set CMD_ARGS=
+set DESKTOP_MODE=0
+:parse_args
+if "%~1"=="" goto end_parse
+if /I "%~1"=="--desktop" ( set DESKTOP_MODE=1 & shift & goto parse_args )
+if /I "%~1"=="--gui"     ( set DESKTOP_MODE=1 & shift & goto parse_args )
+if /I "%~1"=="--web"     ( shift & goto parse_args )
+set CMD_ARGS=%CMD_ARGS% %1
+shift
+goto parse_args
+:end_parse
+
+REM Route to Qt desktop GUI when requested
+if "%DESKTOP_MODE%"=="1" (
+    "$VenvPython" "$InstallDir\main.py" %CMD_ARGS%
+    exit /b %ERRORLEVEL%
+)
+
+REM Default: start API server and open browser
+start /min "" "$VenvPython" -m axiom_app.api
 timeout /t 2 /nobreak >nul
 start http://localhost:3000
 echo Axiom running. Close this window to stop.

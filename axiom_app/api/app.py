@@ -7,14 +7,16 @@ import json
 import logging
 import os
 import pathlib
+import secrets
 import tempfile
 import uuid
 from collections.abc import AsyncGenerator, Generator
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Header, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Header, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from axiom_app.engine import (
     build_index,
@@ -50,12 +52,35 @@ _DEFAULT_LOCAL_ORIGINS = [
 
 _RAG_STREAM_MANAGER = ReplayableRunStreamManager()
 
+_bearer_scheme = HTTPBearer(auto_error=False)
+
 
 def _cors_origins_from_env() -> list[str]:
     raw = os.getenv("AXIOM_API_CORS_ORIGINS", "")
     if not raw.strip():
         return _DEFAULT_LOCAL_ORIGINS
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def _require_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+) -> None:
+    """Enforce Bearer-token auth when AXIOM_API_TOKEN is set.
+
+    When the environment variable is not set (the default) all requests are
+    allowed, preserving backward-compatible local-only usage.  Once set, every
+    request to a protected endpoint must carry a matching token.
+
+    Raises HTTPException with status 401 if the token is required but the
+    request provides no credentials or an incorrect token.
+    """
+    required_token = os.getenv("AXIOM_API_TOKEN", "").strip()
+    if not required_token:
+        return  # Auth not configured — allow all requests
+    if credentials is None or not secrets.compare_digest(
+        credentials.credentials, required_token
+    ):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 log = logging.getLogger(__name__)
@@ -73,10 +98,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.include_router(_sessions.router)
-    app.include_router(_settings.router)
-    app.include_router(_logs.router)
-    app.include_router(_gguf.router)
+    # Protected routers — require token when AXIOM_API_TOKEN is set
+    _auth = [Depends(_require_token)]
+    app.include_router(_sessions.router, dependencies=_auth)
+    app.include_router(_settings.router, dependencies=_auth)
+    app.include_router(_logs.router, dependencies=_auth)
+    app.include_router(_gguf.router, dependencies=_auth)
 
     @app.get("/v1/version")
     def api_version() -> dict[str, str]:
@@ -91,17 +118,17 @@ def create_app() -> FastAPI:
     def healthz() -> dict[str, bool]:
         return {"ok": True}
 
-    @app.post("/v1/index/build", response_model=IndexBuildResultModel)
+    @app.post("/v1/index/build", response_model=IndexBuildResultModel, dependencies=_auth)
     def api_build_index(payload: IndexBuildRequestModel) -> IndexBuildResultModel:
         return IndexBuildResultModel.from_engine(
             _run_engine(build_index, payload.to_engine())
         )
 
-    @app.get("/v1/index/list")
+    @app.get("/v1/index/list", dependencies=_auth)
     def api_list_indexes() -> list[dict[str, Any]]:
         return _run_engine(list_indexes)
 
-    @app.post("/v1/files/upload")
+    @app.post("/v1/files/upload", dependencies=_auth)
     async def api_upload_files(
         files: list[UploadFile] = File(...),
     ) -> dict[str, list[str]]:
@@ -116,7 +143,7 @@ def create_app() -> FastAPI:
             saved.append(str(dest))
         return {"paths": saved}
 
-    @app.post("/v1/index/build/stream")
+    @app.post("/v1/index/build/stream", dependencies=_auth)
     async def api_build_index_stream(
         payload: IndexBuildRequestModel,
     ) -> StreamingResponse:
@@ -155,23 +182,23 @@ def create_app() -> FastAPI:
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    @app.post("/v1/query/rag", response_model=RagQueryResultModel)
+    @app.post("/v1/query/rag", response_model=RagQueryResultModel, dependencies=_auth)
     def api_query_rag(payload: RagQueryRequestModel) -> RagQueryResultModel:
         return RagQueryResultModel.from_engine(
             _run_engine(query_rag, payload.to_engine())
         )
 
-    @app.post("/v1/query/direct", response_model=DirectQueryResultModel)
+    @app.post("/v1/query/direct", response_model=DirectQueryResultModel, dependencies=_auth)
     def api_query_direct(payload: DirectQueryRequestModel) -> DirectQueryResultModel:
         return DirectQueryResultModel.from_engine(
             _run_engine(query_direct, payload.to_engine())
         )
 
-    @app.get("/v1/traces/{run_id}")
+    @app.get("/v1/traces/{run_id}", dependencies=_auth)
     def api_get_trace(run_id: str) -> list[dict[str, Any]]:
         return TraceStore().read_run_events(run_id)
 
-    @app.post("/v1/runs/{run_id}/actions")
+    @app.post("/v1/runs/{run_id}/actions", dependencies=_auth)
     def api_run_action(run_id: str, payload: RunActionRequestModel) -> dict[str, Any]:
         log.info(
             "Run action received: run_id=%s approved=%s payload=%s",
@@ -185,7 +212,7 @@ def create_app() -> FastAPI:
             "status": "accepted",
         }
 
-    @app.post("/v1/query/rag/stream")
+    @app.post("/v1/query/rag/stream", dependencies=_auth)
     def api_stream_rag(
         payload: RagQueryRequestModel,
         last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
