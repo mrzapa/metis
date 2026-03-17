@@ -4,6 +4,7 @@
   "ui_backend": "pyside6",
   "theme": "space_dust",
   "startup_mode_setting": "basic",
+  "api_port": 0,
   "llm_provider": "anthropic",
   "llm_model": "claude-opus-4-6",
   "llm_model_custom": "",

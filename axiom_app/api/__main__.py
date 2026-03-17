@@ -1,8 +1,10 @@
 """CLI launcher for the local Axiom FastAPI app.
 
 Concurrency notes:
-  - Uses a lock file to ensure only one instance runs at a time.
+  - Uses an atomic O_EXCL lock file to ensure only one instance runs at a time.
   - The lock is released when the process exits (normally or via signal).
+  - If the process crashes and leaves a stale lock, remove it manually:
+      rm ~/.axiom_api.lock  (or the path printed in the error message)
 """
 
 from __future__ import annotations
@@ -29,18 +31,21 @@ def _find_free_port(host: str) -> int:
 
 
 def _acquire_lock() -> bool:
-    """Acquire single-instance lock. Returns True if acquired, False if already held."""
+    """Acquire single-instance lock using atomic O_EXCL file creation.
+
+    Returns True if acquired, False if already held.  The lock file path is
+    ``_LOCK_FILE``; its path is also printed in the error message when
+    acquisition fails.  The file holds the current PID for diagnostic purposes
+    but is never used to check liveness — callers must delete the file to clear
+    a stale lock left by a crashed process.
+    """
     try:
-        if _LOCK_FILE.exists():
-            old_pid = _LOCK_FILE.read_text().strip()
-            try:
-                old_pid_int = int(old_pid)
-                os.kill(old_pid_int, 0)
-                return False
-            except (ValueError, ProcessLookupError):
-                pass
-        _LOCK_FILE.write_text(str(os.getpid()))
+        fd = os.open(str(_LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
         return True
+    except FileExistsError:
+        return False
     except OSError:
         return False
 
@@ -48,10 +53,27 @@ def _acquire_lock() -> bool:
 def _release_lock() -> None:
     """Release the single-instance lock."""
     try:
-        if _LOCK_FILE.exists() and _LOCK_FILE.read_text().strip() == str(os.getpid()):
-            _LOCK_FILE.unlink()
+        _LOCK_FILE.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _port_from_settings() -> int | None:
+    """Return api_port from settings.json if present and valid."""
+    try:
+        import json
+
+        settings_path = _REPO_ROOT / "settings.json"
+        if settings_path.exists():
+            data = json.loads(settings_path.read_text(encoding="utf-8"))
+            raw = data.get("api_port")
+            if raw is not None:
+                port = int(raw)
+                if 1 <= port <= 65535:
+                    return port
+    except Exception:
+        pass
+    return None
 
 
 def main() -> None:
@@ -68,7 +90,10 @@ def main() -> None:
 
     host = os.getenv("AXIOM_API_HOST", "127.0.0.1")
     port_env = os.getenv("AXIOM_API_PORT")
-    port = int(port_env) if port_env else _find_free_port(host)
+    if port_env:
+        port = int(port_env)
+    else:
+        port = _port_from_settings() or _find_free_port(host)
 
     print(f"AXIOM_API_LISTENING=http://{host}:{port}", flush=True)
     sys.stdout.flush()

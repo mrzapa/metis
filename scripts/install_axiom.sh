@@ -47,6 +47,13 @@ write_launcher() {
 #!/usr/bin/env bash
 # Auto-generated Axiom launcher — do not edit.
 # Pulls latest code and runs Axiom.
+#
+# Usage:
+#   axiom                  — Web UI (default)
+#   axiom --desktop        — Qt desktop GUI
+#   axiom --gui            — Qt desktop GUI (alias for --desktop)
+#   axiom --web            — Web UI (legacy no-op, same as default)
+#   axiom --cli <args>     — CLI mode (args forwarded to main.py)
 set -euo pipefail
 
 AXIOM_DIR="$INSTALL_DIR"
@@ -54,21 +61,46 @@ BRANCH="$BRANCH"
 VENV_PYTHON="$VENV_DIR/bin/python"
 
 # Pull latest code silently
-if [ -d "$AXIOM_DIR/.git" ]; then
-    git -C "$AXIOM_DIR" pull origin "$BRANCH" --ff-only 2>/dev/null || true
+if [ -d "\$AXIOM_DIR/.git" ]; then
+    git -C "\$AXIOM_DIR" pull origin "\$BRANCH" --ff-only 2>/dev/null || true
 fi
 
-# Start API server and open Axiom
-TEMP_OUTPUT=$(mktemp)
-"$VENV_PYTHON" -m axiom_app.api > "$TEMP_OUTPUT" 2>&1 &
-API_PID=$!
+# Parse flags — detect --desktop/--gui; strip mode flags from FILTERED_ARGS
+DESKTOP_MODE=false
+FILTERED_ARGS=()
+for arg in "\$@"; do
+    case "\$arg" in
+        --desktop)
+            DESKTOP_MODE=true
+            ;;
+        --gui)
+            DESKTOP_MODE=true
+            ;;
+        --web)
+            # Legacy no-op: --web is the default, so silently ignore it
+            ;;
+        *)
+            FILTERED_ARGS+=("\$arg")
+            ;;
+    esac
+done
+
+# Route to Qt desktop GUI when requested
+if [ "\$DESKTOP_MODE" = "true" ]; then
+    exec "\$VENV_PYTHON" "\$AXIOM_DIR/main.py" "\${FILTERED_ARGS[@]}"
+fi
+
+# Default: start API server and open browser (Web UI)
+TEMP_OUTPUT=\$(mktemp)
+"\$VENV_PYTHON" -m axiom_app.api > "\$TEMP_OUTPUT" 2>&1 &
+API_PID=\$!
 
 # Wait for API to start and print its listening URL
 API_URL=""
 for i in {1..30}; do
-    if [ -s "$TEMP_OUTPUT" ]; then
-        API_URL=$(grep "AXIOM_API_LISTENING=" "$TEMP_OUTPUT" | head -1 | sed 's/AXIOM_API_LISTENING=//' | tr -d '[:space:]')
-        if [ -n "$API_URL" ]; then
+    if [ -s "\$TEMP_OUTPUT" ]; then
+        API_URL=\$(grep "AXIOM_API_LISTENING=" "\$TEMP_OUTPUT" | head -1 | sed 's/AXIOM_API_LISTENING=//' | tr -d '[:space:]')
+        if [ -n "\$API_URL" ]; then
             break
         fi
     fi
@@ -76,24 +108,24 @@ for i in {1..30}; do
 done
 
 # Fallback if we couldn't detect the port
-if [ -z "$API_URL" ]; then
+if [ -z "\$API_URL" ]; then
     echo "Warning: Could not detect API port, using default localhost:3000"
     API_URL="http://localhost:3000"
 fi
 
-rm -f "$TEMP_OUTPUT"
+rm -f "\$TEMP_OUTPUT"
 
 # Open browser (cross-platform)
 if command -v xdg-open &>/dev/null; then
-    xdg-open "$API_URL"
+    xdg-open "\$API_URL"
 elif command -v open &>/dev/null; then
-    open "$API_URL"
+    open "\$API_URL"
 else
-    echo "Open $API_URL in your browser."
+    echo "Open \$API_URL in your browser."
 fi
-echo "Axiom running (PID $API_PID) at $API_URL. Press Ctrl+C to stop."
-trap "kill $API_PID 2>/dev/null" EXIT INT TERM
-wait $API_PID
+echo "Axiom running (PID \$API_PID) at \$API_URL. Press Ctrl+C to stop."
+trap "kill \$API_PID 2>/dev/null" EXIT INT TERM
+wait \$API_PID
 LAUNCHER_EOF
 
     chmod +x "$LAUNCHER"

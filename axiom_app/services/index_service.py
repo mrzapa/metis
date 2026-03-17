@@ -488,7 +488,7 @@ def persist_index_bundle(
         embedding_signature=str(bundle.embedding_signature or ""),
         source_files=list(bundle.documents),
         manifest_path=str(manifest_path),
-        bundle_path=str(bundle_path),
+        bundle_path=_BUNDLE_FILE,
         vector_store_path=str(vector_store_path) if vector_store_path else "",
         collection_name=str(
             collection_name

@@ -58,7 +58,16 @@ The installer clones the repo, sets up a virtual environment, installs dependenc
 axiom
 ```
 
-Axiom opens as a desktop app. Index your documents, start chatting, and get grounded answers.
+Axiom opens in your browser. Index your documents, start chatting, and get grounded answers.
+
+**Launch modes:**
+
+| Mode | Command | Notes |
+|------|---------|-------|
+| **Web UI** | `axiom` | Default — starts API server and opens browser |
+| **Qt Desktop GUI** | `axiom --desktop` | Launches the native Qt application |
+| **Qt Desktop GUI** | `axiom --gui` | Alias for `--desktop` |
+| **CLI** | `axiom --cli <command>` | Headless mode — see [CLI](#-cli) |
 
 ### Use
 
