@@ -226,7 +226,6 @@ def test_brain_graph_returns_nodes_and_edges(monkeypatch) -> None:
         def list_sessions(self, **_kwargs):  # type: ignore[override]
             return []
 
-    import axiom_app.api.app as _m
     import axiom_app.services.session_repository as _sr
 
     monkeypatch.setattr(_sr, "SessionRepository", lambda **_kw: _FakeRepo())
