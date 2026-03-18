@@ -88,12 +88,13 @@ if (`$desktopMode) {
 }
 
 # Default: start API server and open browser (Web UI)
-`$tempFile = [System.IO.Path]::GetTempFileName()
+`$tempFile    = [System.IO.Path]::GetTempFileName()
+`$tempErrFile = [System.IO.Path]::GetTempFileName()
 `$apiProcess = Start-Process -FilePath "$VenvPython" ``
     -ArgumentList "-m", "axiom_app.api" ``
     -WorkingDirectory `$axiomDir ``
     -PassThru -WindowStyle Minimized ``
-    -RedirectStandardOutput `$tempFile -RedirectStandardError `$tempFile
+    -RedirectStandardOutput `$tempFile -RedirectStandardError `$tempErrFile
 
 # Wait for API to start and print its listening URL (up to 15 seconds)
 `$apiUrl = ""
@@ -114,7 +115,8 @@ if ([string]::IsNullOrEmpty(`$apiUrl)) {
     `$apiUrl = "http://localhost:3000"
 }
 
-Remove-Item `$tempFile -ErrorAction SilentlyContinue
+Remove-Item `$tempFile    -ErrorAction SilentlyContinue
+Remove-Item `$tempErrFile -ErrorAction SilentlyContinue
 
 Start-Process `$apiUrl
 Write-Host "Axiom running (PID `$(`$apiProcess.Id)) at `$apiUrl. Press Ctrl+C to stop."
