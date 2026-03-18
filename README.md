@@ -58,7 +58,13 @@ The installer clones the repo, sets up a virtual environment, installs dependenc
 axiom
 ```
 
-Axiom opens as a desktop app. Index your documents, start chatting, and get grounded answers.
+Axiom opens the local web UI at `http://127.0.0.1:3000` by default.
+
+| Interface | Command |
+|-----------|---------|
+| **Web UI** | `axiom` |
+| **Desktop GUI** | `axiom --desktop` or `axiom --gui` |
+| **CLI** | `axiom --cli <command>` |
 
 ### Use
 
