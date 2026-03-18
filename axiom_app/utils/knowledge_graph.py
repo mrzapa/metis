@@ -1,7 +1,17 @@
 """Lightweight knowledge-graph utilities used by Axiom ingestion/retrieval.
 
-The implementation is intentionally dependency-light (stdlib only) so it can
-run in constrained environments where spaCy/networkx are unavailable.
+The implementation provides two extraction strategies:
+
+1. **Rule-based (default)**: stdlib-only heuristics — works in constrained
+   environments without additional dependencies.
+2. **spaCy-enhanced (optional)**: when spaCy is installed and a model is
+   available, uses NER for higher-quality entity extraction with typed labels
+   (PERSON, ORG, GPE, PRODUCT, etc.) and supports multilingual documents.
+
+To enable spaCy extraction, install spaCy and a language model::
+
+    pip install spacy
+    python -m spacy download en_core_web_sm
 """
 
 from __future__ import annotations
@@ -9,12 +19,17 @@ from __future__ import annotations
 from collections import Counter, deque
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "to", "for", "of", "in", "on", "at", "with",
     "from", "by", "as", "is", "are", "was", "were", "be", "been", "being", "that",
     "this", "it", "its", "their", "his", "her", "our", "your", "they", "we", "you",
 }
+
+# Cached spaCy NLP pipeline (loaded lazily on first use).
+_spacy_nlp: Any = None
+_spacy_available: bool | None = None  # None = not yet checked
 
 
 @dataclass(slots=True)
@@ -46,6 +61,82 @@ class KnowledgeGraph:
 
     def neighbors(self, entity: str) -> set[str]:
         return set(self.edges.get(canonicalize_entity(entity), {}).keys())
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise the graph to a JSON-compatible dictionary."""
+        return {
+            "nodes": {name: dict(attrs) for name, attrs in self.nodes.items()},
+            "edges": {
+                src: {tgt: list(rels) for tgt, rels in tgt_map.items()}
+                for src, tgt_map in self.edges.items()
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "KnowledgeGraph":
+        """Reconstruct a graph from a serialised dictionary."""
+        graph = cls()
+        for name, attrs in (data.get("nodes") or {}).items():
+            graph.nodes[name] = dict(attrs)
+        for src, tgt_map in (data.get("edges") or {}).items():
+            for tgt, rels in tgt_map.items():
+                graph.edges.setdefault(src, {})[tgt] = set(rels)
+        return graph
+
+
+def _load_spacy() -> Any:
+    """Attempt to load a spaCy NLP pipeline; return None on failure."""
+    global _spacy_nlp, _spacy_available  # noqa: PLW0603
+    if _spacy_available is False:
+        return None
+    if _spacy_nlp is not None:
+        return _spacy_nlp
+
+    try:
+        import spacy  # type: ignore[import-untyped]
+
+        # Try common English models in order of preference (smallest first for
+        # fast startup; users with a large model benefit automatically).
+        for model_name in ("en_core_web_sm", "en_core_web_md", "en_core_web_lg"):
+            try:
+                _spacy_nlp = spacy.load(model_name, disable=["parser", "lemmatizer"])
+                _spacy_available = True
+                return _spacy_nlp
+            except OSError:
+                continue
+
+        # No English model found — fall back to rule-based extraction.
+        _spacy_available = False
+        return None
+    except ImportError:
+        _spacy_available = False
+        return None
+
+
+def _extract_entities_spacy(chunk: str) -> tuple[list[tuple[str, str]], list[tuple[str, str, str]]]:
+    """spaCy-based entity extraction with typed NER labels."""
+    nlp = _load_spacy()
+    if nlp is None:
+        return extract_entities_and_relations(chunk)
+
+    doc = nlp(chunk)
+    entities: list[tuple[str, str]] = []
+    seen_texts: set[str] = set()
+
+    for ent in doc.ents:
+        text = ent.text.strip()
+        label = ent.label_
+        if not text or text.lower() in _STOPWORDS:
+            continue
+        canonical = canonicalize_entity(text)
+        if canonical and canonical not in seen_texts:
+            seen_texts.add(canonical)
+            entities.append((label, text))
+
+    # Relation extraction remains heuristic even with spaCy; a dedicated
+    # relation extractor (e.g., a cross-encoder) would improve this.
+    _, relations = extract_entities_and_relations(chunk)
+    return entities, relations
 
 
 
@@ -107,13 +198,25 @@ def normalise_entities(entities: list[tuple[str, str]]) -> list[tuple[str, str]]
 
 
 
-def build_knowledge_graph(chunks: list[str]) -> tuple[KnowledgeGraph, dict[str, set[int]]]:
-    """Build graph and reverse index mapping entity -> chunk indices."""
+def build_knowledge_graph(
+    chunks: list[str],
+    *,
+    use_spacy: bool = True,
+) -> tuple[KnowledgeGraph, dict[str, set[int]]]:
+    """Build graph and reverse index mapping entity -> chunk indices.
+
+    Args:
+        chunks: Text chunks to extract entities and relations from.
+        use_spacy: When ``True`` (default), use spaCy NER if available,
+            otherwise fall back to the rule-based heuristic extractor.
+    """
     graph = KnowledgeGraph()
     entity_to_chunks: dict[str, set[int]] = {}
 
+    extractor = _extract_entities_spacy if use_spacy else extract_entities_and_relations
+
     for idx, chunk in enumerate(chunks):
-        entities, rels = extract_entities_and_relations(chunk)
+        entities, rels = extractor(chunk)
         normalized_entities = normalise_entities(entities)
         cleaned_rels = glean_relationships(rels)
 

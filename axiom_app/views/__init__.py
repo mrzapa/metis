@@ -1,9 +1,8 @@
-"""axiom_app.views — Tkinter/ttk UI layer.
+"""axiom_app.views — Legacy Qt UI layer (deprecated).
 
-Modules
--------
-styles  : STYLE_CONFIG, UI_SPACING, get_palette, resolve_fonts, apply_ttk_theme
-widgets : AnimationEngine, IOSSegmentedToggle, CollapsibleFrame, RoundedCard,
-          TooltipManager
-app_view: AppView — sidebar-based main window (replaces the old ttk.Notebook layout)
+The Qt/PySide6 desktop interface has been removed. Axiom's primary interface
+is now the Tauri + Next.js web application located in ``apps/axiom-web/``.
+
+This package is kept as a namespace stub for backwards compatibility but no
+longer contains any PySide6 widgets or Qt-specific modules.
 """

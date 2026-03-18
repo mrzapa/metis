@@ -681,3 +681,34 @@ export async function unregisterGgufModel(id: string): Promise<{ status: string;
   }
   return res.json();
 }
+
+// ── Brain graph ────────────────────────────────────────────────────────────
+
+export interface BrainGraphNode {
+  node_id: string;
+  node_type: "category" | "index" | "session";
+  label: string;
+  x: number;
+  y: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface BrainGraphEdge {
+  source_id: string;
+  target_id: string;
+  edge_type: string;
+}
+
+export interface BrainGraphResponse {
+  nodes: BrainGraphNode[];
+  edges: BrainGraphEdge[];
+}
+
+export async function fetchBrainGraph(): Promise<BrainGraphResponse> {
+  const res = await apiFetch(`${await getApiBase()}/v1/brain/graph`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch brain graph (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
