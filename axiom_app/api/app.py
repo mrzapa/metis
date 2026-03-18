@@ -26,9 +26,9 @@ from axiom_app.engine import (
     stream_rag_answer,
 )
 from axiom_app.engine.querying import _normalize_run_id
-from axiom_app.models.brain_graph import BrainGraph
 from axiom_app.services.stream_replay import ReplayableRunStreamManager
 from axiom_app.services.trace_store import TraceStore
+from axiom_app.services.workspace_orchestrator import WorkspaceOrchestrator
 
 from . import gguf as _gguf
 from . import logs as _logs
@@ -132,17 +132,7 @@ def create_app() -> FastAPI:
     @app.get("/v1/brain/graph", dependencies=_auth)
     def api_brain_graph() -> dict[str, Any]:
         """Return the unified brain graph built from all indexes and sessions."""
-        import os
-        from axiom_app.services.session_repository import SessionRepository
-
-        indexes = _run_engine(list_indexes)
-
-        db_path = os.getenv("AXIOM_SESSION_DB_PATH") or None
-        repo = SessionRepository(db_path=db_path)
-        repo.init_db()
-        sessions = repo.list_sessions()
-
-        graph = BrainGraph().build_from_indexes_and_sessions(indexes, sessions)
+        graph = WorkspaceOrchestrator().get_workspace_graph()
 
         return {
             "nodes": [
