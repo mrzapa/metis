@@ -306,21 +306,31 @@ if ((Test-PortInUse -HostName `$apiHost -Port `$apiPort) -or (Test-PortInUse -Ho
 `$webStdErr = [System.IO.Path]::GetTempFileName()
 
 try {
-    `$apiProcess = Start-Process -FilePath `$venvPython `
-        -ArgumentList @("-m", "uvicorn", "axiom_app.api.app:app", "--host", `$apiHost, "--port", "`$apiPort") `
-        -WorkingDirectory `$axiomDir `
-        -PassThru -WindowStyle Minimized `
-        -RedirectStandardOutput `$apiStdOut -RedirectStandardError `$apiStdErr
+    `$apiSplat = @{
+        FilePath               = `$venvPython
+        ArgumentList           = @("-m", "uvicorn", "axiom_app.api.app:app", "--host", `$apiHost, "--port", "`$apiPort")
+        WorkingDirectory       = `$axiomDir
+        PassThru               = `$true
+        WindowStyle            = "Minimized"
+        RedirectStandardOutput = `$apiStdOut
+        RedirectStandardError  = `$apiStdErr
+    }
+    `$apiProcess = Start-Process @apiSplat
 
     if (-not (Wait-ForUrl -Label "API" -Url `$apiHealthUrl -Process `$apiProcess)) {
         Throw-StartupFailure -Label "API server" -Process `$apiProcess -StdOut `$apiStdOut -StdErr `$apiStdErr -Hint "Verify that FastAPI dependencies are installed and that port `$apiPort is available."
     }
 
-    `$webProcess = Start-Process -FilePath `$venvPython `
-        -ArgumentList @("-m", "http.server", "`$webPort", "--bind", `$webHost, "--directory", `$webDir) `
-        -WorkingDirectory `$axiomDir `
-        -PassThru -WindowStyle Minimized `
-        -RedirectStandardOutput `$webStdOut -RedirectStandardError `$webStdErr
+    `$webSplat = @{
+        FilePath               = `$venvPython
+        ArgumentList           = @("-m", "http.server", "`$webPort", "--bind", `$webHost, "--directory", `$webDir)
+        WorkingDirectory       = `$axiomDir
+        PassThru               = `$true
+        WindowStyle            = "Minimized"
+        RedirectStandardOutput = `$webStdOut
+        RedirectStandardError  = `$webStdErr
+    }
+    `$webProcess = Start-Process @webSplat
 
     if (-not (Wait-ForUrl -Label "Web UI" -Url `$webUrl -Process `$webProcess)) {
         Throw-StartupFailure -Label "Web UI server" -Process `$webProcess -StdOut `$webStdOut -StdErr `$webStdErr -Hint "Verify that the exported web bundle exists at `$webDir and that port `$webPort is available."
