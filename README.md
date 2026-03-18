@@ -19,12 +19,11 @@
 
 <br />
 
-Axiom is a **local-first desktop AI workspace** built with Tauri + Next.js + FastAPI. It runs entirely on your machine — your files never leave your device.
+Axiom is a **local-first AI workspace** built with Tauri + Next.js + FastAPI. It runs entirely on your machine — your files never leave your device.
 
 - **Fully local.** Run with a local GGUF model and you don't even need an internet connection.
 - **Swap anything.** LLM, embeddings, vector store — change providers in a config file. Today it's OpenAI, tomorrow it's a model on your laptop.
-- **Desktop-native.** Built with Tauri for a native window experience — no Electron bloat.
-- **Five ways to think.** Q&A, Summary, Tutor, Research, and Evidence Pack modes give you different lenses on the same documents.
+- **Desktop-native.** Built with Tauri for a native window experience — no Electron bloat.- **Five ways to think.** Q&A, Summary, Tutor, Research, and Evidence Pack modes give you different lenses on the same documents.
 
 <br />
 
@@ -65,8 +64,6 @@ Axiom opens in your browser. Index your documents, start chatting, and get groun
 | Mode | Command | Notes |
 |------|---------|-------|
 | **Web UI** | `axiom` | Default — starts API server and opens browser |
-| **Qt Desktop GUI** | `axiom --desktop` | Launches the native Qt application |
-| **Qt Desktop GUI** | `axiom --gui` | Alias for `--desktop` |
 | **CLI** | `axiom --cli <command>` | Headless mode — see [CLI](#-cli) |
 
 ### Use
@@ -101,12 +98,13 @@ Most RAG apps hardcode their stack. Axiom treats every layer as a plug-in. Switc
 
 ### Everything else
 
-- **Knowledge graphs** — automatic entity extraction and relationship linking
+- **Brain graph** — interactive visual graph of indexes, sessions, and entities with zoom, pan, and detail panels
+- **Knowledge graphs** — automatic entity extraction and relationship linking (rule-based; spaCy NER when installed)
 - **Persistent sessions** — SQLite-backed conversations
 - **Agent profiles** — save different configurations for different projects
 - **Structure-aware ingestion** — parses PDFs, DOCX, Markdown, HTML, plain text
 - **Background processing** — indexing and queries run in threads, UI never freezes
-- **Theming** — Space Dust, Light, and Dark themes
+- **Frontier AI theme** — dark mode with gradient accents and AI-native design
 
 ---
 

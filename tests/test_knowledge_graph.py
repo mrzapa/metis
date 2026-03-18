@@ -56,3 +56,26 @@ def test_extract_query_entities_falls_back_to_keywords() -> None:
     entities = extract_query_entities("what does recursion mean in algorithms")
     assert entities
     assert "recursion" in entities
+
+
+def test_knowledge_graph_to_dict_round_trips() -> None:
+    graph = KnowledgeGraph()
+    graph.add_node("python", entity_type="LANGUAGE")
+    graph.add_edge("python", "implements", "function")
+
+    data = graph.to_dict()
+    restored = KnowledgeGraph.from_dict(data)
+
+    assert "python" in restored.nodes
+    assert restored.nodes["python"]["type"] == "LANGUAGE"
+    assert "function" in restored.edges.get("python", {})
+    assert "implements" in restored.edges["python"]["function"]
+
+
+def test_build_knowledge_graph_use_spacy_false_uses_heuristic() -> None:
+    chunks = ["Alan Turing invented the Turing Machine."]
+    graph, entity_to_chunks = build_knowledge_graph(chunks, use_spacy=False)
+
+    assert isinstance(graph, KnowledgeGraph)
+    # Rule-based extractor should find at least one proper-noun entity
+    assert len(graph.nodes) > 0

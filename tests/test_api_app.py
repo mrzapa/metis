@@ -212,3 +212,33 @@ def test_stream_rag_error_event(monkeypatch, tmp_path) -> None:
 
     assert [frame_id for frame_id, _ in frames] == [1]
     assert [payload["type"] for _, payload in frames] == ["error"]
+
+
+def test_brain_graph_returns_nodes_and_edges(monkeypatch) -> None:
+    client = TestClient(api_app_module.create_app())
+
+    monkeypatch.setattr(api_app_module, "list_indexes", lambda: [])
+
+    class _FakeRepo:
+        def init_db(self) -> None:
+            pass
+
+        def list_sessions(self, **_kwargs):  # type: ignore[override]
+            return []
+
+    import axiom_app.api.app as _m
+    import axiom_app.services.session_repository as _sr
+
+    monkeypatch.setattr(_sr, "SessionRepository", lambda **_kw: _FakeRepo())
+
+    response = client.get("/v1/brain/graph")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "nodes" in payload
+    assert "edges" in payload
+    # Root categories are always present
+    node_ids = {n["node_id"] for n in payload["nodes"]}
+    assert "category:brain" in node_ids
+    assert "category:indexes" in node_ids
+    assert "category:sessions" in node_ids

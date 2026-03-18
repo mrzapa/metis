@@ -196,10 +196,14 @@ class TestReadmeDocs:
         )
 
     def test_readme_documents_desktop_override(self) -> None:
-        """README should document --desktop/--gui as Qt GUI override."""
+        """Qt --desktop/--gui flags have been removed; README should not document them."""
         content = README.read_text(encoding="utf-8")
-        assert "--desktop" in content, "README should document --desktop"
-        assert "--gui" in content, "README should document --gui"
+        assert "--desktop" not in content, (
+            "README should not document deprecated --desktop flag (Qt interface removed)"
+        )
+        assert "--gui" not in content, (
+            "README should not document deprecated --gui flag (Qt interface removed)"
+        )
 
     def test_readme_documents_cli_mode(self) -> None:
         """README should document --cli for CLI mode."""

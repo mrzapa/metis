@@ -1,8 +1,8 @@
 """axiom_app.config — Application-wide configuration constants and Config dataclass.
 
-This module holds shared app identity and baseline runtime defaults used by the
-MVC app while the legacy runtime remains available behind the default entry
-path.
+This module holds shared app identity and baseline runtime defaults.  The
+primary user interface is the Tauri + Next.js web application in
+``apps/axiom-web/``.  The legacy PySide6 desktop interface has been removed.
 
 Version: Read from VERSION file at repo root. All consumers (config.py, API,
 Tauri, frontend) should derive from this single source.
@@ -41,10 +41,10 @@ APP_SUBTITLE: str = "Personal RAG Assistant"
 
 # ---------------------------------------------------------------------------
 # UI backend
-# Valid values: "pyside6" | "ttk"
+# Valid values: "tauri" | "web"
 # ---------------------------------------------------------------------------
 
-UI_BACKEND_DEFAULT: str = "pyside6"
+UI_BACKEND_DEFAULT: str = "tauri"
 
 # ---------------------------------------------------------------------------
 # Config dataclass
