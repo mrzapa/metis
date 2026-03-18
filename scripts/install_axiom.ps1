@@ -94,13 +94,13 @@ function Show-Help {
 
 function Test-PortInUse {
     param(
-        [string]`$Host,
+        [string]`$HostName,
         [int]`$Port
     )
 
     `$client = [System.Net.Sockets.TcpClient]::new()
     try {
-        `$async = `$client.BeginConnect(`$Host, `$Port, `$null, `$null)
+        `$async = `$client.BeginConnect(`$HostName, `$Port, `$null, `$null)
         if (-not `$async.AsyncWaitHandle.WaitOne(250)) {
             return `$false
         }
@@ -289,7 +289,7 @@ if (-not (Test-Path (Join-Path `$webDir "index.html"))) {
     throw [System.InvalidOperationException]::new("Built web UI not found at `$webDir. Re-run the installer or build apps/axiom-web before launching.")
 }
 
-if ((Test-PortInUse -Host `$apiHost -Port `$apiPort) -or (Test-PortInUse -Host `$webHost -Port `$webPort)) {
+if ((Test-PortInUse -HostName `$apiHost -Port `$apiPort) -or (Test-PortInUse -HostName `$webHost -Port `$webPort)) {
     if ((Test-UrlReady -Url `$apiHealthUrl) -and (Test-UrlReady -Url `$webUrl)) {
         Start-Process `$webUrl
         Write-Host "Axiom is already running at `$webUrl."

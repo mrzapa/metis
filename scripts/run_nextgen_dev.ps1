@@ -46,13 +46,13 @@ function Get-InstallHint {
 
 function Test-PortInUse {
     param(
-        [string]$Host,
+        [string]$HostName,
         [int]$Port
     )
 
     $client = [System.Net.Sockets.TcpClient]::new()
     try {
-        $async = $client.BeginConnect($Host, $Port, $null, $null)
+        $async = $client.BeginConnect($HostName, $Port, $null, $null)
         if (-not $async.AsyncWaitHandle.WaitOne(250)) {
             return $false
         }
@@ -155,10 +155,10 @@ try {
     if (-not (Test-Path $WebNext)) {
         Fail "Web dependencies are missing. Run '$(Get-InstallHint)' and retry."
     }
-    if (Test-PortInUse -Host $ApiHost -Port $ApiPort) {
+    if (Test-PortInUse -HostName $ApiHost -Port $ApiPort) {
         Fail "Port $ApiPort is already in use. Stop the process on $ApiUrl or run the API separately."
     }
-    if (Test-PortInUse -Host $WebHost -Port $WebPort) {
+    if (Test-PortInUse -HostName $WebHost -Port $WebPort) {
         Fail "Port $WebPort is already in use. Stop the process on $WebUrl or free the Next dev port."
     }
 
