@@ -19,11 +19,12 @@
 
 <br />
 
-Axiom is a **local-first AI workspace** built with Tauri + Next.js + FastAPI. It runs entirely on your machine — your files never leave your device.
+Axiom is a **local-first desktop AI workspace** built with Tauri + Next.js + FastAPI. It runs entirely on your machine — your files never leave your device.
 
 - **Fully local.** Run with a local GGUF model and you don't even need an internet connection.
 - **Swap anything.** LLM, embeddings, vector store — change providers in a config file. Today it's OpenAI, tomorrow it's a model on your laptop.
-- **Desktop-native.** Built with Tauri for a native window experience — no Electron bloat.- **Five ways to think.** Q&A, Summary, Tutor, Research, and Evidence Pack modes give you different lenses on the same documents.
+- **Desktop-native.** Built with Tauri for a native window experience — no Electron bloat.
+- **Five ways to think.** Q&A, Summary, Tutor, Research, and Evidence Pack modes give you different lenses on the same documents.
 
 <br />
 
@@ -57,14 +58,13 @@ The installer clones the repo, sets up a virtual environment, installs dependenc
 axiom
 ```
 
-Axiom opens in your browser. Index your documents, start chatting, and get grounded answers.
+Axiom opens the local web UI at `http://127.0.0.1:3000` by default.
 
-**Launch modes:**
-
-| Mode | Command | Notes |
-|------|---------|-------|
-| **Web UI** | `axiom` | Default — starts API server and opens browser |
-| **CLI** | `axiom --cli <command>` | Headless mode — see [CLI](#-cli) |
+| Interface | Command |
+|-----------|---------|
+| **Web UI** | `axiom` |
+| **Desktop GUI** | `axiom --desktop` or `axiom --gui` |
+| **CLI** | `axiom --cli <command>` |
 
 ### Use
 
@@ -98,13 +98,12 @@ Most RAG apps hardcode their stack. Axiom treats every layer as a plug-in. Switc
 
 ### Everything else
 
-- **Brain graph** — interactive visual graph of indexes, sessions, and entities with zoom, pan, and detail panels
-- **Knowledge graphs** — automatic entity extraction and relationship linking (rule-based; spaCy NER when installed)
+- **Knowledge graphs** — automatic entity extraction and relationship linking
 - **Persistent sessions** — SQLite-backed conversations
 - **Agent profiles** — save different configurations for different projects
 - **Structure-aware ingestion** — parses PDFs, DOCX, Markdown, HTML, plain text
 - **Background processing** — indexing and queries run in threads, UI never freezes
-- **Frontier AI theme** — dark mode with gradient accents and AI-native design
+- **Theming** — Space Dust, Light, and Dark themes
 
 ---
 

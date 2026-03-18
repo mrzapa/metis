@@ -41,7 +41,7 @@ $RepoUrl     = if ($env:AXIOM_REPO)        { $env:AXIOM_REPO }        else { "ht
 $Branch      = if ($env:AXIOM_BRANCH)      { $env:AXIOM_BRANCH }      else { "main" }
 $PythonBin   = if ($env:AXIOM_PYTHON)      { $env:AXIOM_PYTHON }      else { "python" }
 $VenvDir     = Join-Path $InstallDir ".venv"
-$InstallSpec = "{0}[runtime-all]" -f $InstallDir
+$InstallSpec = "{0}[runtime-all,api]" -f $InstallDir
 $LauncherDir = Join-Path $HOME ".local" "bin"
 $LauncherPs1 = Join-Path $LauncherDir "axiom.ps1"
 $LauncherCmd = Join-Path $LauncherDir "axiom.cmd"
@@ -69,100 +69,293 @@ function Write-Launchers {
 #   axiom --web            -- Web UI (legacy no-op, same as default)
 #   axiom --cli <args>     -- CLI mode (args forwarded)
 `$ErrorActionPreference = "Stop"
-`$axiomDir = "$InstallDir"
-`$branch   = "$Branch"
+`$axiomDir    = "$InstallDir"
+`$branch      = "$Branch"
+`$venvPython  = "$VenvPython"
+`$apiHost     = "127.0.0.1"
+`$apiPort     = 8000
+`$webHost     = "127.0.0.1"
+`$webPort     = 3000
+`$apiUrl      = "http://`$(`$apiHost):`$(`$apiPort)"
+`$apiHealthUrl = "`$apiUrl/healthz"
+`$webUrl      = "http://`$(`$webHost):`$(`$webPort)"
+`$webDir      = Join-Path `$axiomDir "apps\axiom-web\out"
 
-# Pull latest code silently
+function Show-Help {
+    Write-Host "Axiom launcher"
+    Write-Host ""
+    Write-Host "Usage:"
+    Write-Host "  axiom                  Start the local API and static web UI"
+    Write-Host "  axiom --desktop        Start the legacy Qt desktop shell"
+    Write-Host "  axiom --gui            Alias for --desktop"
+    Write-Host "  axiom --cli <args>     Run the CLI"
+    Write-Host "  axiom --help           Show this help"
+}
+
+function Test-PortInUse {
+    param(
+        [string]`$Host,
+        [int]`$Port
+    )
+
+    `$client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        `$async = `$client.BeginConnect(`$Host, `$Port, `$null, `$null)
+        if (-not `$async.AsyncWaitHandle.WaitOne(250)) {
+            return `$false
+        }
+        `$null = `$client.EndConnect(`$async)
+        return `$true
+    }
+    catch {
+        return `$false
+    }
+    finally {
+        `$client.Dispose()
+    }
+}
+
+function Test-UrlReady {
+    param([string]`$Url)
+
+    `$client = [System.Net.Http.HttpClient]::new()
+    `$client.Timeout = [TimeSpan]::FromMilliseconds(500)
+
+    try {
+        `$response = `$client.GetAsync(`$Url).GetAwaiter().GetResult()
+        try {
+            return [int]`$response.StatusCode -ge 200 -and [int]`$response.StatusCode -lt 500
+        }
+        finally {
+            `$response.Dispose()
+        }
+    }
+    catch {
+        return `$false
+    }
+    finally {
+        `$client.Dispose()
+    }
+}
+
+function Wait-ForUrl {
+    param(
+        [string]`$Label,
+        [string]`$Url,
+        [System.Diagnostics.Process]`$Process,
+        [int]`$Attempts = 60
+    )
+
+    for (`$attempt = 0; `$attempt -lt `$Attempts; `$attempt++) {
+        if (Test-UrlReady -Url `$Url) {
+            return `$true
+        }
+        if (`$null -ne `$Process) {
+            try {
+                `$Process.Refresh()
+                if (`$Process.HasExited) {
+                    return `$false
+                }
+            } catch {
+                return `$false
+            }
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    Write-Host "`$Label did not respond within `$(`$Attempts / 2) seconds." -ForegroundColor Yellow
+    return `$false
+}
+
+function Get-LogTail {
+    param([string]`$Path)
+
+    if (-not (Test-Path `$Path)) {
+        return ""
+    }
+
+    return ((Get-Content `$Path -Tail 40 -ErrorAction SilentlyContinue) -join "`n").Trim()
+}
+
+function Throw-StartupFailure {
+    param(
+        [string]`$Label,
+        [System.Diagnostics.Process]`$Process,
+        [string]`$StdOut,
+        [string]`$StdErr,
+        [string]`$Hint
+    )
+
+    `$details = [System.Collections.Generic.List[string]]::new()
+    if (`$null -ne `$Process) {
+        try {
+            `$Process.Refresh()
+            if (`$Process.HasExited) {
+                `$details.Add("`$Label exited with code `$(`$Process.ExitCode).")
+            }
+        } catch {
+        }
+    }
+
+    `$stdoutTail = Get-LogTail -Path `$StdOut
+    if (-not [string]::IsNullOrWhiteSpace(`$stdoutTail)) {
+        `$details.Add("`$Label stdout:`n`$stdoutTail")
+    }
+
+    `$stderrTail = Get-LogTail -Path `$StdErr
+    if (-not [string]::IsNullOrWhiteSpace(`$stderrTail)) {
+        `$details.Add("`$Label stderr:`n`$stderrTail")
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace(`$Hint)) {
+        `$details.Add(`$Hint)
+    }
+
+    throw [System.InvalidOperationException]::new((`$details -join "`n`n"))
+}
+
+function Stop-ChildProcess {
+    param(
+        [System.Diagnostics.Process]`$Process,
+        [string]`$Label
+    )
+
+    if (`$null -eq `$Process) {
+        return
+    }
+
+    try {
+        `$Process.Refresh()
+    }
+    catch {
+        return
+    }
+
+    if (`$Process.HasExited) {
+        return
+    }
+
+    Write-Host "Stopping `$Label..." -ForegroundColor DarkGray
+    `$null = & taskkill /PID `$Process.Id /T /F 2>`$null
+    try {
+        `$null = `$Process.WaitForExit(5000)
+    }
+    catch {
+    }
+}
+
 if (Test-Path (Join-Path `$axiomDir ".git")) {
     try { git -C `$axiomDir pull origin `$branch --ff-only 2>`$null } catch {}
 }
 
-# Parse flags -- detect --desktop/--gui; collect remaining args into launchArgs
+`$showHelp = (`$args -contains "-h") -or (`$args -contains "--help")
 `$desktopMode = (`$args -contains "--desktop") -or (`$args -contains "--gui")
-`$launchArgs  = `$args | Where-Object { `$_ -ne "--desktop" -and `$_ -ne "--gui" -and `$_ -ne "--web" }
+`$cliMode = `$args -contains "--cli"
+`$launchArgs = @(`$args | Where-Object {
+    `$_ -ne "--desktop" -and
+    `$_ -ne "--gui" -and
+    `$_ -ne "--web" -and
+    `$_ -ne "--cli" -and
+    `$_ -ne "-h" -and
+    `$_ -ne "--help"
+})
 
-# Route to Qt desktop GUI when requested
-if (`$desktopMode) {
-    & "$VenvPython" "`$axiomDir\main.py" @launchArgs
-    exit `$LASTEXITCODE
+if (`$showHelp) {
+    Show-Help
+    exit 0
 }
 
-# Default: start API server and open browser (Web UI)
-`$tempFile    = [System.IO.Path]::GetTempFileName()
-`$tempErrFile = [System.IO.Path]::GetTempFileName()
-`$apiProcess = Start-Process -FilePath "$VenvPython" ``
-    -ArgumentList "-m", "axiom_app.api" ``
-    -WorkingDirectory `$axiomDir ``
-    -PassThru -WindowStyle Minimized ``
-    -RedirectStandardOutput `$tempFile -RedirectStandardError `$tempErrFile
+if (`$desktopMode -and `$cliMode) {
+    throw [System.InvalidOperationException]::new("Choose either --desktop/--gui or --cli, not both.")
+}
 
-# Wait for API to start and print its listening URL (up to 15 seconds)
-`$apiUrl = ""
-for (`$i = 0; `$i -lt 30; `$i++) {
-    Start-Sleep -Milliseconds 500
-    if (Test-Path `$tempFile) {
-        `$content = Get-Content `$tempFile -Raw -ErrorAction SilentlyContinue
-        if (`$content -match "AXIOM_API_LISTENING=(.+)") {
-            `$apiUrl = `$matches[1].Trim()
-            break
+Push-Location `$axiomDir
+try {
+    if (`$desktopMode) {
+        & `$venvPython (Join-Path `$axiomDir "main.py") @launchArgs
+        exit `$LASTEXITCODE
+    }
+
+    if (`$cliMode) {
+        & `$venvPython (Join-Path `$axiomDir "main.py") "--cli" @launchArgs
+        exit `$LASTEXITCODE
+    }
+}
+finally {
+    Pop-Location
+}
+
+if (-not (Test-Path (Join-Path `$webDir "index.html"))) {
+    throw [System.InvalidOperationException]::new("Built web UI not found at `$webDir. Re-run the installer or build apps/axiom-web before launching.")
+}
+
+if ((Test-PortInUse -Host `$apiHost -Port `$apiPort) -or (Test-PortInUse -Host `$webHost -Port `$webPort)) {
+    if ((Test-UrlReady -Url `$apiHealthUrl) -and (Test-UrlReady -Url `$webUrl)) {
+        Start-Process `$webUrl
+        Write-Host "Axiom is already running at `$webUrl."
+        exit 0
+    }
+    throw [System.InvalidOperationException]::new("Ports `$apiPort/`$webPort are already in use. Stop the existing processes or close the app before starting a new instance.")
+}
+
+`$apiProcess = `$null
+`$webProcess = `$null
+`$apiStdOut = [System.IO.Path]::GetTempFileName()
+`$apiStdErr = [System.IO.Path]::GetTempFileName()
+`$webStdOut = [System.IO.Path]::GetTempFileName()
+`$webStdErr = [System.IO.Path]::GetTempFileName()
+
+try {
+    `$apiProcess = Start-Process -FilePath `$venvPython `
+        -ArgumentList @("-m", "uvicorn", "axiom_app.api.app:app", "--host", `$apiHost, "--port", "`$apiPort") `
+        -WorkingDirectory `$axiomDir `
+        -PassThru -WindowStyle Minimized `
+        -RedirectStandardOutput `$apiStdOut -RedirectStandardError `$apiStdErr
+
+    if (-not (Wait-ForUrl -Label "API" -Url `$apiHealthUrl -Process `$apiProcess)) {
+        Throw-StartupFailure -Label "API server" -Process `$apiProcess -StdOut `$apiStdOut -StdErr `$apiStdErr -Hint "Verify that FastAPI dependencies are installed and that port `$apiPort is available."
+    }
+
+    `$webProcess = Start-Process -FilePath `$venvPython `
+        -ArgumentList @("-m", "http.server", "`$webPort", "--bind", `$webHost, "--directory", `$webDir) `
+        -WorkingDirectory `$axiomDir `
+        -PassThru -WindowStyle Minimized `
+        -RedirectStandardOutput `$webStdOut -RedirectStandardError `$webStdErr
+
+    if (-not (Wait-ForUrl -Label "Web UI" -Url `$webUrl -Process `$webProcess)) {
+        Throw-StartupFailure -Label "Web UI server" -Process `$webProcess -StdOut `$webStdOut -StdErr `$webStdErr -Hint "Verify that the exported web bundle exists at `$webDir and that port `$webPort is available."
+    }
+
+    Start-Process `$webUrl
+    Write-Host "Axiom running (API PID `$(`$apiProcess.Id), Web PID `$(`$webProcess.Id)) at `$webUrl. Press Ctrl+C to stop."
+
+    while (`$true) {
+        Start-Sleep -Seconds 1
+        `$apiProcess.Refresh()
+        `$webProcess.Refresh()
+        if (`$apiProcess.HasExited) {
+            Throw-StartupFailure -Label "API server" -Process `$apiProcess -StdOut `$apiStdOut -StdErr `$apiStdErr -Hint "The API server stopped unexpectedly."
+        }
+        if (`$webProcess.HasExited) {
+            Throw-StartupFailure -Label "Web UI server" -Process `$webProcess -StdOut `$webStdOut -StdErr `$webStdErr -Hint "The static web server stopped unexpectedly."
         }
     }
 }
-
-# Fallback if we couldn't detect the port
-if ([string]::IsNullOrEmpty(`$apiUrl)) {
-    Write-Host "Warning: Could not detect API port, using default localhost:3000"
-    `$apiUrl = "http://localhost:3000"
+finally {
+    Stop-ChildProcess -Process `$webProcess -Label "web UI server"
+    Stop-ChildProcess -Process `$apiProcess -Label "API server"
+    Remove-Item `$apiStdOut, `$apiStdErr, `$webStdOut, `$webStdErr -ErrorAction SilentlyContinue
 }
-
-Remove-Item `$tempFile    -ErrorAction SilentlyContinue
-Remove-Item `$tempErrFile -ErrorAction SilentlyContinue
-
-Start-Process `$apiUrl
-Write-Host "Axiom running (PID `$(`$apiProcess.Id)) at `$apiUrl. Press Ctrl+C to stop."
-try { Wait-Process -Id `$apiProcess.Id } catch {}
 "@ | Set-Content -Path $LauncherPs1 -Encoding UTF8
 
-    # CMD wrapper so `axiom` works from cmd.exe too
-    # --desktop/--gui: override to run Qt GUI instead of web UI (default).
-    # Legacy --web flag is ignored (treated as default web behavior).
+    # CMD wrapper so `axiom` works from cmd.exe too.
     @"
 @echo off
 REM Auto-generated Axiom launcher - do not edit.
-REM Usage:
-REM   axiom              -- Web UI (default)
-REM   axiom --desktop    -- Qt desktop GUI
-REM   axiom --gui        -- Qt desktop GUI (alias)
-REM   axiom --web        -- Web UI (legacy no-op)
-REM   axiom --cli ...    -- CLI mode (args forwarded)
-cd /d "$InstallDir"
-git pull origin $Branch --ff-only >nul 2>&1
-
-REM Collect all non-mode args into CMD_ARGS
-set CMD_ARGS=
-set DESKTOP_MODE=0
-:parse_args
-if "%~1"=="" goto end_parse
-if /I "%~1"=="--desktop" ( set DESKTOP_MODE=1 & shift & goto parse_args )
-if /I "%~1"=="--gui"     ( set DESKTOP_MODE=1 & shift & goto parse_args )
-if /I "%~1"=="--web"     ( shift & goto parse_args )
-set CMD_ARGS=%CMD_ARGS% %1
-shift
-goto parse_args
-:end_parse
-
-REM Route to Qt desktop GUI when requested
-if "%DESKTOP_MODE%"=="1" (
-    "$VenvPython" "$InstallDir\main.py" %CMD_ARGS%
-    exit /b %ERRORLEVEL%
-)
-
-REM Default: start API server and open browser
-start /min "" "$VenvPython" -m axiom_app.api
-timeout /t 2 /nobreak >nul
-start http://localhost:3000
-echo Axiom running. Close this window to stop.
-ping -n 10 127.0.0.1 >nul
+set "PS_BIN=%ProgramFiles%\PowerShell\7\pwsh.exe"
+if not exist "%PS_BIN%" set "PS_BIN=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+"%PS_BIN%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0axiom.ps1" %*
+exit /b %ERRORLEVEL%
 "@ | Set-Content -Path $LauncherCmd -Encoding ASCII
 }
 
