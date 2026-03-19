@@ -66,9 +66,17 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat }: SessionsPanel
           )}
 
           {!loading && !error && sessions.length === 0 && (
-            <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-              {search ? "No matching sessions" : "No sessions yet"}
-            </p>
+            <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
+              <MessageSquarePlus className="size-5 text-muted-foreground/60" />
+              <p className="text-xs text-muted-foreground">
+                {search ? "No matching sessions" : "No sessions yet"}
+              </p>
+              {!search && (
+                <Button variant="outline" size="sm" className="mt-1" onClick={onNewChat}>
+                  Start a conversation
+                </Button>
+              )}
+            </div>
           )}
 
           {sessions.map((s) => (
