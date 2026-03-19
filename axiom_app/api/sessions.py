@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from axiom_app.services.session_repository import SessionRepository
 
 from .models import (
+    CreateSessionRequestModel,
     FeedbackRequestModel,
     FeedbackResponseModel,
     SessionDetailModel,
@@ -43,6 +44,16 @@ def list_sessions(
     """List session summaries with optional full-text search and skill filter."""
     summaries = repo.list_sessions(search=search, skill=skill)
     return [SessionSummaryModel.from_dataclass(s) for s in summaries]
+
+
+@router.post("", response_model=SessionSummaryModel, status_code=201)
+def create_session(
+    payload: CreateSessionRequestModel,
+    repo: _RepoDep = ...,
+) -> SessionSummaryModel:
+    """Create a new session with the given title."""
+    summary = repo.create_session(title=payload.title or "New Chat")
+    return SessionSummaryModel.from_dataclass(summary)
 
 
 @router.get("/{session_id}", response_model=SessionDetailModel)

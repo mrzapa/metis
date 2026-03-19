@@ -7,7 +7,7 @@ import { ChatPanel } from "@/components/chat/chat-panel";
 import { EvidencePanel } from "@/components/chat/evidence-panel";
 import { Badge } from "@/components/ui/badge";
 import { PageChrome } from "@/components/shell/page-chrome";
-import { fetchSession, fetchSettings, updateSettings, queryDirect, queryRagStream, submitRunAction } from "@/lib/api";
+import { fetchSession, fetchSettings, updateSettings, queryDirect, queryRagStream, submitRunAction, createSession } from "@/lib/api";
 import type { SessionSummary, TraceEvent } from "@/lib/api";
 import type { RagStreamEvent } from "@/lib/api";
 import type { EvidenceSource } from "@/lib/chat-types";
@@ -148,6 +148,7 @@ export default function ChatPage() {
   const [shellPostureToken, setShellPostureToken] = useState(0);
   const [preferredEvidenceTab, setPreferredEvidenceTab] = useState<"sources" | "trace">("sources");
   const [initialDraft, setInitialDraft] = useState("");
+  const [sessionRefreshToken, setSessionRefreshToken] = useState(0);
   const [selectedRagMode, setSelectedRagMode] = useState<string>("Q&A");
   const {
     createMessage,
@@ -410,6 +411,23 @@ export default function ChatPage() {
     [agenticMode, applyShellPosture, loadSession, publishResumableRun, stopRagStream],
   );
 
+  const autoCreateSession = useCallback(
+    async (question: string): Promise<void> => {
+      if (selectedId !== null || messages.length > 0) return;
+      const trimmed = question.trim();
+      const title = trimmed.slice(0, 60) + (trimmed.length > 60 ? "…" : "");
+      try {
+        const summary = await createSession(title || "New Chat");
+        setSelectedId(summary.session_id);
+        setSessionMeta(summary);
+        setSessionRefreshToken((t) => t + 1);
+      } catch {
+        // Best-effort — proceed without a session if creation fails.
+      }
+    },
+    [selectedId, messages.length],
+  );
+
   const handleDirectSend = useCallback(
     async (prompt: string) => {
       setIsSending(true);
@@ -423,6 +441,8 @@ export default function ChatPage() {
           sources: [],
         }),
       ]);
+
+      await autoCreateSession(prompt);
 
       try {
         if (!settingsRef.current) {
@@ -461,7 +481,7 @@ export default function ChatPage() {
         setIsSending(false);
       }
     },
-    [appendCompletedRunMessage, appendMessages, createMessage],
+    [appendCompletedRunMessage, appendMessages, autoCreateSession, createMessage],
   );
 
   const startRagStream = useCallback(
@@ -764,6 +784,8 @@ export default function ChatPage() {
       stopRagStream("navigation");
       publishResumableRun(null);
 
+      await autoCreateSession(question);
+
       const userMessageTs = new Date().toISOString();
       const assistantMessageTs = new Date().toISOString();
       const runId = createClientRunId();
@@ -811,6 +833,7 @@ export default function ChatPage() {
       activeIndexLabel,
       activeIndexPath,
       appendMessages,
+      autoCreateSession,
       createMessage,
       isStreamingRag,
       publishResumableRun,
@@ -946,6 +969,7 @@ export default function ChatPage() {
                   selectedId={selectedId}
                   onSelect={handleSelect}
                   onNewChat={handleNewChat}
+                  refreshToken={sessionRefreshToken}
                 />
               ),
             },

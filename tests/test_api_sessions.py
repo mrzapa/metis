@@ -139,6 +139,38 @@ def test_get_session_no_absolute_file_paths_in_sources(client, repo):
 
 
 # ---------------------------------------------------------------------------
+# POST /v1/sessions
+# ---------------------------------------------------------------------------
+
+
+def test_create_session_returns_summary(client):
+    r = client.post("/v1/sessions", json={"title": "My first chat"})
+
+    assert r.status_code == 201
+    body = r.json()
+    assert body["title"] == "My first chat"
+    assert body["session_id"]
+
+
+def test_create_session_appears_in_list(client):
+    client.post("/v1/sessions", json={"title": "Auto session"})
+
+    r = client.get("/v1/sessions")
+
+    assert r.status_code == 200
+    items = r.json()
+    assert len(items) == 1
+    assert items[0]["title"] == "Auto session"
+
+
+def test_create_session_default_title(client):
+    r = client.post("/v1/sessions", json={})
+
+    assert r.status_code == 201
+    assert r.json()["title"] == "New Chat"
+
+
+# ---------------------------------------------------------------------------
 # POST /v1/sessions/{session_id}/feedback
 # ---------------------------------------------------------------------------
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -13,11 +13,20 @@ interface SessionsPanelProps {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onNewChat: () => void;
+  refreshToken?: number;
 }
 
-export function SessionsPanel({ selectedId, onSelect, onNewChat }: SessionsPanelProps) {
+export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }: SessionsPanelProps) {
   const [search, setSearch] = useState("");
-  const { sessions, loading, error } = useSessions(search);
+  const { sessions, loading, error, reload } = useSessions(search);
+
+  // Reload the session list whenever the parent bumps the refresh token.
+  const prevRefreshTokenRef = useRef(refreshToken);
+  useEffect(() => {
+    if (refreshToken === undefined || prevRefreshTokenRef.current === refreshToken) return;
+    prevRefreshTokenRef.current = refreshToken;
+    reload();
+  }, [refreshToken, reload]);
 
   const isConnectionError = error?.toLowerCase().includes("connection error");
 

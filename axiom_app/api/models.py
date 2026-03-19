@@ -281,6 +281,12 @@ class RunActionRequestModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class CreateSessionRequestModel(BaseModel):
+    title: str = "New Chat"
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class FeedbackRequestModel(BaseModel):
     run_id: str
     vote: int  # -1 or 1; repo accepts any int
