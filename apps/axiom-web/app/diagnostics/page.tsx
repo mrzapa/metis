@@ -73,8 +73,8 @@ export default function DiagnosticsPage() {
   return (
     <PageChrome
       eyebrow="Diagnostics"
-      title="Inspect compatibility, logs, and safe settings without leaving the shell."
-      description="Diagnostics is still the recovery path for startup failures, but it now looks and feels like part of the product instead of a detached support page."
+      title="System health and logs"
+      description="Check API compatibility, view logs, and inspect settings. Useful for troubleshooting startup or connection issues."
       actions={
         <Button
           onClick={handleCopy}

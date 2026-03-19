@@ -903,27 +903,15 @@ export default function ChatPage() {
 
   return (
     <PageChrome
-      eyebrow="Conversation Console"
-      title="Run grounded conversations inside a calmer AI workspace."
-      description="Switch between direct reasoning and RAG, inspect evidence and trace data, and keep the active index close without sacrificing flow."
+      eyebrow="Chat"
+      title="Ask questions, get grounded answers"
+      description="Switch between direct reasoning and retrieval-augmented mode. Inspect evidence, trace data, and manage sessions."
       actions={
         <>
-          <Badge variant="outline">Ctrl/Cmd + K focuses the composer</Badge>
-          {activeIndexLabel ? <Badge variant="outline">Active index: {activeIndexLabel}</Badge> : null}
+          {activeIndexLabel ? <Badge variant="outline">Index: {activeIndexLabel}</Badge> : null}
         </>
       }
-      heroAside={
-        <div className="space-y-2">
-          <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
-            Conversation posture
-          </p>
-          <p className="text-sm leading-7 text-muted-foreground">
-            {agenticMode
-              ? "Agentic mode is guiding the shell toward trace-first review so you can watch the system reason in real time."
-              : "Direct or RAG sessions stay centered on the transcript, with evidence and trace always one panel away."}
-          </p>
-        </div>
-      }
+      heroAside={undefined}
       fullBleed
       contentClassName="rounded-none border-0 bg-transparent p-0"
     >

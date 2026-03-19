@@ -297,9 +297,9 @@ export default function GgufPage() {
 
   return (
     <PageChrome
-      eyebrow="Local Models"
-      title="Manage GGUF models inside the same workspace shell."
-      description="Catalog browsing, hardware fit, validation, and local registration now sit alongside the rest of Axiom instead of feeling like an isolated admin utility."
+      eyebrow="Models"
+      title="Manage local GGUF models"
+      description="Browse the catalog, check hardware compatibility, validate, and register local models for fully offline inference."
       actions={
         <>
           <div className="flex items-center gap-2 rounded-full border border-white/8 bg-black/10 px-3 py-1.5 text-sm">
