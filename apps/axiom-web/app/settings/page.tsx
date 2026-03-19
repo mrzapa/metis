@@ -260,19 +260,9 @@ export default function SettingsPage() {
 
   return (
     <PageChrome
-      eyebrow="Workspace Settings"
-      title="Tune the model, retrieval, graph, and memory stack."
-      description="Axiom still exposes deep controls, but they now live inside the same shell and visual language as the rest of the workspace."
-      heroAside={
-        <div className="space-y-2">
-          <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
-            Settings posture
-          </p>
-          <p className="text-sm leading-7 text-muted-foreground">
-            These controls are intentionally low-level. Use them when you want to shape retrieval quality, graph behavior, or model limits beyond the default onboarding flow.
-          </p>
-        </div>
-      }
+      eyebrow="Settings"
+      title="Configure your workspace"
+      description="Fine-tune model providers, retrieval parameters, graph behavior, and memory settings."
     >
       <div className="mx-auto max-w-3xl space-y-8">
         <div>

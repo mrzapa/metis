@@ -88,9 +88,9 @@ export default function BrainPage() {
 
   return (
     <PageChrome
-      eyebrow="Workspace Graph"
-      title="See how sessions, indexes, and categories connect."
-      description="The brain graph turns Axiom’s internals into a live map so users can orient themselves inside the workspace instead of guessing what exists."
+      eyebrow="Brain"
+      title="Visualize your knowledge graph"
+      description="Explore how sessions, indexes, and categories connect across your workspace."
       actions={
         <>
           <Input
