@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AmbientBackdrop } from "@/components/shell/ambient-backdrop";
@@ -393,47 +392,36 @@ export default function SetupPage() {
       <AmbientBackdrop />
 
       <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col px-4 pb-8 pt-4 sm:px-6 lg:px-8">
-        <header className="glass-panel flex flex-wrap items-center gap-3 rounded-[1.6rem] px-4 py-3 sm:px-5">
+        <header className="glass-panel flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3 sm:px-5">
           <div>
-            <p className="font-display text-lg font-semibold tracking-[-0.04em] text-foreground">
+            <p className="text-lg font-semibold tracking-tight text-foreground">
               Axiom Setup
             </p>
-            <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
-              guided first launch
+            <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+              First-run configuration
             </p>
           </div>
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <StatusPill label={`Step ${step + 1} of ${steps.length}`} tone="checking" />
             <Link href="/">
-              <Button variant="outline" size="sm">Back to welcome</Button>
+              <Button variant="outline" size="sm">Back to home</Button>
             </Link>
           </div>
         </header>
 
         <main className="flex-1 py-8">
-          <section className="mb-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-end">
-            <div className="glass-panel rounded-[1.8rem] px-5 py-6 sm:px-6">
-              <p className="font-display text-xs uppercase tracking-[0.32em] text-primary/90">
-                First-run journey
+          <section className="mb-6">
+            <div className="glass-panel rounded-2xl px-5 py-5 sm:px-6">
+              <p className="text-xs font-medium uppercase tracking-[0.2em] text-primary/80">
+                Getting started
               </p>
-              <h1 className="mt-3 font-display text-balance text-4xl font-semibold tracking-[-0.05em] text-foreground">
-                Make the first launch feel capable in under ten minutes.
+              <h1 className="mt-2 text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+                Set up your workspace
               </h1>
-              <p className="mt-3 max-w-3xl text-pretty text-sm leading-7 text-muted-foreground sm:text-base">
-                Configure the model stack, build the first index, and leave onboarding with a staged chat prompt instead of a dead-end success screen.
+              <p className="mt-2 max-w-2xl text-pretty text-sm leading-relaxed text-muted-foreground">
+                Configure your model provider, choose embedding settings, and optionally import your first documents. This takes about two minutes.
               </p>
-            </div>
-
-            <div className="glass-panel rounded-[1.5rem] px-5 py-4">
-              <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
-                Setup outcomes
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Badge variant="outline">Model provider selected</Badge>
-                <Badge variant="outline">Embedding provider selected</Badge>
-                <Badge variant="outline">Starter prompt staged</Badge>
-              </div>
             </div>
           </section>
 
