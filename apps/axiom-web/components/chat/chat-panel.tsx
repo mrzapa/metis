@@ -53,6 +53,9 @@ interface ChatPanelProps {
   liveTraceEvents?: TraceEvent[];
 }
 
+const RAG_MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"] as const;
+const DEFAULT_RAG_MODE = "Q&A";
+
 export function ChatPanel({
   messages,
   sessionMeta,
@@ -72,6 +75,8 @@ export function ChatPanel({
   modelName,
   onModelChange,
   composerRef,
+  selectedMode,
+  onModeChange,
   onActionApprove,
   onActionDeny,
   reconnectState,
@@ -415,7 +420,7 @@ export function ChatPanel({
       {/* Composer */}
       <div className="border-t border-white/8 bg-black/10 p-3">
         <div className="mx-auto max-w-3xl space-y-2">
-          {/* Mode selector */}
+          {/* Path + RAG mode selector */}
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted-foreground">Path:</span>
             <button
@@ -442,6 +447,26 @@ export function ChatPanel({
             >
               RAG
             </button>
+            {queryMode === "rag" && (
+              <>
+                <span className="text-[11px] text-muted-foreground/50">·</span>
+                <span className="text-[11px] text-muted-foreground">Mode:</span>
+                <select
+                  value={selectedMode ?? DEFAULT_RAG_MODE}
+                  onChange={(e) => {
+                    onModeChange?.(e.target.value);
+                  }}
+                  className="rounded-full bg-muted px-3 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/80 focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
+                  aria-label="RAG mode"
+                >
+                  {RAG_MODES.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
           </div>
 
           <div className="flex items-end gap-2">

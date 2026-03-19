@@ -148,6 +148,7 @@ export default function ChatPage() {
   const [shellPostureToken, setShellPostureToken] = useState(0);
   const [preferredEvidenceTab, setPreferredEvidenceTab] = useState<"sources" | "trace">("sources");
   const [initialDraft, setInitialDraft] = useState("");
+  const [selectedRagMode, setSelectedRagMode] = useState<string>("Q&A");
   const {
     createMessage,
     restoreStreamingRun,
@@ -254,11 +255,24 @@ export default function ChatPage() {
         const isAgentic = Boolean(settings.agentic_mode);
         setAgenticMode(isAgentic);
         applyShellPosture(isAgentic);
+
+        const mode = String(settings.selected_mode ?? "Q&A");
+        setSelectedRagMode(mode);
       })
       .catch(() => {
         // Keep the badge empty on fetch error.
       });
   }, [applyShellPosture]);
+
+  const handleRagModeChange = useCallback(async (mode: string) => {
+    setSelectedRagMode(mode);
+    try {
+      await updateSettings({ selected_mode: mode });
+      settingsRef.current = null;
+    } catch {
+      // Best-effort — the mode is still applied for the current session.
+    }
+  }, []);
 
   const handleModelChange = useCallback((provider: string, model: string) => {
     setModelProvider(provider);
@@ -526,7 +540,9 @@ export default function ChatPage() {
             settingsRef.current = await fetchSettings();
           }
 
-          await queryRagStream(manifestPath, question, settingsRef.current, {
+          const ragSettings = { ...settingsRef.current, selected_mode: selectedRagMode };
+
+          await queryRagStream(manifestPath, question, ragSettings, {
             signal: controller.signal,
             runId,
             lastEventId: attemptLastEventId,
@@ -732,6 +748,7 @@ export default function ChatPage() {
       markRunActionRequired,
       markRunError,
       publishResumableRun,
+      selectedRagMode,
       setMessageStatus,
       setRunPendingSources,
       setRunSubqueries,
@@ -969,6 +986,8 @@ export default function ChatPage() {
                   modelName={modelName}
                   onModelChange={handleModelChange}
                   composerRef={composerRef}
+                  selectedMode={selectedRagMode}
+                  onModeChange={handleRagModeChange}
                   onActionApprove={handleActionApprove}
                   onActionDeny={handleActionDeny}
                   agenticMode={agenticMode}
