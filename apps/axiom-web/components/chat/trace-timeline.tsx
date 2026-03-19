@@ -65,7 +65,7 @@ function PayloadViewer({ payload }: { payload: Record<string, unknown> }) {
 
   return (
     <div className="mt-1">
-      <pre className="text-xs font-mono bg-muted/50 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
+      <pre className="overflow-x-auto rounded-2xl border border-white/8 bg-black/12 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">
         {display}
       </pre>
       {wasTruncated && (
@@ -112,7 +112,7 @@ function TraceEventRow({ event }: { event: TraceEvent }) {
         className={`absolute left-0 top-[7px] size-2 rounded-full ${dotColor}`}
       />
 
-      <div className="border rounded-md overflow-hidden">
+      <div className="overflow-hidden rounded-2xl border border-white/8 bg-black/10">
         <button
           onClick={() => setOpen((v) => !v)}
           className="w-full flex items-start gap-2 px-3 py-2 hover:bg-muted/40 text-left transition-colors"
@@ -146,7 +146,7 @@ function TraceEventRow({ event }: { event: TraceEvent }) {
         </button>
 
         {open && hasPayload && (
-          <div className="px-3 pb-3 pt-1 border-t bg-muted/20">
+          <div className="border-t border-white/8 bg-black/12 px-3 pb-3 pt-1">
             <PayloadViewer payload={event.payload} />
           </div>
         )}

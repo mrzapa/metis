@@ -22,9 +22,9 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat }: SessionsPanel
   const isConnectionError = error?.toLowerCase().includes("connection error");
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="glass-panel flex h-full flex-col overflow-hidden rounded-[1.8rem]">
       {/* Header */}
-      <div className="flex items-center justify-between border-b px-3 py-2">
+      <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
         <h2 className="text-sm font-semibold">Sessions</h2>
         <Button variant="ghost" size="icon" className="size-7" aria-label="New chat" onClick={onNewChat}>
           <MessageSquarePlus className="size-4" />
@@ -32,20 +32,20 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat }: SessionsPanel
       </div>
 
       {/* Search */}
-      <div className="relative border-b px-3 py-2">
-        <Search className="absolute left-5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+      <div className="relative border-b border-white/8 px-4 py-3">
+        <Search className="absolute left-7 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
           placeholder="Search sessions…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-8 pl-8 text-sm"
+          className="h-9 pl-9 text-sm"
           aria-label="Search sessions"
         />
       </div>
 
       {/* Session list */}
       <ScrollArea className="flex-1">
-        <div className="p-1" role="listbox" aria-label="Sessions">
+        <div className="space-y-1 p-2" role="listbox" aria-label="Sessions">
           {loading && (
             <p className="px-3 py-8 text-center text-xs text-muted-foreground">
               Loading…
@@ -78,8 +78,10 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat }: SessionsPanel
               aria-selected={selectedId === s.session_id}
               onClick={() => onSelect(s.session_id)}
               className={cn(
-                "flex w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-accent",
-                selectedId === s.session_id && "bg-accent"
+                "flex w-full cursor-pointer flex-col gap-1 rounded-[1.2rem] border px-3 py-3 text-left text-sm transition-all duration-200 hover:border-primary/18 hover:bg-white/6",
+                selectedId === s.session_id
+                  ? "border-primary/20 bg-primary/10"
+                  : "border-transparent bg-transparent"
               )}
             >
               <span className="truncate font-medium">
@@ -108,10 +110,10 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat }: SessionsPanel
       </ScrollArea>
 
       {/* Footer nav */}
-      <div className="border-t px-3 py-2">
+      <div className="border-t border-white/8 px-4 py-3">
         <Link
           href="/settings"
-          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-white/6 hover:text-foreground"
         >
           <Settings className="size-3.5" />
           Settings

@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 import {
   fetchGgufCatalog,
   fetchGgufHardware,
@@ -15,6 +14,7 @@ import {
   type GgufInstalledEntry,
   type GgufValidateResult,
 } from "@/lib/api";
+import { PageChrome } from "@/components/shell/page-chrome";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -24,7 +24,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertCircle,
   CheckCircle2,
-  ChevronRight,
   Cpu,
   HardDrive,
   Loader2,
@@ -215,7 +214,7 @@ export default function GgufPage() {
   // Unregister state
   const [unregistering, setUnregistering] = useState<string | null>(null);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -232,11 +231,11 @@ export default function GgufPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [useCase]);
 
   useEffect(() => {
     loadData();
-  }, [useCase]);
+  }, [loadData]);
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -297,25 +296,44 @@ export default function GgufPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Nav */}
-      <header className="flex h-12 items-center gap-4 border-b px-6">
-        <Link href="/" className="text-sm font-semibold tracking-tight">
-          Axiom
-        </Link>
-        <ChevronRight className="size-3.5 text-muted-foreground" />
-        <span className="text-sm text-muted-foreground">GGUF Models</span>
-        <div className="ml-auto flex items-center gap-4">
-          <Link href="/settings" className="text-sm text-muted-foreground hover:text-foreground">
-            Settings
-          </Link>
-          <Link href="/chat" className="text-sm text-muted-foreground hover:text-foreground">
-            Chat →
-          </Link>
+    <PageChrome
+      eyebrow="Local Models"
+      title="Manage GGUF models inside the same workspace shell."
+      description="Catalog browsing, hardware fit, validation, and local registration now sit alongside the rest of Axiom instead of feeling like an isolated admin utility."
+      actions={
+        <>
+          <div className="flex items-center gap-2 rounded-full border border-white/8 bg-black/10 px-3 py-1.5 text-sm">
+            <span className="text-muted-foreground">Use case</span>
+            <select
+              value={useCase}
+              onChange={(e) => setUseCase(e.target.value)}
+              className="bg-transparent text-foreground outline-none"
+            >
+              {USE_CASES.map((uc) => (
+                <option key={uc.value} value={uc.value} className="bg-background text-foreground">
+                  {uc.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button variant="outline" onClick={handleRefresh} disabled={refreshing} className="gap-1.5">
+            {refreshing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            Refresh
+          </Button>
+        </>
+      }
+      heroAside={
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+            Local inference posture
+          </p>
+          <p className="text-sm leading-7 text-muted-foreground">
+            Browse advisory hardware fit, validate a GGUF file before registering it, and keep a local model catalog close to the rest of the workspace.
+          </p>
         </div>
-      </header>
-
-      <main className="mx-auto max-w-4xl space-y-6 px-4 py-8">
+      }
+    >
+      <div className="mx-auto max-w-4xl space-y-6">
         <div>
           <h1 className="text-lg font-semibold">GGUF Model Management</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -339,28 +357,6 @@ export default function GgufPage() {
           <>
             {/* Hardware Profile */}
             {hardware && <HardwareCard hardware={hardware} />}
-
-            {/* Actions Bar */}
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Use case:</span>
-                <select
-                  value={useCase}
-                  onChange={(e) => setUseCase(e.target.value)}
-                  className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
-                >
-                  {USE_CASES.map((uc) => (
-                    <option key={uc.value} value={uc.value}>
-                      {uc.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <Button variant="outline" onClick={handleRefresh} disabled={refreshing} className="gap-1.5">
-                {refreshing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                Refresh
-              </Button>
-            </div>
 
             <Separator />
 
@@ -458,7 +454,7 @@ export default function GgufPage() {
             </Tabs>
           </>
         )}
-      </main>
-    </div>
+      </div>
+    </PageChrome>
   );
 }

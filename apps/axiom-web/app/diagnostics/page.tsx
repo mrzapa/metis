@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { AlertCircle, CheckCircle2, ChevronRight, ClipboardCopy, Loader2, TriangleAlert } from "lucide-react";
+import { AlertCircle, CheckCircle2, ClipboardCopy, Loader2, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { PageChrome } from "@/components/shell/page-chrome";
 import { fetchSettings, fetchLogTail, fetchApiVersion, checkApiCompatibility, type LogTailResult } from "@/lib/api";
 
 const WEB_VERSION = "1.0";
@@ -71,25 +71,42 @@ export default function DiagnosticsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Nav */}
-      <header className="flex h-12 items-center gap-4 border-b px-6">
-        <Link href="/" className="text-sm font-semibold tracking-tight">
-          Axiom
-        </Link>
-        <ChevronRight className="size-3.5 text-muted-foreground" />
-        <span className="text-sm text-muted-foreground">Diagnostics</span>
-        <div className="ml-auto flex items-center gap-4">
-          <Link href="/settings" className="text-sm text-muted-foreground hover:text-foreground">
-            Settings
-          </Link>
-          <Link href="/chat" className="text-sm text-muted-foreground hover:text-foreground">
-            Chat →
-          </Link>
+    <PageChrome
+      eyebrow="Diagnostics"
+      title="Inspect compatibility, logs, and safe settings without leaving the shell."
+      description="Diagnostics is still the recovery path for startup failures, but it now looks and feels like part of the product instead of a detached support page."
+      actions={
+        <Button
+          onClick={handleCopy}
+          disabled={loading || !!error}
+          variant="outline"
+          className="gap-1.5"
+        >
+          {copied ? (
+            <>
+              <CheckCircle2 className="size-4 text-green-600" />
+              Copied
+            </>
+          ) : (
+            <>
+              <ClipboardCopy className="size-4" />
+              Copy diagnostics
+            </>
+          )}
+        </Button>
+      }
+      heroAside={
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+            Recovery posture
+          </p>
+          <p className="text-sm leading-7 text-muted-foreground">
+            Version mismatches, safe settings, and the redacted API log tail all live here so startup and runtime failures are easier to diagnose.
+          </p>
         </div>
-      </header>
-
-      <main className="mx-auto max-w-3xl space-y-8 px-4 py-8">
+      }
+    >
+      <div className="mx-auto max-w-3xl space-y-8">
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-lg font-semibold">Diagnostics</h1>
@@ -97,24 +114,6 @@ export default function DiagnosticsPage() {
               Version info, safe settings, and redacted log tail for bug reports.
             </p>
           </div>
-          <Button
-            onClick={handleCopy}
-            disabled={loading || !!error}
-            variant="outline"
-            className="gap-1.5"
-          >
-            {copied ? (
-              <>
-                <CheckCircle2 className="size-4 text-green-600" />
-                Copied
-              </>
-            ) : (
-              <>
-                <ClipboardCopy className="size-4" />
-                Copy diagnostics
-              </>
-            )}
-          </Button>
         </div>
 
         {error && (
@@ -202,7 +201,7 @@ export default function DiagnosticsPage() {
             </section>
           </>
         )}
-      </main>
-    </div>
+      </div>
+    </PageChrome>
   );
 }

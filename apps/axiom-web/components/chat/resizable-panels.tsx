@@ -129,7 +129,7 @@ export function ResizablePanels({ panels, className, resetToken }: ResizablePane
             ]);
           }
         }}
-        className="cursor-col-resize bg-border transition-colors hover:bg-ring focus-visible:bg-ring focus-visible:outline-none"
+        className="mx-1 cursor-col-resize rounded-full bg-white/6 transition-colors hover:bg-primary/30 focus-visible:bg-primary/30 focus-visible:outline-none"
       />
 
       {/* Centre panel */}
@@ -152,7 +152,7 @@ export function ResizablePanels({ panels, className, resetToken }: ResizablePane
             ]);
           }
         }}
-        className="cursor-col-resize bg-border transition-colors hover:bg-ring focus-visible:bg-ring focus-visible:outline-none"
+        className="mx-1 cursor-col-resize rounded-full bg-white/6 transition-colors hover:bg-primary/30 focus-visible:bg-primary/30 focus-visible:outline-none"
       />
 
       {/* Right panel */}
