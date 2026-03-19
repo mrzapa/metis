@@ -60,6 +60,7 @@ export function PageChrome({
       <div className="relative z-10 flex min-h-screen">
         {/* ── Sidebar (xl+) ───────────────────────────────────────── */}
         <aside className="hidden w-64 shrink-0 p-3 xl:block">
+          {/* top-3 + bottom p-3 = 1.5rem total vertical padding → min-h = 100vh - 1.5rem */}
           <nav className="glass-panel-strong sticky top-3 flex min-h-[calc(100vh-1.5rem)] flex-col rounded-2xl p-4">
             <Link href="/" className="mb-6 flex items-center gap-2.5 px-2">
               <span className="flex size-8 items-center justify-center rounded-lg bg-primary/14 text-primary">

@@ -35,6 +35,9 @@ import {
 
 type ApiStatus = "connected" | "disconnected" | "checking";
 
+const HEALTH_CHECK_INTERVAL_MS = 8000;
+const MAX_RECENT_SESSIONS = 5;
+
 export default function Home() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [setupComplete, setSetupComplete] = useState<boolean | null>(null);
@@ -57,7 +60,7 @@ export default function Home() {
       }
     }
     check();
-    const id = setInterval(check, 8000);
+    const id = setInterval(check, HEALTH_CHECK_INTERVAL_MS);
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
@@ -74,7 +77,7 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     fetchSessions()
-      .then((data) => { if (!cancelled) setSessions(data.slice(0, 5)); })
+      .then((data) => { if (!cancelled) setSessions(data.slice(0, MAX_RECENT_SESSIONS)); })
       .catch(() => { if (!cancelled) setSessions([]); })
       .finally(() => { if (!cancelled) setLoadingSessions(false); });
     return () => { cancelled = true; };
