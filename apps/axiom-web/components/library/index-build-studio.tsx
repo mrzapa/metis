@@ -30,14 +30,12 @@ import {
 type BuildStep = "idle" | "active" | "done";
 
 interface ProgressState {
-  started: BuildStep;
   reading: BuildStep;
   embedding: BuildStep;
   saved: BuildStep;
 }
 
 const INITIAL_PROGRESS: ProgressState = {
-  started: "idle",
   reading: "idle",
   embedding: "idle",
   saved: "idle",
@@ -158,7 +156,7 @@ export function IndexBuildStudio({
     setBuilding(true);
     setBuildError(null);
     setBuildResult(null);
-    setProgress({ started: "active", reading: "idle", embedding: "idle", saved: "idle" });
+    setProgress({ reading: "active", embedding: "idle", saved: "idle" });
 
     try {
       const settings =
@@ -168,27 +166,15 @@ export function IndexBuildStudio({
 
       const result = await buildIndexStream(readyPaths, settings, (event) => {
         const type = String(event.type ?? "");
-        if (type === "build_started") {
-          setProgress({ started: "done", reading: "active", embedding: "idle", saved: "idle" });
-        } else if (type === "status") {
+        if (type === "status") {
           const text = String(event.text ?? "").toLowerCase();
           if (text.includes("embedding")) {
-            setProgress({ started: "done", reading: "done", embedding: "active", saved: "idle" });
-          } else if (
-            text.includes("reading") ||
-            text.includes("loading") ||
-            text.includes("preparing")
-          ) {
-            setProgress((current) =>
-              current.embedding === "idle" && current.reading === "idle"
-                ? { ...current, started: "done", reading: "active" }
-                : current,
-            );
+            setProgress({ reading: "done", embedding: "active", saved: "idle" });
           }
         }
       });
 
-      setProgress({ started: "done", reading: "done", embedding: "done", saved: "done" });
+      setProgress({ reading: "done", embedding: "done", saved: "done" });
       setBuildResult(result);
       onBuildComplete?.(result);
       loadIndexes();
@@ -434,11 +420,10 @@ export function IndexBuildStudio({
                 {building ? "Building..." : "Build index"}
               </Button>
 
-              {progress.started !== "idle" ? (
+              {building || progress.reading !== "idle" ? (
                 <div className="mt-5 space-y-3">
                   {(
                     [
-                      ["started", "Build started"],
                       ["reading", "Reading documents"],
                       ["embedding", "Computing embeddings"],
                       ["saved", "Saved and ready"],
