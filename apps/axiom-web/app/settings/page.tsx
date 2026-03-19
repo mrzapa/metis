@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -9,8 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageChrome } from "@/components/shell/page-chrome";
 import { fetchSettings, updateSettings } from "@/lib/api";
-import { AlertCircle, CheckCircle2, ChevronRight, Info, Loader2, TriangleAlert } from "lucide-react";
+import { AlertCircle, CheckCircle2, Info, Loader2, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const schema = z.object({
@@ -259,25 +259,22 @@ export default function SettingsPage() {
   const llmTemp = watch("llm_temperature");
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Nav */}
-      <header className="flex h-12 items-center gap-4 border-b px-6">
-        <Link href="/" className="text-sm font-semibold tracking-tight">
-          Axiom
-        </Link>
-        <ChevronRight className="size-3.5 text-muted-foreground" />
-        <span className="text-sm text-muted-foreground">Settings</span>
-        <div className="ml-auto flex items-center gap-4">
-          <Link href="/library" className="text-sm text-muted-foreground hover:text-foreground">
-            Library
-          </Link>
-          <Link href="/chat" className="text-sm text-muted-foreground hover:text-foreground">
-            Chat →
-          </Link>
+    <PageChrome
+      eyebrow="Workspace Settings"
+      title="Tune the model, retrieval, graph, and memory stack."
+      description="Axiom still exposes deep controls, but they now live inside the same shell and visual language as the rest of the workspace."
+      heroAside={
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+            Settings posture
+          </p>
+          <p className="text-sm leading-7 text-muted-foreground">
+            These controls are intentionally low-level. Use them when you want to shape retrieval quality, graph behavior, or model limits beyond the default onboarding flow.
+          </p>
         </div>
-      </header>
-
-      <main className="mx-auto max-w-2xl space-y-8 px-4 py-8">
+      }
+    >
+      <div className="mx-auto max-w-3xl space-y-8">
         <div>
           <h1 className="text-lg font-semibold">Settings</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -885,7 +882,7 @@ export default function SettingsPage() {
             </div>
           </form>
         )}
-      </main>
-    </div>
+      </div>
+    </PageChrome>
   );
 }

@@ -128,7 +128,10 @@ export function BrainGraph({
     for (const n of data.nodes) {
       map.set(n.node_id, { x: n.x, y: n.y });
     }
-    setPositions(map);
+    const frame = requestAnimationFrame(() => {
+      setPositions(map);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [data]);
 
   // Fit the graph to the viewport on initial load / data change
@@ -143,7 +146,10 @@ export function BrainGraph({
     const scale = Math.min(w / gw, h / gh, 1.5);
     const tx = w / 2 - ((minX + maxX) / 2) * scale;
     const ty = h / 2 - ((minY + maxY) / 2) * scale;
-    setTransform({ tx, ty, scale });
+    const frame = requestAnimationFrame(() => {
+      setTransform({ tx, ty, scale });
+    });
+    return () => cancelAnimationFrame(frame);
   }, [data]);
 
   // ── Wheel zoom ─────────────────────────────────────────────────────────
