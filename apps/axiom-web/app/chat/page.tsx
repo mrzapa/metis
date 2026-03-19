@@ -5,6 +5,8 @@ import { ResizablePanels } from "@/components/chat/resizable-panels";
 import { SessionsPanel } from "@/components/chat/sessions-panel";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { EvidencePanel } from "@/components/chat/evidence-panel";
+import { Badge } from "@/components/ui/badge";
+import { PageChrome } from "@/components/shell/page-chrome";
 import { fetchSession, fetchSettings, updateSettings, queryDirect, queryRagStream, submitRunAction } from "@/lib/api";
 import type { SessionSummary, TraceEvent } from "@/lib/api";
 import type { RagStreamEvent } from "@/lib/api";
@@ -145,6 +147,7 @@ export default function ChatPage() {
   const [traceFirstLayout, setTraceFirstLayout] = useState(false);
   const [shellPostureToken, setShellPostureToken] = useState(0);
   const [preferredEvidenceTab, setPreferredEvidenceTab] = useState<"sources" | "trace">("sources");
+  const [initialDraft, setInitialDraft] = useState("");
   const {
     createMessage,
     restoreStreamingRun,
@@ -280,6 +283,15 @@ export default function ChatPage() {
     }
 
     localStorage.removeItem("axiom_active_index");
+  }, []);
+
+  useEffect(() => {
+    const seedPrompt = localStorage.getItem("axiom_chat_seed_prompt");
+    if (!seedPrompt) {
+      return;
+    }
+    setInitialDraft(seedPrompt);
+    localStorage.removeItem("axiom_chat_seed_prompt");
   }, []);
 
   useEffect(() => {
@@ -890,84 +902,113 @@ export default function ChatPage() {
   }, []);
 
   return (
-    <main className="h-screen w-screen overflow-hidden bg-background">
-      <ResizablePanels
-        resetToken={shellPostureToken}
-        panels={[
-          {
-            default: 1,
-            min: 200,
-            children: (
-              <SessionsPanel
-                selectedId={selectedId}
-                onSelect={handleSelect}
-                onNewChat={handleNewChat}
-              />
-            ),
-          },
-          {
-            default: traceFirstLayout ? 2.5 : 3,
-            min: 400,
-            children: (
-              <ChatPanel
-                messages={messages}
-                sessionMeta={sessionMeta}
-                loading={loadingSession}
-                error={sessionError}
-                onDirectSend={handleDirectSend}
-                onRagSend={handleRagSend}
-                isSending={isSending}
-                isStreamingRag={isStreamingRag}
-                onStopStreaming={() => stopRagStream("user")}
-                activeIndexPath={activeIndexPath}
-                activeIndexLabel={activeIndexLabel}
-                initialQueryMode={queryModeOverride ?? undefined}
-                onIndexChange={(path, label) => {
-                  setActiveIndexPath(path);
-                  setActiveIndexLabel(label);
-                }}
-                reconnectState={
-                  resumableRun && !isStreamingRag
-                    ? {
-                        question: resumableRun.question,
-                        lastEventId: resumableRun.lastEventId,
-                      }
-                    : null
-                }
-                onReconnectRun={handleReconnectRag}
-                onDiscardReconnect={handleDiscardResumableRun}
-                getRunSubqueries={getRunSubqueries}
-                modelProvider={modelProvider}
-                modelName={modelName}
-                onModelChange={handleModelChange}
-                composerRef={composerRef}
-                onActionApprove={handleActionApprove}
-                onActionDeny={handleActionDeny}
-                agenticMode={agenticMode}
-                agenticModeSaving={agenticModeSaving}
-                agenticModeError={agenticModeError}
-                onAgenticModeChange={handleAgenticModeChange}
-                liveTraceEvents={liveTraceEvents}
-              />
-            ),
-          },
-          {
-            default: traceFirstLayout ? 2 : 1.5,
-            min: 240,
-            children: (
-              <EvidencePanel
-                sources={latestSources}
-                runIds={runIdsNewestFirst}
-                latestRunId={latestRunId}
-                liveTraceEvents={liveTraceEvents}
-                isStreaming={isStreamingRag}
-                preferredTab={preferredEvidenceTab}
-                postureToken={shellPostureToken}
-              />
-            ),
-          },
-        ]}
-      />
-    </main>
+    <PageChrome
+      eyebrow="Conversation Console"
+      title="Run grounded conversations inside a calmer AI workspace."
+      description="Switch between direct reasoning and RAG, inspect evidence and trace data, and keep the active index close without sacrificing flow."
+      actions={
+        <>
+          <Badge variant="outline">Ctrl/Cmd + K focuses the composer</Badge>
+          {activeIndexLabel ? <Badge variant="outline">Active index: {activeIndexLabel}</Badge> : null}
+        </>
+      }
+      heroAside={
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+            Conversation posture
+          </p>
+          <p className="text-sm leading-7 text-muted-foreground">
+            {agenticMode
+              ? "Agentic mode is guiding the shell toward trace-first review so you can watch the system reason in real time."
+              : "Direct or RAG sessions stay centered on the transcript, with evidence and trace always one panel away."}
+          </p>
+        </div>
+      }
+      fullBleed
+      contentClassName="rounded-none border-0 bg-transparent p-0"
+    >
+      <div className="h-[calc(100vh-15.5rem)] min-h-[42rem] overflow-hidden rounded-[1.9rem]">
+        <ResizablePanels
+          className="h-full"
+          resetToken={shellPostureToken}
+          panels={[
+            {
+              default: 1,
+              min: 220,
+              children: (
+                <SessionsPanel
+                  selectedId={selectedId}
+                  onSelect={handleSelect}
+                  onNewChat={handleNewChat}
+                />
+              ),
+            },
+            {
+              default: traceFirstLayout ? 2.5 : 3,
+              min: 420,
+              children: (
+                <ChatPanel
+                  key={`${queryModeOverride ?? "direct"}:${initialDraft ? "seeded" : "blank"}:${activeIndexPath ?? "no-index"}`}
+                  messages={messages}
+                  sessionMeta={sessionMeta}
+                  loading={loadingSession}
+                  error={sessionError}
+                  onDirectSend={handleDirectSend}
+                  onRagSend={handleRagSend}
+                  isSending={isSending}
+                  isStreamingRag={isStreamingRag}
+                  onStopStreaming={() => stopRagStream("user")}
+                  activeIndexPath={activeIndexPath}
+                  activeIndexLabel={activeIndexLabel}
+                  initialQueryMode={queryModeOverride ?? undefined}
+                  initialDraft={initialDraft}
+                  onIndexChange={(path, label) => {
+                    setActiveIndexPath(path);
+                    setActiveIndexLabel(label);
+                  }}
+                  reconnectState={
+                    resumableRun && !isStreamingRag
+                      ? {
+                          question: resumableRun.question,
+                          lastEventId: resumableRun.lastEventId,
+                        }
+                      : null
+                  }
+                  onReconnectRun={handleReconnectRag}
+                  onDiscardReconnect={handleDiscardResumableRun}
+                  getRunSubqueries={getRunSubqueries}
+                  modelProvider={modelProvider}
+                  modelName={modelName}
+                  onModelChange={handleModelChange}
+                  composerRef={composerRef}
+                  onActionApprove={handleActionApprove}
+                  onActionDeny={handleActionDeny}
+                  agenticMode={agenticMode}
+                  agenticModeSaving={agenticModeSaving}
+                  agenticModeError={agenticModeError}
+                  onAgenticModeChange={handleAgenticModeChange}
+                  liveTraceEvents={liveTraceEvents}
+                />
+              ),
+            },
+            {
+              default: traceFirstLayout ? 2 : 1.5,
+              min: 260,
+              children: (
+                <EvidencePanel
+                  sources={latestSources}
+                  runIds={runIdsNewestFirst}
+                  latestRunId={latestRunId}
+                  liveTraceEvents={liveTraceEvents}
+                  isStreaming={isStreamingRag}
+                  preferredTab={preferredEvidenceTab}
+                  postureToken={shellPostureToken}
+                />
+              ),
+            },
+          ]}
+        />
+      </div>
+    </PageChrome>
   );
 }

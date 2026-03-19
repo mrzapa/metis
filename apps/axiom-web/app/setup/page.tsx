@@ -1,47 +1,157 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AmbientBackdrop } from "@/components/shell/ambient-backdrop";
+import { OnboardingStep } from "@/components/shell/onboarding-step";
+import { StatusPill } from "@/components/shell/status-pill";
+import { IndexBuildStudio } from "@/components/library/index-build-studio";
+import { fetchSettings, updateSettings, type IndexBuildResult } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { updateSettings } from "@/lib/api";
-import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+  ArrowLeft,
+  ArrowRight,
+  Brain,
+  CheckCircle2,
+  Database,
+  KeyRound,
+  Sparkles,
+} from "lucide-react";
 
-const LLM_PROVIDERS = ["anthropic", "openai", "local"] as const;
-const EMBEDDING_PROVIDERS = ["openai", "local"] as const;
+const LLM_PROVIDERS = [
+  {
+    value: "anthropic",
+    label: "Anthropic",
+    description: "Strong writing quality and research synthesis out of the box.",
+  },
+  {
+    value: "openai",
+    label: "OpenAI",
+    description: "Balanced reasoning, tool use, and a broad model lineup.",
+  },
+  {
+    value: "local",
+    label: "Local model",
+    description: "Keep inference on-device when you prefer a fully local stack.",
+  },
+] as const;
 
-type LlmProvider = (typeof LLM_PROVIDERS)[number];
-type EmbeddingProvider = (typeof EMBEDDING_PROVIDERS)[number];
+const EMBEDDING_PROVIDERS = [
+  {
+    value: "openai",
+    label: "OpenAI embeddings",
+    description: "A fast default for most hosted setups.",
+  },
+  {
+    value: "local",
+    label: "Local embeddings",
+    description: "Good when you want indexing to stay on your machine.",
+  },
+] as const;
+
+const STEP_HINTS = [
+  "Pick the model provider that matches your comfort level with cloud versus local inference. You can still change this later in Settings.",
+  "Add credentials only when they are needed. Local provider setups can leave this blank and continue.",
+  "Embedding choice controls how documents are indexed and retrieved. Matching this to your privacy posture matters more than the specific brand.",
+  "Building an index here creates the first quick win: you land in chat with something grounded to ask against.",
+  "The finish step seeds chat without auto-sending anything, so the user keeps control while still feeling guided.",
+];
+
+const STARTER_PROMPTS_WITH_INDEX = [
+  "Give me a fast overview of what is inside this index and what kinds of questions it can answer.",
+  "What are the most important themes or findings in these documents?",
+  "Suggest three high-value questions I should ask next based on this material.",
+];
+
+const STARTER_PROMPTS_DIRECT = [
+  "Help me plan my first workflow in Axiom and explain when to use direct chat versus RAG.",
+  "Teach me how to set up a grounded research session in this workspace.",
+  "What should I import first if I want Axiom to feel useful within ten minutes?",
+];
 
 export default function SetupPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
-  const [llmProvider, setLlmProvider] = useState<LlmProvider>("anthropic");
+  const [llmProvider, setLlmProvider] =
+    useState<(typeof LLM_PROVIDERS)[number]["value"]>("anthropic");
   const [apiKey, setApiKey] = useState("");
   const [embeddingProvider, setEmbeddingProvider] =
-    useState<EmbeddingProvider>("openai");
+    useState<(typeof EMBEDDING_PROVIDERS)[number]["value"]>("openai");
+  const [baselineSettings, setBaselineSettings] = useState<Record<string, unknown>>({});
+  const [builtIndex, setBuiltIndex] = useState<IndexBuildResult | null>(null);
+  const [selectedPrompt, setSelectedPrompt] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchSettings()
+      .then((settings) => {
+        setBaselineSettings(settings);
+        if (typeof settings.llm_provider === "string") {
+          const candidate = settings.llm_provider as string;
+          if (LLM_PROVIDERS.some((provider) => provider.value === candidate)) {
+            setLlmProvider(candidate as (typeof LLM_PROVIDERS)[number]["value"]);
+          }
+        }
+        if (typeof settings.embedding_provider === "string") {
+          const candidate = settings.embedding_provider as string;
+          if (EMBEDDING_PROVIDERS.some((provider) => provider.value === candidate)) {
+            setEmbeddingProvider(candidate as (typeof EMBEDDING_PROVIDERS)[number]["value"]);
+          }
+        }
+      })
+      .catch(() => {
+        // The onboarding flow can still proceed with sane defaults.
+      });
+  }, []);
+
+  const starterPrompts = builtIndex ? STARTER_PROMPTS_WITH_INDEX : STARTER_PROMPTS_DIRECT;
+
+  useEffect(() => {
+    setSelectedPrompt((current) => {
+      if (starterPrompts.includes(current)) {
+        return current;
+      }
+      return starterPrompts[0];
+    });
+  }, [starterPrompts]);
+
+  const buildSettings = useMemo(() => {
+    const nextSettings: Record<string, unknown> = {
+      ...baselineSettings,
+      llm_provider: llmProvider,
+      embedding_provider: embeddingProvider,
+      basic_wizard_completed: false,
+    };
+    if (apiKey) {
+      const keyField =
+        llmProvider === "anthropic"
+          ? "api_key_anthropic"
+          : llmProvider === "openai"
+            ? "api_key_openai"
+            : null;
+      if (keyField) {
+        nextSettings[keyField] = apiKey;
+      }
+    }
+    return nextSettings;
+  }, [apiKey, baselineSettings, embeddingProvider, llmProvider]);
 
   async function handleFinish() {
     setSaving(true);
     setError(null);
+
     try {
       const updates: Record<string, unknown> = {
         llm_provider: llmProvider,
         embedding_provider: embeddingProvider,
         basic_wizard_completed: true,
       };
-      // Only include api_key if user provided one (backend may reject it,
-      // but we pass the intent through).
+
       if (apiKey) {
         const keyField =
           llmProvider === "anthropic"
@@ -53,8 +163,21 @@ export default function SetupPage() {
           updates[keyField] = apiKey;
         }
       }
+
       await updateSettings(updates);
-      router.push("/");
+
+      if (builtIndex) {
+        localStorage.setItem(
+          "axiom_active_index",
+          JSON.stringify({
+            manifest_path: builtIndex.manifest_path,
+            label: builtIndex.index_id,
+          }),
+        );
+      }
+
+      localStorage.setItem("axiom_chat_seed_prompt", selectedPrompt);
+      router.push("/chat");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings");
     } finally {
@@ -63,168 +186,331 @@ export default function SetupPage() {
   }
 
   const steps = [
-    // Step 0 — Choose LLM provider
-    <Card key="llm">
-      <CardHeader>
-        <CardTitle>Choose LLM Provider</CardTitle>
-        <CardDescription>
-          Select the language model provider Axiom will use for chat and
-          retrieval-augmented generation.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <select
-          id="llm_provider"
-          value={llmProvider}
-          onChange={(e) => setLlmProvider(e.target.value as LlmProvider)}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
-        >
-          {LLM_PROVIDERS.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-      </CardContent>
-      <CardFooter>
-        <Button onClick={() => setStep(1)}>Next</Button>
-      </CardFooter>
-    </Card>,
+    {
+      title: "Choose your primary model provider",
+      description:
+        "Pick the provider Axiom should use for direct chat and synthesis. This sets the tone for the rest of onboarding, but it is still easy to adjust later.",
+      content: (
+        <div className="grid gap-4 md:grid-cols-3">
+          {LLM_PROVIDERS.map((provider) => {
+            const active = provider.value === llmProvider;
+            return (
+              <button
+                key={provider.value}
+                type="button"
+                onClick={() => setLlmProvider(provider.value)}
+                className={cn(
+                  "cursor-pointer rounded-[1.5rem] border p-5 text-left transition-all duration-200",
+                  active
+                    ? "border-primary/30 bg-primary/12 shadow-lg shadow-primary/10"
+                    : "border-white/8 bg-black/10 hover:border-primary/16 hover:bg-white/6",
+                )}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-display text-2xl font-semibold tracking-[-0.04em] text-foreground">
+                    {provider.label}
+                  </span>
+                  {active ? <CheckCircle2 className="size-5 text-primary" /> : null}
+                </div>
+                <p className="mt-3 text-sm leading-7 text-muted-foreground">
+                  {provider.description}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      ),
+      hint: STEP_HINTS[0],
+    },
+    {
+      title: "Add credentials if this provider needs them",
+      description:
+        llmProvider === "local"
+          ? "Local model mode does not require a hosted API key. You can continue immediately or add one later if you switch providers."
+          : "Paste the API key for the provider you chose. Axiom will pass it through to settings and use it for chat and research workflows.",
+      content: (
+        <div className="space-y-5">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+            <div className="space-y-3">
+              <label htmlFor="api_key" className="text-sm font-medium text-foreground">
+                {llmProvider === "anthropic" ? "Anthropic API key" : llmProvider === "openai" ? "OpenAI API key" : "Optional API key"}
+              </label>
+              <Input
+                id="api_key"
+                type="password"
+                placeholder={llmProvider === "local" ? "Optional" : "sk-..."}
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+              />
+              <p className="text-sm leading-7 text-muted-foreground">
+                {llmProvider === "local"
+                  ? "Leave this blank if you are staying fully local."
+                  : "If you skip this now, you can still add it later in your settings file."}
+              </p>
+            </div>
 
-    // Step 1 — Enter API key
-    <Card key="apikey">
-      <CardHeader>
-        <CardTitle>Enter API Key</CardTitle>
-        <CardDescription>
-          Provide the API key for your chosen provider. You can leave this blank
-          and set it later in <code>settings.json</code>.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Input
-          id="api_key"
-          type="password"
-          placeholder="sk-..."
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
+            <div className="rounded-[1.45rem] border border-white/8 bg-black/10 p-4">
+              <KeyRound className="size-5 text-primary" />
+              <p className="mt-3 font-medium text-foreground">Credential posture</p>
+              <p className="mt-2 text-sm leading-7 text-muted-foreground">
+                Keys are not echoed back in the UI. They are only forwarded to the backend settings update when you finish onboarding.
+              </p>
+            </div>
+          </div>
+        </div>
+      ),
+      hint: STEP_HINTS[1],
+    },
+    {
+      title: "Choose how documents will be embedded",
+      description:
+        "Embeddings power document similarity, search quality, and grounded answers. This decision mostly affects indexing, not direct chat.",
+      content: (
+        <div className="grid gap-4 md:grid-cols-2">
+          {EMBEDDING_PROVIDERS.map((provider) => {
+            const active = provider.value === embeddingProvider;
+            return (
+              <button
+                key={provider.value}
+                type="button"
+                onClick={() => setEmbeddingProvider(provider.value)}
+                className={cn(
+                  "cursor-pointer rounded-[1.5rem] border p-5 text-left transition-all duration-200",
+                  active
+                    ? "border-primary/30 bg-primary/12 shadow-lg shadow-primary/10"
+                    : "border-white/8 bg-black/10 hover:border-primary/16 hover:bg-white/6",
+                )}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-display text-2xl font-semibold tracking-[-0.04em] text-foreground">
+                    {provider.label}
+                  </span>
+                  {active ? <CheckCircle2 className="size-5 text-primary" /> : null}
+                </div>
+                <p className="mt-3 text-sm leading-7 text-muted-foreground">
+                  {provider.description}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      ),
+      hint: STEP_HINTS[2],
+    },
+    {
+      title: "Build the first knowledge base",
+      description:
+        "Indexing a small set of documents here makes the app feel useful immediately. You can skip this and import more later, but a quick first index is the smoothest path into chat.",
+      content: (
+        <IndexBuildStudio
+          settingsOverrides={buildSettings}
+          showExistingIndexes={false}
+          onBuildComplete={setBuiltIndex}
         />
-      </CardContent>
-      <CardFooter>
-        <div className="flex w-full gap-2">
-          <Button variant="outline" onClick={() => setStep(0)}>
-            Back
-          </Button>
-          <Button onClick={() => setStep(2)}>Next</Button>
-        </div>
-      </CardFooter>
-    </Card>,
+      ),
+      hint: STEP_HINTS[3],
+    },
+    {
+      title: "Launch with a quick win",
+      description:
+        "Axiom will open chat with a starter prompt ready in the composer. Nothing is auto-sent, so you can review and change the wording before you run it.",
+      content: (
+        <div className="space-y-6">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="space-y-4">
+              <div className="grid gap-3">
+                {starterPrompts.map((prompt) => {
+                  const active = prompt === selectedPrompt;
+                  return (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => setSelectedPrompt(prompt)}
+                      className={cn(
+                        "cursor-pointer rounded-[1.4rem] border p-4 text-left transition-all duration-200",
+                        active
+                          ? "border-primary/30 bg-primary/12"
+                          : "border-white/8 bg-black/10 hover:border-primary/16 hover:bg-white/6",
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm leading-7 text-foreground">{prompt}</p>
+                        {active ? <Sparkles className="size-4 text-primary" /> : null}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
 
-    // Step 2 — Choose embedding provider
-    <Card key="embedding">
-      <CardHeader>
-        <CardTitle>Choose Embedding Provider</CardTitle>
-        <CardDescription>
-          Select the provider used for generating document embeddings during
-          indexing and retrieval.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <select
-          id="embedding_provider"
-          value={embeddingProvider}
-          onChange={(e) =>
-            setEmbeddingProvider(e.target.value as EmbeddingProvider)
-          }
-          className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
-        >
-          {EMBEDDING_PROVIDERS.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-      </CardContent>
-      <CardFooter>
-        <div className="flex w-full gap-2">
-          <Button variant="outline" onClick={() => setStep(1)}>
-            Back
-          </Button>
-          <Button onClick={() => setStep(3)}>Next</Button>
-        </div>
-      </CardFooter>
-    </Card>,
+              {error ? (
+                <div className="rounded-[1.3rem] border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                  {error}
+                </div>
+              ) : null}
+            </div>
 
-    // Step 3 — Confirm and save
-    <Card key="confirm">
-      <CardHeader>
-        <CardTitle>Confirm Setup</CardTitle>
-        <CardDescription>
-          Review your choices below and click Finish to save.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <dl className="space-y-2 text-sm">
-          <div className="flex justify-between">
-            <dt className="font-medium">LLM Provider</dt>
-            <dd className="text-muted-foreground">{llmProvider}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="font-medium">API Key</dt>
-            <dd className="text-muted-foreground">
-              {apiKey ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "(not set)"}
-            </dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="font-medium">Embedding Provider</dt>
-            <dd className="text-muted-foreground">{embeddingProvider}</dd>
-          </div>
-        </dl>
+            <div className="rounded-[1.55rem] border border-white/8 bg-black/10 p-5">
+              <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+                Launch summary
+              </p>
+              <div className="mt-4 space-y-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">LLM provider</span>
+                  <span className="text-foreground">{llmProvider}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">Embeddings</span>
+                  <span className="text-foreground">{embeddingProvider}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">First index</span>
+                  <span className="text-foreground">
+                    {builtIndex ? builtIndex.index_id : "Not built yet"}
+                  </span>
+                </div>
+              </div>
 
-        {error && (
-          <div className="mt-4 flex items-center gap-1.5 text-sm text-destructive">
-            <AlertCircle className="size-4" />
-            {error}
+              <div className="mt-5 flex flex-wrap gap-2">
+                <StatusPill label={builtIndex ? "RAG ready" : "Direct chat ready"} tone={builtIndex ? "connected" : "neutral"} />
+                <StatusPill label="Starter prompt staged" tone="neutral" />
+              </div>
+
+              <p className="mt-4 text-sm leading-7 text-muted-foreground">
+                {builtIndex
+                  ? "You will land in chat with this index preselected and a grounded starter prompt in the composer."
+                  : "You will land in direct chat mode with a prompt that helps you orient yourself inside the workspace."}
+              </p>
+            </div>
           </div>
-        )}
-      </CardContent>
-      <CardFooter>
-        <div className="flex w-full gap-2">
-          <Button variant="outline" onClick={() => setStep(2)}>
-            Back
-          </Button>
-          <Button onClick={handleFinish} disabled={saving} className="gap-1.5">
-            {saving && <Loader2 className="size-4 animate-spin" />}
-            {saving ? "Saving\u2026" : "Finish"}
-          </Button>
         </div>
-      </CardFooter>
-    </Card>,
+      ),
+      hint: STEP_HINTS[4],
+    },
   ];
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-md space-y-6">
-        <div className="text-center">
-          <h1 className="text-lg font-semibold">Axiom Setup</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Step {step + 1} of {steps.length}
-          </p>
-        </div>
+    <div className="relative min-h-screen overflow-hidden">
+      <AmbientBackdrop />
 
-        {/* Progress dots */}
-        <div className="flex justify-center gap-2">
-          {steps.map((_, i) => (
-            <div
-              key={i}
-              className={`size-2 rounded-full transition-colors ${
-                i <= step ? "bg-primary" : "bg-muted"
-              }`}
-            />
-          ))}
-        </div>
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col px-4 pb-8 pt-4 sm:px-6 lg:px-8">
+        <header className="glass-panel flex flex-wrap items-center gap-3 rounded-[1.6rem] px-4 py-3 sm:px-5">
+          <div>
+            <p className="font-display text-lg font-semibold tracking-[-0.04em] text-foreground">
+              Axiom Setup
+            </p>
+            <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+              guided first launch
+            </p>
+          </div>
 
-        {steps[step]}
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <StatusPill label={`Step ${step + 1} of ${steps.length}`} tone="checking" />
+            <Link href="/">
+              <Button variant="outline" size="sm">Back to welcome</Button>
+            </Link>
+          </div>
+        </header>
+
+        <main className="flex-1 py-8">
+          <section className="mb-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-end">
+            <div className="glass-panel rounded-[1.8rem] px-5 py-6 sm:px-6">
+              <p className="font-display text-xs uppercase tracking-[0.32em] text-primary/90">
+                First-run journey
+              </p>
+              <h1 className="mt-3 font-display text-balance text-4xl font-semibold tracking-[-0.05em] text-foreground">
+                Make the first launch feel capable in under ten minutes.
+              </h1>
+              <p className="mt-3 max-w-3xl text-pretty text-sm leading-7 text-muted-foreground sm:text-base">
+                Configure the model stack, build the first index, and leave onboarding with a staged chat prompt instead of a dead-end success screen.
+              </p>
+            </div>
+
+            <div className="glass-panel rounded-[1.5rem] px-5 py-4">
+              <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+                Setup outcomes
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Badge variant="outline">Model provider selected</Badge>
+                <Badge variant="outline">Embedding provider selected</Badge>
+                <Badge variant="outline">Starter prompt staged</Badge>
+              </div>
+            </div>
+          </section>
+
+          <div className="mb-5 flex flex-wrap gap-2">
+            {steps.map((entry, index) => (
+              <button
+                key={entry.title}
+                type="button"
+                onClick={() => {
+                  if (index <= step) {
+                    setStep(index);
+                  }
+                }}
+                className={cn(
+                  "cursor-pointer rounded-full px-4 py-2 text-sm font-medium transition-all",
+                  index === step
+                    ? "bg-primary/16 text-primary"
+                    : index < step
+                      ? "bg-emerald-400/12 text-emerald-200"
+                      : "bg-white/6 text-muted-foreground",
+                )}
+              >
+                {index + 1}. {shortenStepTitle(entry.title)}
+              </button>
+            ))}
+          </div>
+
+          <OnboardingStep
+            index={step}
+            total={steps.length}
+            title={steps[step].title}
+            description={steps[step].description}
+            hint={steps[step].hint}
+          >
+            {steps[step].content}
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/8 pt-6">
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setStep((current) => Math.max(0, current - 1))}
+                  disabled={step === 0}
+                  className="gap-2"
+                >
+                  <ArrowLeft className="size-4" />
+                  Back
+                </Button>
+                {step === 3 ? (
+                  <Button type="button" variant="ghost" onClick={() => setStep(4)}>
+                    Skip indexing for now
+                  </Button>
+                ) : null}
+              </div>
+
+              {step < steps.length - 1 ? (
+                <Button type="button" onClick={() => setStep((current) => Math.min(current + 1, steps.length - 1))} className="gap-2">
+                  Continue
+                  <ArrowRight className="size-4" />
+                </Button>
+              ) : (
+                <Button type="button" onClick={handleFinish} disabled={saving} className="gap-2">
+                  {saving ? <Database className="size-4 animate-pulse" /> : <Brain className="size-4" />}
+                  {saving ? "Launching workspace..." : "Finish and open chat"}
+                </Button>
+              )}
+            </div>
+          </OnboardingStep>
+        </main>
       </div>
     </div>
   );
+}
+
+function shortenStepTitle(title: string): string {
+  if (title.length <= 28) {
+    return title;
+  }
+  return `${title.slice(0, 25)}...`;
 }

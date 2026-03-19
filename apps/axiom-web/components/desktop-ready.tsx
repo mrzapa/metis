@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { getApiBase } from "@/lib/api";
-import { AlertCircle, Loader2, RefreshCw } from "lucide-react";
+import { LaunchStage } from "@/components/shell/launch-stage";
 import { Button } from "@/components/ui/button";
+import { AlertCircle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 
 export type DesktopReadyState = "loading" | "ready" | "error";
 
@@ -26,9 +28,9 @@ export function DesktopReadyGuard({ children }: DesktopReadyGuardProps) {
   const [state, setState] = useState<DesktopReadyState>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [launchPhase, setLaunchPhase] = useState(0);
 
   useEffect(() => {
-    // Only apply in Tauri environment
     if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
       setState("ready");
       return;
@@ -38,7 +40,7 @@ export function DesktopReadyGuard({ children }: DesktopReadyGuardProps) {
 
     async function checkReady() {
       try {
-        const baseUrl = await getApiBase();
+        await getApiBase();
         if (mounted) {
           setState("ready");
         }
@@ -52,7 +54,6 @@ export function DesktopReadyGuard({ children }: DesktopReadyGuardProps) {
 
     checkReady();
 
-    // Listen for sidecar errors from Tauri
     async function setupListener() {
       try {
         const { listen } = await import("@tauri-apps/api/event");
@@ -77,57 +78,116 @@ export function DesktopReadyGuard({ children }: DesktopReadyGuardProps) {
     };
   }, [retryCount]);
 
+  useEffect(() => {
+    if (state !== "loading") {
+      return;
+    }
+    const id = window.setInterval(() => {
+      setLaunchPhase((current) => (current + 1) % 3);
+    }, 1400);
+    return () => window.clearInterval(id);
+  }, [state]);
+
   async function handleRetry() {
     setState("loading");
     setErrorMessage(null);
+    setLaunchPhase(0);
     setRetryCount((c) => c + 1);
   }
 
-  // In web mode, render children immediately
   if (state === "ready") {
     return <>{children}</>;
   }
 
-  // In loading state
+  const phases = [
+    "Bootstrapping the local sidecar",
+    "Negotiating a local API port",
+    "Verifying workspace health",
+  ];
+
   if (state === "loading") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-4 text-center">
-          <Loader2 className="size-8 animate-spin text-primary" />
-          <div className="space-y-1">
-            <p className="font-medium">Starting Axiom...</p>
-            <p className="text-sm text-muted-foreground">
-              Initializing local API server
+      <LaunchStage
+        eyebrow="Axiom Launch"
+        title="Bringing your local workspace online."
+        description="Axiom is starting its desktop sidecar, checking the local API, and preparing the workspace shell."
+        statusLabel="Starting services"
+        statusTone="checking"
+        aside={
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+                Launch phases
+              </p>
+              <div className="mt-4 space-y-3">
+                {phases.map((phase, index) => {
+                  const active = index === launchPhase;
+                  const completed = index < launchPhase;
+                  return (
+                    <div
+                      key={phase}
+                      className="flex items-center gap-3 rounded-2xl border border-white/8 bg-black/10 px-4 py-3"
+                    >
+                      {completed ? (
+                        <CheckCircle2 className="size-4 text-emerald-300" />
+                      ) : active ? (
+                        <Loader2 className="size-4 animate-spin text-primary" />
+                      ) : (
+                        <span className="size-4 rounded-full border border-white/12 bg-white/4" />
+                      )}
+                      <span className={active ? "text-foreground" : "text-muted-foreground"}>
+                        {phase}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <p className="text-sm leading-7 text-muted-foreground">
+              This usually takes a few seconds. If it stalls, diagnostics stays available and you can retry without restarting the whole UI.
             </p>
           </div>
-        </div>
-      </div>
+        }
+      />
     );
   }
 
-  // In error state
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="flex flex-col items-center gap-4 text-center max-w-md px-4">
-        <div className="rounded-full bg-destructive/10 p-3">
-          <AlertCircle className="size-8 text-destructive" />
-        </div>
-        <div className="space-y-2">
-          <p className="font-semibold text-lg">Unable to Start</p>
-          <p className="text-sm text-muted-foreground">
-            {errorMessage || "The local API server failed to start. This may be a configuration issue."}
+    <LaunchStage
+      eyebrow="Axiom Launch"
+      title="The local API did not come up cleanly."
+      description="The desktop shell is running, but the local service failed its startup checks. You can retry immediately or inspect diagnostics for logs and version compatibility."
+      statusLabel="Launch interrupted"
+      statusTone="disconnected"
+      actions={
+        <>
+          <Button onClick={handleRetry} variant="outline" className="gap-2">
+            <RefreshCw className="size-4" />
+            Try again
+          </Button>
+          <Link href="/diagnostics">
+            <Button>Open diagnostics</Button>
+          </Link>
+        </>
+      }
+      aside={
+        <div className="space-y-4">
+          <div className="inline-flex size-12 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
+            <AlertCircle className="size-6" />
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+              Startup message
+            </p>
+            <p className="mt-3 text-sm leading-7 text-muted-foreground">
+              {errorMessage || "The local API server failed to start. This is usually caused by configuration or compatibility issues."}
+            </p>
+          </div>
+          <p className="text-sm leading-7 text-muted-foreground">
+            Diagnostics surfaces safe settings, versions, and a redacted log tail so startup failures are easier to recover from.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={handleRetry} variant="outline" className="gap-1.5">
-            <RefreshCw className="size-4" />
-            Try Again
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground mt-4">
-          If this persists, check the application logs or restart the application.
-        </p>
-      </div>
-    </div>
+      }
+    />
   );
 }

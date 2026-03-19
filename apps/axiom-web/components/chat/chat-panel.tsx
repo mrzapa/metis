@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useRef, useEffect, type KeyboardEvent, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -28,6 +29,7 @@ interface ChatPanelProps {
   activeIndexPath?: string | null;
   activeIndexLabel?: string | null;
   initialQueryMode?: "direct" | "rag";
+  initialDraft?: string;
   onIndexChange?: (manifestPath: string, label: string) => void;
   modelProvider?: string | null;
   modelName?: string | null;
@@ -64,6 +66,7 @@ export function ChatPanel({
   activeIndexPath,
   activeIndexLabel,
   initialQueryMode,
+  initialDraft,
   onIndexChange,
   modelProvider,
   modelName,
@@ -81,7 +84,7 @@ export function ChatPanel({
   onAgenticModeChange,
   liveTraceEvents,
 }: ChatPanelProps) {
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(initialDraft ?? "");
   const [queryMode, setQueryMode] = useState<"direct" | "rag">(initialQueryMode ?? "direct");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
@@ -93,13 +96,6 @@ export function ChatPanel({
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
-
-  // Sync queryMode when parent preloads an override (e.g. from localStorage on boot)
-  useEffect(() => {
-    if (initialQueryMode != null) {
-      setQueryMode(initialQueryMode);
-    }
-  }, [initialQueryMode]);
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     // Don't intercept keys while IME composition is active (CJK input, etc.)
@@ -135,9 +131,9 @@ export function ChatPanel({
   const ragInputDisabled = queryMode === "rag" && !activeIndexPath;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="glass-panel-strong flex h-full flex-col overflow-hidden rounded-[1.8rem]">
       {/* Header */}
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b px-4">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-white/8 px-4">
         <h2 className="truncate text-sm font-semibold">
           {sessionMeta?.title ?? "New Chat"}
         </h2>
@@ -177,12 +173,12 @@ export function ChatPanel({
             <Bot className="size-3" />
             Agentic {agenticMode ? "on" : "off"}
           </button>
-          <a
+          <Link
             href="/settings"
             className="rounded px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:underline"
           >
             Settings
-          </a>
+          </Link>
           {/* Model status badge */}
           {(modelProvider || modelName) && (
             <>
@@ -202,17 +198,17 @@ export function ChatPanel({
       </div>
 
       {agenticModeError && (
-        <div className="flex items-center gap-1.5 border-b bg-destructive/10 px-4 py-1.5 text-[11px] text-destructive">
+        <div className="flex items-center gap-1.5 border-b border-white/8 bg-destructive/10 px-4 py-1.5 text-[11px] text-destructive">
           <AlertCircle className="size-3 shrink-0" />
           {agenticModeError}
         </div>
       )}
 
       {reconnectState && (
-        <div className="border-b bg-amber-50/60 px-4 py-3">
+        <div className="border-b border-white/8 bg-chart-4/10 px-4 py-3">
           <div className="mx-auto flex max-w-3xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-chart-4">
                 Interrupted RAG Run
               </p>
               <p className="mt-1 text-sm text-foreground">
@@ -241,7 +237,7 @@ export function ChatPanel({
 
       {/* Index banner (RAG mode only) */}
       {queryMode === "rag" && (
-        <div className="flex shrink-0 items-center justify-between border-b bg-muted/40 px-4 py-1.5 text-xs">
+        <div className="flex shrink-0 items-center justify-between border-b border-white/8 bg-white/4 px-4 py-2 text-xs">
           {activeIndexPath ? (
             <>
               <span className="text-muted-foreground">
@@ -294,10 +290,16 @@ export function ChatPanel({
           )}
 
           {!loading && !error && messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
-              <p className="text-lg font-medium">Start a conversation</p>
-              <p className="mt-1 text-sm">
-                Ask a question about your documents.
+            <div className="glass-panel mx-auto flex max-w-2xl flex-col items-center justify-center rounded-[1.8rem] px-6 py-14 text-center text-muted-foreground">
+              <p className="font-display text-3xl font-semibold tracking-[-0.04em] text-foreground">
+                Start with a question that feels specific.
+              </p>
+              <p className="mt-3 max-w-xl text-sm leading-7">
+                {queryMode === "rag"
+                  ? activeIndexPath
+                    ? "Ask about the material you indexed, compare documents, or request a high-confidence overview grounded in sources."
+                    : "Choose an index to unlock grounded RAG answers and evidence-backed synthesis."
+                  : "Use direct mode for fast ideation, planning, or questions that do not need document grounding yet."}
               </p>
             </div>
           )}
@@ -323,10 +325,10 @@ export function ChatPanel({
               ) : (
                 <div
                   className={cn(
-                    "max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed",
+                    "max-w-[82%] rounded-[1.25rem] border px-4 py-3 text-sm leading-relaxed shadow-lg shadow-black/10",
                     msg.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted"
+                      ? "border-primary/25 bg-primary text-primary-foreground"
+                      : "border-white/8 bg-white/6"
                   )}
                 >
                   {msg.role === "assistant" ? (
@@ -402,7 +404,7 @@ export function ChatPanel({
 
           {isSending && !isStreamingRag && (
             <div className="flex justify-start">
-              <div className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+              <div className="rounded-[1.1rem] border border-white/8 bg-white/6 px-3 py-2 text-sm text-muted-foreground">
                 <Loader2 className="size-3.5 animate-spin" />
               </div>
             </div>
@@ -411,7 +413,7 @@ export function ChatPanel({
       </ScrollArea>
 
       {/* Composer */}
-      <div className="border-t p-3">
+      <div className="border-t border-white/8 bg-black/10 p-3">
         <div className="mx-auto max-w-3xl space-y-2">
           {/* Mode selector */}
           <div className="flex items-center gap-1.5">
@@ -420,7 +422,7 @@ export function ChatPanel({
               type="button"
               onClick={() => setQueryMode("direct")}
               className={cn(
-                "rounded px-2 py-0.5 text-[11px] font-medium transition-colors",
+                "rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
                 queryMode === "direct"
                   ? "bg-primary text-primary-foreground"
                   : "bg-muted text-muted-foreground hover:bg-muted/80"
@@ -432,7 +434,7 @@ export function ChatPanel({
               type="button"
               onClick={() => setQueryMode("rag")}
               className={cn(
-                "rounded px-2 py-0.5 text-[11px] font-medium transition-colors",
+                "rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
                 queryMode === "rag"
                   ? "bg-primary text-primary-foreground"
                   : "bg-muted text-muted-foreground hover:bg-muted/80"
@@ -463,7 +465,7 @@ export function ChatPanel({
             {isStreamingRag ? (
               <Button
                 variant="outline"
-                className="h-9 shrink-0 px-3"
+                className="h-10 shrink-0 px-3"
                 onClick={onStopStreaming}
                 aria-label="Stop streaming response"
               >
@@ -473,7 +475,7 @@ export function ChatPanel({
             ) : (
               <Button
                 size="icon"
-                className="size-9 shrink-0"
+                className="size-10 shrink-0"
                 onClick={handleSend}
                 disabled={!canSend}
                 aria-label="Send message"

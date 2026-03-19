@@ -7,6 +7,9 @@
 
 import { useEffect, useState } from "react";
 import { BrainGraph, type BrainGraphData, type BrainNode } from "@/components/brain/brain-graph";
+import { PageChrome } from "@/components/shell/page-chrome";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { fetchBrainGraph } from "@/lib/api";
 
 function NodeDetailPanel({ node, onClose }: { node: BrainNode; onClose: () => void }) {
@@ -15,7 +18,7 @@ function NodeDetailPanel({ node, onClose }: { node: BrainNode; onClose: () => vo
   );
 
   return (
-    <aside className="w-72 shrink-0 overflow-y-auto border-l border-border bg-card p-4 text-sm">
+    <aside className="glass-panel w-80 shrink-0 overflow-y-auto rounded-[1.6rem] p-4 text-sm">
       <div className="mb-3 flex items-center justify-between">
         <span className="font-semibold text-foreground">{node.label}</span>
         <button
@@ -60,8 +63,6 @@ export default function BrainPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
 
     fetchBrainGraph()
       .then((graph) => {
@@ -86,29 +87,21 @@ export default function BrainPage() {
   const edgeCount = data?.edges.length ?? 0;
 
   return (
-    <div className="flex h-screen flex-col bg-background">
-      {/* Header */}
-      <header className="flex items-center gap-4 border-b border-border px-4 py-3">
-        <div>
-          <h1 className="text-base font-semibold text-foreground">Brain Graph</h1>
-          <p className="text-xs text-muted-foreground">
-            {loading
-              ? "Loading…"
-              : error
-                ? "Failed to load"
-                : `${nodeCount} nodes · ${edgeCount} edges`}
-          </p>
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <input
+    <PageChrome
+      eyebrow="Workspace Graph"
+      title="See how sessions, indexes, and categories connect."
+      description="The brain graph turns Axiom’s internals into a live map so users can orient themselves inside the workspace instead of guessing what exists."
+      actions={
+        <>
+          <Input
             type="search"
-            placeholder="Filter nodes…"
+            placeholder="Filter nodes..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="h-8 w-48 rounded-md border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-56"
           />
-          <button
+          <Button
+            variant="outline"
             onClick={() => {
               setLoading(true);
               fetchBrainGraph()
@@ -116,44 +109,55 @@ export default function BrainPage() {
                 .catch((err: unknown) => setError(String(err instanceof Error ? err.message : err)))
                 .finally(() => setLoading(false));
             }}
-            className="rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
           >
             Refresh
-          </button>
+          </Button>
+        </>
+      }
+      heroAside={
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+            Graph snapshot
+          </p>
+          <p className="text-sm leading-7 text-muted-foreground">
+            {loading
+              ? "Loading graph data..."
+              : error
+                ? "The graph failed to load."
+                : `${nodeCount} nodes and ${edgeCount} edges are available for exploration.`}
+          </p>
         </div>
-      </header>
-
-      {/* Main content */}
-      <div className="flex flex-1 overflow-hidden">
-        {loading && (
-          <div className="flex flex-1 items-center justify-center">
-            <span className="animate-pulse text-muted-foreground text-sm">Building graph…</span>
-          </div>
-        )}
-
-        {error && !loading && (
-          <div className="flex flex-1 items-center justify-center">
-            <p className="text-destructive text-sm">{error}</p>
-          </div>
-        )}
-
-        {data && !loading && (
-          <>
+      }
+      fullBleed
+      contentClassName="rounded-none border-0 bg-transparent p-0"
+    >
+      <div className="flex h-[calc(100vh-15.5rem)] min-h-[38rem] gap-4 overflow-hidden">
+        <div className="glass-panel-strong flex flex-1 overflow-hidden rounded-[1.8rem]">
+          {loading ? (
+            <div className="flex flex-1 items-center justify-center">
+              <span className="animate-pulse text-muted-foreground text-sm">Building graph...</span>
+            </div>
+          ) : error ? (
+            <div className="flex flex-1 items-center justify-center">
+              <p className="text-destructive text-sm">{error}</p>
+            </div>
+          ) : data ? (
             <BrainGraph
               data={data}
               filter={filter}
               onNodeSelect={setSelectedNode}
               className="flex-1"
             />
-            {selectedNode && (
-              <NodeDetailPanel
-                node={selectedNode}
-                onClose={() => setSelectedNode(null)}
-              />
-            )}
-          </>
-        )}
+          ) : null}
+        </div>
+
+        {selectedNode ? (
+          <NodeDetailPanel
+            node={selectedNode}
+            onClose={() => setSelectedNode(null)}
+          />
+        ) : null}
       </div>
-    </div>
+    </PageChrome>
   );
 }

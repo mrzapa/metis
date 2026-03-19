@@ -100,10 +100,10 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
   }, [selectedRunId, showLiveTrace]);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="glass-panel flex h-full flex-col overflow-hidden rounded-[1.8rem]">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex h-full flex-col">
         {/* Tab bar */}
-        <div className="shrink-0 border-b px-3 pt-2">
+        <div className="shrink-0 border-b border-white/8 px-3 pt-3">
           <TabsList variant="line" className="h-8">
             <TabsTrigger
               value="sources"
@@ -146,7 +146,7 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
                       a.click();
                       URL.revokeObjectURL(url);
                     }}
-                    className="rounded border px-2 py-1 text-[11px] font-medium hover:bg-muted transition-colors"
+                    className="rounded-full border border-white/8 px-3 py-1 text-[11px] font-medium hover:bg-muted transition-colors"
                   >
                     Download JSON
                   </button>
@@ -181,7 +181,7 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
         {/* Trace tab */}
         <TabsContent value="trace" className="flex h-full flex-col overflow-hidden">
           {/* Run selector */}
-          <div className="shrink-0 border-b px-3 py-2">
+          <div className="shrink-0 border-b border-white/8 px-3 py-2">
             <div className="flex items-center gap-2">
               <label htmlFor="run-selector" className="text-xs text-muted-foreground whitespace-nowrap">
                 Run
