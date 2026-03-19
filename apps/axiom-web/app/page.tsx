@@ -2,213 +2,240 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { motion } from "motion/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { SectionHeader } from "@/components/ui/section-header";
+import { StatCard } from "@/components/ui/stat-card";
 import { AmbientBackdrop } from "@/components/shell/ambient-backdrop";
 import { StatusPill } from "@/components/shell/status-pill";
-import { WelcomeHero } from "@/components/shell/welcome-hero";
-import { fetchSettings, getApiBase } from "@/lib/api";
+import {
+  fetchSettings,
+  fetchSessions,
+  fetchIndexes,
+  getApiBase,
+  type SessionSummary,
+  type IndexSummary,
+} from "@/lib/api";
 import {
   ArrowRight,
+  BookOpen,
   Brain,
+  Clock,
+  Database,
+  FolderOpen,
   LibraryBig,
   MessageSquare,
+  Plus,
+  Settings2,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 
-type Status = "connected" | "disconnected" | "checking";
+type ApiStatus = "connected" | "disconnected" | "checking";
 
 export default function Home() {
-  const [status, setStatus] = useState<Status>("checking");
-  const [sidecarError, setSidecarError] = useState<string | null>(null);
+  const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [setupComplete, setSetupComplete] = useState<boolean | null>(null);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [indexes, setIndexes] = useState<IndexSummary[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(true);
+  const [loadingIndexes, setLoadingIndexes] = useState(true);
 
-  useEffect(() => {
-    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
-      return;
-    }
-    let unlisten: (() => void) | undefined;
-    import("@tauri-apps/api/event").then(({ listen }) => {
-      listen<string>("sidecar-timeout", (event) => {
-        setSidecarError(event.payload);
-        setStatus("disconnected");
-      }).then((fn) => {
-        unlisten = fn;
-      });
-    });
-    return () => unlisten?.();
-  }, []);
-
+  // Health check
   useEffect(() => {
     let cancelled = false;
-
     async function check() {
       try {
         const base = await getApiBase();
         const res = await fetch(`${base}/healthz`);
         const data = await res.json();
-        if (!cancelled) setStatus(data.ok ? "connected" : "disconnected");
+        if (!cancelled) setApiStatus(data.ok ? "connected" : "disconnected");
       } catch {
-        if (!cancelled) setStatus("disconnected");
+        if (!cancelled) setApiStatus("disconnected");
       }
     }
-
     check();
-    const id = setInterval(check, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
+    const id = setInterval(check, 8000);
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
+  // Fetch settings for setup state
   useEffect(() => {
     let cancelled = false;
     fetchSettings()
-      .then((settings) => {
-        if (!cancelled) {
-          setSetupComplete(Boolean(settings.basic_wizard_completed));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSetupComplete(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
+      .then((s) => { if (!cancelled) setSetupComplete(Boolean(s.basic_wizard_completed)); })
+      .catch(() => { if (!cancelled) setSetupComplete(false); });
+    return () => { cancelled = true; };
   }, []);
 
-  const statusTone =
-    status === "connected"
-      ? "connected"
-      : status === "disconnected"
-        ? "disconnected"
-        : "checking";
+  // Fetch recent sessions
+  useEffect(() => {
+    let cancelled = false;
+    fetchSessions()
+      .then((data) => { if (!cancelled) setSessions(data.slice(0, 5)); })
+      .catch(() => { if (!cancelled) setSessions([]); })
+      .finally(() => { if (!cancelled) setLoadingSessions(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Fetch indexes
+  useEffect(() => {
+    let cancelled = false;
+    fetchIndexes()
+      .then((data) => { if (!cancelled) setIndexes(data); })
+      .catch(() => { if (!cancelled) setIndexes([]); })
+      .finally(() => { if (!cancelled) setLoadingIndexes(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const totalDocs = indexes.reduce((sum, idx) => sum + idx.document_count, 0);
+  const totalChunks = indexes.reduce((sum, idx) => sum + idx.chunk_count, 0);
+
+  const sessionCountLabel = loadingSessions
+    ? "—"
+    : String(sessions.length);
+  const sessionDetailLabel = loadingSessions
+    ? "Loading..."
+    : sessions.length > 0
+      ? "Recent conversations"
+      : "No conversations yet";
 
   return (
     <div className="relative min-h-screen overflow-hidden">
       <AmbientBackdrop />
 
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col px-4 pb-8 pt-4 sm:px-6 lg:px-8">
-        <header className="glass-panel flex flex-wrap items-center gap-3 rounded-[1.6rem] px-4 py-3 sm:px-5">
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col px-4 pb-12 pt-4 sm:px-6 lg:px-8">
+        {/* ── Header ──────────────────────────────────────────────── */}
+        <motion.header
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: "easeOut" }}
+          className="glass-panel flex items-center gap-3 rounded-2xl px-4 py-3 sm:px-5"
+        >
           <div>
-            <p className="font-display text-lg font-semibold tracking-[-0.04em] text-foreground">Axiom</p>
-            <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
-              local-first AI workspace
+            <p className="text-lg font-semibold tracking-tight text-foreground">Axiom</p>
+            <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+              Local-first AI workspace
             </p>
           </div>
-
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            <StatusPill
-              label={
-                status === "connected"
-                  ? "API online"
-                  : status === "disconnected"
-                    ? "API unavailable"
-                    : "Checking API"
-              }
-              tone={statusTone}
-              animate={status === "checking"}
-            />
-            <Link href="/diagnostics">
-              <Button variant="outline" size="sm">Diagnostics</Button>
-            </Link>
-          </div>
-        </header>
-
-        <main className="flex-1 py-10 sm:py-12">
-          <WelcomeHero
-            eyebrow="Launch-First Workspace"
-            title="A private research cockpit that feels inviting from the first second."
-            description="Axiom now opens like a product instead of a placeholder: you can verify system health, complete setup with a guided path, build your first index, and move into chat without losing momentum."
-            actions={
-              <>
-                <Link href={setupComplete ? "/chat" : "/setup"}>
-                  <Button size="lg" className="gap-2">
-                    {setupComplete ? "Open workspace" : "Start guided setup"}
-                    <ArrowRight className="size-4" />
-                  </Button>
-                </Link>
-                <Link href={setupComplete ? "/library" : "/diagnostics"}>
-                  <Button variant="outline" size="lg">
-                    {setupComplete ? "Build an index" : "Check diagnostics"}
-                  </Button>
-                </Link>
-              </>
+          <nav className="ml-auto hidden items-center gap-1 md:flex">
+            {[
+              { href: "/chat", label: "Chat" },
+              { href: "/library", label: "Library" },
+              { href: "/settings", label: "Settings" },
+            ].map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-white/8 hover:text-foreground"
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+          <StatusPill
+            label={
+              apiStatus === "connected"
+                ? "Online"
+                : apiStatus === "disconnected"
+                  ? "Offline"
+                  : "Checking"
             }
-            stats={[
-              { label: "Privacy posture", value: "Local-first" },
-              { label: "Primary flow", value: "Chat + Retrieval" },
-              { label: "First-run tone", value: "Guided" },
-            ]}
-            preview={
-              <div className="space-y-4">
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline">Grounded answers</Badge>
-                  <Badge variant="outline">Recursive research</Badge>
-                  <Badge variant="outline">Desktop sidecar API</Badge>
-                </div>
-
-                <div className="rounded-[1.5rem] border border-white/8 bg-black/12 p-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.26em] text-muted-foreground">
-                        System readiness
-                      </p>
-                      <p className="mt-2 font-display text-2xl font-semibold tracking-[-0.04em] text-foreground">
-                        {status === "connected"
-                          ? "Ready to launch"
-                          : status === "disconnected"
-                            ? "Needs attention"
-                            : "Checking local services"}
-                      </p>
-                    </div>
-                    <StatusPill
-                      label={
-                        status === "connected"
-                          ? "Connected"
-                          : status === "disconnected"
-                            ? "Disconnected"
-                            : "Checking"
-                      }
-                      tone={statusTone}
-                      animate={status === "checking"}
-                    />
-                  </div>
-                  <p className="mt-3 text-sm leading-7 text-muted-foreground">
-                    {sidecarError ??
-                      (status === "connected"
-                        ? "The local API responded successfully. You can move straight into onboarding or open the workspace."
-                        : "If the sidecar does not become available, use diagnostics to inspect logs, version compatibility, and safe settings." )}
-                  </p>
-                </div>
-              </div>
-            }
+            tone={apiStatus === "connected" ? "connected" : apiStatus === "disconnected" ? "disconnected" : "checking"}
+            animate={apiStatus === "checking"}
+            className="ml-auto md:ml-0"
           />
+        </motion.header>
 
-          <section className="mt-8 grid gap-4 lg:grid-cols-3">
+        {/* ── Hero ────────────────────────────────────────────────── */}
+        <motion.section
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: "easeOut", delay: 0.05 }}
+          className="mt-8 space-y-4"
+        >
+          <h1 className="text-balance text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+            Your private research workspace
+          </h1>
+          <p className="max-w-2xl text-lg leading-relaxed text-muted-foreground">
+            Import documents, build knowledge indexes, and get grounded answers — all running locally on your machine.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Link href={setupComplete ? "/chat" : "/setup"}>
+              <Button size="lg" className="gap-2">
+                {setupComplete ? "Open workspace" : "Get started"}
+                <ArrowRight className="size-4" />
+              </Button>
+            </Link>
+            {setupComplete && (
+              <Link href="/library">
+                <Button variant="outline" size="lg" className="gap-2">
+                  <Plus className="size-4" />
+                  Add documents
+                </Button>
+              </Link>
+            )}
+          </div>
+        </motion.section>
+
+        {/* ── Setup banner (if not complete) ──────────────────────── */}
+        {setupComplete === false && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+            className="mt-6 flex items-center gap-4 rounded-2xl border border-primary/20 bg-primary/8 px-5 py-4"
+          >
+            <Sparkles className="size-5 shrink-0 text-primary" />
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-foreground">Complete your setup</p>
+              <p className="text-sm text-muted-foreground">
+                Configure your model provider and import your first documents to unlock grounded AI conversations.
+              </p>
+            </div>
+            <Link href="/setup">
+              <Button size="sm" className="shrink-0 gap-1.5">
+                Start setup <ArrowRight className="size-3.5" />
+              </Button>
+            </Link>
+          </motion.div>
+        )}
+
+        {/* ── Quick actions grid ──────────────────────────────────── */}
+        <motion.section
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.12 }}
+          className="mt-8"
+        >
+          <SectionHeader title="Quick actions" eyebrow="Get started" />
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
               {
-                href: setupComplete ? "/chat" : "/setup",
-                icon: MessageSquare,
-                title: setupComplete ? "Chat immediately" : "Guided setup",
-                body: setupComplete
-                  ? "Direct and RAG chat are ready as soon as you enter the workspace."
-                  : "Choose providers, set credentials, build an index, and launch with a starter prompt.",
+                href: "/library",
+                icon: FolderOpen,
+                title: "Add documents",
+                desc: "Import files to build a searchable knowledge base.",
               },
               {
-                href: "/library",
-                icon: LibraryBig,
-                title: "Build knowledge bases",
-                body: "Import documents with a calmer, more visual indexing workflow that carries cleanly into chat.",
+                href: "/chat",
+                icon: MessageSquare,
+                title: "Start a conversation",
+                desc: "Ask questions with direct or retrieval-augmented chat.",
+              },
+              {
+                href: "/settings",
+                icon: Settings2,
+                title: "Configure providers",
+                desc: "Set up your preferred LLM and embedding models.",
               },
               {
                 href: "/brain",
                 icon: Brain,
-                title: "See the shape of your workspace",
-                body: "Explore sessions, indexes, and relationships without leaving the core shell.",
+                title: "Explore your brain",
+                desc: "Visualize indexes, sessions, and knowledge connections.",
               },
             ].map((item) => {
               const Icon = item.icon;
@@ -216,54 +243,192 @@ export default function Home() {
                 <Link
                   key={item.title}
                   href={item.href}
-                  className="glass-panel group rounded-[1.7rem] p-5 transition-all duration-200 hover:-translate-y-1 hover:border-primary/25"
+                  className="glass-panel group flex flex-col rounded-2xl p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/25"
                 >
-                  <span className="inline-flex size-11 items-center justify-center rounded-2xl border border-primary/20 bg-primary/14 text-primary">
+                  <div className="flex size-10 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary transition-colors group-hover:bg-primary/16">
                     <Icon className="size-5" />
-                  </span>
-                  <h2 className="mt-4 font-display text-2xl font-semibold tracking-[-0.04em] text-foreground">
-                    {item.title}
-                  </h2>
-                  <p className="mt-2 text-sm leading-7 text-muted-foreground">{item.body}</p>
+                  </div>
+                  <h3 className="mt-3 font-semibold text-foreground">{item.title}</h3>
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{item.desc}</p>
                 </Link>
               );
             })}
-          </section>
+          </div>
+        </motion.section>
 
-          <section className="mt-8 glass-panel rounded-[1.8rem] p-5 sm:p-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
-                  Trust signals
-                </p>
-                <h2 className="mt-2 font-display text-3xl font-semibold tracking-[-0.04em] text-foreground">
-                  Designed to feel capable, not chaotic.
-                </h2>
-              </div>
-              <ShieldCheck className="size-8 text-primary" />
+        {/* ── Stats ───────────────────────────────────────────────── */}
+        {setupComplete && (
+          <motion.section
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.18 }}
+            className="mt-8 grid gap-3 sm:grid-cols-3"
+          >
+            <StatCard
+              icon={<Database className="size-4" />}
+              label="Indexes"
+              value={loadingIndexes ? "—" : indexes.length}
+              detail={loadingIndexes ? "Loading..." : `${totalDocs} documents · ${totalChunks} chunks`}
+            />
+            <StatCard
+              icon={<Clock className="size-4" />}
+              label="Sessions"
+              value={sessionCountLabel}
+              detail={sessionDetailLabel}
+            />
+            <StatCard
+              icon={<ShieldCheck className="size-4" />}
+              label="Privacy"
+              value="Local-first"
+              detail="All data stays on your machine"
+            />
+          </motion.section>
+        )}
+
+        {/* ── Recent sessions ─────────────────────────────────────── */}
+        {setupComplete && (
+          <motion.section
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.22 }}
+            className="mt-8"
+          >
+            <SectionHeader
+              title="Recent sessions"
+              eyebrow="History"
+              action={
+                sessions.length > 0 ? (
+                  <Link href="/chat">
+                    <Button variant="outline" size="sm" className="gap-1.5">
+                      View all <ArrowRight className="size-3.5" />
+                    </Button>
+                  </Link>
+                ) : undefined
+              }
+            />
+            <div className="mt-4">
+              {loadingSessions ? (
+                <div className="glass-panel rounded-2xl p-8 text-center">
+                  <p className="text-sm text-muted-foreground">Loading sessions…</p>
+                </div>
+              ) : sessions.length === 0 ? (
+                <EmptyState
+                  icon={<MessageSquare className="size-6" />}
+                  title="No conversations yet"
+                  description="Start your first conversation to see it here. You can chat directly or use retrieval-augmented mode with your indexed documents."
+                  action={
+                    <Link href="/chat">
+                      <Button className="gap-2">
+                        <MessageSquare className="size-4" />
+                        Start a conversation
+                      </Button>
+                    </Link>
+                  }
+                  className="glass-panel rounded-2xl"
+                />
+              ) : (
+                <div className="grid gap-2">
+                  {sessions.map((session) => (
+                    <Link
+                      key={session.session_id}
+                      href={`/chat?session=${session.session_id}`}
+                      className="glass-panel group flex items-center gap-4 rounded-xl px-4 py-3 transition-all duration-200 hover:border-primary/20"
+                    >
+                      <div className="flex size-9 items-center justify-center rounded-lg border border-white/8 bg-white/4 text-muted-foreground group-hover:text-primary">
+                        <BookOpen className="size-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-foreground">
+                          {session.title || "Untitled session"}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {session.mode} · {session.llm_provider}/{session.llm_model} ·{" "}
+                          {new Date(session.updated_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <ArrowRight className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                    </Link>
+                  ))}
+                </div>
+              )}
             </div>
-            <div className="mt-6 grid gap-4 md:grid-cols-3">
-              <div className="rounded-[1.35rem] border border-white/8 bg-black/10 p-4">
-                <p className="font-medium text-foreground">Local by default</p>
-                <p className="mt-2 text-sm leading-7 text-muted-foreground">
-                  The launch flow foregrounds privacy and system readiness instead of hiding them behind a blank screen.
-                </p>
-              </div>
-              <div className="rounded-[1.35rem] border border-white/8 bg-black/10 p-4">
-                <p className="font-medium text-foreground">Grounded research</p>
-                <p className="mt-2 text-sm leading-7 text-muted-foreground">
-                  Retrieval, trace, and evidence concepts show up early so users understand how answers are formed.
-                </p>
-              </div>
-              <div className="rounded-[1.35rem] border border-white/8 bg-black/10 p-4">
-                <p className="font-medium text-foreground">Actionable diagnostics</p>
-                <p className="mt-2 text-sm leading-7 text-muted-foreground">
-                  When something fails, diagnostics and setup stay accessible instead of trapping users behind app chrome.
-                </p>
-              </div>
+          </motion.section>
+        )}
+
+        {/* ── Library status ──────────────────────────────────────── */}
+        {setupComplete && (
+          <motion.section
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.26 }}
+            className="mt-8"
+          >
+            <SectionHeader
+              title="Knowledge library"
+              eyebrow="Indexes"
+              action={
+                indexes.length > 0 ? (
+                  <Link href="/library">
+                    <Button variant="outline" size="sm" className="gap-1.5">
+                      Manage library <ArrowRight className="size-3.5" />
+                    </Button>
+                  </Link>
+                ) : undefined
+              }
+            />
+            <div className="mt-4">
+              {loadingIndexes ? (
+                <div className="glass-panel rounded-2xl p-8 text-center">
+                  <p className="text-sm text-muted-foreground">Loading indexes…</p>
+                </div>
+              ) : indexes.length === 0 ? (
+                <EmptyState
+                  icon={<LibraryBig className="size-6" />}
+                  title="No documents indexed"
+                  description="Import your first documents to unlock retrieval-augmented conversations. Axiom will chunk, embed, and index them for fast semantic search."
+                  action={
+                    <Link href="/library">
+                      <Button className="gap-2">
+                        <Plus className="size-4" />
+                        Add documents
+                      </Button>
+                    </Link>
+                  }
+                  className="glass-panel rounded-2xl"
+                />
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {indexes.map((idx) => (
+                    <div key={idx.index_id} className="glass-panel rounded-xl p-4">
+                      <div className="flex items-center gap-2">
+                        <Database className="size-4 text-primary" />
+                        <p className="truncate font-medium text-foreground">
+                          {idx.index_id}
+                        </p>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Badge variant="outline">{idx.document_count} docs</Badge>
+                        <Badge variant="outline">{idx.chunk_count} chunks</Badge>
+                        <Badge variant="outline">{idx.backend}</Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          </section>
-        </main>
+          </motion.section>
+        )}
+
+        {/* ── Footer ──────────────────────────────────────────────── */}
+        <footer className="mt-auto pt-12">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/8 pt-4 text-xs text-muted-foreground">
+            <p>Axiom — Private AI workspace</p>
+            <div className="flex gap-3">
+              <Link href="/settings" className="transition-colors hover:text-foreground">Settings</Link>
+              <Link href="/diagnostics" className="transition-colors hover:text-foreground">Diagnostics</Link>
+            </div>
+          </div>
+        </footer>
       </div>
     </div>
   );
