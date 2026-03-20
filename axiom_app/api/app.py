@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from axiom_app.engine import list_indexes, query_direct, query_rag, stream_rag_answer
+from axiom_app.engine import list_indexes
 from axiom_app.engine.querying import _normalize_run_id
 from axiom_app.services.stream_replay import ReplayableRunStreamManager
 from axiom_app.services.trace_store import TraceStore
