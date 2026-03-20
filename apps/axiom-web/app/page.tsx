@@ -230,7 +230,7 @@ export default function Home() {
           initial={{ opacity: 0, scale: 0.92 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.7, ease: "easeOut" }}
-          className="mb-16 flex flex-col items-center sm:mb-20"
+          className="mb-20 flex flex-col items-center sm:mb-28"
         >
           <h1 className="sr-only">AXIOM</h1>
           <div className="home-orbital-ring relative flex items-center justify-center">
@@ -271,7 +271,7 @@ export default function Home() {
                       kind={item.kind ?? "chat"}
                       animated
                       size={80}
-                      className="transition-transform duration-500 group-hover:-translate-y-1 group-hover:scale-[1.06]"
+                      className="drop-shadow-[0_0_15px_rgba(100,150,255,0.6)] transition-transform duration-500 group-hover:-translate-y-1 group-hover:scale-[1.08]"
                     />
                   </div>
 

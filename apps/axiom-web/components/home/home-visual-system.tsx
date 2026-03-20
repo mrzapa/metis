@@ -175,46 +175,6 @@ function MotionWrapper({
   );
 }
 
-function PulseDot({
-  cx,
-  cy,
-  radius,
-  delay = 0,
-  fill,
-  animated,
-}: {
-  cx: number;
-  cy: number;
-  radius: number;
-  delay?: number;
-  fill: string;
-  animated: boolean;
-}) {
-  const reduceMotion = useReducedMotion();
-  const shouldAnimate = animated && !reduceMotion;
-
-  if (!shouldAnimate) {
-    return <circle cx={cx} cy={cy} r={radius} fill={fill} />;
-  }
-
-  return (
-    <motion.circle
-      cx={cx}
-      cy={cy}
-      r={radius}
-      fill={fill}
-      animate={{ opacity: [0.35, 1, 0.55] }}
-      transition={{
-        duration: 1.8,
-        repeat: Number.POSITIVE_INFINITY,
-        repeatType: "mirror",
-        ease: "easeInOut",
-        delay,
-      }}
-    />
-  );
-}
-
 function ChatGlyph({
   animated,
   idSuffix,
@@ -226,75 +186,60 @@ function ChatGlyph({
   const shouldAnimate = animated && !reduceMotion;
 
   return (
-    <svg viewBox="0 0 96 96" className="size-full" aria-hidden="true">
+    <svg viewBox="0 0 100 100" className="size-full" aria-hidden="true">
       <defs>
-        <linearGradient id={`home-chat-stroke-${idSuffix}`} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#f7fbff" />
-          <stop offset="55%" stopColor="#adc6ff" />
-          <stop offset="100%" stopColor="#6bb8ff" />
-        </linearGradient>
+        <radialGradient id={`home-chat-fill-${idSuffix}`} cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.8" />
+          <stop offset="100%" stopColor="#1E3A8A" stopOpacity="0.9" />
+        </radialGradient>
+        <filter id={`home-chat-glow-${idSuffix}`}>
+          <feGaussianBlur stdDeviation="3" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
       </defs>
-      <path
-        d="M25 25h42a13 13 0 0 1 13 13v11a13 13 0 0 1-13 13H46l-13 11v-11h-8a13 13 0 0 1-13-13V38a13 13 0 0 1 13-13Z"
-        fill="rgba(255,255,255,0.06)"
-        stroke={`url(#home-chat-stroke-${idSuffix})`}
-        strokeWidth="3"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M31 37h34"
-        stroke="rgba(255,255,255,0.84)"
-        strokeLinecap="round"
-        strokeWidth="3"
-      />
-      <path
-        d="M31 47h24"
-        stroke="rgba(173,198,255,0.8)"
-        strokeLinecap="round"
-        strokeWidth="3"
-      />
-      <path
-        d="M56 31c6 4 10 10 10 17"
-        fill="none"
-        stroke="rgba(173,198,255,0.24)"
-        strokeLinecap="round"
-        strokeWidth="6"
-      />
-      {shouldAnimate ? (
-        <motion.path
-          d="M56 31c6 4 10 10 10 17"
-          fill="none"
-          stroke="#ffffff"
-          strokeLinecap="round"
-          strokeWidth="3"
-          strokeDasharray="8 18"
-          animate={{ strokeDashoffset: [0, -52] }}
-          transition={{
-            duration: 2.8,
-            repeat: Number.POSITIVE_INFINITY,
-            ease: "linear",
-          }}
-        />
-      ) : null}
-      <PulseDot cx={30} cy={35} radius={2.6} fill="#f7fbff" animated={animated} />
-      <PulseDot cx={47} cy={48} radius={2.2} fill="#adc6ff" animated={animated} delay={0.55} />
-      <PulseDot cx={63} cy={40} radius={2.1} fill="#7dd3ff" animated={animated} delay={1.0} />
+      {/* Outer glow */}
       {shouldAnimate ? (
         <motion.circle
-          cx={64}
-          cy={33}
-          r={4.4}
-          fill="rgba(125,211,255,0.35)"
-          animate={{ r: [3.8, 5.8, 3.8], opacity: [0.45, 0.9, 0.45] }}
-          transition={{
-            duration: 2.2,
-            repeat: Number.POSITIVE_INFINITY,
-            ease: "easeInOut",
-          }}
+          cx={50} cy={50} r={38}
+          fill="rgba(59,130,246,0.1)"
+          animate={{ opacity: [0.06, 0.16, 0.06] }}
+          transition={{ duration: 3, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
         />
-      ) : (
-        <circle cx={64} cy={33} r={4.4} fill="rgba(125,211,255,0.35)" />
-      )}
+      ) : null}
+      {/* Main bubble shape */}
+      <path
+        d="M25 50C25 36.19 36.19 25 50 25C63.81 25 75 36.19 75 50C75 63.81 63.81 75 50 75C45.36 75 41.02 73.74 37.33 71.56C36.66 71.16 35.83 71.02 35.08 71.2L26.67 73.12C25.47 73.4 24.36 72.16 24.77 71.01L27.63 62.92C27.92 62.12 27.82 61.23 27.38 60.51C25.86 58.04 25 55.11 25 50Z"
+        fill={`url(#home-chat-fill-${idSuffix})`}
+        stroke="#60A5FA"
+        strokeWidth="2"
+        filter={`url(#home-chat-glow-${idSuffix})`}
+      />
+      {/* Three dots */}
+      <circle cx={38} cy={50} r={4} fill="#E0F2FE" />
+      <circle cx={50} cy={50} r={4} fill="#E0F2FE" />
+      <circle cx={62} cy={50} r={4} fill="#E0F2FE" />
+      {/* Specular highlight */}
+      <ellipse cx={44} cy={38} rx={12} ry={6} fill="rgba(255,255,255,0.12)" />
+      {/* Animated pulse on dots */}
+      {shouldAnimate ? (
+        <>
+          <motion.circle cx={38} cy={50} r={5.5} fill="rgba(224,242,254,0.35)"
+            animate={{ opacity: [0.2, 0.6, 0.2] }}
+            transition={{ duration: 1.8, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut", delay: 0 }}
+          />
+          <motion.circle cx={50} cy={50} r={5.5} fill="rgba(224,242,254,0.35)"
+            animate={{ opacity: [0.2, 0.6, 0.2] }}
+            transition={{ duration: 1.8, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut", delay: 0.3 }}
+          />
+          <motion.circle cx={62} cy={50} r={5.5} fill="rgba(224,242,254,0.35)"
+            animate={{ opacity: [0.2, 0.6, 0.2] }}
+            transition={{ duration: 1.8, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut", delay: 0.6 }}
+          />
+        </>
+      ) : null}
     </svg>
   );
 }
@@ -310,114 +255,76 @@ function NeuronGlyph({
   const shouldAnimate = animated && !reduceMotion;
 
   return (
-    <svg viewBox="0 0 96 96" className="size-full" aria-hidden="true">
+    <svg viewBox="0 0 100 100" className="size-full" aria-hidden="true">
       <defs>
-        <linearGradient id={`home-neuron-core-${idSuffix}`} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#ffffff" />
-          <stop offset="50%" stopColor="#bfd0ff" />
-          <stop offset="100%" stopColor="#6bb8ff" />
-        </linearGradient>
+        <radialGradient id={`home-neuron-core-${idSuffix}`} cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#DBEAFE" />
+          <stop offset="100%" stopColor="#60A5FA" />
+        </radialGradient>
+        <filter id={`home-neuron-glow-${idSuffix}`}>
+          <feGaussianBlur stdDeviation="2" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
       </defs>
-      <g fill="none" strokeLinecap="round" strokeLinejoin="round">
-        <path
-          d="M48 48 29 28"
-          stroke="rgba(173,198,255,0.5)"
-          strokeWidth="2.5"
-        />
-        <path
-          d="M48 48 68 26"
-          stroke="rgba(173,198,255,0.5)"
-          strokeWidth="2.5"
-        />
-        <path
-          d="M48 48 28 65"
-          stroke="rgba(173,198,255,0.5)"
-          strokeWidth="2.5"
-        />
-        <path
-          d="M48 48 69 67"
-          stroke="rgba(173,198,255,0.5)"
-          strokeWidth="2.5"
-        />
-        <path
-          d="M48 48 48 22"
-          stroke="rgba(125,211,255,0.55)"
-          strokeWidth="2.5"
-        />
-        <path
-          d="M48 48 48 76"
-          stroke="rgba(125,211,255,0.55)"
-          strokeWidth="2.5"
-        />
-        <path
-          d="M29 28c-4 2-8 7-9 12"
-          stroke="rgba(173,198,255,0.32)"
-          strokeWidth="2"
-        />
-        <path
-          d="M68 26c6 2 10 6 12 12"
-          stroke="rgba(173,198,255,0.32)"
-          strokeWidth="2"
-        />
-        <path
-          d="M28 65c-4 3-7 7-8 11"
-          stroke="rgba(173,198,255,0.32)"
-          strokeWidth="2"
-        />
-        <path
-          d="M69 67c5 2 9 6 11 11"
-          stroke="rgba(173,198,255,0.32)"
-          strokeWidth="2"
-        />
-      </g>
-      <g>
-        <motion.circle
-          cx={48}
-          cy={48}
-          r={10}
-          fill={`url(#home-neuron-core-${idSuffix})`}
-          animate={
-            shouldAnimate
-              ? { opacity: [0.45, 1, 0.5] }
-              : undefined
-          }
-          transition={
-            shouldAnimate
-              ? {
-                  duration: 1.4,
-                  repeat: Number.POSITIVE_INFINITY,
-                  repeatType: "mirror",
-                  ease: "easeInOut",
-                }
-              : undefined
-          }
-        />
-        <circle cx={48} cy={48} r={6.4} fill="rgba(7,12,22,0.92)" />
-        <circle cx={47.5} cy={46.5} r={2.2} fill="#ffffff" />
-      </g>
-      <g>
-        <PulseDot cx={29} cy={28} radius={2.3} fill="#f7fbff" animated={animated} delay={0.1} />
-        <PulseDot cx={68} cy={26} radius={2.1} fill="#adc6ff" animated={animated} delay={0.4} />
-        <PulseDot cx={28} cy={65} radius={2.1} fill="#7dd3ff" animated={animated} delay={0.7} />
-        <PulseDot cx={69} cy={67} radius={2.2} fill="#f7fbff" animated={animated} delay={1.0} />
-        <PulseDot cx={48} cy={22} radius={1.9} fill="#f7fbff" animated={animated} delay={1.3} />
-        <PulseDot cx={48} cy={76} radius={1.9} fill="#adc6ff" animated={animated} delay={1.5} />
-      </g>
+      {/* Dendrite branches */}
+      <path d="M50 40 C45 25, 30 15, 20 20" stroke="#93C5FD" strokeLinecap="round" strokeWidth="2" fill="none" />
+      <path d="M50 40 C55 25, 70 15, 80 20" stroke="#93C5FD" strokeLinecap="round" strokeWidth="2" fill="none" />
+      <path d="M40 50 C25 45, 15 60, 20 70" stroke="#93C5FD" strokeLinecap="round" strokeWidth="2" fill="none" />
+      <path d="M60 50 C75 45, 85 60, 80 70" stroke="#93C5FD" strokeLinecap="round" strokeWidth="2" fill="none" />
+      <path d="M50 60 C45 75, 50 90, 50 90" stroke="#93C5FD" strokeLinecap="round" strokeWidth="2" fill="none" />
+      {/* Synapse endpoints */}
+      <circle cx={20} cy={20} r={3} fill="#BFDBFE" />
+      <circle cx={80} cy={20} r={3} fill="#BFDBFE" />
+      <circle cx={20} cy={70} r={3} fill="#BFDBFE" />
+      <circle cx={80} cy={70} r={3} fill="#BFDBFE" />
+      <circle cx={50} cy={90} r={3} fill="#BFDBFE" />
+      {/* Core glow */}
+      <circle cx={50} cy={50} r={10} fill="#60A5FA" filter={`url(#home-neuron-glow-${idSuffix})`} opacity="0.7" />
+      {/* Core body */}
+      <circle cx={50} cy={50} r={8} fill={`url(#home-neuron-core-${idSuffix})`} />
+      {/* Specular highlight */}
+      <ellipse cx={48} cy={46} rx={4} ry={2.5} fill="rgba(255,255,255,0.4)" />
+      {/* Animated pulse */}
       {shouldAnimate ? (
-        <motion.path
-          d="M31 34c5 3 10 7 17 14 7 7 12 11 17 14"
-          fill="none"
-          stroke="rgba(125,211,255,0.75)"
-          strokeLinecap="round"
-          strokeWidth="2.5"
-          strokeDasharray="8 16"
-          animate={{ strokeDashoffset: [0, -72] }}
-          transition={{
-            duration: 3.2,
-            repeat: Number.POSITIVE_INFINITY,
-            ease: "linear",
-          }}
-        />
+        <>
+          <motion.circle cx={50} cy={50} r={14} fill="rgba(96,165,250,0.15)"
+            animate={{ opacity: [0.1, 0.35, 0.1] }}
+            transition={{ duration: 2.4, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
+          />
+          <motion.circle cx={20} cy={20} r={4.5} fill="rgba(191,219,254,0.4)"
+            animate={{ opacity: [0.3, 0.8, 0.3] }}
+            transition={{ duration: 2, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut", delay: 0.2 }}
+          />
+          <motion.circle cx={80} cy={20} r={4.5} fill="rgba(191,219,254,0.4)"
+            animate={{ opacity: [0.3, 0.8, 0.3] }}
+            transition={{ duration: 2, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut", delay: 0.6 }}
+          />
+          <motion.circle cx={20} cy={70} r={4.5} fill="rgba(191,219,254,0.4)"
+            animate={{ opacity: [0.3, 0.8, 0.3] }}
+            transition={{ duration: 2, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut", delay: 1.0 }}
+          />
+          <motion.circle cx={80} cy={70} r={4.5} fill="rgba(191,219,254,0.4)"
+            animate={{ opacity: [0.3, 0.8, 0.3] }}
+            transition={{ duration: 2, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut", delay: 1.4 }}
+          />
+          <motion.path
+            d="M50 40 C45 25, 30 15, 20 20"
+            fill="none" stroke="rgba(147,197,253,0.7)" strokeLinecap="round" strokeWidth="2"
+            strokeDasharray="6 12"
+            animate={{ strokeDashoffset: [0, -36] }}
+            transition={{ duration: 2.8, repeat: Number.POSITIVE_INFINITY, ease: "linear" }}
+          />
+          <motion.path
+            d="M60 50 C75 45, 85 60, 80 70"
+            fill="none" stroke="rgba(147,197,253,0.7)" strokeLinecap="round" strokeWidth="2"
+            strokeDasharray="6 12"
+            animate={{ strokeDashoffset: [0, -36] }}
+            transition={{ duration: 2.8, repeat: Number.POSITIVE_INFINITY, ease: "linear", delay: 0.8 }}
+          />
+        </>
       ) : null}
     </svg>
   );
@@ -434,94 +341,67 @@ function BrainGlyph({
   const shouldAnimate = animated && !reduceMotion;
 
   return (
-    <svg viewBox="0 0 96 96" className="size-full" aria-hidden="true">
+    <svg viewBox="0 0 100 100" className="size-full" aria-hidden="true">
       <defs>
-        <linearGradient id={`home-brain-fill-${idSuffix}`} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#f7fbff" />
-          <stop offset="42%" stopColor="#adc6ff" />
-          <stop offset="100%" stopColor="#6bb8ff" />
-        </linearGradient>
+        <radialGradient id={`home-brain-fill-${idSuffix}`} cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.6" />
+          <stop offset="100%" stopColor="#1E3A8A" stopOpacity="0.8" />
+        </radialGradient>
+        <filter id={`home-brain-glow-${idSuffix}`}>
+          <feGaussianBlur stdDeviation="2.5" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
       </defs>
+      {/* Outer glow */}
+      {shouldAnimate ? (
+        <motion.path
+          d="M30 40 C20 40, 20 60, 30 70 C30 80, 45 85, 50 75 C55 85, 70 80, 70 70 C80 60, 80 40, 70 40 C75 25, 60 20, 50 30 C40 20, 25 25, 30 40 Z"
+          fill="rgba(59,130,246,0.06)" stroke="none"
+          animate={{ scale: [1, 1.04, 1], opacity: [0.06, 0.14, 0.06] }}
+          transition={{ duration: 3.2, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
+          style={{ transformOrigin: "50px 52px" }}
+        />
+      ) : null}
+      {/* Main brain shape */}
       <path
-        d="M35 26c-8 0-14 6-14 14 0 5 2 8 5 11-2 3-3 5-3 9 0 7 5 13 13 13 2 5 6 8 12 8 4 0 8-2 10-5 2 2 5 3 8 3 8 0 14-6 14-14 0-4-2-8-5-10 2-2 3-5 3-9 0-8-6-14-14-14-2-4-6-7-11-7-5 0-9 2-12 5-3-2-6-4-10-4Z"
-        fill="rgba(255,255,255,0.06)"
-        stroke={`url(#home-brain-fill-${idSuffix})`}
-        strokeWidth="3"
-        strokeLinejoin="round"
+        d="M30 40 C20 40, 20 60, 30 70 C30 80, 45 85, 50 75 C55 85, 70 80, 70 70 C80 60, 80 40, 70 40 C75 25, 60 20, 50 30 C40 20, 25 25, 30 40 Z"
+        fill={`url(#home-brain-fill-${idSuffix})`}
+        stroke="#93C5FD"
+        strokeWidth="2"
+        filter={`url(#home-brain-glow-${idSuffix})`}
       />
-      <path
-        d="M43 30c-3 4-4 9-4 14 0 6 2 12 5 16"
-        fill="none"
-        stroke="rgba(255,255,255,0.8)"
-        strokeLinecap="round"
-        strokeWidth="2.2"
-      />
-      <path
-        d="M53 30c3 4 4 9 4 14 0 6-2 12-5 16"
-        fill="none"
-        stroke="rgba(173,198,255,0.8)"
-        strokeLinecap="round"
-        strokeWidth="2.2"
-      />
-      <path
-        d="M33 46c4 1 7 2 11 6"
-        fill="none"
-        stroke="rgba(125,211,255,0.64)"
-        strokeLinecap="round"
-        strokeWidth="2.2"
-      />
-      <path
-        d="M52 52c4-2 8-3 12-3"
-        fill="none"
-        stroke="rgba(125,211,255,0.64)"
-        strokeLinecap="round"
-        strokeWidth="2.2"
-      />
-      <path
-        d="M39 60c2-2 5-4 9-4"
-        fill="none"
-        stroke="rgba(173,198,255,0.44)"
-        strokeLinecap="round"
-        strokeWidth="2.2"
-      />
-      <path
-        d="M57 42c3 0 6 1 9 4"
-        fill="none"
-        stroke="rgba(173,198,255,0.44)"
-        strokeLinecap="round"
-        strokeWidth="2.2"
-      />
-      <PulseDot cx={38} cy={35} radius={2.4} fill="#f7fbff" animated={animated} delay={0.1} />
-      <PulseDot cx={58} cy={34} radius={2.3} fill="#adc6ff" animated={animated} delay={0.4} />
-      <PulseDot cx={65} cy={53} radius={2.2} fill="#7dd3ff" animated={animated} delay={0.8} />
-      <PulseDot cx={33} cy={59} radius={2.1} fill="#f7fbff" animated={animated} delay={1.1} />
+      {/* Hemispheric divide */}
+      <path d="M50 30 L50 75" stroke="#60A5FA" strokeDasharray="2 2" strokeWidth="2" fill="none" />
+      {/* Neural nodes inside brain */}
+      <circle cx={40} cy={45} r={2} fill="#E0F2FE" />
+      <circle cx={60} cy={45} r={2} fill="#E0F2FE" />
+      <circle cx={35} cy={55} r={2} fill="#E0F2FE" />
+      <circle cx={65} cy={55} r={2} fill="#E0F2FE" />
+      <circle cx={45} cy={65} r={2} fill="#E0F2FE" />
+      <circle cx={55} cy={65} r={2} fill="#E0F2FE" />
+      {/* Specular highlight */}
+      <ellipse cx={42} cy={38} rx={10} ry={5} fill="rgba(255,255,255,0.08)" />
+      {/* Animated pulses on neural nodes */}
       {shouldAnimate ? (
         <>
-          <motion.circle
-            cx={39}
-            cy={36}
-            r={5.2}
-            fill="rgba(173,198,255,0.18)"
-            animate={{ r: [4.4, 6.8, 4.4], opacity: [0.2, 0.65, 0.2] }}
-            transition={{
-              duration: 2.6,
-              repeat: Number.POSITIVE_INFINITY,
-              ease: "easeInOut",
-              delay: 0.2,
-            }}
+          <motion.circle cx={40} cy={45} r={3.5} fill="rgba(224,242,254,0.35)"
+            animate={{ opacity: [0.2, 0.7, 0.2] }}
+            transition={{ duration: 2.2, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut", delay: 0 }}
           />
-          <motion.circle
-            cx={64}
-            cy={52}
-            r={6}
-            fill="rgba(125,211,255,0.16)"
-            animate={{ r: [5, 7.6, 5], opacity: [0.18, 0.62, 0.18] }}
-            transition={{
-              duration: 3,
-              repeat: Number.POSITIVE_INFINITY,
-              ease: "easeInOut",
-              delay: 0.6,
-            }}
+          <motion.circle cx={60} cy={45} r={3.5} fill="rgba(224,242,254,0.35)"
+            animate={{ opacity: [0.2, 0.7, 0.2] }}
+            transition={{ duration: 2.2, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut", delay: 0.5 }}
+          />
+          <motion.circle cx={35} cy={55} r={3.5} fill="rgba(224,242,254,0.35)"
+            animate={{ opacity: [0.2, 0.7, 0.2] }}
+            transition={{ duration: 2.2, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut", delay: 1.0 }}
+          />
+          <motion.circle cx={65} cy={55} r={3.5} fill="rgba(224,242,254,0.35)"
+            animate={{ opacity: [0.2, 0.7, 0.2] }}
+            transition={{ duration: 2.2, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut", delay: 1.5 }}
           />
         </>
       ) : null}

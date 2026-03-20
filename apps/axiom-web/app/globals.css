@@ -636,17 +636,17 @@ body {
 .home-cosmos-card {
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   background:
-    linear-gradient(180deg, rgba(12, 18, 32, 0.72), rgba(8, 12, 22, 0.62));
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
+    linear-gradient(180deg, rgba(20, 30, 50, 0.3), rgba(12, 18, 32, 0.35));
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
   box-shadow:
-    0 20px 60px -28px rgba(0, 0, 0, 0.6),
+    0 8px 32px rgba(0, 0, 0, 0.5),
     0 6px 20px -10px rgba(9, 105, 218, 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-  transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+    inset 0 0 20px rgba(255, 255, 255, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease, background 220ms ease;
 }
 
 .home-cosmos-card::before {
@@ -660,12 +660,14 @@ body {
 }
 
 .home-cosmos-card:hover {
-  border-color: rgba(143, 179, 255, 0.2);
+  background:
+    linear-gradient(180deg, rgba(20, 30, 50, 0.5), rgba(12, 18, 32, 0.45));
+  border-color: rgba(56, 189, 248, 0.4);
   box-shadow:
-    0 24px 72px -28px rgba(0, 0, 0, 0.7),
-    0 8px 28px -10px rgba(9, 105, 218, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    0 8px 32px rgba(0, 0, 0, 0.6),
+    0 0 15px rgba(56, 189, 248, 0.2),
+    inset 0 0 20px rgba(56, 189, 248, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 
 .home-cosmos-card > * {
