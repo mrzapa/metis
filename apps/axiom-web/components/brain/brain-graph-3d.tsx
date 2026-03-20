@@ -88,8 +88,8 @@ function makeTextSprite(text: string, color: string): THREE.Sprite {
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
   const sprite = new THREE.Sprite(mat);
 
-  const spriteScale = 0.25;
-  sprite.scale.set(canvas.width * spriteScale / fontSize, canvas.height * spriteScale / fontSize, 1);
+  const labelScaleFactor = 0.25;
+  sprite.scale.set(canvas.width * labelScaleFactor / fontSize, canvas.height * labelScaleFactor / fontSize, 1);
   return sprite;
 }
 
