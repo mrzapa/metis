@@ -307,7 +307,7 @@ finally {
 }
 
 if (-not (Test-Path (Join-Path `$webDir "index.html"))) {
-    throw [System.InvalidOperationException]::new("Built web UI not found at `$webDir. Run the installer with Node.js available or build apps/axiom-web manually before launching.")
+    throw [System.InvalidOperationException]::new("Built web UI not found at `$webDir. Install Node.js and re-run the installer, or build apps/axiom-web manually.")
 }
 
 if ((Test-PortInUse -HostName `$apiHost -Port `$apiPort) -or (Test-PortInUse -HostName `$webHost -Port `$webPort)) {
