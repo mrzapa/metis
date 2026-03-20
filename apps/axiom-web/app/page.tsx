@@ -198,15 +198,6 @@ export default function Home() {
       <div className="deep-space-overlay absolute inset-0" aria-hidden="true" />
       <SpaceAtmosphere />
 
-      {/* Side rail – desktop */}
-      <aside className="fixed left-6 top-1/2 z-30 hidden -translate-y-1/2 md:block">
-        <nav className="home-liquid-glass home-liquid-glass-rail group/rail flex w-[5.35rem] flex-col gap-1.5 overflow-hidden rounded-[1.9rem] px-3 py-3 transition-[width] duration-500 hover:w-[15.75rem] focus-within:w-[15.75rem]">
-          {SIDE_RAIL_ITEMS.map((item) => (
-            <RailLink key={item.href} item={item} setupComplete={setupComplete} />
-          ))}
-        </nav>
-      </aside>
-
       {/* Bottom rail – mobile */}
       <nav className="home-liquid-glass home-liquid-glass-rail fixed bottom-4 left-1/2 z-30 w-[min(92vw,28rem)] -translate-x-1/2 rounded-[1.75rem] px-2 py-2 md:hidden">
         <div className="flex w-full flex-col gap-3">
