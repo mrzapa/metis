@@ -5,8 +5,8 @@ import { SetupGuard } from "@/components/setup-guard";
 import { DesktopReadyGuard } from "@/components/desktop-ready";
 
 export const metadata: Metadata = {
-  title: "Axiom",
-  description: "A local-first AI workspace for research, retrieval, and knowledge building.",
+  title: "AXIOM | Frontier RAG AI",
+  description: "A local-first frontier AI workspace for chat, retrieval, and knowledge building.",
 };
 
 export default function RootLayout({
