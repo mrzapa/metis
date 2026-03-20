@@ -139,6 +139,7 @@ export default function BrainGraph3D({
   const modelSceneRef = useRef<THREE.Scene | null>(null);
   const modelLoadAttemptRef = useRef(0);
   const [sceneReady, setSceneReady] = useState(false);
+  const needsInitialZoomRef = useRef(true);
 
   // Track container dimensions for the ForceGraph width/height props
   const [dims, setDims] = useState({ w: 800, h: 600 });
@@ -176,6 +177,10 @@ export default function BrainGraph3D({
   // -- Zoom-to-fit on first load / data change -----------------------------
 
   useEffect(() => {
+    needsInitialZoomRef.current = true;
+  }, [graphData]);
+
+  useEffect(() => {
     const fg = fgRef.current;
     if (!fg || graphData.nodes.length === 0) return;
     const timer = setTimeout(() => {
@@ -183,6 +188,20 @@ export default function BrainGraph3D({
     }, 350);
     return () => clearTimeout(timer);
   }, [graphData]);
+
+  // -- Configure camera controls for better zoom range --------------------
+
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!fg) return;
+    const controls = fg.controls?.() as
+      | { minDistance?: number; maxDistance?: number }
+      | undefined;
+    if (controls) {
+      controls.minDistance = 10;
+      controls.maxDistance = 5000;
+    }
+  }, [dims.w, dims.h]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -251,6 +270,14 @@ export default function BrainGraph3D({
   const fitModelOverlay = useCallback(() => {
     modelOverlayRef.current?.fitToGraph(graphData.nodes);
   }, [graphData.nodes]);
+
+  const handleEngineStop = useCallback(() => {
+    fitModelOverlay();
+    if (needsInitialZoomRef.current) {
+      needsInitialZoomRef.current = false;
+      fgRef.current?.zoomToFit(600, 60);
+    }
+  }, [fitModelOverlay]);
 
   useEffect(() => {
     if (renderMode !== "hybrid") return;
@@ -385,7 +412,7 @@ export default function BrainGraph3D({
           onSelectedNodeIdChange?.(null);
           onNodeSelect?.(null);
         }}
-        onEngineStop={fitModelOverlay}
+        onEngineStop={handleEngineStop}
         /* Force engine tuning */
         d3AlphaDecay={0.04}
         d3VelocityDecay={0.3}

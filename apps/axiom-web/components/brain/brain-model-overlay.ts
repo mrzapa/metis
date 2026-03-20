@@ -86,8 +86,7 @@ function computeBounds(nodes: readonly GraphPoint[]): {
   const points = nodes.filter(
     (node) =>
       Number.isFinite(node.x) &&
-      Number.isFinite(node.y) &&
-      Number.isFinite(node.z),
+      Number.isFinite(node.y),
   );
 
   if (points.length === 0) return null;
@@ -142,8 +141,8 @@ function buildLightRig(): {
   return { rig, keyLight, rimLight };
 }
 
-/** Scale the brain model to this fraction of the graph's maximum dimension. */
-const BRAIN_SCALE_FACTOR = 1.3;
+/** Scale the brain model relative to the graph's maximum dimension. */
+const BRAIN_SCALE_FACTOR = 2.0;
 
 export async function loadBrainModelOverlay(
   modelUrl = "/brain/brain-model.glb",
@@ -163,7 +162,7 @@ export async function loadBrainModelOverlay(
   const fitToGraph = (nodes: readonly GraphPoint[]) => {
     const bounds = computeBounds(nodes);
     const center = bounds?.center ?? new THREE.Vector3(0, 0, 0);
-    const maxDimension = Math.max(bounds?.maxDimension ?? 160, 120);
+    const maxDimension = Math.max(bounds?.maxDimension ?? 200, 200);
     const targetScale = maxDimension * BRAIN_SCALE_FACTOR;
 
     root.position.copy(center);
