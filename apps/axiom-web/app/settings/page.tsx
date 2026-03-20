@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -9,7 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageChrome } from "@/components/shell/page-chrome";
-import { fetchSettings, updateSettings } from "@/lib/api";
+import {
+  fetchAssistantSettings,
+  fetchSettings,
+  updateAssistantSettings,
+  updateSettings,
+  type AssistantSettings,
+} from "@/lib/api";
 import { AlertCircle, CheckCircle2, Info, Loader2, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -66,6 +72,8 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
+type AssistantFormValues = AssistantSettings;
+
 const RETRIEVAL_MODES = ["flat", "mmr", "hybrid"];
 const SEARCH_TYPES = ["similarity", "mmr"];
 const OUTPUT_STYLES = ["Default answer", "Concise", "Detailed", "Bullet points"];
@@ -73,12 +81,70 @@ const SKILL_MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"];
 const KG_QUERY_MODES = ["hybrid", "vector", "keyword"];
 const COMPREHENSION_DEPTHS = ["Standard", "Deep", "Exhaustive"];
 
+const ASSISTANT_DEFAULT_VALUES: AssistantFormValues = {
+  assistant_identity: {
+    assistant_id: "axiom-companion",
+    name: "Axiom",
+    archetype: "Clippy-style research companion",
+    companion_enabled: true,
+    greeting: "I can help you get started, reflect on completed work, and map what I learn in the Brain tab.",
+    prompt_seed:
+      "You are Axiom, a local-first companion who helps the user get oriented, suggests next steps, and records concise reflections without taking over the main chat.",
+    docked: true,
+    minimized: false,
+  },
+  assistant_runtime: {
+    provider: "",
+    model: "",
+    local_gguf_model_path: "",
+    local_gguf_context_length: 2048,
+    local_gguf_gpu_layers: 0,
+    local_gguf_threads: 0,
+    fallback_to_primary: true,
+    auto_bootstrap: true,
+    auto_install: false,
+    bootstrap_state: "pending",
+    recommended_model_name: "",
+    recommended_quant: "",
+    recommended_use_case: "chat",
+  },
+  assistant_policy: {
+    reflection_enabled: true,
+    reflection_backend: "hybrid",
+    reflection_cooldown_seconds: 180,
+    max_memory_entries: 200,
+    max_playbooks: 64,
+    max_brain_links: 400,
+    trigger_on_onboarding: true,
+    trigger_on_index_build: true,
+    trigger_on_completed_run: true,
+    allow_automatic_writes: true,
+  },
+};
+
+function assistantToForm(values: AssistantSettings): AssistantFormValues {
+  return {
+    assistant_identity: {
+      ...ASSISTANT_DEFAULT_VALUES.assistant_identity,
+      ...values.assistant_identity,
+    },
+    assistant_runtime: {
+      ...ASSISTANT_DEFAULT_VALUES.assistant_runtime,
+      ...values.assistant_runtime,
+    },
+    assistant_policy: {
+      ...ASSISTANT_DEFAULT_VALUES.assistant_policy,
+      ...values.assistant_policy,
+    },
+  };
+}
+
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
   return <p className="mt-0.5 text-xs text-destructive">{message}</p>;
 }
 
-function FieldLabel({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) {
+function FieldLabel({ htmlFor, children }: { htmlFor: string; children: ReactNode }) {
   return (
     <label htmlFor={htmlFor} className="text-sm font-medium">
       {children}
@@ -125,6 +191,11 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [assistantLoading, setAssistantLoading] = useState(true);
+  const [assistantLoadError, setAssistantLoadError] = useState<string | null>(null);
+  const [assistantSaving, setAssistantSaving] = useState(false);
+  const [assistantSaveError, setAssistantSaveError] = useState<string | null>(null);
+  const [assistantSaved, setAssistantSaved] = useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -181,6 +252,16 @@ export default function SettingsPage() {
   });
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = form;
+  const assistantForm = useForm<AssistantFormValues>({
+    defaultValues: ASSISTANT_DEFAULT_VALUES,
+  });
+  const {
+    register: registerAssistant,
+    handleSubmit: handleAssistantSubmit,
+    reset: resetAssistant,
+    watch: watchAssistant,
+    setValue: setAssistantValue,
+  } = assistantForm;
 
   useEffect(() => {
     fetchSettings()
@@ -240,6 +321,15 @@ export default function SettingsPage() {
       .finally(() => setLoading(false));
   }, [reset]);
 
+  useEffect(() => {
+    fetchAssistantSettings()
+      .then((assistant) => {
+        resetAssistant(assistantToForm(assistant));
+      })
+      .catch((err) => setAssistantLoadError(err instanceof Error ? err.message : "Failed to load assistant settings"))
+      .finally(() => setAssistantLoading(false));
+  }, [resetAssistant]);
+
   async function onSubmit(values: FormValues) {
     setSaving(true);
     setSaveError(null);
@@ -255,6 +345,21 @@ export default function SettingsPage() {
     }
   }
 
+  async function onAssistantSubmit(values: AssistantFormValues) {
+    setAssistantSaving(true);
+    setAssistantSaveError(null);
+    setAssistantSaved(false);
+    try {
+      await updateAssistantSettings(values);
+      setAssistantSaved(true);
+      setTimeout(() => setAssistantSaved(false), 3000);
+    } catch (err) {
+      setAssistantSaveError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setAssistantSaving(false);
+    }
+  }
+
   const mmrLambda = watch("mmr_lambda");
   const llmTemp = watch("llm_temperature");
 
@@ -262,13 +367,13 @@ export default function SettingsPage() {
     <PageChrome
       eyebrow="Settings"
       title="Configure your workspace"
-      description="Fine-tune model providers, retrieval parameters, graph behavior, and memory settings."
+      description="Fine-tune model providers, retrieval parameters, graph behavior, memory settings, and the companion assistant."
     >
       <div className="mx-auto max-w-3xl space-y-8">
         <div>
           <h1 className="text-lg font-semibold">Settings</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Core defaults, retrieval controls, graph, memory, and model settings.
+            Core defaults, retrieval controls, graph, memory, model, and companion settings.
           </p>
         </div>
 
@@ -319,6 +424,7 @@ export default function SettingsPage() {
                 <TabsTrigger value="graph">Graph</TabsTrigger>
                 <TabsTrigger value="memory">Memory</TabsTrigger>
                 <TabsTrigger value="model">Model</TabsTrigger>
+                <TabsTrigger value="companion">Companion</TabsTrigger>
               </TabsList>
 
               {/* ── Core ──────────────────────────────────────────────────── */}
@@ -845,6 +951,369 @@ export default function SettingsPage() {
                       onChange={(v) => setValue("agent_lightning_enabled", v)}
                     />
                   </div>
+                </section>
+              </TabsContent>
+
+              {/* ── Companion ─────────────────────────────────────────────── */}
+              <TabsContent value="companion" className="mt-6 space-y-6">
+                <section className="space-y-4">
+                  <div>
+                    <h2 className="text-base font-semibold">Companion assistant settings</h2>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Tune the docked assistant identity, runtime, and reflection policy.
+                    </p>
+                  </div>
+                  <Separator />
+
+                  {assistantLoadError && (
+                    <div className="flex items-center gap-1.5 text-sm text-destructive">
+                      <AlertCircle className="size-4" />
+                      {assistantLoadError}
+                    </div>
+                  )}
+
+                  {assistantLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="size-4 animate-spin" />
+                      Loading companion settings…
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      <div className="space-y-4">
+                        <div>
+                          <h3 className="text-sm font-semibold">Assistant identity</h3>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            Name, greeting, and dock behavior for the companion.
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_identity.assistant_id">Assistant ID</FieldLabel>
+                            <Input
+                              id="assistant_identity.assistant_id"
+                              type="text"
+                              {...registerAssistant("assistant_identity.assistant_id")}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_identity.name">Name</FieldLabel>
+                            <Input
+                              id="assistant_identity.name"
+                              type="text"
+                              {...registerAssistant("assistant_identity.name")}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_identity.archetype">Archetype</FieldLabel>
+                            <Input
+                              id="assistant_identity.archetype"
+                              type="text"
+                              {...registerAssistant("assistant_identity.archetype")}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_identity.greeting">Greeting</FieldLabel>
+                            <Input
+                              id="assistant_identity.greeting"
+                              type="text"
+                              {...registerAssistant("assistant_identity.greeting")}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <FieldLabel htmlFor="assistant_identity.prompt_seed">Prompt seed</FieldLabel>
+                          <textarea
+                            id="assistant_identity.prompt_seed"
+                            rows={5}
+                            {...registerAssistant("assistant_identity.prompt_seed")}
+                            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                            placeholder="Seed prompt used to shape the companion's tone and behavior."
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <ToggleRow
+                            id="assistant_identity.companion_enabled"
+                            label="Companion enabled"
+                            description="Show the assistant companion in the dock."
+                            checked={watchAssistant("assistant_identity.companion_enabled")}
+                            onChange={(v) => setAssistantValue("assistant_identity.companion_enabled", v)}
+                          />
+                          <ToggleRow
+                            id="assistant_identity.docked"
+                            label="Docked"
+                            description="Keep the companion visible as a docked panel."
+                            checked={watchAssistant("assistant_identity.docked")}
+                            onChange={(v) => setAssistantValue("assistant_identity.docked", v)}
+                          />
+                          <ToggleRow
+                            id="assistant_identity.minimized"
+                            label="Start minimized"
+                            description="Collapse the companion by default."
+                            checked={watchAssistant("assistant_identity.minimized")}
+                            onChange={(v) => setAssistantValue("assistant_identity.minimized", v)}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div>
+                          <h3 className="text-sm font-semibold">Runtime</h3>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            Configure the local or remote model source used by the companion.
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_runtime.provider">Provider</FieldLabel>
+                            <Input
+                              id="assistant_runtime.provider"
+                              type="text"
+                              {...registerAssistant("assistant_runtime.provider")}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_runtime.model">Model</FieldLabel>
+                            <Input
+                              id="assistant_runtime.model"
+                              type="text"
+                              {...registerAssistant("assistant_runtime.model")}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_runtime.local_gguf_model_path">GGUF path</FieldLabel>
+                            <Input
+                              id="assistant_runtime.local_gguf_model_path"
+                              type="text"
+                              {...registerAssistant("assistant_runtime.local_gguf_model_path")}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_runtime.bootstrap_state">Bootstrap state</FieldLabel>
+                            <Input
+                              id="assistant_runtime.bootstrap_state"
+                              type="text"
+                              {...registerAssistant("assistant_runtime.bootstrap_state")}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_runtime.local_gguf_context_length">
+                              Context length
+                            </FieldLabel>
+                            <Input
+                              id="assistant_runtime.local_gguf_context_length"
+                              type="number"
+                              min={512}
+                              {...registerAssistant("assistant_runtime.local_gguf_context_length", {
+                                valueAsNumber: true,
+                              })}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_runtime.local_gguf_gpu_layers">GPU layers</FieldLabel>
+                            <Input
+                              id="assistant_runtime.local_gguf_gpu_layers"
+                              type="number"
+                              min={0}
+                              {...registerAssistant("assistant_runtime.local_gguf_gpu_layers", {
+                                valueAsNumber: true,
+                              })}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_runtime.local_gguf_threads">Threads</FieldLabel>
+                            <Input
+                              id="assistant_runtime.local_gguf_threads"
+                              type="number"
+                              min={0}
+                              {...registerAssistant("assistant_runtime.local_gguf_threads", {
+                                valueAsNumber: true,
+                              })}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_runtime.recommended_model_name">Recommended model</FieldLabel>
+                            <Input
+                              id="assistant_runtime.recommended_model_name"
+                              type="text"
+                              {...registerAssistant("assistant_runtime.recommended_model_name")}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_runtime.recommended_quant">Recommended quant</FieldLabel>
+                            <Input
+                              id="assistant_runtime.recommended_quant"
+                              type="text"
+                              {...registerAssistant("assistant_runtime.recommended_quant")}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_runtime.recommended_use_case">Recommended use case</FieldLabel>
+                            <Input
+                              id="assistant_runtime.recommended_use_case"
+                              type="text"
+                              {...registerAssistant("assistant_runtime.recommended_use_case")}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <ToggleRow
+                            id="assistant_runtime.fallback_to_primary"
+                            label="Fallback to primary"
+                            description="Use the main workspace model when the companion runtime is unavailable."
+                            checked={watchAssistant("assistant_runtime.fallback_to_primary")}
+                            onChange={(v) => setAssistantValue("assistant_runtime.fallback_to_primary", v)}
+                          />
+                          <ToggleRow
+                            id="assistant_runtime.auto_bootstrap"
+                            label="Auto bootstrap"
+                            description="Automatically prepare the companion runtime when needed."
+                            checked={watchAssistant("assistant_runtime.auto_bootstrap")}
+                            onChange={(v) => setAssistantValue("assistant_runtime.auto_bootstrap", v)}
+                          />
+                          <ToggleRow
+                            id="assistant_runtime.auto_install"
+                            label="Auto install"
+                            description="Allow the app to install a recommended local model automatically."
+                            checked={watchAssistant("assistant_runtime.auto_install")}
+                            onChange={(v) => setAssistantValue("assistant_runtime.auto_install", v)}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div>
+                          <h3 className="text-sm font-semibold">Policy</h3>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            Control reflection behavior and memory growth limits.
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_policy.reflection_backend">Reflection backend</FieldLabel>
+                            <Input
+                              id="assistant_policy.reflection_backend"
+                              type="text"
+                              {...registerAssistant("assistant_policy.reflection_backend")}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_policy.reflection_cooldown_seconds">
+                              Reflection cooldown
+                            </FieldLabel>
+                            <Input
+                              id="assistant_policy.reflection_cooldown_seconds"
+                              type="number"
+                              min={0}
+                              {...registerAssistant("assistant_policy.reflection_cooldown_seconds", {
+                                valueAsNumber: true,
+                              })}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_policy.max_memory_entries">Max memory entries</FieldLabel>
+                            <Input
+                              id="assistant_policy.max_memory_entries"
+                              type="number"
+                              min={1}
+                              {...registerAssistant("assistant_policy.max_memory_entries", {
+                                valueAsNumber: true,
+                              })}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_policy.max_playbooks">Max playbooks</FieldLabel>
+                            <Input
+                              id="assistant_policy.max_playbooks"
+                              type="number"
+                              min={1}
+                              {...registerAssistant("assistant_policy.max_playbooks", {
+                                valueAsNumber: true,
+                              })}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="assistant_policy.max_brain_links">Max brain links</FieldLabel>
+                            <Input
+                              id="assistant_policy.max_brain_links"
+                              type="number"
+                              min={1}
+                              {...registerAssistant("assistant_policy.max_brain_links", {
+                                valueAsNumber: true,
+                              })}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <ToggleRow
+                            id="assistant_policy.reflection_enabled"
+                            label="Reflection enabled"
+                            description="Allow the assistant to summarize and reflect on completed work."
+                            checked={watchAssistant("assistant_policy.reflection_enabled")}
+                            onChange={(v) => setAssistantValue("assistant_policy.reflection_enabled", v)}
+                          />
+                          <ToggleRow
+                            id="assistant_policy.trigger_on_onboarding"
+                            label="Trigger on onboarding"
+                            description="Run the assistant after onboarding-related events."
+                            checked={watchAssistant("assistant_policy.trigger_on_onboarding")}
+                            onChange={(v) => setAssistantValue("assistant_policy.trigger_on_onboarding", v)}
+                          />
+                          <ToggleRow
+                            id="assistant_policy.trigger_on_index_build"
+                            label="Trigger on index build"
+                            description="Reflect after new indexes finish building."
+                            checked={watchAssistant("assistant_policy.trigger_on_index_build")}
+                            onChange={(v) => setAssistantValue("assistant_policy.trigger_on_index_build", v)}
+                          />
+                          <ToggleRow
+                            id="assistant_policy.trigger_on_completed_run"
+                            label="Trigger on completed run"
+                            description="Reflect after finished chat or tool runs."
+                            checked={watchAssistant("assistant_policy.trigger_on_completed_run")}
+                            onChange={(v) => setAssistantValue("assistant_policy.trigger_on_completed_run", v)}
+                          />
+                          <ToggleRow
+                            id="assistant_policy.allow_automatic_writes"
+                            label="Allow automatic writes"
+                            description="Let the assistant store reflections and memory entries automatically."
+                            checked={watchAssistant("assistant_policy.allow_automatic_writes")}
+                            onChange={(v) => setAssistantValue("assistant_policy.allow_automatic_writes", v)}
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <Button
+                            type="button"
+                            onClick={() => void handleAssistantSubmit(onAssistantSubmit)()}
+                            disabled={assistantSaving}
+                            className="gap-1.5"
+                          >
+                            {assistantSaving && <Loader2 className="size-4 animate-spin" />}
+                            {assistantSaving ? "Saving…" : "Save companion settings"}
+                          </Button>
+                          {assistantSaved && (
+                            <span className={cn("flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400")}>
+                              <CheckCircle2 className="size-4" />
+                              Saved
+                            </span>
+                          )}
+                        </div>
+                        {assistantSaveError && (
+                          <div className="flex items-center gap-1.5 text-sm text-destructive">
+                            <AlertCircle className="size-4" />
+                            {assistantSaveError}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </section>
               </TabsContent>
             </Tabs>

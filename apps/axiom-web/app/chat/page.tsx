@@ -59,6 +59,7 @@ interface StartRagStreamOptions {
   pendingSources: EvidenceSource[];
   question: string;
   runId: string;
+  sessionId?: string | null;
   userMessageTs: string;
 }
 
@@ -150,6 +151,7 @@ export default function ChatPage() {
   const [initialDraft, setInitialDraft] = useState("");
   const [sessionRefreshToken, setSessionRefreshToken] = useState(0);
   const [selectedRagMode, setSelectedRagMode] = useState<string>("Q&A");
+  const sessionIdRef = useRef<string | null>(null);
   const {
     createMessage,
     restoreStreamingRun,
@@ -176,6 +178,7 @@ export default function ChatPage() {
     latestSources,
     runIdsNewestFirst,
   } = useChatTranscript();
+  const companionSessionId = selectedId ?? sessionMeta?.session_id ?? null;
 
   const getRunSubqueries = useCallback(
     (runId: string) => getRun(runId)?.sub_queries,
@@ -301,6 +304,10 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    sessionIdRef.current = companionSessionId;
+  }, [companionSessionId]);
+
+  useEffect(() => {
     const seedPrompt = localStorage.getItem("axiom_chat_seed_prompt");
     if (!seedPrompt) {
       return;
@@ -382,6 +389,7 @@ export default function ChatPage() {
       setLoadingSession(true);
       setSessionError(null);
       setLiveTraceEvents([]);
+      sessionIdRef.current = id;
 
       try {
         const detail = await fetchSession(id);
@@ -412,20 +420,25 @@ export default function ChatPage() {
   );
 
   const autoCreateSession = useCallback(
-    async (question: string): Promise<void> => {
-      if (selectedId !== null || messages.length > 0) return;
+    async (question: string): Promise<string | null> => {
+      if (sessionIdRef.current !== null || messages.length > 0) {
+        return sessionIdRef.current;
+      }
       const trimmed = question.trim();
       const title = trimmed.slice(0, 60) + (trimmed.length > 60 ? "…" : "");
       try {
         const summary = await createSession(title || "New Chat");
         setSelectedId(summary.session_id);
         setSessionMeta(summary);
+        sessionIdRef.current = summary.session_id;
         setSessionRefreshToken((t) => t + 1);
+        return summary.session_id;
       } catch {
         // Best-effort — proceed without a session if creation fails.
+        return sessionIdRef.current;
       }
     },
-    [selectedId, messages.length],
+    [messages.length],
   );
 
   const handleDirectSend = useCallback(
@@ -442,14 +455,14 @@ export default function ChatPage() {
         }),
       ]);
 
-      await autoCreateSession(prompt);
+      const sessionId = await autoCreateSession(prompt);
 
       try {
         if (!settingsRef.current) {
           settingsRef.current = await fetchSettings();
         }
 
-        const result = await queryDirect(prompt, settingsRef.current);
+        const result = await queryDirect(prompt, settingsRef.current, sessionId ?? undefined);
         appendCompletedRunMessage(
           createMessage({
             role: "assistant",
@@ -498,6 +511,7 @@ export default function ChatPage() {
       pendingSources: initialPendingSources,
       question,
       runId,
+      sessionId,
       userMessageTs,
     }: StartRagStreamOptions) => {
       const appendTraceEvent = (
@@ -565,6 +579,7 @@ export default function ChatPage() {
           await queryRagStream(manifestPath, question, ragSettings, {
             signal: controller.signal,
             runId,
+            sessionId,
             lastEventId: attemptLastEventId,
             onEvent: (event, meta) => {
               const currentStream = activeRagStreamRef.current;
@@ -784,7 +799,7 @@ export default function ChatPage() {
       stopRagStream("navigation");
       publishResumableRun(null);
 
-      await autoCreateSession(question);
+      const sessionId = await autoCreateSession(question);
 
       const userMessageTs = new Date().toISOString();
       const assistantMessageTs = new Date().toISOString();
@@ -826,6 +841,7 @@ export default function ChatPage() {
         pendingSources: [],
         question,
         runId,
+        sessionId,
         userMessageTs,
       });
     },
@@ -863,6 +879,7 @@ export default function ChatPage() {
       pendingSources: resumableRun.pendingSources,
       question: resumableRun.question,
       runId: resumableRun.runId,
+      sessionId: sessionIdRef.current,
       userMessageTs: resumableRun.userMessageTs,
     });
   }, [isStreamingRag, resumableRun, setMessageStatus, startRagStream]);
@@ -954,6 +971,10 @@ export default function ChatPage() {
       heroAside={undefined}
       fullBleed
       contentClassName="rounded-none border-0 bg-transparent p-0"
+      companionContext={{
+        sessionId: companionSessionId,
+        runId: latestRunId,
+      }}
     >
       <div className="h-[calc(100vh-15.5rem)] min-h-[42rem] overflow-hidden rounded-[1.9rem]">
         <ResizablePanels

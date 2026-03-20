@@ -6,10 +6,11 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AmbientBackdrop } from "@/components/shell/ambient-backdrop";
+import { AxiomCompanionDock } from "@/components/shell/axiom-companion-dock";
 import { OnboardingStep } from "@/components/shell/onboarding-step";
 import { StatusPill } from "@/components/shell/status-pill";
 import { IndexBuildStudio } from "@/components/library/index-build-studio";
-import { fetchSettings, updateSettings, type IndexBuildResult } from "@/lib/api";
+import { fetchSettings, reflectAssistant, updateSettings, type IndexBuildResult } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -53,11 +54,11 @@ const EMBEDDING_PROVIDERS = [
 ] as const;
 
 const STEP_HINTS = [
-  "Pick the model provider that matches your comfort level with cloud versus local inference. You can still change this later in Settings.",
-  "Add credentials only when they are needed. Local provider setups can leave this blank and continue.",
-  "Embedding choice controls how documents are indexed and retrieved. Matching this to your privacy posture matters more than the specific brand.",
-  "Building an index here creates the first quick win: you land in chat with something grounded to ask against.",
-  "The finish step seeds chat without auto-sending anything, so the user keeps control while still feeling guided.",
+  "I’ll start with the model provider that best fits your comfort level with cloud or local inference. You can still change this later in Settings.",
+  "Only add credentials when they are needed. If you choose a local provider, you can leave this blank and keep going.",
+  "Embedding choice controls how documents are indexed and retrieved. I care more about the privacy posture here than the brand name.",
+  "Building a small first index gives you an immediate win: you’ll land in chat with something grounded to ask against.",
+  "The finish step stages a starter prompt without auto-sending anything, so you stay in control while I keep things moving.",
 ];
 
 const STARTER_PROMPTS_WITH_INDEX = [
@@ -165,6 +166,13 @@ export default function SetupPage() {
 
       await updateSettings(updates);
 
+      void reflectAssistant({
+        trigger: "onboarding",
+        context_id: "onboarding:primary",
+      }).catch(() => {
+        // Reflection is best-effort so the onboarding flow can continue.
+      });
+
       if (builtIndex) {
         localStorage.setItem(
           "axiom_active_index",
@@ -186,9 +194,9 @@ export default function SetupPage() {
 
   const steps = [
     {
-      title: "Choose your primary model provider",
+      title: "Let me pick the primary model provider",
       description:
-        "Pick the provider Axiom should use for direct chat and synthesis. This sets the tone for the rest of onboarding, but it is still easy to adjust later.",
+        "I’ll use this provider for direct chat and synthesis. It sets the tone for the rest of onboarding, but you can still adjust it later.",
       content: (
         <div className="grid gap-4 md:grid-cols-3">
           {LLM_PROVIDERS.map((provider) => {
@@ -222,11 +230,11 @@ export default function SetupPage() {
       hint: STEP_HINTS[0],
     },
     {
-      title: "Add credentials if this provider needs them",
+      title: "Add credentials only if I need them",
       description:
         llmProvider === "local"
           ? "Local model mode does not require a hosted API key. You can continue immediately or add one later if you switch providers."
-          : "Paste the API key for the provider you chose. Axiom will pass it through to settings and use it for chat and research workflows.",
+          : "Paste the API key for the provider you chose. I’ll pass it through to settings and use it for chat and research workflows.",
       content: (
         <div className="space-y-5">
           <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
@@ -243,7 +251,7 @@ export default function SetupPage() {
               />
               <p className="text-sm leading-7 text-muted-foreground">
                 {llmProvider === "local"
-                  ? "Leave this blank if you are staying fully local."
+                  ? "Leave this blank if you’re staying fully local."
                   : "If you skip this now, you can still add it later in your settings file."}
               </p>
             </div>
@@ -261,7 +269,7 @@ export default function SetupPage() {
       hint: STEP_HINTS[1],
     },
     {
-      title: "Choose how documents will be embedded",
+      title: "Choose how I should embed documents",
       description:
         "Embeddings power document similarity, search quality, and grounded answers. This decision mostly affects indexing, not direct chat.",
       content: (
@@ -297,7 +305,7 @@ export default function SetupPage() {
       hint: STEP_HINTS[2],
     },
     {
-      title: "Build the first knowledge base",
+      title: "Build the first knowledge base with me",
       description:
         "Indexing a small set of documents here makes the app feel useful immediately. You can skip this and import more later, but a quick first index is the smoothest path into chat.",
       content: (
@@ -310,9 +318,9 @@ export default function SetupPage() {
       hint: STEP_HINTS[3],
     },
     {
-      title: "Launch with a quick win",
+      title: "I’ll stage your first question",
       description:
-        "Axiom will open chat with a starter prompt ready in the composer. Nothing is auto-sent, so you can review and change the wording before you run it.",
+        "I’ll open chat with a starter prompt ready in the composer. Nothing is auto-sent, so you can review and change the wording before you run it.",
       content: (
         <div className="space-y-6">
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -376,8 +384,8 @@ export default function SetupPage() {
 
               <p className="mt-4 text-sm leading-7 text-muted-foreground">
                 {builtIndex
-                  ? "You will land in chat with this index preselected and a grounded starter prompt in the composer."
-                  : "You will land in direct chat mode with a prompt that helps you orient yourself inside the workspace."}
+                  ? "I’ll land you in chat with this index preselected and a grounded starter prompt in the composer."
+                  : "I’ll land you in direct chat mode with a prompt that helps you orient yourself inside the workspace."}
               </p>
             </div>
           </div>
@@ -398,7 +406,7 @@ export default function SetupPage() {
               Axiom Setup
             </p>
             <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
-              First-run configuration
+              Guided first run
             </p>
           </div>
 
@@ -414,13 +422,13 @@ export default function SetupPage() {
           <section className="mb-6">
             <div className="glass-panel rounded-2xl px-5 py-5 sm:px-6">
               <p className="text-xs font-medium uppercase tracking-[0.2em] text-primary/80">
-                Getting started
+                I’ll guide you through this
               </p>
               <h1 className="mt-2 text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-                Set up your workspace
+                Set up your workspace with me
               </h1>
               <p className="mt-2 max-w-2xl text-pretty text-sm leading-relaxed text-muted-foreground">
-                Configure your model provider, choose embedding settings, and optionally import your first documents. This takes about two minutes.
+                I’ll help you choose a model provider, set embeddings, and optionally import your first documents. This usually takes about two minutes.
               </p>
             </div>
           </section>
@@ -492,6 +500,8 @@ export default function SetupPage() {
           </OnboardingStep>
         </main>
       </div>
+
+      <AxiomCompanionDock className="bottom-24 md:bottom-4" />
     </div>
   );
 }

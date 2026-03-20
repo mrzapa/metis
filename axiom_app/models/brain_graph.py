@@ -23,6 +23,7 @@ class BrainEdge:
     source_id: str
     target_id: str
     edge_type: str
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class BrainGraph:
@@ -95,7 +96,12 @@ class BrainGraph:
             node.x = float(previous.x)
             node.y = float(previous.y)
 
-    def build_from_indexes_and_sessions(self, indexes: list[Any], sessions: list[Any]) -> BrainGraph:
+    def build_from_indexes_and_sessions(
+        self,
+        indexes: list[Any],
+        sessions: list[Any],
+        assistant_payload: dict[str, Any] | None = None,
+    ) -> BrainGraph:
         self.clear()
 
         root = self.add_node(
@@ -103,7 +109,7 @@ class BrainGraph:
                 node_id="category:brain",
                 node_type="category",
                 label="Axiom Brain",
-                metadata={"category_kind": "root"},
+                metadata={"category_kind": "root", "scope": "workspace"},
             )
         )
         indexes_category = self.add_node(
@@ -111,7 +117,7 @@ class BrainGraph:
                 node_id="category:indexes",
                 node_type="category",
                 label="Indexes",
-                metadata={"category_kind": "indexes"},
+                metadata={"category_kind": "indexes", "scope": "workspace"},
             )
         )
         sessions_category = self.add_node(
@@ -119,11 +125,11 @@ class BrainGraph:
                 node_id="category:sessions",
                 node_type="category",
                 label="Sessions",
-                metadata={"category_kind": "sessions"},
+                metadata={"category_kind": "sessions", "scope": "workspace"},
             )
         )
-        self.add_edge(BrainEdge(indexes_category.node_id, root.node_id, "category_member"))
-        self.add_edge(BrainEdge(sessions_category.node_id, root.node_id, "category_member"))
+        self.add_edge(BrainEdge(indexes_category.node_id, root.node_id, "category_member", metadata={"scope": "workspace"}))
+        self.add_edge(BrainEdge(sessions_category.node_id, root.node_id, "category_member", metadata={"scope": "workspace"}))
 
         index_lookup: dict[str, str] = {}
         for row in list(indexes or []):
@@ -143,6 +149,7 @@ class BrainGraph:
                 "source_files": list(row.get("source_files") or []),
                 "manifest_path": str(row.get("manifest_path", "") or ""),
                 "legacy_compat": bool(row.get("legacy_compat", False)),
+                "scope": "workspace",
             }
             self.add_node(
                 BrainNode(
@@ -152,7 +159,7 @@ class BrainGraph:
                     metadata=metadata,
                 )
             )
-            self.add_edge(BrainEdge(node_id, indexes_category.node_id, "category_member"))
+            self.add_edge(BrainEdge(node_id, indexes_category.node_id, "category_member", metadata={"scope": "workspace"}))
             index_lookup[index_id] = node_id
             collection_name = metadata["collection_name"]
             if collection_name:
@@ -198,6 +205,7 @@ class BrainGraph:
                 "final_k": int(getattr(summary, "final_k", 0) or 0),
                 "mmr_lambda": float(getattr(summary, "mmr_lambda", 0.0) or 0.0),
                 "agentic_iterations": int(getattr(summary, "agentic_iterations", 0) or 0),
+                "scope": "workspace",
             }
             self.add_node(
                 BrainNode(
@@ -207,7 +215,7 @@ class BrainGraph:
                     metadata=metadata,
                 )
             )
-            self.add_edge(BrainEdge(node_id, sessions_category.node_id, "category_member"))
+            self.add_edge(BrainEdge(node_id, sessions_category.node_id, "category_member", metadata={"scope": "workspace"}))
 
             if mode not in mode_categories:
                 mode_node_id = f"category:mode:{mode.casefold()}"
@@ -217,11 +225,11 @@ class BrainGraph:
                         node_id=mode_node_id,
                         node_type="category",
                         label=mode,
-                        metadata={"category_kind": "mode", "mode": mode},
+                        metadata={"category_kind": "mode", "mode": mode, "scope": "workspace"},
                     )
                 )
-                self.add_edge(BrainEdge(mode_node_id, sessions_category.node_id, "category_member"))
-            self.add_edge(BrainEdge(node_id, mode_categories[mode], "category_member"))
+                self.add_edge(BrainEdge(mode_node_id, sessions_category.node_id, "category_member", metadata={"scope": "workspace"}))
+            self.add_edge(BrainEdge(node_id, mode_categories[mode], "category_member", metadata={"scope": "workspace"}))
 
             for skill_id in skill_ids:
                 if skill_id not in skill_categories:
@@ -232,11 +240,11 @@ class BrainGraph:
                             node_id=skill_node_id,
                             node_type="category",
                             label=skill_id,
-                            metadata={"category_kind": "skill", "skill_id": skill_id},
+                            metadata={"category_kind": "skill", "skill_id": skill_id, "scope": "workspace"},
                         )
                     )
-                    self.add_edge(BrainEdge(skill_node_id, sessions_category.node_id, "category_member"))
-                self.add_edge(BrainEdge(node_id, skill_categories[skill_id], "category_member"))
+                    self.add_edge(BrainEdge(skill_node_id, sessions_category.node_id, "category_member", metadata={"scope": "workspace"}))
+                self.add_edge(BrainEdge(node_id, skill_categories[skill_id], "category_member", metadata={"scope": "workspace"}))
 
             if not primary_skill_id and skill_ids:
                 primary_skill_id = skill_ids[0]
@@ -246,12 +254,191 @@ class BrainGraph:
             index_id = str(getattr(summary, "index_id", "") or "").strip()
             target_index_id = index_lookup.get(index_id)
             if target_index_id:
-                self.add_edge(BrainEdge(node_id, target_index_id, "uses_index"))
+                self.add_edge(BrainEdge(node_id, target_index_id, "uses_index", metadata={"scope": "workspace"}))
+
+        self._add_assistant_subgraph(dict(assistant_payload or {}), root.node_id)
 
         self._refresh_category_metadata()
         self._seed_positions()
         self.apply_force_layout()
         return self
+
+    def _add_assistant_subgraph(self, assistant_payload: dict[str, Any], root_id: str) -> None:
+        identity = dict(assistant_payload.get("identity") or {})
+        if not bool(identity.get("companion_enabled", True)):
+            return
+        status = dict(assistant_payload.get("status") or {})
+        memory_rows = [
+            dict(item) for item in (assistant_payload.get("memory") or []) if isinstance(item, dict)
+        ][:12]
+        playbook_rows = [
+            dict(item) for item in (assistant_payload.get("playbooks") or []) if isinstance(item, dict)
+        ][:8]
+        brain_links = [
+            dict(item) for item in (assistant_payload.get("brain_links") or []) if isinstance(item, dict)
+        ][:64]
+
+        assistant_category = self.add_node(
+            BrainNode(
+                node_id="category:assistant",
+                node_type="category",
+                label="Axiom Self",
+                metadata={"category_kind": "assistant", "scope": "assistant_self"},
+            )
+        )
+        self.add_edge(
+            BrainEdge(
+                assistant_category.node_id,
+                root_id,
+                "category_member",
+                metadata={"scope": "assistant_self"},
+            )
+        )
+        memory_category = self.add_node(
+            BrainNode(
+                node_id="category:assistant:memory",
+                node_type="category",
+                label="Memories",
+                metadata={"category_kind": "assistant_memory", "scope": "assistant_self"},
+            )
+        )
+        playbook_category = self.add_node(
+            BrainNode(
+                node_id="category:assistant:playbooks",
+                node_type="category",
+                label="Playbooks",
+                metadata={"category_kind": "assistant_playbooks", "scope": "assistant_self"},
+            )
+        )
+        self.add_edge(
+            BrainEdge(
+                memory_category.node_id,
+                assistant_category.node_id,
+                "category_member",
+                metadata={"scope": "assistant_self"},
+            )
+        )
+        self.add_edge(
+            BrainEdge(
+                playbook_category.node_id,
+                assistant_category.node_id,
+                "category_member",
+                metadata={"scope": "assistant_self"},
+            )
+        )
+
+        assistant_name = str(identity.get("name") or "Axiom")
+        assistant_node = self.add_node(
+            BrainNode(
+                node_id="assistant:axiom",
+                node_type="assistant",
+                label=assistant_name,
+                metadata={
+                    "assistant_id": str(identity.get("assistant_id") or "axiom-companion"),
+                    "archetype": str(identity.get("archetype") or ""),
+                    "greeting": str(identity.get("greeting") or ""),
+                    "runtime_provider": str(status.get("runtime_provider") or ""),
+                    "runtime_model": str(status.get("runtime_model") or ""),
+                    "paused": bool(status.get("paused", False)),
+                    "latest_summary": str(status.get("latest_summary") or ""),
+                    "scope": "assistant_self",
+                },
+            )
+        )
+        self.add_edge(
+            BrainEdge(
+                assistant_node.node_id,
+                assistant_category.node_id,
+                "category_member",
+                metadata={"scope": "assistant_self"},
+            )
+        )
+
+        for item in memory_rows:
+            entry_id = str(item.get("entry_id") or "").strip()
+            if not entry_id:
+                continue
+            node_id = f"memory:{entry_id}"
+            label = str(item.get("title") or item.get("summary") or "Memory")
+            self.add_node(
+                BrainNode(
+                    node_id=node_id,
+                    node_type="memory",
+                    label=label,
+                    metadata={
+                        "kind": str(item.get("kind") or "reflection"),
+                        "summary": str(item.get("summary") or ""),
+                        "details": str(item.get("details") or ""),
+                        "why": str(item.get("why") or ""),
+                        "confidence": float(item.get("confidence") or 0.0),
+                        "trigger": str(item.get("trigger") or ""),
+                        "session_id": str(item.get("session_id") or ""),
+                        "run_id": str(item.get("run_id") or ""),
+                        "scope": "assistant_learned",
+                    },
+                )
+            )
+            self.add_edge(
+                BrainEdge(
+                    node_id,
+                    memory_category.node_id,
+                    "category_member",
+                    metadata={"scope": "assistant_self"},
+                )
+            )
+
+        for item in playbook_rows:
+            playbook_id = str(item.get("playbook_id") or "").strip()
+            if not playbook_id:
+                continue
+            node_id = f"playbook:{playbook_id}"
+            bullets = [str(bullet) for bullet in (item.get("bullets") or []) if str(bullet).strip()]
+            self.add_node(
+                BrainNode(
+                    node_id=node_id,
+                    node_type="playbook",
+                    label=str(item.get("title") or "Playbook"),
+                    metadata={
+                        "bullets": bullets,
+                        "source_session_id": str(item.get("source_session_id") or ""),
+                        "source_run_id": str(item.get("source_run_id") or ""),
+                        "confidence": float(item.get("confidence") or 0.0),
+                        "scope": "assistant_self",
+                    },
+                )
+            )
+            self.add_edge(
+                BrainEdge(
+                    node_id,
+                    playbook_category.node_id,
+                    "category_member",
+                    metadata={"scope": "assistant_self"},
+                )
+            )
+
+        for item in brain_links:
+            source_id = str(item.get("source_node_id") or "").strip()
+            target_id = str(item.get("target_node_id") or "").strip()
+            relation = str(item.get("relation") or "neural_link").strip()
+            if source_id not in self.nodes or target_id not in self.nodes:
+                continue
+            metadata = {
+                "provenance": str(item.get("provenance") or "assistant_local"),
+                "summary": str(item.get("summary") or ""),
+                "confidence": float(item.get("confidence") or 0.0),
+                "session_id": str(item.get("session_id") or ""),
+                "run_id": str(item.get("run_id") or ""),
+                "scope": str((item.get("metadata") or {}).get("scope") or "assistant_learned"),
+            }
+            metadata.update(dict(item.get("metadata") or {}))
+            self.add_edge(
+                BrainEdge(
+                    source_id,
+                    target_id,
+                    relation,
+                    metadata=metadata,
+                )
+            )
 
     def apply_force_layout(self, iterations: int = 100) -> BrainGraph:
         if not self.nodes:
@@ -343,6 +530,9 @@ class BrainGraph:
         anchors = {
             "category:indexes": (-320.0, -40.0),
             "category:sessions": (320.0, 40.0),
+            "category:assistant": (0.0, 300.0),
+            "category:assistant:memory": (-140.0, 420.0),
+            "category:assistant:playbooks": (140.0, 420.0),
         }
         for node_id, (x_pos, y_pos) in anchors.items():
             node = self.get_node(node_id)
@@ -357,7 +547,17 @@ class BrainGraph:
                 continue
             parent_id = self._primary_category_for(node.node_id)
             center_x, center_y = anchors.get(parent_id, (0.0, 0.0))
-            radius = 180.0 if node.node_type == "index" else 220.0 if node.node_type == "session" else 120.0
+            radius = (
+                180.0
+                if node.node_type == "index"
+                else 220.0
+                if node.node_type == "session"
+                else 180.0
+                if node.node_type == "assistant"
+                else 165.0
+                if node.node_type in {"memory", "playbook"}
+                else 120.0
+            )
             angle = self._stable_angle(node.node_id)
             node.x = center_x + math.cos(angle) * radius
             node.y = center_y + math.sin(angle) * radius

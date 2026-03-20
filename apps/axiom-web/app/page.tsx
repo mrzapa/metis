@@ -13,6 +13,7 @@ import {
   HomeLaunchIcon,
   type HomeLaunchKind,
 } from "@/components/home/home-visual-system";
+import { AxiomCompanionDock } from "@/components/shell/axiom-companion-dock";
 import { SpaceAtmosphere } from "@/components/home/space-atmosphere";
 import { fetchSettings } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -222,7 +223,17 @@ export default function Home() {
               className="glass-panel mb-8 flex w-full max-w-2xl items-center gap-3 rounded-full px-4 py-3 text-sm text-[#c2c6d6] md:mb-10"
             >
               <Sparkles className="size-4 shrink-0 text-[#adc6ff]" />
-              <span>Setup is incomplete. The launch cards will send you to onboarding.</span>
+              <span>I’m keeping the launch cards pointed at onboarding until setup is complete.</span>
+            </motion.div>
+          ) : setupComplete === null ? (
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, ease: "easeOut", delay: 0.08 }}
+              className="glass-panel mb-8 flex w-full max-w-2xl items-center gap-3 rounded-full px-4 py-3 text-sm text-[#c2c6d6] md:mb-10"
+            >
+              <Sparkles className="size-4 shrink-0 text-[#adc6ff]" />
+              <span>I’m checking your workspace setup before I hand you the right launch path.</span>
             </motion.div>
           ) : null}
 
@@ -265,6 +276,8 @@ export default function Home() {
           </motion.div>
         </div>
       </main>
+
+      <AxiomCompanionDock className="bottom-24 md:bottom-4" />
 
       <div className="pointer-events-none fixed bottom-24 left-1/2 z-20 w-40 -translate-x-1/2 md:bottom-10">
         <div className="thinking-indicator h-px rounded-full">

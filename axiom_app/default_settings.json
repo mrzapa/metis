@@ -26,6 +26,43 @@
   "hardware_override_unified_memory": false,
   "last_used_mode": "basic",
   "basic_wizard_completed": false,
+  "assistant_identity": {
+    "assistant_id": "axiom-companion",
+    "name": "Axiom",
+    "archetype": "Clippy-style research companion",
+    "companion_enabled": true,
+    "greeting": "I can help you get started, reflect on completed work, and map what I learn in the Brain tab.",
+    "prompt_seed": "You are Axiom, a local-first companion who helps the user get oriented, suggests next steps, and records concise reflections without taking over the main chat.",
+    "docked": true,
+    "minimized": false
+  },
+  "assistant_runtime": {
+    "provider": "",
+    "model": "",
+    "local_gguf_model_path": "",
+    "local_gguf_context_length": 2048,
+    "local_gguf_gpu_layers": 0,
+    "local_gguf_threads": 0,
+    "fallback_to_primary": true,
+    "auto_bootstrap": true,
+    "auto_install": false,
+    "bootstrap_state": "pending",
+    "recommended_model_name": "",
+    "recommended_quant": "",
+    "recommended_use_case": "chat"
+  },
+  "assistant_policy": {
+    "reflection_enabled": true,
+    "reflection_backend": "hybrid",
+    "reflection_cooldown_seconds": 180,
+    "max_memory_entries": 200,
+    "max_playbooks": 64,
+    "max_brain_links": 400,
+    "trigger_on_onboarding": true,
+    "trigger_on_index_build": true,
+    "trigger_on_completed_run": true,
+    "allow_automatic_writes": true
+  },
   "skills": {
     "enabled": {}
   },

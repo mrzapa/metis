@@ -117,3 +117,93 @@ def test_brain_graph_can_preserve_positions_from_previous_graph() -> None:
 
     assert current.nodes["session:sess-1"].x == 420.0
     assert current.nodes["session:sess-1"].y == -120.0
+
+
+def test_brain_graph_embeds_assistant_subgraph_with_metadata_and_links() -> None:
+    assistant_payload = {
+        "identity": {
+            "assistant_id": "axiom-companion",
+            "name": "Guide",
+            "archetype": "Research companion",
+            "greeting": "Hello from the companion.",
+            "companion_enabled": True,
+        },
+        "status": {
+            "runtime_provider": "local_gguf",
+            "runtime_model": "axiom-q4",
+            "paused": True,
+            "latest_summary": "A short reflection.",
+        },
+        "memory": [
+            {
+                "entry_id": "memory-1",
+                "created_at": "2026-03-08T12:30:00Z",
+                "kind": "reflection",
+                "title": "Learned from a completed run",
+                "summary": "Captured a short next step.",
+                "confidence": 0.9,
+                "trigger": "completed_run",
+                "session_id": "sess-1",
+                "run_id": "run-1",
+            }
+        ],
+        "playbooks": [
+            {
+                "playbook_id": "playbook-1",
+                "created_at": "2026-03-08T12:31:00Z",
+                "title": "Follow-up pattern",
+                "bullets": ["Lead with the next step."],
+                "source_session_id": "sess-1",
+                "source_run_id": "run-1",
+                "confidence": 0.8,
+            }
+        ],
+        "brain_links": [
+            {
+                "source_node_id": "memory:memory-1",
+                "target_node_id": "assistant:axiom",
+                "relation": "belongs_to",
+                "label": "Belongs To",
+                "summary": "Captured a short next step.",
+                "confidence": 0.9,
+                "metadata": {"scope": "assistant_learned", "note": "derived"},
+            }
+        ],
+    }
+
+    graph = BrainGraph().build_from_indexes_and_sessions([], [], assistant_payload)
+
+    assert "category:assistant" in graph.nodes
+    assert "assistant:axiom" in graph.nodes
+    assert "category:assistant:memory" in graph.nodes
+    assert "category:assistant:playbooks" in graph.nodes
+    assert graph.get_node("assistant:axiom").metadata["runtime_provider"] == "local_gguf"
+    assert graph.get_node("assistant:axiom").metadata["runtime_model"] == "axiom-q4"
+    assert graph.get_node("assistant:axiom").metadata["paused"] is True
+    assert graph.get_node("assistant:axiom").metadata["latest_summary"] == "A short reflection."
+    assert graph.get_node("memory:memory-1").metadata["scope"] == "assistant_learned"
+    assert graph.get_node("playbook:playbook-1").metadata["scope"] == "assistant_self"
+    assert any(
+        edge.edge_type == "category_member"
+        and edge.source_id == "assistant:axiom"
+        and edge.target_id == "category:assistant"
+        for edge in graph.edges
+    )
+    assert any(
+        edge.edge_type == "belongs_to"
+        and edge.source_id == "memory:memory-1"
+        and edge.target_id == "assistant:axiom"
+        and edge.metadata["note"] == "derived"
+        for edge in graph.edges
+    )
+
+
+def test_brain_graph_skips_assistant_subgraph_when_disabled() -> None:
+    graph = BrainGraph().build_from_indexes_and_sessions(
+        [],
+        [],
+        {"identity": {"companion_enabled": False}},
+    )
+
+    assert "category:assistant" not in graph.nodes
+    assert "assistant:axiom" not in graph.nodes

@@ -18,13 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from axiom_app.engine import (
-    build_index,
-    list_indexes,
-    query_direct,
-    query_rag,
-    stream_rag_answer,
-)
+from axiom_app.engine import list_indexes, query_direct, query_rag, stream_rag_answer
 from axiom_app.engine.querying import _normalize_run_id
 from axiom_app.services.stream_replay import ReplayableRunStreamManager
 from axiom_app.services.trace_store import TraceStore
@@ -34,6 +28,7 @@ from . import gguf as _gguf
 from . import logs as _logs
 from . import sessions as _sessions
 from . import settings as _settings
+from . import assistant as _assistant
 from .models import (
     DirectQueryRequestModel,
     DirectQueryResultModel,
@@ -95,7 +90,7 @@ def create_app() -> FastAPI:
         allow_origins=_cors_origins_from_env(),
         allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
     )
 
@@ -105,6 +100,7 @@ def create_app() -> FastAPI:
     app.include_router(_settings.router, dependencies=_auth)
     app.include_router(_logs.router, dependencies=_auth)
     app.include_router(_gguf.router, dependencies=_auth)
+    app.include_router(_assistant.router, dependencies=_auth)
 
     @app.get("/v1/version")
     def api_version() -> dict[str, str]:
@@ -121,8 +117,14 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/index/build", response_model=IndexBuildResultModel, dependencies=_auth)
     def api_build_index(payload: IndexBuildRequestModel) -> IndexBuildResultModel:
+        orchestrator = WorkspaceOrchestrator()
         return IndexBuildResultModel.from_engine(
-            _run_engine(build_index, payload.to_engine())
+            _run_engine(
+                orchestrator.build_index,
+                payload.document_paths,
+                payload.settings,
+                index_id=payload.index_id,
+            )
         )
 
     @app.get("/v1/index/list", dependencies=_auth)
@@ -151,6 +153,7 @@ def create_app() -> FastAPI:
                     "source_id": edge.source_id,
                     "target_id": edge.target_id,
                     "edge_type": edge.edge_type,
+                    "metadata": edge.metadata,
                 }
                 for edge in graph.edges
             ],
@@ -175,7 +178,7 @@ def create_app() -> FastAPI:
     async def api_build_index_stream(
         payload: IndexBuildRequestModel,
     ) -> StreamingResponse:
-        req = payload.to_engine()
+        orchestrator = WorkspaceOrchestrator()
         loop = asyncio.get_event_loop()
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
@@ -183,7 +186,13 @@ def create_app() -> FastAPI:
             asyncio.run_coroutine_threadsafe(queue.put(event), loop)
 
         future = loop.run_in_executor(
-            None, lambda: build_index(req, progress_cb=_progress_cb)
+            None,
+            lambda: orchestrator.build_index(
+                payload.document_paths,
+                payload.settings,
+                index_id=payload.index_id,
+                progress_cb=_progress_cb,
+            ),
         )
 
         async def _event_gen() -> AsyncGenerator[str, None]:
@@ -212,14 +221,24 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/query/rag", response_model=RagQueryResultModel, dependencies=_auth)
     def api_query_rag(payload: RagQueryRequestModel) -> RagQueryResultModel:
+        orchestrator = WorkspaceOrchestrator()
         return RagQueryResultModel.from_engine(
-            _run_engine(query_rag, payload.to_engine())
+            _run_engine(
+                orchestrator.run_rag_query,
+                payload.to_engine(),
+                session_id=payload.session_id,
+            )
         )
 
     @app.post("/v1/query/direct", response_model=DirectQueryResultModel, dependencies=_auth)
     def api_query_direct(payload: DirectQueryRequestModel) -> DirectQueryResultModel:
+        orchestrator = WorkspaceOrchestrator()
         return DirectQueryResultModel.from_engine(
-            _run_engine(query_direct, payload.to_engine())
+            _run_engine(
+                orchestrator.run_direct_query,
+                payload.to_engine(),
+                session_id=payload.session_id,
+            )
         )
 
     @app.get("/v1/traces/{run_id}", dependencies=_auth)
@@ -249,9 +268,16 @@ def create_app() -> FastAPI:
         run_id = _normalize_run_id(req.run_id)
         req.run_id = run_id
         replay_after = _parse_last_event_id(last_event_id)
+        orchestrator = WorkspaceOrchestrator()
 
         if replay_after is None:
-            _RAG_STREAM_MANAGER.ensure_run(run_id, lambda: stream_rag_answer(req))
+            _RAG_STREAM_MANAGER.ensure_run(
+                run_id,
+                lambda: orchestrator.stream_rag_query(
+                    req,
+                    session_id=payload.session_id,
+                ),
+            )
 
         def _event_generator() -> Generator[str, None, None]:
             after_event_id = 0 if replay_after is None else replay_after
@@ -291,9 +317,9 @@ def _encode_sse(payload: dict[str, Any], event_id: int | None = None) -> str:
     return "\n".join(lines) + "\n\n"
 
 
-def _run_engine(func: Any, *args: Any) -> Any:
+def _run_engine(func: Any, *args: Any, **kwargs: Any) -> Any:
     try:
-        return func(*args)
+        return func(*args, **kwargs)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:

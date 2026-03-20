@@ -14,6 +14,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { AmbientBackdrop } from "@/components/shell/ambient-backdrop";
+import { AxiomCompanionDock } from "@/components/shell/axiom-companion-dock";
 import { cn } from "@/lib/utils";
 
 interface PageChromeProps {
@@ -25,6 +26,10 @@ interface PageChromeProps {
   children: ReactNode;
   contentClassName?: string;
   fullBleed?: boolean;
+  companionContext?: {
+    sessionId?: string | null;
+    runId?: string | null;
+  };
 }
 
 const NAV_ITEMS = [
@@ -51,6 +56,7 @@ export function PageChrome({
   children,
   contentClassName,
   fullBleed = false,
+  companionContext,
 }: PageChromeProps) {
   const pathname = usePathname();
 
@@ -179,6 +185,10 @@ export function PageChrome({
           </main>
         </div>
       </div>
+      <AxiomCompanionDock
+        sessionId={companionContext?.sessionId}
+        runId={companionContext?.runId}
+      />
     </div>
   );
 }

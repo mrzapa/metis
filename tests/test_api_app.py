@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 from importlib import import_module
+from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
+from axiom_app.models.brain_graph import BrainGraph
 from axiom_app.services.stream_replay import ReplayableRunStreamManager, StreamReplayStore
 from axiom_app.services.trace_store import TraceStore
 
@@ -20,20 +22,122 @@ def test_healthz_returns_ok() -> None:
     assert response.json() == {"ok": True}
 
 
-def test_query_direct_happy_path(monkeypatch) -> None:
+def test_build_index_uses_orchestrator(monkeypatch) -> None:
     client = TestClient(api_app_module.create_app())
+    captured: dict[str, object] = {}
 
-    def _fake_query_direct(req):
-        class _Result:
-            run_id = req.run_id or "run-xyz"
-            answer_text = "Mock/Test Backend: hello"
-            selected_mode = "Q&A"
-            llm_provider = "mock"
-            llm_model = "mock-model"
+    class _Result:
+        manifest_path = "/tmp/index/manifest.json"
+        index_id = "idx-new"
+        document_count = 3
+        chunk_count = 9
+        embedding_signature = "sig-1"
+        vector_backend = "json"
 
+    fake_orchestrator = MagicMock()
+
+    def _fake_build_index(document_paths, settings, *, index_id=None, progress_cb=None):
+        captured["document_paths"] = document_paths
+        captured["settings"] = settings
+        captured["index_id"] = index_id
+        captured["progress_cb"] = progress_cb
         return _Result()
 
-    monkeypatch.setattr(api_app_module, "query_direct", _fake_query_direct)
+    fake_orchestrator.build_index.side_effect = _fake_build_index
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+
+    response = client.post(
+        "/v1/index/build",
+        json={
+            "document_paths": ["/tmp/doc-1.txt", "/tmp/doc-2.txt"],
+            "settings": {"llm_provider": "mock"},
+            "index_id": "idx-new",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["index_id"] == "idx-new"
+    assert payload["manifest_path"] == "/tmp/index/manifest.json"
+    assert captured == {
+        "document_paths": ["/tmp/doc-1.txt", "/tmp/doc-2.txt"],
+        "settings": {"llm_provider": "mock"},
+        "index_id": "idx-new",
+        "progress_cb": None,
+    }
+    assert fake_orchestrator.build_index.call_count == 1
+
+
+def test_stream_build_index_uses_orchestrator_and_progress_callback(monkeypatch) -> None:
+    client = TestClient(api_app_module.create_app())
+    captured: dict[str, object] = {}
+
+    class _Result:
+        manifest_path = "/tmp/index/manifest.json"
+        index_id = "idx-stream"
+        document_count = 4
+        chunk_count = 12
+        embedding_signature = "sig-stream"
+        vector_backend = "json"
+
+    fake_orchestrator = MagicMock()
+
+    def _fake_build_index(document_paths, settings, *, index_id=None, progress_cb=None):
+        captured["document_paths"] = document_paths
+        captured["settings"] = settings
+        captured["index_id"] = index_id
+        captured["progress_cb"] = progress_cb
+        if progress_cb is not None:
+            progress_cb({"type": "progress", "run_id": "idx-stream", "percent": 50})
+        return _Result()
+
+    fake_orchestrator.build_index.side_effect = _fake_build_index
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+
+    response = client.post(
+        "/v1/index/build/stream",
+        json={
+            "document_paths": ["/tmp/doc-1.txt"],
+            "settings": {"llm_provider": "mock"},
+            "index_id": "idx-stream",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+    frames = _parse_sse_frames(response.text)
+    assert [payload["type"] for _, payload in frames] == [
+        "build_started",
+        "progress",
+        "build_complete",
+    ]
+    assert captured["document_paths"] == ["/tmp/doc-1.txt"]
+    assert captured["settings"] == {"llm_provider": "mock"}
+    assert captured["index_id"] == "idx-stream"
+    assert callable(captured["progress_cb"])
+    assert fake_orchestrator.build_index.call_count == 1
+
+
+def test_query_direct_happy_path(monkeypatch) -> None:
+    client = TestClient(api_app_module.create_app())
+    captured: dict[str, object] = {}
+
+    class _Result:
+        run_id = "run-xyz"
+        answer_text = "Mock/Test Backend: hello"
+        selected_mode = "Q&A"
+        llm_provider = "mock"
+        llm_model = "mock-model"
+
+    fake_orchestrator = MagicMock()
+
+    def _fake_run_direct_query(req, *, session_id=""):
+        captured["prompt"] = req.prompt
+        captured["session_id"] = session_id
+        return _Result()
+
+    fake_orchestrator.run_direct_query.side_effect = _fake_run_direct_query
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/query/direct",
@@ -48,6 +152,81 @@ def test_query_direct_happy_path(monkeypatch) -> None:
     assert payload["answer_text"] == "Mock/Test Backend: hello"
     assert payload["selected_mode"] == "Q&A"
     assert payload["run_id"] == "run-xyz"
+    assert captured == {"prompt": "Say hello", "session_id": ""}
+
+
+def test_query_rag_forwards_session_id_to_orchestrator(monkeypatch) -> None:
+    client = TestClient(api_app_module.create_app())
+    captured: dict[str, object] = {}
+
+    class _Result:
+        run_id = "run-rag"
+        answer_text = "rag answer"
+        sources: list[dict[str, object]] = []
+        context_block = "context"
+        top_score = 0.42
+        selected_mode = "Q&A"
+
+    fake_orchestrator = MagicMock()
+
+    def _fake_run_rag_query(req, *, session_id=""):
+        captured["question"] = req.question
+        captured["session_id"] = session_id
+        return _Result()
+
+    fake_orchestrator.run_rag_query.side_effect = _fake_run_rag_query
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+
+    response = client.post(
+        "/v1/query/rag",
+        json={
+            "manifest_path": "/tmp/fake/manifest.json",
+            "question": "What is Axiom?",
+            "session_id": "s1",
+            "settings": {"llm_provider": "mock", "selected_mode": "Q&A"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["question"] == "What is Axiom?"
+    assert captured["session_id"] == "s1"
+    assert fake_orchestrator.run_rag_query.call_count == 1
+
+
+def test_query_direct_forwards_session_id_to_orchestrator(monkeypatch) -> None:
+    client = TestClient(api_app_module.create_app())
+    captured: dict[str, object] = {}
+
+    class _Result:
+        run_id = "run-direct"
+        answer_text = "direct answer"
+        selected_mode = "Tutor"
+        llm_provider = "mock"
+        llm_model = "mock-model"
+
+    fake_orchestrator = MagicMock()
+
+    def _fake_run_direct_query(req, *, session_id=""):
+        captured["prompt"] = req.prompt
+        captured["session_id"] = session_id
+        return _Result()
+
+    fake_orchestrator.run_direct_query.side_effect = _fake_run_direct_query
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+
+    response = client.post(
+        "/v1/query/direct",
+        json={
+            "prompt": "Say hello",
+            "session_id": "s2",
+            "settings": {"llm_provider": "mock", "selected_mode": "Tutor"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["prompt"] == "Say hello"
+    assert captured["session_id"] == "s2"
+    assert fake_orchestrator.run_direct_query.call_count == 1
 
 
 def _set_stream_manager(monkeypatch, tmp_path) -> None:
@@ -76,13 +255,15 @@ def _parse_sse_frames(body: str) -> list[tuple[int | None, dict[str, object]]]:
 def test_stream_rag_happy_path_includes_sse_ids(monkeypatch, tmp_path) -> None:
     _set_stream_manager(monkeypatch, tmp_path)
     client = TestClient(api_app_module.create_app())
+    fake_orchestrator = MagicMock()
 
-    def _fake_stream(req, cancel_token=None):
+    def _fake_stream_rag_query(req, *, session_id=""):
         yield {"type": "run_started", "run_id": "r1"}
         yield {"type": "token", "run_id": "r1", "text": "hello"}
         yield {"type": "final", "run_id": "r1", "answer_text": "hello", "sources": []}
 
-    monkeypatch.setattr(api_app_module, "stream_rag_answer", _fake_stream)
+    fake_orchestrator.stream_rag_query.side_effect = _fake_stream_rag_query
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/query/rag/stream",
@@ -114,13 +295,15 @@ def test_stream_rag_happy_path_includes_sse_ids(monkeypatch, tmp_path) -> None:
 def test_stream_rag_replays_only_events_after_last_event_id(monkeypatch, tmp_path) -> None:
     _set_stream_manager(monkeypatch, tmp_path)
     client = TestClient(api_app_module.create_app())
+    fake_orchestrator = MagicMock()
 
-    def _fake_stream(req, cancel_token=None):
+    def _fake_stream_rag_query(req, *, session_id=""):
         yield {"type": "run_started", "run_id": "r1"}
         yield {"type": "token", "run_id": "r1", "text": "hello"}
         yield {"type": "final", "run_id": "r1", "answer_text": "hello", "sources": []}
 
-    monkeypatch.setattr(api_app_module, "stream_rag_answer", _fake_stream)
+    fake_orchestrator.stream_rag_query.side_effect = _fake_stream_rag_query
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
 
     first = client.post(
         "/v1/query/rag/stream",
@@ -162,6 +345,9 @@ def test_stream_rag_replays_only_events_after_last_event_id(monkeypatch, tmp_pat
 def test_stream_rag_reconnect_ignores_unrelated_trace_rows(monkeypatch, tmp_path) -> None:
     _set_stream_manager(monkeypatch, tmp_path)
     client = TestClient(api_app_module.create_app())
+    fake_orchestrator = MagicMock()
+    fake_orchestrator.stream_rag_query.return_value = iter(())
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
 
     TraceStore(tmp_path / "traces").append_event(
         run_id="run-with-trace-only",
@@ -192,11 +378,13 @@ def test_stream_rag_reconnect_ignores_unrelated_trace_rows(monkeypatch, tmp_path
 def test_stream_rag_error_event(monkeypatch, tmp_path) -> None:
     _set_stream_manager(monkeypatch, tmp_path)
     client = TestClient(api_app_module.create_app())
+    fake_orchestrator = MagicMock()
 
-    def _fake_stream(req, cancel_token=None):
+    def _fake_stream_rag_query(req, *, session_id=""):
         yield {"type": "error", "run_id": "r0", "message": "question must not be empty."}
 
-    monkeypatch.setattr(api_app_module, "stream_rag_answer", _fake_stream)
+    fake_orchestrator.stream_rag_query.side_effect = _fake_stream_rag_query
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/query/rag/stream",
@@ -216,19 +404,9 @@ def test_stream_rag_error_event(monkeypatch, tmp_path) -> None:
 
 def test_brain_graph_returns_nodes_and_edges(monkeypatch) -> None:
     client = TestClient(api_app_module.create_app())
-
-    monkeypatch.setattr(api_app_module, "list_indexes", lambda: [])
-
-    class _FakeRepo:
-        def init_db(self) -> None:
-            pass
-
-        def list_sessions(self, **_kwargs):  # type: ignore[override]
-            return []
-
-    import axiom_app.services.session_repository as _sr
-
-    monkeypatch.setattr(_sr, "SessionRepository", lambda **_kw: _FakeRepo())
+    fake_orchestrator = MagicMock()
+    fake_orchestrator.get_workspace_graph.return_value = BrainGraph().build_from_indexes_and_sessions([], [])
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
 
     response = client.get("/v1/brain/graph")
 

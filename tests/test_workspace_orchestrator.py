@@ -15,10 +15,7 @@ import pytest
 
 from axiom_app.models.brain_graph import BrainGraph
 from axiom_app.models.parity_types import SkillDefinition
-from axiom_app.models.session_types import (
-    SessionDetail,
-    SessionSummary,
-)
+from axiom_app.models.session_types import SessionDetail, SessionSummary
 from axiom_app.services.workspace_orchestrator import WorkspaceOrchestrator
 
 
@@ -62,18 +59,30 @@ def _make_skill(skill_id: str = "research") -> SkillDefinition:
 def _make_orchestrator(
     session_repo: Any | None = None,
     skill_repo: Any | None = None,
+    assistant_service: Any | None = None,
 ) -> WorkspaceOrchestrator:
     """Return a WorkspaceOrchestrator with stub dependencies injected."""
     if session_repo is None:
         session_repo = MagicMock()
         session_repo.list_sessions.return_value = []
+        session_repo.get_session.return_value = None
     if skill_repo is None:
         skill_repo = MagicMock()
         skill_repo.list_valid_skills.return_value = []
         skill_repo.enabled_skills.return_value = []
+    if assistant_service is None:
+        assistant_service = MagicMock()
+        assistant_service.get_snapshot.return_value = {
+            "identity": {},
+            "runtime": {},
+            "policy": {},
+            "status": {},
+        }
+        assistant_service.reflect.return_value = {"ok": True}
     return WorkspaceOrchestrator(
         session_repo=session_repo,
         skill_repo=skill_repo,
+        assistant_service=assistant_service,
         index_dir="/tmp/fake_indexes",
     )
 
@@ -87,14 +96,14 @@ class TestIngestDocuments:
     def test_delegates_to_build_index(self, monkeypatch: pytest.MonkeyPatch) -> None:
         captured: list[Any] = []
 
-        def _fake_build_index(req: Any, progress_cb: Any = None) -> Any:
-            captured.append((req, progress_cb))
+        def _fake_build_index(self: Any, document_paths: list[str], settings: dict[str, Any], *, index_id: str | None = None, progress_cb: Any = None) -> Any:
+            captured.append((document_paths, settings, index_id, progress_cb))
             result = MagicMock()
             result.index_id = "idx-new"
             return result
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.build_index",
+            "axiom_app.services.workspace_orchestrator.WorkspaceOrchestrator.build_index",
             _fake_build_index,
         )
 
@@ -106,11 +115,11 @@ class TestIngestDocuments:
         )
 
         assert len(captured) == 1
-        req, cb = captured[0]
-        assert req.document_paths == ["/tmp/a.txt"]
-        assert req.settings == {"llm_provider": "mock"}
-        assert req.index_id == "idx-new"
-        assert cb is None
+        document_paths, settings, index_id, progress_cb = captured[0]
+        assert document_paths == ["/tmp/a.txt"]
+        assert settings == {"llm_provider": "mock"}
+        assert index_id == "idx-new"
+        assert progress_cb is None
         assert result.index_id == "idx-new"
 
     def test_passes_progress_callback(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,6 +140,71 @@ class TestIngestDocuments:
         _make_orchestrator().ingest_documents(
             ["/tmp/b.txt"], {}, progress_cb=cb
         )
+        assert captured[0] is cb
+
+
+class TestBuildIndex:
+    def test_resolves_settings_and_reflects(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: list[Any] = []
+        assistant_service = MagicMock()
+        assistant_service.reflect.return_value = {"ok": True}
+
+        def _fake_build_index(req: Any, progress_cb: Any = None) -> Any:
+            captured.append((req, progress_cb))
+            result = MagicMock()
+            result.index_id = "idx-new"
+            return result
+
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator.build_index",
+            _fake_build_index,
+        )
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            lambda: {},
+        )
+
+        orch = _make_orchestrator(assistant_service=assistant_service)
+        result = orch.build_index(
+            document_paths=["/tmp/a.txt"],
+            settings={"llm_provider": "mock"},
+            index_id="idx-new",
+        )
+
+        assert len(captured) == 1
+        req, cb = captured[0]
+        assert req.document_paths == ["/tmp/a.txt"]
+        assert req.settings == {
+            "llm_provider": "mock",
+            "assistant_identity": {},
+            "assistant_runtime": {},
+            "assistant_policy": {},
+        }
+        assert req.index_id == "idx-new"
+        assert cb is None
+        assert result.index_id == "idx-new"
+        assistant_service.reflect.assert_called_once_with(
+            trigger="index_build",
+            settings=req.settings,
+            context_id="index:idx-new",
+        )
+
+    def test_passes_progress_callback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: list[Any] = []
+
+        def _fake_build_index(req: Any, progress_cb: Any = None) -> Any:
+            captured.append(progress_cb)
+            return MagicMock()
+
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator.build_index",
+            _fake_build_index,
+        )
+
+        def cb(ev: Any) -> None:
+            pass
+
+        _make_orchestrator().build_index(["/tmp/b.txt"], {}, progress_cb=cb)
         assert captured[0] is cb
 
 
@@ -176,7 +250,14 @@ class TestGetIndex:
 
 class TestRunRagQuery:
     def test_delegates_to_query_rag(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        fake_result = MagicMock()
+        fake_result = MagicMock(
+            run_id="run-rag",
+            answer_text="answer",
+            sources=[],
+            context_block="context",
+            top_score=0.5,
+            selected_mode="Q&A",
+        )
 
         def _fake_query_rag(req: Any) -> Any:
             return fake_result
@@ -193,13 +274,116 @@ class TestRunRagQuery:
             question="What is Axiom?",
             settings={},
         )
-        result = _make_orchestrator().run_rag_query(req)
+        orch = _make_orchestrator()
+        orch._trace_store.append_event = MagicMock()  # type: ignore[method-assign]
+        result = orch.run_rag_query(req)
         assert result is fake_result
+
+    def test_session_id_persists_session_messages_and_reflects(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_result = MagicMock(
+            run_id="run-1",
+            answer_text="answer",
+            sources=[{"sid": "S1", "source": "doc.txt", "snippet": "evidence"}],
+            context_block="context",
+            top_score=0.91,
+            selected_mode="Q&A",
+        )
+        session_repo = MagicMock()
+        session_repo.get_session.return_value = None
+        session_repo.upsert_session.return_value = _make_summary("s1")
+        session_repo.append_message.return_value = None
+        assistant_service = MagicMock()
+        assistant_service.get_snapshot.return_value = {"identity": {"name": "Companion"}}
+        assistant_service.reflect.return_value = {"ok": True}
+        orch = _make_orchestrator(session_repo=session_repo, assistant_service=assistant_service)
+        trace_append = MagicMock()
+        orch._trace_store.append_event = trace_append  # type: ignore[method-assign]
+
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            lambda: {
+                "selected_mode": "Q&A",
+                "llm_provider": "mock",
+                "llm_model_custom": "model-x",
+                "embedding_model_custom": "embed-x",
+                "vector_db_type": "json",
+                "retrieval_k": 9,
+                "top_k": 4,
+                "mmr_lambda": 0.25,
+                "agentic_max_iterations": 2,
+            },
+        )
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator.list_indexes",
+            lambda index_dir=None: [
+                {"manifest_path": "/tmp/manifest.json", "index_id": "idx-1"}
+            ],
+        )
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator.query_rag",
+            lambda req: fake_result,
+        )
+
+        expected_settings = {
+            "selected_mode": "Q&A",
+            "llm_provider": "mock",
+            "llm_model_custom": "model-x",
+            "embedding_model_custom": "embed-x",
+            "vector_db_type": "json",
+            "retrieval_k": 9,
+            "top_k": 4,
+            "mmr_lambda": 0.25,
+            "agentic_max_iterations": 2,
+            "assistant_identity": {},
+            "assistant_runtime": {},
+            "assistant_policy": {},
+        }
+        req = RagQueryRequest(
+            manifest_path="/tmp/manifest.json",
+            question="What is Axiom?",
+            settings={"selected_mode": "Q&A"},
+        )
+        result = orch.run_rag_query(req, session_id="s1")
+
+        assert result is fake_result
+        session_repo.upsert_session.assert_called_once()
+        upsert_kwargs = session_repo.upsert_session.call_args.kwargs
+        assert upsert_kwargs["title"] == "What is Axiom?"
+        assert upsert_kwargs["index_id"] == "idx-1"
+        assert upsert_kwargs["llm_provider"] == "mock"
+        assert upsert_kwargs["llm_model"] == "model-x"
+        assert upsert_kwargs["embed_model"] == "embed-x"
+        assert "Companion" in upsert_kwargs["extra_json"]
+        assert session_repo.append_message.call_args_list[0].args == ("s1",)
+        assert session_repo.append_message.call_args_list[0].kwargs == {
+            "role": "user",
+            "content": "What is Axiom?",
+            "run_id": "",
+            "sources": [],
+        }
+        assert session_repo.append_message.call_args_list[1].args == ("s1",)
+        assert session_repo.append_message.call_args_list[1].kwargs["role"] == "assistant"
+        assert session_repo.append_message.call_args_list[1].kwargs["run_id"] == "run-1"
+        assert assistant_service.reflect.call_args.kwargs == {
+            "trigger": "completed_run",
+            "settings": expected_settings,
+            "session_id": "s1",
+            "run_id": "run-1",
+        }
+        assert trace_append.call_count == 2
 
 
 class TestRunDirectQuery:
     def test_delegates_to_query_direct(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        fake_result = MagicMock()
+        fake_result = MagicMock(
+            run_id="run-direct",
+            answer_text="hello",
+            selected_mode="Q&A",
+            llm_provider="mock",
+            llm_model="mock-model",
+        )
 
         def _fake_query_direct(req: Any) -> Any:
             return fake_result
@@ -212,8 +396,84 @@ class TestRunDirectQuery:
         from axiom_app.engine.querying import DirectQueryRequest
 
         req = DirectQueryRequest(prompt="Hello", settings={})
-        result = _make_orchestrator().run_direct_query(req)
+        orch = _make_orchestrator()
+        orch._trace_store.append_event = MagicMock()  # type: ignore[method-assign]
+        result = orch.run_direct_query(req)
         assert result is fake_result
+
+    def test_session_id_persists_session_messages_and_reflects(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_result = MagicMock(
+            run_id="run-2",
+            answer_text="answer",
+            selected_mode="Tutor",
+            llm_provider="mock",
+            llm_model="model-y",
+        )
+        session_repo = MagicMock()
+        session_repo.get_session.return_value = None
+        session_repo.upsert_session.return_value = _make_summary("s2")
+        session_repo.append_message.return_value = None
+        assistant_service = MagicMock()
+        assistant_service.get_snapshot.return_value = {"identity": {"name": "Companion"}}
+        assistant_service.reflect.return_value = {"ok": True}
+        orch = _make_orchestrator(session_repo=session_repo, assistant_service=assistant_service)
+        trace_append = MagicMock()
+        orch._trace_store.append_event = trace_append  # type: ignore[method-assign]
+
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            lambda: {
+                "selected_mode": "Tutor",
+                "llm_provider": "mock",
+                "llm_model_custom": "model-y",
+                "embedding_model_custom": "embed-y",
+                "vector_db_type": "json",
+                "retrieval_k": 3,
+                "top_k": 2,
+                "mmr_lambda": 0.5,
+                "agentic_max_iterations": 1,
+            },
+        )
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator.query_direct",
+            lambda req: fake_result,
+        )
+
+        req = DirectQueryRequest(prompt="Hello", settings={"selected_mode": "Tutor"})
+        result = orch.run_direct_query(req, session_id="s2")
+
+        assert result is fake_result
+        session_repo.upsert_session.assert_called_once()
+        assert session_repo.upsert_session.call_args.kwargs["title"] == "Hello"
+        assert session_repo.append_message.call_args_list[0].kwargs == {
+            "role": "user",
+            "content": "Hello",
+            "run_id": "",
+            "sources": [],
+        }
+        assert session_repo.append_message.call_args_list[1].kwargs["run_id"] == "run-2"
+        assert assistant_service.reflect.call_args.kwargs == {
+            "trigger": "completed_run",
+            "settings": {
+                "selected_mode": "Tutor",
+                "llm_provider": "mock",
+                "llm_model_custom": "model-y",
+                "embedding_model_custom": "embed-y",
+                "vector_db_type": "json",
+                "retrieval_k": 3,
+                "top_k": 2,
+                "mmr_lambda": 0.5,
+                "agentic_max_iterations": 1,
+                "assistant_identity": {},
+                "assistant_runtime": {},
+                "assistant_policy": {},
+            },
+            "session_id": "s2",
+            "run_id": "run-2",
+        }
+        assert trace_append.call_count == 1
 
 
 class TestStreamRagQuery:
@@ -234,6 +494,118 @@ class TestStreamRagQuery:
         result = list(_make_orchestrator().stream_rag_query(req))
         assert result == events
 
+    def test_session_id_writes_user_and_assistant_messages(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        session_repo = MagicMock()
+        session_repo.get_session.return_value = None
+        session_repo.upsert_session.return_value = _make_summary("s3")
+        assistant_service = MagicMock()
+        assistant_service.get_snapshot.return_value = {"identity": {"name": "Companion"}}
+        assistant_service.reflect.return_value = {"ok": True}
+        orch = _make_orchestrator(session_repo=session_repo, assistant_service=assistant_service)
+        trace_append = MagicMock()
+        orch._trace_store.append_event = trace_append  # type: ignore[method-assign]
+
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            lambda: {"selected_mode": "Q&A", "llm_provider": "mock"},
+        )
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator.stream_rag_answer",
+            lambda req, cancel_token=None: iter(
+                [
+                    {"type": "retrieval_complete", "run_id": "run-3", "sources": [{"sid": "S1", "source": "doc", "snippet": "evidence"}]},
+                    {"type": "final", "run_id": "run-3", "answer_text": "done", "sources": [{"sid": "S1", "source": "doc", "snippet": "evidence"}]},
+                ]
+            ),
+        )
+
+        req = RagQueryRequest(
+            manifest_path="/tmp/m.json",
+            question="?",
+            settings={"selected_mode": "Q&A"},
+            run_id="run-3",
+        )
+        result = list(orch.stream_rag_query(req, session_id="s3"))
+
+        assert [item["type"] for item in result] == ["retrieval_complete", "final"]
+        assert session_repo.append_message.call_args_list[0].kwargs["role"] == "user"
+        assert session_repo.append_message.call_args_list[1].kwargs["role"] == "assistant"
+        assert assistant_service.reflect.call_args.kwargs["session_id"] == "s3"
+        assert assistant_service.reflect.call_args.kwargs["run_id"] == "run-3"
+        assert assistant_service.reflect.call_args.kwargs["settings"] == {
+            "selected_mode": "Q&A",
+            "llm_provider": "mock",
+            "assistant_identity": {},
+            "assistant_runtime": {},
+            "assistant_policy": {},
+        }
+        assert trace_append.call_count == 2
+
+
+class TestTraceHooks:
+    def test_records_non_token_events_and_maps_stages(self) -> None:
+        orch = _make_orchestrator()
+        append_event = MagicMock()
+        orch._trace_store.append_event = append_event  # type: ignore[method-assign]
+
+        orch._record_trace_event("run-4", {"type": "token", "run_id": "run-4", "text": "skip"})
+        orch._record_trace_event(
+            "run-4",
+            {"type": "retrieval_complete", "run_id": "run-4", "sources": [{"sid": "S1"}]},
+        )
+        orch._record_trace_event(
+            "run-4",
+            {"type": "final", "run_id": "run-4", "answer_text": "done"},
+        )
+
+        assert append_event.call_count == 2
+        first_call = append_event.call_args_list[0].kwargs
+        second_call = append_event.call_args_list[1].kwargs
+        assert first_call["stage"] == "retrieval"
+        assert first_call["event_type"] == "retrieval_complete"
+        assert first_call["payload"] == {"sources": [{"sid": "S1"}]}
+        assert second_call["stage"] == "synthesis"
+        assert second_call["event_type"] == "final"
+
+
+class TestReflectionHooks:
+    def test_reflect_assistant_forwards_session_and_run_arguments(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assistant_service = MagicMock()
+        assistant_service.reflect.return_value = {"ok": True}
+        orch = _make_orchestrator(assistant_service=assistant_service)
+
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            lambda: {"selected_mode": "Tutor", "llm_provider": "mock"},
+        )
+
+        result = orch.reflect_assistant(
+            trigger="manual",
+            session_id="s9",
+            run_id="r9",
+            force=True,
+            settings={"llm_provider": "openai"},
+        )
+
+        assert result == {"ok": True}
+        assistant_service.reflect.assert_called_once_with(
+            trigger="manual",
+            settings={
+                "selected_mode": "Tutor",
+                "llm_provider": "openai",
+                "assistant_identity": {},
+                "assistant_runtime": {},
+                "assistant_policy": {},
+            },
+            session_id="s9",
+            run_id="r9",
+            force=True,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Graph / Brain canvas
@@ -251,8 +623,13 @@ class TestGetWorkspaceGraph:
 
         session_repo = MagicMock()
         session_repo.list_sessions.return_value = []
+        assistant_service = MagicMock()
+        assistant_service.get_snapshot.return_value = {"identity": {"companion_enabled": False}}
 
-        orch = WorkspaceOrchestrator(session_repo=session_repo)
+        orch = _make_orchestrator(
+            session_repo=session_repo,
+            assistant_service=assistant_service,
+        )
         graph = orch.get_workspace_graph()
 
         assert isinstance(graph, BrainGraph)
@@ -262,9 +639,14 @@ class TestGetWorkspaceGraph:
     def test_uses_session_repo(self) -> None:
         session_repo = MagicMock()
         session_repo.list_sessions.return_value = [_make_summary()]
+        assistant_service = MagicMock()
+        assistant_service.get_snapshot.return_value = {"identity": {"companion_enabled": False}}
 
         with patch("axiom_app.services.workspace_orchestrator.list_indexes", return_value=[]):
-            orch = WorkspaceOrchestrator(session_repo=session_repo)
+            orch = _make_orchestrator(
+                session_repo=session_repo,
+                assistant_service=assistant_service,
+            )
             orch.get_workspace_graph()
 
         session_repo.list_sessions.assert_called_once()

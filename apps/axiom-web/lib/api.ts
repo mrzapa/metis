@@ -151,6 +151,119 @@ export interface TraceEvent {
   citations_chosen?: string[] | null;
 }
 
+export interface AssistantIdentity {
+  assistant_id: string;
+  name: string;
+  archetype: string;
+  companion_enabled: boolean;
+  greeting: string;
+  prompt_seed: string;
+  docked: boolean;
+  minimized: boolean;
+}
+
+export interface AssistantRuntime {
+  provider: string;
+  model: string;
+  local_gguf_model_path: string;
+  local_gguf_context_length: number;
+  local_gguf_gpu_layers: number;
+  local_gguf_threads: number;
+  fallback_to_primary: boolean;
+  auto_bootstrap: boolean;
+  auto_install: boolean;
+  bootstrap_state: string;
+  recommended_model_name: string;
+  recommended_quant: string;
+  recommended_use_case: string;
+}
+
+export interface AssistantPolicy {
+  reflection_enabled: boolean;
+  reflection_backend: string;
+  reflection_cooldown_seconds: number;
+  max_memory_entries: number;
+  max_playbooks: number;
+  max_brain_links: number;
+  trigger_on_onboarding: boolean;
+  trigger_on_index_build: boolean;
+  trigger_on_completed_run: boolean;
+  allow_automatic_writes: boolean;
+}
+
+export interface AssistantStatus {
+  state: string;
+  paused: boolean;
+  runtime_ready: boolean;
+  runtime_source: string;
+  runtime_provider: string;
+  runtime_model: string;
+  bootstrap_state: string;
+  bootstrap_message: string;
+  recommended_model_name: string;
+  recommended_quant: string;
+  recommended_use_case: string;
+  last_reflection_at: string;
+  last_reflection_trigger: string;
+  latest_summary: string;
+  latest_why: string;
+}
+
+export interface AssistantMemoryEntry {
+  entry_id: string;
+  created_at: string;
+  kind: string;
+  title: string;
+  summary: string;
+  details: string;
+  why: string;
+  provenance: string;
+  confidence: number;
+  trigger: string;
+  context_id: string;
+  session_id: string;
+  run_id: string;
+  tags: string[];
+  related_node_ids: string[];
+}
+
+export interface AssistantPlaybook {
+  playbook_id: string;
+  created_at: string;
+  title: string;
+  bullets: string[];
+  source_session_id: string;
+  source_run_id: string;
+  provenance: string;
+  confidence: number;
+  active: boolean;
+}
+
+export interface AssistantBrainLink {
+  link_id: string;
+  created_at: string;
+  source_node_id: string;
+  target_node_id: string;
+  relation: string;
+  label: string;
+  provenance: string;
+  summary: string;
+  confidence: number;
+  session_id: string;
+  run_id: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface AssistantSnapshot {
+  identity: AssistantIdentity;
+  runtime: AssistantRuntime;
+  policy: AssistantPolicy;
+  status: AssistantStatus;
+  memory: AssistantMemoryEntry[];
+  playbooks: AssistantPlaybook[];
+  brain_links: AssistantBrainLink[];
+}
+
 export interface SessionDetail {
   summary: SessionSummary;
   messages: SessionMessage[];
@@ -362,11 +475,12 @@ export async function queryRag(
   manifest_path: string,
   question: string,
   settings: Record<string, unknown>,
+  sessionId?: string,
 ): Promise<RagQueryResult> {
   const res = await apiFetch(`${await getApiBase()}/v1/query/rag`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ manifest_path, question, settings }),
+    body: JSON.stringify({ manifest_path, question, settings, session_id: sessionId ?? "" }),
   });
   if (!res.ok) {
     const detail = await res.text();
@@ -382,6 +496,7 @@ export async function queryRagStream(
   options: {
     signal?: AbortSignal;
     runId?: string;
+    sessionId?: string | null;
     lastEventId?: number | null;
     onEvent: (event: RagStreamEvent, meta: { eventId: number | null }) => void;
   },
@@ -405,6 +520,7 @@ export async function queryRagStream(
       question,
       settings,
       run_id: options.runId,
+      session_id: options.sessionId ?? "",
     }),
     signal: options.signal,
   });
@@ -550,11 +666,12 @@ export async function checkApiCompatibility(): Promise<{
 export async function queryDirect(
   prompt: string,
   settings: Record<string, unknown>,
+  sessionId?: string,
 ): Promise<DirectQueryResult> {
   const res = await apiFetch(`${await getApiBase()}/v1/query/direct`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, settings }),
+    body: JSON.stringify({ prompt, settings, session_id: sessionId ?? "" }),
   });
   if (!res.ok) {
     const detail = await res.text();
@@ -707,6 +824,7 @@ export interface BrainGraphEdge {
   source_id: string;
   target_id: string;
   edge_type: string;
+  metadata: Record<string, unknown>;
 }
 
 export interface BrainGraphResponse {
@@ -719,6 +837,138 @@ export async function fetchBrainGraph(): Promise<BrainGraphResponse> {
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Failed to fetch brain graph (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function fetchAssistant(): Promise<AssistantSnapshot> {
+  const res = await apiFetch(`${await getApiBase()}/v1/assistant`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch assistant (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export interface AssistantSettings {
+  assistant_identity: AssistantIdentity;
+  assistant_runtime: AssistantRuntime;
+  assistant_policy: AssistantPolicy;
+}
+
+export interface AssistantSettingsUpdate {
+  assistant_identity?: Partial<AssistantIdentity>;
+  assistant_runtime?: Partial<AssistantRuntime>;
+  assistant_policy?: Partial<AssistantPolicy>;
+}
+
+export async function fetchAssistantSettings(): Promise<AssistantSettings> {
+  const snapshot = await fetchAssistant();
+  return {
+    assistant_identity: snapshot.identity,
+    assistant_runtime: snapshot.runtime,
+    assistant_policy: snapshot.policy,
+  };
+}
+
+export async function updateAssistant(payload: {
+  identity?: Record<string, unknown>;
+  runtime?: Record<string, unknown>;
+  policy?: Record<string, unknown>;
+  status?: Record<string, unknown>;
+}): Promise<AssistantSnapshot> {
+  const res = await apiFetch(`${await getApiBase()}/v1/assistant`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to update assistant (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function updateAssistantSettings(
+  payload: AssistantSettingsUpdate,
+): Promise<AssistantSettings> {
+  const snapshot = await updateAssistant({
+    identity: payload.assistant_identity,
+    runtime: payload.assistant_runtime,
+    policy: payload.assistant_policy,
+  });
+  return {
+    assistant_identity: snapshot.identity,
+    assistant_runtime: snapshot.runtime,
+    assistant_policy: snapshot.policy,
+  };
+}
+
+export async function fetchAssistantStatus(): Promise<AssistantStatus> {
+  const res = await apiFetch(`${await getApiBase()}/v1/assistant/status`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch assistant status (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function reflectAssistant(payload: {
+  trigger?: string;
+  context_id?: string;
+  session_id?: string;
+  run_id?: string;
+  force?: boolean;
+}): Promise<Record<string, unknown>> {
+  const res = await apiFetch(`${await getApiBase()}/v1/assistant/reflect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      trigger: payload.trigger ?? "manual",
+      context_id: payload.context_id ?? "",
+      session_id: payload.session_id ?? "",
+      run_id: payload.run_id ?? "",
+      force: Boolean(payload.force),
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to reflect assistant (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function bootstrapAssistant(
+  installLocalModel = false,
+): Promise<AssistantSnapshot> {
+  const res = await apiFetch(`${await getApiBase()}/v1/assistant/bootstrap`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ install_local_model: installLocalModel }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to bootstrap assistant (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function fetchAssistantMemory(limit = 20): Promise<AssistantMemoryEntry[]> {
+  const res = await apiFetch(`${await getApiBase()}/v1/assistant/memory?limit=${encodeURIComponent(String(limit))}`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch assistant memory (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function clearAssistantMemory(limit = 10): Promise<Record<string, unknown>> {
+  const res = await apiFetch(`${await getApiBase()}/v1/assistant/memory?limit=${encodeURIComponent(String(limit))}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to clear assistant memory (${res.status}): ${detail}`);
   }
   return res.json();
 }

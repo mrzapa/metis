@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * BrainGraph — interactive SVG graph visualisation of indexes, sessions,
- * and categories.  Supports zoom/pan, node drag, tooltip on hover, and
+ * BrainGraph - interactive SVG graph visualisation of indexes, sessions,
+ * and categories. Supports zoom/pan, node drag, tooltip on hover, and
  * click-to-select with a detail side-panel.
  *
  * Data is fetched from GET /v1/brain/graph and rendered as an SVG force
@@ -17,11 +17,11 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
-// ── Types ─────────────────────────────────────────────────────────────────
+// -- Types ---------------------------------------------------------------
 
 export interface BrainNode {
   node_id: string;
-  node_type: "category" | "index" | "session";
+  node_type: "category" | "index" | "session" | "assistant" | "memory" | "playbook";
   label: string;
   x: number;
   y: number;
@@ -32,6 +32,7 @@ export interface BrainEdge {
   source_id: string;
   target_id: string;
   edge_type: string;
+  metadata: Record<string, unknown>;
 }
 
 export interface BrainGraphData {
@@ -39,26 +40,66 @@ export interface BrainGraphData {
   edges: BrainEdge[];
 }
 
-// ── Visual constants ───────────────────────────────────────────────────────
+export type BrainScope = "workspace" | "assistant_self" | "assistant_learned";
 
-const NODE_RADIUS: Record<string, number> = {
+// -- Visual constants ----------------------------------------------------
+
+const NODE_RADIUS: Record<BrainNode["node_type"], number> = {
   category: 26,
   index: 18,
   session: 14,
+  assistant: 22,
+  memory: 17,
+  playbook: 17,
 };
 
-const NODE_COLOR: Record<string, string> = {
+const NODE_COLOR: Record<BrainNode["node_type"], string> = {
   category: "var(--color-accent)",
   index: "var(--color-primary)",
   session: "var(--color-chart-2)",
+  assistant: "var(--color-chart-3)",
+  memory: "var(--color-chart-4)",
+  playbook: "var(--color-chart-5)",
 };
 
-const EDGE_COLOR: Record<string, string> = {
-  category_member: "var(--color-border)",
-  uses_index: "var(--color-primary)",
+const NODE_SCOPE_STROKE: Record<BrainScope, string> = {
+  workspace: "var(--color-border)",
+  assistant_self: "var(--color-chart-3)",
+  assistant_learned: "var(--color-chart-4)",
 };
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+const SCOPE_LABEL: Record<BrainScope, string> = {
+  workspace: "Workspace",
+  assistant_self: "Axiom Self",
+  assistant_learned: "Assistant-Learned",
+};
+
+const SCOPE_EDGE_STYLE: Record<
+  BrainScope,
+  { stroke: string; width: number; opacity: number; dash?: string; marker?: string }
+> = {
+  workspace: {
+    stroke: "var(--color-border)",
+    width: 1,
+    opacity: 0.55,
+  },
+  assistant_self: {
+    stroke: "var(--color-chart-3)",
+    width: 1.25,
+    opacity: 0.75,
+  },
+  assistant_learned: {
+    stroke: "var(--color-chart-4)",
+    width: 1.7,
+    opacity: 0.9,
+    dash: "7 5",
+    marker: "url(#arrow-learned)",
+  },
+};
+
+const ALL_SCOPES: BrainScope[] = ["workspace", "assistant_self", "assistant_learned"];
+
+// -- Helpers -------------------------------------------------------------
 
 function worldBounds(nodes: BrainNode[]): {
   minX: number;
@@ -67,7 +108,10 @@ function worldBounds(nodes: BrainNode[]): {
   maxY: number;
 } {
   if (nodes.length === 0) return { minX: -200, minY: -200, maxX: 200, maxY: 200 };
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
   for (const n of nodes) {
     if (n.x < minX) minX = n.x;
     if (n.y < minY) minY = n.y;
@@ -77,12 +121,18 @@ function worldBounds(nodes: BrainNode[]): {
   return { minX, minY, maxX, maxY };
 }
 
-// ── Component ──────────────────────────────────────────────────────────────
+function scopeFromMetadata(metadata: Record<string, unknown>): BrainScope {
+  const raw = metadata.scope;
+  return raw === "assistant_self" || raw === "assistant_learned" ? raw : "workspace";
+}
+
+// -- Component -----------------------------------------------------------
 
 interface BrainGraphProps {
   data: BrainGraphData;
-  /** Text filter — nodes whose labels don't match are dimmed. */
+  /** Text filter - nodes whose labels don't match are dimmed. */
   filter?: string;
+  activeScopes?: BrainScope[];
   onNodeSelect?: (node: BrainNode | null) => void;
   className?: string;
 }
@@ -90,6 +140,7 @@ interface BrainGraphProps {
 export function BrainGraph({
   data,
   filter = "",
+  activeScopes = ALL_SCOPES,
   onNodeSelect,
   className = "",
 }: BrainGraphProps) {
@@ -152,7 +203,7 @@ export function BrainGraph({
     return () => cancelAnimationFrame(frame);
   }, [data]);
 
-  // ── Wheel zoom ─────────────────────────────────────────────────────────
+  // -- Wheel zoom --------------------------------------------------------
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.1 : 0.91;
@@ -174,17 +225,20 @@ export function BrainGraph({
     return () => svg.removeEventListener("wheel", handleWheel);
   }, [handleWheel]);
 
-  // ── SVG background pan ─────────────────────────────────────────────────
-  const onBgPointerDown = useCallback((e: ReactPointerEvent<SVGElement>) => {
-    if (e.button !== 0) return;
-    panRef.current = {
-      startPx: e.clientX,
-      startPy: e.clientY,
-      startTx: transform.tx,
-      startTy: transform.ty,
-    };
-    (e.target as SVGElement).setPointerCapture(e.pointerId);
-  }, [transform]);
+  // -- SVG background pan -----------------------------------------------
+  const onBgPointerDown = useCallback(
+    (e: ReactPointerEvent<SVGElement>) => {
+      if (e.button !== 0) return;
+      panRef.current = {
+        startPx: e.clientX,
+        startPy: e.clientY,
+        startTx: transform.tx,
+        startTy: transform.ty,
+      };
+      (e.target as SVGElement).setPointerCapture(e.pointerId);
+    },
+    [transform],
+  );
 
   const onBgPointerMove = useCallback((e: ReactPointerEvent<SVGElement>) => {
     if (!panRef.current) return;
@@ -201,7 +255,7 @@ export function BrainGraph({
     panRef.current = null;
   }, []);
 
-  // ── Node drag ──────────────────────────────────────────────────────────
+  // -- Node drag ---------------------------------------------------------
   const onNodePointerDown = useCallback(
     (e: ReactPointerEvent<SVGCircleElement>, nodeId: string) => {
       e.stopPropagation();
@@ -245,25 +299,44 @@ export function BrainGraph({
       dragRef.current = null;
       if (!wasDrag) {
         const node = data.nodes.find((n) => n.node_id === nodeId) ?? null;
-        setSelectedId((prev) => (prev === nodeId ? null : nodeId));
-        onNodeSelect?.(selectedId === nodeId ? null : node);
+        const nextSelectedId = selectedId === nodeId ? null : nodeId;
+        setSelectedId(nextSelectedId);
+        onNodeSelect?.(nextSelectedId ? node : null);
       }
     },
     [data.nodes, onNodeSelect, selectedId],
   );
 
-  // ── Filter matching ────────────────────────────────────────────────────
+  // -- Filtering ---------------------------------------------------------
   const filterLower = filter.trim().toLowerCase();
+  const activeScopeSet = new Set(activeScopes.length > 0 ? activeScopes : ALL_SCOPES);
+  const nodeById = new Map(data.nodes.map((node) => [node.node_id, node] as const));
+
   const matchNode = (n: BrainNode) =>
     !filterLower || n.label.toLowerCase().includes(filterLower);
 
-  // ── Render ─────────────────────────────────────────────────────────────
+  const isVisibleNode = (node: BrainNode) => activeScopeSet.has(scopeFromMetadata(node.metadata));
+  const isVisibleEdge = (edge: BrainEdge) =>
+    activeScopeSet.has(scopeFromMetadata(edge.metadata));
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const selectedNode = data.nodes.find((node) => node.node_id === selectedId) ?? null;
+    const visibleScopes = new Set(activeScopes.length > 0 ? activeScopes : ALL_SCOPES);
+    const selectedScope = selectedNode ? scopeFromMetadata(selectedNode.metadata) : null;
+    if (!selectedNode || !selectedScope || !visibleScopes.has(selectedScope)) {
+      setSelectedId(null);
+      onNodeSelect?.(null);
+    }
+  }, [activeScopes, data.nodes, onNodeSelect, selectedId]);
+
+  // -- Render ------------------------------------------------------------
   const { tx, ty, scale } = transform;
 
   return (
     <svg
       ref={svgRef}
-      className={`w-full h-full select-none cursor-grab active:cursor-grabbing ${className}`}
+      className={`h-full w-full select-none cursor-grab active:cursor-grabbing ${className}`}
       onPointerDown={onBgPointerDown}
       onPointerMove={(e) => {
         onBgPointerMove(e);
@@ -273,25 +346,36 @@ export function BrainGraph({
       aria-label="Brain graph"
     >
       <defs>
+        <marker id="arrow-uses" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="var(--color-primary)" opacity="0.75" />
+        </marker>
         <marker
-          id="arrow-uses"
+          id="arrow-learned"
           markerWidth="8"
           markerHeight="8"
           refX="6"
           refY="3"
           orient="auto"
         >
-          <path d="M0,0 L0,6 L8,3 z" fill="var(--color-primary)" opacity="0.7" />
+          <path d="M0,0 L0,6 L8,3 z" fill="var(--color-chart-4)" opacity="0.9" />
         </marker>
       </defs>
 
       <g transform={`translate(${tx},${ty}) scale(${scale})`}>
         {/* Edges */}
         {data.edges.map((edge, i) => {
+          if (!isVisibleEdge(edge)) return null;
           const src = positions.get(edge.source_id);
           const tgt = positions.get(edge.target_id);
           if (!src || !tgt) return null;
-          const isUsesIndex = edge.edge_type === "uses_index";
+          const sourceNode = nodeById.get(edge.source_id) ?? null;
+          const targetNode = nodeById.get(edge.target_id) ?? null;
+          const scope = scopeFromMetadata(edge.metadata);
+          const style = SCOPE_EDGE_STYLE[scope];
+          const usesIndex = scope === "workspace" && edge.edge_type === "uses_index";
+          const dimmed =
+            filterLower && (!(sourceNode && matchNode(sourceNode)) || !(targetNode && matchNode(targetNode)));
+
           return (
             <line
               key={i}
@@ -299,23 +383,28 @@ export function BrainGraph({
               y1={src.y}
               x2={tgt.x}
               y2={tgt.y}
-              stroke={EDGE_COLOR[edge.edge_type] ?? "var(--color-border)"}
-              strokeWidth={isUsesIndex ? 1.5 : 0.8}
-              strokeOpacity={0.55}
-              markerEnd={isUsesIndex ? "url(#arrow-uses)" : undefined}
+              stroke={style.stroke}
+              strokeWidth={usesIndex ? 1.6 : style.width}
+              strokeOpacity={dimmed ? 0.2 : style.opacity}
+              strokeDasharray={style.dash}
+              markerEnd={usesIndex ? "url(#arrow-uses)" : style.marker}
             />
           );
         })}
 
         {/* Nodes */}
         {data.nodes.map((node) => {
+          if (!isVisibleNode(node)) return null;
           const pos = positions.get(node.node_id) ?? { x: node.x, y: node.y };
           const r = NODE_RADIUS[node.node_type] ?? 14;
-          const color = NODE_COLOR[node.node_type] ?? "var(--color-muted)";
+          const fill = NODE_COLOR[node.node_type] ?? "var(--color-muted)";
+          const scope = scopeFromMetadata(node.metadata);
+          const stroke = NODE_SCOPE_STROKE[scope];
           const isSelected = selectedId === node.node_id;
           const isHovered = hoveredId === node.node_id;
           const dimmed = filterLower && !matchNode(node);
-          const labelFontSize = node.node_type === "category" ? 9 : 7.5;
+          const labelFontSize =
+            node.node_type === "category" ? 9 : node.node_type === "assistant" ? 8.2 : 7.5;
 
           return (
             <g
@@ -327,10 +416,10 @@ export function BrainGraph({
                 cx={pos.x}
                 cy={pos.y}
                 r={r + (isSelected ? 3 : isHovered ? 1 : 0)}
-                fill={color}
-                fillOpacity={isSelected ? 0.95 : isHovered ? 0.85 : 0.75}
-                stroke={isSelected ? "var(--color-ring)" : "transparent"}
-                strokeWidth={isSelected ? 2.5 : 0}
+                fill={fill}
+                fillOpacity={isSelected ? 0.98 : isHovered ? 0.9 : 0.8}
+                stroke={isSelected ? "var(--color-ring)" : stroke}
+                strokeWidth={isSelected ? 2.5 : scope === "assistant_self" ? 1.25 : 1}
                 style={{ transition: "r 0.15s, fill-opacity 0.15s", cursor: "pointer" }}
                 onPointerDown={(e) => onNodePointerDown(e, node.node_id)}
                 onPointerMove={onNodePointerMove}
@@ -356,7 +445,7 @@ export function BrainGraph({
                   <rect
                     x={pos.x + r + 4}
                     y={pos.y - 14}
-                    width={Math.min(node.label.length * 6 + 16, 180)}
+                    width={Math.min(node.label.length * 6 + 24, 200)}
                     height={22}
                     rx={4}
                     fill="var(--color-popover)"
@@ -370,7 +459,7 @@ export function BrainGraph({
                     fill="var(--color-popover-foreground)"
                     style={{ pointerEvents: "none" }}
                   >
-                    {`[${node.node_type}] ${node.label}`}
+                    {`[${SCOPE_LABEL[scope]} · ${node.node_type}] ${node.label}`}
                   </text>
                 </g>
               )}

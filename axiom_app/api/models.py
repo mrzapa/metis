@@ -64,6 +64,7 @@ class RagQueryRequestModel(BaseModel):
     question: str
     settings: dict[str, Any]
     run_id: str | None = None
+    session_id: str = ""
     require_action: bool = False
 
     model_config = ConfigDict(extra="forbid")
@@ -102,6 +103,7 @@ class DirectQueryRequestModel(BaseModel):
     prompt: str
     settings: dict[str, Any]
     run_id: str | None = None
+    session_id: str = ""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -297,6 +299,144 @@ class FeedbackRequestModel(BaseModel):
 
 class FeedbackResponseModel(BaseModel):
     ok: bool
+
+
+class AssistantIdentityModel(BaseModel):
+    assistant_id: str
+    name: str
+    archetype: str
+    companion_enabled: bool
+    greeting: str
+    prompt_seed: str
+    docked: bool
+    minimized: bool
+
+
+class AssistantRuntimeModel(BaseModel):
+    provider: str
+    model: str
+    local_gguf_model_path: str
+    local_gguf_context_length: int
+    local_gguf_gpu_layers: int
+    local_gguf_threads: int
+    fallback_to_primary: bool
+    auto_bootstrap: bool
+    auto_install: bool
+    bootstrap_state: str
+    recommended_model_name: str
+    recommended_quant: str
+    recommended_use_case: str
+
+
+class AssistantPolicyModel(BaseModel):
+    reflection_enabled: bool
+    reflection_backend: str
+    reflection_cooldown_seconds: int
+    max_memory_entries: int
+    max_playbooks: int
+    max_brain_links: int
+    trigger_on_onboarding: bool
+    trigger_on_index_build: bool
+    trigger_on_completed_run: bool
+    allow_automatic_writes: bool
+
+
+class AssistantStatusModel(BaseModel):
+    state: str
+    paused: bool
+    runtime_ready: bool
+    runtime_source: str
+    runtime_provider: str
+    runtime_model: str
+    bootstrap_state: str
+    bootstrap_message: str
+    recommended_model_name: str
+    recommended_quant: str
+    recommended_use_case: str
+    last_reflection_at: str
+    last_reflection_trigger: str
+    latest_summary: str
+    latest_why: str
+
+
+class AssistantMemoryEntryModel(BaseModel):
+    entry_id: str
+    created_at: str
+    kind: str
+    title: str
+    summary: str
+    details: str = ""
+    why: str = ""
+    provenance: str = ""
+    confidence: float = 0.0
+    trigger: str = ""
+    context_id: str = ""
+    session_id: str = ""
+    run_id: str = ""
+    tags: list[str] = Field(default_factory=list)
+    related_node_ids: list[str] = Field(default_factory=list)
+
+
+class AssistantPlaybookModel(BaseModel):
+    playbook_id: str
+    created_at: str
+    title: str
+    bullets: list[str] = Field(default_factory=list)
+    source_session_id: str = ""
+    source_run_id: str = ""
+    provenance: str = ""
+    confidence: float = 0.0
+    active: bool = True
+
+
+class AssistantBrainLinkModel(BaseModel):
+    link_id: str
+    created_at: str
+    source_node_id: str
+    target_node_id: str
+    relation: str
+    label: str
+    provenance: str = ""
+    summary: str = ""
+    confidence: float = 0.0
+    session_id: str = ""
+    run_id: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AssistantSnapshotModel(BaseModel):
+    identity: AssistantIdentityModel
+    runtime: AssistantRuntimeModel
+    policy: AssistantPolicyModel
+    status: AssistantStatusModel
+    memory: list[AssistantMemoryEntryModel] = Field(default_factory=list)
+    playbooks: list[AssistantPlaybookModel] = Field(default_factory=list)
+    brain_links: list[AssistantBrainLinkModel] = Field(default_factory=list)
+
+
+class AssistantUpdateRequestModel(BaseModel):
+    identity: dict[str, Any] | None = None
+    runtime: dict[str, Any] | None = None
+    policy: dict[str, Any] | None = None
+    status: dict[str, Any] | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AssistantReflectRequestModel(BaseModel):
+    trigger: str = "manual"
+    context_id: str = ""
+    session_id: str = ""
+    run_id: str = ""
+    force: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AssistantBootstrapRequestModel(BaseModel):
+    install_local_model: bool = False
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class GgufCatalogEntryModel(BaseModel):

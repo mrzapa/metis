@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from axiom_app.models.assistant_types import (
+    AssistantIdentity,
+    AssistantPolicy,
+    AssistantRuntime,
+)
 from axiom_app.models.parity_types import (
     ResolvedRuntimeSettings,
     SkillDefinition,
@@ -53,6 +58,10 @@ MODE_PROMPT_PACKS = {
         "every factual statement is explicitly grounded."
     ),
 }
+
+_DEFAULT_ASSISTANT_IDENTITY = AssistantIdentity()
+_DEFAULT_ASSISTANT_RUNTIME = AssistantRuntime()
+_DEFAULT_ASSISTANT_POLICY = AssistantPolicy()
 
 
 def normalize_mode_name(mode_name: str) -> str:
@@ -457,3 +466,51 @@ def resolve_runtime_settings(
             "skills": next_session_state.to_payload(),
         },
     )
+
+
+def resolve_assistant_identity(settings: dict[str, Any]) -> AssistantIdentity:
+    payload = settings.get("assistant_identity")
+    if isinstance(payload, dict):
+        return AssistantIdentity.from_payload(payload)
+    return AssistantIdentity.from_payload(_DEFAULT_ASSISTANT_IDENTITY.to_payload())
+
+
+def resolve_assistant_runtime(settings: dict[str, Any]) -> AssistantRuntime:
+    payload = settings.get("assistant_runtime")
+    if isinstance(payload, dict):
+        return AssistantRuntime.from_payload(payload)
+    return AssistantRuntime.from_payload(_DEFAULT_ASSISTANT_RUNTIME.to_payload())
+
+
+def resolve_assistant_policy(settings: dict[str, Any]) -> AssistantPolicy:
+    payload = settings.get("assistant_policy")
+    if isinstance(payload, dict):
+        return AssistantPolicy.from_payload(payload)
+    return AssistantPolicy.from_payload(_DEFAULT_ASSISTANT_POLICY.to_payload())
+
+
+def build_assistant_reflection_prompt(
+    identity: AssistantIdentity,
+    *,
+    context_lines: list[str],
+    trace_events: list[dict[str, Any]] | None = None,
+    seed_summary: str = "",
+) -> str:
+    trace_preview = [
+        f"- {str(item.get('event_type') or item.get('stage') or 'event')}: {str((item.get('payload') or {}))[:180]}"
+        for item in (trace_events or [])[:6]
+    ]
+    prompt_parts = [
+        identity.prompt_seed.strip(),
+        (
+            "You are generating a compact local reflection for the persistent Axiom companion. "
+            "Return JSON with keys: title, summary, details, why, playbook_title, playbook_bullets, tags, confidence."
+        ),
+    ]
+    if seed_summary.strip():
+        prompt_parts.append(f"Seed summary: {seed_summary.strip()}")
+    if context_lines:
+        prompt_parts.append("Context:\n" + "\n".join(f"- {line}" for line in context_lines if str(line).strip()))
+    if trace_preview:
+        prompt_parts.append("Trace preview:\n" + "\n".join(trace_preview))
+    return "\n\n".join(part for part in prompt_parts if part.strip())
