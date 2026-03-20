@@ -229,7 +229,7 @@ if [ -d "\$AXIOM_DIR/.git" ]; then
             (cd "\$web_app_dir" && npm install --silent 2>/dev/null && npm run build 2>/dev/null) && {
                 echo "Web UI rebuilt successfully."
             } || {
-                echo "Web UI rebuild failed — using cached version." >&2
+                echo "Web UI rebuild failed. Install Node.js and re-run the installer to fix." >&2
             }
         fi
     fi
@@ -280,7 +280,7 @@ if [ "\$CLI_MODE" = true ]; then
 fi
 
 if [ ! -f "\${WEB_DIR}/index.html" ]; then
-    echo "Built web UI not found at \${WEB_DIR}. Run the installer with Node.js available or build apps/axiom-web manually before launching." >&2
+    echo "Built web UI not found at \${WEB_DIR}. Install Node.js and re-run the installer, or build apps/axiom-web manually." >&2
     exit 1
 fi
 
