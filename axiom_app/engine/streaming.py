@@ -12,6 +12,7 @@ from axiom_app.engine.querying import (
     _selected_mode,
     _system_instructions,
 )
+from axiom_app.services.reranker import reciprocal_rank_fusion
 from axiom_app.services.vector_store import resolve_vector_store
 from axiom_app.utils.llm_providers import create_llm
 
@@ -110,10 +111,54 @@ def stream_rag_answer(
         }
 
         mode = _selected_mode(settings)
+        sub_sources: list[dict[str, Any]] = []
         if mode == "Research" and settings.get("use_sub_queries", False):
             sub_queries = _generate_sub_queries(question, llm)
             if sub_queries:
                 yield {"type": "subqueries", "run_id": run_id, "queries": sub_queries}
+
+                # ── Sub-query retrieval ───────────────────────────────
+                # Run each sub-query through the same retrieval pipeline
+                # and fuse their hit indices with the primary results.
+                primary_hits = query_result.hit_indices
+                all_ranked_lists: list[list[int]] = [primary_hits]
+                for sq in sub_queries:
+                    try:
+                        sq_result = adapter.query(bundle, sq, settings)
+                        all_ranked_lists.append(sq_result.hit_indices)
+                        sub_sources.extend(
+                            s.to_dict() for s in sq_result.sources
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                if len(all_ranked_lists) > 1:
+                    from axiom_app.services.index_service import build_query_result
+                    fused = reciprocal_rank_fusion(*all_ranked_lists)
+                    top_k = int(settings.get("top_k", 5))
+                    fused = fused[:top_k]
+                    # Re-compute scores from the primary result.
+                    scores = [0.0] * len(bundle.chunks) if not hasattr(bundle, "embeddings") else []
+                    if hasattr(bundle, "embeddings") and bundle.embeddings:
+                        from axiom_app.services.index_service import cosine_similarity
+                        from axiom_app.utils.embedding_providers import create_embeddings
+                        from axiom_app.utils.mock_embeddings import MockEmbeddings
+
+                        try:
+                            emb = create_embeddings(settings)
+                        except (ValueError, ImportError):
+                            emb = MockEmbeddings(dimensions=32)
+                        q_vec = emb.embed_query(question)
+                        scores = [cosine_similarity(q_vec, vec) for vec in bundle.embeddings]
+                    query_result = build_query_result(bundle, question, fused, scores)
+                    sources = [s.to_dict() for s in query_result.sources]
+                    yield {
+                        "type": "retrieval_augmented",
+                        "run_id": run_id,
+                        "sources": sources,
+                        "context_block": query_result.context_block,
+                        "top_score": float(query_result.top_score),
+                    }
 
         if req.require_action:
             yield {
