@@ -96,9 +96,11 @@ describe("AxiomCompanionDock", () => {
     });
 
     expect(
-      await screen.findByText("The companion stays minimized but persistent."),
+      await screen.findByText("Axiom Companion"),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Expand companion" })).toBeInTheDocument();
-    expect(screen.getByText("Dedicated local companion")).toBeInTheDocument();
+    // Subtitle and summary are hidden in the compact minimized pill
+    expect(screen.queryByText("Dedicated local companion")).not.toBeInTheDocument();
+    expect(screen.queryByText("The companion stays minimized but persistent.")).not.toBeInTheDocument();
   });
 });

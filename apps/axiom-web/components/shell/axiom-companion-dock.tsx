@@ -166,33 +166,53 @@ export function AxiomCompanionDock({
   return (
     <aside
       className={cn(
-        "pointer-events-auto fixed bottom-4 right-4 z-40 w-[min(24rem,calc(100vw-2rem))]",
+        "pointer-events-auto fixed bottom-4 right-4 z-40",
+        minimized ? "w-auto" : "w-[min(24rem,calc(100vw-2rem))]",
         className,
       )}
       aria-label="Axiom companion"
     >
-      <div className="glass-panel-strong rounded-[1.6rem] border border-white/10 shadow-2xl shadow-black/30">
-        <div className="flex items-center gap-3 border-b border-white/8 px-4 py-3">
-          <span className="flex size-9 items-center justify-center rounded-full bg-primary/15 text-primary">
-            <Bot className="size-4" />
+      <div className={cn(
+        "glass-panel-strong border border-white/10 shadow-2xl shadow-black/30",
+        minimized ? "rounded-full" : "rounded-[1.6rem]",
+      )}>
+        <div className={cn(
+          "flex items-center",
+          minimized ? "gap-2 px-2.5 py-1.5" : "gap-3 border-b border-white/8 px-4 py-3",
+        )}>
+          <span className={cn(
+            "flex items-center justify-center rounded-full bg-primary/15 text-primary",
+            minimized ? "size-7" : "size-9",
+          )}>
+            <Bot className={minimized ? "size-3.5" : "size-4"} />
           </span>
-          <div className="min-w-0">
-            <p className="truncate font-display text-lg font-semibold tracking-[-0.03em] text-foreground">
+          {!minimized && (
+            <div className="min-w-0">
+              <p className="truncate font-display text-lg font-semibold tracking-[-0.03em] text-foreground">
+                {snapshot?.identity.name ?? "Axiom"}
+              </p>
+              <p className="truncate text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                {snapshot?.status.runtime_source === "dedicated_local"
+                  ? "Dedicated local companion"
+                  : "Companion overlay"}
+              </p>
+            </div>
+          )}
+          {minimized && (
+            <span className="text-sm font-medium text-foreground">
               {snapshot?.identity.name ?? "Axiom"}
-            </p>
-            <p className="truncate text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-              {snapshot?.status.runtime_source === "dedicated_local"
-                ? "Dedicated local companion"
-                : "Companion overlay"}
-            </p>
-          </div>
+            </span>
+          )}
           <button
             type="button"
             onClick={() => void handleMinimizeToggle()}
-            className="ml-auto rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-white/8 hover:text-foreground"
+            className={cn(
+              "rounded-full text-muted-foreground transition-colors hover:bg-white/8 hover:text-foreground",
+              minimized ? "ml-0.5 p-1" : "ml-auto p-1.5",
+            )}
             aria-label={minimized ? "Expand companion" : "Minimize companion"}
           >
-            {minimized ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+            {minimized ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-4" />}
           </button>
         </div>
 
@@ -330,11 +350,7 @@ export function AxiomCompanionDock({
               </>
             )}
           </div>
-        ) : (
-          <div className="px-4 py-3 text-sm text-muted-foreground">
-            {snapshot?.status.latest_summary || "Companion minimized"}
-          </div>
-        )}
+        ) : null}
       </div>
     </aside>
   );
