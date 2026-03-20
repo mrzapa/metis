@@ -11,6 +11,7 @@ import {
   type BrainGraphData,
   type BrainNode,
   type BrainScope,
+  scopeFromMetadata,
 } from "@/components/brain/brain-graph";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { Button } from "@/components/ui/button";
@@ -54,11 +55,6 @@ const SCOPE_META: Record<
     dashed: true,
   },
 };
-
-function scopeFromMetadata(metadata: Record<string, unknown>): BrainScope {
-  const raw = metadata.scope;
-  return raw === "assistant_self" || raw === "assistant_learned" ? raw : "workspace";
-}
 
 function normalizeBrainGraph(graph: Awaited<ReturnType<typeof fetchBrainGraph>>): BrainGraphData {
   return {
