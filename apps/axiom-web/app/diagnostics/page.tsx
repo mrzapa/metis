@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, ClipboardCopy, Loader2, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { fetchSettings, fetchLogTail, fetchApiVersion, checkApiCompatibility, type LogTailResult } from "@/lib/api";
 
@@ -30,6 +30,26 @@ interface Versions {
 interface CompatibilityStatus {
   compatible: boolean;
   warning: string | null;
+}
+
+function StatCard({
+  label,
+  value,
+  caption,
+}: {
+  label: string;
+  value: string;
+  caption: string;
+}) {
+  return (
+    <div className="rounded-[1.2rem] border border-white/8 bg-black/10 px-4 py-3">
+      <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-2 font-mono text-lg text-foreground">{value}</p>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">{caption}</p>
+    </div>
+  );
 }
 
 export default function DiagnosticsPage() {
@@ -75,26 +95,6 @@ export default function DiagnosticsPage() {
       eyebrow="Diagnostics"
       title="System health and logs"
       description="Check API compatibility, view logs, and inspect settings. Useful for troubleshooting startup or connection issues."
-      actions={
-        <Button
-          onClick={handleCopy}
-          disabled={loading || !!error}
-          variant="outline"
-          className="gap-1.5"
-        >
-          {copied ? (
-            <>
-              <CheckCircle2 className="size-4 text-green-600" />
-              Copied
-            </>
-          ) : (
-            <>
-              <ClipboardCopy className="size-4" />
-              Copy diagnostics
-            </>
-          )}
-        </Button>
-      }
       heroAside={
         <div className="space-y-2">
           <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
@@ -106,100 +106,191 @@ export default function DiagnosticsPage() {
         </div>
       }
     >
-      <div className="mx-auto max-w-3xl space-y-8">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-lg font-semibold">Diagnostics</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Version info, safe settings, and redacted log tail for bug reports.
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(18rem,0.7fr)] xl:items-end">
+          <div className="glass-panel rounded-[1.6rem] px-5 py-5 sm:px-6">
+            <p className="text-xs font-medium uppercase tracking-[0.22em] text-primary/80">
+              Diagnostics
             </p>
+            <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div className="space-y-2">
+                <h1 className="text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+                  System health and logs
+                </h1>
+                <p className="max-w-2xl text-pretty text-sm leading-6 text-muted-foreground">
+                  Check API compatibility, inspect the safe settings snapshot, and review the redacted log tail without leaving the workspace.
+                </p>
+              </div>
+              <Button
+                onClick={handleCopy}
+                disabled={loading || !!error}
+                variant="outline"
+                className="shrink-0 gap-1.5"
+              >
+                {copied ? (
+                  <>
+                    <CheckCircle2 className="size-4 text-green-600" />
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <ClipboardCopy className="size-4" />
+                    Copy diagnostics
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
-        </div>
+
+          <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+            <StatCard
+              label="Web"
+              value={versions?.web ?? "1.0"}
+              caption="Frontend build version."
+            />
+            <StatCard
+              label="API"
+              value={versions?.api ?? "—"}
+              caption="Backend service version."
+            />
+            <StatCard
+              label="Desktop"
+              value={versions?.desktop ?? "—"}
+              caption={
+                versions?.desktop === "unavailable"
+                  ? "Browser mode or no desktop bridge."
+                  : "Tauri shell version."
+              }
+            />
+          </div>
+        </section>
 
         {error && (
-          <div className="flex items-center gap-1.5 text-sm text-destructive">
+          <div className="flex items-center gap-2 rounded-[1.1rem] border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             <AlertCircle className="size-4" />
             {error}
           </div>
         )}
 
         {compatibility && !compatibility.compatible && compatibility.warning && (
-          <div className="flex items-start gap-2 rounded-md border border-yellow-500/50 bg-yellow-500/10 p-3 text-sm text-yellow-700 dark:text-yellow-400">
-            <TriangleAlert className="size-4 mt-0.5 shrink-0" />
-            <span>{compatibility.warning}</span>
-          </div>
+          <Card className="border-yellow-500/40 bg-yellow-500/10">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base text-yellow-700 dark:text-yellow-400">
+                <TriangleAlert className="size-4" />
+                Compatibility warning
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-yellow-700 dark:text-yellow-400">
+              {compatibility.warning}
+            </CardContent>
+          </Card>
         )}
 
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="flex items-center gap-2 rounded-[1.2rem] border border-white/8 bg-black/10 px-4 py-4 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
             Loading diagnostics…
           </div>
         ) : (
-          <>
-            {/* Versions */}
-            <section className="space-y-3">
-              <h2 className="text-base font-semibold">Versions</h2>
-              <Separator />
-              <dl className="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-2 text-sm">
-                <dt className="text-muted-foreground">Web</dt>
-                <dd className="font-mono">{versions?.web ?? "—"}</dd>
-                <dt className="text-muted-foreground">API</dt>
-                <dd className="font-mono">{versions?.api ?? "—"}</dd>
-                <dt className="text-muted-foreground">Desktop</dt>
-                <dd className="font-mono">
-                  {versions?.desktop === "unavailable" ? (
-                    <span className="text-muted-foreground italic">unavailable (browser mode)</span>
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.12fr)_minmax(20rem,0.88fr)]">
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Versions</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <dl className="grid gap-x-4 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
+                    <div className="rounded-[1rem] border border-white/8 bg-black/10 px-4 py-3">
+                      <dt className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                        Web
+                      </dt>
+                      <dd className="mt-2 font-mono text-base text-foreground">
+                        {versions?.web ?? "—"}
+                      </dd>
+                    </div>
+                    <div className="rounded-[1rem] border border-white/8 bg-black/10 px-4 py-3">
+                      <dt className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                        API
+                      </dt>
+                      <dd className="mt-2 font-mono text-base text-foreground">
+                        {versions?.api ?? "—"}
+                      </dd>
+                    </div>
+                    <div className="rounded-[1rem] border border-white/8 bg-black/10 px-4 py-3 sm:col-span-2 xl:col-span-1">
+                      <dt className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                        Desktop
+                      </dt>
+                      <dd className="mt-2 font-mono text-base text-foreground">
+                        {versions?.desktop === "unavailable" ? (
+                          <span className="text-muted-foreground italic">
+                            unavailable (browser mode)
+                          </span>
+                        ) : (
+                          versions?.desktop ?? "—"
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>API log tail</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {logTail?.missing && (
+                      <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-700 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
+                        log file not found
+                      </span>
+                    )}
+                    {!logTail?.missing && logTail && (
+                      <span className="text-xs text-muted-foreground">
+                        last {logTail.lines.length} of {logTail.total_lines ?? "?"} lines · redacted
+                      </span>
+                    )}
+                  </div>
+                  {logTail?.missing || !logTail?.lines.length ? (
+                    <p className="rounded-[1rem] border border-white/8 bg-black/10 px-4 py-6 text-sm text-muted-foreground italic">
+                      No log entries available.
+                    </p>
                   ) : (
-                    versions?.desktop ?? "—"
+                    <pre className="max-h-[32rem] overflow-auto rounded-[1rem] border border-white/8 bg-black/10 p-4 text-xs font-mono leading-relaxed text-foreground/90">
+                      {logTail.lines.join("\n")}
+                    </pre>
                   )}
-                </dd>
-              </dl>
-            </section>
+                  {logTail && (
+                    <p className="text-xs text-muted-foreground">
+                      Path: <code className="font-mono">{logTail.log_path}</code>
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
 
-            {/* Safe settings */}
-            <section className="space-y-3">
-              <h2 className="text-base font-semibold">Settings (safe subset)</h2>
-              <Separator />
-              {settings ? (
-                <pre className="max-h-64 overflow-auto rounded-md border bg-muted/30 p-3 text-xs font-mono">
-                  {JSON.stringify(settings, null, 2)}
-                </pre>
-              ) : (
-                <p className="text-sm text-muted-foreground">No settings loaded.</p>
-              )}
-            </section>
-
-            {/* Log tail */}
-            <section className="space-y-3">
-              <div className="flex items-center gap-3">
-                <h2 className="text-base font-semibold">API log tail</h2>
-                {logTail?.missing && (
-                  <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-700 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
-                    log file not found
-                  </span>
-                )}
-                {!logTail?.missing && logTail && (
-                  <span className="text-xs text-muted-foreground">
-                    last {logTail.lines.length} of {logTail.total_lines ?? "?"} lines · redacted
-                  </span>
-                )}
-              </div>
-              <Separator />
-              {logTail?.missing || !logTail?.lines.length ? (
-                <p className="text-sm text-muted-foreground italic">No log entries available.</p>
-              ) : (
-                <pre className="max-h-96 overflow-auto rounded-md border bg-muted/30 p-3 text-xs font-mono leading-relaxed">
-                  {logTail.lines.join("\n")}
-                </pre>
-              )}
-              {logTail && (
-                <p className="text-xs text-muted-foreground">
-                  Path: <code className="font-mono">{logTail.log_path}</code>
-                </p>
-              )}
-            </section>
-          </>
+            <aside className="space-y-6 xl:sticky xl:top-24">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Safe settings</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    This is the redacted settings subset that can help spot bad provider state or mismatched local config at a glance.
+                  </p>
+                  {settings ? (
+                    <pre className="max-h-[28rem] overflow-auto rounded-[1rem] border border-white/8 bg-black/10 p-4 text-xs font-mono leading-relaxed text-foreground/90">
+                      {JSON.stringify(settings, null, 2)}
+                    </pre>
+                  ) : (
+                    <p className="rounded-[1rem] border border-white/8 bg-black/10 px-4 py-6 text-sm text-muted-foreground">
+                      No settings loaded.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </aside>
+          </div>
         )}
       </div>
     </PageChrome>

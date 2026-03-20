@@ -100,7 +100,7 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
   }, [selectedRunId, showLiveTrace]);
 
   return (
-    <div className="glass-panel flex h-full flex-col overflow-hidden rounded-[1.8rem]">
+    <div className="glass-panel flex h-full min-h-0 flex-col overflow-hidden rounded-[1.8rem]">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex h-full flex-col">
         {/* Tab bar */}
         <div className="shrink-0 border-b border-white/8 px-3 pt-3">
@@ -127,8 +127,8 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
         </div>
 
         {/* Sources tab */}
-        <TabsContent value="sources" className="flex-1 overflow-hidden">
-          <ScrollArea className="h-full">
+        <TabsContent value="sources" className="flex-1 min-h-0 overflow-hidden">
+          <ScrollArea className="h-full min-h-0">
             <div className="space-y-2 p-3">
               {selectedMode === "Evidence Pack" && sources.length > 0 && (
                 <div className="flex justify-end pb-1">
@@ -168,8 +168,8 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
         </TabsContent>
 
         {/* Outline tab */}
-        <TabsContent value="outline" className="flex-1 overflow-hidden">
-          <ScrollArea className="h-full">
+        <TabsContent value="outline" className="flex-1 min-h-0 overflow-hidden">
+          <ScrollArea className="h-full min-h-0">
             <div className="p-3">
               <p className="py-8 text-center text-xs text-muted-foreground">
                 Outline will show the structure of the current conversation.
@@ -179,7 +179,7 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
         </TabsContent>
 
         {/* Trace tab */}
-        <TabsContent value="trace" className="flex h-full flex-col overflow-hidden">
+        <TabsContent value="trace" className="flex h-full min-h-0 flex-col overflow-hidden">
           {/* Run selector */}
           <div className="shrink-0 border-b border-white/8 px-3 py-2">
             <div className="flex items-center gap-2">
@@ -210,7 +210,7 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
 
           {/* Timeline content */}
           <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-full">
+            <ScrollArea className="h-full min-h-0">
               <div className="p-3">
                 {!selectedRunId ? (
                   <p className="py-8 text-center text-xs text-muted-foreground">

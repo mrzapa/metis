@@ -62,59 +62,146 @@ function normalizeBrainGraph(graph: Awaited<ReturnType<typeof fetchBrainGraph>>)
   } as BrainGraphData;
 }
 
-function NodeDetailPanel({ node, onClose }: { node: BrainNode; onClose: () => void }) {
-  const scope = scopeFromMetadata(node.metadata);
-  const metaEntries = Object.entries(node.metadata).filter(
-    ([key, v]) =>
-      key !== "scope" &&
-      v !== "" &&
-      v !== null &&
-      v !== undefined &&
-      !(Array.isArray(v) && v.length === 0),
-  );
+function formatNodeValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.join(", ") : "—";
+  }
+  if (typeof value === "object" && value !== null) {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "—";
+    }
+  }
+  return String(value);
+}
+
+function GraphInspectorPanel({
+  node,
+  visibleStats,
+  nodeCount,
+  edgeCount,
+  activeScopeCount,
+  onClose,
+}: {
+  node: BrainNode | null;
+  visibleStats: { nodes: number; edges: number };
+  nodeCount: number;
+  edgeCount: number;
+  activeScopeCount: number;
+  onClose?: () => void;
+}) {
+  const scope = node ? scopeFromMetadata(node.metadata) : null;
+  const metaEntries = node
+    ? Object.entries(node.metadata).filter(
+        ([key, value]) =>
+          key !== "scope" &&
+          value !== "" &&
+          value !== null &&
+          value !== undefined &&
+          !(Array.isArray(value) && value.length === 0),
+      )
+    : [];
 
   return (
-    <aside className="glass-panel w-80 shrink-0 overflow-y-auto rounded-[1.6rem] p-4 text-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate font-semibold text-foreground">{node.label}</p>
-          <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
-            {SCOPE_META[scope].label}
+    <aside className="glass-panel w-full overflow-hidden rounded-[1.6rem] p-4 text-sm shadow-2xl shadow-black/25">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">
+            {node ? "Node inspector" : "Graph snapshot"}
+          </p>
+          <h3 className="truncate font-display text-lg font-semibold tracking-[-0.03em] text-foreground">
+            {node ? node.label : "Select a node to inspect its metadata"}
+          </h3>
+          <p className="text-xs leading-5 text-muted-foreground">
+            {node
+              ? `Connected in the ${scope ? SCOPE_META[scope].label.toLowerCase() : "workspace"} scope.`
+              : "Use the filters to tighten the graph, then click a node to pin its details here."}
           </p>
         </div>
-        <button
-          onClick={onClose}
-          className="text-muted-foreground transition-colors hover:text-foreground"
-          aria-label="Close detail panel"
-        >
-          ✕
-        </button>
+
+        {node && onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-border/70 px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+            aria-label="Close detail panel"
+          >
+            Close
+          </button>
+        ) : null}
       </div>
 
-      <dl className="space-y-1.5">
-        <div className="flex gap-2">
-          <dt className="text-muted-foreground">Type</dt>
-          <dd className="font-medium capitalize text-foreground">{node.node_type}</dd>
-        </div>
-        <div className="flex gap-2">
-          <dt className="text-muted-foreground">Scope</dt>
-          <dd className="font-medium text-foreground">{SCOPE_META[scope].label}</dd>
-        </div>
-        <div className="flex gap-2">
-          <dt className="text-muted-foreground">ID</dt>
-          <dd className="truncate font-mono text-xs text-foreground">{node.node_id}</dd>
-        </div>
-        {metaEntries.map(([key, value]) => (
-          <div key={key} className="flex gap-2">
-            <dt className="shrink-0 text-muted-foreground capitalize">
-              {key.replace(/_/g, " ")}
-            </dt>
-            <dd className="truncate text-foreground">
-              {Array.isArray(value) ? value.join(", ") || "—" : String(value)}
-            </dd>
+      {node ? (
+        <>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <span className="rounded-full border border-border/70 bg-black/10 px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+              {SCOPE_META[scope ?? "workspace"].label}
+            </span>
+            <span className="rounded-full border border-border/70 bg-black/10 px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+              {node.node_type}
+            </span>
+            <span className="rounded-full border border-border/70 bg-black/10 px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+              {metaEntries.length} metadata fields
+            </span>
           </div>
-        ))}
-      </dl>
+
+          <dl className="space-y-2 text-xs leading-5">
+            <div className="flex gap-2">
+              <dt className="shrink-0 text-muted-foreground">ID</dt>
+              <dd className="min-w-0 break-all font-mono text-[11px] text-foreground">
+                {node.node_id}
+              </dd>
+            </div>
+            {metaEntries.map(([key, value]) => (
+              <div key={key} className="flex gap-2">
+                <dt className="shrink-0 text-muted-foreground capitalize">
+                  {key.replace(/_/g, " ")}
+                </dt>
+                <dd className="min-w-0 break-words text-foreground">
+                  {formatNodeValue(value)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+          <div className="rounded-[1.1rem] border border-border/70 bg-background/35 px-3 py-3">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              Visible nodes
+            </p>
+            <p className="mt-2 font-display text-2xl font-semibold text-foreground">
+              {visibleStats.nodes}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              of {nodeCount} total across the current scope set.
+            </p>
+          </div>
+          <div className="rounded-[1.1rem] border border-border/70 bg-background/35 px-3 py-3">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              Visible edges
+            </p>
+            <p className="mt-2 font-display text-2xl font-semibold text-foreground">
+              {visibleStats.edges}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              of {edgeCount} total relationships.
+            </p>
+          </div>
+          <div className="rounded-[1.1rem] border border-border/70 bg-background/35 px-3 py-3">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              Active scopes
+            </p>
+            <p className="mt-2 font-display text-2xl font-semibold text-foreground">
+              {activeScopeCount}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              of {ALL_SCOPES.length} available.
+            </p>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
@@ -184,6 +271,27 @@ export default function BrainPage() {
 
   const nodeCount = data?.nodes.length ?? 0;
   const edgeCount = data?.edges.length ?? 0;
+  const selectedScope = selectedNode ? scopeFromMetadata(selectedNode.metadata) : null;
+
+  const heroMetrics = [
+    {
+      label: "Visible nodes",
+      value: visibleStats.nodes,
+      note: `${nodeCount} total nodes in the workspace`,
+    },
+    {
+      label: "Visible edges",
+      value: visibleStats.edges,
+      note: `${edgeCount} total relationships`,
+    },
+    {
+      label: "Selection",
+      value: selectedNode ? "Pinned" : "Idle",
+      note: selectedNode
+        ? `${selectedScope ? SCOPE_META[selectedScope].label : "Workspace"} node selected`
+        : "Click a node to inspect it",
+    },
+  ] as const;
 
   const toggleScope = (scope: BrainScope) => {
     setActiveScopes((prev) => {
@@ -201,13 +309,13 @@ export default function BrainPage() {
       title="Visualize your persistent companion brain"
       description="Explore how workspace structure, the Axiom Self, and learned companion memory connect."
       actions={
-        <>
+        <div className="flex w-full flex-wrap items-center gap-2">
           <Input
             type="search"
             placeholder="Filter nodes..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="w-56"
+            className="h-10 w-full rounded-full md:w-72"
           />
           <Button
             variant="outline"
@@ -220,115 +328,154 @@ export default function BrainPage() {
                 .catch((err: unknown) => setError(String(err instanceof Error ? err.message : err)))
                 .finally(() => setLoading(false));
             }}
+            className="shrink-0"
           >
             Refresh
           </Button>
-        </>
+        </div>
       }
       heroAside={
-        <div className="space-y-3">
-          <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
-            Graph snapshot
-          </p>
-          <p className="text-sm leading-7 text-muted-foreground">
-            {loading
-              ? "Loading graph data..."
-              : error
-                ? "The graph failed to load."
-                : `${visibleStats.nodes} visible nodes and ${visibleStats.edges} visible edges out of ${nodeCount} nodes and ${edgeCount} edges.`}
-          </p>
-          <div className="space-y-2 rounded-[1.1rem] border border-border/70 bg-background/35 px-3 py-3">
-            <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
-              Legend
-            </p>
-            <div className="space-y-2 text-xs text-muted-foreground">
-              {ALL_SCOPES.map((scope) => {
-                const meta = SCOPE_META[scope];
-                return (
-                  <div key={scope} className="flex items-center gap-2.5">
-                    <span
-                      className="h-2.5 w-2.5 rounded-full"
-                      style={{
-                        backgroundColor: meta.swatch,
-                        border: scope === "workspace" ? "1px solid var(--color-border)" : "none",
-                      }}
-                    />
-                    <span
-                      className="block h-0 w-6 shrink-0"
-                      style={{
-                        borderBottom: meta.dashed
-                          ? `2px dashed ${meta.lineColor}`
-                          : `2px solid ${meta.lineColor}`,
-                      }}
-                    />
-                    <span>{meta.label}</span>
-                  </div>
-                );
-              })}
+        <div className="grid min-w-[18rem] gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+          {heroMetrics.map((metric) => (
+            <div
+              key={metric.label}
+              className="rounded-[1.1rem] border border-border/70 bg-background/35 px-3 py-3"
+            >
+              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                {metric.label}
+              </p>
+              <p className="mt-2 font-display text-2xl font-semibold text-foreground">
+                {metric.value}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {metric.note}
+              </p>
             </div>
-          </div>
+          ))}
         </div>
       }
       fullBleed
       contentClassName="rounded-none border-0 bg-transparent p-0"
     >
-      <div className="flex h-[calc(100vh-15.5rem)] min-h-[38rem] gap-4 overflow-hidden">
-        <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-hidden">
-          <div className="glass-panel rounded-[1.4rem] p-4">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="space-y-1">
+      <div className="flex min-h-[calc(100vh-12.5rem)] flex-col gap-4 overflow-hidden">
+        <div className="glass-panel rounded-[1.5rem] p-4 sm:p-5">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
                 <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
                   Scope filters
                 </p>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  Toggle between workspace structure, the Axiom Self, and learned memory links.
-                </p>
+                <span className="rounded-full border border-border/70 bg-black/10 px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                  {activeScopes.length} active
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveScopes([...ALL_SCOPES])}
+                  className="ml-auto rounded-full border border-border/70 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+                >
+                  Reset scopes
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setActiveScopes([...ALL_SCOPES])}
-                className="rounded-full border border-border/70 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
-              >
-                Reset scopes
-              </button>
+
+              <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+                Toggle the workspace, the Axiom Self, and learned memory layers, then inspect the graph at a denser desktop scale.
+              </p>
+
+              <div className="flex flex-wrap gap-2">
+                {ALL_SCOPES.map((scope) => {
+                  const meta = SCOPE_META[scope];
+                  const active = activeScopes.includes(scope);
+                  const count = scopeStats[scope];
+
+                  return (
+                    <button
+                      key={scope}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => toggleScope(scope)}
+                      className={[
+                        "flex items-center gap-3 rounded-full border px-3 py-2.5 text-left transition-all",
+                        active
+                          ? "border-foreground/20 bg-foreground/10 text-foreground shadow-sm"
+                          : "border-border/70 bg-background/40 text-muted-foreground hover:border-foreground/20 hover:text-foreground",
+                      ].join(" ")}
+                    >
+                      <span
+                        className="h-3 w-3 rounded-full"
+                        style={{
+                          backgroundColor: meta.swatch,
+                          border: scope === "workspace" ? "1px solid var(--color-border)" : "none",
+                        }}
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium">{meta.label}</span>
+                        <span className="block text-[11px] opacity-80">{meta.description}</span>
+                      </span>
+                      <span className="flex flex-col items-end gap-1">
+                        <span className="rounded-full bg-background/70 px-2 py-0.5 text-[11px] font-medium">
+                          {count.nodes}n / {count.edges}e
+                        </span>
+                        <span
+                          className="block h-0 w-8 rounded-full"
+                          style={{
+                            borderBottom: meta.dashed
+                              ? `2px dashed ${meta.lineColor}`
+                              : `2px solid ${meta.lineColor}`,
+                            opacity: active ? 1 : 0.45,
+                          }}
+                        />
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-3">
+                {heroMetrics.map((metric) => (
+                  <div
+                    key={metric.label}
+                    className="rounded-[1.1rem] border border-border/70 bg-background/30 px-3 py-3"
+                  >
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                      {metric.label}
+                    </p>
+                    <p className="mt-2 font-display text-xl font-semibold text-foreground">
+                      {metric.value}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {metric.note}
+                    </p>
+                  </div>
+                ))}
+              </div>
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              {ALL_SCOPES.map((scope) => {
-                const meta = SCOPE_META[scope];
-                const active = activeScopes.includes(scope);
-                const count = scopeStats[scope];
-
-                return (
-                  <button
-                    key={scope}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => toggleScope(scope)}
-                    className={[
-                      "flex items-center gap-3 rounded-full border px-3 py-2 text-left transition-all",
-                      active
-                        ? "border-foreground/20 bg-foreground/10 text-foreground shadow-sm"
-                        : "border-border/70 bg-background/40 text-muted-foreground hover:border-foreground/20 hover:text-foreground",
-                    ].join(" ")}
-                  >
-                    <span
-                      className="h-3 w-3 rounded-full"
-                      style={{
-                        backgroundColor: meta.swatch,
-                        border: scope === "workspace" ? "1px solid var(--color-border)" : "none",
-                      }}
-                    />
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium">{meta.label}</span>
-                      <span className="block text-[11px] opacity-80">{meta.description}</span>
-                    </span>
-                    <span className="flex flex-col items-end gap-1">
-                      <span className="rounded-full bg-background/70 px-2 py-0.5 text-[11px] font-medium">
-                        {count.nodes}n / {count.edges}e
-                      </span>
+            <div className="rounded-[1.3rem] border border-border/70 bg-background/35 px-4 py-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
+                Legend and focus
+              </p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                {loading
+                  ? "Loading graph data..."
+                  : error
+                    ? "The graph failed to load."
+                    : `${visibleStats.nodes} visible nodes and ${visibleStats.edges} visible edges currently survive the active scope filters.`}
+              </p>
+              <div className="mt-4 space-y-2">
+                {ALL_SCOPES.map((scope) => {
+                  const meta = SCOPE_META[scope];
+                  const active = activeScopes.includes(scope);
+                  return (
+                    <div key={scope} className="flex items-center gap-2.5 text-xs text-muted-foreground">
                       <span
-                        className="block h-0 w-8 rounded-full"
+                        className="h-2.5 w-2.5 rounded-full"
+                        style={{
+                          backgroundColor: meta.swatch,
+                          border: scope === "workspace" ? "1px solid var(--color-border)" : "none",
+                        }}
+                      />
+                      <span
+                        className="block h-0 w-6 shrink-0"
                         style={{
                           borderBottom: meta.dashed
                             ? `2px dashed ${meta.lineColor}`
@@ -336,13 +483,19 @@ export default function BrainPage() {
                           opacity: active ? 1 : 0.45,
                         }}
                       />
-                    </span>
-                  </button>
-                );
-              })}
+                      <span className="flex-1">{meta.label}</span>
+                      <span className="rounded-full border border-border/60 bg-black/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em]">
+                        {active ? "active" : "dimmed"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
+        </div>
 
+        <div className="relative flex min-h-[40rem] flex-1 overflow-hidden rounded-[1.9rem]">
           <div className="glass-panel-strong flex min-h-0 flex-1 overflow-hidden rounded-[1.8rem]">
             {loading ? (
               <div className="flex flex-1 items-center justify-center">
@@ -364,9 +517,31 @@ export default function BrainPage() {
               />
             ) : null}
           </div>
+
+          <div className="pointer-events-none absolute inset-x-4 bottom-4 hidden xl:flex xl:justify-end">
+            <div className="pointer-events-auto w-[20.5rem] max-w-full">
+              <GraphInspectorPanel
+                node={selectedNode}
+                visibleStats={visibleStats}
+                nodeCount={nodeCount}
+                edgeCount={edgeCount}
+                activeScopeCount={activeScopes.length}
+                onClose={selectedNode ? () => setSelectedNode(null) : undefined}
+              />
+            </div>
+          </div>
         </div>
 
-        {selectedNode ? <NodeDetailPanel node={selectedNode} onClose={() => setSelectedNode(null)} /> : null}
+        <div className="xl:hidden">
+          <GraphInspectorPanel
+            node={selectedNode}
+            visibleStats={visibleStats}
+            nodeCount={nodeCount}
+            edgeCount={edgeCount}
+            activeScopeCount={activeScopes.length}
+            onClose={selectedNode ? () => setSelectedNode(null) : undefined}
+          />
+        </div>
       </div>
     </PageChrome>
   );

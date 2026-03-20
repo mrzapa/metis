@@ -136,14 +136,14 @@ export function ChatPanel({
   const ragInputDisabled = queryMode === "rag" && !activeIndexPath;
 
   return (
-    <div className="glass-panel-strong flex h-full flex-col overflow-hidden rounded-[1.8rem]">
+    <div className="glass-panel-strong flex h-full min-h-0 flex-col overflow-hidden rounded-[1.8rem]">
       {/* Header */}
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-white/8 px-4">
+      <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b border-white/8 px-4 py-3">
         <h2 className="truncate text-sm font-semibold">
           {sessionMeta?.title ?? "New Chat"}
         </h2>
         {sessionMeta && (
-          <div className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+          <div className="flex shrink-0 flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
             {sessionMeta.mode && (
               <span className="rounded bg-muted px-1.5 py-0.5">
                 {sessionMeta.mode}
@@ -275,8 +275,8 @@ export function ChatPanel({
       )}
 
       {/* Transcript */}
-      <ScrollArea className="flex-1" ref={scrollRef as React.Ref<HTMLDivElement>}>
-        <div className="mx-auto max-w-3xl space-y-4 p-4">
+      <ScrollArea className="flex-1 min-h-0" ref={scrollRef as React.Ref<HTMLDivElement>}>
+        <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-5">
           {loading && (
             <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
               <Loader2 className="size-6 animate-spin" />
@@ -295,7 +295,7 @@ export function ChatPanel({
           )}
 
           {!loading && !error && messages.length === 0 && (
-            <div className="glass-panel mx-auto flex max-w-2xl flex-col items-center justify-center rounded-[1.8rem] px-6 py-14 text-center text-muted-foreground">
+            <div className="glass-panel mx-auto flex max-w-3xl flex-col items-center justify-center rounded-[1.8rem] px-8 py-16 text-center text-muted-foreground">
               <p className="font-display text-3xl font-semibold tracking-[-0.04em] text-foreground">
                 Start with a question that feels specific.
               </p>
@@ -419,7 +419,7 @@ export function ChatPanel({
 
       {/* Composer */}
       <div className="border-t border-white/8 bg-black/10 p-3">
-        <div className="mx-auto max-w-3xl space-y-2">
+        <div className="mx-auto max-w-4xl space-y-2">
           {/* Path + RAG mode selector */}
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted-foreground">Path:</span>

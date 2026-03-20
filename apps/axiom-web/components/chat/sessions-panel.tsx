@@ -31,7 +31,7 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
   const isConnectionError = error?.toLowerCase().includes("connection error");
 
   return (
-    <div className="glass-panel flex h-full flex-col overflow-hidden rounded-[1.8rem]">
+    <div className="glass-panel flex h-full min-h-0 flex-col overflow-hidden rounded-[1.8rem]">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
         <h2 className="text-sm font-semibold">Sessions</h2>
@@ -53,7 +53,7 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
       </div>
 
       {/* Session list */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="space-y-1 p-2" role="listbox" aria-label="Sessions">
           {loading && (
             <p className="px-3 py-8 text-center text-xs text-muted-foreground">

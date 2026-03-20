@@ -99,6 +99,9 @@ const SCOPE_EDGE_STYLE: Record<
 };
 
 const ALL_SCOPES: BrainScope[] = ["workspace", "assistant_self", "assistant_learned"];
+const GRAPH_PADDING = 72;
+const GRAPH_SCALE_CAP_DESKTOP = 2.25;
+const GRAPH_SCALE_CAP_MOBILE = 1.85;
 
 // -- Extracted inline styles (avoid object allocation per render) ---------
 
@@ -216,9 +219,11 @@ export function BrainGraph({
     const { minX, minY, maxX, maxY } = worldBounds(data.nodes);
     const w = svg.clientWidth || 800;
     const h = svg.clientHeight || 600;
-    const gw = maxX - minX + 100;
-    const gh = maxY - minY + 100;
-    const scale = Math.min(w / gw, h / gh, 1.5);
+    const padding = Math.max(GRAPH_PADDING, Math.min(104, Math.min(w, h) * 0.1));
+    const gw = maxX - minX + padding * 2;
+    const gh = maxY - minY + padding * 2;
+    const scaleCap = w > 1280 || h > 860 ? GRAPH_SCALE_CAP_DESKTOP : GRAPH_SCALE_CAP_MOBILE;
+    const scale = Math.min(w / gw, h / gh, scaleCap);
     const tx = w / 2 - ((minX + maxX) / 2) * scale;
     const ty = h / 2 - ((minY + maxY) / 2) * scale;
     const frame = requestAnimationFrame(() => {
@@ -371,8 +376,11 @@ export function BrainGraph({
     const visibleScopes = new Set(activeScopes.length > 0 ? activeScopes : ALL_SCOPES);
     const selectedScope = selectedNode ? scopeFromMetadata(selectedNode.metadata) : null;
     if (!selectedNode || !selectedScope || !visibleScopes.has(selectedScope)) {
-      setSelectedId(null);
-      onNodeSelect?.(null);
+      const frame = requestAnimationFrame(() => {
+        setSelectedId(null);
+        onNodeSelect?.(null);
+      });
+      return () => cancelAnimationFrame(frame);
     }
   }, [activeScopes, data.nodes, onNodeSelect, selectedId]);
 
@@ -393,8 +401,39 @@ export function BrainGraph({
       onPointerUp={onBgPointerUp}
       onPointerCancel={onBgPointerUp}
       aria-label="Brain graph"
+      shapeRendering="geometricPrecision"
     >
       <defs>
+        <radialGradient id="brain-canvas-glow" cx="50%" cy="42%" r="65%">
+          <stop offset="0%" stopColor="rgba(9,105,218,0.24)" />
+          <stop offset="35%" stopColor="rgba(9,105,218,0.1)" />
+          <stop offset="72%" stopColor="rgba(0,0,0,0)" />
+        </radialGradient>
+        <radialGradient id="brain-canvas-vignette" cx="50%" cy="50%" r="65%">
+          <stop offset="0%" stopColor="rgba(255,255,255,0.02)" />
+          <stop offset="100%" stopColor="rgba(0,0,0,0.42)" />
+        </radialGradient>
+        <pattern id="brain-canvas-grid" width="72" height="72" patternUnits="userSpaceOnUse">
+          <path
+            d="M 72 0 L 0 0 0 72"
+            fill="none"
+            stroke="rgba(255,255,255,0.12)"
+            strokeWidth="1"
+          />
+        </pattern>
+        <filter id="brain-node-glow" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="5" result="blur" />
+          <feColorMatrix
+            in="blur"
+            type="matrix"
+            values="1 0 0 0 0.08  0 1 0 0 0.36  0 0 1 0 0.78  0 0 0 0.45 0"
+            result="glow"
+          />
+          <feMerge>
+            <feMergeNode in="glow" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
         <marker id="arrow-uses" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
           <path d="M0,0 L0,6 L8,3 z" fill="var(--color-primary)" opacity="0.75" />
         </marker>
@@ -409,6 +448,11 @@ export function BrainGraph({
           <path d="M0,0 L0,6 L8,3 z" fill="var(--color-chart-4)" opacity="0.9" />
         </marker>
       </defs>
+
+      <rect width="100%" height="100%" fill="rgba(5,7,10,0.82)" />
+      <rect width="100%" height="100%" fill="url(#brain-canvas-grid)" opacity="0.45" />
+      <rect width="100%" height="100%" fill="url(#brain-canvas-glow)" />
+      <rect width="100%" height="100%" fill="url(#brain-canvas-vignette)" />
 
       <g transform={`translate(${tx},${ty}) scale(${scale})`}>
         {/* Edges */}
@@ -453,7 +497,7 @@ export function BrainGraph({
           const isHovered = hoveredId === node.node_id;
           const dimmed = filterLower && !matchNode(node);
           const labelFontSize =
-            node.node_type === "category" ? 9 : node.node_type === "assistant" ? 8.2 : 7.5;
+            node.node_type === "category" ? 9.5 : node.node_type === "assistant" ? 8.5 : 7.8;
 
           return (
             <g
@@ -461,6 +505,15 @@ export function BrainGraph({
               opacity={dimmed ? 0.2 : 1}
               style={STYLE_OPACITY_TRANSITION}
             >
+              <circle
+                cx={pos.x}
+                cy={pos.y}
+                r={r + (isSelected ? 15 : isHovered ? 12 : 9)}
+                fill={fill}
+                fillOpacity={isSelected ? 0.12 : isHovered ? 0.1 : 0.06}
+                filter="url(#brain-node-glow)"
+                pointerEvents="none"
+              />
               <circle
                 cx={pos.x}
                 cy={pos.y}

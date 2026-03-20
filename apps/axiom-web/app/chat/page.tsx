@@ -976,14 +976,14 @@ export default function ChatPage() {
         runId: latestRunId,
       }}
     >
-      <div className="h-[calc(100vh-15.5rem)] min-h-[42rem] overflow-hidden rounded-[1.9rem]">
+      <div className="h-[calc(100vh-13.75rem)] min-h-[44rem] overflow-hidden rounded-[1.9rem]">
         <ResizablePanels
           className="h-full"
           resetToken={shellPostureToken}
-          storageKey="axiom_chat_panel_sizes"
+          storageKey="axiom_chat_panel_sizes_v2"
           panels={[
             {
-              default: 1,
+              default: 0.95,
               min: 220,
               children: (
                 <SessionsPanel
@@ -995,8 +995,8 @@ export default function ChatPage() {
               ),
             },
             {
-              default: traceFirstLayout ? 2.5 : 3,
-              min: 420,
+              default: traceFirstLayout ? 2.9 : 4.25,
+              min: 460,
               children: (
                 <ChatPanel
                   key={`${queryModeOverride ?? "direct"}:${initialDraft ? "seeded" : "blank"}:${activeIndexPath ?? "no-index"}`}
@@ -1045,8 +1045,8 @@ export default function ChatPage() {
               ),
             },
             {
-              default: traceFirstLayout ? 2 : 1.5,
-              min: 260,
+              default: traceFirstLayout ? 2.1 : 1.55,
+              min: 280,
               children: (
                 <EvidencePanel
                   sources={latestSources}

@@ -142,16 +142,16 @@ export function PageChrome({
           </motion.header>
 
           {/* Page content */}
-          <main className="flex-1 py-5 sm:py-6">
+          <main className="flex-1 py-4 sm:py-5">
             <motion.div
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, ease: "easeOut" }}
-              className="mx-auto w-full max-w-6xl"
+              className="mx-auto w-full max-w-[96rem]"
             >
               {/* Page header */}
-              <section className="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.6fr)] lg:items-end">
-                <div className="glass-panel rounded-2xl px-5 py-5 sm:px-6">
+              <section className="mb-4 grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.95fr)] xl:items-stretch">
+                <div className="glass-panel flex h-full flex-col rounded-2xl px-5 py-5 sm:px-6 sm:py-6">
                   <p className="text-xs font-medium uppercase tracking-[0.2em] text-primary/80">
                     {eyebrow}
                   </p>
@@ -161,15 +161,24 @@ export function PageChrome({
                   <p className="mt-2 max-w-2xl text-pretty text-sm leading-relaxed text-muted-foreground">
                     {description}
                   </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  {actions}
-                  {heroAside ? (
-                    <div className="glass-panel min-h-full flex-1 rounded-2xl px-5 py-4">
-                      {heroAside}
+                  {actions && !heroAside ? (
+                    <div className="mt-5 flex flex-wrap items-center gap-3">
+                      {actions}
                     </div>
                   ) : null}
                 </div>
+                {heroAside ? (
+                  <div className="flex min-w-0 flex-col gap-3">
+                    {actions ? (
+                      <div className="flex flex-wrap items-center gap-3">
+                        {actions}
+                      </div>
+                    ) : null}
+                    <div className="glass-panel min-h-full rounded-2xl px-5 py-4 sm:px-6 sm:py-5">
+                      {heroAside}
+                    </div>
+                  </div>
+                ) : null}
               </section>
 
               {/* Main content area */}

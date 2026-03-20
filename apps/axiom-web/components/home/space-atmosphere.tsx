@@ -50,8 +50,8 @@ export function SpaceAtmosphere({ className }: SpaceAtmosphereProps) {
       aria-hidden="true"
       className={cn("pointer-events-none absolute inset-0 overflow-hidden", className)}
     >
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(15,39,72,0.45),transparent_30%),radial-gradient(circle_at_50%_48%,rgba(9,105,218,0.16),transparent_42%),linear-gradient(180deg,rgba(3,5,8,0.98),rgba(3,5,8,0.92)_58%,rgba(3,5,8,1))]" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_20%,rgba(173,198,255,0.08),transparent_14%),radial-gradient(circle_at_84%_18%,rgba(125,211,255,0.08),transparent_16%),radial-gradient(circle_at_60%_76%,rgba(9,105,218,0.08),transparent_20%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_38%_20%,rgba(15,39,72,0.44),transparent_28%),radial-gradient(circle_at_72%_66%,rgba(9,105,218,0.18),transparent_38%),linear-gradient(180deg,rgba(3,5,8,0.98),rgba(3,5,8,0.92)_58%,rgba(3,5,8,1))]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_14%_18%,rgba(173,198,255,0.08),transparent_14%),radial-gradient(circle_at_84%_18%,rgba(125,211,255,0.08),transparent_16%),radial-gradient(circle_at_60%_78%,rgba(9,105,218,0.08),transparent_20%)]" />
       <div className="absolute inset-0 bg-[radial-gradient(circle,_rgba(255,255,255,0.52)_0.8px,transparent_1px)] [background-size:220px_220px] opacity-25" />
       <div className="absolute inset-0">
         {TWINKLE_STARS.map((star, index) => (
@@ -109,8 +109,7 @@ export function SpaceAtmosphere({ className }: SpaceAtmosphereProps) {
           ))}
         </div>
       ) : null}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.56)_100%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_44%,transparent_0%,rgba(0,0,0,0.52)_100%)]" />
     </div>
   );
 }
-

@@ -175,7 +175,7 @@ export function ResizablePanels({
       }}
     >
       {/* Left panel */}
-      <div className="overflow-hidden">{panels[0].children}</div>
+      <div className="min-h-0 overflow-hidden">{panels[0].children}</div>
 
       {/* Divider 0 */}
       <div
@@ -202,7 +202,7 @@ export function ResizablePanels({
       />
 
       {/* Centre panel */}
-      <div className="overflow-hidden">{panels[1].children}</div>
+      <div className="min-h-0 overflow-hidden">{panels[1].children}</div>
 
       {/* Divider 1 */}
       <div
@@ -229,7 +229,7 @@ export function ResizablePanels({
       />
 
       {/* Right panel */}
-      <div className="overflow-hidden">{panels[2].children}</div>
+      <div className="min-h-0 overflow-hidden">{panels[2].children}</div>
     </div>
   );
 }
