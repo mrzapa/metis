@@ -203,7 +203,7 @@ class EvidenceSourceModel(BaseModel):
     anchor: str = ""
     header_path: str = ""
     excerpt: str = ""
-    file_path: str = ""
+    file_path: str = Field(default="", exclude=True)
     date: str = ""
     timestamp: str = ""
     speaker: str = ""

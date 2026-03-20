@@ -181,11 +181,11 @@ def create_app() -> FastAPI:
         payload: IndexBuildRequestModel,
     ) -> StreamingResponse:
         orchestrator = WorkspaceOrchestrator()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
         def _progress_cb(event: dict[str, Any]) -> None:
-            asyncio.run_coroutine_threadsafe(queue.put(event), loop)
+            loop.call_soon_threadsafe(queue.put_nowait, event)
 
         future = loop.run_in_executor(
             None,
@@ -206,6 +206,7 @@ def create_app() -> FastAPI:
                 except asyncio.TimeoutError:
                     pass
             # Drain any remaining queued events
+            await asyncio.sleep(0)
             while not queue.empty():
                 event = queue.get_nowait()
                 yield f"event: message\ndata: {json.dumps(event)}\n\n"
