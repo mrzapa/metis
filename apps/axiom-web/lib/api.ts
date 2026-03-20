@@ -734,7 +734,7 @@ export async function fetchGgufCatalog(useCase = "general"): Promise<GgufCatalog
   const res = await apiFetch(`${await getApiBase()}/v1/gguf/catalog?use_case=${encodeURIComponent(useCase)}`);
   if (!res.ok) {
     const detail = await res.text();
-    throw new Error(`Failed to fetch GGUF catalog (${res.status}): ${detail}`);
+    throw new Error(`Failed to fetch GGUF catalogue (${res.status}): ${detail}`);
   }
   return res.json();
 }
@@ -776,7 +776,7 @@ export async function refreshGgufCatalog(useCase = "general"): Promise<{ status:
   });
   if (!res.ok) {
     const detail = await res.text();
-    throw new Error(`Failed to refresh GGUF catalog (${res.status}): ${detail}`);
+    throw new Error(`Failed to refresh GGUF catalogue (${res.status}): ${detail}`);
   }
   return res.json();
 }
