@@ -23,42 +23,26 @@ import ForceGraph3D, { type ForceGraphMethods } from "react-force-graph-3d";
 import * as THREE from "three";
 
 import {
-  type BrainNode,
-  type BrainEdge,
   type BrainGraphData,
+  type BrainNode,
+  type BrainRenderMode,
   type BrainScope,
-  scopeFromMetadata,
-  NODE_COLOR_HEX,
-  NODE_RADIUS_3D,
-  SCOPE_LINK_COLOR,
+  ALL_BRAIN_SCOPES,
 } from "./brain-graph";
+import {
+  buildBrainSceneGraph,
+  type BrainSceneGraph,
+  type BrainSceneLink,
+  type BrainSceneNode,
+} from "./brain-graph-view-model";
+import {
+  loadBrainModelOverlay,
+  type BrainModelOverlayHandle,
+} from "./brain-model-overlay";
 
 // -- Constants ----------------------------------------------------------------
 
-const ALL_SCOPES: BrainScope[] = ["workspace", "assistant_self", "assistant_learned"];
-
 const BG_COLOR = "#05070a";
-
-// -- Internal graph node / link types for react-force-graph-3d ----------------
-
-interface GraphNode {
-  id: string;
-  brain: BrainNode;
-  color: string;
-  radius: number;
-  dimmed: boolean;
-  x?: number;
-  y?: number;
-  z?: number;
-}
-
-interface GraphLink {
-  source: string;
-  target: string;
-  edge: BrainEdge;
-  color: string;
-  width: number;
-}
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -125,25 +109,36 @@ export interface BrainGraph3DProps {
   data: BrainGraphData;
   filter?: string;
   activeScopes?: BrainScope[];
+  renderMode?: BrainRenderMode;
+  selectedNodeId?: string | null;
+  onSelectedNodeIdChange?: (nodeId: string | null) => void;
   onNodeSelect?: (node: BrainNode | null) => void;
+  onModelLoadError?: (message: string) => void;
+  modelUrl?: string;
   className?: string;
 }
 
 export default function BrainGraph3D({
   data,
   filter = "",
-  activeScopes = ALL_SCOPES,
+  activeScopes = ALL_BRAIN_SCOPES,
+  renderMode = "hybrid",
+  selectedNodeId = null,
+  onSelectedNodeIdChange,
   onNodeSelect,
+  onModelLoadError,
+  modelUrl = "/brain/brain-model.glb",
   className = "",
 }: BrainGraph3DProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const fgRef = useRef<ForceGraphMethods<GraphNode, GraphLink> | undefined>(undefined);
-
-  // Track the selected node in state so the Three.js objects can react to it
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const fgRef = useRef<ForceGraphMethods<BrainSceneNode, BrainSceneLink> | undefined>(undefined);
 
   // Track Three.js objects we create so we can dispose them on cleanup
   const createdObjectsRef = useRef<THREE.Object3D[]>([]);
+  const modelOverlayRef = useRef<BrainModelOverlayHandle | null>(null);
+  const modelSceneRef = useRef<THREE.Scene | null>(null);
+  const modelLoadAttemptRef = useRef(0);
+  const [sceneReady, setSceneReady] = useState(false);
 
   // Track container dimensions for the ForceGraph width/height props
   const [dims, setDims] = useState({ w: 800, h: 600 });
@@ -165,54 +160,18 @@ export default function BrainGraph3D({
     return () => {
       for (const obj of objects) disposeObject3D(obj);
       objects.length = 0;
+      if (modelOverlayRef.current) {
+        modelOverlayRef.current.dispose();
+        modelOverlayRef.current = null;
+      }
     };
   }, []);
 
   // -- Build filtered graph data -------------------------------------------
-
-  const filterLower = useMemo(() => filter.trim().toLowerCase(), [filter]);
-
-  const activeScopeSet = useMemo(
-    () => new Set<BrainScope>(activeScopes.length > 0 ? activeScopes : ALL_SCOPES),
-    [activeScopes],
+  const graphData = useMemo<BrainSceneGraph>(
+    () => buildBrainSceneGraph(data, { filter, activeScopes }),
+    [data, filter, activeScopes],
   );
-
-  const graphData = useMemo(() => {
-    const visibleNodes: GraphNode[] = [];
-    const visibleIds = new Set<string>();
-
-    for (const node of data.nodes) {
-      const scope = scopeFromMetadata(node.metadata);
-      if (!activeScopeSet.has(scope)) continue;
-
-      const dimmed = filterLower ? !node.label.toLowerCase().includes(filterLower) : false;
-      visibleIds.add(node.node_id);
-      visibleNodes.push({
-        id: node.node_id,
-        brain: node,
-        color: NODE_COLOR_HEX[node.node_type] ?? "#888888",
-        radius: NODE_RADIUS_3D[node.node_type] ?? 4,
-        dimmed,
-      });
-    }
-
-    const visibleLinks: GraphLink[] = [];
-    for (const edge of data.edges) {
-      const scope = scopeFromMetadata(edge.metadata);
-      if (!activeScopeSet.has(scope)) continue;
-      if (!visibleIds.has(edge.source_id) || !visibleIds.has(edge.target_id)) continue;
-
-      visibleLinks.push({
-        source: edge.source_id,
-        target: edge.target_id,
-        edge,
-        color: SCOPE_LINK_COLOR[scope] ?? "rgba(255,255,255,0.15)",
-        width: scope === "assistant_learned" ? 1.4 : scope === "assistant_self" ? 1.0 : 0.6,
-      });
-    }
-
-    return { nodes: visibleNodes, links: visibleLinks };
-  }, [data, activeScopeSet, filterLower]);
 
   // -- Zoom-to-fit on first load / data change -----------------------------
 
@@ -225,16 +184,89 @@ export default function BrainGraph3D({
     return () => clearTimeout(timer);
   }, [graphData]);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (fgRef.current?.scene()) {
+        modelSceneRef.current = fgRef.current.scene();
+        setSceneReady(true);
+      }
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [dims.h, dims.w, graphData.nodes.length]);
+
+  const clearModelOverlay = useCallback(() => {
+    const scene = modelSceneRef.current;
+    const overlay = modelOverlayRef.current;
+    if (!overlay) return;
+
+    if (scene) {
+      scene.remove(overlay.root);
+      scene.remove(overlay.lightRig);
+    }
+    overlay.dispose();
+    modelOverlayRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (!sceneReady || !modelSceneRef.current) return;
+
+    if (renderMode !== "hybrid") {
+      clearModelOverlay();
+      return;
+    }
+
+    let cancelled = false;
+    const loadAttempt = modelLoadAttemptRef.current + 1;
+    modelLoadAttemptRef.current = loadAttempt;
+    clearModelOverlay();
+
+    loadBrainModelOverlay(modelUrl)
+      .then((overlay) => {
+        if (cancelled || modelLoadAttemptRef.current !== loadAttempt || !modelSceneRef.current) {
+          overlay.dispose();
+          return;
+        }
+
+        modelSceneRef.current.add(overlay.root);
+        modelSceneRef.current.add(overlay.lightRig);
+        overlay.fitToGraph(graphData.nodes);
+        modelOverlayRef.current = overlay;
+      })
+      .catch((error: unknown) => {
+        if (cancelled || modelLoadAttemptRef.current !== loadAttempt) return;
+        const message =
+          error instanceof Error
+            ? error.message
+            : "The anatomical brain model could not be loaded.";
+        clearModelOverlay();
+        onModelLoadError?.(message);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clearModelOverlay, graphData.nodes, modelUrl, onModelLoadError, renderMode, sceneReady]);
+
+  const fitModelOverlay = useCallback(() => {
+    modelOverlayRef.current?.fitToGraph(graphData.nodes);
+  }, [graphData.nodes]);
+
+  useEffect(() => {
+    if (renderMode !== "hybrid") return;
+    const timer = setTimeout(() => {
+      fitModelOverlay();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [fitModelOverlay, graphData, renderMode]);
+
   // -- Custom Three.js node objects ----------------------------------------
 
-  // Include `selectedId` and `filterLower` so the callback identity changes
-  // when the selection or filter changes, which triggers ForceGraph3D to
-  // re-create node objects with up-to-date visual state.
-  const nodeThreeObject = useCallback((node: GraphNode) => {
+  const nodeThreeObject = useCallback((node: BrainSceneNode) => {
     const group = new THREE.Group();
     createdObjectsRef.current.push(group);
 
-    const isSelected = node.id === selectedId;
+    const isSelected = node.id === selectedNodeId;
     const r = node.radius;
     const color = new THREE.Color(node.color);
 
@@ -287,31 +319,33 @@ export default function BrainGraph3D({
     group.add(sprite);
 
     return group;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- selectedId and filterLower trigger visual refresh
-  }, [selectedId, filterLower]);
+  }, [selectedNodeId]);
 
   // -- Node click handler --------------------------------------------------
 
   const handleNodeClick = useCallback(
-    (node: GraphNode) => {
-      setSelectedId((prev) => {
-        const nextId = prev === node.id ? null : node.id;
-        onNodeSelect?.(nextId ? node.brain : null);
-        return nextId;
-      });
+    (node: BrainSceneNode) => {
+      const nextId = selectedNodeId === node.id ? null : node.id;
+      onSelectedNodeIdChange?.(nextId);
+      onNodeSelect?.(nextId ? node.brain : null);
     },
-    [onNodeSelect],
+    [onNodeSelect, onSelectedNodeIdChange, selectedNodeId],
   );
 
   // Clear selection when the selected node is no longer visible
   useEffect(() => {
-    if (!selectedId) return;
-    const stillVisible = graphData.nodes.some((n) => n.id === selectedId);
+    if (!selectedNodeId) return;
+    const stillVisible = graphData.visibleNodeIds.has(selectedNodeId);
     if (!stillVisible) {
-      setSelectedId(null);
+      onSelectedNodeIdChange?.(null);
       onNodeSelect?.(null);
     }
-  }, [graphData, selectedId, onNodeSelect]);
+  }, [graphData.visibleNodeIds, onNodeSelect, onSelectedNodeIdChange, selectedNodeId]);
+
+  useEffect(() => {
+    if (!onNodeSelect) return;
+    onNodeSelect(selectedNodeId ? graphData.visibleNodeById.get(selectedNodeId) ?? null : null);
+  }, [graphData.visibleNodeById, onNodeSelect, selectedNodeId]);
 
   // -- Controls hint visibility -------------------------------------------
 
@@ -331,7 +365,7 @@ export default function BrainGraph3D({
       className={`relative h-full w-full overflow-hidden ${className}`}
       aria-label="Brain graph"
     >
-      <ForceGraph3D<GraphNode, GraphLink>
+      <ForceGraph3D<BrainSceneNode, BrainSceneLink>
         ref={fgRef}
         width={dims.w}
         height={dims.h}
@@ -342,11 +376,16 @@ export default function BrainGraph3D({
         nodeThreeObject={nodeThreeObject}
         nodeThreeObjectExtend={false}
         /* Link styling */
-        linkColor={(link: GraphLink) => link.color}
-        linkWidth={(link: GraphLink) => link.width}
+        linkColor={(link: BrainSceneLink) => link.color}
+        linkWidth={(link: BrainSceneLink) => link.width}
         linkOpacity={0.7}
         /* Interactions */
         onNodeClick={handleNodeClick}
+        onBackgroundClick={() => {
+          onSelectedNodeIdChange?.(null);
+          onNodeSelect?.(null);
+        }}
+        onEngineStop={fitModelOverlay}
         /* Force engine tuning */
         d3AlphaDecay={0.04}
         d3VelocityDecay={0.3}

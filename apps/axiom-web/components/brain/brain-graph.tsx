@@ -30,6 +30,13 @@ export interface BrainGraphData {
 }
 
 export type BrainScope = "workspace" | "assistant_self" | "assistant_learned";
+export type BrainRenderMode = "hybrid" | "raw";
+
+export const ALL_BRAIN_SCOPES: BrainScope[] = [
+  "workspace",
+  "assistant_self",
+  "assistant_learned",
+];
 
 // -- Helpers -------------------------------------------------------------
 

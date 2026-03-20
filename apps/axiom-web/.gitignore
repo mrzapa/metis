@@ -16,6 +16,7 @@
 # next.js
 /.next/
 /out/
+/public/brain/brain-model.glb
 
 # production
 /build

@@ -495,3 +495,75 @@ def test_brain_graph_returns_nodes_and_edges(monkeypatch) -> None:
     assert "category:brain" in node_ids
     assert "category:indexes" in node_ids
     assert "category:sessions" in node_ids
+
+
+def test_brain_graph_preserves_assistant_node_types_and_scope_metadata(monkeypatch) -> None:
+    client = TestClient(api_app_module.create_app())
+    fake_orchestrator = MagicMock()
+    fake_orchestrator.get_workspace_graph.return_value = BrainGraph().build_from_indexes_and_sessions(
+        [],
+        [],
+        {
+            "identity": {
+                "assistant_id": "axiom-companion",
+                "name": "Guide",
+                "companion_enabled": True,
+            },
+            "status": {
+                "runtime_provider": "local_gguf",
+                "runtime_model": "axiom-q4",
+                "paused": False,
+            },
+            "memory": [
+                {
+                    "entry_id": "memory-1",
+                    "title": "Learned from a completed run",
+                    "summary": "Captured a short next step.",
+                    "confidence": 0.9,
+                }
+            ],
+            "playbooks": [
+                {
+                    "playbook_id": "playbook-1",
+                    "title": "Follow-up pattern",
+                    "bullets": ["Lead with the next step."],
+                    "confidence": 0.8,
+                }
+            ],
+            "brain_links": [
+                {
+                    "source_node_id": "memory:memory-1",
+                    "target_node_id": "assistant:axiom",
+                    "relation": "belongs_to",
+                    "summary": "Captured a short next step.",
+                    "confidence": 0.9,
+                    "metadata": {"scope": "assistant_learned", "note": "derived"},
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+
+    response = client.get("/v1/brain/graph")
+
+    assert response.status_code == 200
+    payload = response.json()
+    nodes = {node["node_id"]: node for node in payload["nodes"]}
+    edges = {
+        (edge["source_id"], edge["target_id"], edge["edge_type"]): edge for edge in payload["edges"]
+    }
+
+    assert nodes["category:brain"]["metadata"]["scope"] == "workspace"
+    assert nodes["category:assistant"]["node_type"] == "category"
+    assert nodes["category:assistant"]["metadata"]["scope"] == "assistant_self"
+    assert nodes["assistant:axiom"]["node_type"] == "assistant"
+    assert nodes["assistant:axiom"]["metadata"]["scope"] == "assistant_self"
+    assert nodes["memory:memory-1"]["node_type"] == "memory"
+    assert nodes["memory:memory-1"]["metadata"]["scope"] == "assistant_learned"
+    assert nodes["playbook:playbook-1"]["node_type"] == "playbook"
+    assert nodes["playbook:playbook-1"]["metadata"]["scope"] == "assistant_self"
+    assert nodes["category:assistant:memory"]["metadata"]["scope"] == "assistant_self"
+    assert nodes["category:assistant:playbooks"]["metadata"]["scope"] == "assistant_self"
+    assert edges[("category:assistant", "category:brain", "category_member")]["metadata"]["scope"] == "assistant_self"
+    assert edges[("memory:memory-1", "assistant:axiom", "belongs_to")]["metadata"]["scope"] == "assistant_learned"
+    assert edges[("memory:memory-1", "assistant:axiom", "belongs_to")]["metadata"]["note"] == "derived"

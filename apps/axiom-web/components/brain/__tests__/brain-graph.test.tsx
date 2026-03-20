@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 import {
+  ALL_BRAIN_SCOPES,
   scopeFromMetadata,
+  type BrainRenderMode,
   type BrainGraphData,
   type BrainNode,
   type BrainScope,
@@ -10,6 +12,7 @@ import {
   NODE_RADIUS_3D,
   SCOPE_LINK_COLOR,
 } from "../brain-graph";
+import { buildBrainSceneGraph } from "../brain-graph-view-model";
 
 const graphData: BrainGraphData = {
   nodes: [
@@ -42,6 +45,13 @@ const graphData: BrainGraphData = {
 };
 
 describe("BrainGraph scope filtering", () => {
+  it("exports every supported brain scope and render mode", () => {
+    const renderModes: BrainRenderMode[] = ["hybrid", "raw"];
+
+    expect(ALL_BRAIN_SCOPES).toEqual(["workspace", "assistant_self", "assistant_learned"]);
+    expect(renderModes).toEqual(["hybrid", "raw"]);
+  });
+
   it("returns workspace scope for nodes without explicit scope metadata", () => {
     expect(scopeFromMetadata(graphData.nodes[0].metadata)).toBe("workspace");
   });
@@ -82,5 +92,18 @@ describe("BrainGraph scope filtering", () => {
       expect(SCOPE_LINK_COLOR[s]).toBeDefined();
     }
   });
-});
 
+  it("builds a scene graph that filters by scope without hiding dimmed label mismatches", () => {
+    const sceneGraph = buildBrainSceneGraph(graphData, {
+      filter: "workspace",
+      activeScopes: ["workspace", "assistant_self"],
+    });
+
+    expect(sceneGraph.nodes).toHaveLength(2);
+    expect(sceneGraph.visibleNodeIds.has("workspace-1")).toBe(true);
+    expect(sceneGraph.visibleNodeIds.has("assistant-1")).toBe(true);
+    expect(sceneGraph.visibleNodeIds.has("learned-1")).toBe(false);
+    expect(sceneGraph.nodes.find((node) => node.id === "workspace-1")?.dimmed).toBe(false);
+    expect(sceneGraph.nodes.find((node) => node.id === "assistant-1")?.dimmed).toBe(true);
+  });
+});

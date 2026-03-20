@@ -10,9 +10,12 @@ import { useEffect, useMemo, useState } from "react";
 import {
   type BrainGraphData,
   type BrainNode,
+  type BrainRenderMode,
   type BrainScope,
+  ALL_BRAIN_SCOPES,
   scopeFromMetadata,
 } from "@/components/brain/brain-graph";
+import { buildBrainSceneGraph } from "@/components/brain/brain-graph-view-model";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,8 +31,6 @@ const BrainGraph3D = dynamic(() => import("@/components/brain/brain-graph-3d"), 
     </div>
   ),
 });
-
-const ALL_SCOPES: BrainScope[] = ["workspace", "assistant_self", "assistant_learned"];
 
 const SCOPE_META: Record<
   BrainScope,
@@ -204,7 +205,7 @@ function GraphInspectorPanel({
               {activeScopeCount}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              of {ALL_SCOPES.length} available.
+              of {ALL_BRAIN_SCOPES.length} available.
             </p>
           </div>
         </div>
@@ -218,8 +219,10 @@ export default function BrainPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
-  const [activeScopes, setActiveScopes] = useState<BrainScope[]>(() => [...ALL_SCOPES]);
-  const [selectedNode, setSelectedNode] = useState<BrainNode | null>(null);
+  const [activeScopes, setActiveScopes] = useState<BrainScope[]>(() => [...ALL_BRAIN_SCOPES]);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [renderMode, setRenderMode] = useState<BrainRenderMode>("hybrid");
+  const [modelWarning, setModelWarning] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -244,6 +247,18 @@ export default function BrainPage() {
     };
   }, []);
 
+  const sceneGraph = useMemo(
+    () => (data ? buildBrainSceneGraph(data, { filter, activeScopes }) : null),
+    [activeScopes, data, filter],
+  );
+
+  useEffect(() => {
+    if (!selectedNodeId || !sceneGraph) return;
+    if (!sceneGraph.visibleNodeIds.has(selectedNodeId)) {
+      setSelectedNodeId(null);
+    }
+  }, [sceneGraph, selectedNodeId]);
+
   const scopeStats = useMemo(() => {
     const counts: Record<BrainScope, { nodes: number; edges: number }> = {
       workspace: { nodes: 0, edges: 0 },
@@ -262,7 +277,7 @@ export default function BrainPage() {
   }, [data]);
 
   const visibleStats = useMemo(() => {
-    const active = new Set(activeScopes.length > 0 ? activeScopes : ALL_SCOPES);
+    const active = new Set(activeScopes.length > 0 ? activeScopes : ALL_BRAIN_SCOPES);
     let nodes = 0;
     let edges = 0;
 
@@ -278,6 +293,11 @@ export default function BrainPage() {
 
   const nodeCount = data?.nodes.length ?? 0;
   const edgeCount = data?.edges.length ?? 0;
+  const selectedNode = useMemo<BrainNode | null>(() => {
+    if (!data || !selectedNodeId) return null;
+    if (sceneGraph && !sceneGraph.visibleNodeIds.has(selectedNodeId)) return null;
+    return data.nodes.find((node) => node.node_id === selectedNodeId) ?? null;
+  }, [data, sceneGraph, selectedNodeId]);
   const selectedScope = selectedNode ? scopeFromMetadata(selectedNode.metadata) : null;
 
   const heroMetrics = [
@@ -304,7 +324,7 @@ export default function BrainPage() {
     setActiveScopes((prev) => {
       if (prev.includes(scope)) {
         const next = prev.filter((item) => item !== scope);
-        return next.length > 0 ? next : [...ALL_SCOPES];
+        return next.length > 0 ? next : [...ALL_BRAIN_SCOPES];
       }
       return [...prev, scope];
     });
@@ -317,6 +337,35 @@ export default function BrainPage() {
       description="Explore how workspace structure, the Axiom Self, and learned companion memory connect."
       actions={
         <div className="flex w-full flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/50 p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setModelWarning(null);
+                setRenderMode("hybrid");
+              }}
+              className={[
+                "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                renderMode === "hybrid"
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:text-foreground",
+              ].join(" ")}
+            >
+              Hybrid
+            </button>
+            <button
+              type="button"
+              onClick={() => setRenderMode("raw")}
+              className={[
+                "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                renderMode === "raw"
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:text-foreground",
+              ].join(" ")}
+            >
+              Graph only
+            </button>
+          </div>
           <Input
             type="search"
             placeholder="Filter nodes..."
@@ -329,7 +378,8 @@ export default function BrainPage() {
             onClick={() => {
               setLoading(true);
               setError(null);
-              setSelectedNode(null);
+              setSelectedNodeId(null);
+              setModelWarning(null);
               fetchBrainGraph()
                 .then((graph) => setData(normalizeBrainGraph(graph)))
                 .catch((err: unknown) => setError(String(err instanceof Error ? err.message : err)))
@@ -375,9 +425,12 @@ export default function BrainPage() {
                 <span className="rounded-full border border-border/70 bg-black/10 px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
                   {activeScopes.length} active
                 </span>
+                <span className="rounded-full border border-border/70 bg-black/10 px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                  {renderMode === "hybrid" ? "Hybrid anatomy" : "Graph only"}
+                </span>
                 <button
                   type="button"
-                  onClick={() => setActiveScopes([...ALL_SCOPES])}
+                  onClick={() => setActiveScopes([...ALL_BRAIN_SCOPES])}
                   className="ml-auto rounded-full border border-border/70 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
                 >
                   Reset scopes
@@ -389,7 +442,7 @@ export default function BrainPage() {
               </p>
 
               <div className="flex flex-wrap gap-2">
-                {ALL_SCOPES.map((scope) => {
+                {ALL_BRAIN_SCOPES.map((scope) => {
                   const meta = SCOPE_META[scope];
                   const active = activeScopes.includes(scope);
                   const count = scopeStats[scope];
@@ -399,6 +452,7 @@ export default function BrainPage() {
                       key={scope}
                       type="button"
                       aria-pressed={active}
+                      aria-label={meta.label}
                       onClick={() => toggleScope(scope)}
                       className={[
                         "flex items-center gap-3 rounded-full border px-3 py-2.5 text-left transition-all",
@@ -468,8 +522,13 @@ export default function BrainPage() {
                     ? "The graph failed to load."
                     : `${visibleStats.nodes} visible nodes and ${visibleStats.edges} visible edges currently survive the active scope filters.`}
               </p>
+              {modelWarning ? (
+                <p className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                  Hybrid mode fell back to the raw graph: {modelWarning}
+                </p>
+              ) : null}
               <div className="mt-4 space-y-2">
-                {ALL_SCOPES.map((scope) => {
+                {ALL_BRAIN_SCOPES.map((scope) => {
                   const meta = SCOPE_META[scope];
                   const active = activeScopes.includes(scope);
                   return (
@@ -519,7 +578,13 @@ export default function BrainPage() {
                 data={data}
                 filter={filter}
                 activeScopes={activeScopes}
-                onNodeSelect={setSelectedNode}
+                renderMode={renderMode}
+                selectedNodeId={selectedNodeId}
+                onSelectedNodeIdChange={setSelectedNodeId}
+                onModelLoadError={(message) => {
+                  setModelWarning(message);
+                  setRenderMode("raw");
+                }}
                 className="flex-1"
               />
             ) : null}
@@ -528,12 +593,12 @@ export default function BrainPage() {
           <div className="pointer-events-none absolute inset-x-4 bottom-4 hidden xl:flex xl:justify-end">
             <div className="pointer-events-auto w-[20.5rem] max-w-full">
               <GraphInspectorPanel
-                node={selectedNode}
-                visibleStats={visibleStats}
-                nodeCount={nodeCount}
-                edgeCount={edgeCount}
-                activeScopeCount={activeScopes.length}
-                onClose={selectedNode ? () => setSelectedNode(null) : undefined}
+              node={selectedNode}
+              visibleStats={visibleStats}
+              nodeCount={nodeCount}
+              edgeCount={edgeCount}
+              activeScopeCount={activeScopes.length}
+              onClose={selectedNode ? () => setSelectedNodeId(null) : undefined}
               />
             </div>
           </div>
@@ -546,7 +611,7 @@ export default function BrainPage() {
             nodeCount={nodeCount}
             edgeCount={edgeCount}
             activeScopeCount={activeScopes.length}
-            onClose={selectedNode ? () => setSelectedNode(null) : undefined}
+            onClose={selectedNode ? () => setSelectedNodeId(null) : undefined}
           />
         </div>
       </div>

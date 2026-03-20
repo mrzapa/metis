@@ -920,7 +920,7 @@ export async function unregisterGgufModel(id: string): Promise<{ status: string;
 
 export interface BrainGraphNode {
   node_id: string;
-  node_type: "category" | "index" | "session";
+  node_type: "category" | "index" | "session" | "assistant" | "memory" | "playbook";
   label: string;
   x: number;
   y: number;

@@ -177,16 +177,40 @@ def test_brain_graph_embeds_assistant_subgraph_with_metadata_and_links() -> None
     assert "assistant:axiom" in graph.nodes
     assert "category:assistant:memory" in graph.nodes
     assert "category:assistant:playbooks" in graph.nodes
+    assert graph.get_node("category:assistant").node_type == "category"
+    assert graph.get_node("category:assistant").metadata["scope"] == "assistant_self"
+    assert graph.get_node("category:assistant:memory").node_type == "category"
+    assert graph.get_node("category:assistant:memory").metadata["category_kind"] == "assistant_memory"
+    assert graph.get_node("category:assistant:memory").metadata["scope"] == "assistant_self"
+    assert graph.get_node("category:assistant:memory").metadata["member_ids"] == ["memory:memory-1"]
+    assert graph.get_node("category:assistant:memory").metadata["member_count"] == 1
+    assert graph.get_node("category:assistant:playbooks").node_type == "category"
+    assert graph.get_node("category:assistant:playbooks").metadata["category_kind"] == "assistant_playbooks"
+    assert graph.get_node("category:assistant:playbooks").metadata["scope"] == "assistant_self"
+    assert graph.get_node("category:assistant:playbooks").metadata["member_ids"] == ["playbook:playbook-1"]
+    assert graph.get_node("category:assistant:playbooks").metadata["member_count"] == 1
+    assert graph.get_node("assistant:axiom").node_type == "assistant"
+    assert graph.get_node("assistant:axiom").metadata["scope"] == "assistant_self"
     assert graph.get_node("assistant:axiom").metadata["runtime_provider"] == "local_gguf"
     assert graph.get_node("assistant:axiom").metadata["runtime_model"] == "axiom-q4"
     assert graph.get_node("assistant:axiom").metadata["paused"] is True
     assert graph.get_node("assistant:axiom").metadata["latest_summary"] == "A short reflection."
+    assert graph.get_node("memory:memory-1").node_type == "memory"
     assert graph.get_node("memory:memory-1").metadata["scope"] == "assistant_learned"
+    assert graph.get_node("playbook:playbook-1").node_type == "playbook"
     assert graph.get_node("playbook:playbook-1").metadata["scope"] == "assistant_self"
     assert any(
         edge.edge_type == "category_member"
         and edge.source_id == "assistant:axiom"
         and edge.target_id == "category:assistant"
+        and edge.metadata["scope"] == "assistant_self"
+        for edge in graph.edges
+    )
+    assert any(
+        edge.edge_type == "category_member"
+        and edge.source_id == "category:assistant"
+        and edge.target_id == "category:brain"
+        and edge.metadata["scope"] == "assistant_self"
         for edge in graph.edges
     )
     assert any(
@@ -194,6 +218,7 @@ def test_brain_graph_embeds_assistant_subgraph_with_metadata_and_links() -> None
         and edge.source_id == "memory:memory-1"
         and edge.target_id == "assistant:axiom"
         and edge.metadata["note"] == "derived"
+        and edge.metadata["scope"] == "assistant_learned"
         for edge in graph.edges
     )
 
