@@ -555,7 +555,7 @@ export function HomeLaunchIcon({
   const idSuffix = useId().replace(/:/g, "");
 
   return (
-    <div
+    <motion.div
       className={cn(ICON_BASE_CLASS, className)}
       style={
         {
@@ -564,10 +564,48 @@ export function HomeLaunchIcon({
           color: accent,
         } as CSSProperties
       }
+      animate={
+        shouldAnimate
+          ? {
+              y: [0, -1.5, 0],
+              scale: [1, 1.018, 1],
+            }
+          : undefined
+      }
+      transition={
+        shouldAnimate
+          ? {
+              duration: 5.8,
+              repeat: Number.POSITIVE_INFINITY,
+              ease: "easeInOut",
+            }
+          : undefined
+      }
       aria-hidden={title ? undefined : true}
       role={title ? "img" : undefined}
       aria-label={title}
     >
+      <motion.span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-[-8%] rounded-full border border-[rgba(143,179,255,0.14)]"
+        animate={
+          shouldAnimate
+            ? {
+                scale: [0.94, 1.04, 0.96],
+                opacity: [0.16, 0.42, 0.16],
+              }
+            : undefined
+        }
+        transition={
+          shouldAnimate
+            ? {
+                duration: 3.6,
+                repeat: Number.POSITIVE_INFINITY,
+                ease: "easeInOut",
+              }
+            : undefined
+        }
+      />
       <span
         aria-hidden="true"
         className="pointer-events-none absolute inset-[10%] rounded-full bg-[radial-gradient(circle_at_50%_20%,rgba(255,255,255,0.22),rgba(255,255,255,0)_42%),radial-gradient(circle_at_50%_72%,rgba(9,105,218,0.28),rgba(9,105,218,0)_64%)] opacity-90 blur-[1px]"
@@ -592,6 +630,28 @@ export function HomeLaunchIcon({
             : undefined
         }
       />
+      <motion.span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-[20%]"
+        animate={
+          shouldAnimate
+            ? {
+                rotate: 360,
+              }
+            : undefined
+        }
+        transition={
+          shouldAnimate
+            ? {
+                duration: 11,
+                repeat: Number.POSITIVE_INFINITY,
+                ease: "linear",
+              }
+            : undefined
+        }
+      >
+        <span className="absolute left-1/2 top-0 size-1.5 -translate-x-1/2 rounded-full bg-[#d7e7ff] shadow-[0_0_14px_rgba(173,198,255,0.85)]" />
+      </motion.span>
       <motion.span
         aria-hidden="true"
         className="pointer-events-none absolute left-[20%] top-[16%] h-[34%] w-[34%] rounded-full bg-[radial-gradient(circle_at_35%_28%,rgba(255,255,255,0.75),rgba(255,255,255,0.12)_34%,transparent_66%)] blur-[1px]"
@@ -619,6 +679,6 @@ export function HomeLaunchIcon({
       >
         {launchFrame(kind, shouldAnimate, idSuffix)}
       </MotionWrapper>
-    </div>
+    </motion.div>
   );
 }

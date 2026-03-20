@@ -127,7 +127,7 @@ function CatalogList({ entries }: { entries: GgufCatalogEntry[] }) {
     return (
       <div className="flex flex-col items-center gap-2 rounded-[1.2rem] border border-white/8 bg-black/10 py-14 text-muted-foreground">
         <HardDrive className="size-8" />
-        <p>No models in catalog</p>
+        <p>No models in catalogue</p>
       </div>
     );
   }
@@ -331,18 +331,40 @@ export default function GgufPage() {
     <PageChrome
       eyebrow="Models"
       title="Manage local GGUF models"
-      description="Browse the catalog, check hardware compatibility, validate, and register local models for fully offline inference."
+      description="Browse the catalogue, check hardware compatibility, validate, and register local models for fully offline inference."
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 rounded-full border border-white/8 bg-black/10 px-3 py-1.5 text-sm">
+            <span className="text-muted-foreground">Use case</span>
+            <select
+              value={useCase}
+              onChange={(e) => setUseCase(e.target.value)}
+              className="bg-transparent text-foreground outline-none"
+            >
+              {USE_CASES.map((uc) => (
+                <option key={uc.value} value={uc.value} className="bg-background text-foreground">
+                  {uc.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button variant="outline" onClick={handleRefresh} disabled={refreshing} className="gap-1.5">
+            {refreshing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            Refresh
+          </Button>
+        </div>
+      }
       heroAside={
         <div className="space-y-3">
           <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
             Local inference posture
           </p>
           <p className="text-sm leading-7 text-muted-foreground">
-            Browse advisory hardware fit, validate a GGUF file before registering it, and keep a local model catalog close to the rest of the workspace.
+            Browse advisory hardware fit, validate a GGUF file before registering it, and keep a local model catalogue close to the rest of the workspace.
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
             <OverviewPill
-              label="Catalog"
+              label="Catalogue"
               value={`${catalog.length}`}
               note="Models surfaced for this use case."
             />
@@ -356,55 +378,17 @@ export default function GgufPage() {
       }
     >
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)] xl:items-end">
-          <div className="glass-panel rounded-[1.6rem] px-5 py-5 sm:px-6">
-            <p className="text-xs font-medium uppercase tracking-[0.22em] text-primary/80">
-              Models
-            </p>
-            <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div className="space-y-2">
-                <h1 className="text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-                  Manage local GGUF models
-                </h1>
-                <p className="max-w-2xl text-pretty text-sm leading-6 text-muted-foreground">
-                  Browse the catalog, check hardware compatibility, validate, and register local models for fully offline inference.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-2 rounded-full border border-white/8 bg-black/10 px-3 py-1.5 text-sm">
-                  <span className="text-muted-foreground">Use case</span>
-                  <select
-                    value={useCase}
-                    onChange={(e) => setUseCase(e.target.value)}
-                    className="bg-transparent text-foreground outline-none"
-                  >
-                    {USE_CASES.map((uc) => (
-                      <option key={uc.value} value={uc.value} className="bg-background text-foreground">
-                        {uc.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <Button variant="outline" onClick={handleRefresh} disabled={refreshing} className="gap-1.5">
-                  {refreshing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                  Refresh
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-            <OverviewPill
-              label="Hardware"
-              value={hardware ? `${hardware.total_cpu_cores} cores` : "—"}
-              note="Detected compute profile."
-            />
-            <OverviewPill
-              label="Memory"
-              value={hardware ? `${hardware.available_ram_gb.toFixed(1)} GB free` : "—"}
-              note="Headroom for local inference."
-            />
-          </div>
+        <section className="grid gap-3 md:grid-cols-2">
+          <OverviewPill
+            label="Hardware"
+            value={hardware ? `${hardware.total_cpu_cores} cores` : "—"}
+            note="Detected compute profile."
+          />
+          <OverviewPill
+            label="Memory"
+            value={hardware ? `${hardware.available_ram_gb.toFixed(1)} GB free` : "—"}
+            note="Headroom for local inference."
+          />
         </section>
 
         {error && (
@@ -424,12 +408,12 @@ export default function GgufPage() {
             <div className="space-y-6">
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle>Model catalog and installed files</CardTitle>
+                  <CardTitle>Model catalogue and installed files</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <Tabs defaultValue="catalog" className="space-y-5">
                     <TabsList className="grid w-full grid-cols-3">
-                      <TabsTrigger value="catalog">Catalog ({catalog.length})</TabsTrigger>
+                      <TabsTrigger value="catalog">Catalogue ({catalog.length})</TabsTrigger>
                       <TabsTrigger value="installed">Installed ({installed.length})</TabsTrigger>
                       <TabsTrigger value="validate">Validate</TabsTrigger>
                     </TabsList>
@@ -533,7 +517,7 @@ export default function GgufPage() {
                     The left side keeps the interactive workbench wide enough for model browsing and validation.
                   </p>
                   <p>
-                    The right side stays sticky so hardware fit is always visible while you compare catalog entries or register a local file.
+                    The right side stays sticky so hardware fit is always visible while you compare catalogue entries or register a local file.
                   </p>
                 </CardContent>
               </Card>

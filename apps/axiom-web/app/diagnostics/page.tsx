@@ -95,6 +95,26 @@ export default function DiagnosticsPage() {
       eyebrow="Diagnostics"
       title="System health and logs"
       description="Check API compatibility, view logs, and inspect settings. Useful for troubleshooting startup or connection issues."
+      actions={
+        <Button
+          onClick={handleCopy}
+          disabled={loading || !!error}
+          variant="outline"
+          className="shrink-0 gap-1.5"
+        >
+          {copied ? (
+            <>
+              <CheckCircle2 className="size-4 text-green-600" />
+              Copied
+            </>
+          ) : (
+            <>
+              <ClipboardCopy className="size-4" />
+              Copy diagnostics
+            </>
+          )}
+        </Button>
+      }
       heroAside={
         <div className="space-y-2">
           <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
@@ -107,62 +127,26 @@ export default function DiagnosticsPage() {
       }
     >
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(18rem,0.7fr)] xl:items-end">
-          <div className="glass-panel rounded-[1.6rem] px-5 py-5 sm:px-6">
-            <p className="text-xs font-medium uppercase tracking-[0.22em] text-primary/80">
-              Diagnostics
-            </p>
-            <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div className="space-y-2">
-                <h1 className="text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-                  System health and logs
-                </h1>
-                <p className="max-w-2xl text-pretty text-sm leading-6 text-muted-foreground">
-                  Check API compatibility, inspect the safe settings snapshot, and review the redacted log tail without leaving the workspace.
-                </p>
-              </div>
-              <Button
-                onClick={handleCopy}
-                disabled={loading || !!error}
-                variant="outline"
-                className="shrink-0 gap-1.5"
-              >
-                {copied ? (
-                  <>
-                    <CheckCircle2 className="size-4 text-green-600" />
-                    Copied
-                  </>
-                ) : (
-                  <>
-                    <ClipboardCopy className="size-4" />
-                    Copy diagnostics
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-            <StatCard
-              label="Web"
-              value={versions?.web ?? "1.0"}
-              caption="Frontend build version."
-            />
-            <StatCard
-              label="API"
-              value={versions?.api ?? "—"}
-              caption="Backend service version."
-            />
-            <StatCard
-              label="Desktop"
-              value={versions?.desktop ?? "—"}
-              caption={
-                versions?.desktop === "unavailable"
-                  ? "Browser mode or no desktop bridge."
-                  : "Tauri shell version."
-              }
-            />
-          </div>
+        <section className="grid gap-3 md:grid-cols-3">
+          <StatCard
+            label="Web"
+            value={versions?.web ?? "1.0"}
+            caption="Frontend build version."
+          />
+          <StatCard
+            label="API"
+            value={versions?.api ?? "—"}
+            caption="Backend service version."
+          />
+          <StatCard
+            label="Desktop"
+            value={versions?.desktop ?? "—"}
+            caption={
+              versions?.desktop === "unavailable"
+                ? "Browser mode or no desktop bridge."
+                : "Tauri shell version."
+            }
+          />
         </section>
 
         {error && (
