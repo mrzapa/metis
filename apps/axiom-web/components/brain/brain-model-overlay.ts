@@ -142,6 +142,9 @@ function buildLightRig(): {
   return { rig, keyLight, rimLight };
 }
 
+/** Scale the brain model to this fraction of the graph's maximum dimension. */
+const BRAIN_SCALE_FACTOR = 1.3;
+
 export async function loadBrainModelOverlay(
   modelUrl = "/brain/brain-model.glb",
 ): Promise<BrainModelOverlayHandle> {
@@ -161,7 +164,7 @@ export async function loadBrainModelOverlay(
     const bounds = computeBounds(nodes);
     const center = bounds?.center ?? new THREE.Vector3(0, 0, 0);
     const maxDimension = Math.max(bounds?.maxDimension ?? 160, 120);
-    const targetScale = maxDimension * 1.3;
+    const targetScale = maxDimension * BRAIN_SCALE_FACTOR;
 
     root.position.copy(center);
     root.scale.setScalar(targetScale);
