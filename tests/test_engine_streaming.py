@@ -216,3 +216,222 @@ def test_stream_rag_answer_empty_question_yields_error() -> None:
     assert events[0]["message"]
     # Must be JSON-serialisable
     json.dumps(events[0])
+
+
+# ---------------------------------------------------------------------------
+# Agentic iterative refinement loop (AIlice-inspired self-critique)
+# ---------------------------------------------------------------------------
+
+
+def test_stream_agentic_mode_emits_iteration_and_refinement_events(
+    tmp_path, monkeypatch
+) -> None:
+    """agentic_mode=True emits iteration_start, gaps_identified, and
+    refinement_retrieval events before the final answer."""
+    build_result = _build_test_index(tmp_path, monkeypatch)
+
+    # Patch _identify_gaps to return a deterministic non-empty list.
+    monkeypatch.setattr(
+        engine_streaming,
+        "_identify_gaps",
+        lambda question, draft, ctx, llm: ["gap query A"],
+    )
+
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who wrote the first algorithm?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "selected_mode": "Research",
+            "agentic_mode": True,
+            "agentic_max_iterations": 1,
+            "top_k": 2,
+            "retrieval_k": 2,
+        },
+        run_id="agentic-run-1",
+    )
+
+    events = list(stream_rag_answer(req))
+    event_types = [e["type"] for e in events]
+
+    assert "error" not in event_types, f"Unexpected error: {events}"
+
+    # All events are JSON-serialisable.
+    for event in events:
+        json.dumps(event)
+
+    # Required agentic events are present.
+    assert "iteration_start" in event_types
+    assert "gaps_identified" in event_types
+    assert "refinement_retrieval" in event_types
+
+    # run_id is consistent across all events.
+    assert all(e["run_id"] == "agentic-run-1" for e in events)
+
+    # iteration_start payload is correct.
+    it_start = next(e for e in events if e["type"] == "iteration_start")
+    assert it_start["iteration"] == 1
+    assert it_start["total_iterations"] == 1
+
+    # gaps_identified payload contains the patched gaps.
+    gaps_evt = next(e for e in events if e["type"] == "gaps_identified")
+    assert gaps_evt["gaps"] == ["gap query A"]
+    assert gaps_evt["iteration"] == 1
+
+    # refinement_retrieval contains sources and context_block.
+    refine_evt = next(e for e in events if e["type"] == "refinement_retrieval")
+    assert "sources" in refine_evt
+    assert "context_block" in refine_evt
+    assert "top_score" in refine_evt
+    assert isinstance(refine_evt["top_score"], float)
+    assert refine_evt["iteration"] == 1
+
+    # Sequence: run_started first, final last, token events present.
+    assert event_types[0] == "run_started"
+    assert event_types[-1] == "final"
+    assert "token" in event_types
+
+    # final.answer_text equals joined token texts.
+    token_texts = "".join(e["text"] for e in events if e["type"] == "token")
+    final = events[-1]
+    assert final["answer_text"] == token_texts
+
+
+def test_stream_agentic_mode_no_gaps_stops_early(tmp_path, monkeypatch) -> None:
+    """When _identify_gaps returns [] the loop breaks after the first
+    iteration_start event without emitting gaps_identified."""
+    build_result = _build_test_index(tmp_path, monkeypatch)
+
+    monkeypatch.setattr(
+        engine_streaming,
+        "_identify_gaps",
+        lambda question, draft, ctx, llm: [],  # no gaps found
+    )
+
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who wrote the first algorithm?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "agentic_mode": True,
+            "agentic_max_iterations": 3,
+            "top_k": 2,
+            "retrieval_k": 2,
+        },
+        run_id="agentic-no-gaps",
+    )
+
+    events = list(stream_rag_answer(req))
+    event_types = [e["type"] for e in events]
+
+    assert "error" not in event_types
+    # iteration_start is emitted once, then the loop breaks.
+    assert event_types.count("iteration_start") == 1
+    # No gaps means no gaps_identified or refinement_retrieval events.
+    assert "gaps_identified" not in event_types
+    assert "refinement_retrieval" not in event_types
+    assert event_types[-1] == "final"
+
+
+def test_stream_agentic_mode_respects_max_iterations(tmp_path, monkeypatch) -> None:
+    """The loop never exceeds agentic_max_iterations iteration cycles."""
+    build_result = _build_test_index(tmp_path, monkeypatch)
+
+    monkeypatch.setattr(
+        engine_streaming,
+        "_identify_gaps",
+        lambda question, draft, ctx, llm: ["gap Q"],
+    )
+
+    max_iter = 2
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who wrote the first algorithm?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "agentic_mode": True,
+            "agentic_max_iterations": max_iter,
+            "top_k": 2,
+            "retrieval_k": 2,
+        },
+        run_id="agentic-max-iter",
+    )
+
+    events = list(stream_rag_answer(req))
+    event_types = [e["type"] for e in events]
+
+    assert "error" not in event_types
+
+    iteration_starts = [e for e in events if e["type"] == "iteration_start"]
+    assert len(iteration_starts) == max_iter
+    assert [e["iteration"] for e in iteration_starts] == list(range(1, max_iter + 1))
+    assert all(e["total_iterations"] == max_iter for e in iteration_starts)
+    assert event_types[-1] == "final"
+
+
+def test_stream_non_agentic_no_agentic_events(tmp_path, monkeypatch) -> None:
+    """When agentic_mode is False, no agentic events are emitted."""
+    build_result = _build_test_index(tmp_path, monkeypatch)
+
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who wrote the first algorithm?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "agentic_mode": False,
+            "top_k": 2,
+            "retrieval_k": 2,
+        },
+    )
+
+    events = list(stream_rag_answer(req))
+    event_types = [e["type"] for e in events]
+
+    assert "iteration_start" not in event_types
+    assert "gaps_identified" not in event_types
+    assert "refinement_retrieval" not in event_types
+    assert event_types[-1] == "final"
+
+
+def test_dedup_sources_removes_duplicates() -> None:
+    """_dedup_sources removes entries with the same chunk_id."""
+    from axiom_app.engine.streaming import _dedup_sources
+
+    sources = [
+        {"chunk_id": "c1", "snippet": "foo"},
+        {"chunk_id": "c2", "snippet": "bar"},
+        {"chunk_id": "c1", "snippet": "foo"},  # duplicate
+        {"chunk_id": "c3", "snippet": "baz"},
+    ]
+    result = _dedup_sources(sources)
+    chunk_ids = [s["chunk_id"] for s in result]
+    assert chunk_ids == ["c1", "c2", "c3"]
+
+
+def test_identify_gaps_returns_list(tmp_path, monkeypatch) -> None:
+    """_identify_gaps returns a list and handles LLM failures gracefully."""
+    from axiom_app.engine.streaming import _identify_gaps
+
+    class _MockLLM:
+        def invoke(self, messages: list) -> object:
+            # Return well-formed JSON list
+            return type("R", (), {"content": '["query about X", "query about Y"]'})()
+
+    gaps = _identify_gaps("test question", "test answer", "test context", _MockLLM())
+    assert isinstance(gaps, list)
+    assert len(gaps) == 2
+
+    class _BadLLM:
+        def invoke(self, messages: list) -> object:
+            raise RuntimeError("LLM error")
+
+    gaps_on_error = _identify_gaps("q", "a", "ctx", _BadLLM())
+    assert gaps_on_error == []
