@@ -72,21 +72,24 @@ function RailVisual({
   item,
   active,
   compact = false,
+  animated = false,
 }: {
   item: LaunchItem;
   active: boolean;
   compact?: boolean;
+  animated?: boolean;
 }) {
   if (item.kind) {
     return (
       <HomeLaunchIcon
         kind={item.kind}
-        size={compact ? 36 : 42}
+        animated={animated}
+        size={compact ? 36 : 40}
         className={cn(
-          "shrink-0 transition-[transform,opacity] duration-300",
+          "shrink-0 transition-[transform,opacity,filter] duration-300",
           active
             ? "scale-100 opacity-100"
-            : "scale-[0.98] opacity-85 group-hover/rail:scale-100 group-hover/rail:opacity-100",
+            : "scale-[0.985] opacity-90 group-hover/rail-link:scale-[1.03] group-hover/rail-link:opacity-100",
         )}
       />
     );
@@ -97,11 +100,11 @@ function RailVisual({
   return (
     <span
       className={cn(
-        "flex items-center justify-center rounded-full transition-all duration-300",
-        compact ? "size-9" : "size-11 shrink-0",
+        "flex items-center justify-center rounded-full ring-1 ring-transparent transition-all duration-300",
+        compact ? "size-9" : "size-10 shrink-0",
         active
           ? "bg-[#adc6ff]/10 text-[#adc6ff]"
-          : "bg-white/4 text-[#8c909f] group-hover/rail:bg-white/7 group-hover/rail:text-[#dfe2eb]",
+          : "bg-white/4 text-[#8c909f] group-hover/rail-link:bg-white/7 group-hover/rail-link:text-[#dfe2eb] group-hover/rail-link:ring-white/10",
       )}
     >
       <Icon className="size-4" />
@@ -127,27 +130,27 @@ function RailLink({
       aria-label={item.label}
       className={cn(
         compact
-          ? "flex flex-1 flex-col items-center justify-center gap-1.5 rounded-2xl px-2 py-2 text-center transition-colors"
-          : "grid w-full grid-cols-[2.85rem_minmax(0,1fr)] items-center gap-2 rounded-[1.35rem] px-2.5 py-2.5 text-left transition-colors",
+          ? "group/rail-link flex flex-1 flex-col items-center justify-center gap-1.5 rounded-2xl px-2 py-2 text-center transition-colors"
+          : "group/rail-link flex w-full items-center gap-3 rounded-[1.45rem] px-3 py-3 text-left transition-[background-color,color,transform] duration-300",
         active
           ? "text-[#dfe2eb]"
-          : "text-[#8c909f] hover:text-[#dfe2eb]",
+          : "text-[#8c909f] hover:bg-white/[0.045] hover:text-[#dfe2eb]",
         compact && "hover:bg-white/5",
       )}
     >
       {compact ? (
-        <RailVisual item={item} active={active} compact />
+        <RailVisual item={item} active={active} compact animated={false} />
       ) : (
-        <span className="flex items-center justify-center">
-          <RailVisual item={item} active={active} />
+        <span className="flex shrink-0 items-center justify-center">
+          <RailVisual item={item} active={active} animated />
         </span>
       )}
       <span
         className={cn(
           compact
             ? "max-w-[5.25rem] truncate font-display text-[10px] uppercase tracking-[0.18em]"
-            : "min-w-0 overflow-hidden whitespace-nowrap font-display text-[11px] uppercase tracking-[0.28em] opacity-0 transition-all duration-300 group-hover/rail:translate-x-0 group-hover/rail:opacity-100",
-          !compact && "translate-x-2",
+            : "min-w-0 max-w-0 overflow-hidden whitespace-nowrap font-display text-[10.5px] uppercase tracking-[0.28em] opacity-0 transition-[max-width,opacity,transform] duration-300 group-hover/rail:max-w-[8.75rem] group-hover/rail:translate-x-0 group-hover/rail:opacity-100 group-focus-within/rail:max-w-[8.75rem] group-focus-within/rail:translate-x-0 group-focus-within/rail:opacity-100 group-hover/rail-link:text-[#eef3ff]",
+          !compact && "-translate-x-1",
         )}
       >
         {item.railLabel}
@@ -186,7 +189,7 @@ export default function Home() {
       <SpaceAtmosphere />
 
       <aside className="fixed left-6 top-1/2 z-30 hidden -translate-y-1/2 md:block">
-        <nav className="home-liquid-glass home-liquid-glass-rail group/rail flex w-20 flex-col gap-2.5 overflow-hidden rounded-[1.9rem] px-2.5 py-2.5 transition-[width] duration-500 hover:w-60">
+        <nav className="home-liquid-glass home-liquid-glass-rail group/rail flex w-[5.35rem] flex-col gap-1.5 overflow-hidden rounded-[1.9rem] px-3 py-3 transition-[width] duration-500 hover:w-[15.75rem] focus-within:w-[15.75rem]">
           {SIDE_RAIL_ITEMS.map((item) => (
             <RailLink key={item.href} item={item} setupComplete={setupComplete} />
           ))}
@@ -353,7 +356,7 @@ export default function Home() {
                           kind={item.kind ?? "chat"}
                           animated
                           size={92}
-                          className="shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
+                          className="shadow-[0_0_0_1px_rgba(255,255,255,0.04)] transition-transform duration-500 group-hover:-translate-y-1 group-hover:scale-[1.04]"
                         />
                         <span className="pointer-events-none absolute inset-[-10%] rounded-full border border-[rgba(143,179,255,0.1)] opacity-70 blur-[1px]" />
                       </div>
