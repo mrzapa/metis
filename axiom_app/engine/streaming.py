@@ -129,8 +129,12 @@ def stream_rag_answer(
                         sub_sources.extend(
                             s.to_dict() for s in sq_result.sources
                         )
-                    except Exception:  # noqa: BLE001
-                        pass
+                    except Exception as exc:  # noqa: BLE001
+                        import logging as _logging
+
+                        _logging.getLogger(__name__).debug(
+                            "Sub-query retrieval failed for %r: %s", sq, exc
+                        )
 
                 if len(all_ranked_lists) > 1:
                     from axiom_app.services.index_service import build_query_result

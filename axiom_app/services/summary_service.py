@@ -56,7 +56,8 @@ def _invoke_llm(llm: Any, system: str, user: str) -> str:
             {"type": "human", "content": user},
         ])
         return str(getattr(resp, "content", resp) or "").strip()
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        log.warning("LLM invocation failed during summarisation: %s", exc)
         return ""
 
 

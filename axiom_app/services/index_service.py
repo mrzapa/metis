@@ -797,7 +797,12 @@ def build_index_bundle(
                         post_message(
                             {"type": "log", "text": f"  {source}: summary generated"}
                         )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            import logging as _logging
+
+            _logging.getLogger(__name__).warning(
+                "Summary generation failed: %s", exc
+            )
             # Summary generation is best-effort; do not fail the build.
             if callable(post_message):
                 post_message(
