@@ -306,7 +306,7 @@ export default function BrainPage() {
   return (
     <PageChrome
       eyebrow="Brain"
-      title="Visualize your persistent companion brain"
+      title="Visualise your persistent companion brain"
       description="Explore how workspace structure, the Axiom Self, and learned companion memory connect."
       actions={
         <div className="flex w-full flex-wrap items-center gap-2">
