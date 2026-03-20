@@ -63,19 +63,19 @@ function stylizeModel(model: THREE.Object3D): void {
         : new THREE.Color("#e8c3b7");
 
     child.material = new THREE.MeshPhysicalMaterial({
-      color: baseColor.lerp(new THREE.Color("#f4d4c8"), 0.4),
+      color: baseColor.lerp(new THREE.Color("#f4d4c8"), 0.3),
       transparent: true,
-      opacity: 0.18,
-      roughness: 0.35,
-      metalness: 0.02,
-      transmission: 0.05,
-      clearcoat: 0.2,
+      opacity: 0.3,
+      roughness: 0.4,
+      metalness: 0.05,
+      transmission: 0.02,
+      clearcoat: 0.15,
       side: THREE.DoubleSide,
-      depthWrite: false,
+      depthWrite: true,
     });
     child.castShadow = false;
     child.receiveShadow = false;
-    child.renderOrder = -5;
+    child.renderOrder = -1;
   });
 }
 
@@ -126,15 +126,18 @@ function buildLightRig(): {
   const rig = new THREE.Group();
   rig.name = "brain-model-light-rig";
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.45);
-  const hemisphere = new THREE.HemisphereLight(0xf4c2b3, 0x0a1220, 0.6);
-  const keyLight = new THREE.DirectionalLight(0xfff3e8, 1.1);
-  const rimLight = new THREE.DirectionalLight(0xc2dbff, 0.65);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+  const hemisphere = new THREE.HemisphereLight(0xf4c2b3, 0x0a1220, 0.7);
+  const keyLight = new THREE.DirectionalLight(0xfff3e8, 1.2);
+  const rimLight = new THREE.DirectionalLight(0xc2dbff, 0.5);
+  const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+  fillLight.position.set(0, -1, 0.5);
 
   rig.add(ambient);
   rig.add(hemisphere);
   rig.add(keyLight);
   rig.add(rimLight);
+  rig.add(fillLight);
 
   return { rig, keyLight, rimLight };
 }
@@ -158,14 +161,14 @@ export async function loadBrainModelOverlay(
     const bounds = computeBounds(nodes);
     const center = bounds?.center ?? new THREE.Vector3(0, 0, 0);
     const maxDimension = Math.max(bounds?.maxDimension ?? 160, 120);
-    const targetScale = maxDimension * 0.65;
+    const targetScale = maxDimension * 1.3;
 
     root.position.copy(center);
     root.scale.setScalar(targetScale);
 
     lightRig.position.copy(center);
-    keyLight.position.set(center.x + maxDimension * 0.6, center.y + maxDimension * 0.45, center.z + maxDimension * 0.75);
-    rimLight.position.set(center.x - maxDimension * 0.5, center.y + maxDimension * 0.2, center.z - maxDimension * 0.65);
+    keyLight.position.set(center.x + targetScale * 0.8, center.y + targetScale * 0.6, center.z + targetScale);
+    rimLight.position.set(center.x - targetScale * 0.6, center.y + targetScale * 0.3, center.z - targetScale * 0.8);
   };
 
   const dispose = () => {

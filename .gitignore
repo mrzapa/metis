@@ -42,3 +42,7 @@ profiles/
 # Node / Next.js
 node_modules/
 .next/
+
+# Temp / CI artifacts
+.cache/
+.playwright-cli/

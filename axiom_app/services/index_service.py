@@ -352,7 +352,7 @@ def _build_hierarchical_sources(
         sources.append(source)
         focus_hint = ""
         if matched_previews:
-            focus_hint = f"\nMatched child hits:\n- " + "\n- ".join(preview[:220] for preview in matched_previews[:3])
+            focus_hint = "\nMatched child hits:\n- " + "\n- ".join(preview[:220] for preview in matched_previews[:3])
         context_parts.append(
             f"[{sid}] {source.source} > {source.section_hint or source.breadcrumb or source.source} "
             f"(score={best_score:.3f}, matched_children={len(child_hits)}):\n{source.snippet}{focus_hint}"
