@@ -2,8 +2,8 @@
 
 /**
  * BrainGraph - interactive SVG graph visualisation of indexes, sessions,
- * and categories. Supports zoom/pan, node drag, tooltip on hover, and
- * click-to-select with a detail side-panel.
+ * and categories. Supports zoom/pan, node drag, and click-to-select with
+ * a detail side-panel.
  *
  * Data is fetched from GET /v1/brain/graph and rendered as an SVG force
  * layout (positions are computed by the backend's apply_force_layout()).
@@ -111,7 +111,6 @@ const STYLE_CIRCLE: React.CSSProperties = {
   cursor: "pointer",
 };
 const STYLE_LABEL: React.CSSProperties = { pointerEvents: "none", userSelect: "none" };
-const STYLE_TOOLTIP_TEXT: React.CSSProperties = { pointerEvents: "none" };
 
 // -- Helpers -------------------------------------------------------------
 
@@ -168,7 +167,6 @@ export function BrainGraph({
 
   // Interaction state
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   // -- Refs mirroring state so callbacks stay stable -----------------------
   const transformRef = useRef(transform);
@@ -494,7 +492,6 @@ export function BrainGraph({
           const scope = scopeFromMetadata(node.metadata);
           const stroke = NODE_SCOPE_STROKE[scope];
           const isSelected = selectedId === node.node_id;
-          const isHovered = hoveredId === node.node_id;
           const dimmed = filterLower && !matchNode(node);
           const labelFontSize =
             node.node_type === "category" ? 9.5 : node.node_type === "assistant" ? 8.5 : 7.8;
@@ -508,26 +505,24 @@ export function BrainGraph({
               <circle
                 cx={pos.x}
                 cy={pos.y}
-                r={r + (isSelected ? 15 : isHovered ? 12 : 9)}
+                r={r + (isSelected ? 15 : 9)}
                 fill={fill}
-                fillOpacity={isSelected ? 0.12 : isHovered ? 0.1 : 0.06}
+                fillOpacity={isSelected ? 0.12 : 0.06}
                 filter="url(#brain-node-glow)"
                 pointerEvents="none"
               />
               <circle
                 cx={pos.x}
                 cy={pos.y}
-                r={r + (isSelected ? 3 : isHovered ? 1 : 0)}
+                r={r + (isSelected ? 3 : 0)}
                 fill={fill}
-                fillOpacity={isSelected ? 0.98 : isHovered ? 0.9 : 0.8}
+                fillOpacity={isSelected ? 0.98 : 0.8}
                 stroke={isSelected ? "var(--color-ring)" : stroke}
                 strokeWidth={isSelected ? 2.5 : scope === "assistant_self" ? 1.25 : 1}
                 style={STYLE_CIRCLE}
                 onPointerDown={(e) => onNodePointerDown(e, node.node_id)}
                 onPointerMove={onNodePointerMove}
                 onPointerUp={(e) => onNodePointerUp(e, node.node_id)}
-                onPointerEnter={() => setHoveredId(node.node_id)}
-                onPointerLeave={() => setHoveredId(null)}
               />
               <text
                 x={pos.x}
@@ -540,31 +535,6 @@ export function BrainGraph({
               >
                 {node.label.length > 18 ? `${node.label.slice(0, 17)}…` : node.label}
               </text>
-
-              {/* Tooltip */}
-              {isHovered && (
-                <g>
-                  <rect
-                    x={pos.x + r + 4}
-                    y={pos.y - 14}
-                    width={Math.min(node.label.length * 6 + 24, 200)}
-                    height={22}
-                    rx={4}
-                    fill="var(--color-popover)"
-                    stroke="var(--color-border)"
-                    strokeWidth={0.8}
-                  />
-                  <text
-                    x={pos.x + r + 12}
-                    y={pos.y + 3}
-                    fontSize={9}
-                    fill="var(--color-popover-foreground)"
-                    style={STYLE_TOOLTIP_TEXT}
-                  >
-                    {`[${SCOPE_LABEL[scope]} · ${node.node_type}] ${node.label}`}
-                  </text>
-                </g>
-              )}
             </g>
           );
         })}
