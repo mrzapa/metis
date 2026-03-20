@@ -66,6 +66,7 @@
   "api_key_perplexity": "",
   "chunk_size": 1000,
   "chunk_overlap": 100,
+  "chunk_strategy": "fixed",
   "document_loader": "auto",
   "structure_aware_ingestion": false,
   "semantic_layout_ingestion": false,

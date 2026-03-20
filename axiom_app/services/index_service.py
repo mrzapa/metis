@@ -23,6 +23,8 @@ from typing import Any, Callable
 
 from axiom_app.models.parity_types import IndexManifest
 from axiom_app.models.session_types import EvidenceSource
+from axiom_app.services.reranker import rerank_hits
+from axiom_app.services.semantic_chunker import chunk_text_semantic
 from axiom_app.utils.document_loader import load_document
 from axiom_app.utils.embedding_providers import create_embeddings
 from axiom_app.utils.knowledge_graph import (
@@ -693,10 +695,16 @@ def build_index_bundle(
     except (ValueError, ImportError):
         emb = MockEmbeddings(dimensions=_EMB_DIM)
 
+    chunk_strategy = str(
+        settings.get("chunk_strategy", "fixed") or "fixed"
+    ).strip().lower()
+
     all_chunks: list[dict[str, Any]] = []
     total_docs = max(1, len(documents))
     all_outline_nodes: list[dict[str, Any]] = []
     all_events: list[dict[str, Any]] = []
+    # Collect per-document raw chunks for optional summary generation.
+    per_doc_chunks: list[tuple[str, str, list[str]]] = []  # (source, path, chunks)
     for doc_idx, path in enumerate(documents, start=1):
         if cancel_token is not None and getattr(cancel_token, "cancelled", False):
             break
@@ -707,7 +715,8 @@ def build_index_bundle(
         outline_nodes = _extract_outline_nodes(text, str(path))
         all_outline_nodes.extend(outline_nodes)
         all_events.extend(_extract_events(text, source))
-        raw_chunks = chunk_text(text, chunk_size, overlap)
+        raw_chunks = chunk_text_semantic(text, chunk_size, overlap, strategy=chunk_strategy)
+        per_doc_chunks.append((source, str(path), list(raw_chunks)))
         search_cursor = 0
         for idx, chunk in enumerate(raw_chunks):
             char_start = text.find(chunk, search_cursor)
@@ -764,6 +773,37 @@ def build_index_bundle(
 
     if callable(post_message):
         post_message({"type": "status", "text": "Computing embeddings…"})
+
+    # ── Document summary generation (map-reduce) ──────────────────────
+    build_digest = settings.get("build_digest_index", False)
+    if build_digest and per_doc_chunks:
+        if callable(post_message):
+            post_message({"type": "status", "text": "Generating document summaries…"})
+        try:
+            from axiom_app.services.summary_service import (
+                build_summary_chunk,
+                generate_document_summary,
+            )
+            from axiom_app.utils.llm_providers import create_llm
+
+            llm = create_llm(settings)
+            for source, file_path, doc_chunk_texts in per_doc_chunks:
+                summary = generate_document_summary(doc_chunk_texts, llm)
+                if summary:
+                    all_chunks.append(
+                        build_summary_chunk(summary, source, file_path)
+                    )
+                    if callable(post_message):
+                        post_message(
+                            {"type": "log", "text": f"  {source}: summary generated"}
+                        )
+        except Exception:  # noqa: BLE001
+            # Summary generation is best-effort; do not fail the build.
+            if callable(post_message):
+                post_message(
+                    {"type": "log", "text": "  (summary generation skipped — LLM unavailable)"}
+                )
+
     embeddings = emb.embed_documents([chunk["text"] for chunk in all_chunks])
     graph, entity_to_chunks = build_knowledge_graph(
         [chunk["text"] for chunk in all_chunks]
@@ -809,6 +849,7 @@ def select_hit_indices(
 ) -> list[int]:
     top_k = int(settings.get("top_k", 3))
     kg_mode = str(settings.get("kg_query_mode", "hybrid") or "hybrid")
+    use_reranker = bool(settings.get("use_reranker", False))
     graph_hits: list[int] = []
     if bundle.knowledge_graph is not None and bundle.entity_to_chunks:
         graph_hits = collect_graph_chunk_candidates(
@@ -818,6 +859,9 @@ def select_hit_indices(
             mode=kg_mode,
             limit=max(top_k * 3, top_k),
         )
+
+    if use_reranker:
+        return rerank_hits(bundle, question, ranked_indices, graph_hits, settings)
 
     if kg_mode in {"naive", "bypass"} or not graph_hits:
         return ranked_indices[:top_k]
