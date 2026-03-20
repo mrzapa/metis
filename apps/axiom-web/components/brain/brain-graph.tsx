@@ -12,6 +12,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -99,6 +100,16 @@ const SCOPE_EDGE_STYLE: Record<
 
 const ALL_SCOPES: BrainScope[] = ["workspace", "assistant_self", "assistant_learned"];
 
+// -- Extracted inline styles (avoid object allocation per render) ---------
+
+const STYLE_OPACITY_TRANSITION: React.CSSProperties = { transition: "opacity 0.2s" };
+const STYLE_CIRCLE: React.CSSProperties = {
+  transition: "r 0.15s, fill-opacity 0.15s",
+  cursor: "pointer",
+};
+const STYLE_LABEL: React.CSSProperties = { pointerEvents: "none", userSelect: "none" };
+const STYLE_TOOLTIP_TEXT: React.CSSProperties = { pointerEvents: "none" };
+
 // -- Helpers -------------------------------------------------------------
 
 function worldBounds(nodes: BrainNode[]): {
@@ -156,6 +167,16 @@ export function BrainGraph({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
+  // -- Refs mirroring state so callbacks stay stable -----------------------
+  const transformRef = useRef(transform);
+  useEffect(() => { transformRef.current = transform; }, [transform]);
+
+  const positionsRef = useRef(positions);
+  useEffect(() => { positionsRef.current = positions; }, [positions]);
+
+  const selectedIdRef = useRef(selectedId);
+  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
+
   // Drag state stored in a ref so pointer-move handlers are always current
   const dragRef = useRef<{
     nodeId: string;
@@ -172,6 +193,9 @@ export function BrainGraph({
     startTx: number;
     startTy: number;
   } | null>(null);
+
+  // RAF handle for pointer-move throttling
+  const rafRef = useRef<number>(0);
 
   // Seed positions from graph data whenever data changes
   useEffect(() => {
@@ -229,26 +253,28 @@ export function BrainGraph({
   const onBgPointerDown = useCallback(
     (e: ReactPointerEvent<SVGElement>) => {
       if (e.button !== 0) return;
+      const t = transformRef.current;
       panRef.current = {
         startPx: e.clientX,
         startPy: e.clientY,
-        startTx: transform.tx,
-        startTy: transform.ty,
+        startTx: t.tx,
+        startTy: t.ty,
       };
       (e.target as SVGElement).setPointerCapture(e.pointerId);
     },
-    [transform],
+    [],
   );
 
   const onBgPointerMove = useCallback((e: ReactPointerEvent<SVGElement>) => {
     if (!panRef.current) return;
     const dx = e.clientX - panRef.current.startPx;
     const dy = e.clientY - panRef.current.startPy;
-    setTransform((prev) => ({
-      ...prev,
-      tx: panRef.current!.startTx + dx,
-      ty: panRef.current!.startTy + dy,
-    }));
+    const stx = panRef.current.startTx;
+    const sty = panRef.current.startTy;
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      setTransform((prev) => ({ ...prev, tx: stx + dx, ty: sty + dy }));
+    });
   }, []);
 
   const onBgPointerUp = useCallback(() => {
@@ -259,7 +285,7 @@ export function BrainGraph({
   const onNodePointerDown = useCallback(
     (e: ReactPointerEvent<SVGCircleElement>, nodeId: string) => {
       e.stopPropagation();
-      const pos = positions.get(nodeId) ?? { x: 0, y: 0 };
+      const pos = positionsRef.current.get(nodeId) ?? { x: 0, y: 0 };
       dragRef.current = {
         nodeId,
         startPx: e.clientX,
@@ -269,24 +295,28 @@ export function BrainGraph({
       };
       (e.target as SVGElement).setPointerCapture(e.pointerId);
     },
-    [positions],
+    [],
   );
 
   const onNodePointerMove = useCallback(
     (e: ReactPointerEvent<SVGCircleElement>) => {
       if (!dragRef.current) return;
-      const dx = (e.clientX - dragRef.current.startPx) / transform.scale;
-      const dy = (e.clientY - dragRef.current.startPy) / transform.scale;
-      setPositions((prev) => {
-        const next = new Map(prev);
-        next.set(dragRef.current!.nodeId, {
-          x: dragRef.current!.startNx + dx,
-          y: dragRef.current!.startNy + dy,
+      const s = transformRef.current.scale;
+      const dx = (e.clientX - dragRef.current.startPx) / s;
+      const dy = (e.clientY - dragRef.current.startPy) / s;
+      const nid = dragRef.current.nodeId;
+      const snx = dragRef.current.startNx;
+      const sny = dragRef.current.startNy;
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        setPositions((prev) => {
+          const next = new Map(prev);
+          next.set(nid, { x: snx + dx, y: sny + dy });
+          return next;
         });
-        return next;
       });
     },
-    [transform.scale],
+    [],
   );
 
   const onNodePointerUp = useCallback(
@@ -299,25 +329,41 @@ export function BrainGraph({
       dragRef.current = null;
       if (!wasDrag) {
         const node = data.nodes.find((n) => n.node_id === nodeId) ?? null;
-        const nextSelectedId = selectedId === nodeId ? null : nodeId;
+        const nextSelectedId = selectedIdRef.current === nodeId ? null : nodeId;
         setSelectedId(nextSelectedId);
         onNodeSelect?.(nextSelectedId ? node : null);
       }
     },
-    [data.nodes, onNodeSelect, selectedId],
+    [data.nodes, onNodeSelect],
   );
 
-  // -- Filtering ---------------------------------------------------------
-  const filterLower = filter.trim().toLowerCase();
-  const activeScopeSet = new Set(activeScopes.length > 0 ? activeScopes : ALL_SCOPES);
-  const nodeById = new Map(data.nodes.map((node) => [node.node_id, node] as const));
+  // -- Filtering (memoised) ---------------------------------------------
+  const filterLower = useMemo(() => filter.trim().toLowerCase(), [filter]);
 
-  const matchNode = (n: BrainNode) =>
-    !filterLower || n.label.toLowerCase().includes(filterLower);
+  const activeScopeSet = useMemo(
+    () => new Set(activeScopes.length > 0 ? activeScopes : ALL_SCOPES),
+    [activeScopes],
+  );
 
-  const isVisibleNode = (node: BrainNode) => activeScopeSet.has(scopeFromMetadata(node.metadata));
-  const isVisibleEdge = (edge: BrainEdge) =>
-    activeScopeSet.has(scopeFromMetadata(edge.metadata));
+  const nodeById = useMemo(
+    () => new Map(data.nodes.map((node) => [node.node_id, node] as const)),
+    [data.nodes],
+  );
+
+  const matchNode = useCallback(
+    (n: BrainNode) => !filterLower || n.label.toLowerCase().includes(filterLower),
+    [filterLower],
+  );
+
+  const isVisibleNode = useCallback(
+    (node: BrainNode) => activeScopeSet.has(scopeFromMetadata(node.metadata)),
+    [activeScopeSet],
+  );
+
+  const isVisibleEdge = useCallback(
+    (edge: BrainEdge) => activeScopeSet.has(scopeFromMetadata(edge.metadata)),
+    [activeScopeSet],
+  );
 
   useEffect(() => {
     if (!selectedId) return;
@@ -330,6 +376,11 @@ export function BrainGraph({
     }
   }, [activeScopes, data.nodes, onNodeSelect, selectedId]);
 
+  // Clean up pending RAF on unmount
+  useEffect(() => {
+    return () => cancelAnimationFrame(rafRef.current);
+  }, []);
+
   // -- Render ------------------------------------------------------------
   const { tx, ty, scale } = transform;
 
@@ -338,9 +389,7 @@ export function BrainGraph({
       ref={svgRef}
       className={`h-full w-full select-none cursor-grab active:cursor-grabbing ${className}`}
       onPointerDown={onBgPointerDown}
-      onPointerMove={(e) => {
-        onBgPointerMove(e);
-      }}
+      onPointerMove={onBgPointerMove}
       onPointerUp={onBgPointerUp}
       onPointerCancel={onBgPointerUp}
       aria-label="Brain graph"
@@ -410,7 +459,7 @@ export function BrainGraph({
             <g
               key={node.node_id}
               opacity={dimmed ? 0.2 : 1}
-              style={{ transition: "opacity 0.2s" }}
+              style={STYLE_OPACITY_TRANSITION}
             >
               <circle
                 cx={pos.x}
@@ -420,7 +469,7 @@ export function BrainGraph({
                 fillOpacity={isSelected ? 0.98 : isHovered ? 0.9 : 0.8}
                 stroke={isSelected ? "var(--color-ring)" : stroke}
                 strokeWidth={isSelected ? 2.5 : scope === "assistant_self" ? 1.25 : 1}
-                style={{ transition: "r 0.15s, fill-opacity 0.15s", cursor: "pointer" }}
+                style={STYLE_CIRCLE}
                 onPointerDown={(e) => onNodePointerDown(e, node.node_id)}
                 onPointerMove={onNodePointerMove}
                 onPointerUp={(e) => onNodePointerUp(e, node.node_id)}
@@ -434,7 +483,7 @@ export function BrainGraph({
                 fontSize={labelFontSize}
                 fill="var(--color-foreground)"
                 fillOpacity={0.85}
-                style={{ pointerEvents: "none", userSelect: "none" }}
+                style={STYLE_LABEL}
               >
                 {node.label.length > 18 ? `${node.label.slice(0, 17)}…` : node.label}
               </text>
@@ -457,7 +506,7 @@ export function BrainGraph({
                     y={pos.y + 3}
                     fontSize={9}
                     fill="var(--color-popover-foreground)"
-                    style={{ pointerEvents: "none" }}
+                    style={STYLE_TOOLTIP_TEXT}
                   >
                     {`[${SCOPE_LABEL[scope]} · ${node.node_type}] ${node.label}`}
                   </text>
