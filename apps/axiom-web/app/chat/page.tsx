@@ -7,8 +7,8 @@ import { ChatPanel } from "@/components/chat/chat-panel";
 import { EvidencePanel } from "@/components/chat/evidence-panel";
 import { Badge } from "@/components/ui/badge";
 import { PageChrome } from "@/components/shell/page-chrome";
-import { fetchSession, fetchSettings, updateSettings, queryDirect, queryRagStream, submitRunAction, createSession } from "@/lib/api";
-import type { SessionSummary, TraceEvent } from "@/lib/api";
+import { createSession, fetchSession, fetchSettings, queryDirect, queryKnowledgeSearch, queryRagStream, submitRunAction, updateSettings } from "@/lib/api";
+import type { RetrievalFallback, SessionSummary, TraceEvent } from "@/lib/api";
 import type { RagStreamEvent } from "@/lib/api";
 import type { EvidenceSource } from "@/lib/chat-types";
 import { useChatTranscript } from "@/app/chat/use-chat-transcript";
@@ -20,10 +20,12 @@ import {
 } from "@/app/chat/rag-stream-resume";
 
 type StopStreamReason = "user" | "navigation";
+const KNOWLEDGE_SEARCH_MODE = "Knowledge Search";
 
 interface ActiveRagStream {
   assistantMessageId: string;
   controller: AbortController;
+  fallback: RetrievalFallback | null;
   pendingSources: EvidenceSource[];
   requestId: number;
   runId: string;
@@ -80,6 +82,29 @@ function createClientRunId(): string {
     return crypto.randomUUID();
   }
   return `rag-run-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function mergeEvidenceSources(
+  existing: EvidenceSource[],
+  incoming: EvidenceSource[],
+): EvidenceSource[] {
+  const merged = [...existing];
+  const seen = new Set(
+    existing.map((source) => String(source.chunk_id || source.sid || source.snippet || "")),
+  );
+
+  for (const source of incoming) {
+    const key = String(source.chunk_id || source.sid || source.snippet || "");
+    if (key && seen.has(key)) {
+      continue;
+    }
+    if (key) {
+      seen.add(key);
+    }
+    merged.push(source);
+  }
+
+  return merged;
 }
 
 function buildResumableRagRunState(
@@ -151,6 +176,7 @@ export default function ChatPage() {
   const [initialDraft, setInitialDraft] = useState("");
   const [sessionRefreshToken, setSessionRefreshToken] = useState(0);
   const [selectedRagMode, setSelectedRagMode] = useState<string>("Q&A");
+  const [latestFallback, setLatestFallback] = useState<RetrievalFallback | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const {
     createMessage,
@@ -176,6 +202,7 @@ export default function ChatPage() {
     messages,
     latestRunId,
     latestSources,
+    latestAnswer,
     runIdsNewestFirst,
   } = useChatTranscript();
   const companionSessionId = selectedId ?? sessionMeta?.session_id ?? null;
@@ -202,6 +229,7 @@ export default function ChatPage() {
       activeRagStreamRef.current = null;
       activeStream.controller.abort();
       setIsStreamingRag(false);
+      setLatestFallback(activeStream.fallback);
       publishResumableRun(null);
 
       if (reason !== "user") return;
@@ -393,14 +421,16 @@ export default function ChatPage() {
 
       try {
         const detail = await fetchSession(id);
-        setSessionMessages(detail.messages);
-        setSessionMeta(detail.summary);
-      } catch (error) {
+      setSessionMessages(detail.messages);
+      setSessionMeta(detail.summary);
+      setLatestFallback(null);
+    } catch (error) {
         setSessionError(
           error instanceof Error ? error.message : "Failed to load session",
         );
-        reset();
-        setSessionMeta(null);
+      reset();
+      setSessionMeta(null);
+      setLatestFallback(null);
       } finally {
         setLoadingSession(false);
       }
@@ -454,6 +484,7 @@ export default function ChatPage() {
           sources: [],
         }),
       ]);
+      setLatestFallback(null);
 
       const sessionId = await autoCreateSession(prompt);
 
@@ -547,6 +578,7 @@ export default function ChatPage() {
         const activeStream: ActiveRagStream = {
           assistantMessageId,
           controller,
+          fallback: null,
           pendingSources: [...initialPendingSources],
           requestId,
           runId,
@@ -649,6 +681,26 @@ export default function ChatPage() {
                     },
                   });
                   break;
+                case "retrieval_augmented": {
+                  const mergedSources = mergeEvidenceSources(
+                    currentStream.pendingSources,
+                    event.sources,
+                  );
+                  currentStream.pendingSources = mergedSources;
+                  setRunPendingSources(resolvedRunId, mergedSources);
+                  appendTraceEvent(currentStream, {
+                    run_id: resolvedRunId,
+                    event_id: eventId !== null ? String(eventId) : undefined,
+                    stage: "retrieval",
+                    event_type: "retrieval_augmented",
+                    timestamp: new Date().toISOString(),
+                    payload: {
+                      sources_count: event.sources.length,
+                      top_score: event.top_score,
+                    },
+                  });
+                  break;
+                }
                 case "subqueries":
                   currentStream.subQueries = event.queries;
                   setRunSubqueries(resolvedRunId, event.queries);
@@ -659,6 +711,63 @@ export default function ChatPage() {
                     event_type: "subqueries",
                     timestamp: new Date().toISOString(),
                     payload: { queries: event.queries },
+                  });
+                  break;
+                case "iteration_start":
+                  appendTraceEvent(currentStream, {
+                    run_id: resolvedRunId,
+                    event_id: eventId !== null ? String(eventId) : undefined,
+                    stage: "reflection",
+                    event_type: "iteration_start",
+                    timestamp: new Date().toISOString(),
+                    iteration: event.iteration,
+                    payload: {
+                      total_iterations: event.total_iterations,
+                    },
+                  });
+                  break;
+                case "gaps_identified":
+                  appendTraceEvent(currentStream, {
+                    run_id: resolvedRunId,
+                    event_id: eventId !== null ? String(eventId) : undefined,
+                    stage: "reflection",
+                    event_type: "gaps_identified",
+                    timestamp: new Date().toISOString(),
+                    iteration: event.iteration,
+                    payload: { gaps: event.gaps },
+                  });
+                  break;
+                case "refinement_retrieval": {
+                  const mergedSources = mergeEvidenceSources(
+                    currentStream.pendingSources,
+                    event.sources,
+                  );
+                  currentStream.pendingSources = mergedSources;
+                  setRunPendingSources(resolvedRunId, mergedSources);
+                  appendTraceEvent(currentStream, {
+                    run_id: resolvedRunId,
+                    event_id: eventId !== null ? String(eventId) : undefined,
+                    stage: "retrieval",
+                    event_type: "refinement_retrieval",
+                    timestamp: new Date().toISOString(),
+                    iteration: event.iteration,
+                    payload: {
+                      sources_count: event.sources.length,
+                      top_score: event.top_score,
+                    },
+                  });
+                  break;
+                }
+                case "fallback_decision":
+                  currentStream.fallback = event.fallback ?? null;
+                  setLatestFallback(event.fallback ?? null);
+                  appendTraceEvent(currentStream, {
+                    run_id: resolvedRunId,
+                    event_id: eventId !== null ? String(eventId) : undefined,
+                    stage: "fallback",
+                    event_type: "fallback_decision",
+                    timestamp: new Date().toISOString(),
+                    payload: { fallback: event.fallback },
                   });
                   break;
                 case "token":
@@ -681,8 +790,10 @@ export default function ChatPage() {
                     payload: {
                       answer_length: event.answer_text.length,
                       sources_count: finalSources.length,
+                      fallback_triggered: Boolean(event.fallback?.triggered ?? currentStream.fallback?.triggered),
                     },
                   });
+                  setLatestFallback(event.fallback ?? currentStream.fallback);
                   activeRagStreamRef.current = null;
                   setIsStreamingRag(false);
                   publishResumableRun(null);
@@ -692,6 +803,7 @@ export default function ChatPage() {
                 case "action_required":
                   activeRagStreamRef.current = null;
                   setIsStreamingRag(false);
+                  setLatestFallback(null);
                   publishResumableRun(null);
                   markRunActionRequired(
                     resolvedRunId,
@@ -710,6 +822,7 @@ export default function ChatPage() {
                   });
                   activeRagStreamRef.current = null;
                   setIsStreamingRag(false);
+                  setLatestFallback(null);
                   publishResumableRun(null);
                   if (currentStream.hasBoundRun) {
                     markRunError(resolvedRunId, event.message);
@@ -798,12 +911,71 @@ export default function ChatPage() {
 
       stopRagStream("navigation");
       publishResumableRun(null);
+      setLatestFallback(null);
 
       const sessionId = await autoCreateSession(question);
+      const isKnowledgeSearch = selectedRagMode === KNOWLEDGE_SEARCH_MODE;
 
       const userMessageTs = new Date().toISOString();
-      const assistantMessageTs = new Date().toISOString();
       const runId = createClientRunId();
+
+      appendMessages([
+        createMessage({
+          role: "user",
+          content: question,
+          ts: userMessageTs,
+          run_id: "",
+          sources: [],
+          query_mode: isKnowledgeSearch ? "knowledge_search" : "rag",
+        }),
+      ]);
+      setLiveTraceEvents([]);
+
+      if (isKnowledgeSearch) {
+        setIsSending(true);
+        try {
+          if (!settingsRef.current) {
+            settingsRef.current = await fetchSettings();
+          }
+
+          const ragSettings = { ...settingsRef.current, selected_mode: selectedRagMode };
+          const result = await queryKnowledgeSearch(activeIndexPath, question, ragSettings, {
+            runId,
+            sessionId,
+          });
+          setLatestFallback(result.fallback ?? null);
+          appendCompletedRunMessage(
+            createMessage({
+              role: "assistant",
+              content: result.summary_text,
+              ts: new Date().toISOString(),
+              run_id: result.run_id,
+              sources: result.sources,
+              query_mode: "knowledge_search",
+            }),
+          );
+        } catch (error) {
+          appendMessages([
+            createMessage(
+              {
+                role: "assistant",
+                content:
+                  error instanceof Error ? error.message : "An error occurred.",
+                ts: new Date().toISOString(),
+                run_id: "",
+                sources: [],
+                query_mode: "knowledge_search",
+              },
+              { status: "error" },
+            ),
+          ]);
+        } finally {
+          setIsSending(false);
+        }
+        return;
+      }
+
+      const assistantMessageTs = new Date().toISOString();
       const assistantMessage = createMessage(
         {
           role: "assistant",
@@ -816,18 +988,7 @@ export default function ChatPage() {
         { status: "streaming" },
       );
 
-      appendMessages([
-        createMessage({
-          role: "user",
-          content: question,
-          ts: userMessageTs,
-          run_id: "",
-          sources: [],
-          query_mode: "rag",
-        }),
-        assistantMessage,
-      ]);
-      setLiveTraceEvents([]);
+      appendMessages([assistantMessage]);
 
       await startRagStream({
         assistantMessageId: assistantMessage.id,
@@ -852,7 +1013,9 @@ export default function ChatPage() {
       autoCreateSession,
       createMessage,
       isStreamingRag,
+      selectedRagMode,
       publishResumableRun,
+      appendCompletedRunMessage,
       startRagStream,
       stopRagStream,
     ],
@@ -906,6 +1069,7 @@ export default function ChatPage() {
     setLoadingSession(false);
     setSessionError(null);
     setLiveTraceEvents([]);
+    setLatestFallback(null);
     applyShellPosture(agenticMode);
   }, [agenticMode, applyShellPosture, publishResumableRun, reset, stopRagStream]);
 
@@ -1052,6 +1216,9 @@ export default function ChatPage() {
                   sources={latestSources}
                   runIds={runIdsNewestFirst}
                   latestRunId={latestRunId}
+                  selectedMode={selectedRagMode}
+                  latestAnswer={latestAnswer}
+                  fallback={latestFallback}
                   liveTraceEvents={liveTraceEvents}
                   isStreaming={isStreamingRag}
                   preferredTab={preferredEvidenceTab}

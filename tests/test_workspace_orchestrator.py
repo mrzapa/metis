@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from axiom_app.engine.querying import DirectQueryRequest, RagQueryRequest
 from axiom_app.models.brain_graph import BrainGraph
 from axiom_app.models.parity_types import SkillDefinition
 from axiom_app.models.session_types import SessionDetail, SessionSummary
@@ -289,6 +290,37 @@ class TestRunRagQuery:
             context_block="context",
             top_score=0.91,
             selected_mode="Q&A",
+            retrieval_plan={
+                "stages": [
+                    {
+                        "stage_type": "retrieval_complete",
+                        "payload": {
+                            "sources": [{"sid": "S1", "source": "doc.txt", "snippet": "evidence"}],
+                            "context_block": "context",
+                            "top_score": 0.91,
+                        },
+                    },
+                    {
+                        "stage_type": "fallback_decision",
+                        "payload": {
+                            "triggered": False,
+                            "strategy": "synthesize_anyway",
+                            "reason": "",
+                            "min_score": 0.15,
+                            "observed_score": 0.91,
+                            "message": "ok",
+                        },
+                    },
+                ]
+            },
+            fallback={
+                "triggered": False,
+                "strategy": "synthesize_anyway",
+                "reason": "",
+                "min_score": 0.15,
+                "observed_score": 0.91,
+                "message": "ok",
+            },
         )
         session_repo = MagicMock()
         session_repo.get_session.return_value = None
@@ -372,7 +404,11 @@ class TestRunRagQuery:
             "session_id": "s1",
             "run_id": "run-1",
         }
-        assert trace_append.call_count == 2
+        assert [call.kwargs["event_type"] for call in trace_append.call_args_list] == [
+            "retrieval_complete",
+            "fallback_decision",
+            "final",
+        ]
 
 
 class TestRunDirectQuery:
@@ -476,6 +512,137 @@ class TestRunDirectQuery:
         assert trace_append.call_count == 1
 
 
+class TestRunKnowledgeSearch:
+    def test_session_id_persists_search_summary_and_sources(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from axiom_app.engine.querying import KnowledgeSearchRequest
+
+        fake_result = MagicMock(
+            run_id="run-search-1",
+            summary_text="Found 2 relevant passages.",
+            sources=[{"sid": "S1", "source": "doc.txt", "snippet": "evidence"}],
+            context_block="context",
+            top_score=0.77,
+            selected_mode="Knowledge Search",
+            fallback={"triggered": False, "strategy": "synthesize_anyway"},
+        )
+        session_repo = MagicMock()
+        session_repo.get_session.return_value = None
+        session_repo.upsert_session.return_value = _make_summary("s-search")
+        assistant_service = MagicMock()
+        assistant_service.get_snapshot.return_value = {"identity": {"name": "Companion"}}
+        orch = _make_orchestrator(session_repo=session_repo, assistant_service=assistant_service)
+        trace_append = MagicMock()
+        orch._trace_store.append_event = trace_append  # type: ignore[method-assign]
+
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            lambda: {
+                "selected_mode": "Knowledge Search",
+                "llm_provider": "mock",
+                "top_k": 4,
+            },
+        )
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator.knowledge_search",
+            lambda req: fake_result,
+        )
+
+        req = KnowledgeSearchRequest(
+            manifest_path="/tmp/manifest.json",
+            question="Find evidence",
+            settings={"selected_mode": "Knowledge Search"},
+        )
+        result = orch.run_knowledge_search(req, session_id="s-search")
+
+        assert result is fake_result
+        assert session_repo.append_message.call_args_list[0].kwargs["role"] == "user"
+        assert session_repo.append_message.call_args_list[1].kwargs["role"] == "assistant"
+        assert session_repo.append_message.call_args_list[1].kwargs["run_id"] == "run-search-1"
+        assert trace_append.call_args.kwargs["event_type"] == "knowledge_search_complete"
+
+    def test_records_retrieval_plan_stages_before_completion(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from axiom_app.engine.querying import KnowledgeSearchRequest
+
+        fake_result = MagicMock(
+            run_id="run-search-2",
+            summary_text="Found 2 relevant passages.",
+            sources=[{"sid": "S2", "source": "doc.txt", "snippet": "augmented evidence"}],
+            context_block="context",
+            top_score=0.88,
+            selected_mode="Knowledge Search",
+            retrieval_plan={
+                "stages": [
+                    {
+                        "stage_type": "retrieval_complete",
+                        "payload": {
+                            "sources": [{"sid": "S1"}],
+                            "context_block": "ctx",
+                            "top_score": 0.5,
+                        },
+                    },
+                    {
+                        "stage_type": "query_expansion",
+                        "payload": {"queries": ["ada algorithm"]},
+                    },
+                    {
+                        "stage_type": "fallback_decision",
+                        "payload": {
+                            "triggered": False,
+                            "strategy": "synthesize_anyway",
+                            "reason": "",
+                            "min_score": 0.15,
+                            "observed_score": 0.88,
+                            "message": "ok",
+                        },
+                    },
+                ]
+            },
+            fallback={
+                "triggered": False,
+                "strategy": "synthesize_anyway",
+                "reason": "",
+                "min_score": 0.15,
+                "observed_score": 0.88,
+                "message": "ok",
+            },
+        )
+        orch = _make_orchestrator()
+        trace_append = MagicMock()
+        orch._trace_store.append_event = trace_append  # type: ignore[method-assign]
+
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            lambda: {"selected_mode": "Knowledge Search", "llm_provider": "mock"},
+        )
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator.knowledge_search",
+            lambda req: fake_result,
+        )
+
+        req = KnowledgeSearchRequest(
+            manifest_path="/tmp/manifest.json",
+            question="Find evidence",
+            settings={"selected_mode": "Knowledge Search"},
+        )
+        orch.run_knowledge_search(req)
+
+        event_types = [call.kwargs["event_type"] for call in trace_append.call_args_list]
+        stages = [call.kwargs["stage"] for call in trace_append.call_args_list]
+
+        assert event_types == [
+            "retrieval_complete",
+            "subqueries",
+            "fallback_decision",
+            "knowledge_search_complete",
+        ]
+        assert stages == ["retrieval", "retrieval", "fallback", "retrieval"]
+        assert trace_append.call_args_list[-1].kwargs["payload"]["fallback"] == fake_result.fallback
+
+
 class TestStreamRagQuery:
     def test_delegates_to_stream_rag_answer(self, monkeypatch: pytest.MonkeyPatch) -> None:
         events = [{"type": "token", "text": "hello"}]
@@ -543,6 +710,72 @@ class TestStreamRagQuery:
         }
         assert trace_append.call_count == 2
 
+    def test_retrieval_augmented_updates_pending_sources_for_final_message(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from axiom_app.engine.querying import RagQueryRequest
+
+        session_repo = MagicMock()
+        session_repo.get_session.return_value = None
+        session_repo.upsert_session.return_value = _make_summary("s4")
+        assistant_service = MagicMock()
+        assistant_service.get_snapshot.return_value = {"identity": {"name": "Companion"}}
+        assistant_service.reflect.return_value = {"ok": True}
+        orch = _make_orchestrator(session_repo=session_repo, assistant_service=assistant_service)
+        trace_append = MagicMock()
+        orch._trace_store.append_event = trace_append  # type: ignore[method-assign]
+
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            lambda: {"selected_mode": "Research", "llm_provider": "mock"},
+        )
+        monkeypatch.setattr(
+            "axiom_app.services.workspace_orchestrator.stream_rag_answer",
+            lambda req, cancel_token=None: iter(
+                [
+                    {
+                        "type": "retrieval_complete",
+                        "run_id": "run-aug-1",
+                        "sources": [{"sid": "S1", "source": "doc", "snippet": "initial evidence"}],
+                    },
+                    {
+                        "type": "retrieval_augmented",
+                        "run_id": "run-aug-1",
+                        "sources": [{"sid": "S2", "source": "doc", "snippet": "augmented evidence"}],
+                    },
+                    {
+                        "type": "final",
+                        "run_id": "run-aug-1",
+                        "answer_text": "done",
+                        "fallback": {"triggered": False, "strategy": "synthesize_anyway"},
+                    },
+                ]
+            ),
+        )
+
+        req = RagQueryRequest(
+            manifest_path="/tmp/m.json",
+            question="?",
+            settings={"selected_mode": "Research"},
+            run_id="run-aug-1",
+        )
+        result = list(orch.stream_rag_query(req, session_id="s4"))
+
+        assert [item["type"] for item in result] == [
+            "retrieval_complete",
+            "retrieval_augmented",
+            "final",
+        ]
+        assistant_message = session_repo.append_message.call_args_list[1].kwargs
+        assert assistant_message["role"] == "assistant"
+        assert assistant_message["run_id"] == "run-aug-1"
+        assert [source.sid for source in assistant_message["sources"]] == ["S2"]
+        assert [call.kwargs["event_type"] for call in trace_append.call_args_list] == [
+            "retrieval_complete",
+            "retrieval_augmented",
+            "final",
+        ]
+
 
 class TestTraceHooks:
     def test_records_non_token_events_and_maps_stages(self) -> None:
@@ -559,15 +792,29 @@ class TestTraceHooks:
             "run-4",
             {"type": "final", "run_id": "run-4", "answer_text": "done"},
         )
+        orch._record_trace_event(
+            "run-4",
+            {"type": "fallback_decision", "run_id": "run-4", "fallback": {"triggered": True}},
+        )
+        orch._record_trace_event(
+            "run-4",
+            {"type": "knowledge_search_complete", "run_id": "run-4", "sources": [{"sid": "S1"}]},
+        )
 
-        assert append_event.call_count == 2
+        assert append_event.call_count == 4
         first_call = append_event.call_args_list[0].kwargs
         second_call = append_event.call_args_list[1].kwargs
+        third_call = append_event.call_args_list[2].kwargs
+        fourth_call = append_event.call_args_list[3].kwargs
         assert first_call["stage"] == "retrieval"
         assert first_call["event_type"] == "retrieval_complete"
         assert first_call["payload"] == {"sources": [{"sid": "S1"}]}
         assert second_call["stage"] == "synthesis"
         assert second_call["event_type"] == "final"
+        assert third_call["stage"] == "fallback"
+        assert third_call["event_type"] == "fallback_decision"
+        assert fourth_call["stage"] == "retrieval"
+        assert fourth_call["event_type"] == "knowledge_search_complete"
 
 
 class TestReflectionHooks:

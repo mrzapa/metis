@@ -6,6 +6,21 @@ export interface EvidenceSource {
   score: number | null;
   breadcrumb: string;
   section_hint: string;
+  chunk_id?: string;
+  chunk_idx?: number | null;
+  label?: string;
+  locator?: string;
+  anchor?: string;
+  header_path?: string;
+  excerpt?: string;
+  file_path?: string;
+  date?: string;
+  timestamp?: string;
+  speaker?: string;
+  actor?: string;
+  entry_type?: string;
+  type?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ActionRequiredAction {

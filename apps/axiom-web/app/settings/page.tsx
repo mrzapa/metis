@@ -32,11 +32,17 @@ const schema = z.object({
   // ── Advanced Retrieval ────────────────────────────────────────────────────
   chunk_size: z.number().int().min(100, "Min 100").max(10000, "Max 10000"),
   chunk_overlap: z.number().int().min(0, "Min 0").max(500, "Max 500"),
+  parent_chunk_size: z.number().int().min(200, "Min 200").max(50000, "Max 50000"),
+  parent_chunk_overlap: z.number().int().min(0, "Min 0").max(10000, "Max 10000"),
   retrieval_k: z.number().int().min(1, "Min 1").max(200, "Max 200"),
   top_k: z.number().int().min(1, "Min 1").max(50, "Max 50"),
+  knowledge_search_top_k: z.number().int().min(1, "Min 1").max(50, "Max 50"),
   retrieval_mode: z.string().min(1),
   search_type: z.string().min(1),
   mmr_lambda: z.number().min(0).max(1),
+  retrieval_min_score: z.number().min(0).max(1),
+  fallback_strategy: z.string().min(1),
+  fallback_message: z.string(),
   use_reranker: z.boolean(),
   use_sub_queries: z.boolean(),
   enable_summarizer: z.boolean(),
@@ -74,10 +80,11 @@ type FormValues = z.infer<typeof schema>;
 
 type AssistantFormValues = AssistantSettings;
 
-const RETRIEVAL_MODES = ["flat", "mmr", "hybrid"];
+const RETRIEVAL_MODES = ["flat", "mmr", "hybrid", "hierarchical"];
 const SEARCH_TYPES = ["similarity", "mmr"];
 const OUTPUT_STYLES = ["Default answer", "Concise", "Detailed", "Bullet points"];
-const SKILL_MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"];
+const SKILL_MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack", "Knowledge Search"];
+const FALLBACK_STRATEGIES = ["synthesize_anyway", "no_answer"];
 const KG_QUERY_MODES = ["hybrid", "vector", "keyword"];
 const COMPREHENSION_DEPTHS = ["Standard", "Deep", "Exhaustive"];
 
@@ -212,11 +219,18 @@ export default function SettingsPage() {
       // Advanced Retrieval
       chunk_size: 1000,
       chunk_overlap: 100,
+      parent_chunk_size: 2800,
+      parent_chunk_overlap: 320,
       retrieval_k: 25,
       top_k: 5,
+      knowledge_search_top_k: 8,
       retrieval_mode: "flat",
       search_type: "similarity",
       mmr_lambda: 0.5,
+      retrieval_min_score: 0.15,
+      fallback_strategy: "synthesize_anyway",
+      fallback_message:
+        "I couldn't find enough grounded evidence in the selected index to answer confidently. Try Knowledge Search, increase retrieval depth, or rephrase the question.",
       use_reranker: true,
       use_sub_queries: true,
       enable_summarizer: true,
@@ -279,11 +293,19 @@ export default function SettingsPage() {
           // Advanced Retrieval
           chunk_size: (raw.chunk_size as number) ?? 1000,
           chunk_overlap: (raw.chunk_overlap as number) ?? 100,
+          parent_chunk_size: (raw.parent_chunk_size as number) ?? 2800,
+          parent_chunk_overlap: (raw.parent_chunk_overlap as number) ?? 320,
           retrieval_k: (raw.retrieval_k as number) ?? 25,
           top_k: (raw.top_k as number) ?? 5,
+          knowledge_search_top_k: (raw.knowledge_search_top_k as number) ?? 8,
           retrieval_mode: (raw.retrieval_mode as string) ?? "flat",
           search_type: (raw.search_type as string) ?? "similarity",
           mmr_lambda: (raw.mmr_lambda as number) ?? 0.5,
+          retrieval_min_score: (raw.retrieval_min_score as number) ?? 0.15,
+          fallback_strategy: (raw.fallback_strategy as string) ?? "synthesize_anyway",
+          fallback_message:
+            (raw.fallback_message as string) ??
+            "I couldn't find enough grounded evidence in the selected index to answer confidently. Try Knowledge Search, increase retrieval depth, or rephrase the question.",
           use_reranker: (raw.use_reranker as boolean) ?? true,
           use_sub_queries: (raw.use_sub_queries as boolean) ?? true,
           enable_summarizer: (raw.enable_summarizer as boolean) ?? true,
@@ -570,6 +592,28 @@ export default function SettingsPage() {
                       <FieldError message={errors.chunk_overlap?.message} />
                     </div>
                     <div className="space-y-1.5">
+                      <FieldLabel htmlFor="parent_chunk_size">Parent chunk size</FieldLabel>
+                      <Input
+                        id="parent_chunk_size"
+                        type="number"
+                        min={200}
+                        max={50000}
+                        {...register("parent_chunk_size", { valueAsNumber: true })}
+                      />
+                      <FieldError message={errors.parent_chunk_size?.message} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <FieldLabel htmlFor="parent_chunk_overlap">Parent chunk overlap</FieldLabel>
+                      <Input
+                        id="parent_chunk_overlap"
+                        type="number"
+                        min={0}
+                        max={10000}
+                        {...register("parent_chunk_overlap", { valueAsNumber: true })}
+                      />
+                      <FieldError message={errors.parent_chunk_overlap?.message} />
+                    </div>
+                    <div className="space-y-1.5">
                       <FieldLabel htmlFor="retrieval_k">
                         Retrieval k{" "}
                         <span className="font-normal text-muted-foreground">(candidates)</span>
@@ -597,6 +641,19 @@ export default function SettingsPage() {
                       />
                       <FieldError message={errors.top_k?.message} />
                     </div>
+                    <div className="space-y-1.5">
+                      <FieldLabel htmlFor="knowledge_search_top_k">
+                        Knowledge Search top k
+                      </FieldLabel>
+                      <Input
+                        id="knowledge_search_top_k"
+                        type="number"
+                        min={1}
+                        max={50}
+                        {...register("knowledge_search_top_k", { valueAsNumber: true })}
+                      />
+                      <FieldError message={errors.knowledge_search_top_k?.message} />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -621,6 +678,30 @@ export default function SettingsPage() {
                       >
                         {SEARCH_TYPES.map((t) => (
                           <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <FieldLabel htmlFor="retrieval_min_score">Retrieval min score</FieldLabel>
+                      <Input
+                        id="retrieval_min_score"
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        {...register("retrieval_min_score", { valueAsNumber: true })}
+                      />
+                      <FieldError message={errors.retrieval_min_score?.message} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <FieldLabel htmlFor="fallback_strategy">Fallback strategy</FieldLabel>
+                      <select
+                        id="fallback_strategy"
+                        {...register("fallback_strategy")}
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        {FALLBACK_STRATEGIES.map((strategy) => (
+                          <option key={strategy} value={strategy}>{strategy}</option>
                         ))}
                       </select>
                     </div>
@@ -688,6 +769,20 @@ export default function SettingsPage() {
                       />
                       <FieldError message={errors.agentic_max_iterations?.message} />
                     </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <FieldLabel htmlFor="fallback_message">Fallback message</FieldLabel>
+                    <textarea
+                      id="fallback_message"
+                      rows={3}
+                      {...register("fallback_message")}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                      placeholder="Shown when the retrieval score falls below the configured threshold."
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Used when retrieval quality is below the minimum score threshold.
+                    </p>
                   </div>
 
                   <div className="space-y-2">

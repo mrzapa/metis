@@ -154,6 +154,38 @@ def test_stream_rag_answer_research_mode_emits_subqueries(tmp_path, monkeypatch)
     json.dumps(sq_event)  # must be JSON-serialisable
 
 
+def test_stream_rag_answer_research_mode_emits_retrieval_augmented(tmp_path, monkeypatch) -> None:
+    build_result = _build_test_index(tmp_path, monkeypatch)
+
+    monkeypatch.setattr(
+        engine_streaming,
+        "_generate_sub_queries",
+        lambda question, llm: ["sub-query A", "sub-query B"],
+    )
+
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who wrote the first algorithm?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "selected_mode": "Research",
+            "use_sub_queries": True,
+            "top_k": 2,
+            "retrieval_k": 2,
+        },
+        run_id="research-run-augmented",
+    )
+
+    events = list(stream_rag_answer(req))
+    augmented = next(e for e in events if e["type"] == "retrieval_augmented")
+    assert augmented["run_id"] == "research-run-augmented"
+    assert augmented["sources"]
+    assert augmented["context_block"]
+    assert isinstance(augmented["top_score"], float)
+
+
 def test_stream_rag_answer_non_research_no_subqueries(tmp_path, monkeypatch) -> None:
     """Non-Research runs must never emit a subqueries event."""
     build_result = _build_test_index(tmp_path, monkeypatch)
@@ -216,6 +248,87 @@ def test_stream_rag_answer_empty_question_yields_error() -> None:
     assert events[0]["message"]
     # Must be JSON-serialisable
     json.dumps(events[0])
+
+
+def test_stream_rag_answer_no_answer_fallback_short_circuits_generation(
+    tmp_path, monkeypatch
+) -> None:
+    build_result = _build_test_index(tmp_path, monkeypatch)
+
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who wrote the first algorithm?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "retrieval_min_score": 0.99,
+            "fallback_strategy": "no_answer",
+            "fallback_message": "Need better evidence.",
+            "selected_mode": "Q&A",
+            "top_k": 2,
+            "retrieval_k": 2,
+        },
+        run_id="fallback-run-1",
+    )
+
+    events = list(stream_rag_answer(req))
+    event_types = [e["type"] for e in events]
+    assert event_types == ["run_started", "retrieval_complete", "fallback_decision", "final"]
+    assert "token" not in event_types
+    fallback_event = next(e for e in events if e["type"] == "fallback_decision")
+    assert fallback_event["fallback"]["triggered"] is True
+    assert fallback_event["fallback"]["strategy"] == "no_answer"
+    assert fallback_event["fallback"]["message"] == "Need better evidence."
+    final = events[-1]
+    assert final["fallback"]["triggered"] is True
+    assert final["fallback"]["strategy"] == "no_answer"
+    assert final["answer_text"] == "Need better evidence."
+
+
+def test_stream_rag_answer_research_emits_retrieval_augmented_event(
+    tmp_path, monkeypatch
+) -> None:
+    build_result = _build_test_index(tmp_path, monkeypatch)
+
+    monkeypatch.setattr(
+        engine_streaming,
+        "_generate_sub_queries",
+        lambda question, llm: ["Ada Lovelace algorithm", "compiler history"],
+    )
+
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who wrote the first algorithm?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "selected_mode": "Research",
+            "use_sub_queries": True,
+            "top_k": 2,
+            "retrieval_k": 2,
+        },
+        run_id="augmented-run-1",
+    )
+
+    events = list(stream_rag_answer(req))
+    event_types = [e["type"] for e in events]
+
+    assert "error" not in event_types, f"Unexpected error event: {events}"
+    assert "retrieval_augmented" in event_types
+    assert event_types.index("subqueries") < event_types.index("retrieval_augmented")
+    assert event_types.index("retrieval_augmented") < event_types.index("fallback_decision")
+
+    augmented = next(e for e in events if e["type"] == "retrieval_augmented")
+    assert augmented["run_id"] == "augmented-run-1"
+    assert augmented["sources"]
+    assert augmented["context_block"]
+    assert isinstance(augmented["top_score"], float)
+
+    final = events[-1]
+    assert final["type"] == "final"
+    assert final["fallback"]["strategy"] == "synthesize_anyway"
 
 
 # ---------------------------------------------------------------------------

@@ -49,8 +49,8 @@ function formatSourceLabel(source: EvidenceSource): string {
 }
 
 function formatSourceHint(source: EvidenceSource): string {
-  const hints = [source.section_hint, source.breadcrumb]
-    .map(cleanSourceValue)
+  const hints = [source.section_hint, source.breadcrumb, source.locator]
+    .map((value) => cleanSourceValue(String(value ?? "")))
     .filter(Boolean)
     .filter((value, index, values) => values.indexOf(value) === index);
 

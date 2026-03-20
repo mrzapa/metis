@@ -185,6 +185,187 @@ class QueryResult:
     top_score: float
 
 
+def _build_parent_child_windows(
+    child_chunks: list[dict[str, Any]],
+    *,
+    parent_chunk_size: int,
+    parent_chunk_overlap: int,
+) -> list[list[dict[str, Any]]]:
+    groups: list[list[dict[str, Any]]] = []
+    if not child_chunks:
+        return groups
+
+    start = 0
+    while start < len(child_chunks):
+        group: list[dict[str, Any]] = []
+        total_len = 0
+        idx = start
+        while idx < len(child_chunks):
+            chunk = child_chunks[idx]
+            addition = len(str(chunk.get("text") or "")) + (2 if group else 0)
+            if group and total_len + addition > parent_chunk_size:
+                break
+            group.append(chunk)
+            total_len += addition
+            idx += 1
+
+        if not group:
+            group = [child_chunks[start]]
+            idx = start + 1
+
+        groups.append(group)
+        if idx >= len(child_chunks):
+            break
+
+        overlap_len = 0
+        next_start = idx
+        while next_start > start:
+            candidate = child_chunks[next_start - 1]
+            addition = len(str(candidate.get("text") or "")) + (2 if overlap_len else 0)
+            if overlap_len + addition > parent_chunk_overlap:
+                break
+            overlap_len += addition
+            next_start -= 1
+        start = max(next_start, start + 1)
+    return groups
+
+
+def _allowed_hit_types(settings: dict[str, Any]) -> set[str]:
+    retrieval_mode = str(settings.get("retrieval_mode", "flat") or "flat").strip().lower()
+    if retrieval_mode == "hierarchical":
+        return {"chunk", "child_chunk", "faq"}
+    return {"chunk", "child_chunk", "summary", "faq"}
+
+
+def _chunk_is_allowed(chunk: dict[str, Any], settings: dict[str, Any]) -> bool:
+    allowed = _allowed_hit_types(settings)
+    chunk_type = str(chunk.get("type") or "chunk").strip().lower()
+    return chunk_type in allowed
+
+
+def _chunk_index_lookup(bundle: IndexBundle) -> dict[str, int]:
+    lookup: dict[str, int] = {}
+    for idx, chunk in enumerate(bundle.chunks):
+        lookup[str(chunk.get("id") or f"chunk-{idx}")] = idx
+    return lookup
+
+
+def _best_score_for_hits(
+    score_lookup: dict[int, float] | list[float],
+    hit_indices: list[int],
+) -> float:
+    return max((_score_for_index(score_lookup, idx) for idx in hit_indices), default=0.0)
+
+
+def _build_hierarchical_sources(
+    bundle: IndexBundle,
+    hit_indices: list[int],
+    score_lookup: dict[int, float] | list[float],
+    *,
+    top_k: int,
+) -> tuple[list[EvidenceSource], list[str], list[int], float]:
+    lookup = _chunk_index_lookup(bundle)
+    grouped_hits: dict[str, dict[str, Any]] = {}
+    group_order: list[str] = []
+
+    for idx in hit_indices:
+        if idx < 0 or idx >= len(bundle.chunks):
+            continue
+        chunk = bundle.chunks[idx]
+        chunk_id = str(chunk.get("id") or f"chunk-{idx}")
+        metadata = dict(chunk.get("metadata") or {})
+        parent_chunk_id = str(metadata.get("parent_chunk_id") or chunk.get("parent_chunk_id") or chunk_id)
+        parent_idx = lookup.get(parent_chunk_id, idx)
+        if parent_chunk_id not in grouped_hits:
+            grouped_hits[parent_chunk_id] = {
+                "parent_idx": parent_idx,
+                "child_hit_indices": [],
+                "best_score": 0.0,
+            }
+            group_order.append(parent_chunk_id)
+        grouped_hits[parent_chunk_id]["child_hit_indices"].append(idx)
+        grouped_hits[parent_chunk_id]["best_score"] = max(
+            float(grouped_hits[parent_chunk_id]["best_score"] or 0.0),
+            _score_for_index(score_lookup, idx),
+        )
+
+    ranked_group_ids = sorted(
+        group_order,
+        key=lambda group_id: (
+            -float(grouped_hits[group_id]["best_score"] or 0.0),
+            group_order.index(group_id),
+        ),
+    )[:top_k]
+
+    sources: list[EvidenceSource] = []
+    context_parts: list[str] = []
+    selected_hit_indices: list[int] = []
+    top_score = 0.0
+
+    for rank, group_id in enumerate(ranked_group_ids, start=1):
+        group = grouped_hits[group_id]
+        parent_idx = int(group["parent_idx"])
+        if parent_idx < 0 or parent_idx >= len(bundle.chunks):
+            continue
+        parent_chunk = bundle.chunks[parent_idx]
+        child_hits = [int(item) for item in group.get("child_hit_indices", [])]
+        matched_previews = [
+            str(bundle.chunks[child_idx].get("excerpt") or bundle.chunks[child_idx].get("text") or "").strip()
+            for child_idx in child_hits
+            if 0 <= child_idx < len(bundle.chunks)
+        ]
+        best_score = float(group.get("best_score") or 0.0)
+        if rank == 1:
+            top_score = best_score
+        selected_hit_indices.extend(child_hits)
+        sid = f"S{rank}"
+        source = EvidenceSource(
+            sid=sid,
+            source=str(parent_chunk.get("source") or "unknown"),
+            snippet=str(parent_chunk.get("text") or "").strip(),
+            chunk_id=str(parent_chunk.get("id") or ""),
+            chunk_idx=int(parent_chunk.get("chunk_idx", rank - 1)),
+            score=best_score,
+            title=str(parent_chunk.get("source") or "unknown"),
+            label=str(parent_chunk.get("label") or parent_chunk.get("source") or "unknown"),
+            section_hint=str(parent_chunk.get("section_hint") or ""),
+            locator=str(parent_chunk.get("locator") or ""),
+            entry_type=str(parent_chunk.get("type") or "parent_chunk"),
+            file_path=str(parent_chunk.get("file_path") or ""),
+            anchor=str(parent_chunk.get("anchor") or ""),
+            excerpt=str(parent_chunk.get("excerpt") or parent_chunk.get("text") or ""),
+            header_path=str(parent_chunk.get("header_path") or ""),
+            breadcrumb=str(parent_chunk.get("breadcrumb") or parent_chunk.get("header_path") or ""),
+            metadata={
+                "index_id": bundle.index_id,
+                "vector_backend": bundle.vector_backend,
+                "matched_child_chunk_ids": [
+                    str(bundle.chunks[child_idx].get("id") or f"chunk-{child_idx}")
+                    for child_idx in child_hits
+                    if 0 <= child_idx < len(bundle.chunks)
+                ],
+                "matched_child_count": len(child_hits),
+                "matched_child_previews": [preview for preview in matched_previews if preview][:3],
+                **dict(parent_chunk.get("metadata") or {}),
+            },
+        )
+        sources.append(source)
+        focus_hint = ""
+        if matched_previews:
+            focus_hint = f"\nMatched child hits:\n- " + "\n- ".join(preview[:220] for preview in matched_previews[:3])
+        context_parts.append(
+            f"[{sid}] {source.source} > {source.section_hint or source.breadcrumb or source.source} "
+            f"(score={best_score:.3f}, matched_children={len(child_hits)}):\n{source.snippet}{focus_hint}"
+        )
+
+    return (
+        sources,
+        context_parts,
+        [idx for idx in selected_hit_indices if 0 <= idx < len(bundle.chunks)],
+        top_score,
+    )
+
+
 def _embedding_signature(settings: dict[str, Any]) -> str:
     provider = str(
         settings.get("embedding_provider") or settings.get("embeddings_backend") or ""
@@ -698,6 +879,17 @@ def build_index_bundle(
     chunk_strategy = str(
         settings.get("chunk_strategy", "fixed") or "fixed"
     ).strip().lower()
+    parent_chunk_size = max(
+        chunk_size + 1,
+        int(settings.get("parent_chunk_size") or max(chunk_size * 3, 2400)),
+    )
+    parent_chunk_overlap = max(
+        0,
+        min(
+            parent_chunk_size - 1,
+            int(settings.get("parent_chunk_overlap") or max(overlap * 2, min(chunk_size, 240))),
+        ),
+    )
 
     all_chunks: list[dict[str, Any]] = []
     total_docs = max(1, len(documents))
@@ -717,6 +909,7 @@ def build_index_bundle(
         all_events.extend(_extract_events(text, source))
         raw_chunks = chunk_text_semantic(text, chunk_size, overlap, strategy=chunk_strategy)
         per_doc_chunks.append((source, str(path), list(raw_chunks)))
+        doc_child_chunks: list[dict[str, Any]] = []
         search_cursor = 0
         for idx, chunk in enumerate(raw_chunks):
             char_start = text.find(chunk, search_cursor)
@@ -731,7 +924,7 @@ def build_index_bundle(
             header_path = " > ".join(
                 [str(item).strip() for item in header_tokens if str(item).strip()]
             )
-            all_chunks.append(
+            doc_child_chunks.append(
                 {
                     "id": f"{source}::chunk{idx}",
                     "text": chunk,
@@ -747,12 +940,64 @@ def build_index_bundle(
                     "locator": f"chunk {idx}",
                     "anchor": f"chunk-{idx}",
                     "excerpt": chunk[:320],
-                    "type": "chunk",
+                    "type": "child_chunk",
                     "char_span": [char_start, char_end],
                     "metadata": {
                         "source_path": str(path),
                         "char_span": [char_start, char_end],
                         "header_path": header_path,
+                        "content_type": "child_chunk",
+                    },
+                }
+            )
+        all_chunks.extend(doc_child_chunks)
+        parent_windows = _build_parent_child_windows(
+            doc_child_chunks,
+            parent_chunk_size=parent_chunk_size,
+            parent_chunk_overlap=parent_chunk_overlap,
+        )
+        for parent_idx, window in enumerate(parent_windows):
+            if not window:
+                continue
+            parent_id = f"{source}::parent{parent_idx}"
+            first_child = window[0]
+            last_child = window[-1]
+            char_start = int((first_child.get("char_span") or [0, 0])[0] or 0)
+            char_end = int((last_child.get("char_span") or [0, 0])[1] or char_start)
+            parent_text = "\n\n".join(str(child.get("text") or "") for child in window).strip()
+            child_ids = [str(child.get("id") or "") for child in window if str(child.get("id") or "").strip()]
+            section_hint = str(first_child.get("section_hint") or source)
+            header_path = str(first_child.get("header_path") or "")
+            for child in window:
+                child_metadata = dict(child.get("metadata") or {})
+                child_metadata["parent_chunk_id"] = parent_id
+                child_metadata["content_type"] = "child_chunk"
+                child["metadata"] = child_metadata
+            all_chunks.append(
+                {
+                    "id": parent_id,
+                    "text": parent_text,
+                    "source": source,
+                    "chunk_idx": parent_idx,
+                    "file_path": str(path),
+                    "source_path": str(path),
+                    "title": source,
+                    "label": f"{source} (context {parent_idx + 1})",
+                    "section_hint": section_hint,
+                    "header_path": header_path,
+                    "breadcrumb": header_path or source,
+                    "locator": f"context {parent_idx + 1}",
+                    "anchor": f"context-{parent_idx + 1}",
+                    "excerpt": parent_text[:320],
+                    "type": "parent_chunk",
+                    "char_span": [char_start, char_end],
+                    "metadata": {
+                        "source_path": str(path),
+                        "char_span": [char_start, char_end],
+                        "header_path": header_path,
+                        "child_chunk_ids": child_ids,
+                        "child_count": len(child_ids),
+                        "content_type": "parent_chunk",
                     },
                 }
             )
@@ -834,6 +1079,9 @@ def build_index_bundle(
         metadata={
             "selected_source_paths": list(documents),
             "document_title": pathlib.Path(documents[0]).name if documents else "",
+            "parent_child_enabled": True,
+            "parent_chunk_size": parent_chunk_size,
+            "parent_chunk_overlap": parent_chunk_overlap,
         },
     )
 
@@ -855,6 +1103,10 @@ def select_hit_indices(
     top_k = int(settings.get("top_k", 3))
     kg_mode = str(settings.get("kg_query_mode", "hybrid") or "hybrid")
     use_reranker = bool(settings.get("use_reranker", False))
+    ranked_indices = [
+        idx for idx in ranked_indices
+        if 0 <= idx < len(bundle.chunks) and _chunk_is_allowed(bundle.chunks[idx], settings)
+    ]
     graph_hits: list[int] = []
     if bundle.knowledge_graph is not None and bundle.entity_to_chunks:
         graph_hits = collect_graph_chunk_candidates(
@@ -864,6 +1116,10 @@ def select_hit_indices(
             mode=kg_mode,
             limit=max(top_k * 3, top_k),
         )
+        graph_hits = [
+            idx for idx in graph_hits
+            if 0 <= idx < len(bundle.chunks) and _chunk_is_allowed(bundle.chunks[idx], settings)
+        ]
 
     if use_reranker:
         return rerank_hits(bundle, question, ranked_indices, graph_hits, settings)
@@ -880,7 +1136,28 @@ def build_query_result(
     question: str,
     hit_indices: list[int],
     score_lookup: dict[int, float] | list[float],
+    settings: dict[str, Any] | None = None,
 ) -> QueryResult:
+    resolved_settings = dict(settings or {})
+    top_k = int(resolved_settings.get("top_k", 5) or 5)
+    retrieval_mode = str(resolved_settings.get("retrieval_mode", "flat") or "flat").strip().lower()
+    if retrieval_mode == "hierarchical":
+        sources, context_parts, selected_hits, top_score = _build_hierarchical_sources(
+            bundle,
+            hit_indices,
+            score_lookup,
+            top_k=top_k,
+        )
+        return QueryResult(
+            prompt=question,
+            context_block="\n\n".join(context_parts)
+            if context_parts
+            else "(no relevant passages found)",
+            sources=sources,
+            hit_indices=selected_hits,
+            top_score=top_score,
+        )
+
     sources: list[EvidenceSource] = []
     context_parts: list[str] = []
     for rank, idx in enumerate(hit_indices, start=1):
@@ -946,4 +1223,4 @@ def query_index_bundle(
     scores = [cosine_similarity(q_vec, vector) for vector in bundle.embeddings]
     ranked = sorted(range(len(scores)), key=lambda idx: scores[idx], reverse=True)
     hits = select_hit_indices(bundle, question, ranked, settings)
-    return build_query_result(bundle, question, hits, scores)
+    return build_query_result(bundle, question, hits, scores, settings=settings)

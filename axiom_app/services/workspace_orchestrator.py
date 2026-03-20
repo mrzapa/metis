@@ -28,6 +28,7 @@ import axiom_app.settings_store as _settings_store
 from axiom_app.engine import (
     build_index,
     get_index,
+    knowledge_search,
     list_indexes,
     query_direct,
     query_rag,
@@ -37,6 +38,8 @@ from axiom_app.engine.indexing import IndexBuildRequest, IndexBuildResult
 from axiom_app.engine.querying import (
     DirectQueryRequest,
     DirectQueryResult,
+    KnowledgeSearchRequest,
+    KnowledgeSearchResult,
     RagQueryRequest,
     RagQueryResult,
 )
@@ -167,16 +170,27 @@ class WorkspaceOrchestrator:
             self._prepare_session_for_query(session_id, req.question, resolved_settings, manifest_path=req.manifest_path)
             self.append_message(session_id, role="user", content=req.question, run_id="")
         result = query_rag(normalized)
-        self._record_trace_event(
-            result.run_id,
-            {
-                "type": "retrieval_complete",
-                "run_id": result.run_id,
-                "sources": result.sources,
-                "context_block": result.context_block,
-                "top_score": result.top_score,
-            },
-        )
+        for stage in list(result.retrieval_plan.get("stages") or []):
+            stage_type = str(stage.get("stage_type") or "").strip()
+            payload = dict(stage.get("payload") or {})
+            if not stage_type:
+                continue
+            self._record_trace_event(
+                result.run_id,
+                {
+                    "type": (
+                        "subqueries"
+                        if stage_type == "query_expansion"
+                        else stage_type
+                    ),
+                    "run_id": result.run_id,
+                    **(
+                        {"fallback": payload}
+                        if stage_type == "fallback_decision"
+                        else payload
+                    ),
+                },
+            )
         self._record_trace_event(
             result.run_id,
             {
@@ -184,6 +198,7 @@ class WorkspaceOrchestrator:
                 "run_id": result.run_id,
                 "answer_text": result.answer_text,
                 "sources": result.sources,
+                "fallback": result.fallback,
             },
         )
         if session_id:
@@ -244,6 +259,72 @@ class WorkspaceOrchestrator:
             )
         return result
 
+    def run_knowledge_search(
+        self,
+        req: KnowledgeSearchRequest,
+        *,
+        session_id: str = "",
+    ) -> KnowledgeSearchResult:
+        """Execute retrieval-only knowledge search via the engine."""
+        resolved_settings = self._resolve_query_settings(req.settings)
+        normalized = KnowledgeSearchRequest(
+            manifest_path=req.manifest_path,
+            question=req.question,
+            settings=resolved_settings,
+            run_id=req.run_id,
+        )
+        if session_id:
+            self._prepare_session_for_query(session_id, req.question, resolved_settings, manifest_path=req.manifest_path)
+            self.append_message(session_id, role="user", content=req.question, run_id="")
+        result = knowledge_search(normalized)
+        for stage in list(result.retrieval_plan.get("stages") or []):
+            stage_type = str(stage.get("stage_type") or "").strip()
+            payload = dict(stage.get("payload") or {})
+            if not stage_type:
+                continue
+            self._record_trace_event(
+                result.run_id,
+                {
+                    "type": (
+                        "subqueries"
+                        if stage_type == "query_expansion"
+                        else stage_type
+                    ),
+                    "run_id": result.run_id,
+                    **(
+                        {"fallback": payload}
+                        if stage_type == "fallback_decision"
+                        else payload
+                    ),
+                },
+            )
+        self._record_trace_event(
+            result.run_id,
+            {
+                "type": "knowledge_search_complete",
+                "run_id": result.run_id,
+                "sources": result.sources,
+                "context_block": result.context_block,
+                "top_score": result.top_score,
+                "fallback": result.fallback,
+            },
+        )
+        if session_id:
+            self.append_message(
+                session_id,
+                role="assistant",
+                content=result.summary_text,
+                run_id=result.run_id,
+                sources=[EvidenceSource.from_dict(item) for item in result.sources],
+            )
+            self._assistant_service.reflect(
+                trigger="completed_run",
+                settings=resolved_settings,
+                session_id=session_id,
+                run_id=result.run_id,
+            )
+        return result
+
     def stream_rag_query(
         self,
         req: RagQueryRequest,
@@ -280,7 +361,7 @@ class WorkspaceOrchestrator:
                 if event_run_id:
                     final_run_id = event_run_id
                 self._record_trace_event(final_run_id, event)
-                if event.get("type") == "retrieval_complete":
+                if event.get("type") in {"retrieval_complete", "retrieval_augmented"}:
                     pending_sources = [
                         item if isinstance(item, EvidenceSource) else EvidenceSource.from_dict(item)
                         for item in list(event.get("sources") or [])
@@ -565,10 +646,12 @@ class WorkspaceOrchestrator:
             "run_started": "retrieval",
             "retrieval_complete": "retrieval",
             "retrieval_augmented": "retrieval",
+            "knowledge_search_complete": "retrieval",
             "subqueries": "retrieval",
             "iteration_start": "reflection",
             "gaps_identified": "reflection",
             "refinement_retrieval": "retrieval",
+            "fallback_decision": "fallback",
             "final": "synthesis",
             "error": "error",
             "action_required": "action_required",

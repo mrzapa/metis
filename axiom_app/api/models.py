@@ -12,6 +12,8 @@ from axiom_app.engine import (
     DirectQueryResult,
     IndexBuildRequest,
     IndexBuildResult,
+    KnowledgeSearchRequest,
+    KnowledgeSearchResult,
     RagQueryRequest,
     RagQueryResult,
 )
@@ -86,6 +88,8 @@ class RagQueryResultModel(BaseModel):
     context_block: str
     top_score: float
     selected_mode: str
+    retrieval_plan: dict[str, Any] = Field(default_factory=dict)
+    fallback: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def from_engine(cls, result: RagQueryResult) -> "RagQueryResultModel":
@@ -96,6 +100,50 @@ class RagQueryResultModel(BaseModel):
             context_block=result.context_block,
             top_score=result.top_score,
             selected_mode=result.selected_mode,
+            retrieval_plan=dict(result.retrieval_plan or {}),
+            fallback=dict(result.fallback or {}),
+        )
+
+
+class KnowledgeSearchRequestModel(BaseModel):
+    manifest_path: str
+    question: str
+    settings: dict[str, Any]
+    run_id: str | None = None
+    session_id: str = ""
+
+    model_config = ConfigDict(extra="forbid")
+
+    def to_engine(self) -> KnowledgeSearchRequest:
+        return KnowledgeSearchRequest(
+            manifest_path=Path(self.manifest_path),
+            question=self.question,
+            settings=dict(self.settings),
+            run_id=self.run_id,
+        )
+
+
+class KnowledgeSearchResultModel(BaseModel):
+    run_id: str
+    summary_text: str
+    sources: list[dict[str, Any]]
+    context_block: str
+    top_score: float
+    selected_mode: str
+    retrieval_plan: dict[str, Any] = Field(default_factory=dict)
+    fallback: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_engine(cls, result: KnowledgeSearchResult) -> "KnowledgeSearchResultModel":
+        return cls(
+            run_id=result.run_id,
+            summary_text=result.summary_text,
+            sources=result.sources,
+            context_block=result.context_block,
+            top_score=result.top_score,
+            selected_mode=result.selected_mode,
+            retrieval_plan=dict(result.retrieval_plan or {}),
+            fallback=dict(result.fallback or {}),
         )
 
 
@@ -148,9 +196,14 @@ class EvidenceSourceModel(BaseModel):
     chunk_idx: int | None = None
     score: float | None = None
     title: str = ""
+    label: str = ""
     breadcrumb: str = ""
     section_hint: str = ""
+    locator: str = ""
     anchor: str = ""
+    header_path: str = ""
+    excerpt: str = ""
+    file_path: str = ""
     date: str = ""
     timestamp: str = ""
     speaker: str = ""
@@ -168,9 +221,14 @@ class EvidenceSourceModel(BaseModel):
             chunk_idx=src.chunk_idx,
             score=src.score,
             title=src.title,
+            label=src.label,
             breadcrumb=src.breadcrumb,
             section_hint=src.section_hint,
+            locator=src.locator,
             anchor=src.anchor,
+            header_path=src.header_path,
+            excerpt=src.excerpt,
+            file_path=src.file_path,
             date=src.date,
             timestamp=src.timestamp,
             speaker=src.speaker,

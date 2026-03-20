@@ -84,6 +84,43 @@ export interface RagQueryResult {
   context_block: string;
   top_score: number;
   selected_mode: string;
+  retrieval_plan: RetrievalPlan;
+  fallback: RetrievalFallback;
+}
+
+export interface RetrievalFallback {
+  triggered?: boolean;
+  strategy?: string;
+  reason?: string;
+  min_score?: number;
+  observed_score?: number;
+  message?: string;
+}
+
+export interface RetrievalPlanStage {
+  stage_type: string;
+  payload: Record<string, unknown>;
+}
+
+export interface RetrievalPlan {
+  question?: string;
+  selected_mode?: string;
+  effective_queries?: string[];
+  fallback?: RetrievalFallback;
+  stages: RetrievalPlanStage[];
+  top_score?: number;
+  source_count?: number;
+}
+
+export interface KnowledgeSearchResult {
+  run_id: string;
+  summary_text: string;
+  sources: EvidenceSource[];
+  context_block: string;
+  top_score: number;
+  selected_mode: string;
+  retrieval_plan: RetrievalPlan;
+  fallback: RetrievalFallback;
 }
 
 export interface RagStreamRunStartedEvent {
@@ -93,6 +130,14 @@ export interface RagStreamRunStartedEvent {
 
 export interface RagStreamRetrievalCompleteEvent {
   type: "retrieval_complete";
+  run_id: string;
+  sources: EvidenceSource[];
+  context_block: string;
+  top_score: number;
+}
+
+export interface RagStreamRetrievalAugmentedEvent {
+  type: "retrieval_augmented";
   run_id: string;
   sources: EvidenceSource[];
   context_block: string;
@@ -110,6 +155,7 @@ export interface RagStreamFinalEvent {
   run_id: string;
   answer_text: string;
   sources: EvidenceSource[];
+  fallback?: RetrievalFallback;
 }
 
 export interface RagStreamErrorEvent {
@@ -130,14 +176,48 @@ export interface RagStreamSubqueriesEvent {
   queries: string[];
 }
 
+export interface RagStreamFallbackDecisionEvent {
+  type: "fallback_decision";
+  run_id: string;
+  fallback: RetrievalFallback;
+}
+
+export interface RagStreamIterationStartEvent {
+  type: "iteration_start";
+  run_id: string;
+  iteration: number;
+  total_iterations: number;
+}
+
+export interface RagStreamGapsIdentifiedEvent {
+  type: "gaps_identified";
+  run_id: string;
+  gaps: string[];
+  iteration: number;
+}
+
+export interface RagStreamRefinementRetrievalEvent {
+  type: "refinement_retrieval";
+  run_id: string;
+  iteration: number;
+  sources: EvidenceSource[];
+  context_block: string;
+  top_score: number;
+}
+
 export type RagStreamEvent =
   | RagStreamRunStartedEvent
   | RagStreamRetrievalCompleteEvent
+  | RagStreamRetrievalAugmentedEvent
   | RagStreamTokenEvent
   | RagStreamFinalEvent
   | RagStreamErrorEvent
   | RagStreamActionRequiredEvent
-  | RagStreamSubqueriesEvent;
+  | RagStreamSubqueriesEvent
+  | RagStreamFallbackDecisionEvent
+  | RagStreamIterationStartEvent
+  | RagStreamGapsIdentifiedEvent
+  | RagStreamRefinementRetrievalEvent;
 
 export interface TraceEvent {
   run_id: string;
@@ -485,6 +565,33 @@ export async function queryRag(
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`RAG query failed (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function queryKnowledgeSearch(
+  manifest_path: string,
+  question: string,
+  settings: Record<string, unknown>,
+  options?: {
+    runId?: string;
+    sessionId?: string | null;
+  },
+): Promise<KnowledgeSearchResult> {
+  const res = await apiFetch(`${await getApiBase()}/v1/search/knowledge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      manifest_path,
+      question,
+      settings,
+      run_id: options?.runId,
+      session_id: options?.sessionId ?? "",
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Knowledge search failed (${res.status}): ${detail}`);
   }
   return res.json();
 }

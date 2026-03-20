@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { fetchTraceEvents, type TraceEvent } from "@/lib/api";
+import { fetchTraceEvents, type RetrievalFallback, type TraceEvent } from "@/lib/api";
 import type { EvidenceSource } from "@/lib/chat-types";
 import { FileText, List, Activity } from "lucide-react";
 import { EvidenceSourceCard } from "@/components/chat/evidence-source-card";
@@ -16,54 +16,52 @@ interface EvidencePanelProps {
   latestRunId: string | null;
   selectedMode?: string;
   latestAnswer?: string;
+  fallback?: RetrievalFallback | null;
   liveTraceEvents?: TraceEvent[];
   isStreaming?: boolean;
   preferredTab?: "sources" | "trace";
   postureToken?: number;
 }
 
-export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, latestAnswer, liveTraceEvents, isStreaming, preferredTab, postureToken }: EvidencePanelProps) {
+export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, latestAnswer, fallback, liveTraceEvents, isStreaming, preferredTab, postureToken }: EvidencePanelProps) {
   const [selectedRunId, setSelectedRunId] = useState<string>(latestRunId ?? "");
-  const [syncedLatestRunId, setSyncedLatestRunId] = useState<string | null>(latestRunId);
   const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
   const [traceLoading, setTraceLoading] = useState(Boolean(latestRunId));
   const [traceError, setTraceError] = useState<string | null>(null);
-  const [traceStateRunId, setTraceStateRunId] = useState<string>(latestRunId ?? "");
   const [activeTab, setActiveTab] = useState(preferredTab ?? "sources");
-  const [syncedMode, setSyncedMode] = useState(selectedMode);
-  const [syncedPostureToken, setSyncedPostureToken] = useState(postureToken ?? 0);
-
-  if (selectedMode !== syncedMode) {
-    setSyncedMode(selectedMode);
-    if (selectedMode === "Evidence Pack") {
-      setActiveTab("sources");
-    }
-  }
-
-  if ((postureToken ?? 0) !== syncedPostureToken) {
-    setSyncedPostureToken(postureToken ?? 0);
-    if (preferredTab) {
-      setActiveTab(preferredTab);
-    }
-  }
-
-  if (latestRunId !== syncedLatestRunId) {
-    setSyncedLatestRunId(latestRunId);
-    if (latestRunId) {
-      setSelectedRunId(latestRunId);
-    }
-  }
-
-  if (selectedRunId !== traceStateRunId) {
-    setTraceStateRunId(selectedRunId);
-    setTraceEvents([]);
-    setTraceError(null);
-    setTraceLoading(Boolean(selectedRunId));
-  }
 
   // Deduplicated, non-empty run IDs (most-recent first as they appear in the array)
   const availableRunIds = useMemo(() => [...new Set(runIds.filter(Boolean))], [runIds]);
   const showLiveTrace = Boolean(isStreaming && selectedRunId === latestRunId);
+
+  useEffect(() => {
+    if (selectedMode !== "Evidence Pack") {
+      return;
+    }
+    queueMicrotask(() => setActiveTab("sources"));
+  }, [selectedMode]);
+
+  useEffect(() => {
+    if (!preferredTab) {
+      return;
+    }
+    queueMicrotask(() => setActiveTab(preferredTab));
+  }, [postureToken, preferredTab]);
+
+  useEffect(() => {
+    if (!latestRunId) {
+      return;
+    }
+    queueMicrotask(() => setSelectedRunId(latestRunId));
+  }, [latestRunId]);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setTraceEvents([]);
+      setTraceError(null);
+      setTraceLoading(Boolean(selectedRunId));
+    });
+  }, [selectedRunId]);
 
   // Fetch trace events whenever selectedRunId changes (skip while streaming the active run)
   useEffect(() => {
@@ -130,12 +128,22 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
         <TabsContent value="sources" className="flex-1 min-h-0 overflow-hidden">
           <ScrollArea className="h-full min-h-0">
             <div className="space-y-2 p-3">
+              {fallback?.triggered && (
+                <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2">
+                  <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
+                    Retrieval fallback triggered
+                  </p>
+                  <p className="mt-1 text-xs text-amber-700/90 dark:text-amber-200/80">
+                    {fallback.message || fallback.reason || "The system could not find strong enough evidence to answer confidently."}
+                  </p>
+                </div>
+              )}
               {selectedMode === "Evidence Pack" && sources.length > 0 && (
                 <div className="flex justify-end pb-1">
                   <button
                     type="button"
                     onClick={() => {
-                      const data = { answer: latestAnswer ?? "", sources };
+                      const data = { answer: latestAnswer ?? "", mode: selectedMode, fallback, sources };
                       const blob = new Blob([JSON.stringify(data, null, 2)], {
                         type: "application/json",
                       });

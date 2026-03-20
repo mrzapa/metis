@@ -75,6 +75,8 @@ class Config:
     # Ingestion defaults
     chunk_size: int = 1000
     chunk_overlap: int = 200
+    parent_chunk_size: int = 2800
+    parent_chunk_overlap: int = 320
     structure_aware_ingestion: bool = False
     build_digest_index: bool = True
     build_comprehension_index: bool = False
@@ -82,8 +84,14 @@ class Config:
     # Retrieval defaults
     retrieval_k: int = 25
     final_k: int = 5
+    knowledge_search_top_k: int = 8
     mmr_lambda: float = 0.5
     retrieval_mode: str = "flat"
+    retrieval_min_score: float = 0.15
+    fallback_strategy: str = "synthesize_anyway"
+    fallback_message: str = (
+        "I couldn't find enough grounded evidence in the selected index to answer confidently."
+    )
     agentic_mode: bool = False
     agentic_max_iterations: int = 2
 

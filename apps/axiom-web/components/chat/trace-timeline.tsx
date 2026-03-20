@@ -5,11 +5,13 @@ import { ChevronDown, ChevronRight, Clock } from "lucide-react";
 import type { TraceEvent } from "@/lib/api";
 
 // Canonical stage order; unknown stages are appended at the end
-const STAGE_ORDER = ["skills", "retrieval", "synthesis", "validation", "grounding"];
+const STAGE_ORDER = ["skills", "retrieval", "reflection", "fallback", "synthesis", "validation", "grounding"];
 
 const STAGE_LABELS: Record<string, string> = {
   skills: "Skills",
   retrieval: "Retrieval",
+  reflection: "Reflection",
+  fallback: "Fallback",
   synthesis: "Synthesis",
   validation: "Validation",
   grounding: "Grounding",
@@ -18,6 +20,8 @@ const STAGE_LABELS: Record<string, string> = {
 const STAGE_COLORS: Record<string, string> = {
   skills: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
   retrieval: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
+  reflection: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300",
+  fallback: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
   synthesis: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   validation: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
   grounding: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
@@ -26,6 +30,8 @@ const STAGE_COLORS: Record<string, string> = {
 const STAGE_DOT_COLORS: Record<string, string> = {
   skills: "bg-violet-400",
   retrieval: "bg-blue-400",
+  reflection: "bg-cyan-400",
+  fallback: "bg-amber-400",
   synthesis: "bg-emerald-400",
   validation: "bg-amber-400",
   grounding: "bg-rose-400",

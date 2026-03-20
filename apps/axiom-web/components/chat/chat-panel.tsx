@@ -53,7 +53,7 @@ interface ChatPanelProps {
   liveTraceEvents?: TraceEvent[];
 }
 
-const RAG_MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack"] as const;
+const RAG_MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack", "Knowledge Search"] as const;
 const DEFAULT_RAG_MODE = "Q&A";
 
 export function ChatPanel({
@@ -94,6 +94,7 @@ export function ChatPanel({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isKnowledgeSearchMode = queryMode === "rag" && selectedMode === "Knowledge Search";
 
   // Auto-scroll when messages change
   useEffect(() => {
@@ -302,7 +303,9 @@ export function ChatPanel({
               <p className="mt-3 max-w-xl text-sm leading-7">
                 {queryMode === "rag"
                   ? activeIndexPath
-                    ? "Ask about the material you indexed, compare documents, or request a high-confidence overview grounded in sources."
+                    ? isKnowledgeSearchMode
+                      ? "Search the indexed material first and inspect the strongest evidence without running a full synthesis pass."
+                      : "Ask about the material you indexed, compare documents, or request a high-confidence overview grounded in sources."
                     : "Choose an index to unlock grounded RAG answers and evidence-backed synthesis."
                   : "Use direct mode for fast ideation, planning, or questions that do not need document grounding yet."}
               </p>
@@ -476,7 +479,9 @@ export function ChatPanel({
                 ragInputDisabled
                   ? "Select an index first…"
                   : queryMode === "rag"
-                  ? "Ask about your documents…"
+                  ? isKnowledgeSearchMode
+                    ? "Search your indexed knowledge…"
+                    : "Ask about your documents…"
                   : "Ask anything…"
               }
               value={draft}
@@ -513,6 +518,11 @@ export function ChatPanel({
               </Button>
             )}
           </div>
+          {isKnowledgeSearchMode && (
+            <p className="text-[11px] text-muted-foreground/70">
+              Retrieval-first mode returns a concise search summary plus the strongest sources.
+            </p>
+          )}
           <p className="select-none text-[11px] text-muted-foreground/60">
             Enter to send · Shift+Enter for new line · Esc to clear · Ctrl/⌘+K to focus
           </p>

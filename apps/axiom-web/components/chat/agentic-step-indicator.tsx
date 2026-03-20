@@ -12,12 +12,17 @@ const STEPS = [
 ] as const;
 
 function deriveSteps(events: TraceEvent[], isStreaming: boolean): [StepState, StepState, StepState] {
-  const hasRetrieval = events.some((e) => e.event_type === "retrieval_complete");
+  const hasRetrieval = events.some((e) =>
+    ["retrieval_complete", "retrieval_augmented", "refinement_retrieval"].includes(e.event_type),
+  );
   const hasFinal = events.some((e) => e.event_type === "final");
+  const hasValidationSignal = events.some((e) =>
+    ["iteration_start", "gaps_identified"].includes(e.event_type),
+  );
 
   const retrieval: StepState = hasFinal || hasRetrieval ? "complete" : isStreaming ? "active" : "upcoming";
   const synthesis: StepState = hasFinal ? "complete" : hasRetrieval ? "active" : "upcoming";
-  const validation: StepState = hasFinal ? "complete" : "upcoming";
+  const validation: StepState = hasFinal ? "complete" : hasValidationSignal ? "active" : "upcoming";
 
   return [retrieval, synthesis, validation];
 }

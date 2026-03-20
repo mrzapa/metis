@@ -34,6 +34,8 @@ from .models import (
     DirectQueryResultModel,
     IndexBuildRequestModel,
     IndexBuildResultModel,
+    KnowledgeSearchRequestModel,
+    KnowledgeSearchResultModel,
     RagQueryRequestModel,
     RagQueryResultModel,
     RunActionRequestModel,
@@ -225,6 +227,17 @@ def create_app() -> FastAPI:
         return RagQueryResultModel.from_engine(
             _run_engine(
                 orchestrator.run_rag_query,
+                payload.to_engine(),
+                session_id=payload.session_id,
+            )
+        )
+
+    @app.post("/v1/search/knowledge", response_model=KnowledgeSearchResultModel, dependencies=_auth)
+    def api_search_knowledge(payload: KnowledgeSearchRequestModel) -> KnowledgeSearchResultModel:
+        orchestrator = WorkspaceOrchestrator()
+        return KnowledgeSearchResultModel.from_engine(
+            _run_engine(
+                orchestrator.run_knowledge_search,
                 payload.to_engine(),
                 session_id=payload.session_id,
             )

@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.stubGlobal("window", { ...globalThis.window });
 
 // Dynamically import after mocks are in place
-const { fetchSessions, fetchSettings, fetchApiVersion } = await import(
+const { fetchSessions, fetchSettings, fetchApiVersion, queryKnowledgeSearch } = await import(
   "../api"
 );
 
@@ -80,5 +80,51 @@ describe("fetchApiVersion", () => {
 
     const result = await fetchApiVersion();
     expect(result).toBe("1.0.0");
+  });
+});
+
+describe("queryKnowledgeSearch", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("posts to the knowledge search endpoint with run and session ids", async () => {
+    const mockResult = {
+      run_id: "run-1",
+      summary_text: "Found 2 relevant passages.",
+      sources: [{ sid: "S1", source: "doc", snippet: "evidence" }],
+      context_block: "context",
+      top_score: 0.92,
+      selected_mode: "Knowledge Search",
+      retrieval_plan: { stages: [] },
+      fallback: { triggered: false, strategy: "synthesize_anyway" },
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResult),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await queryKnowledgeSearch(
+      "/tmp/index.json",
+      "What does this say?",
+      { selected_mode: "Knowledge Search" },
+      { runId: "run-1", sessionId: "session-1" },
+    );
+
+    expect(result).toEqual(mockResult);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/v1/search/knowledge");
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      manifest_path: "/tmp/index.json",
+      question: "What does this say?",
+      settings: { selected_mode: "Knowledge Search" },
+      run_id: "run-1",
+      session_id: "session-1",
+    });
   });
 });

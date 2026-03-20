@@ -117,13 +117,12 @@ function normalizeEvidenceSources(value: unknown): EvidenceSource[] {
     return [];
   }
 
-  return value
-    .map((entry) => {
+  return value.reduce<EvidenceSource[]>((sources, entry) => {
       if (!entry || typeof entry !== "object") {
-        return null;
+        return sources;
       }
       const source = entry as Record<string, unknown>;
-      return {
+      const normalized: EvidenceSource = {
         sid: String(source.sid ?? ""),
         source: String(source.source ?? ""),
         snippet: String(source.snippet ?? ""),
@@ -134,9 +133,33 @@ function normalizeEvidenceSources(value: unknown): EvidenceSource[] {
             : null,
         breadcrumb: String(source.breadcrumb ?? ""),
         section_hint: String(source.section_hint ?? ""),
-      } satisfies EvidenceSource;
-    })
-    .filter((entry): entry is EvidenceSource => Boolean(entry?.sid));
+        chunk_id: String(source.chunk_id ?? ""),
+        chunk_idx:
+          typeof source.chunk_idx === "number" || source.chunk_idx === null
+            ? source.chunk_idx
+            : null,
+        label: String(source.label ?? ""),
+        locator: String(source.locator ?? ""),
+        anchor: String(source.anchor ?? ""),
+        header_path: String(source.header_path ?? ""),
+        excerpt: String(source.excerpt ?? ""),
+        file_path: String(source.file_path ?? ""),
+        date: String(source.date ?? ""),
+        timestamp: String(source.timestamp ?? ""),
+        speaker: String(source.speaker ?? ""),
+        actor: String(source.actor ?? ""),
+        entry_type: String(source.entry_type ?? ""),
+        type: String(source.type ?? ""),
+        metadata:
+          source.metadata && typeof source.metadata === "object"
+            ? (source.metadata as Record<string, unknown>)
+            : {},
+      };
+      if (normalized.sid) {
+        sources.push(normalized);
+      }
+      return sources;
+    }, []);
 }
 
 function normalizeTraceEvents(value: unknown): TraceEvent[] {

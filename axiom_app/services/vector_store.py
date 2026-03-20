@@ -361,7 +361,7 @@ class ChromaVectorStoreAdapter(VectorStoreAdapter):
             ranked.append(idx)
             scores[idx] = _normalized_distance_score(distances[pos] if pos < len(distances) else None)
         hits = select_hit_indices(bundle, question, ranked, settings)
-        return build_query_result(bundle, question, hits, scores)
+        return build_query_result(bundle, question, hits, scores, settings=settings)
 
 
 class WeaviateVectorStoreAdapter(VectorStoreAdapter):
@@ -562,7 +562,7 @@ class WeaviateVectorStoreAdapter(VectorStoreAdapter):
             client.close()
 
         hits = select_hit_indices(bundle, question, ranked, settings)
-        return build_query_result(bundle, question, hits, scores)
+        return build_query_result(bundle, question, hits, scores, settings=settings)
 
     def delete(self, path: str | pathlib.Path) -> None:
         target = pathlib.Path(path)

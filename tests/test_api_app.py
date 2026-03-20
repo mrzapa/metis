@@ -166,6 +166,8 @@ def test_query_rag_forwards_session_id_to_orchestrator(monkeypatch) -> None:
         context_block = "context"
         top_score = 0.42
         selected_mode = "Q&A"
+        retrieval_plan = {}
+        fallback = {}
 
     fake_orchestrator = MagicMock()
 
@@ -191,6 +193,80 @@ def test_query_rag_forwards_session_id_to_orchestrator(monkeypatch) -> None:
     assert captured["question"] == "What is Axiom?"
     assert captured["session_id"] == "s1"
     assert fake_orchestrator.run_rag_query.call_count == 1
+
+
+def test_query_rag_serializes_retrieval_plan_and_fallback(monkeypatch) -> None:
+    client = TestClient(api_app_module.create_app())
+
+    class _Result:
+        run_id = "run-rag-plan"
+        answer_text = "rag answer"
+        sources: list[dict[str, object]] = []
+        context_block = "context"
+        top_score = 0.42
+        selected_mode = "Q&A"
+        retrieval_plan = {"stages": [{"stage_type": "retrieval_complete", "payload": {}}]}
+        fallback = {"triggered": False, "strategy": "synthesize_anyway"}
+
+    fake_orchestrator = MagicMock()
+    fake_orchestrator.run_rag_query.return_value = _Result()
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+
+    response = client.post(
+        "/v1/query/rag",
+        json={
+            "manifest_path": "/tmp/fake/manifest.json",
+            "question": "What is Axiom?",
+            "settings": {"llm_provider": "mock", "selected_mode": "Q&A"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["retrieval_plan"]["stages"][0]["stage_type"] == "retrieval_complete"
+    assert payload["fallback"]["strategy"] == "synthesize_anyway"
+
+
+def test_search_knowledge_forwards_session_id_to_orchestrator(monkeypatch) -> None:
+    client = TestClient(api_app_module.create_app())
+    captured: dict[str, object] = {}
+
+    class _Result:
+        run_id = "run-search"
+        summary_text = "Found 2 passages."
+        sources = [{"sid": "S1", "source": "doc", "snippet": "evidence"}]
+        context_block = "context"
+        top_score = 0.81
+        selected_mode = "Knowledge Search"
+        retrieval_plan = {"stages": [{"stage_type": "retrieval_complete", "payload": {}}]}
+        fallback = {"triggered": False, "strategy": "synthesize_anyway"}
+
+    fake_orchestrator = MagicMock()
+
+    def _fake_run_knowledge_search(req, *, session_id=""):
+        captured["question"] = req.question
+        captured["session_id"] = session_id
+        return _Result()
+
+    fake_orchestrator.run_knowledge_search.side_effect = _fake_run_knowledge_search
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+
+    response = client.post(
+        "/v1/search/knowledge",
+        json={
+            "manifest_path": "/tmp/fake/manifest.json",
+            "question": "Find evidence",
+            "session_id": "s-search",
+            "settings": {"llm_provider": "mock", "selected_mode": "Knowledge Search"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary_text"] == "Found 2 passages."
+    assert payload["retrieval_plan"]["stages"][0]["stage_type"] == "retrieval_complete"
+    assert payload["fallback"]["strategy"] == "synthesize_anyway"
+    assert captured == {"question": "Find evidence", "session_id": "s-search"}
 
 
 def test_query_direct_forwards_session_id_to_orchestrator(monkeypatch) -> None:
