@@ -245,7 +245,28 @@ function Stop-ChildProcess {
 }
 
 if (Test-Path (Join-Path `$axiomDir ".git")) {
+    `$headBefore = git -C `$axiomDir rev-parse HEAD 2>`$null
     try { git -C `$axiomDir pull origin `$branch --ff-only 2>`$null } catch {}
+    `$headAfter = git -C `$axiomDir rev-parse HEAD 2>`$null
+
+    `$needsBuild = (-not (Test-Path (Join-Path `$webDir "index.html"))) -or (`$headBefore -ne `$headAfter)
+
+    if (`$needsBuild -and (Get-Command "node" -ErrorAction SilentlyContinue)) {
+        `$webAppDir = Join-Path `$axiomDir "apps\axiom-web"
+        if (Test-Path (Join-Path `$webAppDir "package.json")) {
+            Write-Host "Rebuilding web UI..."
+            Push-Location `$webAppDir
+            try {
+                npm install --silent 2>`$null
+                npm run build 2>`$null
+                Write-Host "Web UI rebuilt successfully."
+            } catch {
+                Write-Host "Web UI rebuild failed - using cached version." -ForegroundColor Yellow
+            } finally {
+                Pop-Location
+            }
+        }
+    }
 }
 
 `$showHelp = (`$args -contains "-h") -or (`$args -contains "--help")
@@ -286,7 +307,7 @@ finally {
 }
 
 if (-not (Test-Path (Join-Path `$webDir "index.html"))) {
-    throw [System.InvalidOperationException]::new("Built web UI not found at `$webDir. Re-run the installer or build apps/axiom-web before launching.")
+    throw [System.InvalidOperationException]::new("Built web UI not found at `$webDir. Run the installer with Node.js available or build apps/axiom-web manually before launching.")
 }
 
 if ((Test-PortInUse -HostName `$apiHost -Port `$apiPort) -or (Test-PortInUse -HostName `$webHost -Port `$webPort)) {
@@ -549,6 +570,27 @@ function Invoke-Update {
     Write-Info "Updating dependencies..."
     & $VenvPython -m pip install --upgrade pip --quiet
     & $VenvPip install -e $InstallSpec --quiet
+
+    # ── Rebuild web UI ───────────────────────────────────────────────
+    $WebAppDir = Join-Path $InstallDir "apps" "axiom-web"
+    if (Get-Command "node" -ErrorAction SilentlyContinue) {
+        if (Test-Path (Join-Path $WebAppDir "package.json")) {
+            Write-Info "Rebuilding web UI..."
+            Push-Location $WebAppDir
+            try {
+                npm install --silent
+                npm run build
+                Write-Ok "Web UI rebuilt successfully."
+            } catch {
+                Write-Warn "Web UI rebuild failed: $_"
+            } finally {
+                Pop-Location
+            }
+        }
+    } else {
+        Write-Warn "Node.js not found — skipping web UI rebuild."
+    }
+
     Write-Launchers -VenvPython $VenvPython
 
     Write-Ok "Axiom updated to latest."

@@ -62,9 +62,9 @@ API_PORT="8000"
 WEB_HOST="127.0.0.1"
 WEB_PORT="3000"
 API_URL="http://127.0.0.1:8000"
-API_HEALTH_URL="${API_URL}/healthz"
+API_HEALTH_URL="\${API_URL}/healthz"
 WEB_URL="http://127.0.0.1:3000"
-WEB_DIR="${AXIOM_DIR}/apps/axiom-web/out"
+WEB_DIR="\${AXIOM_DIR}/apps/axiom-web/out"
 API_PID=""
 WEB_PID=""
 API_STDOUT=""
@@ -87,18 +87,18 @@ EOF
 }
 
 open_browser() {
-    local url="$1"
+    local url="\$1"
     if command -v xdg-open >/dev/null 2>&1; then
-        xdg-open "$url" >/dev/null 2>&1 || true
+        xdg-open "\$url" >/dev/null 2>&1 || true
     elif command -v open >/dev/null 2>&1; then
-        open "$url" >/dev/null 2>&1 || true
+        open "\$url" >/dev/null 2>&1 || true
     else
-        echo "Open $url in your browser."
+        echo "Open \$url in your browser."
     fi
 }
 
 port_in_use() {
-    "$VENV_PYTHON" - "$1" "$2" <<'PY'
+    "\$VENV_PYTHON" - "\$1" "\$2" <<'PY'
 import socket
 import sys
 
@@ -112,7 +112,7 @@ PY
 }
 
 url_ready() {
-    "$VENV_PYTHON" - "$1" <<'PY'
+    "\$VENV_PYTHON" - "\$1" <<'PY'
 import sys
 import urllib.error
 import urllib.request
@@ -128,68 +128,68 @@ PY
 }
 
 wait_for_url() {
-    local label="$1"
-    local url="$2"
-    local pid="$3"
-    local max_attempts="${4:-60}"
+    local label="\$1"
+    local url="\$2"
+    local pid="\$3"
+    local max_attempts="\${4:-60}"
     local attempt=0
 
-    while [ "$attempt" -lt "$max_attempts" ]; do
-        if url_ready "$url"; then
+    while [ "\$attempt" -lt "\$max_attempts" ]; do
+        if url_ready "\$url"; then
             return 0
         fi
-        if ! kill -0 "$pid" 2>/dev/null; then
+        if ! kill -0 "\$pid" 2>/dev/null; then
             return 1
         fi
-        attempt=$((attempt + 1))
+        attempt=\$((attempt + 1))
         sleep 0.5
     done
 
-    echo "${label} did not respond within $((max_attempts / 2)) seconds." >&2
+    echo "\${label} did not respond within \$((max_attempts / 2)) seconds." >&2
     return 1
 }
 
 stop_pid() {
-    local pid="$1"
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-        kill "$pid" 2>/dev/null || true
-        wait "$pid" 2>/dev/null || true
+    local pid="\$1"
+    if [ -n "\$pid" ] && kill -0 "\$pid" 2>/dev/null; then
+        kill "\$pid" 2>/dev/null || true
+        wait "\$pid" 2>/dev/null || true
     fi
 }
 
 log_tail() {
-    local path="$1"
-    if [ -f "$path" ]; then
-        tail -n 40 "$path" 2>/dev/null || true
+    local path="\$1"
+    if [ -f "\$path" ]; then
+        tail -n 40 "\$path" 2>/dev/null || true
     fi
 }
 
 startup_failure() {
-    local label="$1"
-    local pid="$2"
-    local stdout_file="$3"
-    local stderr_file="$4"
-    local hint="$5"
+    local label="\$1"
+    local pid="\$2"
+    local stdout_file="\$3"
+    local stderr_file="\$4"
+    local hint="\$5"
 
     {
-        if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
-            echo "${label} exited before becoming ready."
+        if [ -n "\$pid" ] && ! kill -0 "\$pid" 2>/dev/null; then
+            echo "\${label} exited before becoming ready."
         fi
 
         local stdout_tail
-        stdout_tail="$(log_tail "$stdout_file")"
-        if [ -n "$stdout_tail" ]; then
-            printf '%s\n%s\n' "${label} stdout:" "$stdout_tail"
+        stdout_tail="\$(log_tail "\$stdout_file")"
+        if [ -n "\$stdout_tail" ]; then
+            printf '%s\n%s\n' "\${label} stdout:" "\$stdout_tail"
         fi
 
         local stderr_tail
-        stderr_tail="$(log_tail "$stderr_file")"
-        if [ -n "$stderr_tail" ]; then
-            printf '%s\n%s\n' "${label} stderr:" "$stderr_tail"
+        stderr_tail="\$(log_tail "\$stderr_file")"
+        if [ -n "\$stderr_tail" ]; then
+            printf '%s\n%s\n' "\${label} stderr:" "\$stderr_tail"
         fi
 
-        if [ -n "$hint" ]; then
-            echo "$hint"
+        if [ -n "\$hint" ]; then
+            echo "\$hint"
         fi
     } >&2
 
@@ -197,21 +197,42 @@ startup_failure() {
 }
 
 cleanup() {
-    local exit_code=$?
+    local exit_code=\$?
     trap - EXIT INT TERM
-    if [ "$CLEANUP_RUNNING" -eq 0 ]; then
+    if [ "\$CLEANUP_RUNNING" -eq 0 ]; then
         CLEANUP_RUNNING=1
-        stop_pid "$WEB_PID"
-        stop_pid "$API_PID"
-        rm -f "$API_STDOUT" "$API_STDERR" "$WEB_STDOUT" "$WEB_STDERR"
+        stop_pid "\$WEB_PID"
+        stop_pid "\$API_PID"
+        rm -f "\$API_STDOUT" "\$API_STDERR" "\$WEB_STDOUT" "\$WEB_STDERR"
     fi
-    exit "$exit_code"
+    exit "\$exit_code"
 }
 
 trap cleanup EXIT INT TERM
 
-if [ -d "$AXIOM_DIR/.git" ]; then
-    git -C "$AXIOM_DIR" pull origin "$BRANCH" --ff-only 2>/dev/null || true
+if [ -d "\$AXIOM_DIR/.git" ]; then
+    head_before=\$(git -C "\$AXIOM_DIR" rev-parse HEAD 2>/dev/null || true)
+    git -C "\$AXIOM_DIR" pull origin "\$BRANCH" --ff-only 2>/dev/null || true
+    head_after=\$(git -C "\$AXIOM_DIR" rev-parse HEAD 2>/dev/null || true)
+
+    needs_build=false
+    if [ ! -f "\${WEB_DIR}/index.html" ]; then
+        needs_build=true
+    elif [ "\$head_before" != "\$head_after" ]; then
+        needs_build=true
+    fi
+
+    if [ "\$needs_build" = true ] && command -v node >/dev/null 2>&1; then
+        web_app_dir="\$AXIOM_DIR/apps/axiom-web"
+        if [ -f "\$web_app_dir/package.json" ]; then
+            echo "Rebuilding web UI..."
+            (cd "\$web_app_dir" && npm install --silent 2>/dev/null && npm run build 2>/dev/null) && {
+                echo "Web UI rebuilt successfully."
+            } || {
+                echo "Web UI rebuild failed — using cached version." >&2
+            }
+        fi
+    fi
 fi
 
 DESKTOP_MODE=false
@@ -219,8 +240,8 @@ CLI_MODE=false
 SHOW_HELP=false
 FILTERED_ARGS=()
 
-for arg in "$@"; do
-    case "$arg" in
+for arg in "\$@"; do
+    case "\$arg" in
         --desktop|--gui)
             DESKTOP_MODE=true
             ;;
@@ -233,72 +254,72 @@ for arg in "$@"; do
             SHOW_HELP=true
             ;;
         *)
-            FILTERED_ARGS+=("$arg")
+            FILTERED_ARGS+=("\$arg")
             ;;
     esac
 done
 
-if [ "$SHOW_HELP" = true ]; then
+if [ "\$SHOW_HELP" = true ]; then
     show_help
     exit 0
 fi
 
-cd "$AXIOM_DIR"
+cd "\$AXIOM_DIR"
 
-if [ "$DESKTOP_MODE" = true ] && [ "$CLI_MODE" = true ]; then
+if [ "\$DESKTOP_MODE" = true ] && [ "\$CLI_MODE" = true ]; then
     echo "Choose either --desktop/--gui or --cli, not both." >&2
     exit 1
 fi
 
-if [ "$DESKTOP_MODE" = true ]; then
-    exec "$VENV_PYTHON" "$AXIOM_DIR/main.py" "${FILTERED_ARGS[@]}"
+if [ "\$DESKTOP_MODE" = true ]; then
+    exec "\$VENV_PYTHON" "\$AXIOM_DIR/main.py" "\${FILTERED_ARGS[@]}"
 fi
 
-if [ "$CLI_MODE" = true ]; then
-    exec "$VENV_PYTHON" "$AXIOM_DIR/main.py" --cli "${FILTERED_ARGS[@]}"
+if [ "\$CLI_MODE" = true ]; then
+    exec "\$VENV_PYTHON" "\$AXIOM_DIR/main.py" --cli "\${FILTERED_ARGS[@]}"
 fi
 
-if [ ! -f "${WEB_DIR}/index.html" ]; then
-    echo "Built web UI not found at ${WEB_DIR}. Re-run the installer or build apps/axiom-web before launching." >&2
+if [ ! -f "\${WEB_DIR}/index.html" ]; then
+    echo "Built web UI not found at \${WEB_DIR}. Run the installer with Node.js available or build apps/axiom-web manually before launching." >&2
     exit 1
 fi
 
-if port_in_use "$API_HOST" "$API_PORT" || port_in_use "$WEB_HOST" "$WEB_PORT"; then
-    if url_ready "$API_HEALTH_URL" && url_ready "$WEB_URL"; then
-        open_browser "$WEB_URL"
-        echo "Axiom is already running at ${WEB_URL}."
+if port_in_use "\$API_HOST" "\$API_PORT" || port_in_use "\$WEB_HOST" "\$WEB_PORT"; then
+    if url_ready "\$API_HEALTH_URL" && url_ready "\$WEB_URL"; then
+        open_browser "\$WEB_URL"
+        echo "Axiom is already running at \${WEB_URL}."
         exit 0
     fi
-    echo "Ports ${API_PORT}/${WEB_PORT} are already in use. Stop the existing processes or close the app before starting a new instance." >&2
+    echo "Ports \${API_PORT}/\${WEB_PORT} are already in use. Stop the existing processes or close the app before starting a new instance." >&2
     exit 1
 fi
 
-API_STDOUT="$(mktemp)"
-API_STDERR="$(mktemp)"
-WEB_STDOUT="$(mktemp)"
-WEB_STDERR="$(mktemp)"
+API_STDOUT="\$(mktemp)"
+API_STDERR="\$(mktemp)"
+WEB_STDOUT="\$(mktemp)"
+WEB_STDERR="\$(mktemp)"
 
-"$VENV_PYTHON" -m uvicorn axiom_app.api.app:app --host "$API_HOST" --port "$API_PORT" >"$API_STDOUT" 2>"$API_STDERR" &
-API_PID=$!
-if ! wait_for_url "API" "$API_HEALTH_URL" "$API_PID"; then
-    startup_failure "API server" "$API_PID" "$API_STDOUT" "$API_STDERR" "Verify that FastAPI dependencies are installed and that port ${API_PORT} is available."
+"\$VENV_PYTHON" -m uvicorn axiom_app.api.app:app --host "\$API_HOST" --port "\$API_PORT" >"\$API_STDOUT" 2>"\$API_STDERR" &
+API_PID=\$!
+if ! wait_for_url "API" "\$API_HEALTH_URL" "\$API_PID"; then
+    startup_failure "API server" "\$API_PID" "\$API_STDOUT" "\$API_STDERR" "Verify that FastAPI dependencies are installed and that port \${API_PORT} is available."
 fi
 
-"$VENV_PYTHON" -m http.server "$WEB_PORT" --bind "$WEB_HOST" --directory "$WEB_DIR" >"$WEB_STDOUT" 2>"$WEB_STDERR" &
-WEB_PID=$!
-if ! wait_for_url "Web UI" "$WEB_URL" "$WEB_PID"; then
-    startup_failure "Web UI server" "$WEB_PID" "$WEB_STDOUT" "$WEB_STDERR" "Verify that the exported web bundle exists at ${WEB_DIR} and that port ${WEB_PORT} is available."
+"\$VENV_PYTHON" -m http.server "\$WEB_PORT" --bind "\$WEB_HOST" --directory "\$WEB_DIR" >"\$WEB_STDOUT" 2>"\$WEB_STDERR" &
+WEB_PID=\$!
+if ! wait_for_url "Web UI" "\$WEB_URL" "\$WEB_PID"; then
+    startup_failure "Web UI server" "\$WEB_PID" "\$WEB_STDOUT" "\$WEB_STDERR" "Verify that the exported web bundle exists at \${WEB_DIR} and that port \${WEB_PORT} is available."
 fi
 
-open_browser "$WEB_URL"
-echo "Axiom running (API PID $API_PID, Web PID $WEB_PID) at $WEB_URL. Press Ctrl+C to stop."
+open_browser "\$WEB_URL"
+echo "Axiom running (API PID \$API_PID, Web PID \$WEB_PID) at \$WEB_URL. Press Ctrl+C to stop."
 
 while :; do
-    if ! kill -0 "$API_PID" 2>/dev/null; then
-        startup_failure "API server" "$API_PID" "$API_STDOUT" "$API_STDERR" "The API server stopped unexpectedly."
+    if ! kill -0 "\$API_PID" 2>/dev/null; then
+        startup_failure "API server" "\$API_PID" "\$API_STDOUT" "\$API_STDERR" "The API server stopped unexpectedly."
     fi
-    if ! kill -0 "$WEB_PID" 2>/dev/null; then
-        startup_failure "Web UI server" "$WEB_PID" "$WEB_STDOUT" "$WEB_STDERR" "The static web server stopped unexpectedly."
+    if ! kill -0 "\$WEB_PID" 2>/dev/null; then
+        startup_failure "Web UI server" "\$WEB_PID" "\$WEB_STDOUT" "\$WEB_STDERR" "The static web server stopped unexpectedly."
     fi
     sleep 1
 done
@@ -456,6 +477,22 @@ do_update() {
     info "Updating dependencies…"
     "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet
     "$VENV_DIR/bin/pip" install -e "$INSTALL_SPEC" --quiet
+
+    # ── Rebuild web UI ────────────────────────────────────────────────
+    local web_app_dir="$INSTALL_DIR/apps/axiom-web"
+    if command -v node &>/dev/null; then
+        if [ -f "$web_app_dir/package.json" ]; then
+            info "Rebuilding web UI..."
+            (cd "$web_app_dir" && npm install --silent && npm run build) && {
+                ok "Web UI rebuilt successfully."
+            } || {
+                warn "Web UI rebuild failed. The backend is still usable without the web UI."
+            }
+        fi
+    else
+        warn "Node.js not found — skipping web UI rebuild."
+    fi
+
     write_launcher
 
     ok "Axiom updated to latest."
