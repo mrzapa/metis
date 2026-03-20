@@ -367,7 +367,7 @@ export default function SettingsPage() {
     <PageChrome
       eyebrow="Settings"
       title="Configure your workspace"
-      description="Fine-tune model providers, retrieval parameters, graph behavior, memory settings, and the companion assistant."
+      description="Fine-tune model providers, retrieval parameters, graph behaviour, memory settings, and the companion assistant."
     >
       <div className="mx-auto max-w-3xl space-y-8">
         <div>
@@ -707,8 +707,8 @@ export default function SettingsPage() {
                     />
                     <ToggleRow
                       id="enable_summarizer"
-                      label="Enable summarizer"
-                      description="Summarize long context windows before passing to the LLM."
+                      label="Enable summariser"
+                      description="Summarise long context windows before passing to the LLM."
                       checked={watch("enable_summarizer")}
                       onChange={(v) => setValue("enable_summarizer", v)}
                     />
@@ -983,7 +983,7 @@ export default function SettingsPage() {
                         <div>
                           <h3 className="text-sm font-semibold">Assistant identity</h3>
                           <p className="mt-0.5 text-xs text-muted-foreground">
-                            Name, greeting, and dock behavior for the companion.
+                            Name, greeting, and dock behaviour for the companion.
                           </p>
                         </div>
 
@@ -1029,7 +1029,7 @@ export default function SettingsPage() {
                             rows={5}
                             {...registerAssistant("assistant_identity.prompt_seed")}
                             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring resize-y"
-                            placeholder="Seed prompt used to shape the companion's tone and behavior."
+                            placeholder="Seed prompt used to shape the companion's tone and behaviour."
                           />
                         </div>
 
@@ -1189,7 +1189,7 @@ export default function SettingsPage() {
                         <div>
                           <h3 className="text-sm font-semibold">Policy</h3>
                           <p className="mt-0.5 text-xs text-muted-foreground">
-                            Control reflection behavior and memory growth limits.
+                            Control reflection behaviour and memory growth limits.
                           </p>
                         </div>
 
@@ -1254,7 +1254,7 @@ export default function SettingsPage() {
                           <ToggleRow
                             id="assistant_policy.reflection_enabled"
                             label="Reflection enabled"
-                            description="Allow the assistant to summarize and reflect on completed work."
+                            description="Allow the assistant to summarise and reflect on completed work."
                             checked={watchAssistant("assistant_policy.reflection_enabled")}
                             onChange={(v) => setAssistantValue("assistant_policy.reflection_enabled", v)}
                           />
