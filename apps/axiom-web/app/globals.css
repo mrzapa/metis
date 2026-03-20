@@ -219,6 +219,233 @@ body {
       0 0 0 1px color-mix(in oklch, white 6%, transparent),
       0 0 0 10px color-mix(in oklch, var(--primary) 6%, transparent);
   }
+
+  .home-liquid-glass {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid color-mix(in oklch, white 11%, transparent);
+    background:
+      radial-gradient(circle at 20% 0%, color-mix(in oklch, white 14%, transparent) 0%, transparent 30%),
+      radial-gradient(circle at 80% 100%, color-mix(in oklch, var(--primary) 10%, transparent) 0%, transparent 34%),
+      linear-gradient(180deg, color-mix(in oklch, var(--card) 72%, transparent), color-mix(in oklch, var(--card) 54%, transparent));
+    backdrop-filter: blur(28px) saturate(155%);
+    -webkit-backdrop-filter: blur(28px) saturate(155%);
+    box-shadow:
+      0 28px 72px -34px color-mix(in oklch, black 72%, transparent),
+      0 10px 30px -18px color-mix(in oklch, var(--primary) 20%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 18%, transparent),
+      inset 0 0 0 1px color-mix(in oklch, white 5%, transparent);
+  }
+
+  .home-liquid-glass::before {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      linear-gradient(135deg, color-mix(in oklch, white 18%, transparent) 0%, transparent 28%),
+      linear-gradient(180deg, transparent 0%, color-mix(in oklch, white 6%, transparent) 100%);
+    opacity: 0.85;
+  }
+
+  .home-liquid-glass::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    background:
+      radial-gradient(circle at 50% 0%, color-mix(in oklch, white 22%, transparent) 0%, transparent 22%),
+      linear-gradient(110deg, transparent 18%, color-mix(in oklch, white 10%, transparent) 45%, transparent 72%);
+    opacity: 0.35;
+    transform: translate3d(0, 0, 0);
+    animation: liquid-glass-sheen 12s ease-in-out infinite;
+  }
+
+  .home-liquid-glass > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .home-liquid-glass-card {
+    border-radius: 1.9rem;
+    transition:
+      transform 220ms ease,
+      box-shadow 220ms ease,
+      border-color 220ms ease,
+      background-color 220ms ease;
+  }
+
+  .home-liquid-glass-card:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in oklch, white 18%, transparent);
+    box-shadow:
+      0 34px 82px -36px color-mix(in oklch, black 76%, transparent),
+      0 14px 34px -18px color-mix(in oklch, var(--primary) 24%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 24%, transparent);
+  }
+
+  .home-liquid-glass-rail {
+    border-radius: 9999px;
+    background:
+      radial-gradient(circle at 50% 0%, color-mix(in oklch, white 12%, transparent) 0%, transparent 36%),
+      linear-gradient(180deg, rgba(11, 16, 24, 0.84), rgba(8, 10, 14, 0.72));
+    backdrop-filter: blur(24px) saturate(145%);
+    -webkit-backdrop-filter: blur(24px) saturate(145%);
+    box-shadow:
+      0 28px 90px -52px color-mix(in oklch, black 78%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 10%, transparent),
+      inset 0 0 0 1px color-mix(in oklch, white 6%, transparent);
+  }
+
+  .home-liquid-glass-rail::before {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      linear-gradient(135deg, color-mix(in oklch, white 12%, transparent) 0%, transparent 32%),
+      linear-gradient(180deg, transparent 0%, color-mix(in oklch, var(--primary) 6%, transparent) 100%);
+    opacity: 0.8;
+  }
+
+  .home-liquid-glass-rail > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .home-space-atmosphere {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .home-space-atmosphere__base {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 24% 18%, color-mix(in oklch, var(--primary) 18%, transparent) 0%, transparent 28%),
+      radial-gradient(circle at 74% 36%, color-mix(in oklch, var(--secondary) 10%, transparent) 0%, transparent 24%),
+      radial-gradient(circle at 50% 54%, color-mix(in oklch, white 7%, transparent) 0%, transparent 42%);
+    opacity: 0.92;
+    filter: saturate(120%);
+  }
+
+  .home-space-atmosphere__stars,
+  .home-space-atmosphere__twinkles,
+  .home-space-atmosphere__shooting-stars {
+    position: absolute;
+    inset: 0;
+  }
+
+  .home-space-atmosphere__stars {
+    background-image:
+      radial-gradient(1px 1px at 11% 18%, rgba(255, 255, 255, 0.75), transparent),
+      radial-gradient(1px 1px at 17% 63%, rgba(173, 198, 255, 0.62), transparent),
+      radial-gradient(1px 1px at 28% 26%, rgba(255, 255, 255, 0.4), transparent),
+      radial-gradient(1.5px 1.5px at 37% 14%, rgba(255, 255, 255, 0.62), transparent),
+      radial-gradient(1px 1px at 49% 34%, rgba(173, 198, 255, 0.48), transparent),
+      radial-gradient(1px 1px at 63% 24%, rgba(255, 255, 255, 0.58), transparent),
+      radial-gradient(1.5px 1.5px at 71% 59%, rgba(255, 255, 255, 0.56), transparent),
+      radial-gradient(1px 1px at 82% 18%, rgba(173, 198, 255, 0.42), transparent),
+      radial-gradient(1px 1px at 88% 48%, rgba(255, 255, 255, 0.55), transparent),
+      radial-gradient(1.5px 1.5px at 93% 82%, rgba(255, 255, 255, 0.68), transparent);
+    background-repeat: repeat;
+    background-size: 520px 520px;
+    opacity: 0.55;
+    animation: home-stars-drift 240s linear infinite;
+  }
+
+  .home-space-atmosphere__twinkles {
+    background-image:
+      radial-gradient(circle at 17% 27%, rgba(255, 255, 255, 0.95) 0 1px, transparent 2px),
+      radial-gradient(circle at 41% 52%, rgba(173, 198, 255, 0.72) 0 1px, transparent 2px),
+      radial-gradient(circle at 68% 19%, rgba(255, 255, 255, 0.9) 0 1px, transparent 2px),
+      radial-gradient(circle at 86% 33%, rgba(255, 255, 255, 0.82) 0 1px, transparent 2px),
+      radial-gradient(circle at 59% 73%, rgba(173, 198, 255, 0.68) 0 1px, transparent 2px);
+    opacity: 0.38;
+    mix-blend-mode: screen;
+    animation: home-twinkle 6.5s ease-in-out infinite;
+  }
+
+  .home-space-atmosphere__shooting-stars span {
+    position: absolute;
+    display: block;
+    width: 150px;
+    height: 2px;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.12) 18%, rgba(173, 198, 255, 0.84) 50%, rgba(255, 255, 255, 0.1) 82%, transparent 100%);
+    filter: drop-shadow(0 0 6px rgba(173, 198, 255, 0.6));
+    opacity: 0;
+    transform: rotate(-18deg);
+    animation: home-shooting-star 9s linear infinite;
+  }
+
+  .home-space-atmosphere__shooting-stars span::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: inherit;
+    filter: blur(2px);
+    opacity: 0.7;
+  }
+
+  .home-space-atmosphere__shooting-stars span:nth-child(1) {
+    top: 12%;
+    left: 14%;
+    animation-delay: 1.5s;
+  }
+
+  .home-space-atmosphere__shooting-stars span:nth-child(2) {
+    top: 24%;
+    right: 10%;
+    animation-delay: 5.4s;
+    animation-duration: 10.5s;
+    transform: rotate(-22deg);
+  }
+
+  .home-space-atmosphere__shooting-stars span:nth-child(3) {
+    top: 58%;
+    left: 28%;
+    animation-delay: 7.1s;
+    animation-duration: 11.2s;
+    transform: rotate(-16deg);
+  }
+
+  .home-space-atmosphere__vignette {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at center, transparent 0%, color-mix(in oklch, black 72%, transparent) 100%);
+  }
+
+  .home-space-atmosphere__orbit {
+    position: absolute;
+    border-radius: 9999px;
+    border: 1px solid color-mix(in oklch, white 8%, transparent);
+    box-shadow: 0 0 24px color-mix(in oklch, var(--primary) 10%, transparent);
+    opacity: 0.4;
+    animation: home-orbit-breathe 16s ease-in-out infinite;
+  }
+
+  .home-space-atmosphere__orbit--one {
+    top: 9%;
+    left: 19%;
+    width: 13rem;
+    height: 13rem;
+  }
+
+  .home-space-atmosphere__orbit--two {
+    right: 12%;
+    bottom: 11%;
+    width: 18rem;
+    height: 18rem;
+    animation-delay: 4s;
+  }
 }
 
 @keyframes starfield-drift {
@@ -243,6 +470,72 @@ body {
   100% { transform: translateX(400%); }
 }
 
+@keyframes liquid-glass-sheen {
+  0%,
+  100% {
+    transform: translate3d(-1%, 0, 0);
+  }
+  50% {
+    transform: translate3d(1.5%, 0, 0);
+  }
+}
+
+@keyframes home-stars-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-120px, 90px, 0);
+  }
+}
+
+@keyframes home-twinkle {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  45% {
+    opacity: 0.48;
+    transform: scale(1.03);
+  }
+  60% {
+    opacity: 0.22;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes home-shooting-star {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scaleX(0.3) rotate(var(--shooting-star-angle, -18deg));
+  }
+  8% {
+    opacity: 0.92;
+    transform: translate3d(0, 0, 0) scaleX(1) rotate(var(--shooting-star-angle, -18deg));
+  }
+  18% {
+    opacity: 0;
+    transform: translate3d(160px, 110px, 0) scaleX(1.2) rotate(var(--shooting-star-angle, -18deg));
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(160px, 110px, 0) scaleX(1.2) rotate(var(--shooting-star-angle, -18deg));
+  }
+}
+
+@keyframes home-orbit-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.28;
+  }
+  50% {
+    transform: scale(1.015);
+    opacity: 0.5;
+  }
+}
+
 .animate-progress-indeterminate {
   animation: progress-indeterminate 1.5s ease-in-out infinite;
 }
@@ -255,5 +548,12 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .home-space-atmosphere__stars,
+  .home-space-atmosphere__twinkles,
+  .home-space-atmosphere__shooting-stars span,
+  .home-liquid-glass::after {
+    animation: none !important;
   }
 }
