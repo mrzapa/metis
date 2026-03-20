@@ -31,9 +31,9 @@ dependencies = ["PySide6>=6.6", "psutil>=6", "PyYAML>=6"]
 
 [project.optional-dependencies]
 api = [
-    "fastapi",
-    "python-multipart",
-    "uvicorn[standard]",
+    "fastapi==0.135.1",
+    "python-multipart==0.0.22",
+    "uvicorn[standard]==0.42.0",
 ]
 dev = [
     "pytest>=8",
@@ -41,9 +41,9 @@ dev = [
     "ruff>=0.6",
     "pre-commit>=3.8",
     "httpx>=0.28",
-    "fastapi>=0.104",
-    "python-multipart>=0.0.9",
-    "uvicorn[standard]>=0.24",
+    "fastapi==0.135.1",
+    "python-multipart==0.0.22",
+    "uvicorn[standard]==0.42.0",
     "litestar>=2.4",
 ]
 runtime-all = [
