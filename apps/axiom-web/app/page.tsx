@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import {
   Settings2,
-  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -159,6 +158,17 @@ function RailLink({
   );
 }
 
+function CardCornerSparkles() {
+  return (
+    <>
+      <span className="home-card-sparkle home-card-sparkle--tl" />
+      <span className="home-card-sparkle home-card-sparkle--tr" />
+      <span className="home-card-sparkle home-card-sparkle--bl" />
+      <span className="home-card-sparkle home-card-sparkle--br" />
+    </>
+  );
+}
+
 export default function Home() {
   const [setupComplete, setSetupComplete] = useState<boolean | null>(null);
 
@@ -188,6 +198,7 @@ export default function Home() {
       <div className="deep-space-overlay absolute inset-0" aria-hidden="true" />
       <SpaceAtmosphere />
 
+      {/* Side rail – desktop */}
       <aside className="fixed left-6 top-1/2 z-30 hidden -translate-y-1/2 md:block">
         <nav className="home-liquid-glass home-liquid-glass-rail group/rail flex w-[5.35rem] flex-col gap-1.5 overflow-hidden rounded-[1.9rem] px-3 py-3 transition-[width] duration-500 hover:w-[15.75rem] focus-within:w-[15.75rem]">
           {SIDE_RAIL_ITEMS.map((item) => (
@@ -196,6 +207,7 @@ export default function Home() {
         </nav>
       </aside>
 
+      {/* Bottom rail – mobile */}
       <nav className="home-liquid-glass home-liquid-glass-rail fixed bottom-4 left-1/2 z-30 w-[min(92vw,28rem)] -translate-x-1/2 rounded-[1.75rem] px-2 py-2 md:hidden">
         <div className="flex w-full flex-col gap-3">
           <div className="grid grid-cols-4 gap-1">
@@ -211,177 +223,71 @@ export default function Home() {
         </div>
       </nav>
 
-      <main className="relative z-10 flex min-h-screen items-center justify-center px-5 pb-32 pt-8 sm:px-8 md:px-12 lg:px-16">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-10 lg:gap-12">
-          <motion.section
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, ease: "easeOut" }}
-            className="grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.72fr)] lg:items-center"
-          >
-            <div className="space-y-8">
-              <div className="space-y-6 text-left">
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[0.72rem] uppercase tracking-[0.32em] text-[#92a4d4]">
-                  <span className="size-1.5 rounded-full bg-[#59d9ff] shadow-[0_0_14px_rgba(89,217,255,0.9)]" />
-                  Local-first workspace
-                </div>
+      {/* Main content – centered logo + cards */}
+      <main className="relative z-10 flex min-h-screen flex-col items-center justify-center px-5 pb-32 pt-8 sm:px-8 md:px-12 lg:px-16">
+        {/* Central logo with orbital ring */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.92 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.7, ease: "easeOut" }}
+          className="mb-16 flex flex-col items-center sm:mb-20"
+        >
+          <h1 className="sr-only">AXIOM</h1>
+          <div className="home-orbital-ring relative flex items-center justify-center">
+            <AxiomHomeLogo
+              className="size-28 sm:size-32 md:size-36"
+              priority
+            />
+          </div>
+        </motion.div>
 
-                <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:gap-8">
-                  <h1 className="sr-only">AXIOM</h1>
-                  <AxiomHomeLogo
-                    className="size-40 sm:size-48 md:size-56 lg:size-60"
-                    priority
-                  />
-                  <div className="hidden h-px flex-1 bg-gradient-to-r from-[#8fb3ff]/40 via-white/15 to-transparent xl:block" />
-                </div>
+        {/* Action cards */}
+        <motion.section
+          initial={{ opacity: 0, y: 28 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, ease: "easeOut", delay: 0.15 }}
+          className="grid w-full max-w-4xl gap-5 md:grid-cols-3 md:gap-6"
+        >
+          {ACTION_ITEMS.map((item, index) => {
+            const href = resolveHref(item.href, setupComplete);
 
-                <div className="max-w-2xl space-y-4">
-                  <h2 className="font-display text-balance text-4xl font-semibold tracking-[-0.05em] text-[#f4f7ff] sm:text-5xl lg:text-6xl">
-                    Build, chat, and map your knowledge in one orbital cockpit.
-                  </h2>
-                  <p className="max-w-xl text-pretty text-base leading-8 text-[#98a2bf] sm:text-lg">
-                    Axiom keeps sessions, indexes, the brain graph, and local GGUF models in one
-                    private, desktop-native workspace so the empty space becomes usable surface.
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                {[
-                  "Private by default",
-                  "Desktop-first layout",
-                  "Model and graph aware",
-                ].map((label) => (
-                  <div
-                    key={label}
-                    className="glass-panel rounded-full px-4 py-3 text-center text-xs uppercase tracking-[0.24em] text-[#b9c3dd]"
-                  >
-                    {label}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <motion.aside
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, ease: "easeOut", delay: 0.1 }}
-              className="home-liquid-glass rounded-[2rem] p-5 sm:p-6"
-            >
-              <div className="space-y-5">
-                <div className="space-y-2">
-                  <p className="font-display text-xs uppercase tracking-[0.34em] text-[#6dd6ff]">
-                    Launch posture
-                  </p>
-                  <h3 className="font-display text-2xl font-semibold tracking-[-0.04em] text-[#f4f7ff]">
-                    One workspace, three modes.
-                  </h3>
-                  <p className="text-sm leading-7 text-[#97a2bd]">
-                    Keep chat for direct synthesis, library for your indexes and GGUF models, and
-                    brain for the graph of everything the workspace knows.
-                  </p>
-                </div>
-
-                <div className="space-y-2 rounded-[1.35rem] border border-white/8 bg-[rgba(0,0,0,0.14)] p-4">
-                  <div className="flex items-center justify-between gap-3 text-xs uppercase tracking-[0.26em] text-[#8f9bb7]">
-                    <span>Local inference</span>
-                    <span>Offline-ready</span>
-                  </div>
-                  <div className="mt-4 grid gap-2 text-sm text-[#dce3f6]">
-                    <div className="flex items-center justify-between gap-4 rounded-full bg-white/5 px-3 py-2">
-                      <span>Chat</span>
-                      <span className="text-[#8fb3ff]">Grounded answers</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-4 rounded-full bg-white/5 px-3 py-2">
-                      <span>Brain</span>
-                      <span className="text-[#8fb3ff]">Persistent topology</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-4 rounded-full bg-white/5 px-3 py-2">
-                      <span>Models</span>
-                      <span className="text-[#8fb3ff]">Hardware aware</span>
-                    </div>
-                  </div>
-                </div>
-
-                {setupComplete === false ? (
-                  <div className="flex items-center gap-3 rounded-[1.35rem] border border-[rgba(143,179,255,0.18)] bg-[rgba(143,179,255,0.08)] px-4 py-3 text-sm text-[#c5d1ef]">
-                    <Sparkles className="size-4 shrink-0 text-[#8fb3ff]" />
-                    <span>I’m keeping the launch paths pointed at onboarding until setup is complete.</span>
-                  </div>
-                ) : setupComplete === null ? (
-                  <div className="flex items-center gap-3 rounded-[1.35rem] border border-[rgba(143,179,255,0.18)] bg-[rgba(143,179,255,0.08)] px-4 py-3 text-sm text-[#c5d1ef]">
-                    <Sparkles className="size-4 shrink-0 text-[#8fb3ff]" />
-                    <span>I’m checking your workspace setup before I hand you the right launch path.</span>
-                  </div>
-                ) : null}
-              </div>
-            </motion.aside>
-          </motion.section>
-
-          <motion.section
-            initial={{ opacity: 0, y: 22 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, ease: "easeOut", delay: 0.08 }}
-            className="grid gap-5 md:grid-cols-3 md:gap-6"
-          >
-            {ACTION_ITEMS.map((item, index) => {
-              const href = resolveHref(item.href, setupComplete);
-
-              return (
-                <motion.div
-                  key={item.href}
-                  initial={{ opacity: 0, y: 22 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.45, ease: "easeOut", delay: 0.12 + index * 0.08 }}
-                  whileHover={{ y: -6 }}
-                  whileTap={{ scale: 0.99 }}
+            return (
+              <motion.div
+                key={item.href}
+                initial={{ opacity: 0, y: 22 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45, ease: "easeOut", delay: 0.25 + index * 0.1 }}
+                whileHover={{ y: -6 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <Link
+                  href={href}
+                  className="home-cosmos-card group relative flex flex-col items-center gap-5 rounded-2xl px-6 py-8 text-center md:px-8 md:py-10"
                 >
-                  <Link
-                    href={href}
-                    className="home-liquid-glass home-liquid-glass-card group flex min-h-[18rem] flex-col justify-between rounded-[2rem] p-6 text-left md:min-h-[19rem] md:p-7"
-                  >
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="rounded-full border border-white/8 bg-white/5 px-3 py-1 text-[10px] uppercase tracking-[0.28em] text-[#9aa4bf]">
-                        0{index + 1}
-                      </div>
-                      <div className="h-px flex-1 bg-gradient-to-r from-white/10 via-white/5 to-transparent" />
-                      <span className="text-[10px] uppercase tracking-[0.24em] text-[#6dd6ff]">
-                        Launch
-                      </span>
-                    </div>
+                  <CardCornerSparkles />
 
-                    <div className="flex flex-1 flex-col items-center justify-center gap-5 text-center">
-                      <div className="relative">
-                        <HomeLaunchIcon
-                          kind={item.kind ?? "chat"}
-                          animated
-                          size={92}
-                          className="shadow-[0_0_0_1px_rgba(255,255,255,0.04)] transition-transform duration-500 group-hover:-translate-y-1 group-hover:scale-[1.04]"
-                        />
-                        <span className="pointer-events-none absolute inset-[-10%] rounded-full border border-[rgba(143,179,255,0.1)] opacity-70 blur-[1px]" />
-                      </div>
-                      <div className="space-y-3">
-                        <h2 className="font-display text-[1.8rem] font-semibold tracking-[-0.04em] text-[#f4f7ff]">
-                          {item.label}
-                        </h2>
-                        <p className="max-w-xs text-sm leading-7 text-[#8f98b1]">
-                          {item.description}
-                        </p>
-                      </div>
-                    </div>
+                  <div className="relative">
+                    <HomeLaunchIcon
+                      kind={item.kind ?? "chat"}
+                      animated
+                      size={80}
+                      className="transition-transform duration-500 group-hover:-translate-y-1 group-hover:scale-[1.06]"
+                    />
+                  </div>
 
-                    <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.24em] text-[#9aa4bf]">
-                      <span>{item.railLabel}</span>
-                      <span className="transition-transform duration-300 group-hover:translate-x-1">
-                        Open
-                      </span>
-                    </div>
-                  </Link>
-                </motion.div>
-              );
-            })}
-          </motion.section>
-        </div>
+                  <div className="space-y-2">
+                    <h2 className="font-display text-xl font-semibold tracking-[-0.03em] text-[#f4f7ff]">
+                      {item.label}
+                    </h2>
+                    <p className="text-sm leading-6 text-[#8f98b1]">
+                      {item.description}
+                    </p>
+                  </div>
+                </Link>
+              </motion.div>
+            );
+          })}
+        </motion.section>
       </main>
 
       <AxiomCompanionDock className="bottom-24 md:bottom-4" />
