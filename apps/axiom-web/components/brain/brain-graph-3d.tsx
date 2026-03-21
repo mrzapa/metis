@@ -49,6 +49,10 @@ const ZOOM_TO_FIT_MS = 600;
 const ZOOM_TO_FIT_PADDING = 60;
 /** Small z-offset prevents gimbal lock when looking straight down. */
 const CAMERA_TOP_VIEW_Z_OFFSET = 0.01;
+/** Charge force strength – more negative = stronger node repulsion. */
+const D3_CHARGE_STRENGTH = -120;
+/** Preferred link distance between connected nodes. */
+const D3_LINK_DISTANCE = 80;
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -145,6 +149,8 @@ export default function BrainGraph3D({
   const modelSceneRef = useRef<THREE.Scene | null>(null);
   const modelLoadAttemptRef = useRef(0);
   const [sceneReady, setSceneReady] = useState(false);
+  const needsInitialZoomRef = useRef(true);
+  const rendererConfiguredRef = useRef(false);
   const [autoRotate, setAutoRotate] = useState(false);
 
   // Track container dimensions for the ForceGraph width/height props
@@ -183,6 +189,7 @@ export default function BrainGraph3D({
   // -- Zoom-to-fit on first load / data change -----------------------------
 
   useEffect(() => {
+    needsInitialZoomRef.current = true;
     const fg = fgRef.current;
     if (!fg || graphData.nodes.length === 0) return;
     const timer = setTimeout(() => {
@@ -191,25 +198,15 @@ export default function BrainGraph3D({
     return () => clearTimeout(timer);
   }, [graphData]);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (fgRef.current?.scene()) {
-        modelSceneRef.current = fgRef.current.scene();
-        setSceneReady(true);
-      }
-    }, 0);
-
-    return () => clearTimeout(timer);
-  }, [dims.h, dims.w, graphData.nodes.length]);
-
-  // -- Post-mount renderer / scene / controls configuration ----------------
+  // -- Post-mount: configure renderer, fog, controls, and forces ----------
 
   useEffect(() => {
     const fg = fgRef.current;
-    if (!fg || !sceneReady) return;
+    if (!fg || rendererConfiguredRef.current) return;
+    rendererConfiguredRef.current = true;
 
-    // Renderer quality: crisp rendering on high-DPI displays + filmic tone mapping
-    const renderer = fg.renderer();
+    // Renderer quality settings
+    const renderer = fg.renderer?.();
     if (renderer) {
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -230,9 +227,25 @@ export default function BrainGraph3D({
       controls.rotateSpeed = 0.8;
       controls.zoomSpeed = 1.2;
       controls.minDistance = 30;
-      controls.maxDistance = 800;
+      controls.maxDistance = 2000;
     }
-  }, [sceneReady]);
+
+    // d3-force tuning: spread nodes out to fill the brain volume
+    fg.d3Force("charge")?.strength(D3_CHARGE_STRENGTH);
+    fg.d3Force("link")?.distance(D3_LINK_DISTANCE);
+    fg.d3ReheatSimulation();
+  }, [dims.w, dims.h]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (fgRef.current?.scene()) {
+        modelSceneRef.current = fgRef.current.scene();
+        setSceneReady(true);
+      }
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [dims.h, dims.w, graphData.nodes.length]);
 
   // -- Auto-rotate control -------------------------------------------------
 
@@ -301,6 +314,14 @@ export default function BrainGraph3D({
   const fitModelOverlay = useCallback(() => {
     modelOverlayRef.current?.fitToGraph(graphData.nodes);
   }, [graphData.nodes]);
+
+  const handleEngineStop = useCallback(() => {
+    fitModelOverlay();
+    if (needsInitialZoomRef.current) {
+      needsInitialZoomRef.current = false;
+      fgRef.current?.zoomToFit(ZOOM_TO_FIT_MS, ZOOM_TO_FIT_PADDING);
+    }
+  }, [fitModelOverlay]);
 
   useEffect(() => {
     if (renderMode !== "hybrid") return;
@@ -467,7 +488,7 @@ export default function BrainGraph3D({
           onSelectedNodeIdChange?.(null);
           onNodeSelect?.(null);
         }}
-        onEngineStop={fitModelOverlay}
+        onEngineStop={handleEngineStop}
         /* Force engine tuning */
         d3AlphaDecay={0.04}
         d3VelocityDecay={0.3}

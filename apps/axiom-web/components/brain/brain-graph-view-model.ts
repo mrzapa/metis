@@ -70,6 +70,7 @@ export function buildBrainSceneGraph(
       dimmed,
       x: node.x,
       y: node.y,
+      z: 0,
     });
   }
 
