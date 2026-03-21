@@ -43,6 +43,7 @@ import {
 // -- Constants ----------------------------------------------------------------
 
 const BG_COLOR = "#05070a";
+const FOG_DENSITY = 0.0018;
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -139,6 +140,7 @@ export default function BrainGraph3D({
   const modelSceneRef = useRef<THREE.Scene | null>(null);
   const modelLoadAttemptRef = useRef(0);
   const [sceneReady, setSceneReady] = useState(false);
+  const [autoRotate, setAutoRotate] = useState(false);
 
   // Track container dimensions for the ForceGraph width/height props
   const [dims, setDims] = useState({ w: 800, h: 600 });
@@ -194,6 +196,49 @@ export default function BrainGraph3D({
 
     return () => clearTimeout(timer);
   }, [dims.h, dims.w, graphData.nodes.length]);
+
+  // -- Post-mount renderer / scene / controls configuration ----------------
+
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!fg || !sceneReady) return;
+
+    // Renderer quality: crisp rendering on high-DPI displays + filmic tone mapping
+    const renderer = fg.renderer();
+    if (renderer) {
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
+    }
+
+    // Exponential fog for depth perception (distant nodes subtly fade)
+    const scene = fg.scene();
+    if (scene && !scene.fog) {
+      scene.fog = new THREE.FogExp2(BG_COLOR, FOG_DENSITY);
+    }
+
+    // Orbit controls: smooth damped interaction, constrained zoom range
+    const controls = fg.controls() as Record<string, unknown>;
+    if (controls) {
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.rotateSpeed = 0.8;
+      controls.zoomSpeed = 1.2;
+      controls.minDistance = 30;
+      controls.maxDistance = 800;
+    }
+  }, [sceneReady]);
+
+  // -- Auto-rotate control -------------------------------------------------
+
+  useEffect(() => {
+    if (!sceneReady) return;
+    const controls = fgRef.current?.controls() as Record<string, unknown> | undefined;
+    if (controls) {
+      controls.autoRotate = autoRotate;
+      controls.autoRotateSpeed = 0.8;
+    }
+  }, [autoRotate, sceneReady]);
 
   const clearModelOverlay = useCallback(() => {
     const scene = modelSceneRef.current;
@@ -259,6 +304,32 @@ export default function BrainGraph3D({
     }, 500);
     return () => clearTimeout(timer);
   }, [fitModelOverlay, graphData, renderMode]);
+
+  // -- Node hover for cursor change ----------------------------------------
+
+  const handleNodeHover = useCallback((node: BrainSceneNode | null) => {
+    if (containerRef.current) {
+      containerRef.current.style.cursor = node ? "pointer" : "grab";
+    }
+  }, []);
+
+  // -- Camera preset views --------------------------------------------------
+
+  const setCameraView = useCallback((direction: "front" | "top" | "side") => {
+    const fg = fgRef.current;
+    if (!fg) return;
+    const dist = fg.camera().position.length() || 300;
+    const views: Record<string, { x: number; y: number; z: number }> = {
+      front: { x: 0, y: 0, z: dist },
+      top: { x: 0, y: dist, z: 0.01 },
+      side: { x: dist, y: 0, z: 0 },
+    };
+    fg.cameraPosition(views[direction], { x: 0, y: 0, z: 0 }, 1000);
+  }, []);
+
+  const resetView = useCallback(() => {
+    fgRef.current?.zoomToFit(600, 60);
+  }, []);
 
   // -- Custom Three.js node objects ----------------------------------------
 
@@ -379,8 +450,14 @@ export default function BrainGraph3D({
         linkColor={(link: BrainSceneLink) => link.color}
         linkWidth={(link: BrainSceneLink) => link.width}
         linkOpacity={0.7}
+        /* Directional link particles for visual flow */
+        linkDirectionalParticles={2}
+        linkDirectionalParticleWidth={1.5}
+        linkDirectionalParticleSpeed={0.004}
+        linkDirectionalParticleColor={(link: BrainSceneLink) => link.color}
         /* Interactions */
         onNodeClick={handleNodeClick}
+        onNodeHover={handleNodeHover}
         onBackgroundClick={() => {
           onSelectedNodeIdChange?.(null);
           onNodeSelect?.(null);
@@ -389,6 +466,7 @@ export default function BrainGraph3D({
         /* Force engine tuning */
         d3AlphaDecay={0.04}
         d3VelocityDecay={0.3}
+        warmupTicks={30}
       />
 
       {/* 3D navigation hint overlay */}
@@ -401,6 +479,42 @@ export default function BrainGraph3D({
           <span>Pan: right-drag</span>
         </div>
       )}
+
+      {/* Camera controls toolbar */}
+      <div className="absolute right-4 top-4 flex flex-col gap-1 rounded-xl border border-white/10 bg-black/60 p-1.5 backdrop-blur-sm">
+        {(["front", "top", "side"] as const).map((view) => (
+          <button
+            key={view}
+            type="button"
+            title={`${view.charAt(0).toUpperCase() + view.slice(1)} view`}
+            onClick={() => setCameraView(view)}
+            className="rounded-lg px-2 py-1.5 text-[11px] capitalize text-white/60 transition-colors hover:bg-white/10 hover:text-white/90"
+          >
+            {view}
+          </button>
+        ))}
+        <div className="my-0.5 border-t border-white/10" />
+        <button
+          type="button"
+          title={autoRotate ? "Stop rotation" : "Auto-rotate"}
+          onClick={() => setAutoRotate((prev) => !prev)}
+          className={`rounded-lg px-2 py-1.5 text-[11px] transition-colors ${
+            autoRotate
+              ? "bg-white/15 text-white/90"
+              : "text-white/60 hover:bg-white/10 hover:text-white/90"
+          }`}
+        >
+          {autoRotate ? "⏸ Stop" : "🔄 Spin"}
+        </button>
+        <button
+          type="button"
+          title="Reset view"
+          onClick={resetView}
+          className="rounded-lg px-2 py-1.5 text-[11px] text-white/60 transition-colors hover:bg-white/10 hover:text-white/90"
+        >
+          ↺ Reset
+        </button>
+      </div>
     </div>
   );
 }
