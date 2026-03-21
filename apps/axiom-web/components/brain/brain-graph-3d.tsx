@@ -49,6 +49,10 @@ const FOG_DENSITY = 0.0018;
 const ZOOM_TO_FIT_MS = 600;
 /** Padding around the node cloud when zooming to fit. */
 const ZOOM_TO_FIT_PADDING = 60;
+/** Charge force strength – more negative = stronger node repulsion. */
+const D3_CHARGE_STRENGTH = -120;
+/** Preferred link distance between connected nodes. */
+const D3_LINK_DISTANCE = 80;
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -146,7 +150,7 @@ export default function BrainGraph3D({
   const modelLoadAttemptRef = useRef(0);
   const [sceneReady, setSceneReady] = useState(false);
   const needsInitialZoomRef = useRef(true);
-  const postMountDoneRef = useRef(false);
+  const rendererConfiguredRef = useRef(false);
 
   // Track container dimensions for the ForceGraph width/height props
   const [dims, setDims] = useState({ w: 800, h: 600 });
@@ -197,8 +201,8 @@ export default function BrainGraph3D({
 
   useEffect(() => {
     const fg = fgRef.current;
-    if (!fg || postMountDoneRef.current) return;
-    postMountDoneRef.current = true;
+    if (!fg || rendererConfiguredRef.current) return;
+    rendererConfiguredRef.current = true;
 
     // Renderer quality settings
     const renderer = fg.renderer?.();
@@ -226,8 +230,8 @@ export default function BrainGraph3D({
     }
 
     // d3-force tuning: spread nodes out to fill the brain volume
-    fg.d3Force("charge")?.strength(-120);
-    fg.d3Force("link")?.distance(80);
+    fg.d3Force("charge")?.strength(D3_CHARGE_STRENGTH);
+    fg.d3Force("link")?.distance(D3_LINK_DISTANCE);
     fg.d3ReheatSimulation();
   }, [dims.w, dims.h]);
 
