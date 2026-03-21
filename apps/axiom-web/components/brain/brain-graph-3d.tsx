@@ -43,6 +43,12 @@ import {
 // -- Constants ----------------------------------------------------------------
 
 const BG_COLOR = "#05070a";
+/** Exponential fog density – gently fades distant objects. */
+const FOG_DENSITY = 0.0018;
+/** Transition duration (ms) for zoom-to-fit and camera moves. */
+const ZOOM_TO_FIT_MS = 600;
+/** Padding around the node cloud when zooming to fit. */
+const ZOOM_TO_FIT_PADDING = 60;
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -140,6 +146,7 @@ export default function BrainGraph3D({
   const modelLoadAttemptRef = useRef(0);
   const [sceneReady, setSceneReady] = useState(false);
   const needsInitialZoomRef = useRef(true);
+  const postMountDoneRef = useRef(false);
 
   // Track container dimensions for the ForceGraph width/height props
   const [dims, setDims] = useState({ w: 800, h: 600 });
@@ -181,21 +188,47 @@ export default function BrainGraph3D({
     const fg = fgRef.current;
     if (!fg || graphData.nodes.length === 0) return;
     const timer = setTimeout(() => {
-      fg.zoomToFit(600, 60);
+      fg.zoomToFit(ZOOM_TO_FIT_MS, ZOOM_TO_FIT_PADDING);
     }, 350);
     return () => clearTimeout(timer);
   }, [graphData]);
 
-  // -- Configure camera controls for better zoom range --------------------
+  // -- Post-mount: configure renderer, fog, controls, and forces ----------
 
   useEffect(() => {
     const fg = fgRef.current;
-    if (!fg) return;
-    const controls = fg.controls?.() as Record<string, unknown> | undefined;
-    if (controls && "minDistance" in controls && "maxDistance" in controls) {
-      controls.minDistance = 10;
-      controls.maxDistance = 5000;
+    if (!fg || postMountDoneRef.current) return;
+    postMountDoneRef.current = true;
+
+    // Renderer quality settings
+    const renderer = fg.renderer?.();
+    if (renderer) {
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
     }
+
+    // Exponential fog for depth perception (distant nodes subtly fade)
+    const scene = fg.scene();
+    if (scene && !scene.fog) {
+      scene.fog = new THREE.FogExp2(BG_COLOR, FOG_DENSITY);
+    }
+
+    // Orbit controls: smooth damped interaction, constrained zoom range
+    const controls = fg.controls() as Record<string, unknown>;
+    if (controls) {
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.rotateSpeed = 0.8;
+      controls.zoomSpeed = 1.2;
+      controls.minDistance = 30;
+      controls.maxDistance = 2000;
+    }
+
+    // d3-force tuning: spread nodes out to fill the brain volume
+    fg.d3Force("charge")?.strength(-120);
+    fg.d3Force("link")?.distance(80);
+    fg.d3ReheatSimulation();
   }, [dims.w, dims.h]);
 
   useEffect(() => {
@@ -270,7 +303,7 @@ export default function BrainGraph3D({
     fitModelOverlay();
     if (needsInitialZoomRef.current) {
       needsInitialZoomRef.current = false;
-      fgRef.current?.zoomToFit(600, 60);
+      fgRef.current?.zoomToFit(ZOOM_TO_FIT_MS, ZOOM_TO_FIT_PADDING);
     }
   }, [fitModelOverlay]);
 
@@ -411,6 +444,11 @@ export default function BrainGraph3D({
         /* Force engine tuning */
         d3AlphaDecay={0.04}
         d3VelocityDecay={0.3}
+        warmupTicks={30}
+        /* Link particles for visual flair */
+        linkDirectionalParticles={2}
+        linkDirectionalParticleWidth={1.5}
+        linkDirectionalParticleSpeed={0.004}
       />
 
       {/* 3D navigation hint overlay */}
