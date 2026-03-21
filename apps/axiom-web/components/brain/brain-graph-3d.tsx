@@ -44,6 +44,11 @@ import {
 
 const BG_COLOR = "#05070a";
 const FOG_DENSITY = 0.0018;
+const CAMERA_TRANSITION_MS = 1000;
+const ZOOM_TO_FIT_MS = 600;
+const ZOOM_TO_FIT_PADDING = 60;
+/** Small z-offset prevents gimbal lock when looking straight down. */
+const CAMERA_TOP_VIEW_Z_OFFSET = 0.01;
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -181,7 +186,7 @@ export default function BrainGraph3D({
     const fg = fgRef.current;
     if (!fg || graphData.nodes.length === 0) return;
     const timer = setTimeout(() => {
-      fg.zoomToFit(600, 60);
+      fg.zoomToFit(ZOOM_TO_FIT_MS, ZOOM_TO_FIT_PADDING);
     }, 350);
     return () => clearTimeout(timer);
   }, [graphData]);
@@ -321,14 +326,14 @@ export default function BrainGraph3D({
     const dist = fg.camera().position.length() || 300;
     const views: Record<string, { x: number; y: number; z: number }> = {
       front: { x: 0, y: 0, z: dist },
-      top: { x: 0, y: dist, z: 0.01 },
+      top: { x: 0, y: dist, z: CAMERA_TOP_VIEW_Z_OFFSET },
       side: { x: dist, y: 0, z: 0 },
     };
-    fg.cameraPosition(views[direction], { x: 0, y: 0, z: 0 }, 1000);
+    fg.cameraPosition(views[direction], { x: 0, y: 0, z: 0 }, CAMERA_TRANSITION_MS);
   }, []);
 
   const resetView = useCallback(() => {
-    fgRef.current?.zoomToFit(600, 60);
+    fgRef.current?.zoomToFit(ZOOM_TO_FIT_MS, ZOOM_TO_FIT_PADDING);
   }, []);
 
   // -- Custom Three.js node objects ----------------------------------------
