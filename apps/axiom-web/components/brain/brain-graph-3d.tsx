@@ -49,6 +49,10 @@ const ZOOM_TO_FIT_MS = 600;
 const ZOOM_TO_FIT_PADDING = 60;
 /** Small z-offset prevents gimbal lock when looking straight down. */
 const CAMERA_TOP_VIEW_Z_OFFSET = 0.01;
+/** Charge force strength – more negative = stronger node repulsion. */
+const D3_CHARGE_STRENGTH = -120;
+/** Preferred link distance between connected nodes. */
+const D3_LINK_DISTANCE = 80;
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -145,6 +149,8 @@ export default function BrainGraph3D({
   const modelSceneRef = useRef<THREE.Scene | null>(null);
   const modelLoadAttemptRef = useRef(0);
   const [sceneReady, setSceneReady] = useState(false);
+  const needsInitialZoomRef = useRef(true);
+  const rendererConfiguredRef = useRef(false);
   const [autoRotate, setAutoRotate] = useState(false);
 
   // Track container dimensions for the ForceGraph width/height props
@@ -240,38 +246,6 @@ export default function BrainGraph3D({
 
     return () => clearTimeout(timer);
   }, [dims.h, dims.w, graphData.nodes.length]);
-
-  // -- Post-mount renderer / scene / controls configuration ----------------
-
-  useEffect(() => {
-    const fg = fgRef.current;
-    if (!fg || !sceneReady) return;
-
-    // Renderer quality: crisp rendering on high-DPI displays + filmic tone mapping
-    const renderer = fg.renderer();
-    if (renderer) {
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.0;
-    }
-
-    // Exponential fog for depth perception (distant nodes subtly fade)
-    const scene = fg.scene();
-    if (scene && !scene.fog) {
-      scene.fog = new THREE.FogExp2(BG_COLOR, FOG_DENSITY);
-    }
-
-    // Orbit controls: smooth damped interaction, constrained zoom range
-    const controls = fg.controls() as Record<string, unknown>;
-    if (controls) {
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.08;
-      controls.rotateSpeed = 0.8;
-      controls.zoomSpeed = 1.2;
-      controls.minDistance = 30;
-      controls.maxDistance = 800;
-    }
-  }, [sceneReady]);
 
   // -- Auto-rotate control -------------------------------------------------
 
