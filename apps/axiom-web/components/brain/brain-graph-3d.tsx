@@ -21,6 +21,10 @@ import {
 } from "react";
 import ForceGraph3D, { type ForceGraphMethods } from "react-force-graph-3d";
 import * as THREE from "three";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
 import {
   type BrainGraphData,
@@ -53,6 +57,22 @@ const CAMERA_TOP_VIEW_Z_OFFSET = 0.01;
 const D3_CHARGE_STRENGTH = -120;
 /** Preferred link distance between connected nodes. */
 const D3_LINK_DISTANCE = 80;
+
+// -- Bloom post-processing (inspired by Hastur-HP/The-Brain) ------------------
+
+/** Bloom strength – how bright the glow is. */
+const BLOOM_STRENGTH = 1.0;
+/** Bloom radius – how far the glow spreads. */
+const BLOOM_RADIUS = 0.75;
+/** Bloom threshold – luminance threshold for bloom to kick in. */
+const BLOOM_THRESHOLD = 0.15;
+
+// -- Ambient dust particle system ---------------------------------------------
+
+/** Number of atmospheric dust particles for depth perception. */
+const DUST_COUNT = 600;
+/** Radius of the dust cloud. */
+const DUST_RADIUS = 1200;
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -174,6 +194,67 @@ function createDendrites(radius: number, color: THREE.Color, count: number): THR
   return group;
 }
 
+/**
+ * Create ambient dust particles scattered in 3D space for atmospheric depth.
+ * Inspired by Hastur-HP/The-Brain's ambient data dust effect.
+ */
+function createAmbientDust(count: number, radius: number): THREE.Points {
+  const positions = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const i3 = i * 3;
+    // Uniform distribution in a sphere
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const r = radius * Math.cbrt(Math.random());
+    positions[i3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+    positions[i3 + 2] = r * Math.cos(phi);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+
+  const material = new THREE.PointsMaterial({
+    color: 0x8888aa,
+    size: 1.2,
+    transparent: true,
+    opacity: 0.3,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+
+  const dust = new THREE.Points(geometry, material);
+  dust.frustumCulled = false;
+  dust.name = "ambient-dust";
+  return dust;
+}
+
+/**
+ * Shockwave effect: expanding wireframe sphere on node click.
+ * Inspired by Hastur-HP/The-Brain's click feedback.
+ */
+interface ShockwaveHandle {
+  mesh: THREE.Mesh;
+  startTime: number;
+}
+
+function createShockwave(position: THREE.Vector3, color: THREE.Color): ShockwaveHandle {
+  const geo = new THREE.SphereGeometry(1, 32, 32);
+  const mat = new THREE.MeshBasicMaterial({
+    color,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.5,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(position);
+  mesh.name = "shockwave";
+  return { mesh, startTime: performance.now() };
+}
+
 // -- Component ----------------------------------------------------------------
 
 export interface BrainGraph3DProps {
@@ -214,6 +295,15 @@ export default function BrainGraph3D({
   const rendererConfiguredRef = useRef(false);
   const [autoRotate, setAutoRotate] = useState(false);
 
+  // Bloom post-processing refs
+  const composerRef = useRef<EffectComposer | null>(null);
+  // Ambient dust ref
+  const dustRef = useRef<THREE.Points | null>(null);
+  // Active shockwave effects
+  const shockwavesRef = useRef<ShockwaveHandle[]>([]);
+  // Selection targeting ring (spinning torus)
+  const selectionRingRef = useRef<THREE.Mesh | null>(null);
+
   // Track container dimensions for the ForceGraph width/height props
   const [dims, setDims] = useState({ w: 800, h: 600 });
 
@@ -222,7 +312,11 @@ export default function BrainGraph3D({
     if (!el) return;
     const observer = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
-      if (width > 0 && height > 0) setDims({ w: width, h: height });
+      if (width > 0 && height > 0) {
+        setDims({ w: width, h: height });
+        // Update bloom composer resolution on resize
+        composerRef.current?.setSize(width, height);
+      }
     });
     observer.observe(el);
     return () => observer.disconnect();
@@ -238,17 +332,60 @@ export default function BrainGraph3D({
         modelOverlayRef.current.dispose();
         modelOverlayRef.current = null;
       }
+      if (composerRef.current) {
+        composerRef.current.dispose();
+        composerRef.current = null;
+      }
+      if (dustRef.current) {
+        dustRef.current.geometry.dispose();
+        (dustRef.current.material as THREE.PointsMaterial).dispose();
+        dustRef.current = null;
+      }
     };
   }, []);
 
-  // -- Animation loop for particle brain overlay ----------------------------
+  // -- Animation loop for particle brain overlay, bloom, and effects --------
   useEffect(() => {
     if (!sceneReady) return;
     const clock = new THREE.Clock();
     let rafId: number;
     const tick = () => {
+      const dt = clock.getDelta();
+
+      // Update brain overlay breathing/pulse
       const overlay = modelOverlayRef.current;
-      if (overlay) overlay.update(clock.getDelta());
+      if (overlay) overlay.update(dt);
+
+      // Animate shockwaves (expand + fade)
+      const scene = modelSceneRef.current;
+      const now = performance.now();
+      const waves = shockwavesRef.current;
+      for (let i = waves.length - 1; i >= 0; i--) {
+        const wave = waves[i];
+        const elapsed = (now - wave.startTime) / 1000;
+        const scale = 1 + elapsed * 40;
+        wave.mesh.scale.setScalar(scale);
+        const opacity = Math.max(0, 0.5 - elapsed * 0.8);
+        (wave.mesh.material as THREE.MeshBasicMaterial).opacity = opacity;
+        if (opacity <= 0) {
+          if (scene) scene.remove(wave.mesh);
+          wave.mesh.geometry.dispose();
+          (wave.mesh.material as THREE.MeshBasicMaterial).dispose();
+          waves.splice(i, 1);
+        }
+      }
+
+      // Rotate the selection targeting ring
+      const ring = selectionRingRef.current;
+      if (ring) {
+        ring.rotation.z += 0.02;
+      }
+
+      // Render bloom composer if active, otherwise normal render
+      if (composerRef.current) {
+        composerRef.current.render();
+      }
+
       rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
@@ -273,7 +410,7 @@ export default function BrainGraph3D({
     return () => clearTimeout(timer);
   }, [graphData]);
 
-  // -- Post-mount: configure renderer, fog, controls, and forces ----------
+  // -- Post-mount: configure renderer, fog, bloom, dust, controls, forces --
 
   useEffect(() => {
     const fg = fgRef.current;
@@ -292,6 +429,36 @@ export default function BrainGraph3D({
     const scene = fg.scene();
     if (scene && !scene.fog) {
       scene.fog = new THREE.FogExp2(BG_COLOR, FOG_DENSITY);
+    }
+
+    // Add subtle ambient light for better material visibility
+    if (scene) {
+      const ambientLight = new THREE.AmbientLight(0x404060, 0.6);
+      ambientLight.name = "ambient-light";
+      scene.add(ambientLight);
+    }
+
+    // Bloom post-processing (inspired by Hastur-HP/The-Brain)
+    if (renderer && scene) {
+      const camera = fg.camera();
+      const composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      const bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(dims.w, dims.h),
+        BLOOM_STRENGTH,
+        BLOOM_RADIUS,
+        BLOOM_THRESHOLD,
+      );
+      composer.addPass(bloomPass);
+      composer.addPass(new OutputPass());
+      composerRef.current = composer;
+    }
+
+    // Ambient dust particles for atmospheric depth
+    if (scene && !dustRef.current) {
+      const dust = createAmbientDust(DUST_COUNT, DUST_RADIUS);
+      scene.add(dust);
+      dustRef.current = dust;
     }
 
     // Orbit controls: smooth damped interaction, constrained zoom range
@@ -449,48 +616,52 @@ export default function BrainGraph3D({
     const membraneMat = new THREE.MeshPhongMaterial({
       color,
       emissive: color,
-      emissiveIntensity: isSelected ? 0.5 : 0.3,
+      emissiveIntensity: isSelected ? 0.6 : 0.35,
       transparent: true,
-      opacity: node.dimmed ? 0.03 : isSelected ? 0.18 : 0.10,
+      opacity: node.dimmed ? 0.03 : isSelected ? 0.22 : 0.12,
       depthWrite: false,
       side: THREE.FrontSide,
     });
     group.add(new THREE.Mesh(membraneGeo, membraneMat));
 
-    // Selection ring (only for the selected node)
+    // Selection targeting ring: spinning 3D torus (inspired by The-Brain)
     if (isSelected) {
-      const ringGeo = new THREE.RingGeometry(r + 2, r + 3.2, 48);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
+      const torusGeo = new THREE.TorusGeometry(r + 2.5, 0.4, 16, 64);
+      const torusMat = new THREE.MeshBasicMaterial({
+        color,
         transparent: true,
-        opacity: 0.7,
-        side: THREE.DoubleSide,
+        opacity: 0.75,
         depthWrite: false,
+        blending: THREE.AdditiveBlending,
       });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.lookAt(0, 0, 1);
-      group.add(ring);
+      const torus = new THREE.Mesh(torusGeo, torusMat);
+      torus.rotation.x = Math.PI / 2; // Lay flat like a planetary ring
+      torus.name = "selection-ring";
+      group.add(torus);
+
+      // Store ref so the animation loop can spin it
+      selectionRingRef.current = torus;
     }
 
-    // Inner nucleus: bright core sphere
+    // Inner nucleus: bright core sphere with high emissive
     const nucleusGeo = new THREE.SphereGeometry(r * 0.5, 16, 16);
     const nucleusMat = new THREE.MeshPhongMaterial({
       color,
       emissive: color,
-      emissiveIntensity: isSelected ? 0.8 : 0.6,
+      emissiveIntensity: isSelected ? 0.9 : 0.7,
       shininess: 80,
       transparent: true,
       opacity: node.dimmed ? 0.15 : 0.95,
     });
     group.add(new THREE.Mesh(nucleusGeo, nucleusMat));
 
-    // Main soma sphere
+    // Main soma sphere with glossy Phong material
     const geo = new THREE.SphereGeometry(r + (isSelected ? 1.0 : 0), 24, 24);
     const mat = new THREE.MeshPhongMaterial({
       color,
       emissive: color,
-      emissiveIntensity: isSelected ? 0.55 : 0.40,
-      shininess: 50,
+      emissiveIntensity: isSelected ? 0.6 : 0.45,
+      shininess: 80,
       transparent: true,
       opacity: node.dimmed ? 0.15 : 0.85,
     });
@@ -519,13 +690,28 @@ export default function BrainGraph3D({
     return group;
   }, [selectedNodeId]);
 
-  // -- Node click handler --------------------------------------------------
+  // -- Node click handler with shockwave effect ----------------------------
 
   const handleNodeClick = useCallback(
     (node: BrainSceneNode) => {
       const nextId = selectedNodeId === node.id ? null : node.id;
       onSelectedNodeIdChange?.(nextId);
       onNodeSelect?.(nextId ? node.brain : null);
+
+      // Clear the old selection ring ref when deselecting
+      if (!nextId) {
+        selectionRingRef.current = null;
+      }
+
+      // Shockwave effect on click (inspired by The-Brain)
+      const scene = modelSceneRef.current;
+      if (scene && node.x != null && node.y != null) {
+        const pos = new THREE.Vector3(node.x ?? 0, node.y ?? 0, node.z ?? 0);
+        const color = new THREE.Color(node.color);
+        const wave = createShockwave(pos, color);
+        scene.add(wave.mesh);
+        shockwavesRef.current.push(wave);
+      }
     },
     [onNodeSelect, onSelectedNodeIdChange, selectedNodeId],
   );

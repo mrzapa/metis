@@ -34,7 +34,7 @@ const PARTICLE_COUNT = 32_000;
 /** Extra scale so the brain shell comfortably encloses graph nodes. */
 const BRAIN_SCALE_FACTOR = 1.15;
 /** Base colour of the brain particles (brighter warm-blue-white). */
-const BRAIN_COLOR = new THREE.Color(0xb0ddff);
+const BRAIN_COLOR = new THREE.Color(0xb8e0ff);
 
 // -- Procedural noise (hash-based, no external deps) ------------------------
 
@@ -305,9 +305,9 @@ const VERTEX_SHADER = /* glsl */ `
   void main() {
     vRandom = aRandom;
 
-    // Breathing displacement along normals
+    // Breathing displacement along normals (increased amplitude for visible pulse)
     vec3 pos = position;
-    float pulse = sin(uTime * 0.8 + aRandom * 6.2831) * 0.004;
+    float pulse = sin(uTime * 0.8 + aRandom * 6.2831) * 0.008;
     pos += normalize(pos) * pulse;
 
     vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
@@ -316,7 +316,7 @@ const VERTEX_SHADER = /* glsl */ `
     gl_PointSize = uPointSize * (220.0 / -mvPosition.z);
 
     // Alpha fades slightly for particles further from camera
-    vAlpha = clamp(1.0 - (-mvPosition.z - 40.0) / 700.0, 0.2, 1.0);
+    vAlpha = clamp(1.0 - (-mvPosition.z - 40.0) / 700.0, 0.25, 1.0);
     vDepth = clamp(-mvPosition.z / 500.0, 0.0, 1.0);
 
     gl_Position = projectionMatrix * mvPosition;
@@ -338,16 +338,16 @@ const FRAGMENT_SHADER = /* glsl */ `
     float circle = 1.0 - smoothstep(0.0, 0.5, dist);
 
     // Colour variation: warm pinks at edges, cool blues in center
-    float hueShift = vRandom * 0.2;
-    vec3 warmTint = vec3(0.15, -0.02, 0.05); // subtle pink/purple
-    vec3 col = uColor + vec3(hueShift * 0.12, -hueShift * 0.04, hueShift * 0.18)
-               + warmTint * (1.0 - vDepth) * 0.3;
+    float hueShift = vRandom * 0.25;
+    vec3 warmTint = vec3(0.18, -0.02, 0.06); // subtle pink/purple
+    vec3 variantTint = vec3(hueShift * 0.14, -hueShift * 0.04, hueShift * 0.22);
+    vec3 col = uColor + variantTint + warmTint * (1.0 - vDepth) * 0.35;
 
-    // Gentle pulse glow (brighter baseline)
-    float glow = 0.8 + 0.2 * sin(uTime * 1.0 + vRandom * 6.2831);
+    // Gentle pulse glow (slightly brighter baseline for bloom interaction)
+    float glow = 0.85 + 0.15 * sin(uTime * 1.0 + vRandom * 6.2831);
 
     // Higher base alpha for brighter, more visible brain
-    gl_FragColor = vec4(col * glow, circle * vAlpha * 0.75);
+    gl_FragColor = vec4(col * glow, circle * vAlpha * 0.80);
   }
 `;
 
