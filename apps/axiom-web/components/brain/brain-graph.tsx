@@ -66,7 +66,7 @@ export const NODE_RADIUS_3D: Record<BrainNode["node_type"], number> = {
 };
 
 export const SCOPE_LINK_COLOR: Record<BrainScope, string> = {
-  workspace: "rgba(255,255,255,0.18)",
-  assistant_self: "rgba(227,179,65,0.4)",
-  assistant_learned: "rgba(163,113,247,0.5)",
+  workspace: "rgba(130,180,255,0.28)",
+  assistant_self: "rgba(227,179,65,0.50)",
+  assistant_learned: "rgba(163,113,247,0.55)",
 };
