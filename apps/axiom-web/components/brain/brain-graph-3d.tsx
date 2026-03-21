@@ -43,7 +43,7 @@ import {
 // -- Constants ----------------------------------------------------------------
 
 const BG_COLOR = "#05070a";
-const FOG_DENSITY = 0.001;
+const FOG_DENSITY = 0.0008;
 const CAMERA_TRANSITION_MS = 1000;
 const ZOOM_TO_FIT_MS = 600;
 const ZOOM_TO_FIT_PADDING = 60;
@@ -82,23 +82,43 @@ function disposeMaterial(mat: THREE.Material): void {
   mat.dispose();
 }
 
-/** Create a canvas-based text sprite for a node label. */
-function makeTextSprite(text: string, color: string): THREE.Sprite {
+/** Create a canvas-based text sprite for a node label with semi-transparent backdrop. */
+function makeTextSprite(text: string, color: string, nodeRadius: number): THREE.Sprite {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d")!;
-  const fontSize = 48;
-  const font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif`;
+  const fontSize = 64;
+  const font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif`;
   ctx.font = font;
   const metrics = ctx.measureText(text);
   const textW = metrics.width;
 
-  const pad = 16;
-  canvas.width = textW + pad * 2;
-  canvas.height = fontSize + pad * 2;
+  const padX = 24;
+  const padY = 18;
+  canvas.width = textW + padX * 2;
+  canvas.height = fontSize + padY * 2;
 
+  // Semi-transparent dark backdrop pill for readability
+  const bgRadius = 14;
+  ctx.fillStyle = "rgba(5, 7, 10, 0.65)";
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(4, 4, canvas.width - 8, canvas.height - 8, bgRadius);
+  } else {
+    // Fallback for browsers without roundRect
+    const x = 4, y = 4, w = canvas.width - 8, h = canvas.height - 8, r = bgRadius;
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  ctx.fill();
+
+  // Text
   ctx.font = font;
   ctx.fillStyle = color;
-  ctx.globalAlpha = 0.9;
+  ctx.globalAlpha = 1.0;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, canvas.width / 2, canvas.height / 2);
@@ -108,9 +128,50 @@ function makeTextSprite(text: string, color: string): THREE.Sprite {
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
   const sprite = new THREE.Sprite(mat);
 
-  const labelScaleFactor = 0.25;
-  sprite.scale.set(canvas.width * labelScaleFactor / fontSize, canvas.height * labelScaleFactor / fontSize, 1);
+  // Scale relative to node size for readability
+  const labelScale = Math.max(0.35, nodeRadius * 0.06);
+  sprite.scale.set(canvas.width * labelScale / fontSize, canvas.height * labelScale / fontSize, 1);
   return sprite;
+}
+
+/**
+ * Create small tendril lines radiating from a node to mimic neuron dendrites.
+ * Returns a THREE.Group containing the tendril line segments.
+ */
+function createDendrites(radius: number, color: THREE.Color, count: number): THREE.Group {
+  const group = new THREE.Group();
+  const mat = new THREE.LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.35,
+    linewidth: 1,
+  });
+
+  for (let i = 0; i < count; i++) {
+    // Random direction on a sphere
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const dx = Math.sin(phi) * Math.cos(theta);
+    const dy = Math.sin(phi) * Math.sin(theta);
+    const dz = Math.cos(phi);
+
+    // Tendril: short line from node surface outward with a slight curve
+    const len = radius * (1.2 + Math.random() * 1.8);
+    const midLen = len * 0.5;
+    // Add a small perpendicular offset for organic curve
+    const perpX = (Math.random() - 0.5) * radius * 0.4;
+    const perpY = (Math.random() - 0.5) * radius * 0.4;
+
+    const points = [
+      new THREE.Vector3(dx * radius, dy * radius, dz * radius),
+      new THREE.Vector3(dx * midLen + perpX, dy * midLen + perpY, dz * midLen),
+      new THREE.Vector3(dx * len, dy * len, dz * len),
+    ];
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const line = new THREE.Line(geo, mat);
+    group.add(line);
+  }
+  return group;
 }
 
 // -- Component ----------------------------------------------------------------
@@ -381,9 +442,24 @@ export default function BrainGraph3D({
     const r = node.radius;
     const color = new THREE.Color(node.color);
 
+    // --- Neuron soma (cell body) ---
+
+    // Outer membrane: translucent glowing shell
+    const membraneGeo = new THREE.SphereGeometry(r * (isSelected ? 2.0 : 1.6), 24, 24);
+    const membraneMat = new THREE.MeshPhongMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: isSelected ? 0.5 : 0.3,
+      transparent: true,
+      opacity: node.dimmed ? 0.03 : isSelected ? 0.18 : 0.10,
+      depthWrite: false,
+      side: THREE.FrontSide,
+    });
+    group.add(new THREE.Mesh(membraneGeo, membraneMat));
+
     // Selection ring (only for the selected node)
     if (isSelected) {
-      const ringGeo = new THREE.RingGeometry(r + 2, r + 3.2, 32);
+      const ringGeo = new THREE.RingGeometry(r + 2, r + 3.2, 48);
       const ringMat = new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent: true,
@@ -396,37 +472,48 @@ export default function BrainGraph3D({
       group.add(ring);
     }
 
-    // Glow halo
-    const glowGeo = new THREE.SphereGeometry(r * (isSelected ? 2.4 : 1.9), 16, 16);
-    const glowMat = new THREE.MeshBasicMaterial({
+    // Inner nucleus: bright core sphere
+    const nucleusGeo = new THREE.SphereGeometry(r * 0.5, 16, 16);
+    const nucleusMat = new THREE.MeshPhongMaterial({
       color,
+      emissive: color,
+      emissiveIntensity: isSelected ? 0.8 : 0.6,
+      shininess: 80,
       transparent: true,
-      opacity: node.dimmed ? 0.02 : isSelected ? 0.14 : 0.08,
-      depthWrite: false,
+      opacity: node.dimmed ? 0.15 : 0.95,
     });
-    group.add(new THREE.Mesh(glowGeo, glowMat));
+    group.add(new THREE.Mesh(nucleusGeo, nucleusMat));
 
-    // Main sphere
-    const geo = new THREE.SphereGeometry(r + (isSelected ? 1.5 : 0), 24, 24);
+    // Main soma sphere
+    const geo = new THREE.SphereGeometry(r + (isSelected ? 1.0 : 0), 24, 24);
     const mat = new THREE.MeshPhongMaterial({
       color,
       emissive: color,
-      emissiveIntensity: isSelected ? 0.55 : 0.35,
-      shininess: 60,
+      emissiveIntensity: isSelected ? 0.55 : 0.40,
+      shininess: 50,
       transparent: true,
-      opacity: node.dimmed ? 0.2 : 0.92,
+      opacity: node.dimmed ? 0.15 : 0.85,
     });
     group.add(new THREE.Mesh(geo, mat));
 
-    // Text label
-    const label = node.brain.label.length > 18
-      ? `${node.brain.label.slice(0, 17)}…`
+    // --- Dendrite tendrils ---
+    if (!node.dimmed) {
+      const dendCount = isSelected ? 8 : 5;
+      const dendrites = createDendrites(r, color, dendCount);
+      group.add(dendrites);
+    }
+
+    // --- Readable text label ---
+    const label = node.brain.label.length > 28
+      ? `${node.brain.label.slice(0, 27)}…`
       : node.brain.label;
-    const sprite = makeTextSprite(
-      label,
-      node.dimmed ? "rgba(255,255,255,0.3)" : isSelected ? "rgba(255,255,255,1)" : "rgba(255,255,255,0.88)",
-    );
-    sprite.position.set(0, -(r + 4), 0);
+    const labelColor = node.dimmed
+      ? "rgba(255,255,255,0.25)"
+      : isSelected
+        ? "rgba(255,255,255,1)"
+        : "rgba(255,255,255,0.92)";
+    const sprite = makeTextSprite(label, labelColor, r);
+    sprite.position.set(0, -(r + 5), 0);
     group.add(sprite);
 
     return group;
@@ -488,12 +575,12 @@ export default function BrainGraph3D({
         nodeThreeObjectExtend={false}
         /* Link styling */
         linkColor={(link: BrainSceneLink) => link.color}
-        linkWidth={(link: BrainSceneLink) => link.width}
-        linkOpacity={0.7}
-        /* Directional link particles for visual flow */
-        linkDirectionalParticles={2}
-        linkDirectionalParticleWidth={1.5}
-        linkDirectionalParticleSpeed={0.004}
+        linkWidth={(link: BrainSceneLink) => link.width * 1.5}
+        linkOpacity={0.55}
+        /* Directional link particles for synaptic-fire effect */
+        linkDirectionalParticles={3}
+        linkDirectionalParticleWidth={2.5}
+        linkDirectionalParticleSpeed={0.006}
         linkDirectionalParticleColor={(link: BrainSceneLink) => link.color}
         /* Interactions */
         onNodeClick={handleNodeClick}
