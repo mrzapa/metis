@@ -359,11 +359,15 @@ export async function loadBrainModelOverlay(
     lightRig.position.copy(center);
   };
 
+  let disposed = false;
+
   const update = (deltaSeconds: number) => {
+    if (disposed) return;
     material.uniforms.uTime.value += deltaSeconds;
   };
 
   const dispose = () => {
+    disposed = true;
     geometry.dispose();
     material.dispose();
   };
