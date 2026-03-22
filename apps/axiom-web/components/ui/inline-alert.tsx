@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { AlertCircle, CheckCircle2, Info, TriangleAlert } from "lucide-react";
+import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { cn } from "@/lib/utils";
 
 const alertVariants = cva(
@@ -27,6 +28,13 @@ const ICONS = {
   error: AlertCircle,
 };
 
+const ICON_MODES = {
+  info: "hoverLift",
+  success: "idlePulse",
+  warning: "idlePulse",
+  error: "idlePulse",
+} as const;
+
 interface InlineAlertProps extends VariantProps<typeof alertVariants> {
   children: ReactNode;
   className?: string;
@@ -34,9 +42,10 @@ interface InlineAlertProps extends VariantProps<typeof alertVariants> {
 
 export function InlineAlert({ variant = "info", children, className }: InlineAlertProps) {
   const Icon = ICONS[variant ?? "info"];
+  const mode = ICON_MODES[variant ?? "info"];
   return (
     <div className={cn(alertVariants({ variant }), className)} role="alert">
-      <Icon className="mt-0.5 size-4 shrink-0 text-current opacity-70" />
+      <AnimatedLucideIcon icon={Icon} mode={mode} className="mt-0.5 size-4 shrink-0 text-current opacity-70" />
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );

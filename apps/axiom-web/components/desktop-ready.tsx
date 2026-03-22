@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getApiBase } from "@/lib/api";
 import { LaunchStage } from "@/components/shell/launch-stage";
 import { Button } from "@/components/ui/button";
+import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { AlertCircle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 
 export type DesktopReadyState = "loading" | "ready" | "error";
@@ -129,9 +130,9 @@ export function DesktopReadyGuard({ children }: DesktopReadyGuardProps) {
                       className="flex items-center gap-3 rounded-2xl border border-white/8 bg-black/10 px-4 py-3"
                     >
                       {completed ? (
-                        <CheckCircle2 className="size-4 text-emerald-300" />
+                        <AnimatedLucideIcon icon={CheckCircle2} className="size-4 text-emerald-300" />
                       ) : active ? (
-                        <Loader2 className="size-4 animate-spin text-primary" />
+                        <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4 text-primary" />
                       ) : (
                         <span className="size-4 rounded-full border border-white/12 bg-white/4" />
                       )}
@@ -162,7 +163,7 @@ export function DesktopReadyGuard({ children }: DesktopReadyGuardProps) {
       actions={
         <>
           <Button onClick={handleRetry} variant="outline" className="gap-2">
-            <RefreshCw className="size-4" />
+            <AnimatedLucideIcon icon={RefreshCw} mode="hoverLift" className="size-4" />
             Try again
           </Button>
           <Link href="/diagnostics">
@@ -173,7 +174,7 @@ export function DesktopReadyGuard({ children }: DesktopReadyGuardProps) {
       aside={
         <div className="space-y-4">
           <div className="inline-flex size-12 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
-            <AlertCircle className="size-6" />
+            <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-6" />
           </div>
           <div>
             <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">

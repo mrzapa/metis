@@ -12,9 +12,11 @@ import { StatusPill } from "@/components/shell/status-pill";
 import { IndexBuildStudio } from "@/components/library/index-build-studio";
 import { fetchSettings, reflectAssistant, updateSettings, type IndexBuildResult } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import {
   ArrowLeft,
   ArrowRight,
+  BetweenHorizontalEnd,
   CheckCircle2,
   Database,
   KeyRound,
@@ -257,7 +259,7 @@ export default function SetupPage() {
             </div>
 
             <div className="rounded-[1.45rem] border border-white/8 bg-black/10 p-4">
-              <KeyRound className="size-5 text-primary" />
+              <AnimatedLucideIcon icon={KeyRound} mode="hoverLift" className="size-5 text-primary" />
               <p className="mt-3 font-medium text-foreground">Credential posture</p>
               <p className="mt-2 text-sm leading-7 text-muted-foreground">
                 Keys are not echoed back in the UI. They are only forwarded to the backend settings update when you finish onboarding.
@@ -289,9 +291,17 @@ export default function SetupPage() {
                 )}
               >
                 <div className="flex items-center justify-between gap-3">
-                  <span className="font-display text-2xl font-semibold tracking-[-0.04em] text-foreground">
-                    {provider.label}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <AnimatedLucideIcon
+                      icon={BetweenHorizontalEnd}
+                      mode={active ? "idlePulse" : "hoverLift"}
+                      active={active || undefined}
+                      className={cn("size-4", active ? "text-primary" : "text-muted-foreground")}
+                    />
+                    <span className="font-display text-2xl font-semibold tracking-[-0.04em] text-foreground">
+                      {provider.label}
+                    </span>
+                  </div>
                   {active ? <CheckCircle2 className="size-5 text-primary" /> : null}
                 </div>
                 <p className="mt-3 text-sm leading-7 text-muted-foreground">
@@ -342,7 +352,7 @@ export default function SetupPage() {
                     >
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-sm leading-7 text-foreground">{prompt}</p>
-                        {active ? <Sparkles className="size-4 text-primary" /> : null}
+                        {active ? <AnimatedLucideIcon icon={Sparkles} mode="idlePulse" className="size-4 text-primary" /> : null}
                       </div>
                     </button>
                   );
@@ -492,7 +502,11 @@ export default function SetupPage() {
                 </Button>
               ) : (
                 <Button type="button" onClick={handleFinish} disabled={saving} className="gap-2">
-                  {saving ? <Database className="size-4 animate-pulse" /> : <BrainIcon size={16} className="shrink-0" />}
+                  {saving ? (
+                    <AnimatedLucideIcon icon={Database} mode="idlePulse" className="size-4" />
+                  ) : (
+                    <BrainIcon size={16} className="shrink-0" />
+                  )}
                   {saving ? "Launching workspace..." : "Finish and open chat"}
                 </Button>
               )}

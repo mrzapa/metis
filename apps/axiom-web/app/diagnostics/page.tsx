@@ -5,6 +5,7 @@ import { motion } from "motion/react";
 import { AlertCircle, CheckCircle2, ClipboardCopy, Loader2, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { fetchSettings, fetchLogTail, fetchApiVersion, checkApiCompatibility, type LogTailResult } from "@/lib/api";
 
@@ -110,12 +111,12 @@ export default function DiagnosticsPage() {
         >
           {copied ? (
             <>
-              <CheckCircle2 className="size-4 text-green-600" />
+              <AnimatedLucideIcon icon={CheckCircle2} mode="idlePulse" className="size-4 text-green-600" />
               Copied
             </>
           ) : (
             <>
-              <ClipboardCopy className="size-4" />
+              <AnimatedLucideIcon icon={ClipboardCopy} mode="hoverLift" className="size-4" />
               Copy diagnostics
             </>
           )}
@@ -157,7 +158,7 @@ export default function DiagnosticsPage() {
 
         {error && (
           <div className="flex items-center gap-2 rounded-[1.1rem] border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            <AlertCircle className="size-4" />
+            <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-4" />
             {error}
           </div>
         )}
@@ -166,7 +167,7 @@ export default function DiagnosticsPage() {
           <Card className="border-yellow-500/40 bg-yellow-500/10">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-base text-yellow-700 dark:text-yellow-400">
-                <TriangleAlert className="size-4" />
+                <AnimatedLucideIcon icon={TriangleAlert} mode="idlePulse" className="size-4" />
                 Compatibility warning
               </CardTitle>
             </CardHeader>
@@ -178,7 +179,7 @@ export default function DiagnosticsPage() {
 
         {loading ? (
           <div className="flex items-center gap-2 rounded-[1.2rem] border border-white/8 bg-black/10 px-4 py-4 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
+            <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />
             Loading diagnostics…
           </div>
         ) : (
@@ -246,7 +247,7 @@ export default function DiagnosticsPage() {
                       No log entries available.
                     </p>
                   ) : (
-                    <pre className="max-h-[32rem] overflow-auto rounded-[1rem] border border-white/8 bg-black/10 p-4 text-xs font-mono leading-relaxed text-foreground/90">
+                    <pre className="max-h-128 overflow-auto rounded-[1rem] border border-white/8 bg-black/10 p-4 text-xs font-mono leading-relaxed text-foreground/90">
                       {logTail.lines.join("\n")}
                     </pre>
                   )}
@@ -269,7 +270,7 @@ export default function DiagnosticsPage() {
                     This is the redacted settings subset that can help spot bad provider state or mismatched local config at a glance.
                   </p>
                   {settings ? (
-                    <pre className="max-h-[28rem] overflow-auto rounded-[1rem] border border-white/8 bg-black/10 p-4 text-xs font-mono leading-relaxed text-foreground/90">
+                    <pre className="max-h-112 overflow-auto rounded-[1rem] border border-white/8 bg-black/10 p-4 text-xs font-mono leading-relaxed text-foreground/90">
                       {JSON.stringify(settings, null, 2)}
                     </pre>
                   ) : (

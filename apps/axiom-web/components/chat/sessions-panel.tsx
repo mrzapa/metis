@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { useSessions } from "@/hooks/use-sessions";
 import { cn } from "@/lib/utils";
 import { MessageSquarePlus, Search, Settings, WifiOff } from "lucide-react";
@@ -36,13 +37,17 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
       <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
         <h2 className="text-sm font-semibold">Sessions</h2>
         <Button variant="ghost" size="icon" className="size-7" aria-label="New chat" onClick={onNewChat}>
-          <MessageSquarePlus className="size-4" />
+          <AnimatedLucideIcon icon={MessageSquarePlus} mode="hoverLift" className="size-4" />
         </Button>
       </div>
 
       {/* Search */}
       <div className="relative border-b border-white/8 px-4 py-3">
-        <Search className="absolute left-7 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <AnimatedLucideIcon
+          icon={Search}
+          mode="hoverLift"
+          className="absolute left-7 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+        />
         <Input
           placeholder="Search sessions…"
           value={search}
@@ -64,7 +69,7 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
           {error && (
             <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
               {isConnectionError && (
-                <WifiOff className="size-5 text-muted-foreground" />
+                <AnimatedLucideIcon icon={WifiOff} mode="idlePulse" className="size-5 text-muted-foreground" />
               )}
               <p className="text-xs text-muted-foreground">
                 {isConnectionError
@@ -76,7 +81,7 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
 
           {!loading && !error && sessions.length === 0 && (
             <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
-              <MessageSquarePlus className="size-5 text-muted-foreground/60" />
+              <AnimatedLucideIcon icon={MessageSquarePlus} mode="idlePulse" className="size-5 text-muted-foreground/60" />
               <p className="text-xs text-muted-foreground">
                 {search ? "No matching sessions" : "No sessions yet"}
               </p>
@@ -132,7 +137,7 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
           href="/settings"
           className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-white/6 hover:text-foreground"
         >
-          <Settings className="size-3.5" />
+          <AnimatedLucideIcon icon={Settings} mode="hoverLift" className="size-3.5" />
           Settings
         </Link>
       </div>

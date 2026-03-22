@@ -11,6 +11,7 @@ import type { ChatMessage } from "@/lib/chat-types";
 import { ActionCard } from "@/components/chat/action-card";
 import { AssistantCopyActions } from "@/components/chat/assistant-copy-actions";
 import { AssistantMarkdown } from "@/components/chat/assistant-markdown";
+import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { AlertCircle, Bot, Loader2, SendHorizontal, Square } from "lucide-react";
 import { AgenticStepIndicator } from "@/components/chat/agentic-step-indicator";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
@@ -176,7 +177,7 @@ export function ChatPanel({
             )}
             aria-pressed={agenticMode}
           >
-            <Bot className="size-3" />
+            <AnimatedLucideIcon icon={Bot} mode="hoverLift" className="size-3" />
             Agentic {agenticMode ? "on" : "off"}
           </button>
           <Link
@@ -205,7 +206,7 @@ export function ChatPanel({
 
       {agenticModeError && (
         <div className="flex items-center gap-1.5 border-b border-white/8 bg-destructive/10 px-4 py-1.5 text-[11px] text-destructive">
-          <AlertCircle className="size-3 shrink-0" />
+          <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-3 shrink-0" />
           {agenticModeError}
         </div>
       )}
@@ -280,14 +281,14 @@ export function ChatPanel({
         <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-5">
           {loading && (
             <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
-              <Loader2 className="size-6 animate-spin" />
+              <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-6" />
               <p className="mt-2 text-sm">Loading session…</p>
             </div>
           )}
 
           {!loading && error && (
             <div className="flex flex-col items-center justify-center gap-2 py-20 text-center">
-              <AlertCircle className="size-6 text-destructive" />
+              <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-6 text-destructive" />
               <p className="text-sm font-medium text-destructive">
                 Failed to load session
               </p>
@@ -414,7 +415,7 @@ export function ChatPanel({
           {isSending && !isStreamingRag && (
             <div className="flex justify-start">
               <div className="rounded-[1.1rem] border border-white/8 bg-white/6 px-3 py-2 text-sm text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" />
+                <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-3.5" />
               </div>
             </div>
           )}
@@ -489,7 +490,7 @@ export function ChatPanel({
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={1}
-              className="min-h-[40px] max-h-[160px] resize-none text-sm"
+              className="min-h-10 max-h-40 resize-none text-sm"
               aria-label="Message input"
               disabled={ragInputDisabled}
             />
@@ -512,9 +513,9 @@ export function ChatPanel({
                 aria-label="Send message"
               >
                 {isSending ? (
-                  <Loader2 className="size-4 animate-spin" />
+                  <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />
                 ) : (
-                  <SendHorizontal className="size-4" />
+                  <AnimatedLucideIcon icon={SendHorizontal} mode="hoverLift" className="size-4" />
                 )}
               </Button>
             )}

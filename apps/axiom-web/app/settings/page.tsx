@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { PageChrome } from "@/components/shell/page-chrome";
 import {
   fetchAssistantSettings,
@@ -401,7 +402,7 @@ export default function SettingsPage() {
 
         {/* Guardrail: API keys not editable */}
         <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+          <AnimatedLucideIcon icon={TriangleAlert} mode="idlePulse" className="mt-0.5 size-4 shrink-0" />
           <div>
             <p className="font-medium">API keys are not editable here</p>
             <p className="mt-0.5">
@@ -414,7 +415,7 @@ export default function SettingsPage() {
 
         {/* Settings hint */}
         <div className="flex gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-400">
-          <Info className="mt-0.5 size-4 shrink-0" />
+          <AnimatedLucideIcon icon={Info} mode="hoverLift" className="mt-0.5 size-4 shrink-0" />
           <div>
             <p className="font-medium">Low-level settings</p>
             <p className="mt-0.5">
@@ -427,14 +428,14 @@ export default function SettingsPage() {
 
         {loadError && (
           <div className="flex items-center gap-1.5 text-sm text-destructive">
-            <AlertCircle className="size-4" />
+            <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-4" />
             {loadError}
           </div>
         )}
 
         {loading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
+            <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />
             Loading settings…
           </div>
         ) : (
@@ -1006,7 +1007,7 @@ export default function SettingsPage() {
                       min={64}
                       max={32768}
                       {...register("llm_max_tokens", { valueAsNumber: true })}
-                      className="max-w-[200px]"
+                      className="max-w-50"
                     />
                     <FieldError message={errors.llm_max_tokens?.message} />
                   </div>
@@ -1062,14 +1063,14 @@ export default function SettingsPage() {
 
                   {assistantLoadError && (
                     <div className="flex items-center gap-1.5 text-sm text-destructive">
-                      <AlertCircle className="size-4" />
+                      <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-4" />
                       {assistantLoadError}
                     </div>
                   )}
 
                   {assistantLoading ? (
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Loader2 className="size-4 animate-spin" />
+                      <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />
                       Loading companion settings…
                     </div>
                   ) : (
@@ -1390,19 +1391,19 @@ export default function SettingsPage() {
                             disabled={assistantSaving}
                             className="gap-1.5"
                           >
-                            {assistantSaving && <Loader2 className="size-4 animate-spin" />}
+                            {assistantSaving && <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />}
                             {assistantSaving ? "Saving…" : "Save companion settings"}
                           </Button>
                           {assistantSaved && (
                             <span className={cn("flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400")}>
-                              <CheckCircle2 className="size-4" />
+                              <AnimatedLucideIcon icon={CheckCircle2} mode="idlePulse" className="size-4" />
                               Saved
                             </span>
                           )}
                         </div>
                         {assistantSaveError && (
                           <div className="flex items-center gap-1.5 text-sm text-destructive">
-                            <AlertCircle className="size-4" />
+                            <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-4" />
                             {assistantSaveError}
                           </div>
                         )}
@@ -1416,20 +1417,20 @@ export default function SettingsPage() {
             {/* Save controls */}
             <div className="flex items-center gap-3 pb-8">
               <Button type="submit" disabled={saving} className="gap-1.5">
-                {saving && <Loader2 className="size-4 animate-spin" />}
+                {saving && <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />}
                 {saving ? "Saving…" : "Save settings"}
               </Button>
 
               {saved && (
                 <span className={cn("flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400")}>
-                  <CheckCircle2 className="size-4" />
+                  <AnimatedLucideIcon icon={CheckCircle2} mode="idlePulse" className="size-4" />
                   Saved
                 </span>
               )}
 
               {saveError && (
                 <span className="flex items-center gap-1.5 text-sm text-destructive">
-                  <AlertCircle className="size-4" />
+                  <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-4" />
                   {saveError}
                 </span>
               )}

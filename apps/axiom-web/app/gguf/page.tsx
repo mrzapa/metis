@@ -15,6 +15,7 @@ import {
   type GgufValidateResult,
 } from "@/lib/api";
 import { PageChrome } from "@/components/shell/page-chrome";
+import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,7 +67,7 @@ function HardwareCard({ hardware }: { hardware: GgufHardwareProfile }) {
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
-          <Cpu className="size-4" />
+          <AnimatedLucideIcon icon={Cpu} mode="hoverLift" className="size-4" />
           Hardware Profile
         </CardTitle>
       </CardHeader>
@@ -96,14 +97,14 @@ function HardwareCard({ hardware }: { hardware: GgufHardwareProfile }) {
 
         {hardware.has_gpu && hardware.gpu_name && (
           <div className="flex items-center gap-2 rounded-[1rem] border border-white/8 bg-black/10 px-3 py-3">
-            <HardDrive className="size-4 text-muted-foreground" />
+            <AnimatedLucideIcon icon={HardDrive} mode="hoverLift" className="size-4 text-muted-foreground" />
             <span className="min-w-0 truncate">{hardware.gpu_name}</span>
             {hardware.gpu_vram_gb && <span>({hardware.gpu_vram_gb} GB VRAM)</span>}
           </div>
         )}
         {!hardware.detected && (
           <div className="flex items-center gap-1 rounded-[1rem] border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
-            <AlertCircle className="size-3" />
+            <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-3" />
             Hardware detection limited — recommendations are advisory only
           </div>
         )}
@@ -126,7 +127,7 @@ function CatalogList({ entries }: { entries: GgufCatalogEntry[] }) {
   if (entries.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 rounded-[1.2rem] border border-white/8 bg-black/10 py-14 text-muted-foreground">
-        <HardDrive className="size-8" />
+        <AnimatedLucideIcon icon={HardDrive} mode="idlePulse" className="size-8" />
         <p>No models in catalogue</p>
       </div>
     );
@@ -182,7 +183,7 @@ function InstalledList({
   if (entries.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 rounded-[1.2rem] border border-white/8 bg-black/10 py-14 text-muted-foreground">
-        <Upload className="size-8" />
+        <AnimatedLucideIcon icon={Upload} mode="idlePulse" className="size-8" />
         <p>No locally registered models</p>
         <p className="text-xs">Use the validator below to register a model</p>
       </div>
@@ -212,9 +213,9 @@ function InstalledList({
               className="text-destructive hover:text-destructive"
             >
               {unregistering === entry.id ? (
-                <Loader2 className="size-4 animate-spin" />
+                <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />
               ) : (
-                <Trash2 className="size-4" />
+                <AnimatedLucideIcon icon={Trash2} mode="hoverLift" className="size-4" />
               )}
             </Button>
           </CardContent>
@@ -349,7 +350,11 @@ export default function GgufPage() {
             </select>
           </div>
           <Button variant="outline" onClick={handleRefresh} disabled={refreshing} className="gap-1.5">
-            {refreshing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            {refreshing ? (
+              <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />
+            ) : (
+              <AnimatedLucideIcon icon={RefreshCw} mode="hoverLift" className="size-4" />
+            )}
             Refresh
           </Button>
         </div>
@@ -393,14 +398,14 @@ export default function GgufPage() {
 
         {error && (
           <div className="flex items-center gap-2 rounded-[1.1rem] border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            <AlertCircle className="size-4" />
+            <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-4" />
             {error}
           </div>
         )}
 
         {loading ? (
           <div className="flex items-center gap-2 rounded-[1.2rem] border border-white/8 bg-black/10 px-4 py-4 text-muted-foreground">
-            <Loader2 className="size-6 animate-spin" />
+            <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-6" />
             Loading models...
           </div>
         ) : (
@@ -434,7 +439,7 @@ export default function GgufPage() {
                       <Card className="border-white/8 bg-black/10">
                         <CardHeader className="pb-2">
                           <CardTitle className="flex items-center gap-2 text-base">
-                            <FileCheck className="size-4" />
+                            <AnimatedLucideIcon icon={FileCheck} mode="hoverLift" className="size-4" />
                             Validate Model
                           </CardTitle>
                         </CardHeader>
@@ -448,14 +453,14 @@ export default function GgufPage() {
                               className="flex-1"
                             />
                             <Button onClick={handleValidate} disabled={validating || !validatePath.trim()} className="gap-1.5">
-                              {validating && <Loader2 className="size-4 animate-spin" />}
+                              {validating && <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />}
                               Validate
                             </Button>
                           </div>
 
                           {validateError && (
                             <div className="flex items-center gap-2 rounded-[1rem] border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                              <AlertCircle className="size-4" />
+                              <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-4" />
                               {validateError}
                             </div>
                           )}
@@ -463,7 +468,7 @@ export default function GgufPage() {
                           {validateResult && (
                             <div className="rounded-[1.2rem] border border-green-500/30 bg-green-500/10 p-4">
                               <div className="mb-3 flex items-center gap-2 text-green-600">
-                                <CheckCircle2 className="size-4" />
+                                <AnimatedLucideIcon icon={CheckCircle2} mode="idlePulse" className="size-4" />
                                 <span className="font-medium">Valid GGUF Model</span>
                               </div>
                               <div className="grid gap-2 text-sm sm:grid-cols-2">
@@ -486,7 +491,7 @@ export default function GgufPage() {
                                 className="mt-4 gap-1.5"
                                 size="sm"
                               >
-                                {registering && <Loader2 className="size-4 animate-spin" />}
+                                {registering && <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />}
                                 Register Model
                               </Button>
                             </div>
@@ -494,7 +499,7 @@ export default function GgufPage() {
 
                           {registerSuccess && (
                             <div className="flex items-center gap-2 rounded-[1rem] border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-600">
-                              <CheckCircle2 className="size-4" />
+                              <AnimatedLucideIcon icon={CheckCircle2} mode="idlePulse" className="size-4" />
                               Model registered successfully
                             </div>
                           )}

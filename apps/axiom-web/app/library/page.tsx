@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { IndexBuildStudio } from "@/components/library/index-build-studio";
 import { PageChrome } from "@/components/shell/page-chrome";
 import Link from "next/link";
@@ -15,7 +16,7 @@ export default function LibraryPage() {
       actions={
         <Link href="/chat">
           <Button variant="outline" className="gap-2">
-            <MessageSquare className="size-4" />
+            <AnimatedLucideIcon icon={MessageSquare} mode="hoverLift" className="size-4" />
             Go to chat
           </Button>
         </Link>

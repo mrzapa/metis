@@ -5,6 +5,7 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon"
 import { XIcon } from "lucide-react"
 
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
@@ -70,8 +71,7 @@ function DialogContent({
               />
             }
           >
-            <XIcon
-            />
+            <AnimatedLucideIcon icon={XIcon} mode="hoverLift" />
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
         )}
