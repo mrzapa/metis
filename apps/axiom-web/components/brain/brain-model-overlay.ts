@@ -406,6 +406,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 `;
 
 // -- Neural fibre tract shader (animated energy flow along tracts) ----------
+// Enhanced with twinkle/fadeOut from Digital-Brain thread.frag.glsl
 
 const FIBER_VERTEX_SHADER = /* glsl */ `
   uniform float uTime;
@@ -414,9 +415,12 @@ const FIBER_VERTEX_SHADER = /* glsl */ `
   attribute float aSpeed;
   varying float vAlpha;
   varying float vPhase;
+  varying float vRandom;
 
   void main() {
     vPhase = aPhase;
+    // Use phase as a pseudo-random for per-particle variation
+    vRandom = fract(sin(aPhase * 12.9898 + aSpeed * 78.233) * 43758.5453);
 
     vec3 pos = position;
 
@@ -435,8 +439,10 @@ const FIBER_VERTEX_SHADER = /* glsl */ `
 const FIBER_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uColor;
   uniform float uTime;
+  uniform vec3 uColor2;
   varying float vAlpha;
   varying float vPhase;
+  varying float vRandom;
 
   void main() {
     float dist = distance(gl_PointCoord, vec2(0.5));
@@ -444,14 +450,17 @@ const FIBER_FRAGMENT_SHADER = /* glsl */ `
 
     float circle = 1.0 - smoothstep(0.0, 0.45, dist);
 
-    // Warm energy colour (gold-cyan shift)
-    vec3 energyColor = mix(
-      vec3(0.4, 0.7, 1.0),
-      vec3(1.0, 0.85, 0.5),
-      sin(vPhase * 3.14159 + uTime * 0.5) * 0.5 + 0.5
-    );
+    // Two-colour gradient along tract (inspired by Digital-Brain thread.frag.glsl)
+    vec3 energyColor = mix(uColor, uColor2, vPhase) * 2.5;
 
-    gl_FragColor = vec4(energyColor, circle * vAlpha * 0.55);
+    // Fade out near the ends of each tract for organic taper
+    float fadeOut = 1.0 - smoothstep(0.85, 1.0, vPhase);
+    float fadeIn = smoothstep(0.0, 0.15, vPhase);
+
+    // Twinkle effect (from Digital-Brain thread.frag.glsl)
+    float twinkle = sin(uTime * 4.0 + vRandom * 20.0) * 0.2 + 0.8;
+
+    gl_FragColor = vec4(energyColor, circle * vAlpha * twinkle * fadeOut * fadeIn * 0.60);
   }
 `;
 
@@ -627,7 +636,8 @@ export async function loadBrainModelOverlay(
   const fiberMaterial = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0.0 },
-      uColor: { value: new THREE.Color(0x80c8ff) },
+      uColor: { value: new THREE.Color(0x4488ff) },  // Cool cyan start
+      uColor2: { value: new THREE.Color(0xffaa44) }, // Warm gold end (Digital-Brain two-colour gradient)
       uPointSize: { value: 3.5 },
     },
     vertexShader: FIBER_VERTEX_SHADER,

@@ -478,10 +478,21 @@ export default function BrainGraph3D({
       if (overlay) overlay.update(dt);
 
       // Slowly rotate ambient dust for living atmosphere
+      // Plus per-particle bobbing motion (inspired by Vestige ParticleSystem.animate)
       const dust = dustRef.current;
       if (dust) {
         dust.rotation.y += dt * 0.015;
         dust.rotation.x += dt * 0.005;
+
+        // Per-particle subtle bobbing (neural particle motion from Vestige)
+        const dustPos = dust.geometry.attributes.position as THREE.BufferAttribute;
+        for (let i = 0; i < Math.min(dustPos.count, DUST_COUNT); i++) {
+          const y = dustPos.getY(i);
+          dustPos.setY(i, y + Math.sin(elapsedTime + i * 0.1) * 0.04);
+          const x = dustPos.getX(i);
+          dustPos.setX(i, x + Math.cos(elapsedTime + i * 0.05) * 0.02);
+        }
+        dustPos.needsUpdate = true;
       }
 
       // Animate shockwaves (expand + fade)
@@ -1076,11 +1087,13 @@ export default function BrainGraph3D({
         warmupTicks={30}
       />
 
-      {/* Cinematic vignette overlay */}
+      {/* Cinematic vignette overlay — purple-tinted edges (inspired by Digital-Brain VignettePass) */}
       <div
         className="pointer-events-none absolute inset-0"
         style={{
-          background: "radial-gradient(ellipse at center, transparent 55%, rgba(3,5,8,0.5) 100%)",
+          background: `
+            radial-gradient(ellipse at center, transparent 50%, rgba(30,0,60,0.25) 75%, rgba(3,5,8,0.65) 100%)
+          `,
         }}
       />
 
