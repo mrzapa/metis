@@ -257,8 +257,20 @@ if (Test-Path (Join-Path `$axiomDir ".git")) {
             Write-Host "Rebuilding web UI..."
             Push-Location `$webAppDir
             try {
-                npm install --silent 2>`$null
-                npm run build 2>`$null
+                npm install --silent
+                if (`$LASTEXITCODE -ne 0) {
+                    throw [System.InvalidOperationException]::new("npm install failed while rebuilding web UI.")
+                }
+
+                npm run build
+                if (`$LASTEXITCODE -ne 0) {
+                    throw [System.InvalidOperationException]::new("npm run build failed while rebuilding web UI.")
+                }
+
+                if (-not (Test-Path (Join-Path `$webDir "index.html"))) {
+                    throw [System.InvalidOperationException]::new("Web UI build completed but `$webDir\index.html was not generated.")
+                }
+
                 Write-Host "Web UI rebuilt successfully."
             } catch {
                 Write-Host "Web UI rebuild failed - using cached version." -ForegroundColor Yellow
@@ -501,7 +513,20 @@ function Invoke-Install {
             Push-Location $WebAppDir
             try {
                 npm install --silent
+                if ($LASTEXITCODE -ne 0) {
+                    throw "npm install failed (exit code $LASTEXITCODE)."
+                }
+
                 npm run build
+                if ($LASTEXITCODE -ne 0) {
+                    throw "npm run build failed (exit code $LASTEXITCODE)."
+                }
+
+                $WebOutIndex = Join-Path $WebAppDir "out" "index.html"
+                if (-not (Test-Path $WebOutIndex)) {
+                    throw "Web UI build completed but expected artifact is missing at $WebOutIndex."
+                }
+
                 Write-Ok "Web UI built successfully."
             } catch {
                 Write-Warn "Web UI build failed: $_"

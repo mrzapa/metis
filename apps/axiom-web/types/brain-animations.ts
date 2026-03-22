@@ -170,7 +170,7 @@ export interface AnimationMetrics {
 /**
  * Transition configuration
  */
-export interface TransitionConfig extends Transition {
+export type TransitionConfig = Transition & {
   /** Type of transition: 'tween' or 'spring' */
   type?: "tween" | "spring";
   /** Duration in milliseconds (for tween) */
@@ -183,14 +183,14 @@ export interface TransitionConfig extends Transition {
   damping?: number;
   /** Mass for spring physics */
   mass?: number;
-}
+};
 
 /**
  * Animation variant definition
  */
-export interface AnimationVariant extends Variants {
+export type AnimationVariant = Variants & {
   [key: string]: TargetAndTransition | { transition?: TransitionConfig };
-}
+};
 
 /**
  * Brain graph animation wrapper props

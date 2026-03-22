@@ -12,7 +12,8 @@
  * - Hover state feedback with subtle scale transitions
  */
 
-import { motion, AnimatePresence, stagger } from "motion";
+import { motion, AnimatePresence } from "motion/react";
+import { stagger } from "motion";
 import { ReactNode } from "react";
 import BrainGraph3D, { type BrainGraph3DProps } from "./brain-graph-3d";
 

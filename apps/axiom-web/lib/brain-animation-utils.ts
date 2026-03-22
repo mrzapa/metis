@@ -3,12 +3,12 @@
  * for knowledge graph traversal, evidence highlighting, and research narratives.
  */
 
-import { type TargetAndTransition, type Transition } from "motion";
+import { type TargetAndTransition, type Transition, type Variants } from "motion";
 
 /**
  * Smooth evidence panel appearance with staggered content reveal
  */
-export const evidencePanelVariants = {
+export const evidencePanelVariants: Variants = {
   hidden: {
     opacity: 0,
     y: 10,
@@ -45,7 +45,7 @@ export const evidencePanelVariants = {
 /**
  * Sub-query cascade animation – staggered reveal of research branches
  */
-export const subQueryVariants = {
+export const subQueryVariants: Variants = {
   hidden: {
     opacity: 0,
     x: -20,
@@ -73,7 +73,7 @@ export const subQueryVariants = {
 /**
  * Knowledge graph node pulse on reveal
  */
-export const nodeRevealVariants = {
+export const nodeRevealVariants: Variants = {
   hidden: {
     scale: 0.8,
     opacity: 0,
@@ -100,7 +100,7 @@ export const nodeRevealVariants = {
 /**
  * Connection flash animation between nodes
  */
-export const connectionFlashVariants = {
+export const connectionFlashVariants: Variants = {
   initial: {
     opacity: 1,
     strokeDashoffset: 0,
@@ -117,7 +117,7 @@ export const connectionFlashVariants = {
 /**
  * Citation highlight animation – draw attention to source material
  */
-export const citationHighlightVariants = {
+export const citationHighlightVariants: Variants = {
   rest: {
     borderColor: "rgba(255, 255, 255, 0.1)",
     backgroundColor: "rgba(255, 255, 255, 0.02)",
@@ -135,7 +135,7 @@ export const citationHighlightVariants = {
 /**
  * Research mode expansion ring animation
  */
-export const expansionRingVariants = {
+export const expansionRingVariants: Variants = {
   initial: {
     scale: 0.5,
     opacity: 0.8,
@@ -225,7 +225,7 @@ export function createPulseAnimation(intensity = 0.3) {
 /**
  * Create a shimmer effect for loading skeleton content
  */
-export const shimmerVariants = {
+export const shimmerVariants: Variants = {
   animate: {
     backgroundPosition: ["200% 0", "-200% 0"],
     transition: {

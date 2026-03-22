@@ -5,7 +5,7 @@
  * sub-query cascades and iterative refinement feedback.
  */
 
-import { motion, AnimatePresence } from "motion";
+import { motion, AnimatePresence } from "motion/react";
 import {
   subQueryVariants,
   staggerConfig,

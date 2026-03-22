@@ -98,7 +98,7 @@ export function useNumericAnimation(
   const [displayValue, setDisplayValue] = useState(targetValue);
   const startRef = useRef(Date.now());
   const startValueRef = useRef(displayValue);
-  const frameRef = useRef<number>();
+  const frameRef = useRef<number | null>(null);
 
   useEffect(() => {
     startRef.current = Date.now();
@@ -127,7 +127,7 @@ export function useNumericAnimation(
     frameRef.current = requestAnimationFrame(animate);
 
     return () => {
-      if (frameRef.current) {
+      if (frameRef.current !== null) {
         cancelAnimationFrame(frameRef.current);
       }
     };
@@ -160,7 +160,7 @@ export function useAnimationThrottle(
   callback: () => void,
   targetFps: number = 60,
 ): void {
-  const frameRef = useRef<number>();
+  const frameRef = useRef<number | null>(null);
   const lastFrameRef = useRef(0);
 
   useEffect(() => {
@@ -178,7 +178,7 @@ export function useAnimationThrottle(
     frameRef.current = requestAnimationFrame(handleFrame);
 
     return () => {
-      if (frameRef.current) {
+      if (frameRef.current !== null) {
         cancelAnimationFrame(frameRef.current);
       }
     };

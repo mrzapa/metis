@@ -5,7 +5,7 @@
  * for smoother reveals, highlights, and interactive feedback during research mode.
  */
 
-import { motion, AnimatePresence } from "motion";
+import { motion, AnimatePresence } from "motion/react";
 import { ReactNode } from "react";
 import {
   evidencePanelVariants,
