@@ -59,11 +59,11 @@ const D3_LINK_DISTANCE = 80;
 // -- Bloom post-processing (inspired by Hastur-HP/The-Brain) ------------------
 
 /** Bloom strength – how bright the glow is. */
-const BLOOM_STRENGTH = 0.25;
+const BLOOM_STRENGTH = 0.12;
 /** Bloom radius – how far the glow spreads. */
-const BLOOM_RADIUS = 0.15;
+const BLOOM_RADIUS = 0.1;
 /** Bloom threshold – luminance threshold for bloom to kick in. */
-const BLOOM_THRESHOLD = 0.5;
+const BLOOM_THRESHOLD = 0.72;
 
 // -- Ambient dust particle system ---------------------------------------------
 
@@ -647,7 +647,7 @@ export default function BrainGraph3D({
     if (renderer) {
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.0;
+      renderer.toneMappingExposure = 0.82;
     }
 
     // Exponential fog for depth perception (distant nodes subtly fade)

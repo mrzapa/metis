@@ -37,7 +37,7 @@ const FIBER_TRACT_COUNT = 4_000;
 /** Extra scale so the brain shell comfortably encloses graph nodes. */
 const BRAIN_SCALE_FACTOR = 1.15;
 /** Base colour of the brain particles (brighter warm-blue-white). */
-const BRAIN_COLOR = new THREE.Color(0xb8e0ff);
+const BRAIN_COLOR = new THREE.Color(0x7fa8ca);
 
 // -- Procedural noise (hash-based, no external deps) ------------------------
 
@@ -418,19 +418,20 @@ const FRAGMENT_SHADER = /* glsl */ `
 
     // Electric surface pulse overlay (from Digital-Brain brain.frag.glsl)
     // Creates visible crackling arcs of energy across the cortical surface
-    vec3 electricGlow = uElectricColor * vElectricPulse * 1.2;
+    vec3 electricGlow = uElectricColor * vElectricPulse * 0.58;
     // Sparkle highlights on the strongest electric arcs
-    float sparkle = pow(vElectricPulse, 4.0) * 2.5;
+    float sparkle = pow(vElectricPulse, 4.0) * 1.1;
     electricGlow += vec3(1.0, 0.95, 0.85) * sparkle;
     col += electricGlow;
 
     // Gentle pulse glow with per-particle phase offset
-    float glow = 0.85 + 0.15 * sin(uTime * 1.0 + vRandom * 6.2831);
+    float glow = 0.78 + 0.12 * sin(uTime * 1.0 + vRandom * 6.2831);
 
     // Rim-enhanced alpha: edge particles are slightly brighter
     float rimAlpha = 1.0 + vFresnel * 0.3;
 
-    gl_FragColor = vec4(col * glow, circle * vAlpha * 0.80 * rimAlpha);
+    vec3 toned = clamp(col * glow, vec3(0.0), vec3(1.25));
+    gl_FragColor = vec4(toned, circle * vAlpha * 0.62 * rimAlpha);
   }
 `;
 
@@ -480,7 +481,7 @@ const FIBER_FRAGMENT_SHADER = /* glsl */ `
     float circle = 1.0 - smoothstep(0.0, 0.45, dist);
 
     // Two-colour gradient along tract (inspired by Digital-Brain thread.frag.glsl)
-    vec3 energyColor = mix(uColor, uColor2, vPhase) * 2.5;
+    vec3 energyColor = mix(uColor, uColor2, vPhase) * 1.4;
 
     // Fade out near the ends of each tract for organic taper
     float fadeOut = 1.0 - smoothstep(0.85, 1.0, vPhase);
@@ -489,7 +490,7 @@ const FIBER_FRAGMENT_SHADER = /* glsl */ `
     // Twinkle effect (from Digital-Brain thread.frag.glsl)
     float twinkle = sin(uTime * 4.0 + vRandom * 20.0) * 0.2 + 0.8;
 
-    gl_FragColor = vec4(energyColor, circle * vAlpha * twinkle * fadeOut * fadeIn * 0.60);
+    gl_FragColor = vec4(energyColor, circle * vAlpha * twinkle * fadeOut * fadeIn * 0.46);
   }
 `;
 
@@ -642,7 +643,7 @@ export async function loadBrainModelOverlay(
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
     transparent: true,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,
     depthWrite: false,
     depthTest: true,
   });
@@ -672,7 +673,7 @@ export async function loadBrainModelOverlay(
     vertexShader: FIBER_VERTEX_SHADER,
     fragmentShader: FIBER_FRAGMENT_SHADER,
     transparent: true,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,
     depthWrite: false,
     depthTest: true,
   });
