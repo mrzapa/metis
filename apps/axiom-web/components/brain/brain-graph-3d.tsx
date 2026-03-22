@@ -44,11 +44,11 @@ import {
 
 // -- Constants ----------------------------------------------------------------
 
-const BG_COLOR = "#05070a";
-const FOG_DENSITY = 0.0008;
-const CAMERA_TRANSITION_MS = 1000;
-const ZOOM_TO_FIT_MS = 600;
-const ZOOM_TO_FIT_PADDING = 60;
+const BG_COLOR = "#030508";
+const FOG_DENSITY = 0.0006;
+const CAMERA_TRANSITION_MS = 1200;
+const ZOOM_TO_FIT_MS = 800;
+const ZOOM_TO_FIT_PADDING = 70;
 /** Small z-offset prevents gimbal lock when looking straight down. */
 const CAMERA_TOP_VIEW_Z_OFFSET = 0.01;
 /** Charge force strength – more negative = stronger node repulsion. */
@@ -59,16 +59,16 @@ const D3_LINK_DISTANCE = 80;
 // -- Bloom post-processing (inspired by Hastur-HP/The-Brain) ------------------
 
 /** Bloom strength – how bright the glow is. */
-const BLOOM_STRENGTH = 1.0;
+const BLOOM_STRENGTH = 1.2;
 /** Bloom radius – how far the glow spreads. */
-const BLOOM_RADIUS = 0.75;
+const BLOOM_RADIUS = 0.8;
 /** Bloom threshold – luminance threshold for bloom to kick in. */
-const BLOOM_THRESHOLD = 0.15;
+const BLOOM_THRESHOLD = 0.12;
 
 // -- Ambient dust particle system ---------------------------------------------
 
 /** Number of atmospheric dust particles for depth perception. */
-const DUST_COUNT = 600;
+const DUST_COUNT = 800;
 /** Radius of the dust cloud. */
 const DUST_RADIUS = 1200;
 
@@ -194,10 +194,13 @@ function createDendrites(radius: number, color: THREE.Color, count: number): THR
 
 /**
  * Create ambient dust particles scattered in 3D space for atmospheric depth.
- * Inspired by Hastur-HP/The-Brain's ambient data dust effect.
+ * Uses per-particle colour and size variation for cinematic quality.
  */
 function createAmbientDust(count: number, radius: number): THREE.Points {
   const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const sizes = new Float32Array(count);
+
   for (let i = 0; i < count; i++) {
     const i3 = i * 3;
     // Uniform distribution in a sphere
@@ -207,19 +210,30 @@ function createAmbientDust(count: number, radius: number): THREE.Points {
     positions[i3] = r * Math.sin(phi) * Math.cos(theta);
     positions[i3 + 1] = r * Math.sin(phi) * Math.sin(theta);
     positions[i3 + 2] = r * Math.cos(phi);
+
+    // Colour variation: cool blue to warm lavender
+    const hue = 0.58 + Math.random() * 0.12;
+    const color = new THREE.Color().setHSL(hue, 0.3 + Math.random() * 0.3, 0.55 + Math.random() * 0.2);
+    colors[i3] = color.r;
+    colors[i3 + 1] = color.g;
+    colors[i3 + 2] = color.b;
+
+    sizes[i] = 0.6 + Math.random() * 1.4;
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setAttribute("size", new THREE.Float32BufferAttribute(sizes, 1));
 
   const material = new THREE.PointsMaterial({
-    color: 0x8888aa,
     size: 1.2,
     transparent: true,
-    opacity: 0.3,
+    opacity: 0.25,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     sizeAttenuation: true,
+    vertexColors: true,
   });
 
   const dust = new THREE.Points(geometry, material);
@@ -302,6 +316,10 @@ export default function BrainGraph3D({
   const shockwavesRef = useRef<ShockwaveHandle[]>([]);
   // Selection targeting ring (spinning torus)
   const selectionRingRef = useRef<THREE.Mesh | null>(null);
+  // Hover point light for interactive glow feedback
+  const hoverLightRef = useRef<THREE.PointLight | null>(null);
+  // Cinematic rim lights
+  const rimLightsRef = useRef<THREE.PointLight[]>([]);
 
   // Track container dimensions for the ForceGraph width/height props
   const [dims, setDims] = useState({ w: 800, h: 600 });
@@ -352,12 +370,21 @@ export default function BrainGraph3D({
     if (!sceneReady) return;
     const clock = new THREE.Clock();
     let rafId: number;
+    let elapsedTime = 0;
     const tick = () => {
       const dt = clock.getDelta();
+      elapsedTime += dt;
 
       // Update brain overlay breathing/pulse
       const overlay = modelOverlayRef.current;
       if (overlay) overlay.update(dt);
+
+      // Slowly rotate ambient dust for living atmosphere
+      const dust = dustRef.current;
+      if (dust) {
+        dust.rotation.y += dt * 0.015;
+        dust.rotation.x += dt * 0.005;
+      }
 
       // Animate shockwaves (expand + fade)
       const waves = shockwavesRef.current;
@@ -380,10 +407,22 @@ export default function BrainGraph3D({
         }
       }
 
-      // Rotate the selection targeting ring
+      // Rotate the selection targeting ring with gentle wobble
       const ring = selectionRingRef.current;
       if (ring) {
         ring.rotation.z += 0.02;
+        ring.rotation.x = Math.PI / 2 + Math.sin(elapsedTime * 1.5) * 0.08;
+      }
+
+      // Animate cinematic rim lights (gentle orbit)
+      for (const rimLight of rimLightsRef.current) {
+        if (rimLight.userData.orbitAngle != null) {
+          rimLight.userData.orbitAngle += dt * rimLight.userData.orbitSpeed;
+          const a = rimLight.userData.orbitAngle;
+          const r = rimLight.userData.orbitRadius;
+          rimLight.position.x = Math.cos(a) * r;
+          rimLight.position.z = Math.sin(a) * r;
+        }
       }
 
       // Bloom rendering is handled by ForceGraph3D's internal post-processing
@@ -434,11 +473,41 @@ export default function BrainGraph3D({
       scene.fog = new THREE.FogExp2(BG_COLOR, FOG_DENSITY);
     }
 
-    // Add subtle ambient light for better material visibility
+    // Cinematic lighting setup
     if (scene) {
-      const ambientLight = new THREE.AmbientLight(0x404060, 0.6);
+      // Soft ambient fill
+      const ambientLight = new THREE.AmbientLight(0x303050, 0.5);
       ambientLight.name = "ambient-light";
       scene.add(ambientLight);
+
+      // Key light: warm directional from top-front-right
+      const keyLight = new THREE.DirectionalLight(0xeeddcc, 0.4);
+      keyLight.position.set(200, 300, 200);
+      keyLight.name = "key-light";
+      scene.add(keyLight);
+
+      // Cinematic rim lights (orbiting coloured accents)
+      const rimColors = [0x4488ff, 0x8844ff, 0x44ffaa];
+      const rimLights: THREE.PointLight[] = [];
+      for (let i = 0; i < rimColors.length; i++) {
+        const rimLight = new THREE.PointLight(rimColors[i], 0.6, 800, 1.5);
+        const angle = (i / rimColors.length) * Math.PI * 2;
+        const r = 350;
+        rimLight.position.set(Math.cos(angle) * r, 50 + i * 40, Math.sin(angle) * r);
+        rimLight.name = `rim-light-${i}`;
+        rimLight.userData.orbitAngle = angle;
+        rimLight.userData.orbitSpeed = 0.08 + i * 0.02;
+        rimLight.userData.orbitRadius = r;
+        scene.add(rimLight);
+        rimLights.push(rimLight);
+      }
+      rimLightsRef.current = rimLights;
+
+      // Hover light (initially invisible, positioned on hover)
+      const hoverLight = new THREE.PointLight(0xffffff, 0, 200, 2);
+      hoverLight.name = "hover-light";
+      scene.add(hoverLight);
+      hoverLightRef.current = hoverLight;
     }
 
     // Bloom post-processing via the library's built-in EffectComposer.
@@ -579,11 +648,23 @@ export default function BrainGraph3D({
     return () => clearTimeout(timer);
   }, [fitModelOverlay, graphData, renderMode]);
 
-  // -- Node hover for cursor change ----------------------------------------
+  // -- Node hover for cursor change and glow feedback -----------------------
 
   const handleNodeHover = useCallback((node: BrainSceneNode | null) => {
     if (containerRef.current) {
       containerRef.current.style.cursor = node ? "pointer" : "grab";
+    }
+
+    // Interactive hover glow: move a point light to the hovered node
+    const hoverLight = hoverLightRef.current;
+    if (hoverLight) {
+      if (node && node.x != null && node.y != null && node.z != null) {
+        hoverLight.position.set(node.x, node.y, node.z);
+        hoverLight.color.set(node.color);
+        hoverLight.intensity = 1.5;
+      } else {
+        hoverLight.intensity = 0;
+      }
     }
   }, []);
 
@@ -615,6 +696,19 @@ export default function BrainGraph3D({
     const r = node.radius;
     const color = new THREE.Color(node.color);
 
+    // --- Outer glow halo (large, faint additive sphere for bloom interaction) ---
+    if (!node.dimmed) {
+      const glowGeo = new THREE.SphereGeometry(r * (isSelected ? 3.5 : 2.5), 16, 16);
+      const glowMat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: isSelected ? 0.12 : 0.06,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      group.add(new THREE.Mesh(glowGeo, glowMat));
+    }
+
     // --- Neuron soma (cell body) ---
 
     // Outer membrane: translucent glowing shell
@@ -622,40 +716,55 @@ export default function BrainGraph3D({
     const membraneMat = new THREE.MeshPhongMaterial({
       color,
       emissive: color,
-      emissiveIntensity: isSelected ? 0.6 : 0.35,
+      emissiveIntensity: isSelected ? 0.7 : 0.4,
       transparent: true,
-      opacity: node.dimmed ? 0.03 : isSelected ? 0.22 : 0.12,
+      opacity: node.dimmed ? 0.03 : isSelected ? 0.25 : 0.14,
       depthWrite: false,
       side: THREE.FrontSide,
     });
     group.add(new THREE.Mesh(membraneGeo, membraneMat));
 
-    // Selection targeting ring: spinning 3D torus (inspired by The-Brain)
+    // Selection targeting ring: spinning 3D torus
     if (isSelected) {
-      const torusGeo = new THREE.TorusGeometry(r + 2.5, 0.4, 16, 64);
+      const torusGeo = new THREE.TorusGeometry(r + 2.5, 0.35, 16, 64);
       const torusMat = new THREE.MeshBasicMaterial({
         color,
         transparent: true,
-        opacity: 0.75,
+        opacity: 0.8,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       });
       const torus = new THREE.Mesh(torusGeo, torusMat);
-      torus.rotation.x = Math.PI / 2; // Lay flat like a planetary ring
+      torus.rotation.x = Math.PI / 2;
       torus.name = "selection-ring";
       group.add(torus);
+
+      // Second thinner ring at a different angle for depth
+      const torus2Geo = new THREE.TorusGeometry(r + 3.5, 0.2, 16, 64);
+      const torus2Mat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.3,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const torus2 = new THREE.Mesh(torus2Geo, torus2Mat);
+      torus2.rotation.x = Math.PI / 3;
+      torus2.rotation.z = Math.PI / 6;
+      torus2.name = "selection-ring-outer";
+      group.add(torus2);
 
       // Store ref so the animation loop can spin it
       selectionRingRef.current = torus;
     }
 
     // Inner nucleus: bright core sphere with high emissive
-    const nucleusGeo = new THREE.SphereGeometry(r * 0.5, 16, 16);
+    const nucleusGeo = new THREE.SphereGeometry(r * 0.45, 16, 16);
     const nucleusMat = new THREE.MeshPhongMaterial({
-      color,
+      color: 0xffffff,
       emissive: color,
-      emissiveIntensity: isSelected ? 0.9 : 0.7,
-      shininess: 80,
+      emissiveIntensity: isSelected ? 1.0 : 0.8,
+      shininess: 100,
       transparent: true,
       opacity: node.dimmed ? 0.15 : 0.95,
     });
@@ -666,16 +775,16 @@ export default function BrainGraph3D({
     const mat = new THREE.MeshPhongMaterial({
       color,
       emissive: color,
-      emissiveIntensity: isSelected ? 0.6 : 0.45,
-      shininess: 80,
+      emissiveIntensity: isSelected ? 0.65 : 0.5,
+      shininess: 90,
       transparent: true,
-      opacity: node.dimmed ? 0.15 : 0.85,
+      opacity: node.dimmed ? 0.15 : 0.88,
     });
     group.add(new THREE.Mesh(geo, mat));
 
     // --- Dendrite tendrils ---
     if (!node.dimmed) {
-      const dendCount = isSelected ? 8 : 5;
+      const dendCount = isSelected ? 10 : 6;
       const dendrites = createDendrites(r, color, dendCount);
       group.add(dendrites);
     }
@@ -765,14 +874,16 @@ export default function BrainGraph3D({
         /* Node styling */
         nodeThreeObject={nodeThreeObject}
         nodeThreeObjectExtend={false}
-        /* Link styling */
+        /* Link styling — refined for Apple-level polish */
         linkColor={(link: BrainSceneLink) => link.color}
-        linkWidth={(link: BrainSceneLink) => link.width * 1.5}
-        linkOpacity={0.55}
+        linkWidth={(link: BrainSceneLink) => link.width * 1.8}
+        linkOpacity={0.45}
+        linkCurvature={0.15}
+        linkCurveRotation={0}
         /* Directional link particles for synaptic-fire effect */
-        linkDirectionalParticles={3}
-        linkDirectionalParticleWidth={2.5}
-        linkDirectionalParticleSpeed={0.006}
+        linkDirectionalParticles={4}
+        linkDirectionalParticleWidth={2.0}
+        linkDirectionalParticleSpeed={0.005}
         linkDirectionalParticleColor={(link: BrainSceneLink) => link.color}
         /* Interactions */
         onNodeClick={handleNodeClick}
@@ -788,50 +899,67 @@ export default function BrainGraph3D({
         warmupTicks={30}
       />
 
+      {/* Cinematic vignette overlay */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background: "radial-gradient(ellipse at center, transparent 55%, rgba(3,5,8,0.5) 100%)",
+        }}
+      />
+
       {/* 3D navigation hint overlay */}
       {showHint && (
-        <div className="pointer-events-none absolute bottom-4 left-4 flex items-center gap-3 rounded-xl border border-white/10 bg-black/60 px-3.5 py-2 text-[11px] text-white/60 backdrop-blur-sm transition-opacity duration-500">
-          <span>Orbit: left-drag</span>
-          <span className="text-white/20">·</span>
-          <span>Zoom: scroll</span>
-          <span className="text-white/20">·</span>
-          <span>Pan: right-drag</span>
+        <div className="pointer-events-none absolute bottom-5 left-5 flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.04] px-4 py-2.5 text-[11px] font-medium tracking-wide text-white/50 backdrop-blur-xl transition-opacity duration-700">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block size-1.5 rounded-full bg-white/20" />
+            Orbit
+          </span>
+          <span className="text-white/15">·</span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block size-1.5 rounded-full bg-white/20" />
+            Zoom
+          </span>
+          <span className="text-white/15">·</span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block size-1.5 rounded-full bg-white/20" />
+            Pan
+          </span>
         </div>
       )}
 
-      {/* Camera controls toolbar */}
-      <div className="absolute right-4 top-4 flex flex-col gap-1 rounded-xl border border-white/10 bg-black/60 p-1.5 backdrop-blur-sm">
+      {/* Camera controls toolbar — glass-morphism design */}
+      <div className="absolute right-4 top-4 flex flex-col gap-0.5 rounded-2xl border border-white/[0.08] bg-white/[0.04] p-1.5 backdrop-blur-xl">
         {(["front", "top", "side"] as const).map((view) => (
           <button
             key={view}
             type="button"
             title={`${view.charAt(0).toUpperCase() + view.slice(1)} view`}
             onClick={() => setCameraView(view)}
-            className="rounded-lg px-2 py-1.5 text-[11px] capitalize text-white/60 transition-colors hover:bg-white/10 hover:text-white/90"
+            className="rounded-xl px-3 py-1.5 text-[11px] font-medium capitalize tracking-wide text-white/50 transition-all duration-200 hover:bg-white/[0.08] hover:text-white/90"
           >
             {view}
           </button>
         ))}
-        <div className="my-0.5 border-t border-white/10" />
+        <div className="mx-2 my-1 border-t border-white/[0.06]" />
         <button
           type="button"
           title={autoRotate ? "Stop rotation" : "Auto-rotate"}
           onClick={() => setAutoRotate((prev) => !prev)}
-          className={`rounded-lg px-2 py-1.5 text-[11px] transition-colors ${
+          className={`rounded-xl px-3 py-1.5 text-[11px] font-medium tracking-wide transition-all duration-200 ${
             autoRotate
-              ? "bg-white/15 text-white/90"
-              : "text-white/60 hover:bg-white/10 hover:text-white/90"
+              ? "bg-white/[0.1] text-white/90"
+              : "text-white/50 hover:bg-white/[0.08] hover:text-white/90"
           }`}
         >
-          {autoRotate ? "⏸ Stop" : "🔄 Spin"}
+          {autoRotate ? "⏸ Pause" : "↻ Orbit"}
         </button>
         <button
           type="button"
           title="Reset view"
           onClick={resetView}
-          className="rounded-lg px-2 py-1.5 text-[11px] text-white/60 transition-colors hover:bg-white/10 hover:text-white/90"
+          className="rounded-xl px-3 py-1.5 text-[11px] font-medium tracking-wide text-white/50 transition-all duration-200 hover:bg-white/[0.08] hover:text-white/90"
         >
-          ↺ Reset
+          ⌘ Reset
         </button>
       </div>
     </div>
