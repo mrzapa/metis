@@ -5,8 +5,9 @@
  *
  * Generates an anatomically-inspired brain-shaped point cloud with distinct
  * hemispheres, temporal lobes, frontal protrusion, occipital ridge, and a
- * brain-stem/cerebellum. Rendered with custom ShaderMaterial for a glowing,
- * holographic neural aesthetic with high brightness and recognisable shape.
+ * brain-stem/cerebellum. Includes neural fibre tracts for internal connectivity.
+ * Rendered with custom ShaderMaterial for a cinematic, holographic neural
+ * aesthetic with iridescent colour shifts and animated energy flow.
  */
 
 import * as THREE from "three";
@@ -30,7 +31,9 @@ export interface BrainModelOverlayHandle {
 // -- Constants ---------------------------------------------------------------
 
 /** Number of particles that form the brain shape. */
-const PARTICLE_COUNT = 32_000;
+const PARTICLE_COUNT = 36_000;
+/** Number of neural fibre tract particles (animated energy flow). */
+const FIBER_TRACT_COUNT = 4_000;
 /** Extra scale so the brain shell comfortably encloses graph nodes. */
 const BRAIN_SCALE_FACTOR = 1.15;
 /** Base colour of the brain particles (brighter warm-blue-white). */
@@ -301,14 +304,21 @@ const VERTEX_SHADER = /* glsl */ `
   varying float vAlpha;
   varying float vRandom;
   varying float vDepth;
+  varying vec3 vWorldPos;
+  varying float vFresnel;
+  varying float vElectricPulse;
 
   void main() {
     vRandom = aRandom;
 
-    // Breathing displacement along normals (increased amplitude for visible pulse)
+    // Breathing displacement along normals (organic pulse)
     vec3 pos = position;
     float pulse = sin(uTime * 0.8 + aRandom * 6.2831) * 0.008;
-    pos += normalize(pos) * pulse;
+    // Travelling wave for neural-activity feel
+    float wave = sin(uTime * 1.2 + pos.x * 4.0 + pos.z * 3.0) * 0.003;
+    pos += normalize(pos) * (pulse + wave);
+
+    vWorldPos = (modelMatrix * vec4(pos, 1.0)).xyz;
 
     vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
 
@@ -319,6 +329,24 @@ const VERTEX_SHADER = /* glsl */ `
     vAlpha = clamp(1.0 - (-mvPosition.z - 40.0) / 700.0, 0.25, 1.0);
     vDepth = clamp(-mvPosition.z / 500.0, 0.0, 1.0);
 
+    // Fresnel rim factor: particles near the silhouette glow brighter
+    // (inspired by Digital-Brain brain.frag.glsl + Jarvis-Orb)
+    vec3 viewDir = normalize(cameraPosition - vWorldPos);
+    vec3 surfaceNormal = normalize(vWorldPos);
+    float fresnelDot = max(dot(viewDir, surfaceNormal), 0.0);
+    vFresnel = pow(1.0 - fresnelDot, 2.5);
+
+    // Electric surface pulse (inspired by Digital-Brain brain.frag.glsl)
+    // Three travelling sine waves along different axes create crackling arcs
+    float electricFreq = 8.0;
+    float electricSpeed = 2.5;
+    float w1 = sin(vWorldPos.y * electricFreq + uTime * electricSpeed) * 0.5 + 0.5;
+    float w2 = sin(vWorldPos.x * electricFreq * 1.3 - uTime * electricSpeed * 0.8) * 0.5 + 0.5;
+    float w3 = sin(vWorldPos.z * electricFreq * 0.7 + uTime * electricSpeed * 1.2) * 0.5 + 0.5;
+    float rawPulse = w1 * 0.5 + w2 * 0.3 + w3 * 0.2;
+    // Sharpen to make it look like electric arcs rather than soft waves
+    vElectricPulse = pow(rawPulse, 3.0) * vFresnel;
+
     gl_Position = projectionMatrix * mvPosition;
   }
 `;
@@ -326,9 +354,13 @@ const VERTEX_SHADER = /* glsl */ `
 const FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uColor;
   uniform float uTime;
+  uniform vec3 uElectricColor;
   varying float vAlpha;
   varying float vRandom;
   varying float vDepth;
+  varying vec3 vWorldPos;
+  varying float vFresnel;
+  varying float vElectricPulse;
 
   void main() {
     // Soft circle shape
@@ -337,19 +369,174 @@ const FRAGMENT_SHADER = /* glsl */ `
 
     float circle = 1.0 - smoothstep(0.0, 0.5, dist);
 
+    // Iridescent colour shift based on world position and time
+    float iridescentPhase = vWorldPos.x * 2.0 + vWorldPos.y * 1.5 + uTime * 0.3;
+    vec3 iridescentShift = vec3(
+      sin(iridescentPhase) * 0.06,
+      sin(iridescentPhase + 2.094) * 0.04,
+      sin(iridescentPhase + 4.189) * 0.08
+    );
+
     // Colour variation: warm pinks at edges, cool blues in center
     float hueShift = vRandom * 0.25;
-    vec3 warmTint = vec3(0.18, -0.02, 0.06); // subtle pink/purple
+    vec3 warmTint = vec3(0.18, -0.02, 0.06);
     vec3 variantTint = vec3(hueShift * 0.14, -hueShift * 0.04, hueShift * 0.22);
-    vec3 col = uColor + variantTint + warmTint * (1.0 - vDepth) * 0.35;
+    vec3 col = uColor + variantTint + warmTint * (1.0 - vDepth) * 0.35 + iridescentShift;
 
-    // Gentle pulse glow (slightly brighter baseline for bloom interaction)
+    // Fresnel rim glow: bright silhouette edge (from Digital-Brain/Jarvis-Orb)
+    vec3 rimColor = vec3(0.4, 0.6, 1.0);
+    col += rimColor * vFresnel * 0.45;
+
+    // Electric surface pulse overlay (from Digital-Brain brain.frag.glsl)
+    // Creates visible crackling arcs of energy across the cortical surface
+    vec3 electricGlow = uElectricColor * vElectricPulse * 1.2;
+    // Sparkle highlights on the strongest electric arcs
+    float sparkle = pow(vElectricPulse, 4.0) * 2.5;
+    electricGlow += vec3(1.0, 0.95, 0.85) * sparkle;
+    col += electricGlow;
+
+    // Gentle pulse glow with per-particle phase offset
     float glow = 0.85 + 0.15 * sin(uTime * 1.0 + vRandom * 6.2831);
 
-    // Higher base alpha for brighter, more visible brain
-    gl_FragColor = vec4(col * glow, circle * vAlpha * 0.80);
+    // Rim-enhanced alpha: edge particles are slightly brighter
+    float rimAlpha = 1.0 + vFresnel * 0.3;
+
+    gl_FragColor = vec4(col * glow, circle * vAlpha * 0.80 * rimAlpha);
   }
 `;
+
+// -- Neural fibre tract shader (animated energy flow along tracts) ----------
+// Enhanced with twinkle/fadeOut from Digital-Brain thread.frag.glsl
+
+const FIBER_VERTEX_SHADER = /* glsl */ `
+  uniform float uTime;
+  uniform float uPointSize;
+  attribute float aPhase;
+  attribute float aSpeed;
+  varying float vAlpha;
+  varying float vPhase;
+  varying float vRandom;
+
+  void main() {
+    vPhase = aPhase;
+    // Use phase as a pseudo-random for per-particle variation
+    vRandom = fract(sin(aPhase * 12.9898 + aSpeed * 78.233) * 43758.5453);
+
+    vec3 pos = position;
+
+    // Energy pulse travels along the fibre (using phase as position along tract)
+    float energyPulse = sin((aPhase + uTime * aSpeed) * 6.2831 * 2.0);
+    float brightness = smoothstep(-0.3, 0.5, energyPulse);
+
+    vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+    gl_PointSize = uPointSize * brightness * (180.0 / -mvPosition.z);
+
+    vAlpha = brightness * clamp(1.0 - (-mvPosition.z - 40.0) / 600.0, 0.15, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const FIBER_FRAGMENT_SHADER = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uTime;
+  uniform vec3 uColor2;
+  varying float vAlpha;
+  varying float vPhase;
+  varying float vRandom;
+
+  void main() {
+    float dist = distance(gl_PointCoord, vec2(0.5));
+    if (dist > 0.5) discard;
+
+    float circle = 1.0 - smoothstep(0.0, 0.45, dist);
+
+    // Two-colour gradient along tract (inspired by Digital-Brain thread.frag.glsl)
+    vec3 energyColor = mix(uColor, uColor2, vPhase) * 2.5;
+
+    // Fade out near the ends of each tract for organic taper
+    float fadeOut = 1.0 - smoothstep(0.85, 1.0, vPhase);
+    float fadeIn = smoothstep(0.0, 0.15, vPhase);
+
+    // Twinkle effect (from Digital-Brain thread.frag.glsl)
+    float twinkle = sin(uTime * 4.0 + vRandom * 20.0) * 0.2 + 0.8;
+
+    gl_FragColor = vec4(energyColor, circle * vAlpha * twinkle * fadeOut * fadeIn * 0.60);
+  }
+`;
+
+// -- Neural fibre tract generator -------------------------------------------
+
+/**
+ * Generate particles distributed along internal neural fibre tracts.
+ * These create visible energy-flow pathways inside the brain volume.
+ * Major tracts: corpus callosum, arcuate fasciculus, cingulum bundle.
+ */
+function generateFiberTractPoints(count: number): {
+  positions: Float32Array;
+  phases: Float32Array;
+  speeds: Float32Array;
+} {
+  const positions = new Float32Array(count * 3);
+  const phases = new Float32Array(count);
+  const speeds = new Float32Array(count);
+  let idx = 0;
+
+  const pushPoint = (x: number, y: number, z: number, phase: number, speed: number) => {
+    positions[idx * 3] = x;
+    positions[idx * 3 + 1] = y;
+    positions[idx * 3 + 2] = z;
+    phases[idx] = phase;
+    speeds[idx] = speed;
+    idx++;
+  };
+
+  // Corpus callosum: arch connecting hemispheres (top-center)
+  const ccCount = Math.floor(count * 0.35);
+  for (let i = 0; i < ccCount; i++) {
+    const t = Math.random(); // along the arch
+    const angle = t * Math.PI; // 0 to PI arch
+    const x = Math.cos(angle) * 0.25 + (Math.random() - 0.5) * 0.04;
+    const y = 0.15 + Math.sin(angle) * 0.12 + (Math.random() - 0.5) * 0.03;
+    const z = (Math.random() - 0.5) * 0.20;
+    pushPoint(x, y, z, t, 0.3 + Math.random() * 0.4);
+  }
+
+  // Arcuate fasciculus: curved bundle connecting frontal-temporal (both sides)
+  const afCount = Math.floor(count * 0.25);
+  for (let i = 0; i < afCount; i++) {
+    const side = i % 2 === 0 ? 1 : -1;
+    const t = Math.random();
+    const angle = t * Math.PI * 0.8 - 0.2;
+    const x = side * (0.18 + Math.sin(angle) * 0.12) + (Math.random() - 0.5) * 0.03;
+    const y = -0.05 + Math.cos(angle) * 0.15 + (Math.random() - 0.5) * 0.03;
+    const z = 0.10 - t * 0.25 + (Math.random() - 0.5) * 0.04;
+    pushPoint(x, y, z, t, 0.2 + Math.random() * 0.35);
+  }
+
+  // Cingulum bundle: runs along the midline, front to back
+  const cbCount = Math.floor(count * 0.20);
+  for (let i = 0; i < cbCount; i++) {
+    const t = Math.random();
+    const x = (Math.random() - 0.5) * 0.06;
+    const y = 0.10 + Math.sin(t * Math.PI) * 0.08 + (Math.random() - 0.5) * 0.03;
+    const z = -0.30 + t * 0.60 + (Math.random() - 0.5) * 0.04;
+    pushPoint(x, y, z, t, 0.25 + Math.random() * 0.3);
+  }
+
+  // Thalamic radiations (vertical pathways)
+  const thalamicCount = count - ccCount - afCount - cbCount;
+  for (let i = 0; i < thalamicCount; i++) {
+    const t = Math.random();
+    const angle = Math.random() * Math.PI * 2;
+    const r = 0.05 + Math.random() * 0.08;
+    const x = Math.cos(angle) * r;
+    const z = Math.sin(angle) * r;
+    const y = -0.15 + t * 0.35 + (Math.random() - 0.5) * 0.04;
+    pushPoint(x, y, z, t, 0.15 + Math.random() * 0.5);
+  }
+
+  return { positions, phases, speeds };
+}
 
 // -- Bounds helper ----------------------------------------------------------
 
@@ -396,8 +583,9 @@ function computeBounds(nodes: readonly GraphPoint[]): {
 /**
  * Create the procedural brain particle overlay.
  *
- * Generates a high-detail brain with ~32k particles for a bright, recognisable
- * brain shape. Keeps the async signature for API compatibility.
+ * Generates a high-detail brain with ~36k surface particles plus ~4k animated
+ * neural fibre tract particles for energy-flow visualization.
+ * Keeps the async signature for API compatibility.
  */
 export async function loadBrainModelOverlay(
   _modelUrl?: string,
@@ -420,6 +608,7 @@ export async function loadBrainModelOverlay(
       uTime: { value: 0.0 },
       uColor: { value: BRAIN_COLOR.clone() },
       uPointSize: { value: 3.0 },
+      uElectricColor: { value: new THREE.Color(0x44aaff) },
     },
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
@@ -436,6 +625,33 @@ export async function loadBrainModelOverlay(
   const root = new THREE.Group();
   root.name = "brain-model-overlay";
   root.add(points);
+
+  // -- Neural fibre tracts (animated energy flow) --
+  const fiberData = generateFiberTractPoints(FIBER_TRACT_COUNT);
+  const fiberGeometry = new THREE.BufferGeometry();
+  fiberGeometry.setAttribute("position", new THREE.Float32BufferAttribute(fiberData.positions, 3));
+  fiberGeometry.setAttribute("aPhase", new THREE.Float32BufferAttribute(fiberData.phases, 1));
+  fiberGeometry.setAttribute("aSpeed", new THREE.Float32BufferAttribute(fiberData.speeds, 1));
+
+  const fiberMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0.0 },
+      uColor: { value: new THREE.Color(0x4488ff) },  // Cool cyan start
+      uColor2: { value: new THREE.Color(0xffaa44) }, // Warm gold end (Digital-Brain two-colour gradient)
+      uPointSize: { value: 3.5 },
+    },
+    vertexShader: FIBER_VERTEX_SHADER,
+    fragmentShader: FIBER_FRAGMENT_SHADER,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: true,
+  });
+
+  const fiberPoints = new THREE.Points(fiberGeometry, fiberMaterial);
+  fiberPoints.frustumCulled = false;
+  fiberPoints.renderOrder = -1;
+  root.add(fiberPoints);
 
   // Minimal light rig for API compatibility
   const lightRig = new THREE.Group();
@@ -456,13 +672,17 @@ export async function loadBrainModelOverlay(
 
   const update = (deltaSeconds: number) => {
     if (disposed) return;
-    material.uniforms.uTime.value += deltaSeconds;
+    const t = material.uniforms.uTime.value + deltaSeconds;
+    material.uniforms.uTime.value = t;
+    fiberMaterial.uniforms.uTime.value = t;
   };
 
   const dispose = () => {
     disposed = true;
     geometry.dispose();
     material.dispose();
+    fiberGeometry.dispose();
+    fiberMaterial.dispose();
   };
 
   return { root, lightRig, fitToGraph, update, dispose };
