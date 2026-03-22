@@ -305,6 +305,8 @@ const VERTEX_SHADER = /* glsl */ `
   varying float vRandom;
   varying float vDepth;
   varying vec3 vWorldPos;
+  varying float vFresnel;
+  varying float vElectricPulse;
 
   void main() {
     vRandom = aRandom;
@@ -312,7 +314,7 @@ const VERTEX_SHADER = /* glsl */ `
     // Breathing displacement along normals (organic pulse)
     vec3 pos = position;
     float pulse = sin(uTime * 0.8 + aRandom * 6.2831) * 0.008;
-    // Add a subtle travelling wave for neural-activity feel
+    // Travelling wave for neural-activity feel
     float wave = sin(uTime * 1.2 + pos.x * 4.0 + pos.z * 3.0) * 0.003;
     pos += normalize(pos) * (pulse + wave);
 
@@ -327,6 +329,24 @@ const VERTEX_SHADER = /* glsl */ `
     vAlpha = clamp(1.0 - (-mvPosition.z - 40.0) / 700.0, 0.25, 1.0);
     vDepth = clamp(-mvPosition.z / 500.0, 0.0, 1.0);
 
+    // Fresnel rim factor: particles near the silhouette glow brighter
+    // (inspired by Digital-Brain brain.frag.glsl + Jarvis-Orb)
+    vec3 viewDir = normalize(cameraPosition - vWorldPos);
+    vec3 surfaceNormal = normalize(vWorldPos);
+    float fresnelDot = max(dot(viewDir, surfaceNormal), 0.0);
+    vFresnel = pow(1.0 - fresnelDot, 2.5);
+
+    // Electric surface pulse (inspired by Digital-Brain brain.frag.glsl)
+    // Three travelling sine waves along different axes create crackling arcs
+    float electricFreq = 8.0;
+    float electricSpeed = 2.5;
+    float w1 = sin(vWorldPos.y * electricFreq + uTime * electricSpeed) * 0.5 + 0.5;
+    float w2 = sin(vWorldPos.x * electricFreq * 1.3 - uTime * electricSpeed * 0.8) * 0.5 + 0.5;
+    float w3 = sin(vWorldPos.z * electricFreq * 0.7 + uTime * electricSpeed * 1.2) * 0.5 + 0.5;
+    float rawPulse = w1 * 0.5 + w2 * 0.3 + w3 * 0.2;
+    // Sharpen to make it look like electric arcs rather than soft waves
+    vElectricPulse = pow(rawPulse, 3.0) * vFresnel;
+
     gl_Position = projectionMatrix * mvPosition;
   }
 `;
@@ -334,10 +354,13 @@ const VERTEX_SHADER = /* glsl */ `
 const FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uColor;
   uniform float uTime;
+  uniform vec3 uElectricColor;
   varying float vAlpha;
   varying float vRandom;
   varying float vDepth;
   varying vec3 vWorldPos;
+  varying float vFresnel;
+  varying float vElectricPulse;
 
   void main() {
     // Soft circle shape
@@ -360,11 +383,25 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec3 variantTint = vec3(hueShift * 0.14, -hueShift * 0.04, hueShift * 0.22);
     vec3 col = uColor + variantTint + warmTint * (1.0 - vDepth) * 0.35 + iridescentShift;
 
+    // Fresnel rim glow: bright silhouette edge (from Digital-Brain/Jarvis-Orb)
+    vec3 rimColor = vec3(0.4, 0.6, 1.0);
+    col += rimColor * vFresnel * 0.45;
+
+    // Electric surface pulse overlay (from Digital-Brain brain.frag.glsl)
+    // Creates visible crackling arcs of energy across the cortical surface
+    vec3 electricGlow = uElectricColor * vElectricPulse * 1.2;
+    // Sparkle highlights on the strongest electric arcs
+    float sparkle = pow(vElectricPulse, 4.0) * 2.5;
+    electricGlow += vec3(1.0, 0.95, 0.85) * sparkle;
+    col += electricGlow;
+
     // Gentle pulse glow with per-particle phase offset
     float glow = 0.85 + 0.15 * sin(uTime * 1.0 + vRandom * 6.2831);
 
-    // Higher base alpha for brighter, more visible brain
-    gl_FragColor = vec4(col * glow, circle * vAlpha * 0.80);
+    // Rim-enhanced alpha: edge particles are slightly brighter
+    float rimAlpha = 1.0 + vFresnel * 0.3;
+
+    gl_FragColor = vec4(col * glow, circle * vAlpha * 0.80 * rimAlpha);
   }
 `;
 
@@ -562,6 +599,7 @@ export async function loadBrainModelOverlay(
       uTime: { value: 0.0 },
       uColor: { value: BRAIN_COLOR.clone() },
       uPointSize: { value: 3.0 },
+      uElectricColor: { value: new THREE.Color(0x44aaff) },
     },
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,

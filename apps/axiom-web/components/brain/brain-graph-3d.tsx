@@ -274,6 +274,81 @@ function createShockwave(position: THREE.Vector3, color: THREE.Color): Shockwave
   return { mesh, startTime: performance.now() };
 }
 
+/**
+ * Spawn-burst particle effect (inspired by Vestige's EffectManager.createSpawnBurst).
+ * 60 particles fly outward from a position, decelerate, and fade out.
+ */
+const SPAWN_BURST_COUNT = 60;
+const SPAWN_BURST_LIFESPAN_MS = 1800;
+
+interface SpawnBurstHandle {
+  points: THREE.Points;
+  velocities: THREE.Vector3[];
+  startTime: number;
+}
+
+function createSpawnBurst(position: THREE.Vector3, color: THREE.Color): SpawnBurstHandle {
+  const positions = new Float32Array(SPAWN_BURST_COUNT * 3);
+  const velocities: THREE.Vector3[] = [];
+
+  for (let i = 0; i < SPAWN_BURST_COUNT; i++) {
+    positions[i * 3] = position.x;
+    positions[i * 3 + 1] = position.y;
+    positions[i * 3 + 2] = position.z;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const speed = 0.8 + Math.random() * 1.5;
+    velocities.push(new THREE.Vector3(
+      Math.sin(phi) * Math.cos(theta) * speed,
+      Math.sin(phi) * Math.sin(theta) * speed,
+      Math.cos(phi) * speed,
+    ));
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+
+  const mat = new THREE.PointsMaterial({
+    color,
+    size: 0.8,
+    transparent: true,
+    opacity: 1.0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false;
+  points.name = "spawn-burst";
+  return { points, velocities, startTime: performance.now() };
+}
+
+/**
+ * Connection flash line between two nodes (inspired by Vestige's connection flash).
+ * A bright additive line that fades to zero over ~1 second.
+ */
+interface ConnectionFlashHandle {
+  line: THREE.Line;
+  startTime: number;
+}
+
+const FLASH_LIFESPAN_MS = 800;
+
+function createConnectionFlash(from: THREE.Vector3, to: THREE.Vector3, color: THREE.Color): ConnectionFlashHandle {
+  const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), to.clone()]);
+  const mat = new THREE.LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 1.0,
+    linewidth: 2,
+    blending: THREE.AdditiveBlending,
+  });
+  const line = new THREE.Line(geo, mat);
+  line.name = "connection-flash";
+  return { line, startTime: performance.now() };
+}
+
 // -- Component ----------------------------------------------------------------
 
 export interface BrainGraph3DProps {
@@ -321,6 +396,10 @@ export default function BrainGraph3D({
   const dustRef = useRef<THREE.Points | null>(null);
   // Active shockwave effects
   const shockwavesRef = useRef<ShockwaveHandle[]>([]);
+  // Active spawn burst effects (inspired by Vestige)
+  const spawnBurstsRef = useRef<SpawnBurstHandle[]>([]);
+  // Active connection flash lines (inspired by Vestige)
+  const connectionFlashesRef = useRef<ConnectionFlashHandle[]>([]);
   // Selection targeting ring (spinning torus)
   const selectionRingRef = useRef<THREE.Mesh | null>(null);
   // Hover point light for interactive glow feedback
@@ -369,6 +448,18 @@ export default function BrainGraph3D({
         (dustRef.current.material as THREE.PointsMaterial).dispose();
         dustRef.current = null;
       }
+      // Dispose spawn bursts
+      for (const burst of spawnBurstsRef.current) {
+        burst.points.geometry.dispose();
+        (burst.points.material as THREE.PointsMaterial).dispose();
+      }
+      spawnBurstsRef.current.length = 0;
+      // Dispose connection flashes
+      for (const flash of connectionFlashesRef.current) {
+        flash.line.geometry.dispose();
+        (flash.line.material as THREE.LineBasicMaterial).dispose();
+      }
+      connectionFlashesRef.current.length = 0;
     };
   }, []);
 
@@ -429,6 +520,59 @@ export default function BrainGraph3D({
           const r = rimLight.userData.orbitRadius;
           rimLight.position.x = Math.cos(a) * r;
           rimLight.position.z = Math.sin(a) * r;
+        }
+      }
+
+      // Animate spawn bursts (particles fly outward + fade)
+      // Inspired by Vestige EffectManager.createSpawnBurst
+      const scene = modelSceneRef.current;
+      const bursts = spawnBurstsRef.current;
+      if (bursts.length > 0) {
+        const now = performance.now();
+        for (let i = bursts.length - 1; i >= 0; i--) {
+          const burst = bursts[i];
+          const age = now - burst.startTime;
+          if (age > SPAWN_BURST_LIFESPAN_MS) {
+            if (scene) scene.remove(burst.points);
+            burst.points.geometry.dispose();
+            (burst.points.material as THREE.PointsMaterial).dispose();
+            bursts.splice(i, 1);
+            continue;
+          }
+          const progress = age / SPAWN_BURST_LIFESPAN_MS;
+          const posAttr = burst.points.geometry.attributes.position as THREE.BufferAttribute;
+          for (let j = 0; j < SPAWN_BURST_COUNT; j++) {
+            const vel = burst.velocities[j];
+            posAttr.setX(j, posAttr.getX(j) + vel.x * dt * 60);
+            posAttr.setY(j, posAttr.getY(j) + vel.y * dt * 60);
+            posAttr.setZ(j, posAttr.getZ(j) + vel.z * dt * 60);
+            // Decelerate
+            vel.multiplyScalar(0.96);
+          }
+          posAttr.needsUpdate = true;
+          const mat = burst.points.material as THREE.PointsMaterial;
+          mat.opacity = Math.max(0, 1 - progress * progress);
+          mat.size = 0.8 * (1 - progress * 0.5);
+        }
+      }
+
+      // Animate connection flash lines (fade out)
+      // Inspired by Vestige EffectManager connection flashes
+      const flashes = connectionFlashesRef.current;
+      if (flashes.length > 0) {
+        const now = performance.now();
+        for (let i = flashes.length - 1; i >= 0; i--) {
+          const flash = flashes[i];
+          const age = now - flash.startTime;
+          if (age > FLASH_LIFESPAN_MS) {
+            if (scene) scene.remove(flash.line);
+            flash.line.geometry.dispose();
+            (flash.line.material as THREE.LineBasicMaterial).dispose();
+            flashes.splice(i, 1);
+            continue;
+          }
+          const progress = age / FLASH_LIFESPAN_MS;
+          (flash.line.material as THREE.LineBasicMaterial).opacity = 1 - progress;
         }
       }
 
@@ -833,6 +977,32 @@ export default function BrainGraph3D({
         const wave = createShockwave(pos, color);
         scene.add(wave.mesh);
         shockwavesRef.current.push(wave);
+
+        // Spawn-burst particle effect (inspired by Vestige)
+        const burst = createSpawnBurst(pos, color);
+        scene.add(burst.points);
+        spawnBurstsRef.current.push(burst);
+
+        // Connection flash lines to neighbour nodes (inspired by Vestige)
+        // Flash bright lines from clicked node to all connected neighbours
+        for (const link of graphData.links) {
+          // After force simulation, source/target may be objects or strings
+          const sourceId = (link.source as unknown as Record<string, unknown>)?.id ?? link.source;
+          const targetId = (link.target as unknown as Record<string, unknown>)?.id ?? link.target;
+          let neighbourId: string | undefined;
+          if (sourceId === node.id) neighbourId = targetId as string;
+          else if (targetId === node.id) neighbourId = sourceId as string;
+          if (!neighbourId) continue;
+
+          // Find the neighbour node's position
+          const neighbour = graphData.nodes.find((n) => n.id === neighbourId);
+          if (neighbour && neighbour.x != null && neighbour.y != null && neighbour.z != null) {
+            const nPos = new THREE.Vector3(neighbour.x, neighbour.y, neighbour.z);
+            const flash = createConnectionFlash(pos, nPos, color);
+            scene.add(flash.line);
+            connectionFlashesRef.current.push(flash);
+          }
+        }
       }
     },
     [onNodeSelect, onSelectedNodeIdChange, selectedNodeId],
