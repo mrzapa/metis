@@ -15,12 +15,12 @@ import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
   ArrowRight,
-  Brain,
   CheckCircle2,
   Database,
   KeyRound,
   Sparkles,
 } from "lucide-react";
+import { BrainIcon } from "@/components/icons";
 
 const LLM_PROVIDERS = [
   {
@@ -492,7 +492,7 @@ export default function SetupPage() {
                 </Button>
               ) : (
                 <Button type="button" onClick={handleFinish} disabled={saving} className="gap-2">
-                  {saving ? <Database className="size-4 animate-pulse" /> : <Brain className="size-4" />}
+                  {saving ? <Database className="size-4 animate-pulse" /> : <BrainIcon size={16} className="shrink-0" />}
                   {saving ? "Launching workspace..." : "Finish and open chat"}
                 </Button>
               )}
