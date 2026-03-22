@@ -19,6 +19,12 @@ export interface BrainSceneNode {
   x?: number;
   y?: number;
   z?: number;
+  /** Fixed x position – prevents force simulation from moving the node. */
+  fx?: number;
+  /** Fixed y position – prevents force simulation from moving the node. */
+  fy?: number;
+  /** Fixed z position – prevents force simulation from moving the node. */
+  fz?: number;
 }
 
 export interface BrainSceneLink {
@@ -135,6 +141,9 @@ export function buildBrainSceneGraph(
       x: pos.x,
       y: pos.y,
       z: pos.z,
+      fx: pos.x,
+      fy: pos.y,
+      fz: pos.z,
     });
   }
 

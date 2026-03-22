@@ -109,9 +109,10 @@ function fbm3(x: number, y: number, z: number): number {
  */
 function generateBrainPoints(count: number): Float32Array {
   const positions = new Float32Array(count * 3);
-  const surfaceCount = Math.floor(count * 0.70);
+  // More surface particles for a clearer, crisper outline
+  const surfaceCount = Math.floor(count * 0.74);
   const sulcusCount = Math.floor(count * 0.08);
-  const volumeCount = Math.floor(count * 0.10);
+  const volumeCount = Math.floor(count * 0.06);
   const stemCount = Math.floor(count * 0.07);
   const temporalCount = count - surfaceCount - sulcusCount - volumeCount - stemCount;
   let idx = 0;
@@ -135,48 +136,75 @@ function generateBrainPoints(count: number): Float32Array {
   }
 
   /**
-   * Deform a unit-sphere point into the brain ellipsoid shape with
-   * anatomical-lobe modifiers, then add cortical fold noise.
+   * Deform a unit-sphere point into a recognisable brain-shaped ellipsoid
+   * with anatomical-lobe modifiers and cortical fold noise.
+   *
+   * Key anatomical cues: rounded frontal dome, slight indentation at the
+   * central sulcus, wider temporal lobes that jut forward-and-down,
+   * tapered occipital pole, and a flattened ventral (bottom) surface.
    */
   function deformToBrain(nx: number, ny: number, nz: number): [number, number, number] {
-    // Base ellipsoid radii (wider laterally, shorter vertically, moderate depth)
-    let rx = 0.55;
-    let ry = 0.44;
-    let rz = 0.50;
+    // Base ellipsoid – wider laterally (x), moderate depth (z), shorter vertically (y)
+    let rx = 0.58;
+    let ry = 0.46;
+    let rz = 0.52;
 
-    // Frontal lobe: bulge forward when z > 0 and y > -0.1
-    if (nz > 0.2 && ny > -0.2) {
-      rz += 0.06 * Math.max(0, nz);
-      ry += 0.03 * Math.max(0, nz) * Math.max(0, ny + 0.2);
+    // ---- Frontal lobe: prominent rounded dome forward and upward ----
+    if (nz > 0.15) {
+      const frontFactor = Math.max(0, nz - 0.15);
+      rz += 0.10 * frontFactor;
+      // Dome curves upward toward the front
+      if (ny > -0.3) {
+        ry += 0.05 * frontFactor * Math.max(0, ny + 0.3);
+      }
+      // Slight lateral narrowing toward the front pole for a rounded look
+      rx -= 0.03 * frontFactor * frontFactor;
     }
 
-    // Occipital lobe: slight protrusion at the back
-    if (nz < -0.3) {
-      rz += 0.04 * Math.abs(nz);
+    // ---- Occipital lobe: tapers but protrudes slightly at the back ----
+    if (nz < -0.25) {
+      const backFactor = Math.abs(nz + 0.25);
+      rz += 0.05 * backFactor;
+      // Narrows laterally toward the back
+      rx -= 0.04 * backFactor;
+      // Slight downward bias at the occipital pole
+      if (ny > 0.2) {
+        ry -= 0.03 * backFactor;
+      }
     }
 
-    // Temporal lobes: wider bulge at the sides, lower half
-    if (ny < 0.1 && Math.abs(nx) > 0.3) {
-      rx += 0.05 * Math.abs(nx) * (1 - ny);
-      ry += 0.02 * Math.abs(nx);
+    // ---- Temporal lobes: bulge outward-and-downward at the sides ----
+    const absNx = Math.abs(nx);
+    if (absNx > 0.25 && ny < 0.15) {
+      const temporalStrength = (absNx - 0.25) * Math.max(0, 0.15 - ny);
+      rx += 0.12 * temporalStrength;
+      // Temporal lobes push slightly forward
+      if (nz > -0.2) {
+        rz += 0.04 * temporalStrength;
+      }
     }
 
-    // Flatten bottom slightly (brain rests on the skull base)
-    if (ny < -0.5) {
-      ry *= 0.85;
+    // ---- Parietal dome: gentle upward convexity at the top ----
+    if (ny > 0.4) {
+      ry += 0.025 * (ny - 0.4);
+    }
+
+    // ---- Ventral flattening (brain sits on skull base) ----
+    if (ny < -0.4) {
+      ry *= 0.80 + 0.20 * ((ny + 1) / 0.6);
     }
 
     let px = nx * rx;
     let py = ny * ry;
     let pz = nz * rz;
 
-    // Hemisphere split: longitudinal fissure along x
-    const gap = 0.025;
+    // ---- Hemisphere split: longitudinal fissure along x ----
+    const gap = 0.022;
     px += px >= 0 ? gap : -gap;
 
-    // Cortical fold displacement via noise (stronger for more visible sulci)
-    const noiseScale = 4.0;
-    const noiseAmp = 0.08;
+    // ---- Cortical fold displacement via noise (sulci / gyri) ----
+    const noiseScale = 4.5;
+    const noiseAmp = 0.06;
     const displacement = fbm3(
       px * noiseScale + 7.3,
       py * noiseScale + 2.1,
@@ -196,7 +224,7 @@ function generateBrainPoints(count: number): Float32Array {
     const [px, py, pz] = deformToBrain(nx, ny, nz);
 
     // Slight random scatter
-    const scatter = 0.006;
+    const scatter = 0.005;
     pushPoint(
       px + (Math.random() - 0.5) * scatter,
       py + (Math.random() - 0.5) * scatter,
@@ -241,13 +269,13 @@ function generateBrainPoints(count: number): Float32Array {
   for (let i = 0; i < temporalCount; i++) {
     const angle = Math.random() * Math.PI * 2;
     const side = Math.random() > 0.5 ? 1 : -1;
-    // Temporal lobes sit low and to the sides
+    // Temporal lobes sit low and to the sides, forward-biased
     const nx = side * (0.5 + Math.random() * 0.4);
-    const ny = -0.25 + (Math.random() - 0.5) * 0.3;
-    const nz = Math.cos(angle) * 0.3;
+    const ny = -0.30 + (Math.random() - 0.5) * 0.25;
+    const nz = 0.10 + Math.cos(angle) * 0.25;
     const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
     const [px, py, pz] = deformToBrain(nx / len, ny / len, nz / len);
-    const scatter = 0.008;
+    const scatter = 0.006;
     pushPoint(
       px + (Math.random() - 0.5) * scatter,
       py + (Math.random() - 0.5) * scatter,
@@ -257,38 +285,39 @@ function generateBrainPoints(count: number): Float32Array {
 
   // -- Volumetric interior particles (neural pathways feel) --
   for (let i = 0; i < volumeCount; i++) {
-    const r = Math.random() * 0.38;
+    const r = Math.random() * 0.35;
     const [nx, ny, nz] = randomOnSphere();
     pushPoint(
-      nx * r * 0.52,
+      nx * r * 0.55,
       ny * r * 0.42,
-      nz * r * 0.48,
+      nz * r * 0.50,
     );
   }
 
   // -- Brain stem / cerebellum extension --
   for (let i = 0; i < stemCount; i++) {
     const t = Math.random();
-    if (t < 0.6) {
-      // Brain stem: narrow cylinder downward
-      const stemLen = 0.30;
-      const baseRadius = 0.10 * (1 - t * 0.5);
+    if (t < 0.55) {
+      // Brain stem: narrow cylinder tapering downward
+      const stemLen = 0.28;
+      const baseRadius = 0.09 * (1 - t * 0.6);
       const angle = Math.random() * Math.PI * 2;
       const rr = baseRadius * Math.sqrt(Math.random());
       pushPoint(
         Math.cos(angle) * rr,
-        -0.42 - t * stemLen,
-        Math.sin(angle) * rr + 0.04,
+        -0.44 - t * stemLen,
+        Math.sin(angle) * rr - 0.04,
       );
     } else {
-      // Cerebellum: small rounded lobe at the bottom-back
+      // Cerebellum: compact lobe at the bottom-back with horizontal ridges
       const [nx, ny, nz] = randomOnSphere();
-      const cR = 0.18;
-      pushPoint(
-        nx * cR * 0.7,
-        -0.38 + ny * cR * 0.4 - 0.06,
-        nz * cR * 0.6 - 0.22,
-      );
+      const cR = 0.20;
+      const cx = nx * cR * 0.75;
+      const cy = -0.40 + ny * cR * 0.35 - 0.04;
+      // Slight horizontal ridging for the cerebellar folia
+      const ridge = Math.sin(ny * 20) * 0.006;
+      const cz = nz * cR * 0.55 - 0.25 + ridge;
+      pushPoint(cx, cy, cz);
     }
   }
 

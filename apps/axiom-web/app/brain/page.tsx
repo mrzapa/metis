@@ -590,7 +590,7 @@ export default function BrainPage() {
             ) : null}
           </div>
 
-          <div className="pointer-events-none absolute inset-x-4 bottom-4 hidden xl:flex xl:justify-end">
+          <div className="pointer-events-none absolute inset-x-4 bottom-4 hidden xl:flex xl:justify-start">
             <div className="pointer-events-auto w-[20.5rem] max-w-full">
               <GraphInspectorPanel
               node={selectedNode}
