@@ -59,11 +59,11 @@ const D3_LINK_DISTANCE = 80;
 // -- Bloom post-processing (inspired by Hastur-HP/The-Brain) ------------------
 
 /** Bloom strength – how bright the glow is. */
-const BLOOM_STRENGTH = 1.2;
+const BLOOM_STRENGTH = 0.55;
 /** Bloom radius – how far the glow spreads. */
-const BLOOM_RADIUS = 0.8;
+const BLOOM_RADIUS = 0.35;
 /** Bloom threshold – luminance threshold for bloom to kick in. */
-const BLOOM_THRESHOLD = 0.12;
+const BLOOM_THRESHOLD = 0.3;
 
 // -- Ambient dust particle system ---------------------------------------------
 
@@ -881,11 +881,11 @@ export default function BrainGraph3D({
 
     // --- Outer glow halo (large, faint additive sphere for bloom interaction) ---
     if (!node.dimmed) {
-      const glowGeo = new THREE.SphereGeometry(r * (isSelected ? 3.5 : 2.5), 16, 16);
+      const glowGeo = new THREE.SphereGeometry(r * (isSelected ? 2.8 : 2.0), 16, 16);
       const glowMat = new THREE.MeshBasicMaterial({
         color,
         transparent: true,
-        opacity: isSelected ? 0.12 : 0.06,
+        opacity: isSelected ? 0.07 : 0.03,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       });
@@ -899,9 +899,9 @@ export default function BrainGraph3D({
     const membraneMat = new THREE.MeshPhongMaterial({
       color,
       emissive: color,
-      emissiveIntensity: isSelected ? 0.7 : 0.4,
+      emissiveIntensity: isSelected ? 0.5 : 0.3,
       transparent: true,
-      opacity: node.dimmed ? 0.03 : isSelected ? 0.25 : 0.14,
+      opacity: node.dimmed ? 0.03 : isSelected ? 0.20 : 0.12,
       depthWrite: false,
       side: THREE.FrontSide,
     });
@@ -946,10 +946,10 @@ export default function BrainGraph3D({
     const nucleusMat = new THREE.MeshPhongMaterial({
       color: 0xffffff,
       emissive: color,
-      emissiveIntensity: isSelected ? 1.0 : 0.8,
+      emissiveIntensity: isSelected ? 0.8 : 0.6,
       shininess: 100,
       transparent: true,
-      opacity: node.dimmed ? 0.15 : 0.95,
+      opacity: node.dimmed ? 0.15 : 0.90,
     });
     group.add(new THREE.Mesh(nucleusGeo, nucleusMat));
 
@@ -958,10 +958,10 @@ export default function BrainGraph3D({
     const mat = new THREE.MeshPhongMaterial({
       color,
       emissive: color,
-      emissiveIntensity: isSelected ? 0.65 : 0.5,
+      emissiveIntensity: isSelected ? 0.5 : 0.4,
       shininess: 90,
       transparent: true,
-      opacity: node.dimmed ? 0.15 : 0.88,
+      opacity: node.dimmed ? 0.15 : 0.85,
     });
     group.add(new THREE.Mesh(geo, mat));
 
@@ -1080,6 +1080,8 @@ export default function BrainGraph3D({
         graphData={graphData}
         backgroundColor={BG_COLOR}
         showNavInfo={false}
+        /* Disable node dragging – nodes are fixed at brain-region positions */
+        enableNodeDrag={false}
         /* Node styling */
         nodeThreeObject={nodeThreeObject}
         nodeThreeObjectExtend={false}
