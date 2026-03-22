@@ -299,8 +299,8 @@ function generateBrainPoints(count: number): Float32Array {
     const t = Math.random();
     if (t < 0.55) {
       // Brain stem: narrow cylinder tapering downward
-      const stemLen = 0.28;
-      const baseRadius = 0.09 * (1 - t * 0.6);
+      const stemLen = 0.28;      // stem vertical extent
+      const baseRadius = 0.09 * (1 - t * 0.6); // taper radius
       const angle = Math.random() * Math.PI * 2;
       const rr = baseRadius * Math.sqrt(Math.random());
       pushPoint(
@@ -314,7 +314,7 @@ function generateBrainPoints(count: number): Float32Array {
       const cR = 0.20;
       const cx = nx * cR * 0.75;
       const cy = -0.40 + ny * cR * 0.35 - 0.04;
-      // Slight horizontal ridging for the cerebellar folia
+      // Slight horizontal ridging for the cerebellar folia (freq=20, amp=0.006)
       const ridge = Math.sin(ny * 20) * 0.006;
       const cz = nz * cR * 0.55 - 0.25 + ridge;
       pushPoint(cx, cy, cz);
