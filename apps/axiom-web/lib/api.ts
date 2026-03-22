@@ -231,6 +231,36 @@ export interface TraceEvent {
   citations_chosen?: string[] | null;
 }
 
+export interface CompanionActivityEvent {
+  source: "rag_stream" | "index_build";
+  state: "running" | "completed" | "error";
+  trigger: string;
+  summary: string;
+  timestamp: number;
+  payload?: Record<string, unknown>;
+}
+
+type CompanionActivityListener = (event: CompanionActivityEvent) => void;
+
+const companionActivityListeners = new Set<CompanionActivityListener>();
+
+export function subscribeCompanionActivity(listener: CompanionActivityListener): () => void {
+  companionActivityListeners.add(listener);
+  return () => {
+    companionActivityListeners.delete(listener);
+  };
+}
+
+function emitCompanionActivity(event: CompanionActivityEvent): void {
+  for (const listener of companionActivityListeners) {
+    try {
+      listener(event);
+    } catch {
+      // Listeners should be isolated so one faulty subscriber cannot break others.
+    }
+  }
+}
+
 export interface AssistantIdentity {
   assistant_id: string;
   name: string;
@@ -608,6 +638,15 @@ export async function queryRagStream(
     onEvent: (event: RagStreamEvent, meta: { eventId: number | null }) => void;
   },
 ): Promise<void> {
+  emitCompanionActivity({
+    source: "rag_stream",
+    state: "running",
+    trigger: "query_stream_started",
+    summary: question,
+    timestamp: Date.now(),
+    payload: { manifest_path },
+  });
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -633,6 +672,13 @@ export async function queryRagStream(
   });
   if (!res.ok) {
     const detail = await res.text();
+    emitCompanionActivity({
+      source: "rag_stream",
+      state: "error",
+      trigger: "query_stream_error",
+      summary: detail,
+      timestamp: Date.now(),
+    });
     throw new Error(`RAG stream failed (${res.status}): ${detail}`);
   }
   await readSseEvents<RagStreamEvent>(res, (message) => {
@@ -643,6 +689,44 @@ export async function queryRagStream(
     options.onEvent(message.data, {
       eventId: Number.isFinite(parsedEventId) ? parsedEventId : null,
     });
+
+    if (message.data.type === "run_started") {
+      emitCompanionActivity({
+        source: "rag_stream",
+        state: "running",
+        trigger: "query_run_started",
+        summary: message.data.run_id,
+        timestamp: Date.now(),
+      });
+    } else if (
+      message.data.type === "retrieval_complete" ||
+      message.data.type === "retrieval_augmented" ||
+      message.data.type === "refinement_retrieval"
+    ) {
+      emitCompanionActivity({
+        source: "rag_stream",
+        state: "running",
+        trigger: "query_retrieval",
+        summary: `Retrieved ${message.data.sources.length} sources`,
+        timestamp: Date.now(),
+      });
+    } else if (message.data.type === "final") {
+      emitCompanionActivity({
+        source: "rag_stream",
+        state: "completed",
+        trigger: "query_final",
+        summary: message.data.answer_text.slice(0, 200),
+        timestamp: Date.now(),
+      });
+    } else if (message.data.type === "error") {
+      emitCompanionActivity({
+        source: "rag_stream",
+        state: "error",
+        trigger: "query_error",
+        summary: message.data.message,
+        timestamp: Date.now(),
+      });
+    }
   });
 }
 
@@ -671,6 +755,14 @@ export async function buildIndexStream(
   settings: Record<string, unknown>,
   onEvent: (event: Record<string, unknown>) => void,
 ): Promise<IndexBuildResult> {
+  emitCompanionActivity({
+    source: "index_build",
+    state: "running",
+    trigger: "index_build_started",
+    summary: `${documentPaths.length} documents`,
+    timestamp: Date.now(),
+  });
+
   const res = await apiFetch(`${await getApiBase()}/v1/index/build/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -678,15 +770,45 @@ export async function buildIndexStream(
   });
   if (!res.ok) {
     const detail = await res.text();
+    emitCompanionActivity({
+      source: "index_build",
+      state: "error",
+      trigger: "index_build_error",
+      summary: detail,
+      timestamp: Date.now(),
+    });
     throw new Error(`Build stream failed (${res.status}): ${detail}`);
   }
   let buildResult: IndexBuildResult | null = null;
   await readSseEvents<Record<string, unknown>>(res, ({ data: event }) => {
     onEvent(event);
+    if (event.type === "status") {
+      emitCompanionActivity({
+        source: "index_build",
+        state: "running",
+        trigger: "index_build_status",
+        summary: String(event.text ?? "Indexing"),
+        timestamp: Date.now(),
+      });
+    }
     if (event.type === "error") {
+      emitCompanionActivity({
+        source: "index_build",
+        state: "error",
+        trigger: "index_build_error",
+        summary: String(event.message ?? "Build error"),
+        timestamp: Date.now(),
+      });
       throw new Error(String(event.message ?? "Build error"));
     }
     if (event.type === "build_complete") {
+      emitCompanionActivity({
+        source: "index_build",
+        state: "completed",
+        trigger: "index_build_completed",
+        summary: String(event.manifest_path ?? "Index build complete"),
+        timestamp: Date.now(),
+      });
       buildResult = event as unknown as IndexBuildResult;
     }
   });

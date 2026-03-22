@@ -30,6 +30,7 @@ import {
   type BrainRenderMode,
   type BrainScope,
   ALL_BRAIN_SCOPES,
+  NODE_COLOR_HEX,
 } from "./brain-graph";
 import {
   buildBrainSceneGraph,
@@ -45,7 +46,7 @@ import {
 // -- Constants ----------------------------------------------------------------
 
 const BG_COLOR = "#030508";
-const FOG_DENSITY = 0.0006;
+const FOG_DENSITY = 0.0003;
 const CAMERA_TRANSITION_MS = 1200;
 const ZOOM_TO_FIT_MS = 800;
 const ZOOM_TO_FIT_PADDING = 70;
@@ -56,14 +57,85 @@ const D3_CHARGE_STRENGTH = -120;
 /** Preferred link distance between connected nodes. */
 const D3_LINK_DISTANCE = 80;
 
-// -- Bloom post-processing (inspired by Hastur-HP/The-Brain) ------------------
+// -- Bloom post-processing --------------------------------------------------
 
-/** Bloom strength – how bright the glow is. */
-const BLOOM_STRENGTH = 0.12;
-/** Bloom radius – how far the glow spreads. */
-const BLOOM_RADIUS = 0.1;
-/** Bloom threshold – luminance threshold for bloom to kick in. */
-const BLOOM_THRESHOLD = 0.72;
+/** Bloom strength – tighter, more precise glow on node cores. */
+const BLOOM_STRENGTH = 0.16;
+/** Bloom radius – tight spread for sharp glows, not hazy halos. */
+const BLOOM_RADIUS = 0.06;
+/** Bloom threshold – only the very brightest node cores trigger bloom. */
+const BLOOM_THRESHOLD = 0.86;
+const BLOOM_PULSE_BOOST = 0.12;
+const MAX_IDLE_LABELS = 14;
+const MAX_SELECTION_LABELS = 20;
+
+const ACTIVITY_PROFILES: Record<
+  BrainNode["node_type"],
+  {
+    label: string;
+    pulse: number;
+    bloom: number;
+    directionalParticles: number;
+    directionalSpeed: number;
+    directionalWidth: number;
+    cameraOffset: number;
+  }
+> = {
+  assistant: {
+    label: "Reasoning",
+    pulse: 1.15,
+    bloom: 0.18,
+    directionalParticles: 8,
+    directionalSpeed: 0.010,
+    directionalWidth: 2.6,
+    cameraOffset: 54,
+  },
+  session: {
+    label: "Conversation",
+    pulse: 1.0,
+    bloom: 0.16,
+    directionalParticles: 7,
+    directionalSpeed: 0.009,
+    directionalWidth: 2.4,
+    cameraOffset: 50,
+  },
+  memory: {
+    label: "Memory Recall",
+    pulse: 1.1,
+    bloom: 0.17,
+    directionalParticles: 8,
+    directionalSpeed: 0.010,
+    directionalWidth: 2.5,
+    cameraOffset: 52,
+  },
+  index: {
+    label: "Index Access",
+    pulse: 0.95,
+    bloom: 0.14,
+    directionalParticles: 6,
+    directionalSpeed: 0.008,
+    directionalWidth: 2.2,
+    cameraOffset: 48,
+  },
+  category: {
+    label: "Category Context",
+    pulse: 0.9,
+    bloom: 0.13,
+    directionalParticles: 5,
+    directionalSpeed: 0.007,
+    directionalWidth: 2.0,
+    cameraOffset: 46,
+  },
+  playbook: {
+    label: "Playbook Plan",
+    pulse: 1.05,
+    bloom: 0.16,
+    directionalParticles: 7,
+    directionalSpeed: 0.009,
+    directionalWidth: 2.4,
+    cameraOffset: 52,
+  },
+};
 
 // -- Ambient dust particle system ---------------------------------------------
 
@@ -71,13 +143,6 @@ const BLOOM_THRESHOLD = 0.72;
 const DUST_COUNT = 800;
 /** Radius of the dust cloud. */
 const DUST_RADIUS = 1200;
-
-// -- Node visual tuning -------------------------------------------------------
-
-/** Number of dendrite tendrils on a selected node. */
-const DENDRITE_COUNT_SELECTED = 10;
-/** Number of dendrite tendrils on a default (non-selected) node. */
-const DENDRITE_COUNT_DEFAULT = 6;
 
 // -- Vignette colours ---------------------------------------------------------
 
@@ -125,30 +190,34 @@ function disposeMaterial(mat: THREE.Material): void {
   mat.dispose();
 }
 
-/** Create a canvas-based text sprite for a node label with semi-transparent backdrop. */
+/** Create a canvas-based text sprite for a node label with crisp Apple-style backdrop. */
 function makeTextSprite(text: string, color: string, nodeRadius: number): THREE.Sprite {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d")!;
-  const fontSize = 64;
-  const font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif`;
+  const fontSize = 56;
+  const font = `500 ${fontSize}px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif`;
   ctx.font = font;
   const metrics = ctx.measureText(text);
   const textW = metrics.width;
 
-  const padX = 24;
-  const padY = 18;
+  const padX = 22;
+  const padY = 14;
   canvas.width = textW + padX * 2;
   canvas.height = fontSize + padY * 2;
 
-  // Semi-transparent dark backdrop pill for readability
-  const bgRadius = 14;
-  ctx.fillStyle = "rgba(5, 7, 10, 0.65)";
+  // Frosted-glass pill backdrop (semi-transparent dark with subtle border)
+  const bgRadius = 12;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Subtle border stroke
+  ctx.strokeStyle = "rgba(255,255,255,0.12)";
+  ctx.lineWidth = 2;
+  ctx.fillStyle = "rgba(8, 10, 16, 0.72)";
   ctx.beginPath();
   if (ctx.roundRect) {
-    ctx.roundRect(4, 4, canvas.width - 8, canvas.height - 8, bgRadius);
+    ctx.roundRect(3, 3, canvas.width - 6, canvas.height - 6, bgRadius);
   } else {
-    // Fallback for browsers without roundRect
-    const x = 4, y = 4, w = canvas.width - 8, h = canvas.height - 8, r = bgRadius;
+    const x = 3, y = 3, w = canvas.width - 6, h = canvas.height - 6, r = bgRadius;
     ctx.moveTo(x + r, y);
     ctx.arcTo(x + w, y, x + w, y + h, r);
     ctx.arcTo(x + w, y + h, x, y + h, r);
@@ -157,22 +226,26 @@ function makeTextSprite(text: string, color: string, nodeRadius: number): THREE.
     ctx.closePath();
   }
   ctx.fill();
+  ctx.stroke();
 
-  // Text
+  // Text with subtle shadow for legibility against bright backgrounds
   ctx.font = font;
+  ctx.shadowColor = "rgba(0,0,0,0.6)";
+  ctx.shadowBlur = 6;
   ctx.fillStyle = color;
   ctx.globalAlpha = 1.0;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  ctx.shadowBlur = 0;
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.needsUpdate = true;
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
   const sprite = new THREE.Sprite(mat);
 
-  // Scale relative to node size for readability
-  const labelScale = Math.max(0.35, nodeRadius * 0.06);
+  // Scale relative to node size – slightly larger for better readability
+  const labelScale = Math.max(0.42, nodeRadius * 0.075);
   sprite.scale.set(canvas.width * labelScale / fontSize, canvas.height * labelScale / fontSize, 1);
   return sprite;
 }
@@ -377,9 +450,19 @@ export interface BrainGraph3DProps {
   selectedNodeId?: string | null;
   onSelectedNodeIdChange?: (nodeId: string | null) => void;
   onNodeSelect?: (node: BrainNode | null) => void;
+  companionSignal?: BrainCompanionSignal | null;
   onModelLoadError?: (message: string) => void;
   modelUrl?: string;
   className?: string;
+}
+
+export interface BrainCompanionSignal {
+  state: string;
+  trigger: string;
+  summary: string;
+  runtimeReady: boolean;
+  paused: boolean;
+  timestamp: number;
 }
 
 export default function BrainGraph3D({
@@ -390,6 +473,7 @@ export default function BrainGraph3D({
   selectedNodeId = null,
   onSelectedNodeIdChange,
   onNodeSelect,
+  companionSignal = null,
   onModelLoadError,
   modelUrl = "/brain/brain-model.glb",
   className = "",
@@ -406,12 +490,24 @@ export default function BrainGraph3D({
   const needsInitialZoomRef = useRef(true);
   const rendererConfiguredRef = useRef(false);
   const [autoRotate, setAutoRotate] = useState(false);
+  const [activityLabel, setActivityLabel] = useState("Idle");
+  const [activityProfile, setActivityProfile] = useState({
+    directionalParticles: 4,
+    directionalSpeed: 0.005,
+    directionalWidth: 2.0,
+  });
+  const lastSignalTsRef = useRef(0);
 
   // Bloom post-processing pass ref (added to the library's internal composer)
   const bloomPassRef = useRef<UnrealBloomPass | null>(null);
   const outputPassRef = useRef<OutputPass | null>(null);
   // Ambient dust ref
   const dustRef = useRef<THREE.Points | null>(null);
+  const pointerTargetRef = useRef(new THREE.Vector2(0, 0));
+  const pointerCurrentRef = useRef(new THREE.Vector2(0, 0));
+  const presenceTargetRef = useRef(0);
+  const presenceCurrentRef = useRef(0);
+  const bloomBoostRef = useRef(0);
   // Active shockwave effects
   const shockwavesRef = useRef<ShockwaveHandle[]>([]);
   // Active spawn burst effects (inspired by Vestige)
@@ -439,6 +535,38 @@ export default function BrainGraph3D({
     });
     observer.observe(el);
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const rect = el.getBoundingClientRect();
+      const relX = (event.clientX - rect.left) / rect.width;
+      const relY = (event.clientY - rect.top) / rect.height;
+      const nx = (relX - 0.5) * 2;
+      const ny = (relY - 0.5) * 2;
+
+      pointerTargetRef.current.set(nx, ny);
+      presenceTargetRef.current = 1;
+      el.style.setProperty("--brain-mx", `${Math.round(relX * 100)}%`);
+      el.style.setProperty("--brain-my", `${Math.round(relY * 100)}%`);
+    };
+
+    const handlePointerLeave = () => {
+      pointerTargetRef.current.set(0, 0);
+      presenceTargetRef.current = 0;
+      el.style.setProperty("--brain-mx", "50%");
+      el.style.setProperty("--brain-my", "50%");
+    };
+
+    el.addEventListener("pointermove", handlePointerMove);
+    el.addEventListener("pointerleave", handlePointerLeave);
+    return () => {
+      el.removeEventListener("pointermove", handlePointerMove);
+      el.removeEventListener("pointerleave", handlePointerLeave);
+    };
   }, []);
 
   // Dispose all created Three.js objects on unmount
@@ -493,15 +621,24 @@ export default function BrainGraph3D({
 
       // Update brain overlay breathing/pulse
       const overlay = modelOverlayRef.current;
-      if (overlay) overlay.update(dt);
+      const pointerCurrent = pointerCurrentRef.current;
+      const pointerTarget = pointerTargetRef.current;
+      pointerCurrent.lerp(pointerTarget, 1 - Math.exp(-dt * 4.5));
+      presenceCurrentRef.current +=
+        (presenceTargetRef.current - presenceCurrentRef.current) * (1 - Math.exp(-dt * 4.0));
+
+      if (overlay) {
+        overlay.setPresence(presenceCurrentRef.current);
+        overlay.update(dt);
+      }
 
       // Slowly rotate ambient dust for living atmosphere
       // Plus per-particle bobbing motion (inspired by Vestige ParticleSystem.animate)
       // Throttled to every 4th frame to avoid updating 800 buffer attributes each tick
       const dust = dustRef.current;
       if (dust) {
-        dust.rotation.y += dt * 0.015;
-        dust.rotation.x += dt * 0.005;
+        dust.rotation.y += dt * (0.015 + presenceCurrentRef.current * 0.01);
+        dust.rotation.x += dt * 0.005 + pointerCurrent.y * dt * 0.01;
 
         const frameCounter = Math.round(elapsedTime * 60);
         if (frameCounter % 4 === 0) {
@@ -550,9 +687,16 @@ export default function BrainGraph3D({
           rimLight.userData.orbitAngle += dt * rimLight.userData.orbitSpeed;
           const a = rimLight.userData.orbitAngle;
           const r = rimLight.userData.orbitRadius;
-          rimLight.position.x = Math.cos(a) * r;
-          rimLight.position.z = Math.sin(a) * r;
+          rimLight.position.x = Math.cos(a) * r + pointerCurrent.x * 22;
+          rimLight.position.z = Math.sin(a) * r - pointerCurrent.y * 18;
+          rimLight.position.y = rimLight.userData.baseHeight + pointerCurrent.y * 20;
+          rimLight.intensity = rimLight.userData.baseIntensity + presenceCurrentRef.current * 0.12;
         }
+      }
+
+      if (bloomPassRef.current) {
+        bloomBoostRef.current = Math.max(0, bloomBoostRef.current - dt * 0.11);
+        bloomPassRef.current.strength = BLOOM_STRENGTH + bloomBoostRef.current;
       }
 
       // Animate spawn bursts (particles fly outward + fade)
@@ -623,6 +767,58 @@ export default function BrainGraph3D({
     [data, filter, activeScopes],
   );
 
+  const graphTopology = useMemo(() => {
+    const degreeById = new Map<string, number>();
+    const neighborById = new Map<string, Set<string>>();
+
+    for (const node of graphData.nodes) {
+      degreeById.set(node.id, 0);
+      neighborById.set(node.id, new Set());
+    }
+
+    for (const link of graphData.links) {
+      const sourceId = getLinkNodeId(link.source);
+      const targetId = getLinkNodeId(link.target);
+      if (!degreeById.has(sourceId) || !degreeById.has(targetId)) continue;
+      degreeById.set(sourceId, (degreeById.get(sourceId) ?? 0) + 1);
+      degreeById.set(targetId, (degreeById.get(targetId) ?? 0) + 1);
+      neighborById.get(sourceId)?.add(targetId);
+      neighborById.get(targetId)?.add(sourceId);
+    }
+
+    return { degreeById, neighborById };
+  }, [graphData.links, graphData.nodes]);
+
+  const visibleLabelNodeIds = useMemo(() => {
+    const labels = new Set<string>();
+    const sortedByDegree = [...graphData.nodes].sort(
+      (a, b) => (graphTopology.degreeById.get(b.id) ?? 0) - (graphTopology.degreeById.get(a.id) ?? 0),
+    );
+
+    if (!selectedNodeId) {
+      for (const node of sortedByDegree) {
+        if (labels.size >= MAX_IDLE_LABELS) break;
+        if (!node.dimmed || node.brain.node_type === "assistant") labels.add(node.id);
+      }
+      return labels;
+    }
+
+    labels.add(selectedNodeId);
+    const firstRing = graphTopology.neighborById.get(selectedNodeId) ?? new Set<string>();
+    for (const id of firstRing) {
+      labels.add(id);
+      if (labels.size >= MAX_SELECTION_LABELS) return labels;
+    }
+
+    // Fill the remainder with globally central nodes so selection still keeps context.
+    for (const node of sortedByDegree) {
+      if (labels.size >= MAX_SELECTION_LABELS) break;
+      if (labels.has(node.id)) continue;
+      labels.add(node.id);
+    }
+    return labels;
+  }, [graphData.nodes, graphTopology.degreeById, graphTopology.neighborById, selectedNodeId]);
+
   // -- Zoom-to-fit on first load / data change -----------------------------
 
   useEffect(() => {
@@ -681,6 +877,8 @@ export default function BrainGraph3D({
         rimLight.userData.orbitAngle = angle;
         rimLight.userData.orbitSpeed = 0.08 + i * 0.02;
         rimLight.userData.orbitRadius = r;
+        rimLight.userData.baseHeight = 50 + i * 40;
+        rimLight.userData.baseIntensity = 0.35;
         scene.add(rimLight);
         rimLights.push(rimLight);
       }
@@ -831,6 +1029,89 @@ export default function BrainGraph3D({
     return () => clearTimeout(timer);
   }, [fitModelOverlay, graphData, renderMode]);
 
+  useEffect(() => {
+    if (!selectedNodeId) {
+      setActivityLabel("Idle");
+      setActivityProfile({
+        directionalParticles: 4,
+        directionalSpeed: 0.005,
+        directionalWidth: 2.0,
+      });
+      return;
+    }
+
+    const selectedNode = graphData.nodes.find((node) => node.id === selectedNodeId);
+    if (!selectedNode) return;
+    const profile = ACTIVITY_PROFILES[selectedNode.brain.node_type];
+    setActivityLabel(profile.label);
+    setActivityProfile({
+      directionalParticles: profile.directionalParticles,
+      directionalSpeed: profile.directionalSpeed,
+      directionalWidth: profile.directionalWidth,
+    });
+  }, [graphData.nodes, selectedNodeId]);
+
+  useEffect(() => {
+    if (!companionSignal) return;
+    if (companionSignal.timestamp <= lastSignalTsRef.current) return;
+    lastSignalTsRef.current = companionSignal.timestamp;
+
+    // Global state-based guardrails first.
+    if (!companionSignal.runtimeReady || companionSignal.paused) {
+      setActivityLabel("Companion Paused");
+      setActivityProfile({
+        directionalParticles: 3,
+        directionalSpeed: 0.003,
+        directionalWidth: 1.8,
+      });
+      modelOverlayRef.current?.triggerPulse(0.45);
+      bloomBoostRef.current = Math.max(bloomBoostRef.current, 0.04);
+      return;
+    }
+
+    const triggerText = `${companionSignal.trigger} ${companionSignal.state} ${companionSignal.summary}`.toLowerCase();
+    const pickProfile = (): keyof typeof ACTIVITY_PROFILES => {
+      if (/(memory|recall|reflect|reflection|summar)/.test(triggerText)) return "memory";
+      if (/(search|retrieve|query|rag)/.test(triggerText)) return "index";
+      if (/(session|conversation|chat)/.test(triggerText)) return "session";
+      if (/(playbook|plan|policy|workflow)/.test(triggerText)) return "playbook";
+      if (/(identity|self|companion|assistant)/.test(triggerText)) return "assistant";
+      return "assistant";
+    };
+
+    const profileKey = pickProfile();
+    const profile = ACTIVITY_PROFILES[profileKey];
+    setActivityLabel(profile.label);
+    setActivityProfile({
+      directionalParticles: profile.directionalParticles,
+      directionalSpeed: profile.directionalSpeed,
+      directionalWidth: profile.directionalWidth,
+    });
+    modelOverlayRef.current?.triggerPulse(profile.pulse);
+    bloomBoostRef.current = Math.max(bloomBoostRef.current, BLOOM_PULSE_BOOST + profile.bloom * 0.8);
+  }, [companionSignal]);
+
+  useEffect(() => {
+    if (!selectedNodeId || autoRotate) return;
+    const selectedNode = graphData.nodes.find((node) => node.id === selectedNodeId);
+    if (!selectedNode) return;
+    if (selectedNode.x == null || selectedNode.y == null || selectedNode.z == null) return;
+
+    const fg = fgRef.current;
+    if (!fg) return;
+
+    const profile = ACTIVITY_PROFILES[selectedNode.brain.node_type];
+    const cam = fg.camera();
+    const viewDir = cam.position.clone().sub(new THREE.Vector3(0, 0, 0)).normalize();
+    const focus = new THREE.Vector3(selectedNode.x, selectedNode.y, selectedNode.z);
+    const cameraPos = focus.clone().add(viewDir.multiplyScalar(profile.cameraOffset));
+    fg.cameraPosition(
+      { x: cameraPos.x, y: cameraPos.y, z: cameraPos.z },
+      { x: focus.x, y: focus.y, z: focus.z },
+      900,
+    );
+  }, [autoRotate, graphData.nodes, selectedNodeId]);
+
   // -- Node hover for cursor change and glow feedback -----------------------
 
   const handleNodeHover = useCallback((node: BrainSceneNode | null) => {
@@ -845,6 +1126,7 @@ export default function BrainGraph3D({
         hoverLight.position.set(node.x, node.y, node.z);
         hoverLight.color.set(node.color);
         hoverLight.intensity = 1.5;
+        presenceTargetRef.current = 1;
       } else {
         hoverLight.intensity = 0;
       }
@@ -869,8 +1151,6 @@ export default function BrainGraph3D({
     fgRef.current?.zoomToFit(ZOOM_TO_FIT_MS, ZOOM_TO_FIT_PADDING);
   }, []);
 
-  // -- Custom Three.js node objects ----------------------------------------
-
   const nodeThreeObject = useCallback((node: BrainSceneNode) => {
     const group = new THREE.Group();
     createdObjectsRef.current.push(group);
@@ -879,41 +1159,26 @@ export default function BrainGraph3D({
     const r = node.radius;
     const color = new THREE.Color(node.color);
 
-    // --- Outer glow halo (large, faint additive sphere for bloom interaction) ---
+    // --- Tight additive aura – crisp glow without a diffuse halo ---
     if (!node.dimmed) {
-      const glowGeo = new THREE.SphereGeometry(r * (isSelected ? 2.8 : 2.0), 16, 16);
-      const glowMat = new THREE.MeshBasicMaterial({
+      const auraGeo = new THREE.SphereGeometry(r * (isSelected ? 1.8 : 1.45), 16, 16);
+      const auraMat = new THREE.MeshBasicMaterial({
         color,
         transparent: true,
-        opacity: isSelected ? 0.07 : 0.03,
+        opacity: isSelected ? 0.07 : 0.035,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       });
-      group.add(new THREE.Mesh(glowGeo, glowMat));
+      group.add(new THREE.Mesh(auraGeo, auraMat));
     }
-
-    // --- Neuron soma (cell body) ---
-
-    // Outer membrane: translucent glowing shell
-    const membraneGeo = new THREE.SphereGeometry(r * (isSelected ? 2.0 : 1.6), 24, 24);
-    const membraneMat = new THREE.MeshPhongMaterial({
-      color,
-      emissive: color,
-      emissiveIntensity: isSelected ? 0.5 : 0.3,
-      transparent: true,
-      opacity: node.dimmed ? 0.03 : isSelected ? 0.20 : 0.12,
-      depthWrite: false,
-      side: THREE.FrontSide,
-    });
-    group.add(new THREE.Mesh(membraneGeo, membraneMat));
 
     // Selection targeting ring: spinning 3D torus
     if (isSelected) {
-      const torusGeo = new THREE.TorusGeometry(r + 2.5, 0.35, 16, 64);
+      const torusGeo = new THREE.TorusGeometry(r + 2.0, 0.28, 16, 64);
       const torusMat = new THREE.MeshBasicMaterial({
         color,
         transparent: true,
-        opacity: 0.8,
+        opacity: 0.85,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       });
@@ -922,71 +1187,55 @@ export default function BrainGraph3D({
       torus.name = "selection-ring";
       group.add(torus);
 
-      // Second thinner ring at a different angle for depth
-      const torus2Geo = new THREE.TorusGeometry(r + 3.5, 0.2, 16, 64);
-      const torus2Mat = new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.3,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const torus2 = new THREE.Mesh(torus2Geo, torus2Mat);
-      torus2.rotation.x = Math.PI / 3;
-      torus2.rotation.z = Math.PI / 6;
-      torus2.name = "selection-ring-outer";
-      group.add(torus2);
-
       // Store ref so the animation loop can spin it
       selectionRingRef.current = torus;
     }
 
-    // Inner nucleus: bright core sphere with high emissive
-    const nucleusGeo = new THREE.SphereGeometry(r * 0.45, 16, 16);
+    // Inner nucleus: bright emissive core that triggers bloom
+    const nucleusGeo = new THREE.SphereGeometry(r * 0.40, 16, 16);
     const nucleusMat = new THREE.MeshPhongMaterial({
       color: 0xffffff,
       emissive: color,
-      emissiveIntensity: isSelected ? 0.8 : 0.6,
-      shininess: 100,
+      emissiveIntensity: isSelected ? 1.0 : 0.80,
+      shininess: 120,
       transparent: true,
-      opacity: node.dimmed ? 0.15 : 0.90,
+      opacity: node.dimmed ? 0.12 : 0.95,
     });
     group.add(new THREE.Mesh(nucleusGeo, nucleusMat));
 
-    // Main soma sphere with glossy Phong material
-    const geo = new THREE.SphereGeometry(r + (isSelected ? 1.0 : 0), 24, 24);
-    const mat = new THREE.MeshPhongMaterial({
+    // Main soma – Apple-quality PBR with clearcoat for a glassy, premium finish
+    const geo = new THREE.SphereGeometry(r + (isSelected ? 0.6 : 0), 32, 32);
+    const mat = new THREE.MeshPhysicalMaterial({
       color,
       emissive: color,
-      emissiveIntensity: isSelected ? 0.5 : 0.4,
-      shininess: 90,
+      emissiveIntensity: isSelected ? 0.55 : 0.42,
+      roughness: 0.22,
+      metalness: 0.10,
+      clearcoat: 0.65,
+      clearcoatRoughness: 0.08,
       transparent: true,
-      opacity: node.dimmed ? 0.15 : 0.85,
+      opacity: node.dimmed ? 0.14 : 0.90,
     });
     group.add(new THREE.Mesh(geo, mat));
 
-    // --- Dendrite tendrils ---
-    if (!node.dimmed) {
-      const dendCount = isSelected ? DENDRITE_COUNT_SELECTED : DENDRITE_COUNT_DEFAULT;
-      const dendrites = createDendrites(r, color, dendCount);
-      group.add(dendrites);
-    }
-
     // --- Readable text label ---
     const label = node.brain.label.length > 28
-      ? `${node.brain.label.slice(0, 27)}…`
+      ? `${node.brain.label.slice(0, 27)}\u2026`
       : node.brain.label;
     const labelColor = node.dimmed
-      ? "rgba(255,255,255,0.25)"
+      ? "rgba(255,255,255,0.22)"
       : isSelected
         ? "rgba(255,255,255,1)"
-        : "rgba(255,255,255,0.92)";
-    const sprite = makeTextSprite(label, labelColor, r);
-    sprite.position.set(0, -(r + 5), 0);
-    group.add(sprite);
+        : "rgba(255,255,255,0.90)";
+    const shouldShowLabel = visibleLabelNodeIds.has(node.id);
+    if (shouldShowLabel) {
+      const sprite = makeTextSprite(label, labelColor, r);
+      sprite.position.set(0, -(r + 4.5), 0);
+      group.add(sprite);
+    }
 
     return group;
-  }, [selectedNodeId]);
+  }, [selectedNodeId, visibleLabelNodeIds]);
 
   // -- Node click handler with shockwave effect ----------------------------
 
@@ -1006,6 +1255,14 @@ export default function BrainGraph3D({
       if (scene && node.x != null && node.y != null && node.z != null) {
         const pos = new THREE.Vector3(node.x, node.y, node.z);
         const color = new THREE.Color(node.color);
+        const profile = ACTIVITY_PROFILES[node.brain.node_type];
+        const nodeDegree = graphTopology.degreeById.get(node.id) ?? 0;
+        const degreeBoost = Math.min(0.28, nodeDegree * 0.02);
+        modelOverlayRef.current?.triggerPulse(profile.pulse + degreeBoost);
+        bloomBoostRef.current = Math.max(
+          bloomBoostRef.current,
+          BLOOM_PULSE_BOOST + profile.bloom + degreeBoost * 0.2,
+        );
         const wave = createShockwave(pos, color);
         scene.add(wave.mesh);
         shockwavesRef.current.push(wave);
@@ -1037,7 +1294,7 @@ export default function BrainGraph3D({
         }
       }
     },
-    [onNodeSelect, onSelectedNodeIdChange, selectedNodeId],
+    [graphData.links, graphData.nodes, graphTopology.degreeById, onNodeSelect, onSelectedNodeIdChange, selectedNodeId],
   );
 
   // Clear selection when the selected node is no longer visible
@@ -1056,14 +1313,7 @@ export default function BrainGraph3D({
   }, [graphData.visibleNodeById, onNodeSelect, selectedNodeId]);
 
   // -- Controls hint visibility -------------------------------------------
-
-  const [showHint, setShowHint] = useState(true);
-
-  useEffect(() => {
-    if (!showHint) return;
-    const timer = setTimeout(() => setShowHint(false), 6000);
-    return () => clearTimeout(timer);
-  }, [showHint]);
+  // (Replaced by persistent node-type legend; retained const to avoid refactor)
 
   // -- Render --------------------------------------------------------------
 
@@ -1073,6 +1323,13 @@ export default function BrainGraph3D({
       className={`relative h-full w-full overflow-hidden ${className}`}
       aria-label="Brain graph"
     >
+      <div
+        className="pointer-events-none absolute inset-0 opacity-90"
+        style={{
+          background: "radial-gradient(circle 420px at var(--brain-mx, 50%) var(--brain-my, 50%), rgba(118,205,255,0.14) 0%, rgba(122,123,255,0.08) 28%, rgba(0,0,0,0) 68%)",
+        }}
+      />
+
       <ForceGraph3D<BrainSceneNode, BrainSceneLink>
         ref={fgRef}
         width={dims.w}
@@ -1092,9 +1349,9 @@ export default function BrainGraph3D({
         linkCurvature={0.15}
         linkCurveRotation={0}
         /* Directional link particles for synaptic-fire effect */
-        linkDirectionalParticles={4}
-        linkDirectionalParticleWidth={2.0}
-        linkDirectionalParticleSpeed={0.005}
+        linkDirectionalParticles={activityProfile.directionalParticles}
+        linkDirectionalParticleWidth={activityProfile.directionalWidth}
+        linkDirectionalParticleSpeed={activityProfile.directionalSpeed}
         linkDirectionalParticleColor={(link: BrainSceneLink) => link.color}
         /* Interactions */
         onNodeClick={handleNodeClick}
@@ -1110,7 +1367,7 @@ export default function BrainGraph3D({
         warmupTicks={30}
       />
 
-      {/* Cinematic vignette overlay — purple-tinted edges (inspired by Digital-Brain VignettePass) */}
+      {/* Cinematic vignette overlay — purple-tinted edges */}
       <div
         className="pointer-events-none absolute inset-0"
         style={{
@@ -1118,25 +1375,40 @@ export default function BrainGraph3D({
         }}
       />
 
-      {/* 3D navigation hint overlay */}
-      {showHint && (
-        <div className="pointer-events-none absolute bottom-5 left-5 flex items-center gap-3 rounded-2xl border border-white/20 bg-white/8 px-4 py-2.5 text-[11px] font-medium tracking-wide text-white/75 backdrop-blur-xl transition-opacity duration-700">
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block size-1.5 rounded-full bg-white/40" />
-            Orbit
-          </span>
-          <span className="text-white/30">·</span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block size-1.5 rounded-full bg-white/40" />
-            Zoom
-          </span>
-          <span className="text-white/30">·</span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block size-1.5 rounded-full bg-white/40" />
-            Pan
-          </span>
+      {/* Node type legend — bottom-left, persistent */}
+      <div className="pointer-events-none absolute bottom-5 left-5 flex flex-col gap-1.5 rounded-2xl border border-white/10 bg-black/40 px-3.5 py-3 backdrop-blur-xl">
+        <p className="mb-0.5 text-[9px] font-semibold uppercase tracking-[0.22em] text-white/35">
+          Node types
+        </p>
+        {(
+          [
+            ["category", "Category"],
+            ["index", "Index"],
+            ["session", "Session"],
+            ["assistant", "Assistant"],
+            ["memory", "Memory"],
+            ["playbook", "Playbook"],
+          ] as const
+        ).map(([type, label]) => (
+          <div key={type} className="flex items-center gap-2">
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ backgroundColor: NODE_COLOR_HEX[type], boxShadow: `0 0 6px ${NODE_COLOR_HEX[type]}` }}
+            />
+            <span className="text-[10px] font-medium tracking-wide text-white/55">{label}</span>
+          </div>
+        ))}
+        <div className="mx-0 my-1.5 border-t border-white/8" />
+        <div className="flex items-center gap-2">
+          <span className="size-1.5 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.85)]" />
+          <span className="text-[10px] tracking-wide text-white/65">{activityLabel}</span>
         </div>
-      )}
+        <div className="flex items-center gap-3 text-[9px] text-white/30">
+          <span>drag · orbit</span>
+          <span className="text-white/15">·</span>
+          <span>scroll · zoom</span>
+        </div>
+      </div>
 
       {/* Camera controls toolbar — glass-morphism design */}
       <div className="absolute right-4 top-4 flex flex-col gap-0.5 rounded-2xl border border-white/20 bg-white/8 p-1.5 backdrop-blur-xl">

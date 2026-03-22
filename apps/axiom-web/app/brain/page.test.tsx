@@ -39,9 +39,11 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api", () => ({
   fetchBrainGraph: vi.fn(),
+  fetchAssistantStatus: vi.fn(),
+  subscribeCompanionActivity: vi.fn(() => () => {}),
 }));
 
-const { fetchBrainGraph } = await import("@/lib/api");
+const { fetchAssistantStatus, fetchBrainGraph } = await import("@/lib/api");
 const { default: BrainPage } = await import("./page");
 
 const graphData = {
@@ -70,6 +72,23 @@ describe("BrainPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(fetchBrainGraph).mockResolvedValue(graphData);
+    vi.mocked(fetchAssistantStatus).mockResolvedValue({
+      state: "idle",
+      paused: false,
+      runtime_ready: true,
+      runtime_source: "settings",
+      runtime_provider: "openai",
+      runtime_model: "gpt-5.3-codex",
+      bootstrap_state: "ready",
+      bootstrap_message: "",
+      recommended_model_name: "",
+      recommended_quant: "",
+      recommended_use_case: "",
+      last_reflection_at: "",
+      last_reflection_trigger: "manual",
+      latest_summary: "",
+      latest_why: "",
+    });
   });
 
   it("switches render modes and falls back to raw mode after a model error", async () => {

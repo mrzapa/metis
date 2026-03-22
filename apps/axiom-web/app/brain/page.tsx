@@ -16,10 +16,15 @@ import {
   scopeFromMetadata,
 } from "@/components/brain/brain-graph";
 import { buildBrainSceneGraph } from "@/components/brain/brain-graph-view-model";
+import type { BrainCompanionSignal } from "@/components/brain/brain-graph-3d";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchBrainGraph } from "@/lib/api";
+import {
+  fetchAssistantStatus,
+  fetchBrainGraph,
+  subscribeCompanionActivity,
+} from "@/lib/api";
 
 const BrainGraph3D = dynamic(() => import("@/components/brain/brain-graph-3d"), {
   ssr: false,
@@ -223,6 +228,7 @@ export default function BrainPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [renderMode, setRenderMode] = useState<BrainRenderMode>("hybrid");
   const [modelWarning, setModelWarning] = useState<string | null>(null);
+  const [companionSignal, setCompanionSignal] = useState<BrainCompanionSignal | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -244,6 +250,50 @@ export default function BrainPage() {
 
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return subscribeCompanionActivity((event) => {
+      setCompanionSignal({
+        state: event.state,
+        trigger: event.trigger,
+        summary: event.summary,
+        runtimeReady: event.state !== "error",
+        paused: false,
+        timestamp: event.timestamp,
+      });
+    });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncStatus = async () => {
+      try {
+        const status = await fetchAssistantStatus();
+        if (cancelled) return;
+        setCompanionSignal({
+          state: status.state,
+          trigger: status.last_reflection_trigger,
+          summary: status.latest_summary,
+          runtimeReady: status.runtime_ready,
+          paused: status.paused,
+          timestamp: Date.now(),
+        });
+      } catch {
+        // Brain graph remains fully functional if assistant status endpoint is unavailable.
+      }
+    };
+
+    void syncStatus();
+    const intervalId = window.setInterval(() => {
+      void syncStatus();
+    }, 8000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
     };
   }, []);
 
@@ -590,6 +640,7 @@ export default function BrainPage() {
                 filter={filter}
                 activeScopes={activeScopes}
                 renderMode={renderMode}
+                companionSignal={companionSignal}
                 selectedNodeId={selectedNodeId}
                 onSelectedNodeIdChange={setSelectedNodeId}
                 onModelLoadError={(message) => {

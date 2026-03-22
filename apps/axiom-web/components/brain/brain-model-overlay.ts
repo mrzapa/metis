@@ -25,19 +25,21 @@ export interface BrainModelOverlayHandle {
   lightRig: THREE.Group;
   fitToGraph: (nodes: readonly GraphPoint[]) => void;
   update: (deltaSeconds: number) => void;
+  setPresence: (presence: number) => void;
+  triggerPulse: (strength?: number) => void;
   dispose: () => void;
 }
 
 // -- Constants ---------------------------------------------------------------
 
 /** Number of particles that form the brain shape. */
-const PARTICLE_COUNT = 36_000;
+const PARTICLE_COUNT = 52_000;
 /** Number of neural fibre tract particles (animated energy flow). */
-const FIBER_TRACT_COUNT = 4_000;
+const FIBER_TRACT_COUNT = 3_500;
 /** Extra scale so the brain shell comfortably encloses graph nodes. */
-const BRAIN_SCALE_FACTOR = 1.15;
-/** Base colour of the brain particles (brighter warm-blue-white). */
-const BRAIN_COLOR = new THREE.Color(0x7fa8ca);
+const BRAIN_SCALE_FACTOR = 1.18;
+/** Base colour of the brain particles – crisp cool blue-white. */
+const BRAIN_COLOR = new THREE.Color(0x9ac8e4);
 
 // -- Procedural noise (hash-based, no external deps) ------------------------
 
@@ -109,12 +111,12 @@ function fbm3(x: number, y: number, z: number): number {
  */
 function generateBrainPoints(count: number): Float32Array {
   const positions = new Float32Array(count * 3);
-  // More surface particles for a clearer, crisper outline
-  const surfaceCount = Math.floor(count * 0.74);
-  const sulcusCount = Math.floor(count * 0.08);
-  const volumeCount = Math.floor(count * 0.06);
-  const stemCount = Math.floor(count * 0.07);
-  const temporalCount = count - surfaceCount - sulcusCount - volumeCount - stemCount;
+  // More surface particles for a clearer, crisper outline; no brain-stem (removes bottom lump)
+  const surfaceCount = Math.floor(count * 0.82);
+  const sulcusCount = Math.floor(count * 0.09);
+  const volumeCount = Math.floor(count * 0.02);
+  const stemCount = 0;  // removed – was creating the bottom lump artefact
+  const temporalCount = count - surfaceCount - sulcusCount - volumeCount;
   let idx = 0;
 
   const pushPoint = (x: number, y: number, z: number) => {
@@ -189,9 +191,10 @@ function generateBrainPoints(count: number): Float32Array {
       ry += 0.025 * (ny - 0.4);
     }
 
-    // ---- Ventral flattening (brain sits on skull base) ----
-    if (ny < -0.4) {
-      ry *= 0.80 + 0.20 * ((ny + 1) / 0.6);
+    // ---- Ventral rounding (keep the underside rounded, not flat) ----
+    // Gentle taper only at the very bottom to avoid a hard lump
+    if (ny < -0.52) {
+      ry *= 0.92 + 0.08 * ((ny + 1) / 0.48);
     }
 
     let px = nx * rx;
@@ -329,6 +332,8 @@ function generateBrainPoints(count: number): Float32Array {
 const VERTEX_SHADER = /* glsl */ `
   uniform float uTime;
   uniform float uPointSize;
+  uniform float uPulse;
+  uniform float uPresence;
   attribute float aRandom;
   varying float vAlpha;
   varying float vRandom;
@@ -336,23 +341,26 @@ const VERTEX_SHADER = /* glsl */ `
   varying vec3 vWorldPos;
   varying float vFresnel;
   varying float vElectricPulse;
+  varying float vPresence;
 
   void main() {
     vRandom = aRandom;
+    vPresence = uPresence;
 
     // Breathing displacement along normals (organic pulse)
     vec3 pos = position;
     float pulse = sin(uTime * 0.8 + aRandom * 6.2831) * 0.008;
     // Travelling wave for neural-activity feel
     float wave = sin(uTime * 1.2 + pos.x * 4.0 + pos.z * 3.0) * 0.003;
-    pos += normalize(pos) * (pulse + wave);
+    float activation = uPulse * (0.012 + aRandom * 0.008) + uPresence * 0.006;
+    pos += normalize(pos) * (pulse + wave + activation);
 
     vWorldPos = (modelMatrix * vec4(pos, 1.0)).xyz;
 
     vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
 
-    // Size attenuation: particles shrink with distance
-    gl_PointSize = uPointSize * (220.0 / -mvPosition.z);
+    // Size attenuation: particles shrink with distance (smaller = sharper)
+    gl_PointSize = uPointSize * (1.0 + uPulse * 0.16 + uPresence * 0.08) * (150.0 / -mvPosition.z);
 
     // Alpha fades slightly for particles further from camera
     vAlpha = clamp(1.0 - (-mvPosition.z - 40.0) / 700.0, 0.25, 1.0);
@@ -384,19 +392,21 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uColor;
   uniform float uTime;
   uniform vec3 uElectricColor;
+  uniform float uPulse;
   varying float vAlpha;
   varying float vRandom;
   varying float vDepth;
   varying vec3 vWorldPos;
   varying float vFresnel;
   varying float vElectricPulse;
+  varying float vPresence;
 
   void main() {
-    // Soft circle shape
+    // Crisp hard-edged circle – only the outer 16% of radius fades (sharp points, not blurry blobs)
     float dist = distance(gl_PointCoord, vec2(0.5));
     if (dist > 0.5) discard;
 
-    float circle = 1.0 - smoothstep(0.0, 0.5, dist);
+    float circle = 1.0 - smoothstep(0.42, 0.5, dist);
 
     // Iridescent colour shift based on world position and time
     float iridescentPhase = vWorldPos.x * 2.0 + vWorldPos.y * 1.5 + uTime * 0.3;
@@ -418,20 +428,21 @@ const FRAGMENT_SHADER = /* glsl */ `
 
     // Electric surface pulse overlay (from Digital-Brain brain.frag.glsl)
     // Creates visible crackling arcs of energy across the cortical surface
-    vec3 electricGlow = uElectricColor * vElectricPulse * 0.58;
+    vec3 electricGlow = uElectricColor * vElectricPulse * (0.58 + uPulse * 0.4 + vPresence * 0.18);
     // Sparkle highlights on the strongest electric arcs
     float sparkle = pow(vElectricPulse, 4.0) * 1.1;
     electricGlow += vec3(1.0, 0.95, 0.85) * sparkle;
     col += electricGlow;
 
     // Gentle pulse glow with per-particle phase offset
-    float glow = 0.78 + 0.12 * sin(uTime * 1.0 + vRandom * 6.2831);
+    float glow = 0.78 + 0.12 * sin(uTime * 1.0 + vRandom * 6.2831) + uPulse * 0.16 + vPresence * 0.06;
 
     // Rim-enhanced alpha: edge particles are slightly brighter
     float rimAlpha = 1.0 + vFresnel * 0.3;
 
-    vec3 toned = clamp(col * glow, vec3(0.0), vec3(1.25));
-    gl_FragColor = vec4(toned, circle * vAlpha * 0.62 * rimAlpha);
+    vec3 toned = clamp(col * glow, vec3(0.0), vec3(1.4));
+    // Low per-particle alpha: additive accumulation at dense surface creates crisp bright outline
+    gl_FragColor = vec4(toned, circle * vAlpha * (0.28 + uPulse * 0.12 + vPresence * 0.04) * rimAlpha);
   }
 `;
 
@@ -441,6 +452,8 @@ const FRAGMENT_SHADER = /* glsl */ `
 const FIBER_VERTEX_SHADER = /* glsl */ `
   uniform float uTime;
   uniform float uPointSize;
+  uniform float uPulse;
+  uniform float uPresence;
   attribute float aPhase;
   attribute float aSpeed;
   varying float vAlpha;
@@ -459,9 +472,9 @@ const FIBER_VERTEX_SHADER = /* glsl */ `
     float brightness = smoothstep(-0.3, 0.5, energyPulse);
 
     vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-    gl_PointSize = uPointSize * brightness * (180.0 / -mvPosition.z);
+    gl_PointSize = uPointSize * brightness * (1.0 + uPulse * 0.2 + uPresence * 0.1) * (180.0 / -mvPosition.z);
 
-    vAlpha = brightness * clamp(1.0 - (-mvPosition.z - 40.0) / 600.0, 0.15, 1.0);
+    vAlpha = brightness * (1.0 + uPulse * 0.35 + uPresence * 0.1) * clamp(1.0 - (-mvPosition.z - 40.0) / 600.0, 0.15, 1.0);
     gl_Position = projectionMatrix * mvPosition;
   }
 `;
@@ -470,6 +483,7 @@ const FIBER_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uColor;
   uniform float uTime;
   uniform vec3 uColor2;
+  uniform float uPulse;
   varying float vAlpha;
   varying float vPhase;
   varying float vRandom;
@@ -481,7 +495,7 @@ const FIBER_FRAGMENT_SHADER = /* glsl */ `
     float circle = 1.0 - smoothstep(0.0, 0.45, dist);
 
     // Two-colour gradient along tract (inspired by Digital-Brain thread.frag.glsl)
-    vec3 energyColor = mix(uColor, uColor2, vPhase) * 1.4;
+    vec3 energyColor = mix(uColor, uColor2, vPhase) * (1.4 + uPulse * 0.45);
 
     // Fade out near the ends of each tract for organic taper
     float fadeOut = 1.0 - smoothstep(0.85, 1.0, vPhase);
@@ -490,7 +504,7 @@ const FIBER_FRAGMENT_SHADER = /* glsl */ `
     // Twinkle effect (from Digital-Brain thread.frag.glsl)
     float twinkle = sin(uTime * 4.0 + vRandom * 20.0) * 0.2 + 0.8;
 
-    gl_FragColor = vec4(energyColor, circle * vAlpha * twinkle * fadeOut * fadeIn * 0.46);
+    gl_FragColor = vec4(energyColor, circle * vAlpha * twinkle * fadeOut * fadeIn * (0.22 + uPulse * 0.08));
   }
 `;
 
@@ -637,13 +651,15 @@ export async function loadBrainModelOverlay(
     uniforms: {
       uTime: { value: 0.0 },
       uColor: { value: BRAIN_COLOR.clone() },
-      uPointSize: { value: 3.0 },
+      uPointSize: { value: 1.9 },
       uElectricColor: { value: new THREE.Color(0x44aaff) },
+      uPulse: { value: 0.0 },
+      uPresence: { value: 0.0 },
     },
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
     transparent: true,
-    blending: THREE.NormalBlending,
+    blending: THREE.AdditiveBlending,
     depthWrite: false,
     depthTest: true,
   });
@@ -667,13 +683,15 @@ export async function loadBrainModelOverlay(
     uniforms: {
       uTime: { value: 0.0 },
       uColor: { value: new THREE.Color(0x4488ff) },  // Cool cyan start
-      uColor2: { value: new THREE.Color(0xffaa44) }, // Warm gold end (Digital-Brain two-colour gradient)
-      uPointSize: { value: 3.5 },
+      uColor2: { value: new THREE.Color(0xffaa44) }, // Warm gold end
+      uPointSize: { value: 2.0 },
+      uPulse: { value: 0.0 },
+      uPresence: { value: 0.0 },
     },
     vertexShader: FIBER_VERTEX_SHADER,
     fragmentShader: FIBER_FRAGMENT_SHADER,
     transparent: true,
-    blending: THREE.NormalBlending,
+    blending: THREE.AdditiveBlending,
     depthWrite: false,
     depthTest: true,
   });
@@ -699,12 +717,34 @@ export async function loadBrainModelOverlay(
   };
 
   let disposed = false;
+  let pulseStrength = 0;
+  let presenceCurrent = 0;
+  let presenceTarget = 0;
 
   const update = (deltaSeconds: number) => {
     if (disposed) return;
     const t = material.uniforms.uTime.value + deltaSeconds;
     material.uniforms.uTime.value = t;
     fiberMaterial.uniforms.uTime.value = t;
+
+    pulseStrength = Math.max(0, pulseStrength - deltaSeconds * 0.8);
+    presenceCurrent += (presenceTarget - presenceCurrent) * Math.min(1, deltaSeconds * 4.5);
+
+    material.uniforms.uPulse.value = pulseStrength;
+    material.uniforms.uPresence.value = presenceCurrent;
+    fiberMaterial.uniforms.uPulse.value = pulseStrength;
+    fiberMaterial.uniforms.uPresence.value = presenceCurrent;
+
+    root.rotation.y += deltaSeconds * (0.012 + presenceCurrent * 0.02);
+    root.rotation.x = Math.sin(t * 0.18) * 0.03 + presenceCurrent * 0.02;
+  };
+
+  const setPresence = (presence: number) => {
+    presenceTarget = THREE.MathUtils.clamp(presence, 0, 1);
+  };
+
+  const triggerPulse = (strength = 1) => {
+    pulseStrength = Math.max(pulseStrength, THREE.MathUtils.clamp(strength, 0, 1.5));
   };
 
   const dispose = () => {
@@ -715,5 +755,5 @@ export async function loadBrainModelOverlay(
     fiberMaterial.dispose();
   };
 
-  return { root, lightRig, fitToGraph, update, dispose };
+  return { root, lightRig, fitToGraph, update, setPresence, triggerPulse, dispose };
 }
