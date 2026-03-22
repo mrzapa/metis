@@ -357,21 +357,23 @@ export default function BrainGraph3D({
       if (overlay) overlay.update(dt);
 
       // Animate shockwaves (expand + fade)
-      const scene = modelSceneRef.current;
-      const now = performance.now();
       const waves = shockwavesRef.current;
-      for (let i = waves.length - 1; i >= 0; i--) {
-        const wave = waves[i];
-        const elapsed = (now - wave.startTime) / 1000;
-        const scale = 1 + elapsed * 40;
-        wave.mesh.scale.setScalar(scale);
-        const opacity = Math.max(0, 0.5 - elapsed * 0.8);
-        (wave.mesh.material as THREE.MeshBasicMaterial).opacity = opacity;
-        if (opacity <= 0) {
-          if (scene) scene.remove(wave.mesh);
-          wave.mesh.geometry.dispose();
-          (wave.mesh.material as THREE.MeshBasicMaterial).dispose();
-          waves.splice(i, 1);
+      if (waves.length > 0) {
+        const scene = modelSceneRef.current;
+        const now = performance.now();
+        for (let i = waves.length - 1; i >= 0; i--) {
+          const wave = waves[i];
+          const elapsed = (now - wave.startTime) / 1000;
+          const scale = 1 + elapsed * 40;
+          wave.mesh.scale.setScalar(scale);
+          const opacity = Math.max(0, 0.5 - elapsed * 0.8);
+          (wave.mesh.material as THREE.MeshBasicMaterial).opacity = opacity;
+          if (opacity <= 0) {
+            if (scene) scene.remove(wave.mesh);
+            wave.mesh.geometry.dispose();
+            (wave.mesh.material as THREE.MeshBasicMaterial).dispose();
+            waves.splice(i, 1);
+          }
         }
       }
 
@@ -705,8 +707,8 @@ export default function BrainGraph3D({
 
       // Shockwave effect on click (inspired by The-Brain)
       const scene = modelSceneRef.current;
-      if (scene && node.x != null && node.y != null) {
-        const pos = new THREE.Vector3(node.x ?? 0, node.y ?? 0, node.z ?? 0);
+      if (scene && node.x != null && node.y != null && node.z != null) {
+        const pos = new THREE.Vector3(node.x, node.y, node.z);
         const color = new THREE.Color(node.color);
         const wave = createShockwave(pos, color);
         scene.add(wave.mesh);
