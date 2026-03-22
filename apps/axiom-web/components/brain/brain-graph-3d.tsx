@@ -21,8 +21,6 @@ import {
 } from "react";
 import ForceGraph3D, { type ForceGraphMethods } from "react-force-graph-3d";
 import * as THREE from "three";
-import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
@@ -295,8 +293,9 @@ export default function BrainGraph3D({
   const rendererConfiguredRef = useRef(false);
   const [autoRotate, setAutoRotate] = useState(false);
 
-  // Bloom post-processing refs
-  const composerRef = useRef<EffectComposer | null>(null);
+  // Bloom post-processing pass ref (added to the library's internal composer)
+  const bloomPassRef = useRef<UnrealBloomPass | null>(null);
+  const outputPassRef = useRef<OutputPass | null>(null);
   // Ambient dust ref
   const dustRef = useRef<THREE.Points | null>(null);
   // Active shockwave effects
@@ -314,8 +313,6 @@ export default function BrainGraph3D({
       const { width, height } = entry.contentRect;
       if (width > 0 && height > 0) {
         setDims({ w: width, h: height });
-        // Update bloom composer resolution on resize
-        composerRef.current?.setSize(width, height);
       }
     });
     observer.observe(el);
@@ -332,9 +329,15 @@ export default function BrainGraph3D({
         modelOverlayRef.current.dispose();
         modelOverlayRef.current = null;
       }
-      if (composerRef.current) {
-        composerRef.current.dispose();
-        composerRef.current = null;
+      // Bloom/output passes are managed by the library's internal composer;
+      // we only need to dispose our pass materials.
+      if (bloomPassRef.current) {
+        bloomPassRef.current.dispose();
+        bloomPassRef.current = null;
+      }
+      if (outputPassRef.current) {
+        outputPassRef.current.dispose();
+        outputPassRef.current = null;
       }
       if (dustRef.current) {
         dustRef.current.geometry.dispose();
@@ -344,7 +347,7 @@ export default function BrainGraph3D({
     };
   }, []);
 
-  // -- Animation loop for particle brain overlay, bloom, and effects --------
+  // -- Animation loop for particle brain overlay and effects ----------------
   useEffect(() => {
     if (!sceneReady) return;
     const clock = new THREE.Clock();
@@ -383,10 +386,8 @@ export default function BrainGraph3D({
         ring.rotation.z += 0.02;
       }
 
-      // Render bloom composer if active, otherwise normal render
-      if (composerRef.current) {
-        composerRef.current.render();
-      }
+      // Bloom rendering is handled by ForceGraph3D's internal post-processing
+      // composer — no manual composer.render() call needed here.
 
       rafId = requestAnimationFrame(tick);
     };
@@ -440,11 +441,12 @@ export default function BrainGraph3D({
       scene.add(ambientLight);
     }
 
-    // Bloom post-processing (inspired by Hastur-HP/The-Brain)
-    if (renderer && scene) {
-      const camera = fg.camera();
-      const composer = new EffectComposer(renderer);
-      composer.addPass(new RenderPass(scene, camera));
+    // Bloom post-processing via the library's built-in EffectComposer.
+    // The internal composer already has a RenderPass; we just append
+    // the bloom and output passes so rendering stays in a single loop
+    // and orbit/pan/zoom controls are never disrupted.
+    const composer = fg.postProcessingComposer();
+    if (composer && !bloomPassRef.current) {
       const bloomPass = new UnrealBloomPass(
         new THREE.Vector2(dims.w, dims.h),
         BLOOM_STRENGTH,
@@ -452,8 +454,10 @@ export default function BrainGraph3D({
         BLOOM_THRESHOLD,
       );
       composer.addPass(bloomPass);
-      composer.addPass(new OutputPass());
-      composerRef.current = composer;
+      const outPass = new OutputPass();
+      composer.addPass(outPass);
+      bloomPassRef.current = bloomPass;
+      outputPassRef.current = outPass;
     }
 
     // Ambient dust particles for atmospheric depth

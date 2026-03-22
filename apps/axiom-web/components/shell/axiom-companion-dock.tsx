@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   Bot,
-  Brain,
   ChevronDown,
   ChevronUp,
   Loader2,
@@ -22,6 +21,7 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
+import { BrainIcon } from "@/components/icons";
 
 interface AxiomCompanionDockProps {
   sessionId?: string | null;
@@ -308,7 +308,7 @@ export function AxiomCompanionDock({
                     onClick={() => void load(false)}
                     disabled={busyAction !== ""}
                   >
-                    <Brain className="size-4" />
+                    <BrainIcon size={16} className="shrink-0" />
                     Refresh
                   </Button>
                 </div>
@@ -337,7 +337,7 @@ export function AxiomCompanionDock({
                       {busyAction === "bootstrap" ? (
                         <Loader2 className="size-4 animate-spin" />
                       ) : (
-                        <Brain className="size-4" />
+                        <BrainIcon size={16} className="shrink-0" />
                       )}
                       Install Local Companion
                     </Button>
