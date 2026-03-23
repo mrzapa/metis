@@ -9,6 +9,8 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from axiom_app.services.stream_events import normalize_stream_event
+
 _HERE = pathlib.Path(__file__).resolve().parent
 _PACKAGE_ROOT = _HERE.parent
 _REPO_ROOT = _PACKAGE_ROOT.parent
@@ -17,6 +19,12 @@ _DEFAULT_TRACE_DIR = _REPO_ROOT / "traces"
 _CANONICAL_STREAM_TYPES = {
     "run_started",
     "retrieval_complete",
+    "retrieval_augmented",
+    "subqueries",
+    "iteration_start",
+    "gaps_identified",
+    "refinement_retrieval",
+    "fallback_decision",
     "token",
     "final",
     "error",
@@ -35,16 +43,22 @@ def _normalize_json_value(value: Any) -> Any:
     return str(value)
 
 
-def _normalize_stream_payload(run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _normalize_stream_payload(run_id: str, payload: dict[str, Any], event_id: int) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("stream payload must be a dict")
-    event_type = str(payload.get("type") or "").strip()
+    raw_event_type = str(payload.get("event_type") or payload.get("type") or "").strip()
+    event_type = raw_event_type
     if event_type not in _CANONICAL_STREAM_TYPES:
         raise ValueError(f"unsupported stream event type: {event_type or '<missing>'}")
     normalized = {str(key): _normalize_json_value(value) for key, value in payload.items()}
     normalized["type"] = event_type
+    normalized["event_type"] = event_type
     normalized["run_id"] = str(run_id or "")
-    return normalized
+    return normalize_stream_event(
+        normalized,
+        sequence=event_id,
+        source="rag_stream_replay",
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -58,7 +72,11 @@ class StreamReplayEvent:
         normalized_event_id = int(self.event_id or 0)
         if normalized_event_id <= 0:
             raise ValueError("event_id must be a positive integer")
-        normalized_payload = _normalize_stream_payload(normalized_run_id, dict(self.payload or {}))
+        normalized_payload = _normalize_stream_payload(
+            normalized_run_id,
+            dict(self.payload or {}),
+            normalized_event_id,
+        )
         object.__setattr__(self, "run_id", normalized_run_id)
         object.__setattr__(self, "event_id", normalized_event_id)
         object.__setattr__(self, "payload", normalized_payload)

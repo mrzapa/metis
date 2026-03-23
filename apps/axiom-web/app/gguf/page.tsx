@@ -40,6 +40,13 @@ const USE_CASES = [
   { value: "reasoning", label: "Reasoning" },
 ];
 
+const SCORE_LABELS: Record<string, string> = {
+  quality: "Quality",
+  speed: "Speed",
+  fit: "Hardware fit",
+  context: "Context",
+};
+
 function OverviewPill({
   label,
   value,
@@ -123,7 +130,141 @@ function FitBadge({ level }: { level: string }) {
   return <Badge variant={variants[level] || "secondary"}>{level}</Badge>;
 }
 
-function CatalogList({ entries }: { entries: GgufCatalogEntry[] }) {
+function ScoreBreakdown({ entry }: { entry: GgufCatalogEntry }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {Object.entries(entry.score_components).map(([key, value]) => (
+        <div key={key} className="rounded-[1rem] border border-white/8 bg-black/10 px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+              {SCORE_LABELS[key] || key}
+            </span>
+            <span className="text-sm font-semibold text-foreground">{value.toFixed(1)}</span>
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/8">
+            <div
+              className="h-full rounded-full bg-primary/80"
+              style={{ width: `${Math.max(0, Math.min(value, 100))}%` }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RecommendationDetails({
+  entry,
+  alternatives,
+}: {
+  entry: GgufCatalogEntry | null;
+  alternatives: GgufCatalogEntry[];
+}) {
+  if (!entry) {
+    return (
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Fit explanation</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm leading-6 text-muted-foreground">
+          Select a catalogue entry to inspect why it fits this machine.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const signals = entry.notes.filter((note) => !entry.caveats.includes(note));
+
+  return (
+    <Card data-testid="gguf-fit-panel">
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle className="text-base">Why this model</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">{entry.model_name}</p>
+          </div>
+          <FitBadge level={entry.fit_level} />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <OverviewPill label="Score" value={entry.score.toFixed(1)} note="Weighted recommendation score." />
+          <OverviewPill
+            label="Run mode"
+            value={entry.run_mode.replaceAll("_", " ")}
+            note={`${entry.best_quant} · ${entry.estimated_tps.toFixed(1)} tok/s`}
+          />
+        </div>
+
+        <div className="rounded-[1rem] border border-white/8 bg-black/10 px-4 py-4 text-sm leading-6 text-muted-foreground">
+          {entry.recommendation_summary}
+        </div>
+
+        <div className="space-y-3">
+          <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Score breakdown</p>
+          <ScoreBreakdown entry={entry} />
+        </div>
+
+        {signals.length > 0 && (
+          <div className="space-y-3">
+            <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Positive signals</p>
+            <div className="space-y-2">
+              {signals.map((note) => (
+                <div key={note} className="rounded-[1rem] border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
+                  {note}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {entry.caveats.length > 0 && (
+          <div className="space-y-3">
+            <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Caveats</p>
+            <div className="space-y-2">
+              {entry.caveats.map((note) => (
+                <div key={note} className="rounded-[1rem] border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+                  {note}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {alternatives.length > 0 && (
+          <div className="space-y-3">
+            <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Nearby alternatives</p>
+            <div className="space-y-2">
+              {alternatives.map((alternative) => (
+                <div key={alternative.model_name} className="rounded-[1rem] border border-white/8 bg-black/10 px-3 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">{alternative.model_name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {alternative.best_quant} · {alternative.estimated_tps.toFixed(1)} tok/s
+                      </p>
+                    </div>
+                    <FitBadge level={alternative.fit_level} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CatalogList({
+  entries,
+  onSelect,
+  selectedModelName,
+}: {
+  entries: GgufCatalogEntry[];
+  onSelect: (modelName: string) => void;
+  selectedModelName: string | null;
+}) {
   if (entries.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 rounded-[1.2rem] border border-white/8 bg-black/10 py-14 text-muted-foreground">
@@ -136,36 +277,50 @@ function CatalogList({ entries }: { entries: GgufCatalogEntry[] }) {
   return (
     <div className="grid gap-3 xl:grid-cols-2">
       {entries.map((entry) => (
-        <Card
+        <button
           key={entry.model_name}
-          size="sm"
-          className="gap-3"
+          type="button"
+          onClick={() => onSelect(entry.model_name)}
+          className="text-left"
+          aria-pressed={selectedModelName === entry.model_name}
         >
-          <CardHeader className="pb-2">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="space-y-1">
-                <CardTitle className="text-sm">{entry.model_name}</CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  {entry.provider} · {entry.best_quant}
-                </p>
+          <Card
+            size="sm"
+            className={`gap-3 transition-colors ${
+              selectedModelName === entry.model_name
+                ? "border-primary/60 bg-primary/5"
+                : "hover:border-primary/20"
+            }`}
+          >
+            <CardHeader className="pb-2">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="space-y-1">
+                  <CardTitle className="text-sm">{entry.model_name}</CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    {entry.provider} · {entry.best_quant}
+                  </p>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Badge variant="outline">{entry.parameter_count}</Badge>
+                  <Badge variant="outline">{entry.architecture}</Badge>
+                </div>
               </div>
-              <div className="flex flex-wrap justify-end gap-2">
-                <Badge variant="outline">{entry.parameter_count}</Badge>
-                <Badge variant="outline">{entry.architecture}</Badge>
+            </CardHeader>
+            <CardContent className="space-y-3 text-xs text-muted-foreground">
+              <p className="line-clamp-3 leading-5">{entry.recommendation_summary}</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <span>{entry.estimated_tps.toFixed(1)} tok/s</span>
+                  <span>~{entry.memory_required_gb.toFixed(1)} GB</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <FitBadge level={entry.fit_level} />
+                  <Badge variant="outline">{entry.run_mode}</Badge>
+                </div>
               </div>
-            </div>
-          </CardHeader>
-          <CardContent className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-            <div className="flex flex-wrap gap-2">
-              <span>{entry.estimated_tps.toFixed(1)} tok/s</span>
-              <span>~{entry.memory_required_gb.toFixed(1)} GB</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <FitBadge level={entry.fit_level} />
-              <Badge variant="outline">{entry.run_mode}</Badge>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </button>
       ))}
     </div>
   );
@@ -229,6 +384,7 @@ export default function GgufPage() {
   const [hardware, setHardware] = useState<GgufHardwareProfile | null>(null);
   const [catalog, setCatalog] = useState<GgufCatalogEntry[]>([]);
   const [installed, setInstalled] = useState<GgufInstalledEntry[]>([]);
+  const [selectedModelName, setSelectedModelName] = useState<string | null>(null);
   const [useCase, setUseCase] = useState("general");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -269,6 +425,22 @@ export default function GgufPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (catalog.length === 0) {
+      setSelectedModelName(null);
+      return;
+    }
+    if (!catalog.some((entry) => entry.model_name === selectedModelName)) {
+      setSelectedModelName(catalog[0]?.model_name ?? null);
+    }
+  }, [catalog, selectedModelName]);
+
+  const selectedCatalogEntry =
+    catalog.find((entry) => entry.model_name === selectedModelName) ?? catalog[0] ?? null;
+  const alternativeEntries = selectedCatalogEntry
+    ? catalog.filter((entry) => entry.model_name !== selectedCatalogEntry.model_name).slice(0, 3)
+    : [];
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -424,7 +596,11 @@ export default function GgufPage() {
                     </TabsList>
 
                     <TabsContent value="catalog" className="mt-0">
-                      <CatalogList entries={catalog} />
+                      <CatalogList
+                        entries={catalog}
+                        onSelect={setSelectedModelName}
+                        selectedModelName={selectedModelName}
+                      />
                     </TabsContent>
 
                     <TabsContent value="installed" className="mt-0">
@@ -513,6 +689,7 @@ export default function GgufPage() {
 
             <aside className="space-y-6 xl:sticky xl:top-24">
               {hardware && <HardwareCard hardware={hardware} />}
+              <RecommendationDetails entry={selectedCatalogEntry} alternatives={alternativeEntries} />
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Why this layout</CardTitle>

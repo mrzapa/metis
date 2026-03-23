@@ -1,7 +1,11 @@
 "use client";
 
+import Particles, { initParticlesEngine } from "@tsparticles/react";
+import { loadSlim } from "@tsparticles/slim";
 import { motion, useReducedMotion } from "motion/react";
 import type { CSSProperties } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { Engine, ISourceOptions } from "@tsparticles/engine";
 
 import { cn } from "@/lib/utils";
 
@@ -61,8 +65,107 @@ const SHOOTING_STARS: ShootingStar[] = [
   { left: "46%", top: "28%", dx: "16vw", dy: "6vh", delay: 7.6, duration: 2.3 },
 ];
 
+let particlesEngineInitPromise: Promise<void> | null = null;
+
+function ensureParticlesEngineInit() {
+  if (!particlesEngineInitPromise) {
+    particlesEngineInitPromise = initParticlesEngine(async (engine: Engine) => {
+      await loadSlim(engine);
+    });
+  }
+  return particlesEngineInitPromise;
+}
+
 export function SpaceAtmosphere({ className }: SpaceAtmosphereProps) {
   const reduceMotion = useReducedMotion();
+  const [particlesReady, setParticlesReady] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    ensureParticlesEngineInit().then(() => {
+      if (mounted) {
+        setParticlesReady(true);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const particleOptions = useMemo<ISourceOptions>(() => {
+    const particleCount = reduceMotion ? 48 : 72;
+
+    return {
+      fullScreen: {
+        enable: false,
+      },
+      detectRetina: true,
+      fpsLimit: reduceMotion ? 30 : 60,
+      background: {
+        color: {
+          value: "transparent",
+        },
+      },
+      interactivity: {
+        events: {
+          onHover: {
+            enable: false,
+          },
+          onClick: {
+            enable: false,
+          },
+          resize: {
+            enable: true,
+          },
+        },
+      },
+      particles: {
+        color: {
+          value: ["#ffffff", "#adc6ff"],
+        },
+        number: {
+          value: particleCount,
+          density: {
+            enable: true,
+            width: 1600,
+            height: 900,
+          },
+        },
+        opacity: {
+          value: { min: 0.16, max: 0.58 },
+          animation: {
+            enable: !reduceMotion,
+            speed: 0.2,
+            minimumValue: 0.14,
+            sync: false,
+          },
+        },
+        size: {
+          value: { min: 0.55, max: 1.9 },
+        },
+        move: {
+          enable: !reduceMotion,
+          speed: 0.22,
+          direction: "none",
+          straight: false,
+          outModes: {
+            default: "out",
+          },
+        },
+        twinkle: {
+          particles: {
+            enable: !reduceMotion,
+            color: "#ffffff",
+            frequency: 0.008,
+            opacity: 0.85,
+          },
+        },
+      },
+      pauseOnOutsideViewport: true,
+    };
+  }, [reduceMotion]);
 
   return (
     <div
@@ -77,6 +180,15 @@ export function SpaceAtmosphere({ className }: SpaceAtmosphereProps) {
       <div className="home-nebula home-nebula--one" />
       <div className="home-nebula home-nebula--two" />
       <div className="home-nebula home-nebula--three" />
+
+      {/* Procedural starfield (home route only) */}
+      {particlesReady ? (
+        <Particles
+          id="home-space-particles"
+          className="absolute inset-0 opacity-80"
+          options={particleOptions}
+        />
+      ) : null}
 
       {/* Static micro-star field */}
       <div className="absolute inset-0 bg-[radial-gradient(circle,_rgba(255,255,255,0.55)_0.6px,transparent_0.8px)] [background-size:180px_180px] opacity-20" />
@@ -111,7 +223,7 @@ export function SpaceAtmosphere({ className }: SpaceAtmosphereProps) {
 
       {/* Shooting stars */}
       {!reduceMotion ? (
-        <div className="absolute inset-0">
+        <div className="absolute inset-0" data-testid="shooting-stars-layer">
           {SHOOTING_STARS.map((star, index) => (
             <motion.span
               key={`shooting-star-${index}`}

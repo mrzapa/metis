@@ -510,6 +510,11 @@ class GgufCatalogEntryModel(BaseModel):
     memory_required_gb: float
     memory_available_gb: float
     recommended_context_length: int
+    score: float
+    recommendation_summary: str
+    notes: list[str] = Field(default_factory=list)
+    caveats: list[str] = Field(default_factory=list)
+    score_components: dict[str, float] = Field(default_factory=dict)
     source_repo: str
     source_provider: str
 

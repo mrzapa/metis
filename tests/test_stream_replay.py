@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import pytest
 
 from axiom_app.services.stream_replay import ReplayableRunStreamManager, StreamReplayStore
 
@@ -47,3 +48,39 @@ def test_replayable_run_stream_manager_returns_partial_persisted_history_without
         (1, "run_started"),
         (2, "token"),
     ]
+
+
+def test_stream_replay_adds_normalized_envelope_fields(tmp_path) -> None:
+    store = StreamReplayStore(tmp_path)
+    event = store.append("run-3", 1, {"type": "run_started", "run_id": "run-3"})
+
+    assert event.payload["type"] == "run_started"
+    assert event.payload["event_type"] == "run_started"
+    assert event.payload["event_id"] == "run-3:1"
+    assert event.payload["status"] == "started"
+    assert event.payload["lifecycle"] == "run"
+    assert event.payload["timestamp"]
+    assert event.payload["context"]["run_id"] == "run-3"
+    assert event.payload["payload"] == {}
+
+
+def test_stream_replay_store_rejects_unknown_custom_event_type_on_append(tmp_path) -> None:
+    store = StreamReplayStore(tmp_path)
+
+    with pytest.raises(ValueError, match="unsupported stream event type: custom_event"):
+        store.append("run-4", 1, {"type": "custom_event", "run_id": "run-4"})
+
+
+def test_replayable_run_stream_manager_converts_unknown_custom_event_to_error(tmp_path) -> None:
+    manager = ReplayableRunStreamManager(StreamReplayStore(tmp_path))
+
+    def _fake_stream():
+        yield {"type": "run_started", "run_id": "run-5"}
+        yield {"type": "custom_event", "run_id": "run-5", "details": "unexpected"}
+
+    manager.ensure_run("run-5", _fake_stream)
+    replayed = list(manager.subscribe("run-5", after_event_id=0))
+
+    assert [event.event_type for event in replayed] == ["run_started", "error"]
+    assert replayed[-1].payload["run_id"] == "run-5"
+    assert "unsupported stream event type: custom_event" in replayed[-1].payload["message"]

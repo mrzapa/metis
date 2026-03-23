@@ -14,6 +14,7 @@ from axiom_app.engine.querying import (
     _system_instructions,
 )
 from axiom_app.services.retrieval_pipeline import execute_retrieval_plan, generate_sub_queries
+from axiom_app.services.stream_events import normalize_stream_event
 from axiom_app.services.vector_store import resolve_vector_store
 from axiom_app.utils.llm_providers import create_llm
 
@@ -133,23 +134,30 @@ def stream_rag_answer(
     yields once support is wired up.
     """
     run_id = _normalize_run_id(req.run_id)
+    event_sequence = 0
+
+    def _emit(event: dict[str, Any]) -> dict[str, Any]:
+        nonlocal event_sequence
+        event_sequence += 1
+        return normalize_stream_event(event, sequence=event_sequence, source="rag_stream")
+
     try:
         question = str(req.question or "").strip()
         if not question:
-            yield {"type": "error", "run_id": run_id, "message": "question must not be empty."}
+            yield _emit({"type": "error", "run_id": run_id, "message": "question must not be empty."})
             return
 
-        yield {"type": "run_started", "run_id": run_id}
+        yield _emit({"type": "run_started", "run_id": run_id})
 
         manifest_path, settings = _prepare_rag_settings(req)
         adapter = resolve_vector_store(settings)
         available, reason = adapter.is_available(settings)
         if not available:
-            yield {
+            yield _emit({
                 "type": "error",
                 "run_id": run_id,
                 "message": f"Vector backend unavailable: {reason}",
-            }
+            })
             return
 
         llm = create_llm(settings)
@@ -169,46 +177,46 @@ def stream_rag_answer(
         for stage in retrieval_plan.stages:
             payload = dict(stage.payload or {})
             if stage.stage_type == "retrieval_complete":
-                yield {
+                yield _emit({
                     "type": "retrieval_complete",
                     "run_id": run_id,
                     "sources": list(payload.get("sources") or []),
                     "context_block": str(payload.get("context_block") or ""),
                     "top_score": float(payload.get("top_score", 0.0) or 0.0),
-                }
+                })
             elif stage.stage_type == "query_expansion":
-                yield {
+                yield _emit({
                     "type": "subqueries",
                     "run_id": run_id,
                     "queries": list(payload.get("queries") or []),
-                }
+                })
             elif stage.stage_type == "retrieval_augmented":
-                yield {
+                yield _emit({
                     "type": "retrieval_augmented",
                     "run_id": run_id,
                     "sources": list(payload.get("sources") or []),
                     "context_block": str(payload.get("context_block") or ""),
                     "top_score": float(payload.get("top_score", 0.0) or 0.0),
-                }
+                })
             elif stage.stage_type == "fallback_decision":
-                yield {
+                yield _emit({
                     "type": "fallback_decision",
                     "run_id": run_id,
                     "fallback": payload,
-                }
+                })
 
         if retrieval_plan.fallback.triggered and retrieval_plan.fallback.strategy == "no_answer":
-            yield {
+            yield _emit({
                 "type": "final",
                 "run_id": run_id,
                 "answer_text": retrieval_plan.fallback.message,
                 "sources": sources,
                 "fallback": retrieval_plan.fallback.to_dict(),
-            }
+            })
             return
 
         if req.require_action:
-            yield {
+            yield _emit({
                 "type": "action_required",
                 "run_id": run_id,
                 "action": {
@@ -222,7 +230,7 @@ def stream_rag_answer(
                         "top_score": float(query_result.top_score),
                     },
                 },
-            }
+            })
             return
 
         # ------------------------------------------------------------------
@@ -260,23 +268,23 @@ def stream_rag_answer(
             )
 
             for iteration in range(1, agentic_max_iterations + 1):
-                yield {
+                yield _emit({
                     "type": "iteration_start",
                     "run_id": run_id,
                     "iteration": iteration,
                     "total_iterations": agentic_max_iterations,
-                }
+                })
 
                 gap_queries = _identify_gaps(question, current_draft, accumulated_context, llm)
                 if not gap_queries:
                     break  # Answer is sufficiently complete — stop early.
 
-                yield {
+                yield _emit({
                     "type": "gaps_identified",
                     "run_id": run_id,
                     "gaps": gap_queries,
                     "iteration": iteration,
-                }
+                })
 
                 # Retrieve additional context for each identified gap.
                 iteration_new_sources: list[dict[str, Any]] = []
@@ -319,14 +327,14 @@ def stream_rag_answer(
                     (float(s.get("score") or 0.0) for s in iteration_new_sources),
                     default=0.0,
                 )
-                yield {
+                yield _emit({
                     "type": "refinement_retrieval",
                     "run_id": run_id,
                     "iteration": iteration,
                     "sources": iteration_new_sources,
                     "context_block": new_context_block,
                     "top_score": top_iter_score,
-                }
+                })
 
                 # Re-synthesise a draft for the next gap-analysis cycle
                 # (only needed when further iterations remain).
@@ -376,23 +384,23 @@ def stream_rag_answer(
                 text = _response_text(chunk)
                 if text:
                     answer_parts.append(text)
-                    yield {"type": "token", "run_id": run_id, "text": text}
+                    yield _emit({"type": "token", "run_id": run_id, "text": text})
         else:
             # Non-streaming fallback — emit a single token event with the full answer
             answer = _response_text(llm.invoke(messages))
             answer_parts.append(answer)
-            yield {"type": "token", "run_id": run_id, "text": answer}
+            yield _emit({"type": "token", "run_id": run_id, "text": answer})
 
-        yield {
+        yield _emit({
             "type": "final",
             "run_id": run_id,
             "answer_text": "".join(answer_parts),
             "sources": sources,
             "fallback": retrieval_plan.fallback.to_dict(),
-        }
+        })
 
     except Exception as exc:  # noqa: BLE001
-        yield {"type": "error", "run_id": run_id, "message": str(exc)}
+        yield _emit({"type": "error", "run_id": run_id, "message": str(exc)})
 
 
 __all__ = ["stream_rag_answer", "_identify_gaps", "_dedup_sources"]

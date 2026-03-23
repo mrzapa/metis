@@ -60,6 +60,18 @@ def test_catalog_returns_200(client, mock_recommender):
                 "memory_required_gb": 4.5,
                 "memory_available_gb": 24.0,
                 "recommended_context_length": 4096,
+                "score": 88.4,
+                "notes": [
+                    "GPU: model loaded into VRAM.",
+                    "Baseline estimated speed: 45.0 tok/s.",
+                    "Performance will be significantly reduced.",
+                ],
+                "score_components": {
+                    "quality": 82.0,
+                    "speed": 100.0,
+                    "fit": 100.0,
+                    "context": 100.0,
+                },
                 "source_repo": "Qwen/Qwen2.5-7B-Instruct-GGUF",
                 "source_provider": "bartowski",
             }

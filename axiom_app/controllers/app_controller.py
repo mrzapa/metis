@@ -1891,6 +1891,7 @@ class AppController:
         selected_mode = resolved.mode
         provider = str(settings_snap.get("llm_provider", "mock") or "mock")
         run_id = str(uuid.uuid4())
+        # CHECKPOINT: skill resolution and configuration
         self.trace_store.append_event(
             run_id=run_id,
             stage="skills",
@@ -1915,6 +1916,7 @@ class AppController:
                 "runtime_override_conflicts": list(resolved.runtime_override_conflicts),
             },
         )
+        # STAGE: retrieval results checkpoint
         self.trace_store.append_event(
             run_id=run_id,
             stage="retrieval",
@@ -1937,6 +1939,7 @@ class AppController:
             try:
                 llm = create_llm(settings_snap)
             except (ValueError, ImportError) as exc:
+                # TOOL: llm unavailable error
                 self.trace_store.append_event(
                     run_id=run_id,
                     stage="synthesis",
@@ -2001,6 +2004,7 @@ class AppController:
                     {"type": "system", "content": system_prompt},
                     {"type": "human", "content": prompt},
                 ]
+                # TOOL: llm synthesis request
                 self.trace_store.append_event(
                     run_id=run_id,
                     stage="synthesis",
@@ -2014,6 +2018,7 @@ class AppController:
                 )
                 result = llm.invoke(messages)
                 answer = str(getattr(result, "content", result) or "")
+                # TOOL: llm response completion
                 self.trace_store.append_event(
                     run_id=run_id,
                     stage="synthesis",
@@ -2024,6 +2029,7 @@ class AppController:
 
             if bool(settings_snap.get("enable_claim_level_grounding_citefix_lite")):
                 answer, validation_notes = apply_claim_level_grounding(answer, list(query_result.sources))
+                # CHECKPOINT: claim grounding validation
                 self.trace_store.append_event(
                     run_id=run_id,
                     stage="validation",
@@ -2041,6 +2047,7 @@ class AppController:
                     answer_text=answer,
                     sources=list(query_result.sources),
                 )
+                # CONTENT: grounding artifact created
                 self.trace_store.append_event(
                     run_id=run_id,
                     stage="grounding",

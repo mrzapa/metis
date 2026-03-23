@@ -1,0 +1,134 @@
+"""Helpers for additive normalization of streamed chat events.
+
+The normalization is intentionally additive: existing top-level event keys are
+preserved so legacy clients continue to work, while AG-UI-inspired envelope
+metadata is added for newer consumers.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import datetime, timezone
+from typing import Any
+
+_STATUS_BY_EVENT_TYPE = {
+    "run_started": "started",
+    "retrieval_complete": "in_progress",
+    "retrieval_augmented": "in_progress",
+    "subqueries": "in_progress",
+    "iteration_start": "in_progress",
+    "gaps_identified": "in_progress",
+    "refinement_retrieval": "in_progress",
+    "fallback_decision": "in_progress",
+    "token": "in_progress",
+    "final": "completed",
+    "action_required": "action_required",
+    "error": "failed",
+}
+
+_LIFECYCLE_BY_EVENT_TYPE = {
+    "run_started": "run",
+    "retrieval_complete": "retrieval",
+    "retrieval_augmented": "retrieval",
+    "subqueries": "retrieval",
+    "iteration_start": "reflection",
+    "gaps_identified": "reflection",
+    "refinement_retrieval": "retrieval",
+    "fallback_decision": "fallback",
+    "token": "generation",
+    "final": "run",
+    "action_required": "action",
+    "error": "error",
+}
+
+_META_KEYS = {
+    "type",
+    "event_type",
+    "run_id",
+    "event_id",
+    "timestamp",
+    "status",
+    "lifecycle",
+    "payload",
+    "context",
+}
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _deterministic_event_id(run_id: str, event_type: str, payload: dict[str, Any]) -> str:
+    stable_payload = {
+        str(key): value
+        for key, value in sorted(payload.items(), key=lambda item: str(item[0]))
+        if str(key) not in {"event_id", "timestamp"}
+    }
+    digest = hashlib.sha1(
+        json.dumps(stable_payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:12]
+    prefix = f"{run_id}:{event_type}" if run_id else event_type
+    return f"{prefix}:{digest}"
+
+
+def normalize_stream_event(
+    event: dict[str, Any],
+    *,
+    sequence: int | None = None,
+    source: str = "rag_stream",
+) -> dict[str, Any]:
+    """Return *event* with additive normalized envelope metadata.
+
+    Existing fields are preserved for compatibility.
+    """
+    normalized = dict(event or {})
+
+    event_type = str(normalized.get("event_type") or normalized.get("type") or "").strip()
+    run_id = str(normalized.get("run_id") or "").strip()
+
+    if event_type:
+        normalized["type"] = event_type
+        normalized["event_type"] = event_type
+    if run_id:
+        normalized["run_id"] = run_id
+
+    existing_payload = normalized.get("payload")
+    if isinstance(existing_payload, dict):
+        payload_wrapper = dict(existing_payload)
+    else:
+        payload_wrapper = {
+            key: value
+            for key, value in normalized.items()
+            if key not in _META_KEYS
+        }
+    normalized["payload"] = payload_wrapper
+
+    event_id = str(normalized.get("event_id") or "").strip()
+    if not event_id:
+        if sequence is not None and sequence > 0:
+            event_id = f"{run_id}:{sequence}" if run_id else f"event:{sequence}"
+        else:
+            event_id = _deterministic_event_id(run_id, event_type, payload_wrapper)
+    normalized["event_id"] = event_id
+
+    normalized["timestamp"] = str(normalized.get("timestamp") or _utc_now_iso())
+    normalized["status"] = str(
+        normalized.get("status")
+        or _STATUS_BY_EVENT_TYPE.get(event_type, "in_progress")
+    )
+    normalized["lifecycle"] = str(
+        normalized.get("lifecycle")
+        or _LIFECYCLE_BY_EVENT_TYPE.get(event_type, "event")
+    )
+
+    existing_context = normalized.get("context")
+    context_wrapper = dict(existing_context) if isinstance(existing_context, dict) else {}
+    context_wrapper.setdefault("run_id", run_id)
+    context_wrapper.setdefault("source", source)
+    normalized["context"] = context_wrapper
+
+    return normalized
+
+
+__all__ = ["normalize_stream_event"]

@@ -61,6 +61,14 @@ def test_stream_rag_answer_happy_path(tmp_path, monkeypatch) -> None:
     # All events are JSON-serialisable
     for event in events:
         json.dumps(event)  # raises if not serialisable
+        assert event["event_type"] == event["type"]
+        assert event["event_id"]
+        assert event["timestamp"]
+        assert isinstance(event["payload"], dict)
+        assert isinstance(event["context"], dict)
+        assert event["context"]["run_id"] == event["run_id"]
+        assert event["status"]
+        assert event["lifecycle"]
 
     # Correct ordering: run_started first, retrieval_complete second, final last
     assert event_types[0] == "run_started"
@@ -246,6 +254,10 @@ def test_stream_rag_answer_empty_question_yields_error() -> None:
     assert events[0]["type"] == "error"
     assert events[0]["run_id"] == "err-run"
     assert events[0]["message"]
+    assert events[0]["event_type"] == "error"
+    assert events[0]["status"] == "failed"
+    assert events[0]["event_id"]
+    assert events[0]["timestamp"]
     # Must be JSON-serialisable
     json.dumps(events[0])
 

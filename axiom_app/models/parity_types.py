@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 import uuid
 from typing import Any
 
+# Import trace event schema for documentation and type hints
+from axiom_app.models.trace_event_schema import EventType, EventStatus
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -278,7 +281,20 @@ class IndexManifest:
 
 @dataclass(slots=True)
 class TraceEvent:
-    """Monolith-compatible trace event persisted as JSON lines."""
+    """Monolith-compatible trace event persisted as JSON lines.
+
+    Trace events follow the normalized taxonomy defined in
+    axiom_app/models/trace_event_schema.py and documented in docs/trace-events.md.
+
+    Event types are organized by category:
+    - STAGE: Pipeline phase transitions (stage_start, stage_end)
+    - TOOL: Model/service invocations (tool_invoke, tool_result, tool_error, tool_skip)
+    - CHECKPOINT: Validation and decision points (checkpoint, validation_pass, validation_fail)
+    - CONTENT: Artifact transformations (content_added, content_revised)
+    - ITERATION: Agentic loop milestones (iteration_start, iteration_end)
+
+    Use EventType and EventStatus constants from trace_event_schema for type safety.
+    """
 
     run_id: str
     event_id: str

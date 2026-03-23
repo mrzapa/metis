@@ -123,12 +123,17 @@ export interface KnowledgeSearchResult {
   fallback: RetrievalFallback;
 }
 
-export interface RagStreamRunStartedEvent {
-  type: "run_started";
-  run_id: string;
+export interface RagStreamEnvelopeFields {
+  event_id?: string;
+  event_type?: string;
+  status?: string;
+  lifecycle?: string;
+  timestamp?: string;
+  payload?: Record<string, unknown>;
+  context?: Record<string, unknown>;
 }
 
-export interface RagStreamRetrievalCompleteEvent {
+export interface RagStreamRetrievalCompleteEvent extends RagStreamEnvelopeFields {
   type: "retrieval_complete";
   run_id: string;
   sources: EvidenceSource[];
@@ -136,7 +141,7 @@ export interface RagStreamRetrievalCompleteEvent {
   top_score: number;
 }
 
-export interface RagStreamRetrievalAugmentedEvent {
+export interface RagStreamRetrievalAugmentedEvent extends RagStreamEnvelopeFields {
   type: "retrieval_augmented";
   run_id: string;
   sources: EvidenceSource[];
@@ -144,13 +149,13 @@ export interface RagStreamRetrievalAugmentedEvent {
   top_score: number;
 }
 
-export interface RagStreamTokenEvent {
+export interface RagStreamTokenEvent extends RagStreamEnvelopeFields {
   type: "token";
   run_id: string;
   text: string;
 }
 
-export interface RagStreamFinalEvent {
+export interface RagStreamFinalEvent extends RagStreamEnvelopeFields {
   type: "final";
   run_id: string;
   answer_text: string;
@@ -158,51 +163,56 @@ export interface RagStreamFinalEvent {
   fallback?: RetrievalFallback;
 }
 
-export interface RagStreamErrorEvent {
+export interface RagStreamErrorEvent extends RagStreamEnvelopeFields {
   type: "error";
   run_id: string;
   message: string;
 }
 
-export interface RagStreamActionRequiredEvent {
+export interface RagStreamActionRequiredEvent extends RagStreamEnvelopeFields {
   type: "action_required";
   run_id: string;
   action: ActionRequiredAction;
 }
 
-export interface RagStreamSubqueriesEvent {
+export interface RagStreamSubqueriesEvent extends RagStreamEnvelopeFields {
   type: "subqueries";
   run_id: string;
   queries: string[];
 }
 
-export interface RagStreamFallbackDecisionEvent {
+export interface RagStreamFallbackDecisionEvent extends RagStreamEnvelopeFields {
   type: "fallback_decision";
   run_id: string;
   fallback: RetrievalFallback;
 }
 
-export interface RagStreamIterationStartEvent {
+export interface RagStreamIterationStartEvent extends RagStreamEnvelopeFields {
   type: "iteration_start";
   run_id: string;
   iteration: number;
   total_iterations: number;
 }
 
-export interface RagStreamGapsIdentifiedEvent {
+export interface RagStreamGapsIdentifiedEvent extends RagStreamEnvelopeFields {
   type: "gaps_identified";
   run_id: string;
   gaps: string[];
   iteration: number;
 }
 
-export interface RagStreamRefinementRetrievalEvent {
+export interface RagStreamRefinementRetrievalEvent extends RagStreamEnvelopeFields {
   type: "refinement_retrieval";
   run_id: string;
   iteration: number;
   sources: EvidenceSource[];
   context_block: string;
   top_score: number;
+}
+
+export interface RagStreamRunStartedEvent extends RagStreamEnvelopeFields {
+  type: "run_started";
+  run_id: string;
 }
 
 export type RagStreamEvent =
@@ -219,6 +229,177 @@ export type RagStreamEvent =
   | RagStreamGapsIdentifiedEvent
   | RagStreamRefinementRetrievalEvent;
 
+type JsonRecord = Record<string, unknown>;
+
+function getRecord(value: unknown): JsonRecord {
+  return value && typeof value === "object" ? (value as JsonRecord) : {};
+}
+
+function getText(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function getNumber(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function getStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
+}
+
+function getEvidenceSources(value: unknown): EvidenceSource[] {
+  return Array.isArray(value) ? (value as EvidenceSource[]) : [];
+}
+
+function getEnvelopeFields(input: JsonRecord): RagStreamEnvelopeFields {
+  const payload = getRecord(input.payload);
+  const context = getRecord(input.context);
+  const eventId = getText(input.event_id).trim();
+  const eventType = getText(input.event_type).trim();
+  const status = getText(input.status).trim();
+  const lifecycle = getText(input.lifecycle).trim();
+  const timestamp = getText(input.timestamp).trim();
+
+  return {
+    event_id: eventId || undefined,
+    event_type: eventType || undefined,
+    status: status || undefined,
+    lifecycle: lifecycle || undefined,
+    timestamp: timestamp || undefined,
+    payload: Object.keys(payload).length ? payload : undefined,
+    context: Object.keys(context).length ? context : undefined,
+  };
+}
+
+export function normalizeRagStreamEvent(rawEvent: unknown): RagStreamEvent {
+  const event = getRecord(rawEvent);
+  const payload = getRecord(event.payload);
+  const envelope = getEnvelopeFields(event);
+  const type = getText(event.type || event.event_type).trim() || "error";
+  const runId = getText(event.run_id || payload.run_id).trim();
+
+  switch (type) {
+    case "run_started":
+      return { type: "run_started", run_id: runId, ...envelope };
+    case "retrieval_complete":
+    case "retrieval_augmented":
+    case "refinement_retrieval": {
+      const sources = getEvidenceSources(event.sources ?? payload.sources);
+      const contextBlock = getText(event.context_block ?? payload.context_block);
+      const topScore = getNumber(event.top_score ?? payload.top_score);
+      if (type === "retrieval_complete") {
+        return {
+          type,
+          run_id: runId,
+          sources,
+          context_block: contextBlock,
+          top_score: topScore,
+          ...envelope,
+        };
+      }
+      if (type === "retrieval_augmented") {
+        return {
+          type,
+          run_id: runId,
+          sources,
+          context_block: contextBlock,
+          top_score: topScore,
+          ...envelope,
+        };
+      }
+      return {
+        type,
+        run_id: runId,
+        iteration: getNumber(event.iteration ?? payload.iteration),
+        sources,
+        context_block: contextBlock,
+        top_score: topScore,
+        ...envelope,
+      };
+    }
+    case "token":
+      return {
+        type: "token",
+        run_id: runId,
+        text: getText(event.text ?? payload.text),
+        ...envelope,
+      };
+    case "final":
+      return {
+        type: "final",
+        run_id: runId,
+        answer_text: getText(event.answer_text ?? payload.answer_text),
+        sources: getEvidenceSources(event.sources ?? payload.sources),
+        fallback: getRecord(event.fallback ?? payload.fallback),
+        ...envelope,
+      };
+    case "error":
+      return {
+        type: "error",
+        run_id: runId,
+        message: getText(event.message ?? payload.message, "Unknown stream error"),
+        ...envelope,
+      };
+    case "action_required":
+      return {
+        type: "action_required",
+        run_id: runId,
+        action: getRecord(event.action ?? payload.action) as ActionRequiredAction,
+        ...envelope,
+      };
+    case "subqueries":
+      return {
+        type: "subqueries",
+        run_id: runId,
+        queries: getStringArray(event.queries ?? payload.queries),
+        ...envelope,
+      };
+    case "fallback_decision":
+      return {
+        type: "fallback_decision",
+        run_id: runId,
+        fallback: getRecord(event.fallback ?? payload.fallback),
+        ...envelope,
+      };
+    case "iteration_start":
+      return {
+        type: "iteration_start",
+        run_id: runId,
+        iteration: getNumber(event.iteration ?? payload.iteration),
+        total_iterations: getNumber(event.total_iterations ?? payload.total_iterations),
+        ...envelope,
+      };
+    case "gaps_identified":
+      return {
+        type: "gaps_identified",
+        run_id: runId,
+        gaps: getStringArray(event.gaps ?? payload.gaps),
+        iteration: getNumber(event.iteration ?? payload.iteration),
+        ...envelope,
+      };
+    default:
+      return {
+        type: "error",
+        run_id: runId,
+        message: `Unsupported stream event type: ${type}`,
+        ...envelope,
+      };
+  }
+}
+
+/**
+ * Normalized trace event emitted during query and indexing pipelines.
+ * 
+ * Event types follow the standardized taxonomy defined in docs/trace-events.md:
+ * - STAGE: Pipeline phase transitions (stage_start, stage_end)
+ * - TOOL: Model/service invocations (tool_invoke, tool_result, tool_error, tool_skip)
+ * - CHECKPOINT: Validation points (checkpoint, validation_pass, validation_fail)
+ * - CONTENT: Artifact transformations (content_added, content_revised)
+ * - ITERATION: Agentic loop milestones (iteration_start, iteration_end)
+ * 
+ * The `payload` field may contain normalized fields like `status`, `message`,
+ * `duration_ms`, and `context` for structured event consumption.
+ */
 export interface TraceEvent {
   run_id: string;
   event_id?: string;
@@ -681,49 +862,50 @@ export async function queryRagStream(
     });
     throw new Error(`RAG stream failed (${res.status}): ${detail}`);
   }
-  await readSseEvents<RagStreamEvent>(res, (message) => {
+  await readSseEvents<unknown>(res, (message) => {
+    const parsedEvent = normalizeRagStreamEvent(message.data);
     const parsedEventId =
       message.id && /^-?\d+$/.test(message.id)
         ? Number.parseInt(message.id, 10)
         : Number.NaN;
-    options.onEvent(message.data, {
+    options.onEvent(parsedEvent, {
       eventId: Number.isFinite(parsedEventId) ? parsedEventId : null,
     });
 
-    if (message.data.type === "run_started") {
+    if (parsedEvent.type === "run_started") {
       emitCompanionActivity({
         source: "rag_stream",
         state: "running",
         trigger: "query_run_started",
-        summary: message.data.run_id,
+        summary: parsedEvent.run_id,
         timestamp: Date.now(),
       });
     } else if (
-      message.data.type === "retrieval_complete" ||
-      message.data.type === "retrieval_augmented" ||
-      message.data.type === "refinement_retrieval"
+      parsedEvent.type === "retrieval_complete" ||
+      parsedEvent.type === "retrieval_augmented" ||
+      parsedEvent.type === "refinement_retrieval"
     ) {
       emitCompanionActivity({
         source: "rag_stream",
         state: "running",
         trigger: "query_retrieval",
-        summary: `Retrieved ${message.data.sources.length} sources`,
+        summary: `Retrieved ${parsedEvent.sources.length} sources`,
         timestamp: Date.now(),
       });
-    } else if (message.data.type === "final") {
+    } else if (parsedEvent.type === "final") {
       emitCompanionActivity({
         source: "rag_stream",
         state: "completed",
         trigger: "query_final",
-        summary: message.data.answer_text.slice(0, 200),
+        summary: parsedEvent.answer_text.slice(0, 200),
         timestamp: Date.now(),
       });
-    } else if (message.data.type === "error") {
+    } else if (parsedEvent.type === "error") {
       emitCompanionActivity({
         source: "rag_stream",
         state: "error",
         trigger: "query_error",
-        summary: message.data.message,
+        summary: parsedEvent.message,
         timestamp: Date.now(),
       });
     }
@@ -922,6 +1104,11 @@ export interface GgufCatalogEntry {
   memory_required_gb: number;
   memory_available_gb: number;
   recommended_context_length: number;
+  score: number;
+  recommendation_summary: string;
+  notes: string[];
+  caveats: string[];
+  score_components: Record<string, number>;
   source_repo: string;
   source_provider: string;
 }

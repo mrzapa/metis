@@ -1,4 +1,4 @@
-"""GET /v1/logs/tail — safe, redacted log tail endpoint."""
+"""GET /v1/logs/tail and GET /v1/logs/metrics — safe log and metrics endpoints."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter
 
 import axiom_app.settings_store as _store
+from axiom_app.services.trace_store import TraceStore
 
 router = APIRouter()
 
@@ -58,3 +59,22 @@ def get_log_tail() -> dict[str, Any]:
         "log_path": str(log_path),
         "total_lines": len(raw),
     }
+
+
+@router.get("/v1/logs/metrics")
+def get_trace_metrics() -> dict[str, Any]:
+    """Return aggregated trace-event metrics (counts by type, status, and duration).
+
+    Reads up to 10,000 most-recent events from the on-disk trace store to
+    bound memory use.  No external backend is required.
+
+    Response fields
+    ---------------
+    * ``total_events``      — total trace events counted
+    * ``event_type_counts`` — mapping of event_type → count
+    * ``status_counts``     — mapping of payload status value → count
+    * ``duration_ms``       — aggregate duration stats (count/total/avg/min/max)
+    * ``last_run_id``       — run_id of the most recently persisted event
+    """
+    store = TraceStore()
+    return store.aggregate_metrics()

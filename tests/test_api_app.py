@@ -366,6 +366,14 @@ def test_stream_rag_happy_path_includes_sse_ids(monkeypatch, tmp_path) -> None:
     assert [frame_id for frame_id, _ in frames] == [1, 2, 3]
     assert [payload["type"] for _, payload in frames] == ["run_started", "token", "final"]
     assert data_line_types == ["run_started", "token", "final"]
+    run_started = frames[0][1]
+    assert run_started["event_type"] == "run_started"
+    assert str(run_started["event_id"]).endswith(":1")
+    assert run_started["timestamp"]
+    assert run_started["status"] == "started"
+    assert run_started["lifecycle"] == "run"
+    assert run_started["context"]["run_id"] == run_started["run_id"]
+    assert isinstance(run_started["payload"], dict)
 
 
 def test_stream_rag_replays_only_events_after_last_event_id(monkeypatch, tmp_path) -> None:

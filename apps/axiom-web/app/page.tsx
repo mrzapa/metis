@@ -12,6 +12,7 @@ import {
   HomeLaunchIcon,
   type HomeLaunchKind,
 } from "@/components/home/home-visual-system";
+import { HomeHeroAnimatedCopy } from "@/components/home/home-hero-animated-copy";
 import { AxiomCompanionDock } from "@/components/shell/axiom-companion-dock";
 import { SpaceAtmosphere } from "@/components/home/space-atmosphere";
 import { fetchSettings } from "@/lib/api";
@@ -230,6 +231,7 @@ export default function Home() {
               priority
             />
           </div>
+          <HomeHeroAnimatedCopy />
         </motion.div>
 
         {/* Action cards */}

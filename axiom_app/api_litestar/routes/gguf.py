@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import logging
-import pathlib
 from typing import Any
 
 from litestar import get, post
 from litestar.exceptions import HTTPException as LitestarHTTPException
 
+from axiom_app.services.gguf_serialization import (
+    GgufValidationError,
+    hardware_payload_from_recommender,
+    serialize_catalog_entry,
+    validate_model_path,
+)
 from axiom_app.services.local_llm_recommender import LocalLlmRecommenderService
 from axiom_app.services.local_model_registry import LocalModelRegistryService
 
@@ -30,47 +35,13 @@ async def list_catalog(use_case: str = "general") -> list[dict[str, Any]]:
     """List known GGUF models from the embedded catalog."""
     result = _RECOMMENDER.recommend_models(use_case=use_case, limit=50)
     rows = result.get("rows", [])
-    return [
-        {
-            "model_name": item.get("model_name", ""),
-            "provider": item.get("provider", ""),
-            "parameter_count": item.get("parameter_count", ""),
-            "architecture": item.get("architecture", ""),
-            "use_case": item.get("use_case", ""),
-            "fit_level": item.get("fit_level", ""),
-            "run_mode": item.get("run_mode", ""),
-            "best_quant": item.get("best_quant", ""),
-            "estimated_tps": item.get("estimated_tps", 0.0),
-            "memory_required_gb": item.get("memory_required_gb", 0.0),
-            "memory_available_gb": item.get("memory_available_gb", 0.0),
-            "recommended_context_length": item.get("recommended_context_length", 2048),
-            "source_repo": item.get("source_repo", ""),
-            "source_provider": item.get("source_provider", ""),
-        }
-        for item in rows
-    ]
+    return [serialize_catalog_entry(item) for item in rows]
 
 
 @get("/v1/gguf/hardware")
 async def get_hardware() -> dict[str, Any]:
     """Get detected hardware profile for GGUF recommendations."""
-    hardware = _RECOMMENDER.detect_hardware()
-    return {
-        "total_ram_gb": hardware.total_ram_gb,
-        "available_ram_gb": hardware.available_ram_gb,
-        "total_cpu_cores": hardware.total_cpu_cores,
-        "cpu_name": hardware.cpu_name,
-        "has_gpu": hardware.has_gpu,
-        "gpu_vram_gb": hardware.gpu_vram_gb,
-        "total_gpu_vram_gb": hardware.total_gpu_vram_gb,
-        "gpu_name": hardware.gpu_name,
-        "gpu_count": hardware.gpu_count,
-        "unified_memory": hardware.unified_memory,
-        "backend": hardware.backend,
-        "detected": hardware.detected,
-        "override_enabled": hardware.override_enabled,
-        "notes": hardware.notes,
-    }
+    return hardware_payload_from_recommender(_RECOMMENDER)
 
 
 @get("/v1/gguf/installed")
@@ -93,47 +64,15 @@ async def list_installed() -> list[dict[str, Any]]:
 @post("/v1/gguf/validate")
 async def validate_model(data: dict[str, Any]) -> dict[str, Any]:
     """Validate a GGUF model path and return metadata."""
-    from axiom_app.services.local_llm_recommender import (
-        validate_gguf_filename,
-        quant_from_filename,
-        is_instruct_filename,
-    )
+    try:
+        result = validate_model_path(data.get("model_path", ""))
+    except GgufValidationError as exc:
+        raise LitestarHTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
-    path_str = data.get("model_path", "")
-    if not path_str:
-        raise LitestarHTTPException(status_code=400, detail="model_path is required")
+    if not result.filename_is_conventional:
+        log.warning("GGUF file with unusual name validated: %s", result.payload["filename"])
 
-    path = pathlib.Path(path_str).expanduser()
-
-    if not path.exists():
-        raise LitestarHTTPException(
-            status_code=404, detail=f"Model file not found: {path}"
-        )
-
-    if not path.is_file():
-        raise LitestarHTTPException(
-            status_code=400, detail=f"Path is not a file: {path}"
-        )
-
-    if path.suffix.lower() != ".gguf":
-        raise LitestarHTTPException(
-            status_code=400, detail="Model file must have .gguf extension"
-        )
-
-    file_size = path.stat().st_size
-
-    filename = path.name
-    if not validate_gguf_filename(filename):
-        log.warning("GGUF file with unusual name validated: %s", filename)
-
-    return {
-        "valid": True,
-        "path": str(path),
-        "filename": filename,
-        "file_size_bytes": file_size,
-        "quant": quant_from_filename(filename),
-        "is_instruct": is_instruct_filename(filename),
-    }
+    return result.payload
 
 
 @post("/v1/gguf/refresh")
