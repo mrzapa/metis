@@ -251,6 +251,15 @@ function getEvidenceSources(value: unknown): EvidenceSource[] {
   return Array.isArray(value) ? (value as EvidenceSource[]) : [];
 }
 
+function getActionRequiredAction(value: unknown): ActionRequiredAction {
+  const action = getRecord(value);
+  return {
+    kind: getText(action.kind, "action_required"),
+    summary: getText(action.summary, "Action required"),
+    payload: getRecord(action.payload),
+  };
+}
+
 function getEnvelopeFields(input: JsonRecord): RagStreamEnvelopeFields {
   const payload = getRecord(input.payload);
   const context = getRecord(input.context);
@@ -344,7 +353,7 @@ export function normalizeRagStreamEvent(rawEvent: unknown): RagStreamEvent {
       return {
         type: "action_required",
         run_id: runId,
-        action: getRecord(event.action ?? payload.action) as ActionRequiredAction,
+        action: getActionRequiredAction(event.action ?? payload.action),
         ...envelope,
       };
     case "subqueries":

@@ -52,6 +52,8 @@ function Write-Ok    { param([string]$Msg) Write-Host "[axiom] $Msg" -Foreground
 function Write-Warn  { param([string]$Msg) Write-Host "[axiom] $Msg" -ForegroundColor Yellow }
 function Write-Err   { param([string]$Msg) Write-Host "[axiom] $Msg" -ForegroundColor Red }
 
+$TurbopackRootNote = "Web config pins Turbopack root; Next.js lockfile root warning should be absent."
+
 function Write-Launchers {
     param([string]$VenvPython)
 
@@ -272,6 +274,7 @@ if (Test-Path (Join-Path `$axiomDir ".git")) {
                 }
 
                 Write-Host "Web UI rebuilt successfully."
+                Write-Host $TurbopackRootNote -ForegroundColor DarkGray
             } catch {
                 Write-Host "Web UI rebuild failed - using cached version." -ForegroundColor Yellow
             } finally {
@@ -528,6 +531,7 @@ function Invoke-Install {
                 }
 
                 Write-Ok "Web UI built successfully."
+                Write-Info $TurbopackRootNote
             } catch {
                 Write-Warn "Web UI build failed: $_"
                 Write-Warn "The backend is still usable without the web UI."
@@ -604,8 +608,22 @@ function Invoke-Update {
             Push-Location $WebAppDir
             try {
                 npm install --silent
+                if ($LASTEXITCODE -ne 0) {
+                    throw "npm install failed (exit code $LASTEXITCODE)."
+                }
+
                 npm run build
+                if ($LASTEXITCODE -ne 0) {
+                    throw "npm run build failed (exit code $LASTEXITCODE)."
+                }
+
+                $WebOutIndex = Join-Path $WebAppDir "out" "index.html"
+                if (-not (Test-Path $WebOutIndex)) {
+                    throw "Web UI build completed but expected artifact is missing at $WebOutIndex."
+                }
+
                 Write-Ok "Web UI rebuilt successfully."
+                Write-Info $TurbopackRootNote
             } catch {
                 Write-Warn "Web UI rebuild failed: $_"
             } finally {
