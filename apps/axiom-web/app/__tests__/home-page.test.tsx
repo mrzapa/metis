@@ -13,7 +13,7 @@ vi.mock("motion/react", () => ({
 }));
 
 vi.mock("@/components/home/home-visual-system", () => ({
-  AxiomHomeLogo: () => <div data-testid="home-logo" />,
+  MetisHomeLogo: () => <div data-testid="home-logo" />,
   HomeLaunchIcon: ({ kind }: { kind: string }) => (
     <div data-testid={`launch-icon-${kind}`} />
   ),
@@ -23,8 +23,8 @@ vi.mock("@/components/home/space-atmosphere", () => ({
   SpaceAtmosphere: () => <div data-testid="space-atmosphere" />,
 }));
 
-vi.mock("@/components/shell/axiom-companion-dock", () => ({
-  AxiomCompanionDock: () => <div data-testid="companion-dock" />,
+vi.mock("@/components/shell/metis-companion-dock", () => ({
+  MetisCompanionDock: () => <div data-testid="companion-dock" />,
 }));
 
 vi.mock("@/components/home/home-hero-animated-copy", () => ({

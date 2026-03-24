@@ -54,7 +54,7 @@ const SCOPE_META: Record<
     lineColor: "var(--color-border)",
   },
   assistant_self: {
-    label: "Axiom Self",
+    label: "METIS Self",
     description: "The companion's identity and self-structure.",
     swatch: "var(--color-chart-3)",
     lineColor: "var(--color-chart-3)",
@@ -68,7 +68,8 @@ const SCOPE_META: Record<
   },
 };
 
-const NEURON_MAPPING_STORAGE_KEY = "axiom.brain.nodeTypeNeuronMapping.v1";
+const NEURON_MAPPING_STORAGE_KEY = "metis.brain.nodeTypeNeuronMapping.v1";
+const LEGACY_NEURON_MAPPING_STORAGE_KEY = "axiom.brain.nodeTypeNeuronMapping.v1";
 
 const NODE_TYPE_META: Record<
   BrainNode["node_type"],
@@ -301,7 +302,15 @@ export default function BrainPage() {
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(NEURON_MAPPING_STORAGE_KEY);
+      let raw = window.localStorage.getItem(NEURON_MAPPING_STORAGE_KEY);
+      if (!raw) {
+        const legacy = window.localStorage.getItem(LEGACY_NEURON_MAPPING_STORAGE_KEY);
+        if (legacy) {
+          window.localStorage.setItem(NEURON_MAPPING_STORAGE_KEY, legacy);
+          window.localStorage.removeItem(LEGACY_NEURON_MAPPING_STORAGE_KEY);
+          raw = legacy;
+        }
+      }
       if (!raw) return;
 
       const parsed = JSON.parse(raw) as Partial<NodeTypeNeuronMapping>;
@@ -452,7 +461,7 @@ export default function BrainPage() {
     <PageChrome
       eyebrow="Brain"
       title="Visualise your persistent companion brain"
-      description="Explore how workspace structure, the Axiom Self, and learned companion memory connect."
+      description="Explore how workspace structure, the METIS Self, and learned companion memory connect."
       actions={
         <div className="flex w-full flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/50 p-1">
@@ -556,7 +565,7 @@ export default function BrainPage() {
               </div>
 
               <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-                Toggle the workspace, the Axiom Self, and learned memory layers, then inspect the graph at a denser desktop scale.
+                Toggle the workspace, the METIS Self, and learned memory layers, then inspect the graph at a denser desktop scale.
               </p>
 
               <div className="flex flex-wrap gap-2">

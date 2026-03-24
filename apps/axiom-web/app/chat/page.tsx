@@ -328,7 +328,15 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    const raw = localStorage.getItem("axiom_active_index");
+    let raw = localStorage.getItem("metis_active_index");
+    if (!raw) {
+      const legacy = localStorage.getItem("axiom_active_index");
+      if (legacy) {
+        localStorage.setItem("metis_active_index", legacy);
+        localStorage.removeItem("axiom_active_index");
+        raw = legacy;
+      }
+    }
     if (!raw) return;
 
     try {
@@ -343,6 +351,7 @@ export default function ChatPage() {
       // Ignore malformed local storage entries.
     }
 
+    localStorage.removeItem("metis_active_index");
     localStorage.removeItem("axiom_active_index");
   }, []);
 
@@ -351,11 +360,20 @@ export default function ChatPage() {
   }, [companionSessionId]);
 
   useEffect(() => {
-    const seedPrompt = localStorage.getItem("axiom_chat_seed_prompt");
+    let seedPrompt = localStorage.getItem("metis_chat_seed_prompt");
+    if (!seedPrompt) {
+      const legacy = localStorage.getItem("axiom_chat_seed_prompt");
+      if (legacy) {
+        localStorage.setItem("metis_chat_seed_prompt", legacy);
+        localStorage.removeItem("axiom_chat_seed_prompt");
+        seedPrompt = legacy;
+      }
+    }
     if (!seedPrompt) {
       return;
     }
     setInitialDraft(seedPrompt);
+    localStorage.removeItem("metis_chat_seed_prompt");
     localStorage.removeItem("axiom_chat_seed_prompt");
   }, []);
 
@@ -1174,7 +1192,7 @@ export default function ChatPage() {
         <ResizablePanels
           className="h-full"
           resetToken={shellPostureToken}
-          storageKey="axiom_chat_panel_sizes_v2"
+          storageKey="metis_chat_panel_sizes_v2"
           panels={[
             {
               default: 0.95,

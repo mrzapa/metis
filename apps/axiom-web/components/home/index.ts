@@ -1,5 +1,5 @@
 export {
-  AxiomHomeLogo,
+  MetisHomeLogo,
   HomeLaunchIcon,
   type HomeLaunchIconProps,
   type HomeLaunchKind,

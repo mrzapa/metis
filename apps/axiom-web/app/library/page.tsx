@@ -12,7 +12,7 @@ export default function LibraryPage() {
     <PageChrome
       eyebrow="Library"
       title="Build your knowledge base"
-      description="Import documents, create retrieval indexes, and move into grounded conversations. Axiom chunks, embeds, and indexes your files for fast semantic search."
+      description="Import documents, create retrieval indexes, and move into grounded conversations. METIS chunks, embeds, and indexes your files for fast semantic search."
       actions={
         <Link href="/chat">
           <Button variant="outline" className="gap-2">

@@ -14,7 +14,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { AmbientBackdrop } from "@/components/shell/ambient-backdrop";
-import { AxiomCompanionDock } from "@/components/shell/axiom-companion-dock";
+import { MetisCompanionDock } from "@/components/shell/metis-companion-dock";
 import { cn } from "@/lib/utils";
 
 interface PageChromeProps {
@@ -50,7 +50,7 @@ function isActive(pathname: string, href: string) {
 export function PageChrome({
   title,
   description,
-  eyebrow = "Axiom",
+  eyebrow = "METIS",
   actions,
   heroAside,
   children,
@@ -73,7 +73,7 @@ export function PageChrome({
                 <Home className="size-4" />
               </span>
               <span className="text-base font-semibold tracking-tight text-foreground">
-                Axiom
+                METIS
               </span>
             </Link>
 
@@ -120,7 +120,7 @@ export function PageChrome({
               href="/"
               className="text-base font-semibold tracking-tight text-foreground xl:hidden"
             >
-              Axiom
+              METIS
             </Link>
 
             <nav className="ml-auto flex items-center gap-1">
@@ -194,7 +194,7 @@ export function PageChrome({
           </main>
         </div>
       </div>
-      <AxiomCompanionDock
+      <MetisCompanionDock
         sessionId={companionContext?.sessionId}
         runId={companionContext?.runId}
       />

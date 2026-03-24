@@ -361,7 +361,7 @@ export function IndexBuildStudio({
             {tab === "paths" ? (
               <div className="space-y-4">
                 <div className="rounded-[1.35rem] border border-chart-4/20 bg-chart-4/10 px-4 py-3 text-sm leading-7 text-chart-4">
-                  Use this when the Axiom API can already read the filesystem paths directly, such as a desktop sidecar or self-hosted workspace.
+                  Use this when the METIS API can already read the filesystem paths directly, such as a desktop sidecar or self-hosted workspace.
                 </div>
 
                 <label className="flex cursor-pointer items-center gap-3 text-sm text-muted-foreground">

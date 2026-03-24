@@ -1,7 +1,8 @@
 import type { TraceEvent } from "@/lib/api";
 import type { EvidenceSource } from "@/lib/chat-types";
 
-const RESUMABLE_RAG_RUN_KEY = "axiom_resumable_rag_run";
+const RESUMABLE_RAG_RUN_KEY = "metis_resumable_rag_run";
+const LEGACY_RESUMABLE_RAG_RUN_KEY = "axiom_resumable_rag_run";
 
 export interface ResumableRagRunSnapshot {
   version: 1;
@@ -24,7 +25,15 @@ export function loadResumableRagRun(): ResumableRagRunSnapshot | null {
     return null;
   }
 
-  const raw = window.sessionStorage.getItem(RESUMABLE_RAG_RUN_KEY);
+  let raw = window.sessionStorage.getItem(RESUMABLE_RAG_RUN_KEY);
+  if (!raw) {
+    const legacy = window.sessionStorage.getItem(LEGACY_RESUMABLE_RAG_RUN_KEY);
+    if (legacy) {
+      window.sessionStorage.setItem(RESUMABLE_RAG_RUN_KEY, legacy);
+      window.sessionStorage.removeItem(LEGACY_RESUMABLE_RAG_RUN_KEY);
+      raw = legacy;
+    }
+  }
   if (!raw) {
     return null;
   }
@@ -59,6 +68,7 @@ export function clearResumableRagRun(): void {
   }
 
   window.sessionStorage.removeItem(RESUMABLE_RAG_RUN_KEY);
+  window.sessionStorage.removeItem(LEGACY_RESUMABLE_RAG_RUN_KEY);
 }
 
 function normalizeResumableRagRun(

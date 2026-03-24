@@ -48,7 +48,7 @@ function OrbSpecular({
   );
 }
 
-export function AxiomHomeLogo({
+export function MetisHomeLogo({
   className,
   priority = false,
 }: {
@@ -132,8 +132,8 @@ export function AxiomHomeLogo({
         className="pointer-events-none absolute inset-[20%] rounded-full bg-[radial-gradient(circle_at_50%_50%,rgba(173,198,255,0.16),transparent_68%)] blur-md"
       />
       <Image
-        src="/axiom-logo.png"
-        alt="Axiom logo"
+        src="/metis-logo.png"
+        alt="METIS logo"
         fill
         sizes="(max-width: 768px) 160px, 192px"
         priority={priority}
