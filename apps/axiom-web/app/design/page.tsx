@@ -124,7 +124,7 @@ export default function DesignPage() {
       <Section title="Card">
         <Card className="w-80">
           <CardHeader>
-            <CardTitle>Axiom</CardTitle>
+            <CardTitle>METIS</CardTitle>
             <CardDescription>Local-first RAG application.</CardDescription>
           </CardHeader>
           <CardContent>

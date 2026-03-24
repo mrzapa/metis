@@ -110,9 +110,9 @@ export function DesktopReadyGuard({ children }: DesktopReadyGuardProps) {
   if (state === "loading") {
     return (
       <LaunchStage
-        eyebrow="Axiom Launch"
+        eyebrow="METIS Launch"
         title="Bringing your local workspace online."
-        description="Axiom is starting its desktop sidecar, checking the local API, and preparing the workspace shell."
+        description="METIS is starting its desktop sidecar, checking the local API, and preparing the workspace shell."
         statusLabel="Starting services"
         statusTone="checking"
         aside={
@@ -156,7 +156,7 @@ export function DesktopReadyGuard({ children }: DesktopReadyGuardProps) {
 
   return (
     <LaunchStage
-      eyebrow="Axiom Launch"
+      eyebrow="METIS Launch"
       title="The local API did not come up cleanly."
       description="The desktop shell is running, but the local service failed its startup checks. You can retry immediately or inspect diagnostics for logs and version compatibility."
       statusLabel="Launch interrupted"

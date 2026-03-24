@@ -24,17 +24,17 @@ import {
 import { BrainIcon } from "@/components/icons";
 import { useArrowState } from "@/hooks/use-arrow-state";
 
-interface AxiomCompanionDockProps {
+interface MetisCompanionDockProps {
   sessionId?: string | null;
   runId?: string | null;
   className?: string;
 }
 
-export function AxiomCompanionDock({
+export function MetisCompanionDock({
   sessionId,
   runId,
   className,
-}: AxiomCompanionDockProps) {
+}: MetisCompanionDockProps) {
   const [snapshot, setSnapshot] = useArrowState<AssistantSnapshot | null>(null);
   const [loading, setLoading] = useArrowState(true);
   const [busyAction, setBusyAction] = useArrowState<"" | "toggle" | "reflect" | "clear" | "bootstrap">("");
@@ -171,7 +171,7 @@ export function AxiomCompanionDock({
         minimized ? "w-auto" : "w-[min(24rem,calc(100vw-2rem))]",
         className,
       )}
-      aria-label="Axiom companion"
+      aria-label="METIS companion"
     >
       <div className={cn(
         "glass-panel-strong border border-white/10 shadow-2xl shadow-black/30",
@@ -190,7 +190,7 @@ export function AxiomCompanionDock({
           {!minimized && (
             <div className="min-w-0">
               <p className="truncate font-display text-lg font-semibold tracking-[-0.03em] text-foreground">
-                {snapshot?.identity.name ?? "Axiom"}
+                {snapshot?.identity.name ?? "METIS"}
               </p>
               <p className="truncate text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                 {snapshot?.status.runtime_source === "dedicated_local"
@@ -201,7 +201,7 @@ export function AxiomCompanionDock({
           )}
           {minimized && (
             <span className="text-sm font-medium text-foreground">
-              {snapshot?.identity.name ?? "Axiom"}
+              {snapshot?.identity.name ?? "METIS"}
             </span>
           )}
           <button

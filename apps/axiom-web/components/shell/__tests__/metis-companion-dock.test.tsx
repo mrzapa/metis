@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-import { AxiomCompanionDock } from "../axiom-companion-dock";
+import { MetisCompanionDock } from "../metis-companion-dock";
 import type { AssistantSnapshot } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({
@@ -81,7 +81,7 @@ function buildSnapshot(overrides: Partial<AssistantSnapshot> = {}): AssistantSna
   };
 }
 
-describe("AxiomCompanionDock", () => {
+describe("MetisCompanionDock", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -89,14 +89,14 @@ describe("AxiomCompanionDock", () => {
   it("renders the minimized companion state from the assistant snapshot", async () => {
     vi.mocked(fetchAssistant).mockResolvedValueOnce(buildSnapshot());
 
-    render(<AxiomCompanionDock />);
+    render(<MetisCompanionDock />);
 
     await waitFor(() => {
       expect(fetchAssistant).toHaveBeenCalledTimes(1);
     });
 
     expect(
-      await screen.findByText("Axiom Companion"),
+      await screen.findByText("METIS Companion"),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Expand companion" })).toBeInTheDocument();
     // Subtitle and summary are hidden in the compact minimized pill

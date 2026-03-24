@@ -6,7 +6,15 @@ import { DesktopReadyGuard } from "@/components/desktop-ready";
 
 const uiVariantBootstrap = `(() => {
   try {
-    const stored = window.localStorage.getItem("axiom-ui-variant");
+    let stored = window.localStorage.getItem("metis-ui-variant");
+    if (!stored) {
+      const legacy = window.localStorage.getItem("axiom-ui-variant");
+      if (legacy) {
+        window.localStorage.setItem("metis-ui-variant", legacy);
+        window.localStorage.removeItem("axiom-ui-variant");
+        stored = legacy;
+      }
+    }
     const variant = stored === "refined" || stored === "motion" || stored === "bold" ? stored : "refined";
     document.documentElement.dataset.uiVariant = variant;
   } catch {
@@ -15,7 +23,7 @@ const uiVariantBootstrap = `(() => {
 })();`;
 
 export const metadata: Metadata = {
-  title: "AXIOM | Frontier RAG AI",
+  title: "METIS AI",
   description: "A local-first frontier AI workspace for chat, retrieval, and knowledge building.",
 };
 

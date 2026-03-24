@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AmbientBackdrop } from "@/components/shell/ambient-backdrop";
-import { AxiomCompanionDock } from "@/components/shell/axiom-companion-dock";
+import { MetisCompanionDock } from "@/components/shell/metis-companion-dock";
 import { OnboardingStep } from "@/components/shell/onboarding-step";
 import { StatusPill } from "@/components/shell/status-pill";
 import { IndexBuildStudio } from "@/components/library/index-build-studio";
@@ -71,9 +71,9 @@ const STARTER_PROMPTS_WITH_INDEX = [
 ];
 
 const STARTER_PROMPTS_DIRECT = [
-  "Help me plan my first workflow in Axiom and explain when to use direct chat versus RAG.",
+  "Help me plan my first workflow in METIS and explain when to use direct chat versus RAG.",
   "Teach me how to set up a grounded research session in this workspace.",
-  "What should I import first if I want Axiom to feel useful within ten minutes?",
+  "What should I import first if I want METIS to feel useful within ten minutes?",
 ];
 
 export default function SetupPage() {
@@ -178,7 +178,7 @@ export default function SetupPage() {
 
       if (builtIndex) {
         localStorage.setItem(
-          "axiom_active_index",
+          "metis_active_index",
           JSON.stringify({
             manifest_path: builtIndex.manifest_path,
             label: builtIndex.index_id,
@@ -186,7 +186,7 @@ export default function SetupPage() {
         );
       }
 
-      localStorage.setItem("axiom_chat_seed_prompt", selectedPrompt);
+      localStorage.setItem("metis_chat_seed_prompt", selectedPrompt);
       router.push("/chat");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings");
@@ -414,7 +414,7 @@ export default function SetupPage() {
         <header className="glass-panel flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3 sm:px-5">
           <div>
             <p className="text-lg font-semibold tracking-tight text-foreground">
-              Axiom Setup
+              METIS Setup
             </p>
             <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
               Guided first run
@@ -516,7 +516,7 @@ export default function SetupPage() {
         </main>
       </div>
 
-      <AxiomCompanionDock className="bottom-24 md:bottom-4" />
+      <MetisCompanionDock className="bottom-24 md:bottom-4" />
     </div>
   );
 }

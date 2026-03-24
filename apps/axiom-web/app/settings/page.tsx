@@ -111,13 +111,13 @@ type UiVariant = (typeof UI_VARIANTS)[number]["value"];
 
 const ASSISTANT_DEFAULT_VALUES: AssistantFormValues = {
   assistant_identity: {
-    assistant_id: "axiom-companion",
-    name: "Axiom",
+    assistant_id: "metis-companion",
+    name: "METIS",
     archetype: "Clippy-style research companion",
     companion_enabled: true,
     greeting: "I can help you get started, reflect on completed work, and map what I learn in the Brain tab.",
     prompt_seed:
-      "You are Axiom, a local-first companion who helps the user get oriented, suggests next steps, and records concise reflections without taking over the main chat.",
+      "You are METIS, a local-first companion who helps the user get oriented, suggests next steps, and records concise reflections without taking over the main chat.",
     docked: true,
     minimized: false,
   },
@@ -306,7 +306,7 @@ export default function SettingsPage() {
     setUiVariant(nextVariant);
     document.documentElement.dataset.uiVariant = nextVariant;
     try {
-      window.localStorage.setItem("axiom-ui-variant", nextVariant);
+      window.localStorage.setItem("metis-ui-variant", nextVariant);
     } catch {
       // Ignore storage failures and keep the in-memory selection.
     }

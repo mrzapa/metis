@@ -16,7 +16,7 @@ interface LaunchStageProps {
 }
 
 export function LaunchStage({
-  eyebrow = "Axiom",
+  eyebrow = "METIS",
   title,
   description,
   statusLabel,
