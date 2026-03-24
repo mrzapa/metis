@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useRef, useEffect, type KeyboardEvent, type RefObject } from "react";
+import { useRef, useEffect, type KeyboardEvent, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,8 +10,9 @@ import type { SessionSummary, TraceEvent } from "@/lib/api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { ActionCard } from "@/components/chat/action-card";
 import { AssistantCopyActions } from "@/components/chat/assistant-copy-actions";
-import { AssistantMarkdown } from "@/components/chat/assistant-markdown";
+import { ArrowArtifactBoundary } from "@/components/chat/artifacts/arrow-artifact-boundary";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
+import { useArrowState } from "@/hooks/use-arrow-state";
 import { AlertCircle, Bot, Loader2, SendHorizontal, Square } from "lucide-react";
 import { AgenticStepIndicator } from "@/components/chat/agentic-step-indicator";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
@@ -52,6 +53,8 @@ interface ChatPanelProps {
   agenticModeError?: string | null;
   onAgenticModeChange?: (enabled: boolean) => void;
   liveTraceEvents?: TraceEvent[];
+  artifactsEnabled?: boolean;
+  artifactRuntimeEnabled?: boolean;
 }
 
 const RAG_MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack", "Knowledge Search"] as const;
@@ -89,11 +92,13 @@ export function ChatPanel({
   agenticModeError,
   onAgenticModeChange,
   liveTraceEvents,
+  artifactsEnabled,
+  artifactRuntimeEnabled,
 }: ChatPanelProps) {
-  const [draft, setDraft] = useState(initialDraft ?? "");
-  const [queryMode, setQueryMode] = useState<"direct" | "rag">(initialQueryMode ?? "direct");
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [modelDialogOpen, setModelDialogOpen] = useState(false);
+  const [draft, setDraft] = useArrowState(initialDraft ?? "");
+  const [queryMode, setQueryMode] = useArrowState<"direct" | "rag">(initialQueryMode ?? "direct");
+  const [pickerOpen, setPickerOpen] = useArrowState(false);
+  const [modelDialogOpen, setModelDialogOpen] = useArrowState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isKnowledgeSearchMode = queryMode === "rag" && selectedMode === "Knowledge Search";
 
@@ -138,26 +143,26 @@ export function ChatPanel({
   const ragInputDisabled = queryMode === "rag" && !activeIndexPath;
 
   return (
-    <div className="glass-panel-strong flex h-full min-h-0 flex-col overflow-hidden rounded-[1.8rem]">
+    <div className="glass-panel-strong flex h-full min-h-0 flex-col overflow-hidden rounded-[1.9rem]">
       {/* Header */}
-      <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b border-white/8 px-4 py-3">
+      <div className="glass-strip flex min-h-13 shrink-0 flex-wrap items-center gap-2.5 border-b border-white/10 px-4 py-3.5">
         <h2 className="truncate text-sm font-semibold">
           {sessionMeta?.title ?? "New Chat"}
         </h2>
         {sessionMeta && (
           <div className="flex shrink-0 flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
             {sessionMeta.mode && (
-              <span className="rounded bg-muted px-1.5 py-0.5">
+              <span className="chat-control-pill rounded-full px-2 py-0.5">
                 {sessionMeta.mode}
               </span>
             )}
             {sessionMeta.llm_provider && (
-              <span className="rounded bg-muted px-1.5 py-0.5">
+              <span className="chat-control-pill rounded-full px-2 py-0.5">
                 {sessionMeta.llm_provider}
               </span>
             )}
             {sessionMeta.updated_at && (
-              <span className="rounded bg-muted px-1.5 py-0.5">
+              <span className="chat-control-pill rounded-full px-2 py-0.5">
                 {formatDate(sessionMeta.updated_at)}
               </span>
             )}
@@ -170,10 +175,10 @@ export function ChatPanel({
             onClick={() => onAgenticModeChange?.(!agenticMode)}
             disabled={agenticModeSaving}
             className={cn(
-              "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+              "chat-control-pill flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium transition-colors",
               agenticMode
-                ? "bg-sky-100 text-sky-700 hover:bg-sky-200"
-                : "bg-muted text-muted-foreground hover:bg-muted/80",
+                ? "border-sky-400/25 bg-sky-500/14 text-sky-100 hover:bg-sky-500/18"
+                : "text-muted-foreground hover:bg-white/10",
             )}
             aria-pressed={agenticMode}
           >
@@ -182,20 +187,20 @@ export function ChatPanel({
           </button>
           <Link
             href="/settings"
-            className="rounded px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:underline"
+            className="chat-control-pill rounded-full px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
           >
             Settings
           </Link>
           {/* Model status badge */}
           {(modelProvider || modelName) && (
             <>
-              <span className="rounded bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+              <span className="chat-control-pill rounded-full px-2 py-1 text-[10px] text-muted-foreground">
                 {[modelProvider, modelName].filter(Boolean).join(" / ")}
               </span>
               <button
                 type="button"
                 onClick={() => setModelDialogOpen(true)}
-                className="rounded px-1.5 py-0.5 text-[10px] font-medium text-primary hover:underline"
+                className="chat-control-pill rounded-full px-2 py-1 text-[10px] font-medium text-primary transition-colors hover:bg-primary/12"
               >
                 Change
               </button>
@@ -205,14 +210,14 @@ export function ChatPanel({
       </div>
 
       {agenticModeError && (
-        <div className="flex items-center gap-1.5 border-b border-white/8 bg-destructive/10 px-4 py-1.5 text-[11px] text-destructive">
+        <div className="glass-strip flex items-center gap-1.5 border-b border-destructive/25 bg-destructive/12 px-4 py-1.5 text-[11px] text-destructive">
           <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-3 shrink-0" />
           {agenticModeError}
         </div>
       )}
 
       {reconnectState && (
-        <div className="border-b border-white/8 bg-chart-4/10 px-4 py-3">
+        <div className="glass-strip border-b border-chart-4/35 bg-chart-4/12 px-4 py-3">
           <div className="mx-auto flex max-w-3xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-chart-4">
@@ -244,7 +249,7 @@ export function ChatPanel({
 
       {/* Index banner (RAG mode only) */}
       {queryMode === "rag" && (
-        <div className="flex shrink-0 items-center justify-between border-b border-white/8 bg-white/4 px-4 py-2 text-xs">
+        <div className="glass-strip flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-2 text-xs">
           {activeIndexPath ? (
             <>
               <span className="text-muted-foreground">
@@ -278,7 +283,7 @@ export function ChatPanel({
 
       {/* Transcript */}
       <ScrollArea className="flex-1 min-h-0" ref={scrollRef as React.Ref<HTMLDivElement>}>
-        <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-5">
+        <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-5 lg:p-6">
           {loading && (
             <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
               <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-6" />
@@ -322,7 +327,7 @@ export function ChatPanel({
               )}
             >
               {msg.actionRequired ? (
-                <div className="max-w-[80%]">
+                <div className="max-w-[82%]">
                   <ActionCard
                     runId={msg.run_id}
                     action={msg.actionRequired.action}
@@ -334,10 +339,10 @@ export function ChatPanel({
               ) : (
                 <div
                   className={cn(
-                    "max-w-[82%] rounded-[1.25rem] border px-4 py-3 text-sm leading-relaxed shadow-lg shadow-black/10",
+                      "max-w-[84%] rounded-[1.35rem] border px-4 py-3 text-sm leading-[1.72] shadow-lg shadow-black/10",
                     msg.role === "user"
-                      ? "border-primary/25 bg-primary text-primary-foreground"
-                      : "border-white/8 bg-white/6"
+                      ? "border-primary/30 bg-primary/92 text-primary-foreground shadow-primary/20"
+                      : "glass-micro-surface border-white/10 bg-white/7 text-foreground/96"
                   )}
                 >
                   {msg.role === "assistant" ? (
@@ -346,11 +351,11 @@ export function ChatPanel({
                         {msg.run_id && (() => {
                           const sq = getRunSubqueries?.(msg.run_id);
                           return sq && sq.length > 0 ? (
-                            <div className="mb-2 flex flex-wrap gap-1">
+                            <div className="mb-2.5 flex flex-wrap gap-1.5">
                               {sq.map((q) => (
                                 <span
                                   key={q}
-                                  className="rounded-full bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground ring-1 ring-border"
+                                  className="chat-control-pill rounded-full px-2 py-0.5 text-[10px] text-muted-foreground"
                                 >
                                   {q}
                                 </span>
@@ -358,9 +363,15 @@ export function ChatPanel({
                             </div>
                           ) : null;
                         })()}
-                        <AssistantMarkdown
+                        <ArrowArtifactBoundary
                           content={msg.content || (msg.status === "aborted" ? "Stopped." : "")}
+                          artifacts={msg.artifacts}
                           isStreaming={msg.status === "streaming"}
+                          artifactsEnabled={artifactsEnabled}
+                          artifactRuntimeEnabled={artifactRuntimeEnabled}
+                          sessionId={sessionMeta?.session_id}
+                          runId={msg.run_id}
+                          messageId={msg.id}
                         />
                       </div>
                       <AssistantCopyActions message={msg} sessionId={sessionMeta?.session_id} />
@@ -374,34 +385,37 @@ export function ChatPanel({
                     agenticMode ? (
                       <AgenticStepIndicator
                         liveTraceEvents={liveTraceEvents ?? []}
-                        isStreaming={true}
-                      />
-                    ) : (
-                      <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
-                        <span className="size-1.5 animate-pulse rounded-full bg-current/70" />
-                        Streaming
-                      </div>
-                    )
+                        className={cn(
+                            "flex animate-msg-enter justify-start"
+                        )}
+                          isStreaming={true}
+                        />
+                      ) : (
+                        <div className="mt-1.5 flex animate-msg-enter items-center gap-1 text-[10px] text-muted-foreground">
+                          <span className="size-1.5 animate-pulse rounded-full bg-current/70" />
+                          Streaming
+                        </div>
+                      )
                   )}
                   {msg.role === "assistant" && msg.status === "error" && (
-                    <div className="mt-1.5 text-[10px] text-destructive">
+                    <div className="mt-2 text-[10px] text-destructive">
                       Response interrupted
                     </div>
                   )}
                   {msg.sources.length > 0 && (
-                    <p className="mt-1 text-xs opacity-70">
+                    <p className="mt-2 text-xs opacity-70">
                       {msg.sources.length} source{msg.sources.length > 1 ? "s" : ""}
                     </p>
                   )}
                   {msg.role === "assistant" && (msg.llm_provider || msg.llm_model) && (
-                    <div className="mt-1.5 flex gap-1">
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
                       {msg.llm_provider && (
-                        <span className="rounded bg-background/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                        <span className="chat-control-pill rounded-full px-2 py-0.5 text-[10px] text-muted-foreground">
                           {msg.llm_provider}
                         </span>
                       )}
                       {msg.llm_model && (
-                        <span className="rounded bg-background/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                        <span className="chat-control-pill rounded-full px-2 py-0.5 text-[10px] text-muted-foreground">
                           {msg.llm_model}
                         </span>
                       )}
@@ -414,7 +428,7 @@ export function ChatPanel({
 
           {isSending && !isStreamingRag && (
             <div className="flex justify-start">
-              <div className="rounded-[1.1rem] border border-white/8 bg-white/6 px-3 py-2 text-sm text-muted-foreground">
+              <div className="glass-micro-surface rounded-[1.1rem] px-3 py-2 text-sm text-muted-foreground">
                 <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-3.5" />
               </div>
             </div>
@@ -423,19 +437,19 @@ export function ChatPanel({
       </ScrollArea>
 
       {/* Composer */}
-      <div className="border-t border-white/8 bg-black/10 p-3">
-        <div className="mx-auto max-w-4xl space-y-2">
+      <div className="glass-strip border-t border-white/10 px-3 py-3.5">
+        <div className="mx-auto max-w-4xl space-y-2.5">
           {/* Path + RAG mode selector */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] text-muted-foreground">Path:</span>
             <button
               type="button"
               onClick={() => setQueryMode("direct")}
               className={cn(
-                "rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
+                "chat-control-pill rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
                 queryMode === "direct"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  ? "border-primary/30 bg-primary/90 text-primary-foreground"
+                  : "text-muted-foreground hover:bg-white/10"
               )}
             >
               Direct
@@ -444,10 +458,10 @@ export function ChatPanel({
               type="button"
               onClick={() => setQueryMode("rag")}
               className={cn(
-                "rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
+                "chat-control-pill rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
                 queryMode === "rag"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  ? "border-primary/30 bg-primary/90 text-primary-foreground"
+                  : "text-muted-foreground hover:bg-white/10"
               )}
             >
               RAG
@@ -461,7 +475,7 @@ export function ChatPanel({
                   onChange={(e) => {
                     onModeChange?.(e.target.value);
                   }}
-                  className="rounded-full bg-muted px-3 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/80 focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
+                  className="chat-control-pill cursor-pointer rounded-full px-3 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-white/10 focus:outline-none focus:ring-1 focus:ring-primary/50"
                   aria-label="RAG mode"
                 >
                   {RAG_MODES.map((m) => (
@@ -474,7 +488,7 @@ export function ChatPanel({
             )}
           </div>
 
-          <div className="flex items-end gap-2">
+          <div className="flex items-end gap-2.5">
             <Textarea
               ref={composerRef}
               placeholder={
@@ -490,14 +504,14 @@ export function ChatPanel({
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={1}
-              className="min-h-10 max-h-40 resize-none text-sm"
+              className="glass-micro-surface min-h-11 max-h-40 resize-none border-white/10 bg-white/6 px-3 py-2.5 text-sm leading-6 transition-[border-color,box-shadow] duration-200 focus:border-primary/30 focus:shadow-sm"
               aria-label="Message input"
               disabled={ragInputDisabled}
             />
             {isStreamingRag ? (
               <Button
                 variant="outline"
-                className="h-10 shrink-0 px-3"
+                className="chat-control-pill h-11 shrink-0 px-3"
                 onClick={onStopStreaming}
                 aria-label="Stop streaming response"
               >
@@ -507,7 +521,7 @@ export function ChatPanel({
             ) : (
               <Button
                 size="icon"
-                className="size-10 shrink-0"
+                className="size-11 shrink-0 rounded-2xl border border-primary/25 bg-primary/92 text-primary-foreground shadow-lg shadow-primary/25 transition-all duration-150 hover:scale-[1.05] hover:shadow-primary/38 active:scale-[0.94] disabled:opacity-50 disabled:scale-95"
                 onClick={handleSend}
                 disabled={!canSend}
                 aria-label="Send message"

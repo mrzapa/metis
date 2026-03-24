@@ -31,14 +31,16 @@ function deriveSteps(events: TraceEvent[], isStreaming: boolean): [StepState, St
 export function AgenticStepIndicator({
   liveTraceEvents,
   isStreaming,
+    className,
 }: {
   liveTraceEvents: TraceEvent[];
   isStreaming: boolean;
+    className?: string;
 }) {
   const states = deriveSteps(liveTraceEvents, isStreaming);
 
   return (
-    <div className="mt-2 flex items-center gap-1 text-[10px]">
+     <div className={cn("mt-2 flex items-center gap-1 text-[10px]", className)}>
       {STEPS.map((step, i) => {
         const state = states[i];
         return (

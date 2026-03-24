@@ -22,6 +22,16 @@ import {
 type StopStreamReason = "user" | "navigation";
 const KNOWLEDGE_SEARCH_MODE = "Knowledge Search";
 
+function resolveArtifactsEnabled(settings: Record<string, unknown>): boolean | undefined {
+  const candidate = settings.enable_arrow_artifacts;
+  return typeof candidate === "boolean" ? candidate : undefined;
+}
+
+function resolveArtifactRuntimeEnabled(settings: Record<string, unknown>): boolean | undefined {
+  const candidate = settings.enable_arrow_artifact_runtime;
+  return typeof candidate === "boolean" ? candidate : undefined;
+}
+
 interface ActiveRagStream {
   assistantMessageId: string;
   controller: AbortController;
@@ -177,6 +187,8 @@ export default function ChatPage() {
   const [sessionRefreshToken, setSessionRefreshToken] = useState(0);
   const [selectedRagMode, setSelectedRagMode] = useState<string>("Q&A");
   const [latestFallback, setLatestFallback] = useState<RetrievalFallback | null>(null);
+  const [artifactsEnabled, setArtifactsEnabled] = useState<boolean | undefined>(undefined);
+  const [artifactRuntimeEnabled, setArtifactRuntimeEnabled] = useState<boolean | undefined>(undefined);
   const sessionIdRef = useRef<string | null>(null);
   const {
     createMessage,
@@ -283,6 +295,8 @@ export default function ChatPage() {
         setModelProvider(provider);
         setModelName(model);
         settingsRef.current = settings;
+        setArtifactsEnabled(resolveArtifactsEnabled(settings));
+        setArtifactRuntimeEnabled(resolveArtifactRuntimeEnabled(settings));
 
         const isAgentic = Boolean(settings.agentic_mode);
         setAgenticMode(isAgentic);
@@ -490,7 +504,10 @@ export default function ChatPage() {
 
       try {
         if (!settingsRef.current) {
-          settingsRef.current = await fetchSettings();
+          const settings = await fetchSettings();
+          settingsRef.current = settings;
+          setArtifactsEnabled(resolveArtifactsEnabled(settings));
+          setArtifactRuntimeEnabled(resolveArtifactRuntimeEnabled(settings));
         }
 
         const result = await queryDirect(prompt, settingsRef.current, sessionId ?? undefined);
@@ -503,6 +520,7 @@ export default function ChatPage() {
             sources: [],
             llm_provider: result.llm_provider,
             llm_model: result.llm_model,
+            artifacts: result.artifacts,
             query_mode: "direct",
           }),
         );
@@ -603,7 +621,10 @@ export default function ChatPage() {
 
         try {
           if (!settingsRef.current) {
-            settingsRef.current = await fetchSettings();
+            const settings = await fetchSettings();
+            settingsRef.current = settings;
+            setArtifactsEnabled(resolveArtifactsEnabled(settings));
+            setArtifactRuntimeEnabled(resolveArtifactRuntimeEnabled(settings));
           }
 
           const ragSettings = { ...settingsRef.current, selected_mode: selectedRagMode };
@@ -797,7 +818,12 @@ export default function ChatPage() {
                   activeRagStreamRef.current = null;
                   setIsStreamingRag(false);
                   publishResumableRun(null);
-                  finalizeRun(resolvedRunId, event.answer_text, finalSources);
+                  finalizeRun(
+                    resolvedRunId,
+                    event.answer_text,
+                    finalSources,
+                    event.artifacts,
+                  );
                   break;
                 }
                 case "action_required":
@@ -935,7 +961,10 @@ export default function ChatPage() {
         setIsSending(true);
         try {
           if (!settingsRef.current) {
-            settingsRef.current = await fetchSettings();
+            const settings = await fetchSettings();
+            settingsRef.current = settings;
+            setArtifactsEnabled(resolveArtifactsEnabled(settings));
+            setArtifactRuntimeEnabled(resolveArtifactRuntimeEnabled(settings));
           }
 
           const ragSettings = { ...settingsRef.current, selected_mode: selectedRagMode };
@@ -1140,7 +1169,7 @@ export default function ChatPage() {
         runId: latestRunId,
       }}
     >
-      <div className="h-[calc(100vh-13.75rem)] min-h-176 overflow-hidden rounded-[1.9rem]">
+      <div className="chat-shell-frame h-[calc(100vh-13.75rem)] min-h-176 overflow-hidden rounded-[2rem] p-2.5 sm:p-3">
         <ResizablePanels
           className="h-full"
           resetToken={shellPostureToken}
@@ -1205,6 +1234,8 @@ export default function ChatPage() {
                   agenticModeError={agenticModeError}
                   onAgenticModeChange={handleAgenticModeChange}
                   liveTraceEvents={liveTraceEvents}
+                  artifactsEnabled={artifactsEnabled}
+                  artifactRuntimeEnabled={artifactRuntimeEnabled}
                 />
               ),
             },

@@ -560,3 +560,78 @@ def test_identify_gaps_returns_list(tmp_path, monkeypatch) -> None:
 
     gaps_on_error = _identify_gaps("q", "a", "ctx", _BadLLM())
     assert gaps_on_error == []
+
+
+def test_stream_final_omits_artifacts_when_feature_flag_disabled(tmp_path, monkeypatch) -> None:
+    build_result = _build_test_index(tmp_path, monkeypatch)
+
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who wrote the first algorithm?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "enable_arrow_artifacts": False,
+            "artifacts": [
+                {
+                    "id": "a1",
+                    "type": "table",
+                    "summary": "candidate artifact",
+                    "payload": {"rows": [{"name": "Ada"}]},
+                }
+            ],
+        },
+        run_id="artifacts-disabled-run",
+    )
+
+    final = list(stream_rag_answer(req))[-1]
+    assert final["type"] == "final"
+    assert "artifacts" not in final
+
+
+def test_stream_final_includes_bounded_artifacts_when_enabled(tmp_path, monkeypatch) -> None:
+    build_result = _build_test_index(tmp_path, monkeypatch)
+    large_payload = "x" * 20_000
+
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who wrote the first algorithm?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "enable_arrow_artifacts": True,
+            "artifacts": [
+                {
+                    "id": "a-small",
+                    "type": "table",
+                    "summary": "small payload",
+                    "payload": {"rows": [{"name": "Ada"}]},
+                },
+                {
+                    "id": "a-large",
+                    "type": "text",
+                    "summary": "large payload",
+                    "payload": large_payload,
+                },
+                {"type": "chart"},
+                {"type": "list"},
+                {"type": "map"},
+                {"type": "overflow"},
+            ],
+        },
+        run_id="artifacts-enabled-run",
+    )
+
+    final = list(stream_rag_answer(req))[-1]
+    assert final["type"] == "final"
+    artifacts = list(final.get("artifacts") or [])
+    assert len(artifacts) == 5
+
+    small = next(item for item in artifacts if item.get("id") == "a-small")
+    large = next(item for item in artifacts if item.get("id") == "a-large")
+    assert "payload" in small
+    assert small["payload_truncated"] is False
+    assert large["payload_truncated"] is True
+    assert "payload" not in large

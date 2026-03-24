@@ -12,6 +12,7 @@ from axiom_app.engine.querying import (
     _prepare_rag_settings,
     _response_text,
     _system_instructions,
+    extract_arrow_artifacts,
 )
 from axiom_app.services.retrieval_pipeline import execute_retrieval_plan, generate_sub_queries
 from axiom_app.services.stream_events import normalize_stream_event
@@ -206,12 +207,14 @@ def stream_rag_answer(
                 })
 
         if retrieval_plan.fallback.triggered and retrieval_plan.fallback.strategy == "no_answer":
+            final_artifacts = extract_arrow_artifacts(settings)
             yield _emit({
                 "type": "final",
                 "run_id": run_id,
                 "answer_text": retrieval_plan.fallback.message,
                 "sources": sources,
                 "fallback": retrieval_plan.fallback.to_dict(),
+                **({"artifacts": final_artifacts} if final_artifacts else {}),
             })
             return
 
@@ -391,12 +394,14 @@ def stream_rag_answer(
             answer_parts.append(answer)
             yield _emit({"type": "token", "run_id": run_id, "text": answer})
 
+        final_artifacts = extract_arrow_artifacts(settings)
         yield _emit({
             "type": "final",
             "run_id": run_id,
             "answer_text": "".join(answer_parts),
             "sources": sources,
             "fallback": retrieval_plan.fallback.to_dict(),
+            **({"artifacts": final_artifacts} if final_artifacts else {}),
         })
 
     except Exception as exc:  # noqa: BLE001

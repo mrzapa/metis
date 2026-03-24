@@ -209,6 +209,146 @@ class TestBuildIndex:
         assert captured[0] is cb
 
 
+class TestUiTelemetry:
+    def test_persists_ui_telemetry_via_trace_store(self) -> None:
+        trace_store = MagicMock()
+        orch = _make_orchestrator()
+        orch._trace_store = trace_store
+
+        accepted = orch.ingest_ui_telemetry_events(
+            [
+                {
+                    "event_name": "artifact_interaction",
+                    "source": "chat_artifact_boundary",
+                    "occurred_at": "2026-03-23T12:00:00Z",
+                    "run_id": "run-telemetry",
+                    "session_id": "session-1",
+                    "message_id": "message-1",
+                    "is_streaming": False,
+                    "payload": {
+                        "interaction_type": "card_click",
+                        "artifact_index": 0,
+                        "artifact_id": "artifact-1",
+                        "artifact_type": "timeline",
+                    },
+                }
+            ]
+        )
+
+        assert accepted == 1
+        trace_store.append_event.assert_called_once_with(
+            run_id="run-telemetry",
+            stage="ui_artifact",
+            event_type="artifact_interaction",
+            payload={
+                "source": "chat_artifact_boundary",
+                "session_id": "session-1",
+                "message_id": "message-1",
+                "client_timestamp": "2026-03-23T12:00:00Z",
+                "is_streaming": False,
+                "telemetry": {
+                    "interaction_type": "card_click",
+                    "artifact_index": 0,
+                    "artifact_id": "artifact-1",
+                    "artifact_type": "timeline",
+                },
+            },
+        )
+
+
+class TestUiTelemetrySummary:
+    def test_delegates_to_trace_store(self) -> None:
+        orch = _make_orchestrator()
+        orch._trace_store = MagicMock()
+        orch._trace_store.aggregate_ui_artifact_summary.return_value = {
+            "window_hours": 24,
+            "generated_at": "2026-03-23T12:00:00+00:00",
+            "sampled_event_count": 0,
+            "metrics": {
+                "exposure_count": 0,
+                "render_attempt_count": 0,
+                "render_success_rate": None,
+                "render_failure_rate": None,
+                "fallback_rate_by_reason": {},
+                "interaction_rate": None,
+                "runtime_attempt_rate": None,
+                "runtime_success_rate": None,
+                "runtime_failure_rate": None,
+                "runtime_skip_mix": {},
+                "data_quality": {
+                    "events_with_run_id_pct": None,
+                    "events_with_source_boundary_pct": None,
+                    "events_with_client_timestamp_pct": None,
+                },
+            },
+            "thresholds": {
+                "per_metric": {},
+                "overall_recommendation": "hold",
+                "failed_conditions": [],
+                "sample": {
+                    "exposure_count": 0,
+                    "payload_detected_count": 0,
+                    "render_attempt_count": 0,
+                    "runtime_attempt_count": 0,
+                    "minimum_exposure_count_for_go": 300,
+                },
+            },
+        }
+
+        result = orch.get_ui_telemetry_summary(window_hours=24, limit=1000)
+
+        assert result["window_hours"] == 24
+        orch._trace_store.aggregate_ui_artifact_summary.assert_called_once_with(
+            window_hours=24,
+            limit=1000,
+        )
+
+    def test_normalizes_invalid_window_and_limit(self) -> None:
+        orch = _make_orchestrator()
+        orch._trace_store = MagicMock()
+        orch._trace_store.aggregate_ui_artifact_summary.return_value = {
+            "window_hours": 24,
+            "generated_at": "2026-03-23T12:00:00+00:00",
+            "sampled_event_count": 0,
+            "metrics": {
+                "exposure_count": 0,
+                "render_attempt_count": 0,
+                "render_success_rate": None,
+                "render_failure_rate": None,
+                "fallback_rate_by_reason": {},
+                "interaction_rate": None,
+                "runtime_attempt_rate": None,
+                "runtime_success_rate": None,
+                "runtime_failure_rate": None,
+                "runtime_skip_mix": {},
+                "data_quality": {
+                    "events_with_run_id_pct": None,
+                    "events_with_source_boundary_pct": None,
+                    "events_with_client_timestamp_pct": None,
+                },
+            },
+            "thresholds": {
+                "per_metric": {},
+                "overall_recommendation": "hold",
+                "failed_conditions": [],
+                "sample": {
+                    "exposure_count": 0,
+                    "payload_detected_count": 0,
+                    "render_attempt_count": 0,
+                    "runtime_attempt_count": 0,
+                    "minimum_exposure_count_for_go": 300,
+                },
+            },
+        }
+
+        _ = orch.get_ui_telemetry_summary(window_hours=0, limit=-5)
+
+        orch._trace_store.aggregate_ui_artifact_summary.assert_called_once_with(
+            window_hours=24,
+            limit=50_000,
+        )
+
+
 class TestListIndexes:
     def test_delegates_to_engine(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fake_indexes = [{"index_id": "idx-1"}, {"index_id": "idx-2"}]
@@ -815,6 +955,36 @@ class TestTraceHooks:
         assert third_call["event_type"] == "fallback_decision"
         assert fourth_call["stage"] == "retrieval"
         assert fourth_call["event_type"] == "knowledge_search_complete"
+
+    def test_trace_payload_sanitizes_artifacts_to_metadata_only(self) -> None:
+        orch = _make_orchestrator()
+        append_event = MagicMock()
+        orch._trace_store.append_event = append_event  # type: ignore[method-assign]
+
+        orch._record_trace_event(
+            "run-5",
+            {
+                "type": "final",
+                "run_id": "run-5",
+                "answer_text": "done",
+                "artifacts": [
+                    {
+                        "id": "a1",
+                        "type": "table",
+                        "summary": "artifact",
+                        "payload": "x" * 20_000,
+                    }
+                ],
+            },
+        )
+
+        assert append_event.call_count == 1
+        payload = append_event.call_args.kwargs["payload"]
+        artifacts = list(payload.get("artifacts") or [])
+        assert len(artifacts) == 1
+        assert artifacts[0]["id"] == "a1"
+        assert "payload" not in artifacts[0]
+        assert artifacts[0]["payload_bytes"] > 16_384
 
 
 class TestReflectionHooks:

@@ -1,13 +1,14 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { StatusPill } from "@/components/shell/status-pill";
+import { useArrowState } from "@/hooks/use-arrow-state";
 import {
   buildIndexStream,
   fetchIndexes,
@@ -57,27 +58,27 @@ export function IndexBuildStudio({
 }: IndexBuildStudioProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isDesktop, setIsDesktop] = useState(false);
-  const [tab, setTab] = useState<"upload" | "paths" | "desktop">("upload");
-  const [pathsConsent, setPathsConsent] = useState(false);
+  const [isDesktop, setIsDesktop] = useArrowState(false);
+  const [tab, setTab] = useArrowState<"upload" | "paths" | "desktop">("upload");
+  const [pathsConsent, setPathsConsent] = useArrowState(false);
 
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [uploadedPaths, setUploadedPaths] = useState<string[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useArrowState<File[]>([]);
+  const [uploadedPaths, setUploadedPaths] = useArrowState<string[]>([]);
+  const [uploading, setUploading] = useArrowState(false);
+  const [uploadError, setUploadError] = useArrowState<string | null>(null);
 
-  const [rawPaths, setRawPaths] = useState("");
-  const [desktopPaths, setDesktopPaths] = useState<string[]>([]);
-  const [pickError, setPickError] = useState<string | null>(null);
+  const [rawPaths, setRawPaths] = useArrowState("");
+  const [desktopPaths, setDesktopPaths] = useArrowState<string[]>([]);
+  const [pickError, setPickError] = useArrowState<string | null>(null);
 
-  const [building, setBuilding] = useState(false);
-  const [buildError, setBuildError] = useState<string | null>(null);
-  const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
-  const [buildResult, setBuildResult] = useState<IndexBuildResult | null>(null);
+  const [building, setBuilding] = useArrowState(false);
+  const [buildError, setBuildError] = useArrowState<string | null>(null);
+  const [progress, setProgress] = useArrowState<ProgressState>(INITIAL_PROGRESS);
+  const [buildResult, setBuildResult] = useArrowState<IndexBuildResult | null>(null);
 
-  const [indexes, setIndexes] = useState<IndexSummary[]>([]);
-  const [loadingIndexes, setLoadingIndexes] = useState(false);
-  const [indexError, setIndexError] = useState<string | null>(null);
+  const [indexes, setIndexes] = useArrowState<IndexSummary[]>([]);
+  const [loadingIndexes, setLoadingIndexes] = useArrowState(false);
+  const [indexError, setIndexError] = useArrowState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {

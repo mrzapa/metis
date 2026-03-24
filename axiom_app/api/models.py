@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from datetime import datetime
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from axiom_app.engine import (
     DirectQueryRequest,
@@ -90,9 +91,11 @@ class RagQueryResultModel(BaseModel):
     selected_mode: str
     retrieval_plan: dict[str, Any] = Field(default_factory=dict)
     fallback: dict[str, Any] = Field(default_factory=dict)
+    artifacts: list["QueryArtifactModel"] | None = None
 
     @classmethod
     def from_engine(cls, result: RagQueryResult) -> "RagQueryResultModel":
+        raw_artifacts = getattr(result, "artifacts", None)
         return cls(
             run_id=result.run_id,
             answer_text=result.answer_text,
@@ -102,7 +105,19 @@ class RagQueryResultModel(BaseModel):
             selected_mode=result.selected_mode,
             retrieval_plan=dict(result.retrieval_plan or {}),
             fallback=dict(result.fallback or {}),
+            artifacts=[QueryArtifactModel(**item) for item in list(raw_artifacts or [])] or None,
         )
+
+
+class QueryArtifactModel(BaseModel):
+    id: str = ""
+    type: str
+    summary: str = ""
+    path: str = ""
+    mime_type: str = ""
+    payload: Any | None = None
+    payload_bytes: int = 0
+    payload_truncated: bool = False
 
 
 class KnowledgeSearchRequestModel(BaseModel):
@@ -179,6 +194,228 @@ class DirectQueryResultModel(BaseModel):
             llm_provider=result.llm_provider,
             llm_model=result.llm_model,
         )
+
+
+TelemetryId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+TelemetryLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+
+
+class ArtifactTelemetryBasePayloadModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ArtifactTelemetrySummaryPayloadModel(ArtifactTelemetryBasePayloadModel):
+    artifact_count: int = Field(ge=0, le=5)
+    artifact_types: list[TelemetryLabel] = Field(default_factory=list, max_length=5)
+    artifact_ids: list[TelemetryId] = Field(default_factory=list, max_length=5)
+
+
+class ArtifactPayloadDetectedPayloadModel(ArtifactTelemetrySummaryPayloadModel):
+    has_valid_artifacts: bool
+    detected_count: int = Field(ge=0, le=5)
+    normalized_count: int = Field(ge=0, le=5)
+    invalid_reason: Literal["invalid_payload"] | None = None
+
+
+class ArtifactRenderAttemptPayloadModel(ArtifactTelemetrySummaryPayloadModel):
+    renderer: Literal["default", "custom"]
+
+
+class ArtifactRenderSuccessPayloadModel(ArtifactTelemetrySummaryPayloadModel):
+    renderer: Literal["default", "custom"]
+
+
+class ArtifactRenderFailurePayloadModel(ArtifactTelemetrySummaryPayloadModel):
+    renderer: Literal["default", "custom"]
+    error_name: TelemetryLabel
+
+
+class ArtifactRenderFallbackMarkdownPayloadModel(ArtifactTelemetryBasePayloadModel):
+    reason: Literal["feature_disabled", "no_artifacts", "invalid_payload", "render_error"]
+
+
+class ArtifactInteractionPayloadModel(ArtifactTelemetryBasePayloadModel):
+    interaction_type: Literal["card_click"]
+    artifact_index: int = Field(ge=0, le=4)
+    artifact_id: TelemetryId | None = None
+    artifact_type: TelemetryLabel | None = None
+
+
+class ArtifactBoundaryFlagStatePayloadModel(ArtifactTelemetryBasePayloadModel):
+    state: Literal["enabled", "disabled", "unset"]
+
+
+class ArtifactRuntimeAttemptPayloadModel(ArtifactTelemetryBasePayloadModel):
+    artifact_index: int = Field(ge=0, le=4)
+    artifact_id: TelemetryId | None = None
+    artifact_type: TelemetryLabel
+
+
+class ArtifactRuntimeSuccessPayloadModel(ArtifactTelemetryBasePayloadModel):
+    artifact_index: int = Field(ge=0, le=4)
+    artifact_id: TelemetryId | None = None
+    artifact_type: TelemetryLabel
+
+
+class ArtifactRuntimeFailurePayloadModel(ArtifactTelemetryBasePayloadModel):
+    artifact_index: int = Field(ge=0, le=4)
+    artifact_id: TelemetryId | None = None
+    artifact_type: TelemetryLabel
+    error_name: TelemetryLabel
+
+
+class ArtifactRuntimeSkippedPayloadModel(ArtifactTelemetryBasePayloadModel):
+    artifact_index: int = Field(ge=0, le=4)
+    artifact_id: TelemetryId | None = None
+    artifact_type: TelemetryLabel
+    reason: Literal[
+        "runtime_disabled",
+        "unsupported_type",
+        "payload_truncated",
+        "invalid_payload",
+    ]
+
+
+class ArtifactTelemetryEventBaseModel(BaseModel):
+    source: Literal["chat_artifact_boundary"]
+    occurred_at: datetime
+    run_id: TelemetryId
+    session_id: TelemetryId | None = None
+    message_id: TelemetryId | None = None
+    is_streaming: bool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ArtifactPayloadDetectedEventModel(ArtifactTelemetryEventBaseModel):
+    event_name: Literal["artifact_payload_detected"]
+    payload: ArtifactPayloadDetectedPayloadModel
+
+
+class ArtifactRenderAttemptEventModel(ArtifactTelemetryEventBaseModel):
+    event_name: Literal["artifact_render_attempt"]
+    payload: ArtifactRenderAttemptPayloadModel
+
+
+class ArtifactRenderSuccessEventModel(ArtifactTelemetryEventBaseModel):
+    event_name: Literal["artifact_render_success"]
+    payload: ArtifactRenderSuccessPayloadModel
+
+
+class ArtifactRenderFailureEventModel(ArtifactTelemetryEventBaseModel):
+    event_name: Literal["artifact_render_failure"]
+    payload: ArtifactRenderFailurePayloadModel
+
+
+class ArtifactRenderFallbackMarkdownEventModel(ArtifactTelemetryEventBaseModel):
+    event_name: Literal["artifact_render_fallback_markdown"]
+    payload: ArtifactRenderFallbackMarkdownPayloadModel
+
+
+class ArtifactInteractionEventModel(ArtifactTelemetryEventBaseModel):
+    event_name: Literal["artifact_interaction"]
+    payload: ArtifactInteractionPayloadModel
+
+
+class ArtifactBoundaryFlagStateEventModel(ArtifactTelemetryEventBaseModel):
+    event_name: Literal["artifact_boundary_flag_state"]
+    payload: ArtifactBoundaryFlagStatePayloadModel
+
+
+class ArtifactRuntimeAttemptEventModel(ArtifactTelemetryEventBaseModel):
+    event_name: Literal["artifact_runtime_attempt"]
+    payload: ArtifactRuntimeAttemptPayloadModel
+
+
+class ArtifactRuntimeSuccessEventModel(ArtifactTelemetryEventBaseModel):
+    event_name: Literal["artifact_runtime_success"]
+    payload: ArtifactRuntimeSuccessPayloadModel
+
+
+class ArtifactRuntimeFailureEventModel(ArtifactTelemetryEventBaseModel):
+    event_name: Literal["artifact_runtime_failure"]
+    payload: ArtifactRuntimeFailurePayloadModel
+
+
+class ArtifactRuntimeSkippedEventModel(ArtifactTelemetryEventBaseModel):
+    event_name: Literal["artifact_runtime_skipped"]
+    payload: ArtifactRuntimeSkippedPayloadModel
+
+
+UiTelemetryEventModel = Annotated[
+    ArtifactPayloadDetectedEventModel
+    | ArtifactRenderAttemptEventModel
+    | ArtifactRenderSuccessEventModel
+    | ArtifactRenderFailureEventModel
+    | ArtifactRenderFallbackMarkdownEventModel
+    | ArtifactInteractionEventModel
+    | ArtifactBoundaryFlagStateEventModel
+    | ArtifactRuntimeAttemptEventModel
+    | ArtifactRuntimeSuccessEventModel
+    | ArtifactRuntimeFailureEventModel
+    | ArtifactRuntimeSkippedEventModel,
+    Field(discriminator="event_name"),
+]
+
+
+class UiTelemetryIngestRequestModel(BaseModel):
+    events: list[UiTelemetryEventModel] = Field(min_length=1, max_length=10)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class UiTelemetryDataQualityModel(BaseModel):
+    events_with_run_id_pct: float | None = None
+    events_with_source_boundary_pct: float | None = None
+    events_with_client_timestamp_pct: float | None = None
+
+
+class UiTelemetrySummaryMetricsModel(BaseModel):
+    exposure_count: int = Field(ge=0)
+    render_attempt_count: int = Field(ge=0)
+    render_success_rate: float | None = None
+    render_failure_rate: float | None = None
+    fallback_rate_by_reason: dict[str, float | None] = Field(default_factory=dict)
+    interaction_rate: float | None = None
+    runtime_attempt_rate: float | None = None
+    runtime_success_rate: float | None = None
+    runtime_failure_rate: float | None = None
+    runtime_skip_mix: dict[str, float | None] = Field(default_factory=dict)
+    data_quality: UiTelemetryDataQualityModel
+
+
+class UiTelemetryMetricEvaluationModel(BaseModel):
+    metric: str
+    status: Literal["pass", "warn", "fail"]
+    observed: float | None = None
+    sample_count: int = Field(ge=0)
+    comparator: Literal["min", "max"]
+    go_threshold: float
+    rollback_threshold: float | None = None
+    reason: str
+
+
+class UiTelemetryThresholdSampleModel(BaseModel):
+    exposure_count: int = Field(ge=0)
+    payload_detected_count: int = Field(ge=0)
+    render_attempt_count: int = Field(ge=0)
+    runtime_attempt_count: int = Field(ge=0)
+    minimum_exposure_count_for_go: int = Field(ge=1)
+
+
+class UiTelemetryThresholdEvaluationModel(BaseModel):
+    per_metric: dict[str, UiTelemetryMetricEvaluationModel] = Field(default_factory=dict)
+    overall_recommendation: Literal["go", "hold", "rollback_runtime", "rollback_artifacts"]
+    failed_conditions: list[str] = Field(default_factory=list)
+    sample: UiTelemetryThresholdSampleModel
+
+
+class UiTelemetrySummaryResponseModel(BaseModel):
+    window_hours: int = Field(ge=1)
+    generated_at: datetime
+    sampled_event_count: int = Field(ge=0)
+    metrics: UiTelemetrySummaryMetricsModel
+    thresholds: UiTelemetryThresholdEvaluationModel
 
 
 # ---------------------------------------------------------------------------
@@ -540,5 +777,72 @@ class GgufRegisterRequestModel(BaseModel):
     name: str
     path: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# ---------------------------------------------------------------------------
+# OpenAI Chat Completions compatibility models (Phase 1A)
+# Gated by feature flag `api_compat_openai` — off by default.
+# Only non-streaming is supported in this slice.
+# ---------------------------------------------------------------------------
+
+
+class OpenAIChatMessageModel(BaseModel):
+    """Single message in an OpenAI-style chat completions request."""
+
+    role: Literal["system", "user", "assistant"]
+    content: str
+
+    # OpenAI clients may send extra fields (e.g. name); accept and ignore them.
+    model_config = ConfigDict(extra="ignore")
+
+
+class OpenAIChatCompletionRequestModel(BaseModel):
+    """Minimal OpenAI /v1/chat/completions request shape.
+
+    Extra fields sent by standard OpenAI clients (temperature, max_tokens,
+    top_p, etc.) are accepted and silently ignored — this endpoint is a
+    compatibility facade backed by Axiom's existing pipeline.
+    """
+
+    model: str = "axiom"
+    messages: list[OpenAIChatMessageModel] = Field(min_length=1)
+    # stream=True is not supported in this slice; clients that set it get 501.
+    stream: bool | None = None
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class OpenAIChatCompletionMessageOutputModel(BaseModel):
+    role: Literal["assistant"] = "assistant"
+    content: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class OpenAIChatCompletionChoiceModel(BaseModel):
+    index: int
+    message: OpenAIChatCompletionMessageOutputModel
+    finish_reason: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class OpenAIChatCompletionUsageModel(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class OpenAIChatCompletionResponseModel(BaseModel):
+    id: str
+    object: Literal["chat.completion"] = "chat.completion"
+    created: int
+    model: str
+    choices: list[OpenAIChatCompletionChoiceModel]
+    usage: OpenAIChatCompletionUsageModel
 
     model_config = ConfigDict(extra="forbid")

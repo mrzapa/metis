@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import pytest
 
@@ -84,3 +85,36 @@ def test_replayable_run_stream_manager_converts_unknown_custom_event_to_error(tm
     assert [event.event_type for event in replayed] == ["run_started", "error"]
     assert replayed[-1].payload["run_id"] == "run-5"
     assert "unsupported stream event type: custom_event" in replayed[-1].payload["message"]
+
+
+def test_stream_replay_persists_artifacts_as_metadata_only(tmp_path) -> None:
+    store = StreamReplayStore(tmp_path)
+    event = store.append(
+        "run-6",
+        1,
+        {
+            "type": "final",
+            "run_id": "run-6",
+            "answer_text": "ok",
+            "sources": [],
+            "artifacts": [
+                {
+                    "id": "a1",
+                    "type": "table",
+                    "summary": "artifact",
+                    "payload": "x" * 20_000,
+                }
+            ],
+        },
+    )
+
+    artifacts = list(event.payload.get("artifacts") or [])
+    assert len(artifacts) == 1
+    assert artifacts[0]["id"] == "a1"
+    assert artifacts[0]["payload_truncated"] is False
+    assert "payload" not in artifacts[0]
+
+    rows = store.read_run("run-6")
+    assert len(rows) == 1
+    persisted_size = len(json.dumps(rows[0].to_payload(), ensure_ascii=False).encode("utf-8"))
+    assert persisted_size < 12_000

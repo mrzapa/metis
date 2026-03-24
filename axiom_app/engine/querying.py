@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 from typing import Any
 import uuid
@@ -17,6 +18,13 @@ _DEFAULT_SYSTEM_INSTRUCTIONS = (
     "You are Axiom, a grounded AI assistant. Use citations when retrieved context "
     "is available."
 )
+_ARTIFACT_SETTINGS_KEYS = ("arrow_artifacts", "artifacts")
+_MAX_ARROW_ARTIFACTS = 5
+_MAX_ARROW_ARTIFACT_PAYLOAD_BYTES = 16_384
+_MAX_ARROW_ARTIFACT_SUMMARY_CHARS = 280
+_MAX_ARROW_ARTIFACT_ID_CHARS = 96
+_MAX_ARROW_ARTIFACT_TYPE_CHARS = 64
+_MAX_ARROW_ARTIFACT_PATH_CHARS = 240
 
 
 @dataclass(slots=True)
@@ -38,6 +46,7 @@ class RagQueryResult:
     selected_mode: str
     retrieval_plan: dict[str, Any] = field(default_factory=dict)
     fallback: dict[str, Any] = field(default_factory=dict)
+    artifacts: list[dict[str, Any]] | None = None
 
 
 @dataclass(slots=True)
@@ -91,6 +100,116 @@ def _system_instructions(settings: dict[str, Any]) -> str:
 
 def _response_text(result: Any) -> str:
     return str(getattr(result, "content", result) or "")
+
+
+def _truncate_text(value: Any, limit: int) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[: max(limit - 3, 0)].rstrip() + "..."
+
+
+def _normalize_json_value(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _normalize_json_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_normalize_json_value(item) for item in value]
+    return str(value)
+
+
+def _encode_json_size(value: Any) -> int:
+    try:
+        raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    except TypeError:
+        raw = json.dumps(str(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return len(raw.encode("utf-8"))
+
+
+def _normalize_arrow_artifact(raw: Any, *, metadata_only: bool = False) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+
+    artifact_id = _truncate_text(raw.get("id") or raw.get("artifact_id"), _MAX_ARROW_ARTIFACT_ID_CHARS)
+    artifact_type = _truncate_text(raw.get("type") or raw.get("artifact_type"), _MAX_ARROW_ARTIFACT_TYPE_CHARS)
+    if not artifact_type:
+        artifact_type = "unknown"
+    summary = _truncate_text(raw.get("summary") or raw.get("title") or "", _MAX_ARROW_ARTIFACT_SUMMARY_CHARS)
+    path = _truncate_text(raw.get("path") or raw.get("artifact_path") or "", _MAX_ARROW_ARTIFACT_PATH_CHARS)
+    mime_type = _truncate_text(raw.get("mime_type") or raw.get("mimeType") or "", 96)
+
+    payload_raw = raw.get("payload")
+    if payload_raw is None:
+        payload_raw = raw.get("content")
+    payload = _normalize_json_value(payload_raw)
+    payload_bytes = _encode_json_size(payload) if payload is not None else 0
+
+    normalized: dict[str, Any] = {
+        "type": artifact_type,
+        "payload_bytes": payload_bytes,
+        "payload_truncated": False,
+    }
+    if artifact_id:
+        normalized["id"] = artifact_id
+    if summary:
+        normalized["summary"] = summary
+    if path:
+        normalized["path"] = path
+    if mime_type:
+        normalized["mime_type"] = mime_type
+
+    if metadata_only:
+        return normalized
+
+    if payload is not None and payload_bytes <= _MAX_ARROW_ARTIFACT_PAYLOAD_BYTES:
+        normalized["payload"] = payload
+        return normalized
+
+    if payload is not None:
+        normalized["payload_truncated"] = True
+    return normalized
+
+
+def arrow_artifacts_enabled(settings: dict[str, Any]) -> bool:
+    return bool(settings.get("enable_arrow_artifacts", False))
+
+
+def extract_arrow_artifacts(
+    settings: dict[str, Any],
+    *,
+    metadata_only: bool = False,
+    max_count: int = _MAX_ARROW_ARTIFACTS,
+) -> list[dict[str, Any]]:
+    if not arrow_artifacts_enabled(settings):
+        return []
+
+    raw_items: Any = None
+    for key in _ARTIFACT_SETTINGS_KEYS:
+        if key in settings:
+            raw_items = settings.get(key)
+            break
+    if raw_items is None:
+        return []
+
+    if isinstance(raw_items, dict):
+        candidates = [raw_items]
+    elif isinstance(raw_items, list):
+        candidates = raw_items
+    else:
+        return []
+
+    bounded_count = max(0, min(int(max_count or 0), _MAX_ARROW_ARTIFACTS))
+    normalized: list[dict[str, Any]] = []
+    for item in candidates:
+        if len(normalized) >= bounded_count:
+            break
+        parsed = _normalize_arrow_artifact(item, metadata_only=metadata_only)
+        if parsed is not None:
+            normalized.append(parsed)
+    return normalized
 
 
 def _prepare_rag_settings(req: RagQueryRequest) -> tuple[Path, dict[str, Any]]:
@@ -157,6 +276,7 @@ def query_rag(req: RagQueryRequest) -> RagQueryResult:
         selected_mode=_selected_mode(settings),
         retrieval_plan=retrieval_plan.to_dict(),
         fallback=retrieval_plan.fallback.to_dict(),
+        artifacts=extract_arrow_artifacts(settings) or None,
     )
 
 

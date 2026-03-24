@@ -98,26 +98,26 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
   }, [selectedRunId, showLiveTrace]);
 
   return (
-    <div className="glass-panel flex h-full min-h-0 flex-col overflow-hidden rounded-[1.8rem]">
+    <div className="glass-panel flex h-full min-h-0 flex-col overflow-hidden rounded-[1.9rem]">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex h-full flex-col">
         {/* Tab bar */}
-        <div className="shrink-0 border-b border-white/8 px-3 pt-3">
-          <TabsList variant="line" className="h-8">
+        <div className="glass-strip shrink-0 border-b border-white/10 px-3 pt-3">
+          <TabsList variant="line" className="glass-tab-rail h-9 px-1.5">
             <TabsTrigger
               value="sources"
               className={cn(
-                "gap-1 text-xs",
+                "glass-tab-pill gap-1 text-xs",
                 selectedMode === "Evidence Pack" && "font-semibold text-primary"
               )}
             >
               <FileText className="size-3" />
               Sources
             </TabsTrigger>
-            <TabsTrigger value="outline" className="gap-1 text-xs">
+            <TabsTrigger value="outline" className="glass-tab-pill gap-1 text-xs">
               <List className="size-3" />
               Outline
             </TabsTrigger>
-            <TabsTrigger value="trace" className="gap-1 text-xs">
+            <TabsTrigger value="trace" className="glass-tab-pill gap-1 text-xs">
               <Activity className="size-3" />
               Trace
             </TabsTrigger>
@@ -129,7 +129,7 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
           <ScrollArea className="h-full min-h-0">
             <div className="space-y-2 p-3">
               {fallback?.triggered && (
-                <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2">
+                <div className="glass-micro-surface rounded-2xl border-amber-500/25 bg-amber-500/12 px-3 py-2">
                   <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
                     Retrieval fallback triggered
                   </p>
@@ -154,7 +154,7 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
                       a.click();
                       URL.revokeObjectURL(url);
                     }}
-                    className="rounded-full border border-white/8 px-3 py-1 text-[11px] font-medium hover:bg-muted transition-colors"
+                    className="glass-micro-surface rounded-full px-3 py-1 text-[11px] font-medium transition-colors hover:bg-white/10"
                   >
                     Download JSON
                   </button>
@@ -162,7 +162,7 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
               )}
 
               {sources.length === 0 && (
-                <p className="py-8 text-center text-xs text-muted-foreground">
+                <p className="glass-micro-surface rounded-[1.2rem] px-4 py-8 text-center text-xs text-muted-foreground">
                   No sources yet. Sources will appear here when the assistant
                   references documents.
                 </p>
@@ -178,8 +178,8 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
         {/* Outline tab */}
         <TabsContent value="outline" className="flex-1 min-h-0 overflow-hidden">
           <ScrollArea className="h-full min-h-0">
-            <div className="p-3">
-              <p className="py-8 text-center text-xs text-muted-foreground">
+            <div className="p-3.5">
+              <p className="glass-micro-surface rounded-[1.2rem] px-4 py-8 text-center text-xs text-muted-foreground">
                 Outline will show the structure of the current conversation.
               </p>
             </div>
@@ -189,7 +189,7 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
         {/* Trace tab */}
         <TabsContent value="trace" className="flex h-full min-h-0 flex-col overflow-hidden">
           {/* Run selector */}
-          <div className="shrink-0 border-b border-white/8 px-3 py-2">
+          <div className="glass-strip shrink-0 border-b border-white/10 px-3 py-2">
             <div className="flex items-center gap-2">
               <label htmlFor="run-selector" className="text-xs text-muted-foreground whitespace-nowrap">
                 Run
@@ -201,7 +201,7 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
                   id="run-selector"
                   value={selectedRunId}
                   onChange={(e) => setSelectedRunId(e.target.value)}
-                  className="flex-1 text-xs rounded border bg-background px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="glass-micro-surface flex-1 rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 >
                   <option value="">Select a run…</option>
                   {availableRunIds.map((id, idx) => (
@@ -219,9 +219,9 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
           {/* Timeline content */}
           <div className="flex-1 overflow-hidden">
             <ScrollArea className="h-full min-h-0">
-              <div className="p-3">
+              <div className="p-3.5">
                 {!selectedRunId ? (
-                  <p className="py-8 text-center text-xs text-muted-foreground">
+                  <p className="glass-micro-surface rounded-[1.2rem] px-4 py-8 text-center text-xs text-muted-foreground">
                     Select a run above to view its trace.
                   </p>
                 ) : showLiveTrace ? (
@@ -233,17 +233,17 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
                     {liveTraceEvents && liveTraceEvents.length > 0 ? (
                       <TraceTimeline events={liveTraceEvents} />
                     ) : (
-                      <p className="py-8 text-center text-xs text-muted-foreground animate-pulse">
+                      <p className="glass-micro-surface rounded-[1.2rem] px-4 py-8 text-center text-xs text-muted-foreground animate-pulse">
                         Waiting for trace events…
                       </p>
                     )}
                   </>
                 ) : traceLoading ? (
-                  <p className="py-8 text-center text-xs text-muted-foreground animate-pulse">
+                  <p className="glass-micro-surface rounded-[1.2rem] px-4 py-8 text-center text-xs text-muted-foreground animate-pulse">
                     Loading trace…
                   </p>
                 ) : traceError ? (
-                  <p className="py-8 text-center text-xs text-destructive">
+                  <p className="glass-micro-surface rounded-[1.2rem] px-4 py-8 text-center text-xs text-destructive">
                     {traceError}
                   </p>
                 ) : (

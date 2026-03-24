@@ -9,22 +9,28 @@ import os
 import pathlib
 import secrets
 import tempfile
+import time
 import uuid
 from collections.abc import AsyncGenerator, Generator
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, HTTPException, Header, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Header, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import ValidationError
 
+import axiom_app.settings_store as _settings_store
 from axiom_app.engine import list_indexes
 from axiom_app.engine.querying import _normalize_run_id
 from axiom_app.services.stream_replay import ReplayableRunStreamManager
 from axiom_app.services.trace_store import TraceStore
 from axiom_app.services.workspace_orchestrator import WorkspaceOrchestrator
+from axiom_app.utils.feature_flags import FeatureFlag, get_feature_statuses
 
 from . import gguf as _gguf
+from . import features as _features
 from . import logs as _logs
 from . import sessions as _sessions
 from . import settings as _settings
@@ -36,9 +42,16 @@ from .models import (
     IndexBuildResultModel,
     KnowledgeSearchRequestModel,
     KnowledgeSearchResultModel,
+    OpenAIChatCompletionChoiceModel,
+    OpenAIChatCompletionMessageOutputModel,
+    OpenAIChatCompletionRequestModel,
+    OpenAIChatCompletionResponseModel,
+    OpenAIChatCompletionUsageModel,
     RagQueryRequestModel,
     RagQueryResultModel,
     RunActionRequestModel,
+    UiTelemetryIngestRequestModel,
+    UiTelemetrySummaryResponseModel,
 )
 
 _DEFAULT_LOCAL_ORIGINS = [
@@ -49,6 +62,7 @@ _DEFAULT_LOCAL_ORIGINS = [
 ]
 
 _RAG_STREAM_MANAGER = ReplayableRunStreamManager()
+_MAX_UI_TELEMETRY_REQUEST_BYTES = 16_384
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -103,6 +117,7 @@ def create_app() -> FastAPI:
     app.include_router(_logs.router, dependencies=_auth)
     app.include_router(_gguf.router, dependencies=_auth)
     app.include_router(_assistant.router, dependencies=_auth)
+    app.include_router(_features.router, dependencies=_auth)
 
     @app.get("/v1/version")
     def api_version() -> dict[str, str]:
@@ -259,6 +274,57 @@ def create_app() -> FastAPI:
     def api_get_trace(run_id: str) -> list[dict[str, Any]]:
         return TraceStore().read_run_events(run_id)
 
+    @app.post("/v1/telemetry/ui", dependencies=_auth)
+    async def api_ingest_ui_telemetry(request: Request) -> dict[str, int]:
+        content_length = request.headers.get("content-length", "").strip()
+        if content_length:
+            try:
+                if int(content_length) > _MAX_UI_TELEMETRY_REQUEST_BYTES:
+                    raise HTTPException(status_code=413, detail="Telemetry payload too large")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid Content-Length header")
+
+        raw_body = await request.body()
+        if not raw_body:
+            raise HTTPException(status_code=400, detail="Telemetry payload required")
+        if len(raw_body) > _MAX_UI_TELEMETRY_REQUEST_BYTES:
+            raise HTTPException(status_code=413, detail="Telemetry payload too large")
+
+        try:
+            raw_payload = json.loads(raw_body)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Malformed JSON payload") from exc
+
+        try:
+            payload = UiTelemetryIngestRequestModel.model_validate(raw_payload)
+        except ValidationError as exc:
+            raise RequestValidationError(exc.errors()) from exc
+
+        accepted = WorkspaceOrchestrator().ingest_ui_telemetry_events(
+            [event.model_dump(mode="json") for event in payload.events]
+        )
+        return {"accepted": accepted}
+
+    @app.get(
+        "/v1/telemetry/ui/summary",
+        response_model=UiTelemetrySummaryResponseModel,
+        dependencies=_auth,
+    )
+    def api_ui_telemetry_summary(
+        window_hours: int = 24,
+        limit: int = 50_000,
+    ) -> UiTelemetrySummaryResponseModel:
+        if window_hours <= 0:
+            raise HTTPException(status_code=422, detail="window_hours must be a positive integer")
+        if limit <= 0:
+            raise HTTPException(status_code=422, detail="limit must be a positive integer")
+
+        summary = WorkspaceOrchestrator().get_ui_telemetry_summary(
+            window_hours=window_hours,
+            limit=limit,
+        )
+        return UiTelemetrySummaryResponseModel.model_validate(summary)
+
     @app.post("/v1/runs/{run_id}/actions", dependencies=_auth)
     def api_run_action(run_id: str, payload: RunActionRequestModel) -> dict[str, Any]:
         log.info(
@@ -272,6 +338,79 @@ def create_app() -> FastAPI:
             "approved": payload.approved,
             "status": "accepted",
         }
+
+    @app.post(
+        "/v1/openai/chat/completions",
+        response_model=OpenAIChatCompletionResponseModel,
+        dependencies=_auth,
+    )
+    def api_openai_chat_completions(
+        payload: OpenAIChatCompletionRequestModel,
+    ) -> OpenAIChatCompletionResponseModel:
+        """OpenAI-compatible chat completions endpoint (non-streaming).
+
+        Guarded by feature flag ``api_compat_openai`` (default: off).
+        Internally delegates to the existing direct-query pipeline.
+        """
+        settings = _settings_store.load_settings()
+        flag_enabled = any(
+            s.enabled
+            for s in get_feature_statuses(settings)
+            if s.name == str(FeatureFlag.API_COMPAT_OPENAI)
+        )
+        if not flag_enabled:
+            raise HTTPException(
+                status_code=404,
+                detail="OpenAI compatibility endpoint is disabled. "
+                "Enable feature flag 'api_compat_openai' to use it.",
+            )
+
+        if payload.stream is True:
+            raise HTTPException(
+                status_code=501,
+                detail="Streaming is not supported by this endpoint. "
+                "Use stream=false or omit the field.",
+            )
+
+        # Use the last user-role message as the prompt.
+        prompt = next(
+            (m.content for m in reversed(payload.messages) if m.role == "user"),
+            "",
+        )
+        if not prompt.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="No user message found in the messages array.",
+            )
+
+        direct_req = DirectQueryRequestModel(prompt=prompt, settings=settings)
+        orchestrator = WorkspaceOrchestrator()
+        result = _run_engine(
+            orchestrator.run_direct_query,
+            direct_req.to_engine(),
+        )
+
+        return OpenAIChatCompletionResponseModel(
+            id=f"axiom-{result.run_id}",
+            object="chat.completion",
+            created=int(time.time()),
+            model=payload.model,
+            choices=[
+                OpenAIChatCompletionChoiceModel(
+                    index=0,
+                    message=OpenAIChatCompletionMessageOutputModel(
+                        role="assistant",
+                        content=result.answer_text,
+                    ),
+                    finish_reason="stop",
+                )
+            ],
+            usage=OpenAIChatCompletionUsageModel(
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+            ),
+        )
 
     @app.post("/v1/query/rag/stream", dependencies=_auth)
     def api_stream_rag(

@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
+import { useArrowState } from "@/hooks/use-arrow-state";
 import { useSessions } from "@/hooks/use-sessions";
 import { cn } from "@/lib/utils";
 import { MessageSquarePlus, Search, Settings, WifiOff } from "lucide-react";
@@ -18,7 +19,7 @@ interface SessionsPanelProps {
 }
 
 export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }: SessionsPanelProps) {
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useArrowState("");
   const { sessions, loading, error, reload } = useSessions(search);
 
   // Reload the session list whenever the parent bumps the refresh token.
@@ -32,9 +33,9 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
   const isConnectionError = error?.toLowerCase().includes("connection error");
 
   return (
-    <div className="glass-panel flex h-full min-h-0 flex-col overflow-hidden rounded-[1.8rem]">
+    <div className="glass-panel flex h-full min-h-0 flex-col overflow-hidden rounded-[1.9rem]">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
+      <div className="glass-strip flex items-center justify-between border-b border-white/10 px-4 py-3">
         <h2 className="text-sm font-semibold">Sessions</h2>
         <Button variant="ghost" size="icon" className="size-7" aria-label="New chat" onClick={onNewChat}>
           <AnimatedLucideIcon icon={MessageSquarePlus} mode="hoverLift" className="size-4" />
@@ -42,7 +43,7 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
       </div>
 
       {/* Search */}
-      <div className="relative border-b border-white/8 px-4 py-3">
+      <div className="glass-strip relative border-b border-white/10 px-4 py-3">
         <AnimatedLucideIcon
           icon={Search}
           mode="hoverLift"
@@ -52,14 +53,14 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
           placeholder="Search sessions…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-9 pl-9 text-sm"
+          className="glass-micro-surface h-9 border-white/10 bg-white/6 pl-9 text-sm"
           aria-label="Search sessions"
         />
       </div>
 
       {/* Session list */}
       <ScrollArea className="flex-1 min-h-0">
-        <div className="space-y-1 p-2" role="listbox" aria-label="Sessions">
+        <div className="space-y-1.5 p-2.5" role="listbox" aria-label="Sessions">
           {loading && (
             <p className="px-3 py-8 text-center text-xs text-muted-foreground">
               Loading…
@@ -100,10 +101,10 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
               aria-selected={selectedId === s.session_id}
               onClick={() => onSelect(s.session_id)}
               className={cn(
-                "flex w-full cursor-pointer flex-col gap-1 rounded-[1.2rem] border px-3 py-3 text-left text-sm transition-all duration-200 hover:border-primary/18 hover:bg-white/6",
+                "glass-micro-surface flex w-full cursor-pointer flex-col gap-1 rounded-[1.2rem] px-3 py-3 text-left text-sm transition-all duration-200 hover:border-primary/18 hover:bg-white/8",
                 selectedId === s.session_id
                   ? "border-primary/20 bg-primary/10"
-                  : "border-transparent bg-transparent"
+                  : ""
               )}
             >
               <span className="truncate font-medium">
@@ -115,12 +116,12 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
               {(s.mode || s.llm_provider) && (
                 <div className="mt-0.5 flex gap-1">
                   {s.mode && (
-                    <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                    <span className="chat-control-pill rounded-full px-1.5 py-0.5 text-[10px] text-muted-foreground">
                       {s.mode}
                     </span>
                   )}
                   {s.llm_provider && (
-                    <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                    <span className="chat-control-pill rounded-full px-1.5 py-0.5 text-[10px] text-muted-foreground">
                       {s.llm_provider}
                     </span>
                   )}
@@ -132,10 +133,10 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
       </ScrollArea>
 
       {/* Footer nav */}
-      <div className="border-t border-white/8 px-4 py-3">
+      <div className="glass-strip border-t border-white/10 px-4 py-3">
         <Link
           href="/settings"
-          className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-white/6 hover:text-foreground"
+          className="glass-micro-surface flex items-center gap-2 rounded-xl px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-white/8 hover:text-foreground"
         >
           <AnimatedLucideIcon icon={Settings} mode="hoverLift" className="size-3.5" />
           Settings

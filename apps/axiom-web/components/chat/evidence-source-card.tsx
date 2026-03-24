@@ -75,7 +75,7 @@ export function EvidenceSourceCard({ source: src }: EvidenceSourceCardProps) {
   return (
     <TooltipProvider>
       <Card className="gap-0 py-0">
-        <CardHeader className="px-3 py-2">
+        <CardHeader className="px-3 py-1.5">
           <div className="flex items-start justify-between gap-2">
             {/* Sid badge + label */}
             <div className="flex min-w-0 items-start gap-1.5">
@@ -141,7 +141,7 @@ export function EvidenceSourceCard({ source: src }: EvidenceSourceCardProps) {
 
         <CardContent className="px-3 pb-2">
           {locationHints.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-1">
+            <div className="mb-1.5 flex flex-wrap gap-0.5">
               {locationHints.map((hint) => (
                 <span
                   key={hint}
@@ -162,15 +162,15 @@ export function EvidenceSourceCard({ source: src }: EvidenceSourceCardProps) {
           {/* Snippet */}
           <p
             className={cn(
-              "text-xs text-muted-foreground",
+                "text-xs leading-snug text-muted-foreground",
               !expanded && isLong && "line-clamp-3",
             )}
           >
             {src.snippet}
           </p>
 
-          {matchedChildCount !== null && (
-            <div className="mt-2 rounded-xl border border-white/8 bg-black/10 px-2.5 py-2">
+            {matchedChildCount !== null && matchedChildCount > 0 && (
+              <div className="mt-2 rounded-xl border border-white/8 bg-black/10 px-2.5 py-2">
               <p className="text-[10px] font-medium text-foreground">
                 Matched child chunks: {matchedChildCount}
               </p>

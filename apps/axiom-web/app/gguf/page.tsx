@@ -57,7 +57,7 @@ function OverviewPill({
   note: string;
 }) {
   return (
-    <div className="rounded-[1.1rem] border border-white/8 bg-black/10 px-4 py-3">
+    <div className="glass-settings-pane rounded-[1.1rem] px-4 py-3">
       <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
         {label}
       </p>
@@ -103,7 +103,7 @@ function HardwareCard({ hardware }: { hardware: GgufHardwareProfile }) {
         </div>
 
         {hardware.has_gpu && hardware.gpu_name && (
-          <div className="flex items-center gap-2 rounded-[1rem] border border-white/8 bg-black/10 px-3 py-3">
+          <div className="glass-settings-pane flex items-center gap-2 rounded-[1rem] px-3 py-3">
             <AnimatedLucideIcon icon={HardDrive} mode="hoverLift" className="size-4 text-muted-foreground" />
             <span className="min-w-0 truncate">{hardware.gpu_name}</span>
             {hardware.gpu_vram_gb && <span>({hardware.gpu_vram_gb} GB VRAM)</span>}
@@ -134,7 +134,7 @@ function ScoreBreakdown({ entry }: { entry: GgufCatalogEntry }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {Object.entries(entry.score_components).map(([key, value]) => (
-        <div key={key} className="rounded-[1rem] border border-white/8 bg-black/10 px-4 py-3">
+        <div key={key} className="glass-settings-pane rounded-[1rem] px-4 py-3">
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
               {SCORE_LABELS[key] || key}
@@ -196,7 +196,7 @@ function RecommendationDetails({
           />
         </div>
 
-        <div className="rounded-[1rem] border border-white/8 bg-black/10 px-4 py-4 text-sm leading-6 text-muted-foreground">
+        <div className="glass-settings-pane rounded-[1rem] px-4 py-4 text-sm leading-6 text-muted-foreground">
           {entry.recommendation_summary}
         </div>
 
@@ -236,7 +236,7 @@ function RecommendationDetails({
             <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Nearby alternatives</p>
             <div className="space-y-2">
               {alternatives.map((alternative) => (
-                <div key={alternative.model_name} className="rounded-[1rem] border border-white/8 bg-black/10 px-3 py-3">
+                <div key={alternative.model_name} className="glass-settings-pane rounded-[1rem] px-3 py-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-medium text-foreground">{alternative.model_name}</p>
@@ -267,7 +267,7 @@ function CatalogList({
 }) {
   if (entries.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-2 rounded-[1.2rem] border border-white/8 bg-black/10 py-14 text-muted-foreground">
+      <div className="glass-panel flex flex-col items-center gap-2 rounded-[1.2rem] py-14 text-muted-foreground">
         <AnimatedLucideIcon icon={HardDrive} mode="idlePulse" className="size-8" />
         <p>No models in catalogue</p>
       </div>
@@ -337,7 +337,7 @@ function InstalledList({
 }) {
   if (entries.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-2 rounded-[1.2rem] border border-white/8 bg-black/10 py-14 text-muted-foreground">
+      <div className="glass-panel flex flex-col items-center gap-2 rounded-[1.2rem] py-14 text-muted-foreground">
         <AnimatedLucideIcon icon={Upload} mode="idlePulse" className="size-8" />
         <p>No locally registered models</p>
         <p className="text-xs">Use the validator below to register a model</p>
@@ -507,7 +507,7 @@ export default function GgufPage() {
       description="Browse the catalogue, check hardware compatibility, validate, and register local models for fully offline inference."
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 rounded-full border border-white/8 bg-black/10 px-3 py-1.5 text-sm">
+          <div className="glass-panel flex items-center gap-2 rounded-full px-3 py-1.5 text-sm">
             <span className="text-muted-foreground">Use case</span>
             <select
               value={useCase}
@@ -576,7 +576,7 @@ export default function GgufPage() {
         )}
 
         {loading ? (
-          <div className="flex items-center gap-2 rounded-[1.2rem] border border-white/8 bg-black/10 px-4 py-4 text-muted-foreground">
+          <div className="glass-panel flex items-center gap-2 rounded-[1.2rem] px-4 py-4 text-muted-foreground">
             <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-6" />
             Loading models...
           </div>
@@ -589,7 +589,7 @@ export default function GgufPage() {
                 </CardHeader>
                 <CardContent>
                   <Tabs defaultValue="catalog" className="space-y-5">
-                    <TabsList className="grid w-full grid-cols-3">
+                    <TabsList className="glass-tab-rail grid w-full grid-cols-3">
                       <TabsTrigger value="catalog">Catalogue ({catalog.length})</TabsTrigger>
                       <TabsTrigger value="installed">Installed ({installed.length})</TabsTrigger>
                       <TabsTrigger value="validate">Validate</TabsTrigger>
@@ -612,7 +612,7 @@ export default function GgufPage() {
                     </TabsContent>
 
                     <TabsContent value="validate" className="mt-0 space-y-4">
-                      <Card className="border-white/8 bg-black/10">
+                      <Card className="glass-panel">
                         <CardHeader className="pb-2">
                           <CardTitle className="flex items-center gap-2 text-base">
                             <AnimatedLucideIcon icon={FileCheck} mode="hoverLift" className="size-4" />

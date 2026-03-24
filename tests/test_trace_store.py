@@ -211,6 +211,595 @@ class TestAggregateMetrics:
         json.dumps(metrics)  # must not raise
 
 
+class TestAggregateUiArtifactSummary:
+    @staticmethod
+    def _write_ui_event_lines(store: TraceStore, rows: list[dict[str, object]]) -> None:
+        lines = [json.dumps(row, sort_keys=True) for row in rows]
+        store.runs_jsonl.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_aggregation_math_on_known_fixtures(self, tmp_path) -> None:
+        store = TraceStore(tmp_path)
+        self._write_ui_event_lines(
+            store,
+            [
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:00+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_payload_detected",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:00Z",
+                        "telemetry": {"has_valid_artifacts": True},
+                    },
+                },
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:01+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_attempt",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:01Z",
+                        "telemetry": {},
+                    },
+                },
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:02+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_success",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:02Z",
+                        "telemetry": {},
+                    },
+                },
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:03+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_interaction",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:03Z",
+                        "telemetry": {},
+                    },
+                },
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:04+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_runtime_attempt",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:04Z",
+                        "telemetry": {},
+                    },
+                },
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:05+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_runtime_success",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:05Z",
+                        "telemetry": {},
+                    },
+                },
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:06+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_fallback_markdown",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:06Z",
+                        "telemetry": {"reason": "invalid_payload"},
+                    },
+                },
+            ],
+        )
+
+        summary = store.aggregate_ui_artifact_summary(window_hours=200_000)
+        metrics = summary["metrics"]
+
+        assert metrics["exposure_count"] == 1
+        assert metrics["render_attempt_count"] == 1
+        assert metrics["render_success_rate"] == 1.0
+        assert metrics["render_failure_rate"] == 0.0
+        assert metrics["interaction_rate"] == 1.0
+        assert metrics["runtime_attempt_rate"] == 1.0
+        assert metrics["runtime_success_rate"] == 1.0
+        assert metrics["runtime_failure_rate"] == 0.0
+        assert metrics["fallback_rate_by_reason"]["invalid_payload"] == 1.0
+
+    def test_handles_malformed_payloads_without_crashing(self, tmp_path) -> None:
+        store = TraceStore(tmp_path)
+        store.runs_jsonl.write_text(
+            "\n".join(
+                [
+                    "not-json",
+                    json.dumps({"event_type": "artifact_render_attempt", "payload": "oops"}),
+                    json.dumps(
+                        {
+                            "run_id": "run-1",
+                            "event_type": "artifact_runtime_skipped",
+                            "payload": {
+                                "source": "chat_artifact_boundary",
+                                "telemetry": {"reason": "payload_truncated"},
+                            },
+                        }
+                    ),
+                    json.dumps({"event_type": "unknown_event", "payload": {}}),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        summary = store.aggregate_ui_artifact_summary(window_hours=200_000)
+        assert summary["sampled_event_count"] == 2
+        assert summary["metrics"]["render_attempt_count"] == 0
+        assert summary["metrics"]["runtime_skip_mix"]["payload_truncated"] == 1.0
+
+    def test_missing_run_id_rows_are_excluded_from_rollout_denominators(self, tmp_path) -> None:
+        store = TraceStore(tmp_path)
+        base_payload = {
+            "source": "chat_artifact_boundary",
+            "client_timestamp": "2026-03-23T10:00:00Z",
+            "telemetry": {},
+        }
+        self._write_ui_event_lines(
+            store,
+            [
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:00+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_payload_detected",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:00Z",
+                        "telemetry": {"has_valid_artifacts": True},
+                    },
+                },
+                {
+                    "timestamp": "2026-03-23T10:00:00+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_payload_detected",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:00Z",
+                        "telemetry": {"has_valid_artifacts": True},
+                    },
+                },
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:01+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_attempt",
+                    "payload": base_payload,
+                },
+                {
+                    "timestamp": "2026-03-23T10:00:01+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_attempt",
+                    "payload": base_payload,
+                },
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:02+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_success",
+                    "payload": base_payload,
+                },
+                {
+                    "timestamp": "2026-03-23T10:00:02+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_failure",
+                    "payload": base_payload,
+                },
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:03+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_interaction",
+                    "payload": base_payload,
+                },
+                {
+                    "timestamp": "2026-03-23T10:00:03+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_interaction",
+                    "payload": base_payload,
+                },
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:04+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_runtime_attempt",
+                    "payload": base_payload,
+                },
+                {
+                    "timestamp": "2026-03-23T10:00:04+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_runtime_attempt",
+                    "payload": base_payload,
+                },
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:05+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_runtime_success",
+                    "payload": base_payload,
+                },
+                {
+                    "timestamp": "2026-03-23T10:00:05+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_runtime_failure",
+                    "payload": base_payload,
+                },
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:06+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_fallback_markdown",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:06Z",
+                        "telemetry": {"reason": "invalid_payload"},
+                    },
+                },
+                {
+                    "timestamp": "2026-03-23T10:00:06+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_fallback_markdown",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:06Z",
+                        "telemetry": {"reason": "invalid_payload"},
+                    },
+                },
+            ],
+        )
+
+        summary = store.aggregate_ui_artifact_summary(window_hours=200_000)
+        metrics = summary["metrics"]
+
+        assert summary["sampled_event_count"] == 14
+        assert metrics["exposure_count"] == 1
+        assert metrics["render_attempt_count"] == 1
+        assert metrics["render_success_rate"] == 1.0
+        assert metrics["render_failure_rate"] == 0.0
+        assert metrics["interaction_rate"] == 1.0
+        assert metrics["runtime_attempt_rate"] == 1.0
+        assert metrics["runtime_success_rate"] == 1.0
+        assert metrics["runtime_failure_rate"] == 0.0
+        assert metrics["fallback_rate_by_reason"]["invalid_payload"] == 1.0
+        assert metrics["data_quality"]["events_with_run_id_pct"] == 50.0
+
+    def test_zero_denominator_metrics_return_none(self, tmp_path) -> None:
+        store = TraceStore(tmp_path)
+        self._write_ui_event_lines(
+            store,
+            [
+                {
+                    "run_id": "run-1",
+                    "timestamp": "2026-03-23T10:00:00+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_boundary_flag_state",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:00Z",
+                        "telemetry": {"state": "enabled"},
+                    },
+                }
+            ],
+        )
+
+        summary = store.aggregate_ui_artifact_summary(window_hours=200_000)
+        metrics = summary["metrics"]
+
+        assert metrics["render_success_rate"] is None
+        assert metrics["render_failure_rate"] is None
+        assert metrics["runtime_attempt_rate"] is None
+        assert metrics["runtime_success_rate"] is None
+        assert metrics["runtime_failure_rate"] is None
+
+    def test_recommendation_transitions_to_go(self, tmp_path) -> None:
+        store = TraceStore(tmp_path)
+        rows: list[dict[str, object]] = []
+        for idx in range(400):
+            run_id = f"run-{idx}"
+            base_payload = {
+                "source": "chat_artifact_boundary",
+                "client_timestamp": "2026-03-23T10:00:00Z",
+                "telemetry": {},
+            }
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "timestamp": "2026-03-23T10:00:00+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_payload_detected",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:00Z",
+                        "telemetry": {"has_valid_artifacts": True},
+                    },
+                }
+            )
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "timestamp": "2026-03-23T10:00:01+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_attempt",
+                    "payload": base_payload,
+                }
+            )
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "timestamp": "2026-03-23T10:00:02+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": (
+                        "artifact_render_failure" if idx == 0 else "artifact_render_success"
+                    ),
+                    "payload": base_payload,
+                }
+            )
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "timestamp": "2026-03-23T10:00:03+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_runtime_attempt",
+                    "payload": base_payload,
+                }
+            )
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "timestamp": "2026-03-23T10:00:04+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": (
+                        "artifact_runtime_failure" if idx == 1 else "artifact_runtime_success"
+                    ),
+                    "payload": base_payload,
+                }
+            )
+            if idx < 40:
+                rows.append(
+                    {
+                        "run_id": run_id,
+                        "timestamp": "2026-03-23T10:00:05+00:00",
+                        "stage": "ui_artifact",
+                        "event_type": "artifact_interaction",
+                        "payload": base_payload,
+                    }
+                )
+            if idx < 4:
+                rows.append(
+                    {
+                        "run_id": run_id,
+                        "timestamp": "2026-03-23T10:00:06+00:00",
+                        "stage": "ui_artifact",
+                        "event_type": "artifact_runtime_skipped",
+                        "payload": {
+                            "source": "chat_artifact_boundary",
+                            "client_timestamp": "2026-03-23T10:00:00Z",
+                            "telemetry": {"reason": "invalid_payload"},
+                        },
+                    }
+                )
+            if idx < 10:
+                rows.append(
+                    {
+                        "run_id": run_id,
+                        "timestamp": "2026-03-23T10:00:06+00:00",
+                        "stage": "ui_artifact",
+                        "event_type": "artifact_runtime_skipped",
+                        "payload": {
+                            "source": "chat_artifact_boundary",
+                            "client_timestamp": "2026-03-23T10:00:00Z",
+                            "telemetry": {"reason": "payload_truncated"},
+                        },
+                    }
+                )
+
+        self._write_ui_event_lines(store, rows)
+        summary = store.aggregate_ui_artifact_summary(window_hours=200_000, limit=200_000)
+
+        assert summary["thresholds"]["overall_recommendation"] == "go"
+        assert summary["thresholds"]["failed_conditions"] == []
+
+    def test_recommendation_transitions_to_hold(self, tmp_path) -> None:
+        store = TraceStore(tmp_path)
+        rows: list[dict[str, object]] = []
+        for idx in range(100):
+            run_id = f"run-{idx}"
+            base_payload = {
+                "source": "chat_artifact_boundary",
+                "client_timestamp": "2026-03-23T10:00:00Z",
+                "telemetry": {},
+            }
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "timestamp": "2026-03-23T10:00:00+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_payload_detected",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:00Z",
+                        "telemetry": {"has_valid_artifacts": True},
+                    },
+                }
+            )
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "timestamp": "2026-03-23T10:00:01+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_attempt",
+                    "payload": base_payload,
+                }
+            )
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "timestamp": "2026-03-23T10:00:02+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": (
+                        "artifact_render_failure" if idx == 0 else "artifact_render_success"
+                    ),
+                    "payload": base_payload,
+                }
+            )
+
+        self._write_ui_event_lines(store, rows)
+        summary = store.aggregate_ui_artifact_summary(window_hours=200_000)
+        assert summary["thresholds"]["overall_recommendation"] == "hold"
+
+    def test_recommendation_transitions_to_rollback_artifacts(self, tmp_path) -> None:
+        store = TraceStore(tmp_path)
+        rows: list[dict[str, object]] = []
+        for idx in range(100):
+            rows.append(
+                {
+                    "run_id": f"run-{idx}",
+                    "timestamp": "2026-03-23T10:00:00+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_payload_detected",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:00Z",
+                        "telemetry": {"has_valid_artifacts": True},
+                    },
+                }
+            )
+            rows.append(
+                {
+                    "run_id": f"run-{idx}",
+                    "timestamp": "2026-03-23T10:00:01+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_attempt",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:01Z",
+                        "telemetry": {},
+                    },
+                }
+            )
+            rows.append(
+                {
+                    "run_id": f"run-{idx}",
+                    "timestamp": "2026-03-23T10:00:02+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": (
+                        "artifact_render_failure" if idx < 5 else "artifact_render_success"
+                    ),
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:02Z",
+                        "telemetry": {},
+                    },
+                }
+            )
+
+        self._write_ui_event_lines(store, rows)
+        summary = store.aggregate_ui_artifact_summary(window_hours=200_000)
+
+        assert summary["thresholds"]["overall_recommendation"] == "rollback_artifacts"
+        assert any(
+            condition.startswith("render_failure_rate")
+            for condition in summary["thresholds"]["failed_conditions"]
+        )
+
+    def test_recommendation_transitions_to_rollback_runtime(self, tmp_path) -> None:
+        store = TraceStore(tmp_path)
+        rows: list[dict[str, object]] = []
+        for idx in range(120):
+            rows.append(
+                {
+                    "run_id": f"run-{idx}",
+                    "timestamp": "2026-03-23T10:00:00+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_payload_detected",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:00Z",
+                        "telemetry": {"has_valid_artifacts": True},
+                    },
+                }
+            )
+            rows.append(
+                {
+                    "run_id": f"run-{idx}",
+                    "timestamp": "2026-03-23T10:00:01+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_attempt",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:01Z",
+                        "telemetry": {},
+                    },
+                }
+            )
+            rows.append(
+                {
+                    "run_id": f"run-{idx}",
+                    "timestamp": "2026-03-23T10:00:02+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_render_success",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:02Z",
+                        "telemetry": {},
+                    },
+                }
+            )
+            rows.append(
+                {
+                    "run_id": f"run-{idx}",
+                    "timestamp": "2026-03-23T10:00:03+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": "artifact_runtime_attempt",
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:03Z",
+                        "telemetry": {},
+                    },
+                }
+            )
+            rows.append(
+                {
+                    "run_id": f"run-{idx}",
+                    "timestamp": "2026-03-23T10:00:04+00:00",
+                    "stage": "ui_artifact",
+                    "event_type": (
+                        "artifact_runtime_failure" if idx < 3 else "artifact_runtime_success"
+                    ),
+                    "payload": {
+                        "source": "chat_artifact_boundary",
+                        "client_timestamp": "2026-03-23T10:00:04Z",
+                        "telemetry": {},
+                    },
+                }
+            )
+
+        self._write_ui_event_lines(store, rows)
+        summary = store.aggregate_ui_artifact_summary(window_hours=200_000)
+
+        assert summary["thresholds"]["overall_recommendation"] == "rollback_runtime"
+        assert any(
+            condition.startswith("runtime_failure_rate")
+            for condition in summary["thresholds"]["failed_conditions"]
+        )
+
+
 # ---------------------------------------------------------------------------
 # Audit log emission
 # ---------------------------------------------------------------------------

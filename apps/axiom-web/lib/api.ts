@@ -1,5 +1,6 @@
 import type {
   ActionRequiredAction,
+  ArrowArtifact,
   ChatMessageContent,
   EvidenceSource,
 } from "@/lib/chat-types";
@@ -65,6 +66,7 @@ export interface DirectQueryResult {
   selected_mode: string;
   llm_provider: string;
   llm_model: string;
+  artifacts?: ArrowArtifact[];
 }
 
 export interface IndexSummary {
@@ -86,6 +88,7 @@ export interface RagQueryResult {
   selected_mode: string;
   retrieval_plan: RetrievalPlan;
   fallback: RetrievalFallback;
+  artifacts?: ArrowArtifact[];
 }
 
 export interface RetrievalFallback {
@@ -161,6 +164,7 @@ export interface RagStreamFinalEvent extends RagStreamEnvelopeFields {
   answer_text: string;
   sources: EvidenceSource[];
   fallback?: RetrievalFallback;
+  artifacts?: ArrowArtifact[];
 }
 
 export interface RagStreamErrorEvent extends RagStreamEnvelopeFields {
@@ -249,6 +253,10 @@ function getStringArray(value: unknown): string[] {
 
 function getEvidenceSources(value: unknown): EvidenceSource[] {
   return Array.isArray(value) ? (value as EvidenceSource[]) : [];
+}
+
+function getArrowArtifacts(value: unknown): ArrowArtifact[] | undefined {
+  return Array.isArray(value) ? (value as ArrowArtifact[]) : undefined;
 }
 
 function getActionRequiredAction(value: unknown): ActionRequiredAction {
@@ -340,6 +348,7 @@ export function normalizeRagStreamEvent(rawEvent: unknown): RagStreamEvent {
         answer_text: getText(event.answer_text ?? payload.answer_text),
         sources: getEvidenceSources(event.sources ?? payload.sources),
         fallback: getRecord(event.fallback ?? payload.fallback),
+        artifacts: getArrowArtifacts(event.artifacts ?? payload.artifacts),
         ...envelope,
       };
     case "error":
@@ -571,15 +580,98 @@ export interface SessionDetail {
   traces: Record<string, unknown>;
 }
 
+export type UiTelemetrySummaryWindowHours = 24 | 168;
+
+export interface UiTelemetryDataQuality {
+  events_with_run_id_pct: number | null;
+  events_with_source_boundary_pct: number | null;
+  events_with_client_timestamp_pct: number | null;
+}
+
+export interface UiTelemetrySummaryMetrics {
+  exposure_count: number;
+  render_attempt_count: number;
+  render_success_rate: number | null;
+  render_failure_rate: number | null;
+  fallback_rate_by_reason: Record<string, number | null>;
+  interaction_rate: number | null;
+  runtime_attempt_rate: number | null;
+  runtime_success_rate: number | null;
+  runtime_failure_rate: number | null;
+  runtime_skip_mix: Record<string, number | null>;
+  data_quality: UiTelemetryDataQuality;
+}
+
+export interface UiTelemetryMetricEvaluation {
+  metric: string;
+  status: "pass" | "warn" | "fail";
+  observed: number | null;
+  sample_count: number;
+  comparator: "min" | "max";
+  go_threshold: number;
+  rollback_threshold: number | null;
+  reason: string;
+}
+
+export interface UiTelemetryThresholdSample {
+  exposure_count: number;
+  payload_detected_count: number;
+  render_attempt_count: number;
+  runtime_attempt_count: number;
+  minimum_exposure_count_for_go: number;
+}
+
+export interface UiTelemetryThresholdEvaluation {
+  per_metric: Record<string, UiTelemetryMetricEvaluation>;
+  overall_recommendation: "go" | "hold" | "rollback_runtime" | "rollback_artifacts";
+  failed_conditions: string[];
+  sample: UiTelemetryThresholdSample;
+}
+
+export interface UiTelemetrySummary {
+  window_hours: UiTelemetrySummaryWindowHours;
+  generated_at: string;
+  sampled_event_count: number;
+  metrics: UiTelemetrySummaryMetrics;
+  thresholds: UiTelemetryThresholdEvaluation;
+}
+
 interface SseMessage<T> {
   id: string | null;
   event: string | null;
   data: T;
 }
 
-async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+function getApiBearerToken(): string | undefined {
+  const token = process.env.NEXT_PUBLIC_AXIOM_API_TOKEN?.trim();
+  return token || undefined;
+}
+
+export function getApiAuthHeaderValue(): string | undefined {
+  const token = getApiBearerToken();
+  return token ? `Bearer ${token}` : undefined;
+}
+
+function withApiAuth(init?: RequestInit): RequestInit | undefined {
+  const authHeaderValue = getApiAuthHeaderValue();
+  if (!authHeaderValue) {
+    return init;
+  }
+
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Authorization")) {
+    headers.set("Authorization", authHeaderValue);
+  }
+
+  return {
+    ...init,
+    headers,
+  };
+}
+
+export async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(url, init);
+    return await fetch(url, withApiAuth(init));
   } catch (error) {
     if (
       typeof error === "object" &&
@@ -740,6 +832,23 @@ export async function fetchTraceEvents(runId: string): Promise<TraceEvent[]> {
 export async function fetchSettings(): Promise<Record<string, unknown>> {
   const res = await apiFetch(`${await getApiBase()}/v1/settings`);
   if (!res.ok) throw new Error(`Failed to fetch settings: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchUiTelemetrySummary(
+  windowHours: UiTelemetrySummaryWindowHours,
+  limit?: number,
+): Promise<UiTelemetrySummary> {
+  const params = new URLSearchParams({ window_hours: String(windowHours) });
+  if (typeof limit === "number" && Number.isFinite(limit) && limit > 0) {
+    params.set("limit", String(Math.trunc(limit)));
+  }
+
+  const res = await apiFetch(`${await getApiBase()}/v1/telemetry/ui/summary?${params.toString()}`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch UI telemetry summary (${windowHours}h): ${detail || res.status}`);
+  }
   return res.json();
 }
 
