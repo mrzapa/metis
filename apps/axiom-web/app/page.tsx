@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import {
+  Activity,
   Settings2,
   type LucideIcon,
 } from "lucide-react";
@@ -281,6 +282,31 @@ export default function Home() {
             );
           })}
         </motion.section>
+
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, ease: "easeOut", delay: 0.5 }}
+          className="mt-8"
+        >
+          <Link
+            href="/diagnostics"
+            aria-label="Diagnostics"
+            className="home-liquid-glass inline-flex items-center gap-3 rounded-full px-4 py-3 text-sm text-[#dfe2eb] transition-transform duration-300 hover:-translate-y-0.5 hover:bg-white/6"
+          >
+            <span className="flex size-9 items-center justify-center rounded-full bg-[#adc6ff]/10 text-[#adc6ff]">
+              <Activity className="size-4" />
+            </span>
+            <span className="text-left">
+              <span className="block font-display text-[11px] uppercase tracking-[0.24em] text-[#adc6ff]">
+                Diagnostics
+              </span>
+              <span className="block text-sm text-[#b5bdd3]">
+                Inspect Arrow rollout status, logs, and safe settings.
+              </span>
+            </span>
+          </Link>
+        </motion.div>
       </main>
 
       <AxiomCompanionDock className="bottom-24 md:bottom-4" />

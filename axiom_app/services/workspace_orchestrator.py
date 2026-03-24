@@ -42,6 +42,7 @@ from axiom_app.engine.querying import (
     KnowledgeSearchResult,
     RagQueryRequest,
     RagQueryResult,
+    extract_arrow_artifacts,
 )
 from axiom_app.models.brain_graph import BrainGraph
 from axiom_app.models.session_types import (
@@ -642,6 +643,18 @@ class WorkspaceOrchestrator:
             for key, value in dict(event or {}).items()
             if key not in {"type", "run_id"}
         }
+        if "artifacts" in payload:
+            payload_artifacts = extract_arrow_artifacts(
+                {
+                    "enable_arrow_artifacts": True,
+                    "artifacts": payload.get("artifacts"),
+                },
+                metadata_only=True,
+            )
+            if payload_artifacts:
+                payload["artifacts"] = payload_artifacts
+            else:
+                payload.pop("artifacts", None)
         stage_map = {
             "run_started": "retrieval",
             "retrieval_complete": "retrieval",
@@ -666,6 +679,57 @@ class WorkspaceOrchestrator:
     def enabled_skills(self, settings: dict[str, Any]) -> list[SkillDefinition]:
         """Return skills that are enabled for the given *settings* snapshot."""
         return self._skill_repo.enabled_skills(settings)
+
+    def ingest_ui_telemetry_events(self, events: list[dict[str, Any]]) -> int:
+        """Persist validated frontend UI telemetry through the existing trace path."""
+        accepted = 0
+        for event in events:
+            event_name = str(event.get("event_name") or "").strip()
+            run_id = str(event.get("run_id") or "").strip()
+            if not event_name or not run_id:
+                continue
+
+            payload = event.get("payload")
+            self._trace_store.append_event(
+                run_id=run_id,
+                stage="ui_artifact",
+                event_type=event_name,
+                payload={
+                    "source": str(event.get("source") or "chat_artifact_boundary"),
+                    "session_id": str(event.get("session_id") or ""),
+                    "message_id": str(event.get("message_id") or ""),
+                    "client_timestamp": str(event.get("occurred_at") or ""),
+                    "is_streaming": bool(event.get("is_streaming", False)),
+                    "telemetry": dict(payload) if isinstance(payload, dict) else {},
+                },
+            )
+            accepted += 1
+
+        return accepted
+
+    def get_ui_telemetry_summary(
+        self,
+        *,
+        window_hours: int = 24,
+        limit: int = 50_000,
+    ) -> dict[str, Any]:
+        """Return aggregated UI artifact telemetry and threshold evaluation."""
+        try:
+            normalized_window = int(window_hours)
+        except (TypeError, ValueError):
+            normalized_window = 24
+        if normalized_window <= 0:
+            normalized_window = 24
+        try:
+            normalized_limit = int(limit)
+        except (TypeError, ValueError):
+            normalized_limit = 50_000
+        if normalized_limit <= 0:
+            normalized_limit = 50_000
+        return self._trace_store.aggregate_ui_artifact_summary(
+            window_hours=normalized_window,
+            limit=normalized_limit,
+        )
 
     # ------------------------------------------------------------------
     # Settings

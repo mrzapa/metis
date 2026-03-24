@@ -161,6 +161,109 @@ body {
       inset 0 0 0 1px color-mix(in oklch, white 7%, transparent);
   }
 
+  .glass-strip {
+    background:
+      linear-gradient(180deg, color-mix(in oklch, var(--card) 72%, transparent), color-mix(in oklch, var(--card) 56%, transparent)),
+      color-mix(in oklch, var(--card) 46%, transparent);
+    backdrop-filter: blur(14px) saturate(138%);
+    -webkit-backdrop-filter: blur(14px) saturate(138%);
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklch, white 11%, transparent),
+      inset 0 -1px 0 color-mix(in oklch, white 6%, transparent);
+  }
+
+  .glass-micro-surface {
+    border: 1px solid color-mix(in oklch, white 9%, transparent);
+    background:
+      linear-gradient(180deg, color-mix(in oklch, var(--card) 66%, transparent), color-mix(in oklch, var(--card) 50%, transparent)),
+      color-mix(in oklch, var(--card) 44%, transparent);
+    backdrop-filter: blur(12px) saturate(136%);
+    -webkit-backdrop-filter: blur(12px) saturate(136%);
+    box-shadow: inset 0 1px 0 color-mix(in oklch, white 10%, transparent);
+  }
+
+  .glass-tab-rail {
+    position: relative;
+    border: 1px solid color-mix(in oklch, white 9%, transparent);
+    background:
+      linear-gradient(180deg, color-mix(in oklch, var(--card) 62%, transparent), color-mix(in oklch, var(--card) 48%, transparent)),
+      color-mix(in oklch, var(--card) 42%, transparent);
+    backdrop-filter: blur(16px) saturate(145%);
+    -webkit-backdrop-filter: blur(16px) saturate(145%);
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklch, white 10%, transparent),
+      inset 0 0 0 1px color-mix(in oklch, white 4%, transparent);
+  }
+
+  .glass-tab-rail [data-slot="tabs-trigger"] {
+    border-radius: 0.7rem;
+  }
+
+  .glass-tab-pill {
+    transition: color 180ms ease, border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+  }
+
+  .glass-tab-rail [data-slot="tabs-trigger"][data-active] {
+    color: var(--foreground);
+    border-color: color-mix(in oklch, var(--primary) 34%, transparent);
+    background:
+      linear-gradient(145deg, color-mix(in oklch, var(--primary) 24%, transparent), color-mix(in oklch, var(--primary) 10%, transparent));
+    box-shadow:
+      0 12px 30px -20px color-mix(in oklch, var(--primary) 45%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 12%, transparent);
+  }
+
+  .glass-settings-pane {
+    border: 1px solid color-mix(in oklch, white 8%, transparent);
+    border-radius: calc(var(--radius) * 1.8);
+    padding: 1.1rem 1.15rem;
+    background:
+      radial-gradient(circle at 8% 0%, color-mix(in oklch, white 10%, transparent) 0%, transparent 22%),
+      linear-gradient(180deg, color-mix(in oklch, var(--card) 78%, transparent), color-mix(in oklch, var(--card) 62%, transparent));
+    backdrop-filter: blur(20px) saturate(142%);
+    -webkit-backdrop-filter: blur(20px) saturate(142%);
+    box-shadow:
+      0 24px 64px -38px color-mix(in oklch, black 70%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 13%, transparent);
+  }
+
+  .chat-shell-frame {
+    border: 1px solid color-mix(in oklch, white 8%, transparent);
+    background:
+      radial-gradient(circle at 12% 0%, color-mix(in oklch, white 9%, transparent) 0%, transparent 22%),
+      linear-gradient(180deg, color-mix(in oklch, var(--card) 42%, transparent), color-mix(in oklch, var(--card) 28%, transparent));
+    backdrop-filter: blur(20px) saturate(138%);
+    -webkit-backdrop-filter: blur(20px) saturate(138%);
+    box-shadow:
+      0 32px 96px -54px color-mix(in oklch, black 78%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 10%, transparent),
+      inset 0 0 0 1px color-mix(in oklch, white 4%, transparent);
+  }
+
+  .chat-pane-divider {
+    position: relative;
+    border: 1px solid color-mix(in oklch, white 8%, transparent);
+    background:
+      linear-gradient(180deg, color-mix(in oklch, white 13%, transparent), color-mix(in oklch, var(--primary) 10%, transparent), color-mix(in oklch, white 13%, transparent));
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, white 3%, transparent),
+      0 10px 28px -20px color-mix(in oklch, var(--primary) 34%, transparent);
+    transition: box-shadow 200ms ease, border-color 200ms ease;
+
+    &:hover {
+      border-color: color-mix(in oklch, var(--primary) 28%, transparent);
+      box-shadow:
+        0 0 0 1px color-mix(in oklch, white 3%, transparent),
+        0 0 16px -4px color-mix(in oklch, var(--primary) 52%, transparent),
+        0 10px 28px -20px color-mix(in oklch, var(--primary) 42%, transparent);
+    }
+  }
+
+  .settings-glass-form select:focus,
+  .settings-glass-form textarea:focus {
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--ring) 60%, transparent);
+  }
+
   .rail-shell {
     background:
       linear-gradient(180deg, rgba(13, 17, 23, 0.82), rgba(10, 12, 16, 0.72));
@@ -344,15 +447,7 @@ body {
 
   .home-space-atmosphere__stars {
     background-image:
-      radial-gradient(1px 1px at 11% 18%, rgba(255, 255, 255, 0.75), transparent),
-      radial-gradient(1px 1px at 17% 63%, rgba(173, 198, 255, 0.62), transparent),
-      radial-gradient(1px 1px at 28% 26%, rgba(255, 255, 255, 0.4), transparent),
-      radial-gradient(1.5px 1.5px at 37% 14%, rgba(255, 255, 255, 0.62), transparent),
-      radial-gradient(1px 1px at 49% 34%, rgba(173, 198, 255, 0.48), transparent),
-      radial-gradient(1px 1px at 63% 24%, rgba(255, 255, 255, 0.58), transparent),
-      radial-gradient(1.5px 1.5px at 71% 59%, rgba(255, 255, 255, 0.56), transparent),
-      radial-gradient(1px 1px at 82% 18%, rgba(173, 198, 255, 0.42), transparent),
-      radial-gradient(1px 1px at 88% 48%, rgba(255, 255, 255, 0.55), transparent),
+        radial-gradient(1px 1px at 88% 48%, rgba(255, 255, 255, 0.55), transparent),
       radial-gradient(1.5px 1.5px at 93% 82%, rgba(255, 255, 255, 0.68), transparent);
     background-repeat: repeat;
     background-size: 520px 520px;
@@ -696,24 +791,4 @@ body {
 @keyframes card-sparkle-pulse {
   0%, 100% { opacity: 0.4; transform: scale(0.8); }
   50% { opacity: 1; transform: scale(1.3); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-
-  .home-space-atmosphere__stars,
-  .home-space-atmosphere__twinkles,
-  .home-space-atmosphere__shooting-stars span,
-  .home-liquid-glass::after,
-  .home-nebula,
-  .home-card-sparkle {
-    animation: none !important;
-  }
 }

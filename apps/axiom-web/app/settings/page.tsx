@@ -176,7 +176,7 @@ function ToggleRow({
   return (
     <label
       htmlFor={id}
-      className="flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-3 transition-colors hover:bg-muted/30"
+      className="glass-micro-surface flex cursor-pointer items-start gap-3 rounded-xl px-4 py-3 transition-colors hover:border-white/16 hover:bg-white/10"
     >
       <input
         id={id}
@@ -439,19 +439,19 @@ export default function SettingsPage() {
             Loading settings…
           </div>
         ) : (
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+          <form onSubmit={handleSubmit(onSubmit)} className="settings-glass-form space-y-6">
             <Tabs defaultValue="core">
-              <TabsList className="h-auto w-full flex-wrap gap-1">
-                <TabsTrigger value="core">Core</TabsTrigger>
-                <TabsTrigger value="retrieval">Retrieval</TabsTrigger>
-                <TabsTrigger value="graph">Graph</TabsTrigger>
-                <TabsTrigger value="memory">Memory</TabsTrigger>
-                <TabsTrigger value="model">Model</TabsTrigger>
-                <TabsTrigger value="companion">Companion</TabsTrigger>
+              <TabsList className="glass-tab-rail h-auto w-full flex-wrap gap-1 p-1.5">
+                <TabsTrigger value="core" className="glass-tab-pill">Core</TabsTrigger>
+                <TabsTrigger value="retrieval" className="glass-tab-pill">Retrieval</TabsTrigger>
+                <TabsTrigger value="graph" className="glass-tab-pill">Graph</TabsTrigger>
+                <TabsTrigger value="memory" className="glass-tab-pill">Memory</TabsTrigger>
+                <TabsTrigger value="model" className="glass-tab-pill">Model</TabsTrigger>
+                <TabsTrigger value="companion" className="glass-tab-pill">Companion</TabsTrigger>
               </TabsList>
 
               {/* ── Core ──────────────────────────────────────────────────── */}
-              <TabsContent value="core" className="mt-6 space-y-6">
+              <TabsContent value="core" className="glass-settings-pane mt-6 space-y-6">
                 <section className="space-y-4">
                   <div>
                     <h2 className="text-base font-semibold">Core defaults</h2>
@@ -559,7 +559,7 @@ export default function SettingsPage() {
               </TabsContent>
 
               {/* ── Advanced Retrieval ─────────────────────────────────────── */}
-              <TabsContent value="retrieval" className="mt-6 space-y-6">
+              <TabsContent value="retrieval" className="glass-settings-pane mt-6 space-y-6">
                 <section className="space-y-4">
                   <div>
                     <h2 className="text-base font-semibold">Advanced retrieval controls</h2>
@@ -862,7 +862,7 @@ export default function SettingsPage() {
               </TabsContent>
 
               {/* ── Advanced Graph ─────────────────────────────────────────── */}
-              <TabsContent value="graph" className="mt-6 space-y-6">
+              <TabsContent value="graph" className="glass-settings-pane mt-6 space-y-6">
                 <section className="space-y-4">
                   <div>
                     <h2 className="text-base font-semibold">Advanced graph controls</h2>
@@ -915,7 +915,7 @@ export default function SettingsPage() {
               </TabsContent>
 
               {/* ── Advanced Memory ────────────────────────────────────────── */}
-              <TabsContent value="memory" className="mt-6 space-y-6">
+              <TabsContent value="memory" className="glass-settings-pane mt-6 space-y-6">
                 <section className="space-y-4">
                   <div>
                     <h2 className="text-base font-semibold">Advanced memory controls</h2>
@@ -966,7 +966,7 @@ export default function SettingsPage() {
               </TabsContent>
 
               {/* ── Advanced Model / Provider ──────────────────────────────── */}
-              <TabsContent value="model" className="mt-6 space-y-6">
+              <TabsContent value="model" className="glass-settings-pane mt-6 space-y-6">
                 <section className="space-y-4">
                   <div>
                     <h2 className="text-base font-semibold">Advanced model / provider controls</h2>
@@ -1051,7 +1051,7 @@ export default function SettingsPage() {
               </TabsContent>
 
               {/* ── Companion ─────────────────────────────────────────────── */}
-              <TabsContent value="companion" className="mt-6 space-y-6">
+              <TabsContent value="companion" className="glass-settings-pane mt-6 space-y-6">
                 <section className="space-y-4">
                   <div>
                     <h2 className="text-base font-semibold">Companion assistant settings</h2>

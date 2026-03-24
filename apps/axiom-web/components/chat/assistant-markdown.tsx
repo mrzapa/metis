@@ -18,7 +18,7 @@ export function AssistantMarkdown({ content, isStreaming = false, className }: A
   return (
     <div
       className={cn(
-        "break-words text-sm leading-relaxed",
+        "wrap-break-word text-sm leading-relaxed",
         "[&>*:first-child]:mt-0",
         "[&>*:last-child]:mb-0",
         "[&_p]:my-3",

@@ -29,12 +29,24 @@ export interface ActionRequiredAction {
   payload: Record<string, unknown>;
 }
 
+export interface ArrowArtifact {
+  id?: string;
+  type: string;
+  summary?: string;
+  path?: string;
+  mime_type?: string;
+  payload?: unknown;
+  payload_bytes?: number;
+  payload_truncated?: boolean;
+}
+
 export interface ChatMessageContent {
   role: string;
   content: string;
   ts: string;
   run_id: string;
   sources: EvidenceSource[];
+  artifacts?: ArrowArtifact[];
   llm_provider?: string;
   llm_model?: string;
   query_mode?: string;

@@ -505,6 +505,350 @@ def test_brain_graph_returns_nodes_and_edges(monkeypatch) -> None:
     assert "category:sessions" in node_ids
 
 
+def test_ui_telemetry_endpoint_accepts_valid_events(monkeypatch) -> None:
+    client = TestClient(api_app_module.create_app())
+    captured: dict[str, object] = {}
+
+    class _FakeOrchestrator:
+        def ingest_ui_telemetry_events(self, events):
+            captured["events"] = events
+            return len(events)
+
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
+
+    response = client.post(
+        "/v1/telemetry/ui",
+        json={
+            "events": [
+                {
+                    "event_name": "artifact_render_success",
+                    "source": "chat_artifact_boundary",
+                    "occurred_at": "2026-03-23T12:00:00Z",
+                    "run_id": "run-telemetry",
+                    "session_id": "session-1",
+                    "message_id": "message-1",
+                    "is_streaming": False,
+                    "payload": {
+                        "artifact_count": 1,
+                        "artifact_types": ["timeline"],
+                        "artifact_ids": ["artifact-1"],
+                        "renderer": "default",
+                    },
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"accepted": 1}
+    persisted = captured["events"]
+    assert isinstance(persisted, list)
+    assert persisted[0]["event_name"] == "artifact_render_success"
+    assert persisted[0]["payload"]["artifact_types"] == ["timeline"]
+
+
+def test_ui_telemetry_endpoint_rejects_invalid_payload(monkeypatch) -> None:
+    client = TestClient(api_app_module.create_app())
+    fake_orchestrator = MagicMock()
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+
+    response = client.post(
+        "/v1/telemetry/ui",
+        json={
+            "events": [
+                {
+                    "event_name": "artifact_render_success",
+                    "source": "chat_artifact_boundary",
+                    "occurred_at": "2026-03-23T12:00:00Z",
+                    "run_id": "run-telemetry",
+                    "payload": {
+                        "artifact_count": 1,
+                        "artifact_types": ["timeline"],
+                        "artifact_ids": ["artifact-1"],
+                        "renderer": "default",
+                        "unexpected": True,
+                    },
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    fake_orchestrator.ingest_ui_telemetry_events.assert_not_called()
+
+
+def test_ui_telemetry_endpoint_accepts_runtime_lifecycle_events(monkeypatch) -> None:
+    client = TestClient(api_app_module.create_app())
+    captured: dict[str, object] = {}
+
+    class _FakeOrchestrator:
+        def ingest_ui_telemetry_events(self, events):
+            captured["events"] = events
+            return len(events)
+
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
+
+    response = client.post(
+        "/v1/telemetry/ui",
+        json={
+            "events": [
+                {
+                    "event_name": "artifact_runtime_attempt",
+                    "source": "chat_artifact_boundary",
+                    "occurred_at": "2026-03-23T12:00:00Z",
+                    "run_id": "run-telemetry",
+                    "payload": {
+                        "artifact_index": 0,
+                        "artifact_id": "artifact-1",
+                        "artifact_type": "timeline",
+                    },
+                },
+                {
+                    "event_name": "artifact_runtime_skipped",
+                    "source": "chat_artifact_boundary",
+                    "occurred_at": "2026-03-23T12:00:01Z",
+                    "run_id": "run-telemetry",
+                    "payload": {
+                        "artifact_index": 1,
+                        "artifact_type": "metric_cards",
+                        "reason": "runtime_disabled",
+                    },
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"accepted": 2}
+    persisted = captured["events"]
+    assert isinstance(persisted, list)
+    assert persisted[0]["event_name"] == "artifact_runtime_attempt"
+    assert persisted[1]["event_name"] == "artifact_runtime_skipped"
+
+
+def test_ui_telemetry_endpoint_rejects_malformed_json() -> None:
+    client = TestClient(api_app_module.create_app())
+
+    response = client.post(
+        "/v1/telemetry/ui",
+        content='{"events": [',
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_ui_telemetry_endpoint_requires_auth_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    client = TestClient(api_app_module.create_app())
+
+    response = client.post(
+        "/v1/telemetry/ui",
+        json={
+            "events": [
+                {
+                    "event_name": "artifact_boundary_flag_state",
+                    "source": "chat_artifact_boundary",
+                    "occurred_at": "2026-03-23T12:00:00Z",
+                    "run_id": "run-telemetry",
+                    "payload": {"state": "enabled"},
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_ui_telemetry_endpoint_accepts_auth_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    client = TestClient(api_app_module.create_app())
+    captured: dict[str, object] = {}
+
+    class _FakeOrchestrator:
+        def ingest_ui_telemetry_events(self, events):
+            captured["events"] = events
+            return len(events)
+
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
+
+    response = client.post(
+        "/v1/telemetry/ui",
+        headers={"Authorization": "Bearer secret-token"},
+        json={
+            "events": [
+                {
+                    "event_name": "artifact_boundary_flag_state",
+                    "source": "chat_artifact_boundary",
+                    "occurred_at": "2026-03-23T12:00:00Z",
+                    "run_id": "run-telemetry",
+                    "payload": {"state": "enabled"},
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"accepted": 1}
+    persisted = captured["events"]
+    assert isinstance(persisted, list)
+    assert persisted[0]["event_name"] == "artifact_boundary_flag_state"
+
+
+def test_ui_telemetry_endpoint_rejects_oversized_request() -> None:
+    client = TestClient(api_app_module.create_app())
+    response = client.post(
+        "/v1/telemetry/ui",
+        content="x" * 20_000,
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 413
+
+
+def test_ui_telemetry_summary_endpoint_returns_structured_summary(monkeypatch) -> None:
+    client = TestClient(api_app_module.create_app())
+
+    class _FakeOrchestrator:
+        def get_ui_telemetry_summary(self, *, window_hours=24, limit=50_000):
+            assert window_hours == 24
+            assert limit == 999
+            return {
+                "window_hours": 24,
+                "generated_at": "2026-03-23T12:00:00+00:00",
+                "sampled_event_count": 12,
+                "metrics": {
+                    "exposure_count": 10,
+                    "render_attempt_count": 10,
+                    "render_success_rate": 0.9,
+                    "render_failure_rate": 0.1,
+                    "fallback_rate_by_reason": {
+                        "feature_disabled": 0.0,
+                        "no_artifacts": 0.0,
+                        "invalid_payload": 0.1,
+                        "render_error": 0.0,
+                    },
+                    "interaction_rate": 0.2,
+                    "runtime_attempt_rate": 0.5,
+                    "runtime_success_rate": 0.8,
+                    "runtime_failure_rate": 0.2,
+                    "runtime_skip_mix": {
+                        "runtime_disabled": 0.5,
+                        "unsupported_type": 0.5,
+                        "payload_truncated": 0.0,
+                        "invalid_payload": 0.0,
+                    },
+                    "data_quality": {
+                        "events_with_run_id_pct": 99.0,
+                        "events_with_source_boundary_pct": 100.0,
+                        "events_with_client_timestamp_pct": 98.0,
+                    },
+                },
+                "thresholds": {
+                    "per_metric": {
+                        "render_success_rate": {
+                            "metric": "render_success_rate",
+                            "status": "warn",
+                            "observed": 0.9,
+                            "sample_count": 10,
+                            "comparator": "min",
+                            "go_threshold": 0.995,
+                            "rollback_threshold": 0.985,
+                            "reason": "below_go_threshold",
+                        }
+                    },
+                    "overall_recommendation": "hold",
+                    "failed_conditions": [],
+                    "sample": {
+                        "exposure_count": 10,
+                        "payload_detected_count": 10,
+                        "render_attempt_count": 10,
+                        "runtime_attempt_count": 5,
+                        "minimum_exposure_count_for_go": 300,
+                    },
+                },
+            }
+
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
+
+    response = client.get("/v1/telemetry/ui/summary?window_hours=24&limit=999")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["window_hours"] == 24
+    assert payload["metrics"]["exposure_count"] == 10
+    assert payload["thresholds"]["overall_recommendation"] == "hold"
+
+
+def test_ui_telemetry_summary_endpoint_validates_query_params() -> None:
+    client = TestClient(api_app_module.create_app())
+
+    response = client.get("/v1/telemetry/ui/summary?window_hours=0")
+
+    assert response.status_code == 422
+
+
+def test_ui_telemetry_summary_endpoint_requires_auth_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    client = TestClient(api_app_module.create_app())
+
+    response = client.get("/v1/telemetry/ui/summary")
+
+    assert response.status_code == 401
+
+
+def test_ui_telemetry_summary_endpoint_accepts_auth_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    client = TestClient(api_app_module.create_app())
+
+    class _FakeOrchestrator:
+        def get_ui_telemetry_summary(self, *, window_hours=24, limit=50_000):
+            return {
+                "window_hours": window_hours,
+                "generated_at": "2026-03-23T12:00:00+00:00",
+                "sampled_event_count": 0,
+                "metrics": {
+                    "exposure_count": 0,
+                    "render_attempt_count": 0,
+                    "render_success_rate": None,
+                    "render_failure_rate": None,
+                    "fallback_rate_by_reason": {},
+                    "interaction_rate": None,
+                    "runtime_attempt_rate": None,
+                    "runtime_success_rate": None,
+                    "runtime_failure_rate": None,
+                    "runtime_skip_mix": {},
+                    "data_quality": {
+                        "events_with_run_id_pct": None,
+                        "events_with_source_boundary_pct": None,
+                        "events_with_client_timestamp_pct": None,
+                    },
+                },
+                "thresholds": {
+                    "per_metric": {},
+                    "overall_recommendation": "hold",
+                    "failed_conditions": [],
+                    "sample": {
+                        "exposure_count": 0,
+                        "payload_detected_count": 0,
+                        "render_attempt_count": 0,
+                        "runtime_attempt_count": 0,
+                        "minimum_exposure_count_for_go": 300,
+                    },
+                },
+            }
+
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
+
+    response = client.get(
+        "/v1/telemetry/ui/summary",
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["thresholds"]["overall_recommendation"] == "hold"
+
+
 def test_brain_graph_preserves_assistant_node_types_and_scope_metadata(monkeypatch) -> None:
     client = TestClient(api_app_module.create_app())
     fake_orchestrator = MagicMock()
@@ -575,3 +919,233 @@ def test_brain_graph_preserves_assistant_node_types_and_scope_metadata(monkeypat
     assert edges[("category:assistant", "category:brain", "category_member")]["metadata"]["scope"] == "assistant_self"
     assert edges[("memory:memory-1", "assistant:axiom", "belongs_to")]["metadata"]["scope"] == "assistant_learned"
     assert edges[("memory:memory-1", "assistant:axiom", "belongs_to")]["metadata"]["note"] == "derived"
+
+
+def test_features_list_returns_known_flags() -> None:
+    client = TestClient(api_app_module.create_app())
+
+    response = client.get("/v1/features")
+
+    assert response.status_code == 200
+    payload = response.json()
+    names = {item["name"] for item in payload["features"]}
+    assert "api_compat_openai" in names
+    assert "agent_loop_hardening" in names
+
+
+def test_features_disable_and_enable_roundtrip(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", api_app_module.WorkspaceOrchestrator)
+    import axiom_app.settings_store as _store
+
+    monkeypatch.setattr(_store, "USER_PATH", tmp_path / "settings.json")
+    monkeypatch.setattr(_store, "DEFAULT_PATH", tmp_path / "default_settings.json")
+    _store.DEFAULT_PATH.write_text("{}", encoding="utf-8")
+
+    client = TestClient(api_app_module.create_app())
+
+    disable_response = client.post(
+        "/v1/features/api_compat_openai/disable",
+        json={"reason": "maintenance", "duration_ms": 120000},
+    )
+    assert disable_response.status_code == 200
+    disabled_payload = disable_response.json()
+    assert disabled_payload["feature"] == "api_compat_openai"
+    assert disabled_payload["enabled"] is False
+    assert disabled_payload["disabled_by_kill_switch"] is True
+    assert disabled_payload["kill_switch_reason"] == "maintenance"
+    assert disabled_payload["disabled_until"]
+
+    enable_response = client.post(
+        "/v1/features/api_compat_openai/enable",
+        json={"enabled": True},
+    )
+    assert enable_response.status_code == 200
+    enabled_payload = enable_response.json()
+    assert enabled_payload["feature"] == "api_compat_openai"
+    assert enabled_payload["enabled"] is True
+    assert enabled_payload["disabled_by_kill_switch"] is False
+
+
+def test_features_require_auth_when_token_is_configured(monkeypatch) -> None:
+    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    client = TestClient(api_app_module.create_app())
+
+    response = client.get("/v1/features")
+
+    assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Phase 1A — OpenAI Chat Completions compatibility endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_openai_chat_completions_disabled_by_default(monkeypatch) -> None:
+    """Endpoint returns 404 when api_compat_openai flag is not enabled."""
+    monkeypatch.setattr(
+        api_app_module._settings_store,
+        "load_settings",
+        lambda: {},
+    )
+    client = TestClient(api_app_module.create_app())
+
+    response = client.post(
+        "/v1/openai/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}]},
+    )
+
+    assert response.status_code == 404
+    assert "api_compat_openai" in response.json()["detail"]
+
+
+def test_openai_chat_completions_happy_path(monkeypatch) -> None:
+    """Endpoint returns an OpenAI-shaped response when flag is enabled."""
+    monkeypatch.setattr(
+        api_app_module._settings_store,
+        "load_settings",
+        lambda: {"feature_flags": {"api_compat_openai": True}},
+    )
+
+    class _Result:
+        run_id = "run-openai-compat"
+        answer_text = "Hello from Axiom"
+        selected_mode = "Q&A"
+        llm_provider = "mock"
+        llm_model = "mock-model"
+
+    fake_orchestrator = MagicMock()
+    fake_orchestrator.run_direct_query.return_value = _Result()
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+
+    client = TestClient(api_app_module.create_app())
+    response = client.post(
+        "/v1/openai/chat/completions",
+        json={
+            "model": "axiom",
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "What is Axiom?"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["object"] == "chat.completion"
+    assert payload["id"].startswith("axiom-run-openai-compat")
+    assert payload["model"] == "axiom"
+    assert isinstance(payload["created"], int)
+    assert len(payload["choices"]) == 1
+    choice = payload["choices"][0]
+    assert choice["index"] == 0
+    assert choice["finish_reason"] == "stop"
+    assert choice["message"]["role"] == "assistant"
+    assert choice["message"]["content"] == "Hello from Axiom"
+    assert payload["usage"]["prompt_tokens"] == 0
+    assert payload["usage"]["completion_tokens"] == 0
+    assert payload["usage"]["total_tokens"] == 0
+
+    # Verify that the last user message was forwarded as the prompt.
+    assert fake_orchestrator.run_direct_query.call_count == 1
+    called_req = fake_orchestrator.run_direct_query.call_args[0][0]
+    assert called_req.prompt == "What is Axiom?"
+
+
+def test_openai_chat_completions_rejects_empty_messages_list(monkeypatch) -> None:
+    """Empty messages array fails Pydantic validation (min_length=1) → 422."""
+    monkeypatch.setattr(
+        api_app_module._settings_store,
+        "load_settings",
+        lambda: {"feature_flags": {"api_compat_openai": True}},
+    )
+    client = TestClient(api_app_module.create_app())
+
+    response = client.post(
+        "/v1/openai/chat/completions",
+        json={"model": "axiom", "messages": []},
+    )
+
+    assert response.status_code == 422
+
+
+def test_openai_chat_completions_rejects_no_user_message(monkeypatch) -> None:
+    """Messages with only system role and no user turn get 422."""
+    monkeypatch.setattr(
+        api_app_module._settings_store,
+        "load_settings",
+        lambda: {"feature_flags": {"api_compat_openai": True}},
+    )
+    client = TestClient(api_app_module.create_app())
+
+    response = client.post(
+        "/v1/openai/chat/completions",
+        json={"messages": [{"role": "system", "content": "Be helpful."}]},
+    )
+
+    assert response.status_code == 422
+
+
+def test_openai_chat_completions_requires_auth_when_configured(monkeypatch) -> None:
+    """Auth parity: endpoint requires Bearer token when AXIOM_API_TOKEN is set."""
+    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    monkeypatch.setattr(
+        api_app_module._settings_store,
+        "load_settings",
+        lambda: {"feature_flags": {"api_compat_openai": True}},
+    )
+    client = TestClient(api_app_module.create_app())
+
+    response = client.post(
+        "/v1/openai/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}]},
+    )
+
+    assert response.status_code == 401
+
+
+def test_openai_chat_completions_accepts_auth_when_configured(monkeypatch) -> None:
+    """Endpoint works with a valid Bearer token when auth is configured."""
+    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    monkeypatch.setattr(
+        api_app_module._settings_store,
+        "load_settings",
+        lambda: {"feature_flags": {"api_compat_openai": True}},
+    )
+
+    class _Result:
+        run_id = "run-auth-compat"
+        answer_text = "Authorized response"
+        selected_mode = "Q&A"
+        llm_provider = "mock"
+        llm_model = "mock-model"
+
+    fake_orchestrator = MagicMock()
+    fake_orchestrator.run_direct_query.return_value = _Result()
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+
+    client = TestClient(api_app_module.create_app())
+    response = client.post(
+        "/v1/openai/chat/completions",
+        headers={"Authorization": "Bearer secret-token"},
+        json={"messages": [{"role": "user", "content": "hello"}]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "Authorized response"
+
+
+def test_openai_chat_completions_rejects_stream_true(monkeypatch) -> None:
+    """Streaming is not supported in this slice — stream=true returns 501."""
+    monkeypatch.setattr(
+        api_app_module._settings_store,
+        "load_settings",
+        lambda: {"feature_flags": {"api_compat_openai": True}},
+    )
+    client = TestClient(api_app_module.create_app())
+
+    response = client.post(
+        "/v1/openai/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}], "stream": True},
+    )
+
+    assert response.status_code == 501

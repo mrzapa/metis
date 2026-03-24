@@ -137,6 +137,8 @@
   "enable_summarizer": true,
   "enable_langextract": false,
   "enable_structured_extraction": false,
+  "enable_arrow_artifacts": false,
+  "enable_arrow_artifact_runtime": true,
   "enable_recursive_memory": false,
   "enable_recursive_retrieval": false,
   "enable_citation_v2": true,

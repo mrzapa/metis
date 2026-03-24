@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from axiom_app.engine.querying import extract_arrow_artifacts
 from axiom_app.services.stream_events import normalize_stream_event
 
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -43,6 +44,25 @@ def _normalize_json_value(value: Any) -> Any:
     return str(value)
 
 
+def _artifact_metadata_only(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    raw_artifacts = normalized.get("artifacts")
+    if raw_artifacts is None:
+        return normalized
+    sanitized = extract_arrow_artifacts(
+        {
+            "enable_arrow_artifacts": True,
+            "artifacts": raw_artifacts,
+        },
+        metadata_only=True,
+    )
+    if sanitized:
+        normalized["artifacts"] = sanitized
+    else:
+        normalized.pop("artifacts", None)
+    return normalized
+
+
 def _normalize_stream_payload(run_id: str, payload: dict[str, Any], event_id: int) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("stream payload must be a dict")
@@ -50,7 +70,8 @@ def _normalize_stream_payload(run_id: str, payload: dict[str, Any], event_id: in
     event_type = raw_event_type
     if event_type not in _CANONICAL_STREAM_TYPES:
         raise ValueError(f"unsupported stream event type: {event_type or '<missing>'}")
-    normalized = {str(key): _normalize_json_value(value) for key, value in payload.items()}
+    safe_payload = _artifact_metadata_only(payload)
+    normalized = {str(key): _normalize_json_value(value) for key, value in safe_payload.items()}
     normalized["type"] = event_type
     normalized["event_type"] = event_type
     normalized["run_id"] = str(run_id or "")

@@ -91,6 +91,10 @@ describe("Home page", () => {
       "href",
       "/brain",
     );
+    expect(screen.getByRole("link", { name: "Diagnostics" })).toHaveAttribute(
+      "href",
+      "/diagnostics",
+    );
   });
 
   it("falls back to default launch links when settings fetch fails", async () => {

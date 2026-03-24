@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ActionRequiredAction,
+  ArrowArtifact,
   ChatActionStatus,
   ChatMessage,
   ChatMessageContent,
@@ -334,7 +335,12 @@ export function useChatTranscript() {
     schedulePendingRunTokenFlush();
   }, [schedulePendingRunTokenFlush]);
 
-  const finalizeRun = useCallback((runId: string, answerText: string, sources: EvidenceSource[]) => {
+  const finalizeRun = useCallback((
+    runId: string,
+    answerText: string,
+    sources: EvidenceSource[],
+    artifacts?: ArrowArtifact[],
+  ) => {
     const pendingText = drainPendingRunTokens([runId])[runId] ?? "";
     setState((previousState) => {
       const run = previousState.runsById[runId];
@@ -355,6 +361,7 @@ export function useChatTranscript() {
         content: answerText || `${assistantMessage.content}${pendingText}`,
         run_id: runId,
         sources: finalSources,
+        artifacts: artifacts ?? assistantMessage.artifacts,
         status: "complete",
       };
       nextState.runsById[runId] = {

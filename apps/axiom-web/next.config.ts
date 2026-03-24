@@ -15,6 +15,9 @@ const nextConfig: NextConfig = {
   // unoptimized: true is required when using next/image with output: 'export'.
   // Static exports cannot use the server-side image optimization API.
   images: { unoptimized: true },
+  // Arrow sandbox currently ships source TypeScript via package exports.
+  // Ensure Next transpiles these packages for both dev and production builds.
+  transpilePackages: ["@arrow-js/core", "@arrow-js/sandbox"],
   // Explicit root avoids Turbopack lockfile auto-detection picking unrelated paths.
   turbopack: {
     root: appRoot,

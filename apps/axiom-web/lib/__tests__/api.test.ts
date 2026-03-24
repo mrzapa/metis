@@ -7,6 +7,7 @@ vi.stubGlobal("window", { ...globalThis.window });
 const {
   fetchSessions,
   fetchSettings,
+  fetchUiTelemetrySummary,
   fetchApiVersion,
   fetchGgufCatalog,
   queryKnowledgeSearch,
@@ -68,6 +69,123 @@ describe("fetchSettings", () => {
 
     const result = await fetchSettings();
     expect(result).toEqual(mockSettings);
+  });
+});
+
+describe("fetchUiTelemetrySummary", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns parsed telemetry summary and forwards query params", async () => {
+    const mockSummary = {
+      window_hours: 168,
+      generated_at: "2026-03-23T12:00:00+00:00",
+      sampled_event_count: 42,
+      metrics: {
+        exposure_count: 12,
+        render_attempt_count: 12,
+        render_success_rate: 1,
+        render_failure_rate: 0,
+        fallback_rate_by_reason: {},
+        interaction_rate: 0.25,
+        runtime_attempt_rate: 0.5,
+        runtime_success_rate: 1,
+        runtime_failure_rate: 0,
+        runtime_skip_mix: {},
+        data_quality: {
+          events_with_run_id_pct: 100,
+          events_with_source_boundary_pct: 100,
+          events_with_client_timestamp_pct: 100,
+        },
+      },
+      thresholds: {
+        per_metric: {},
+        overall_recommendation: "go",
+        failed_conditions: [],
+        sample: {
+          exposure_count: 12,
+          payload_detected_count: 12,
+          render_attempt_count: 12,
+          runtime_attempt_count: 6,
+          minimum_exposure_count_for_go: 300,
+        },
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSummary),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchUiTelemetrySummary(168, 999);
+
+    expect(result).toEqual(mockSummary);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/v1/telemetry/ui/summary?window_hours=168&limit=999");
+  });
+
+  it("supports the 24h window without an explicit limit", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          window_hours: 24,
+          generated_at: "2026-03-23T12:00:00+00:00",
+          sampled_event_count: 0,
+          metrics: {
+            exposure_count: 0,
+            render_attempt_count: 0,
+            render_success_rate: null,
+            render_failure_rate: null,
+            fallback_rate_by_reason: {},
+            interaction_rate: null,
+            runtime_attempt_rate: null,
+            runtime_success_rate: null,
+            runtime_failure_rate: null,
+            runtime_skip_mix: {},
+            data_quality: {
+              events_with_run_id_pct: null,
+              events_with_source_boundary_pct: null,
+              events_with_client_timestamp_pct: null,
+            },
+          },
+          thresholds: {
+            per_metric: {},
+            overall_recommendation: "hold",
+            failed_conditions: [],
+            sample: {
+              exposure_count: 0,
+              payload_detected_count: 0,
+              render_attempt_count: 0,
+              runtime_attempt_count: 0,
+              minimum_exposure_count_for_go: 300,
+            },
+          },
+        }),
+      }),
+    );
+
+    await fetchUiTelemetrySummary(24);
+
+    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain("window_hours=24");
+    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).not.toContain("limit=");
+  });
+
+  it("throws a descriptive error on non-ok response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        text: () => Promise.resolve("service unavailable"),
+      }),
+    );
+
+    await expect(fetchUiTelemetrySummary(24)).rejects.toThrow(
+      "Failed to fetch UI telemetry summary (24h): service unavailable",
+    );
   });
 });
 
