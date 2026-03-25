@@ -19,6 +19,8 @@ import pathlib
 import re
 import shutil
 import tempfile
+import threading
+import time
 from typing import Any, Callable
 
 from axiom_app.models.parity_types import IndexManifest
@@ -42,6 +44,64 @@ _EMB_DIM = 32
 _MANIFEST_FILE = "manifest.json"
 _BUNDLE_FILE = "bundle.json"
 _ARTIFACTS_DIR = "artifacts"
+
+
+class _ManifestCache:
+    """Thread-safe TTL cache for loaded IndexManifest instances.
+
+    Eliminates repeated disk reads on the hot query path.  Each entry is
+    evicted after *ttl_seconds* seconds so stale manifests do not persist
+    across index rebuilds.
+    """
+
+    def __init__(self, ttl_seconds: int = 300) -> None:
+        self._ttl = ttl_seconds
+        self._store: dict[str, tuple[IndexManifest, float]] = {}
+        self._lock = threading.RLock()
+
+    # -------------------------------------------------------------------
+    # Public API
+    # -------------------------------------------------------------------
+
+    def get(self, path: pathlib.Path) -> IndexManifest | None:
+        key = self._key(path)
+        with self._lock:
+            entry = self._store.get(key)
+            if entry is None:
+                return None
+            manifest, ts = entry
+            if time.monotonic() - ts > self._ttl:
+                del self._store[key]
+                return None
+            return manifest
+
+    def put(self, path: pathlib.Path, manifest: IndexManifest) -> None:
+        key = self._key(path)
+        with self._lock:
+            self._store[key] = (manifest, time.monotonic())
+
+    def invalidate(self, path: pathlib.Path | str) -> None:
+        key = self._key(pathlib.Path(path))
+        with self._lock:
+            self._store.pop(key, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._store.clear()
+
+    # -------------------------------------------------------------------
+    # Internals
+    # -------------------------------------------------------------------
+
+    @staticmethod
+    def _key(path: pathlib.Path) -> str:
+        resolved = path.resolve()
+        if resolved.is_dir():
+            resolved = resolved / "manifest.json"
+        return str(resolved)
+
+
+_manifest_cache = _ManifestCache()
 
 
 def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
@@ -690,6 +750,7 @@ def persist_index_bundle(
     )
 
     _write_json(manifest_path, manifest.to_payload())
+    _manifest_cache.invalidate(manifest_path)
     return manifest
 
 
@@ -748,6 +809,7 @@ def refresh_index_bundle(bundle: IndexBundle) -> pathlib.Path:
         restore_requirements=manifest.restore_requirements,
         manifest_metadata=manifest.metadata,
     )
+    _manifest_cache.invalidate(rewritten.manifest_path)
     return pathlib.Path(rewritten.manifest_path)
 
 
@@ -756,11 +818,15 @@ def load_index_manifest(path: str | pathlib.Path) -> IndexManifest:
     if candidate.is_dir():
         candidate = candidate / _MANIFEST_FILE
     if candidate.name == _MANIFEST_FILE:
+        cached = _manifest_cache.get(candidate)
+        if cached is not None:
+            return cached
         payload = _load_json(candidate)
         if not isinstance(payload, dict):
             raise ValueError(f"Invalid manifest payload: {candidate}")
         manifest = IndexManifest.from_payload(payload)
         manifest.manifest_path = str(candidate)
+        _manifest_cache.put(candidate, manifest)
         return manifest
 
     bundle = load_index_bundle(candidate)

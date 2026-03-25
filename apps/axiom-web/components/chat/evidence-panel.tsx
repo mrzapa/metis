@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { fetchTraceEvents, type RetrievalFallback, type TraceEvent } from "@/lib/api";
 import type { EvidenceSource } from "@/lib/chat-types";
-import { FileText, List, Activity } from "lucide-react";
+import { FileText, List, Activity, FileDown } from "lucide-react";
 import { EvidenceSourceCard } from "@/components/chat/evidence-source-card";
 import { TraceTimeline } from "@/components/chat/trace-timeline";
 import { cn } from "@/lib/utils";
 import { useArrowState } from "@/hooks/use-arrow-state";
+import { exportChatAnswerAsPptx } from "@/lib/export/pptx";
 
 interface EvidencePanelProps {
   sources: EvidenceSource[];
@@ -30,6 +31,9 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
   const [traceLoading, setTraceLoading] = useArrowState(Boolean(latestRunId));
   const [traceError, setTraceError] = useArrowState<string | null>(null);
   const [activeTab, setActiveTab] = useArrowState(preferredTab ?? "sources");
+  const [exportingPptx, setExportingPptx] = useArrowState(false);
+  const [exportStatus, setExportStatus] = useArrowState<string | null>(null);
+  const exportStatusTimerRef = useRef<number | null>(null);
 
   // Deduplicated, non-empty run IDs (most-recent first as they appear in the array)
   const availableRunIds = useMemo(() => [...new Set(runIds.filter(Boolean))], [runIds]);
@@ -98,6 +102,51 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
     };
   }, [selectedRunId, setTraceError, setTraceEvents, setTraceLoading, showLiveTrace]);
 
+  useEffect(() => {
+    return () => {
+      if (exportStatusTimerRef.current !== null) {
+        window.clearTimeout(exportStatusTimerRef.current);
+      }
+    };
+  }, []);
+
+  const showTransientExportStatus = (message: string) => {
+    setExportStatus(message);
+
+    if (exportStatusTimerRef.current !== null) {
+      window.clearTimeout(exportStatusTimerRef.current);
+    }
+
+    exportStatusTimerRef.current = window.setTimeout(() => {
+      setExportStatus(null);
+      exportStatusTimerRef.current = null;
+    }, 2600);
+  };
+
+  const canExportPptx = Boolean((latestAnswer ?? "").trim() || sources.length > 0);
+
+  const handleExportPptx = async () => {
+    if (!canExportPptx || exportingPptx) {
+      return;
+    }
+
+    try {
+      setExportingPptx(true);
+      await exportChatAnswerAsPptx({
+        answer: latestAnswer ?? "",
+        sources,
+        mode: selectedMode,
+        title: selectedMode ? `Axiom ${selectedMode} Export` : "Axiom Chat Export",
+        fileName: selectedMode ? `axiom-${selectedMode}` : "axiom-chat-export",
+      });
+      showTransientExportStatus("PPTX downloaded");
+    } catch {
+      showTransientExportStatus("PPTX export failed");
+    } finally {
+      setExportingPptx(false);
+    }
+  };
+
   return (
     <div className="chat-pane-surface flex h-full min-h-0 flex-col overflow-hidden rounded-[1.9rem]">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex h-full flex-col">
@@ -139,26 +188,42 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
                   </p>
                 </div>
               )}
-              {selectedMode === "Evidence Pack" && sources.length > 0 && (
-                <div className="flex justify-end pb-1">
+              {(selectedMode === "Evidence Pack" || canExportPptx) && (
+                <div className="flex items-center justify-end gap-1.5 pb-1">
+                  {selectedMode === "Evidence Pack" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const data = { answer: latestAnswer ?? "", mode: selectedMode, fallback, sources };
+                        const blob = new Blob([JSON.stringify(data, null, 2)], {
+                          type: "application/json",
+                        });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = "evidence-pack.json";
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      className="glass-micro-surface rounded-full px-3 py-1 text-[11px] font-medium transition-colors hover:bg-white/10"
+                    >
+                      Download JSON
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
-                      const data = { answer: latestAnswer ?? "", mode: selectedMode, fallback, sources };
-                      const blob = new Blob([JSON.stringify(data, null, 2)], {
-                        type: "application/json",
-                      });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = "evidence-pack.json";
-                      a.click();
-                      URL.revokeObjectURL(url);
+                      void handleExportPptx();
                     }}
-                    className="glass-micro-surface rounded-full px-3 py-1 text-[11px] font-medium transition-colors hover:bg-white/10"
+                    disabled={!canExportPptx || exportingPptx}
+                    className="glass-micro-surface inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-55"
                   >
-                    Download JSON
+                    <FileDown className="size-3" />
+                    {exportingPptx ? "Exporting…" : "Export PPTX"}
                   </button>
+                  {exportStatus && (
+                    <span className="text-[10px] text-muted-foreground">{exportStatus}</span>
+                  )}
                 </div>
               )}
 
