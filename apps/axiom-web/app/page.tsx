@@ -93,7 +93,8 @@ export default function Home() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let W: number, H: number;
+    let W = window.innerWidth;
+    let H = window.innerHeight;
     function resize() {
       W = canvas!.width = window.innerWidth;
       H = canvas!.height = window.innerHeight;

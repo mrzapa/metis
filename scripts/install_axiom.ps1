@@ -42,6 +42,9 @@ $Branch      = if ($env:AXIOM_BRANCH)      { $env:AXIOM_BRANCH }      else { "ma
 $PythonBin   = if ($env:AXIOM_PYTHON)      { $env:AXIOM_PYTHON }      else { "python" }
 $VenvDir     = Join-Path $InstallDir ".venv"
 $InstallSpec = "{0}[runtime-all,api]" -f $InstallDir
+$PipRetries  = if ($env:AXIOM_PIP_RETRIES) { [int]$env:AXIOM_PIP_RETRIES } else { 10 }
+$PipTimeout  = if ($env:AXIOM_PIP_TIMEOUT) { [int]$env:AXIOM_PIP_TIMEOUT } else { 120 }
+$InstallRetries = if ($env:AXIOM_INSTALL_RETRIES) { [int]$env:AXIOM_INSTALL_RETRIES } else { 4 }
 $LauncherDir = Join-Path $HOME ".local" "bin"
 $LauncherPs1 = Join-Path $LauncherDir "axiom.ps1"
 $LauncherCmd = Join-Path $LauncherDir "axiom.cmd"
@@ -51,6 +54,49 @@ function Write-Info  { param([string]$Msg) Write-Host "[axiom] $Msg" -Foreground
 function Write-Ok    { param([string]$Msg) Write-Host "[axiom] $Msg" -ForegroundColor Green }
 function Write-Warn  { param([string]$Msg) Write-Host "[axiom] $Msg" -ForegroundColor Yellow }
 function Write-Err   { param([string]$Msg) Write-Host "[axiom] $Msg" -ForegroundColor Red }
+
+function Invoke-WithRetry {
+    param(
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Operation,
+        [Parameter(Mandatory = $true)]
+        [string]$Description,
+        [int]$MaxAttempts = 3,
+        [int]$BaseDelaySeconds = 2
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            & $Operation
+            return
+        } catch {
+            if ($attempt -ge $MaxAttempts) {
+                throw
+            }
+
+            $delay = [Math]::Min(30, $BaseDelaySeconds * [Math]::Pow(2, $attempt - 1))
+            Write-Warn "$Description failed (attempt $attempt/$MaxAttempts): $($_.Exception.Message)"
+            Write-Info "Retrying in $delay seconds..."
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
+function Invoke-PipCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PythonPath,
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments,
+        [Parameter(Mandatory = $true)]
+        [string]$Description
+    )
+
+    & $PythonPath -m pip @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Description failed with exit code $LASTEXITCODE."
+    }
+}
 
 $TurbopackRootNote = "Web config pins Turbopack root; Next.js lockfile root warning should be absent."
 
@@ -248,7 +294,13 @@ function Stop-ChildProcess {
 
 if (Test-Path (Join-Path `$axiomDir ".git")) {
     `$headBefore = git -C `$axiomDir rev-parse HEAD 2>`$null
-    try { git -C `$axiomDir pull origin `$branch --ff-only 2>`$null } catch {}
+    git -C `$axiomDir fetch origin `$branch 2>`$null
+    git -C `$axiomDir checkout `$branch 2>`$null
+    git -C `$axiomDir pull origin `$branch --ff-only 2>`$null
+    if (`$LASTEXITCODE -ne 0) {
+        Write-Host "Local changes prevented fast-forward pull. Resetting to origin/`$branch..." -ForegroundColor Yellow
+        git -C `$axiomDir reset --hard "origin/`$branch" 2>`$null
+    }
     `$headAfter = git -C `$axiomDir rev-parse HEAD 2>`$null
 
     `$needsBuild = (-not (Test-Path (Join-Path `$webDir "index.html"))) -or (`$headBefore -ne `$headAfter)
@@ -380,9 +432,17 @@ try {
         `$apiProcess.Refresh()
         `$webProcess.Refresh()
         if (`$apiProcess.HasExited) {
+            if (`$apiProcess.ExitCode -eq 0) {
+                Write-Host "API server exited cleanly. Stopping launcher." -ForegroundColor Yellow
+                break
+            }
             Throw-StartupFailure -Label "API server" -Process `$apiProcess -StdOut `$apiStdOut -StdErr `$apiStdErr -Hint "The API server stopped unexpectedly."
         }
         if (`$webProcess.HasExited) {
+            if (`$webProcess.ExitCode -eq 0) {
+                Write-Host "Web UI server exited cleanly. Stopping launcher." -ForegroundColor Yellow
+                break
+            }
             Throw-StartupFailure -Label "Web UI server" -Process `$webProcess -StdOut `$webStdOut -StdErr `$webStdErr -Hint "The static web server stopped unexpectedly."
         }
     }
@@ -465,18 +525,35 @@ function Invoke-Install {
         if ($IsReinstall) {
             Write-Info "Reinstall requested - pulling latest code..."
             git -C $InstallDir fetch origin $Branch
+            if ($LASTEXITCODE -ne 0) {
+                throw "git fetch failed while reinstalling."
+            }
             git -C $InstallDir checkout $Branch 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                throw "git checkout $Branch failed while reinstalling."
+            }
             git -C $InstallDir reset --hard "origin/$Branch"
+            if ($LASTEXITCODE -ne 0) {
+                throw "git reset --hard origin/$Branch failed while reinstalling."
+            }
             Write-Ok "Repository updated to latest origin/$Branch."
         } else {
             Write-Info "Existing installation found - pulling latest code..."
             git -C $InstallDir fetch origin $Branch
+            if ($LASTEXITCODE -ne 0) {
+                throw "git fetch failed while updating existing installation."
+            }
             git -C $InstallDir checkout $Branch 2>$null
-            try {
-                git -C $InstallDir pull origin $Branch --ff-only
-            } catch {
+            if ($LASTEXITCODE -ne 0) {
+                throw "git checkout $Branch failed while updating existing installation."
+            }
+            git -C $InstallDir pull origin $Branch --ff-only
+            if ($LASTEXITCODE -ne 0) {
                 Write-Warn "Fast-forward pull failed. Running hard reset to origin/$Branch."
                 git -C $InstallDir reset --hard "origin/$Branch"
+                if ($LASTEXITCODE -ne 0) {
+                    throw "git reset --hard origin/$Branch failed while recovering from pull failure."
+                }
             }
             Write-Ok "Repository up to date."
         }
@@ -499,11 +576,20 @@ function Invoke-Install {
     }
 
     $VenvPython = Join-Path $VenvDir "Scripts" "python.exe"
-    $VenvPip    = Join-Path $VenvDir "Scripts" "pip.exe"
+    $PipCommonArgs = @(
+        "--disable-pip-version-check",
+        "--no-input",
+        "--retries", $PipRetries.ToString(),
+        "--timeout", $PipTimeout.ToString()
+    )
 
     Write-Info "Installing dependencies..."
-    & $VenvPython -m pip install --upgrade pip --quiet
-    & $VenvPip install -e $InstallSpec --quiet
+    Invoke-WithRetry -Description "pip self-upgrade" -MaxAttempts $InstallRetries -Operation {
+        Invoke-PipCommand -PythonPath $VenvPython -Description "pip self-upgrade" -Arguments (@("install", "--upgrade", "pip", "--quiet") + $PipCommonArgs)
+    }
+    Invoke-WithRetry -Description "dependency installation" -MaxAttempts $InstallRetries -Operation {
+        Invoke-PipCommand -PythonPath $VenvPython -Description "dependency installation" -Arguments (@("install", "-e", $InstallSpec, "--quiet", "--prefer-binary") + $PipCommonArgs)
+    }
     Write-Ok "Dependencies installed."
 
     # ── Web UI (optional) ────────────────────────────────────────────────
@@ -585,20 +671,37 @@ function Invoke-Update {
 
     Write-Info "Pulling latest code..."
     git -C $InstallDir fetch origin $Branch
+    if ($LASTEXITCODE -ne 0) {
+        throw "git fetch failed while updating."
+    }
     git -C $InstallDir checkout $Branch 2>$null
-    try {
-        git -C $InstallDir pull origin $Branch --ff-only
-    } catch {
+    if ($LASTEXITCODE -ne 0) {
+        throw "git checkout $Branch failed while updating."
+    }
+    git -C $InstallDir pull origin $Branch --ff-only
+    if ($LASTEXITCODE -ne 0) {
         Write-Warn "Fast-forward pull failed. Running hard reset to origin/$Branch."
         git -C $InstallDir reset --hard "origin/$Branch"
+        if ($LASTEXITCODE -ne 0) {
+            throw "git reset --hard origin/$Branch failed while recovering from pull failure."
+        }
     }
 
     $VenvPython = Join-Path $VenvDir "Scripts" "python.exe"
-    $VenvPip    = Join-Path $VenvDir "Scripts" "pip.exe"
+    $PipCommonArgs = @(
+        "--disable-pip-version-check",
+        "--no-input",
+        "--retries", $PipRetries.ToString(),
+        "--timeout", $PipTimeout.ToString()
+    )
 
     Write-Info "Updating dependencies..."
-    & $VenvPython -m pip install --upgrade pip --quiet
-    & $VenvPip install -e $InstallSpec --quiet
+    Invoke-WithRetry -Description "pip self-upgrade" -MaxAttempts $InstallRetries -Operation {
+        Invoke-PipCommand -PythonPath $VenvPython -Description "pip self-upgrade" -Arguments (@("install", "--upgrade", "pip", "--quiet") + $PipCommonArgs)
+    }
+    Invoke-WithRetry -Description "dependency update" -MaxAttempts $InstallRetries -Operation {
+        Invoke-PipCommand -PythonPath $VenvPython -Description "dependency update" -Arguments (@("install", "-e", $InstallSpec, "--quiet", "--prefer-binary") + $PipCommonArgs)
+    }
 
     # ── Rebuild web UI ───────────────────────────────────────────────
     $WebAppDir = Join-Path $InstallDir "apps" "axiom-web"

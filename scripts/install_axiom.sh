@@ -13,6 +13,9 @@
 #   AXIOM_REPO          — git clone URL             (default: https://github.com/mrzapa/axiom.git)
 #   AXIOM_BRANCH        — branch to track           (default: main)
 #   AXIOM_PYTHON        — python binary             (default: python3)
+#   AXIOM_PIP_RETRIES   — pip network retries       (default: 10)
+#   AXIOM_PIP_TIMEOUT   — pip network timeout (sec) (default: 120)
+#   AXIOM_INSTALL_RETRIES — full install step retries (default: 4)
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -23,6 +26,9 @@ BRANCH="${AXIOM_BRANCH:-main}"
 PYTHON="${AXIOM_PYTHON:-python3}"
 VENV_DIR="$INSTALL_DIR/.venv"
 INSTALL_SPEC="${INSTALL_DIR}[runtime-all,api]"
+PIP_RETRIES="${AXIOM_PIP_RETRIES:-10}"
+PIP_TIMEOUT="${AXIOM_PIP_TIMEOUT:-120}"
+INSTALL_RETRIES="${AXIOM_INSTALL_RETRIES:-4}"
 LAUNCHER_DIR="$HOME/.local/bin"
 LAUNCHER="$LAUNCHER_DIR/axiom"
 
@@ -38,6 +44,46 @@ info()  { printf "${CYAN}[axiom]${NC} %s\n" "$*"; }
 ok()    { printf "${GREEN}[axiom]${NC} %s\n" "$*"; }
 warn()  { printf "${YELLOW}[axiom]${NC} %s\n" "$*"; }
 err()   { printf "${RED}[axiom]${NC} %s\n" "$*" >&2; }
+
+retry_with_backoff() {
+    local description="$1"
+    local max_attempts="$2"
+    shift 2
+
+    local attempt=1
+    local delay=2
+
+    while [ "$attempt" -le "$max_attempts" ]; do
+        if "$@"; then
+            return 0
+        fi
+
+        if [ "$attempt" -ge "$max_attempts" ]; then
+            err "$description failed after $attempt attempts."
+            return 1
+        fi
+
+        warn "$description failed (attempt $attempt/$max_attempts)."
+        info "Retrying in ${delay}s..."
+        sleep "$delay"
+        delay=$((delay * 2))
+        if [ "$delay" -gt 30 ]; then
+            delay=30
+        fi
+        attempt=$((attempt + 1))
+    done
+}
+
+run_pip() {
+    local venv_python="$1"
+    shift
+
+    "$venv_python" -m pip "$@" \
+        --disable-pip-version-check \
+        --no-input \
+        --retries "$PIP_RETRIES" \
+        --timeout "$PIP_TIMEOUT"
+}
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 write_launcher() {
@@ -412,8 +458,10 @@ do_install() {
     fi
 
     info "Installing dependencies…"
-    "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet
-    "$VENV_DIR/bin/pip" install -e "$INSTALL_SPEC" --quiet
+    retry_with_backoff "pip self-upgrade" "$INSTALL_RETRIES" \
+        run_pip "$VENV_DIR/bin/python" install --upgrade pip --quiet
+    retry_with_backoff "dependency installation" "$INSTALL_RETRIES" \
+        run_pip "$VENV_DIR/bin/python" install -e "$INSTALL_SPEC" --quiet --prefer-binary
     ok "Dependencies installed."
 
     # ── Web UI (optional) ────────────────────────────────────────────────
@@ -475,8 +523,10 @@ do_update() {
     }
 
     info "Updating dependencies…"
-    "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet
-    "$VENV_DIR/bin/pip" install -e "$INSTALL_SPEC" --quiet
+    retry_with_backoff "pip self-upgrade" "$INSTALL_RETRIES" \
+        run_pip "$VENV_DIR/bin/python" install --upgrade pip --quiet
+    retry_with_backoff "dependency update" "$INSTALL_RETRIES" \
+        run_pip "$VENV_DIR/bin/python" install -e "$INSTALL_SPEC" --quiet --prefer-binary
 
     # ── Rebuild web UI ────────────────────────────────────────────────
     local web_app_dir="$INSTALL_DIR/apps/axiom-web"
@@ -518,6 +568,9 @@ Environment variables:
   AXIOM_REPO          Git repository URL   (default: https://github.com/mrzapa/axiom.git)
   AXIOM_BRANCH        Branch to track      (default: main)
   AXIOM_PYTHON        Python binary        (default: python3)
+    AXIOM_PIP_RETRIES   pip request retries  (default: 10)
+    AXIOM_PIP_TIMEOUT   pip timeout seconds  (default: 120)
+    AXIOM_INSTALL_RETRIES  full pip step retries (default: 4)
 EOF
 }
 
