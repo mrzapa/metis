@@ -2,7 +2,7 @@
 
 `axiom_app.engine` is the proposed public core boundary between Axiom frontends and Axiom core functionality.
 
-This package does not exist yet as runtime code. This README defines the intended contract for a future engine layer so that Qt UI code, CLI code, and any other frontend can depend on one stable, typed API instead of importing service modules directly.
+This package does not exist yet as runtime code. This README defines the intended contract for a future engine layer so that the web UI, CLI, and any other frontend can depend on one stable, typed API instead of importing service modules directly.
 
 Once the engine layer exists, views, controllers, and frontends should stop reaching into `axiom_app/services/*` for indexing, query, session, trace, and synthesis behavior. Those modules remain the current implementation backing for now, but they are not the intended long-term frontend integration surface.
 
@@ -16,7 +16,7 @@ Once the engine layer exists, views, controllers, and frontends should stop reac
 
 The engine layer must follow these rules:
 
-- It must not import `Qt`, `PySide6`, or any other UI toolkit.
+- It must not import any UI toolkit.
 - It must not accept or return UI objects such as widgets, signals, controllers, views, dialogs, or model instances owned by the UI shell.
 - It must not depend on `AppModel`, `argparse.Namespace`, or any other frontend-specific container type.
 - It must accept plain settings payloads as `dict[str, Any]`.
@@ -258,7 +258,7 @@ This proposed engine surface must remain a thin, typed boundary over the code th
 
 ## Example Frontend Usage
 
-This is the intended style of usage for any future frontend, including Qt, CLI, or other shells.
+This is the intended style of usage for any future frontend, including the web UI, CLI, or other shells.
 
 ```python
 from axiom_app.engine import load_index, stream_query
@@ -284,12 +284,12 @@ for event in stream_query(bundle, "What changed in this project?", settings):
         print(event.response.response_text)
 ```
 
-The important point is that the caller only passes plain settings, plain strings, and engine store objects, and only receives typed engine records back. No Qt signals, widgets, controllers, or `AppModel` instances cross this boundary.
+The important point is that the caller only passes plain settings, plain strings, and engine store objects, and only receives typed engine records back. No UI-framework objects, widgets, signals, controllers, or `AppModel` instances cross this boundary.
 
 ## Acceptance Checklist For Future Engine Work
 
 - Frontends can index, load, query, stream, and persist sessions without importing `axiom_app/services/*` directly.
-- The engine can be imported in a non-Qt process without pulling in `PySide6`.
+- The engine can be imported in any non-UI process without pulling in UI-framework dependencies.
 - All engine entrypoints accept `dict[str, Any]` settings.
 - Engine entrypoints return typed records instead of frontend-shaped dict payloads.
 - Session and trace persistence map cleanly to the current `SessionRepository` and `TraceStore` implementations.

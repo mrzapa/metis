@@ -3,7 +3,7 @@
 Minimal [Reflex](https://reflex.dev) prototype that wires up to the existing
 `axiom_app` core: lists sessions from the repo-root SQLite database and
 executes direct LLM queries through the current engine — **no changes** to
-`main.py` or any Qt/API packaging required.
+the API server or existing entrypoints required.
 
 ## Prerequisites
 
@@ -58,7 +58,7 @@ Open <http://localhost:3000> in your browser.
 ## What this is NOT
 
 This is a **prototype only**.  It does not replace:
-- `python main.py` (Qt desktop app — canonical entrypoint)
+- `python main.py` (canonical entrypoint — starts FastAPI + opens web UI)
 - `python -m axiom_app.api` (FastAPI backend for axiom-web)
 
 RAG queries, session creation/deletion, auth, and production routing are
