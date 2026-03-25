@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to Axiom.
+Thanks for contributing to METIS AI.
 
 ## Development setup
 

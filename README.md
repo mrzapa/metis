@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="logo.png" alt="Axiom" width="160" />
+  <img src="logo.png" alt="METIS AI" width="160" />
 </p>
 
-<h1 align="center">Axiom</h1>
+<h1 align="center">METIS AI</h1>
 
 <p align="center">
-  <strong>The private, provider-agnostic RAG app that runs entirely on your machine.</strong><br />
+  <strong>The private, provider-agnostic AI workspace that runs entirely on your machine.</strong><br />
   Index your documents. Ask questions. Get grounded answers.<br />
-  No API keys required - bring a local model and go fully offline.
+  No API keys required — bring a local model and go fully offline.
 </p>
 
 <p align="center">
@@ -19,12 +19,14 @@
 
 <br />
 
-Axiom is a **local-first desktop AI workspace** built with Tauri + Next.js + FastAPI. It runs entirely on your machine - your files never leave your device.
+**METIS AI** is a **local-first frontier AI workspace** built with Tauri + Next.js + FastAPI. It runs entirely on your machine — your files never leave your device.
 
 - **Fully local.** Run with a local GGUF model and you don't even need an internet connection.
-- **Swap anything.** LLM, embeddings, vector store - change providers in a config file. Today it's OpenAI, tomorrow it's a model on your laptop.
-- **Desktop-native.** Built with Tauri for a native window experience - no Electron bloat.
+- **Swap anything.** LLM, embeddings, vector store — change providers in a config file. Today it's OpenAI, tomorrow it's a model on your laptop.
+- **Desktop-native.** Built with Tauri for a native window experience — no Electron bloat.
 - **Five ways to think.** Q&A, Summary, Tutor, Research, and Evidence Pack modes give you different lenses on the same documents.
+- **METIS Companion.** An always-on AI companion that learns from your sessions, reflects on conversations, and grows with your workspace.
+- **Brain Graph.** An interactive 3D visualisation of your workspace — indexes, sessions, companion memory, and their relationships.
 
 <br />
 
@@ -50,7 +52,7 @@ curl -fsSL https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_a
 irm https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_axiom.ps1 | iex
 ```
 
-The installer clones the repo, sets up a virtual environment, installs dependencies, and drops an `axiom` launcher on your PATH. It auto-updates on every run.
+The installer clones the repo, sets up a virtual environment, installs dependencies, and drops a launcher on your PATH. It auto-updates on every run.
 
 ### Run
 
@@ -79,17 +81,18 @@ This starts the FastAPI app directly at `http://127.0.0.1:8000`.
 
 ### Use
 
-1. **Add documents** - drag files into the library or use the CLI
-2. **Ask questions** - select a mode (Q&A, Summary, Tutor, Research, Evidence Pack) and chat
-3. **Persist sessions** - conversations auto-save to SQLite
+1. **Add documents** — drag files into the Library or use the CLI
+2. **Ask questions** — select a mode (Q&A, Summary, Tutor, Research, Evidence Pack) and chat
+3. **Explore the Brain** — navigate the 3D graph to see how your workspace connects
+4. **Persist sessions** — conversations auto-save to SQLite
 
 ---
 
 ## ✨ Features
 
-### Zero lock-in - swap every layer
+### Zero lock-in — swap every layer
 
-Most RAG apps hardcode their stack. Axiom treats every layer as a plug-in. Switch providers in `settings.json` and restart - that's it.
+Most RAG apps hardcode their stack. METIS AI treats every layer as a plug-in. Switch providers in `settings.json` and restart — that's it.
 
 | Layer | Options | Go fully offline? |
 |-------|---------|:-----------------:|
@@ -107,20 +110,34 @@ Most RAG apps hardcode their stack. Axiom treats every layer as a plug-in. Switc
 | **Research** | Deep dives with sub-query expansion and reranking |
 | **Evidence Pack** | Structured claim-level grounding with source citations |
 
+### METIS Companion
+
+An always-on AI companion that lives in the workspace shell. It bootstraps an identity, reflects on active sessions, stores learned memories and playbooks, and surfaces contextual hints as you work. The companion is always available from the floating dock at the bottom of every page.
+
+### Brain Graph
+
+An interactive 3D force-directed graph visualising your entire workspace — indexes, sessions, the METIS Self, and learned companion memory — as glowing neural nodes connected by animated edges. Rotate, zoom, and click any node to inspect it.
+
+| Scope | What it shows |
+|-------|--------------|
+| **Workspace** | Indexes, sessions, and structural categories |
+| **METIS Self** | The companion's identity and self-structure |
+| **Assistant-Learned** | Memories, playbooks, and learned links |
+
 ### Everything else
 
-- **Knowledge graphs** - automatic entity extraction and relationship linking
-- **Persistent sessions** - SQLite-backed conversations
-- **Agent profiles** - save different configurations for different projects
-- **Structure-aware ingestion** - parses PDFs, DOCX, Markdown, HTML, plain text
-- **Background processing** - indexing and queries run in threads, UI never freezes
-- **Theming** - Space Dust, Light, and Dark themes
+- **Knowledge graphs** — automatic entity extraction and relationship linking
+- **Persistent sessions** — SQLite-backed conversations that auto-save
+- **Agent profiles** — save different configurations for different projects
+- **Structure-aware ingestion** — parses PDFs, DOCX, Markdown, HTML, and plain text
+- **Background processing** — indexing and queries run in threads; the UI never freezes
+- **Theming** — Space Dust, Light, and Dark themes
 
 ---
 
 ## 💻 CLI
 
-The CLI shares the same retrieval backend as the app - same results, no window.
+The CLI shares the same retrieval backend as the app — same results, no window.
 
 ```bash
 # Index a file
@@ -147,7 +164,7 @@ python main.py --cli query --file docs/my_notes.txt --question "What are the key
 python -m axiom_app.api
 ```
 
-Runs the API at `http://127.0.0.1:8000`.
+Runs the API at `http://127.0.0.1:8000`. Full API reference is available at `http://127.0.0.1:8000/docs` while the server is running.
 
 ### API + Next.js dev UI
 
@@ -172,13 +189,14 @@ This starts:
 
 ## 🔧 Configuration
 
-Axiom ships with sensible defaults in `axiom_app/default_settings.json`. To customize, copy it to `settings.json` in the project root - Axiom picks it up automatically.
+METIS AI ships with sensible defaults in `axiom_app/default_settings.json`. To customise, copy it to `settings.json` in the project root — METIS picks it up automatically on the next launch.
 
 ### Environment variables
 
 | Variable | What it does |
 |----------|-------------|
 | `NEXT_PUBLIC_AXIOM_API_BASE` | Overrides the API base URL used by the web UI during local Next.js development |
+| `AXIOM_API_TOKEN` | When set, all protected endpoints require a Bearer token |
 | `AXIOM_TEST_WEAVIATE_URL` | Weaviate endpoint for live parity tests |
 | `AXIOM_TEST_WEAVIATE_API_KEY` | Weaviate API key |
 | `AXIOM_TEST_WEAVIATE_GRPC_HOST` | Weaviate gRPC host |
@@ -203,21 +221,28 @@ python -m pytest --cov=axiom_app --cov-report=term
 
 ```
 axiom_app/
-├── models/          # Application state
-├── services/       # Indexing, retrieval, sessions, pipelines
-├── utils/          # LLM/embedding factories, document loaders
-└── assets/         # Bundled resources
+├── api/            # FastAPI routes (v1/*)
+├── engine/         # Indexing + retrieval core (provider-agnostic)
+├── models/         # BrainGraph, AppModel, session types
+├── services/       # Session repository, index service, pipeline
+└── utils/          # Knowledge graph, LLM/embedding providers
 
 apps/
-├── axiom-web/      # Next.js UI (TypeScript + Tailwind)
+├── axiom-web/      # Tauri + Next.js UI (TypeScript + Tailwind)
 │   ├── app/
-│   │   ├── chat/   # Chat interface
-│   │   ├── library/ # Document library
-│   │   └── settings/ # Provider and model config
-│   └── components/  # Shared UI components
-└── axiom-desktop/ # Tauri desktop shell
+│   │   ├── chat/       # Chat interface (RAG Q&A)
+│   │   ├── library/    # Document & index library
+│   │   ├── brain/      # Interactive Brain Graph visualisation
+│   │   ├── setup/      # First-run onboarding wizard
+│   │   └── settings/   # Provider and model configuration
+│   └── components/
+│       ├── brain/       # BrainGraph 3D component
+│       ├── chat/        # Chat + evidence panels
+│       └── shell/       # METIS Companion dock, page chrome
+└── axiom-desktop/  # Tauri desktop shell
 
-scripts/             # Installers and dev scripts
+scripts/            # Installers and dev scripts
+skills/             # Self-contained agentic skill workflows
 tests/              # pytest suite
 docker/             # Weaviate for integration testing
 ```
@@ -238,7 +263,7 @@ For full-stack local development:
 bash scripts/run_nextgen_dev.sh
 ```
 
-Make sure linting and tests pass before opening a PR.
+Make sure linting and tests pass before opening a PR. See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ---
 
