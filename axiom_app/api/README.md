@@ -3,7 +3,7 @@
 The API layer is a thin, typed boundary over Axiom's engine layer.
 
 **Design constraints:**
-- Does not import Qt, PySide6, or any UI toolkit.
+- Pure Python layer: accepts and returns JSON-compatible types. No UI toolkit dependencies.
 - Accepts and returns JSON; uses Pydantic models for validation.
 - Engine errors (`ValueError` → 400, `RuntimeError` → 503) are translated to HTTP status codes.
 

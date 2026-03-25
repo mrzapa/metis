@@ -1,6 +1,6 @@
 # 0001: Local API and Web UI
 
-- `Status`: Draft
+- `Status`: Superseded by ADR 0004
 - `Date`: 2026-03-13
 
 ## Context

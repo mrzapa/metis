@@ -1,11 +1,11 @@
 # 0002: Streaming Protocol
 
-- `Status`: Draft
+- `Status`: Superseded by ADR 0004
 - `Date`: 2026-03-13
 
 ## Context
 
-There is no external local API in Axiom today. Streaming behavior is internal to the current Python and PySide6 Qt MVC-backed runtime. If Axiom adds a local API plus a meta-framework web UI inside a desktop container, it will also need a framework-neutral streaming contract between the API and that UI.
+Axiom's local API (FastAPI) and Tauri + Next.js web UI require a framework-neutral streaming contract between the API and the UI.
 
 This ADR is intentionally pre-decision. It defines the goal and evaluation criteria for streaming, not a final transport.
 
@@ -29,7 +29,7 @@ The contract should be evaluated on:
 
 ## Alternatives Considered
 
-- Keep Qt-only: avoids defining a new protocol, but does not support the target local API plus web UI direction.
+- API-only SSE (chosen): server-sent events over the FastAPI layer, consumed by Next.js and Tauri shell.
 - Pure web without desktop container: could simplify browser-oriented streaming choices, but weakens the intended desktop packaging model.
 - Python-only UI via Reflex: may reduce protocol surface in the short term, but ties the UI direction to a Python-specific framework choice.
 - Performance-first API variant using Litestar: may influence transport choices, but it is an API implementation preference rather than a settled streaming contract.
