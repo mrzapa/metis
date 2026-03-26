@@ -115,7 +115,7 @@ const ASSISTANT_DEFAULT_VALUES: AssistantFormValues = {
     name: "METIS",
     archetype: "Clippy-style research companion",
     companion_enabled: true,
-    greeting: "I can help you get started, reflect on completed work, and map what I learn in the Brain tab.",
+    greeting: "I can help you get started, reflect on completed work, and map what I learn in the Brain view.",
     prompt_seed:
       "You are METIS, a local-first companion who helps the user get oriented, suggests next steps, and records concise reflections without taking over the main chat.",
     docked: true,

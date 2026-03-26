@@ -38,10 +38,6 @@ import {
   type BrainSceneLink,
   type BrainSceneNode,
 } from "./brain-graph-view-model";
-import {
-  loadBrainModelOverlay,
-  type BrainModelOverlayHandle,
-} from "./brain-model-overlay";
 
 // -- Constants ----------------------------------------------------------------
 
@@ -500,14 +496,10 @@ export default function BrainGraph3D({
   data,
   filter = "",
   activeScopes = ALL_BRAIN_SCOPES,
-  nodeTypeNeuronMapping,
-  renderMode = "hybrid",
   selectedNodeId = null,
   onSelectedNodeIdChange,
   onNodeSelect,
   companionSignal = null,
-  onModelLoadError,
-  modelUrl = "/brain/brain-model.glb",
   className = "",
 }: BrainGraph3DProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -515,12 +507,9 @@ export default function BrainGraph3D({
 
   // Track Three.js objects we create so we can dispose them on cleanup
   const createdObjectsRef = useRef<THREE.Object3D[]>([]);
-  const modelOverlayRef = useRef<BrainModelOverlayHandle | null>(null);
   const modelSceneRef = useRef<THREE.Scene | null>(null);
-  const modelLoadAttemptRef = useRef(0);
   const [sceneReady, setSceneReady] = useArrowState(false);
   const needsInitialZoomRef = useRef(true);
-  const rendererConfiguredRef = useRef(false);
   const [autoRotate, setAutoRotate] = useArrowState(false);
   const [activityLabel, setActivityLabel] = useArrowState("Idle");
   const [activityProfile, setActivityProfile] = useArrowState({
@@ -557,11 +546,6 @@ export default function BrainGraph3D({
   const [dims, setDims] = useArrowState({ w: 800, h: 600 });
   const wasZeroSizedRef = useRef(false);
 
-  const mergedNodeTypeNeuronMapping = useMemo<NodeTypeNeuronMapping>(() => ({
-    ...DEFAULT_NODE_TYPE_TO_NEURON_KIND,
-    ...(nodeTypeNeuronMapping ?? {}),
-  }), [nodeTypeNeuronMapping]);
-
   const recoverGraphViewport = useCallback(() => {
     const fg = fgRef.current;
     if (!fg) return;
@@ -576,16 +560,17 @@ export default function BrainGraph3D({
     fg.d3ReheatSimulation();
     needsInitialZoomRef.current = true;
 
-    window.setTimeout(() => {
+    fg.zoomToFit(ZOOM_TO_FIT_MS, ZOOM_TO_FIT_PADDING);
+    const liveGraph = (
+      fg as ForceGraphMethods<BrainSceneNode, BrainSceneLink> & {
+        graphData?: () => { nodes?: Array<{ x?: number; y?: number; z?: number }> };
+      }
+    ).graphData?.();
+
+    window.requestAnimationFrame(() => {
       if (!fgRef.current) return;
       fgRef.current.zoomToFit(ZOOM_TO_FIT_MS, ZOOM_TO_FIT_PADDING);
-      const liveGraph = (
-        fgRef.current as ForceGraphMethods<BrainSceneNode, BrainSceneLink> & {
-          graphData?: () => { nodes?: Array<{ x?: number; y?: number; z?: number }> };
-        }
-      ).graphData?.();
-      modelOverlayRef.current?.fitToGraph(liveGraph?.nodes ?? []);
-    }, 120);
+    });
   }, []);
 
   useEffect(() => {
@@ -669,10 +654,6 @@ export default function BrainGraph3D({
     return () => {
       for (const obj of objects) disposeObject3D(obj);
       objects.length = 0;
-      if (modelOverlayRef.current) {
-        modelOverlayRef.current.dispose();
-        modelOverlayRef.current = null;
-      }
       // Bloom/output passes are managed by the library's internal composer;
       // we only need to dispose our pass materials.
       if (bloomPassRef.current) {
@@ -712,19 +693,11 @@ export default function BrainGraph3D({
     const tick = () => {
       const dt = clock.getDelta();
       elapsedTime += dt;
-
-      // Update brain overlay breathing/pulse
-      const overlay = modelOverlayRef.current;
       const pointerCurrent = pointerCurrentRef.current;
       const pointerTarget = pointerTargetRef.current;
       pointerCurrent.lerp(pointerTarget, 1 - Math.exp(-dt * 4.5));
       presenceCurrentRef.current +=
         (presenceTargetRef.current - presenceCurrentRef.current) * (1 - Math.exp(-dt * 4.0));
-
-      if (overlay) {
-        overlay.setPresence(presenceCurrentRef.current);
-        overlay.update(dt);
-      }
 
       // Slowly rotate ambient dust for living atmosphere
       // Plus per-particle bobbing motion (inspired by Vestige ParticleSystem.animate)
@@ -929,8 +902,7 @@ export default function BrainGraph3D({
 
   useEffect(() => {
     const fg = fgRef.current;
-    if (!fg || rendererConfiguredRef.current) return;
-    rendererConfiguredRef.current = true;
+    if (!fg) return;
 
     // Renderer quality settings
     const renderer = fg.renderer?.();
@@ -949,25 +921,36 @@ export default function BrainGraph3D({
     // Cinematic lighting setup
     if (scene) {
       // Soft ambient fill
-      const ambientLight = new THREE.AmbientLight(0x303050, 0.35);
-      ambientLight.name = "ambient-light";
-      scene.add(ambientLight);
+      if (!scene.getObjectByName("ambient-light")) {
+        const ambientLight = new THREE.AmbientLight(0x303050, 0.35);
+        ambientLight.name = "ambient-light";
+        scene.add(ambientLight);
+      }
 
       // Key light: warm directional from top-front-right
-      const keyLight = new THREE.DirectionalLight(0xeeddcc, 0.4);
-      keyLight.position.set(200, 300, 200);
-      keyLight.name = "key-light";
-      scene.add(keyLight);
+      if (!scene.getObjectByName("key-light")) {
+        const keyLight = new THREE.DirectionalLight(0xeeddcc, 0.4);
+        keyLight.position.set(200, 300, 200);
+        keyLight.name = "key-light";
+        scene.add(keyLight);
+      }
 
       // Cinematic rim lights (orbiting coloured accents)
       const rimColors = [0x4488ff, 0x8844ff, 0x44ffaa];
       const rimLights: THREE.PointLight[] = [];
       for (let i = 0; i < rimColors.length; i++) {
+        const name = `rim-light-${i}`;
+        const existing = scene.getObjectByName(name);
+        if (existing instanceof THREE.PointLight) {
+          rimLights.push(existing);
+          continue;
+        }
+
         const rimLight = new THREE.PointLight(rimColors[i], 0.35, 800, 1.5);
         const angle = (i / rimColors.length) * Math.PI * 2;
         const r = 350;
         rimLight.position.set(Math.cos(angle) * r, 50 + i * 40, Math.sin(angle) * r);
-        rimLight.name = `rim-light-${i}`;
+        rimLight.name = name;
         rimLight.userData.orbitAngle = angle;
         rimLight.userData.orbitSpeed = 0.08 + i * 0.02;
         rimLight.userData.orbitRadius = r;
@@ -979,10 +962,15 @@ export default function BrainGraph3D({
       rimLightsRef.current = rimLights;
 
       // Hover light (initially invisible, positioned on hover)
-      const hoverLight = new THREE.PointLight(0xffffff, 0, 200, 2);
-      hoverLight.name = "hover-light";
-      scene.add(hoverLight);
-      hoverLightRef.current = hoverLight;
+      const existingHover = scene.getObjectByName("hover-light");
+      if (existingHover instanceof THREE.PointLight) {
+        hoverLightRef.current = existingHover;
+      } else {
+        const hoverLight = new THREE.PointLight(0xffffff, 0, 200, 2);
+        hoverLight.name = "hover-light";
+        scene.add(hoverLight);
+        hoverLightRef.current = hoverLight;
+      }
     }
 
     // Bloom post-processing via the library's built-in EffectComposer.
@@ -1029,14 +1017,9 @@ export default function BrainGraph3D({
   }, [dims.w, dims.h]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (fgRef.current?.scene()) {
-        modelSceneRef.current = fgRef.current.scene();
-        setSceneReady(true);
-      }
-    }, 0);
-
-    return () => clearTimeout(timer);
+    const scene = fgRef.current?.scene();
+    modelSceneRef.current = scene ?? null;
+    setSceneReady(Boolean(scene));
   }, [dims.h, dims.w, graphData.nodes.length]);
 
   // -- Auto-rotate control -------------------------------------------------
@@ -1050,78 +1033,12 @@ export default function BrainGraph3D({
     }
   }, [autoRotate, sceneReady]);
 
-  const clearModelOverlay = useCallback(() => {
-    const scene = modelSceneRef.current;
-    const overlay = modelOverlayRef.current;
-    if (!overlay) return;
-
-    if (scene) {
-      scene.remove(overlay.root);
-      scene.remove(overlay.lightRig);
-    }
-    overlay.dispose();
-    modelOverlayRef.current = null;
-  }, []);
-
-  useEffect(() => {
-    if (!sceneReady || !modelSceneRef.current) return;
-
-    if (renderMode !== "hybrid") {
-      clearModelOverlay();
-      return;
-    }
-
-    let cancelled = false;
-    const loadAttempt = modelLoadAttemptRef.current + 1;
-    modelLoadAttemptRef.current = loadAttempt;
-    clearModelOverlay();
-
-    loadBrainModelOverlay(modelUrl)
-      .then((overlay) => {
-        if (cancelled || modelLoadAttemptRef.current !== loadAttempt || !modelSceneRef.current) {
-          overlay.dispose();
-          return;
-        }
-
-        modelSceneRef.current.add(overlay.root);
-        modelSceneRef.current.add(overlay.lightRig);
-        overlay.fitToGraph(graphData.nodes);
-        modelOverlayRef.current = overlay;
-      })
-      .catch((error: unknown) => {
-        if (cancelled || modelLoadAttemptRef.current !== loadAttempt) return;
-        const message =
-          error instanceof Error
-            ? error.message
-            : "The anatomical brain model could not be loaded.";
-        clearModelOverlay();
-        onModelLoadError?.(message);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [clearModelOverlay, graphData.nodes, modelUrl, onModelLoadError, renderMode, sceneReady]);
-
-  const fitModelOverlay = useCallback(() => {
-    modelOverlayRef.current?.fitToGraph(graphData.nodes);
-  }, [graphData.nodes]);
-
   const handleEngineStop = useCallback(() => {
-    fitModelOverlay();
     if (needsInitialZoomRef.current) {
       needsInitialZoomRef.current = false;
       fgRef.current?.zoomToFit(ZOOM_TO_FIT_MS, ZOOM_TO_FIT_PADDING);
     }
-  }, [fitModelOverlay]);
-
-  useEffect(() => {
-    if (renderMode !== "hybrid") return;
-    const timer = setTimeout(() => {
-      fitModelOverlay();
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [fitModelOverlay, graphData, renderMode]);
+  }, []);
 
   useEffect(() => {
     if (!selectedNodeId) {
@@ -1158,7 +1075,6 @@ export default function BrainGraph3D({
         directionalSpeed: 0.003,
         directionalWidth: 1.8,
       });
-      modelOverlayRef.current?.triggerPulse(0.45);
       bloomBoostRef.current = Math.max(bloomBoostRef.current, 0.04);
       return;
     }
@@ -1181,7 +1097,6 @@ export default function BrainGraph3D({
       directionalSpeed: profile.directionalSpeed,
       directionalWidth: profile.directionalWidth,
     });
-    modelOverlayRef.current?.triggerPulse(profile.pulse);
     bloomBoostRef.current = Math.max(bloomBoostRef.current, BLOOM_PULSE_BOOST + profile.bloom * 0.8);
   }, [companionSignal]);
 
@@ -1352,7 +1267,6 @@ export default function BrainGraph3D({
         const profile = ACTIVITY_PROFILES[node.brain.node_type];
         const nodeDegree = graphTopology.degreeById.get(node.id) ?? 0;
         const degreeBoost = Math.min(0.28, nodeDegree * 0.02);
-        modelOverlayRef.current?.triggerPulse(profile.pulse + degreeBoost);
         bloomBoostRef.current = Math.max(
           bloomBoostRef.current,
           BLOOM_PULSE_BOOST + profile.bloom + degreeBoost * 0.2,
@@ -1431,7 +1345,7 @@ export default function BrainGraph3D({
         graphData={graphData}
         backgroundColor={BG_COLOR}
         showNavInfo={false}
-        /* Disable node dragging – nodes are fixed at brain-region positions */
+        /* Disable node dragging for stable spatial context during interaction */
         enableNodeDrag={false}
         /* Node styling */
         nodeThreeObject={nodeThreeObject}

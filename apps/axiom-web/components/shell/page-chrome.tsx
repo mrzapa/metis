@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
 import {
   Activity,
-  Brain,
   Cpu,
   Home,
   LibraryBig,
@@ -36,7 +35,6 @@ const NAV_ITEMS = [
   { href: "/", label: "Home", icon: Home },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/library", label: "Library", icon: LibraryBig },
-  { href: "/brain", label: "Brain", icon: Brain },
   { href: "/gguf", label: "Models", icon: Cpu },
   { href: "/settings", label: "Settings", icon: Settings2 },
   { href: "/diagnostics", label: "Diagnostics", icon: Activity },
@@ -124,7 +122,7 @@ export function PageChrome({
             </Link>
 
             <nav className="ml-auto flex items-center gap-1">
-              {NAV_ITEMS.filter((n) => n.href !== "/").map((item) => (
+              {NAV_ITEMS.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}

@@ -19,11 +19,20 @@ const CONCEPTS = [
   { label: "Module XI", title: "Emergence", desc: "Recursive self-improvement pathway generating novel capabilities from existing substrates." },
 ];
 
-const NODE_POSITIONS: [number, number][] = [
-  [0.18, 0.28], [0.35, 0.18], [0.6, 0.15], [0.82, 0.22],
-  [0.12, 0.52], [0.42, 0.45], [0.68, 0.42], [0.88, 0.48],
-  [0.25, 0.72], [0.55, 0.68], [0.78, 0.72],
+const NODE_LAYOUT: [number, number][] = [
+  [0, 0],
+  [0.16, -0.02],
+  [0.06, 0.14],
+  [-0.14, 0.14],
+  [-0.2, -0.06],
+  [0.14, -0.2],
+  [0.34, 0.04],
+  [0.28, 0.24],
+  [0.04, 0.34],
+  [-0.26, 0.24],
+  [-0.36, -0.04],
 ];
+const HOVER_EXPAND_DELAY_MS = 600;
 
 /* ────────────────────────────── helpers ──────────────────────────────── */
 
@@ -38,6 +47,7 @@ interface NodeData {
   brightness: number; targetBrightness: number;
   concept: typeof CONCEPTS[number]; connections: number[];
   awakenDelay: number; parallax: number;
+  hoverBoost: number; targetHoverBoost: number;
   _sx: number; _sy: number;
 }
 
@@ -67,6 +77,16 @@ function makeDust(W: number, H: number): DustData {
   };
 }
 
+function applyNodeLayout(nodes: NodeData[], W: number, H: number) {
+  const cx = W * 0.56;
+  const cy = H * 0.43;
+  const scale = Math.min(W, H) * 0.78;
+  NODE_LAYOUT.forEach(([nx, ny], i) => {
+    nodes[i].x = cx + nx * scale;
+    nodes[i].y = cy + ny * scale;
+  });
+}
+
 /* ────────────────────────────── component ────────────────────────────── */
 
 export default function Home() {
@@ -76,6 +96,9 @@ export default function Home() {
   const cTitleRef = useRef<HTMLDivElement>(null);
   const cDescRef = useRef<HTMLDivElement>(null);
   const activeNodeRef = useRef(-1);
+  const hoveredNodeRef = useRef(-1);
+  const hoverStartRef = useRef(0);
+  const hoverExpandedRef = useRef(false);
   const mouseRef = useRef({ x: -1000, y: -1000 });
 
   const closeConcept = useCallback(() => {
@@ -114,19 +137,46 @@ export default function Home() {
       { x: W * 0.55, y: H * 0.2, rx: 220, ry: 150, angle: 0.8, color: [10, 18, 48], opacity: 0.15 },
     ];
 
+    const motionPreviewEnabled = document.documentElement.dataset.uiVariant === "motion";
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const enhancedHoverMotion = motionPreviewEnabled && !reducedMotion;
+
+    function showConceptAtNode(idx: number) {
+      const c = nodes[idx].concept;
+      if (cLabelRef.current) cLabelRef.current.textContent = c.label;
+      if (cTitleRef.current) cTitleRef.current.textContent = c.title;
+      if (cDescRef.current) cDescRef.current.textContent = c.desc;
+      activeNodeRef.current = idx;
+      const card = conceptCardRef.current;
+      if (!card) return;
+      let cx = nodes[idx]._sx + 24;
+      let cy = nodes[idx]._sy - 60;
+      if (cx + 280 > W) cx = nodes[idx]._sx - 300;
+      if (cy < 20) cy = 20;
+      if (cy + 200 > H) cy = H - 220;
+      card.style.left = cx + "px";
+      card.style.top = cy + "px";
+      card.style.display = "block";
+      requestAnimationFrame(() => card.classList.add("active"));
+    }
+
     /* nodes */
-    const nodes: NodeData[] = NODE_POSITIONS.map((pos, i) => ({
-      x: pos[0] * W, y: pos[1] * H,
+    const nodes: NodeData[] = CONCEPTS.map((concept, i) => ({
+      x: 0, y: 0,
       baseSize: 1.5 + Math.random() * 1.5,
       brightness: 0.15, targetBrightness: 0.15,
-      concept: CONCEPTS[i], connections: [],
+      concept, connections: [],
       awakenDelay: 2000 + Math.random() * 1500,
-      parallax: 0.015, _sx: 0, _sy: 0,
+      parallax: 0.015,
+      hoverBoost: 0,
+      targetHoverBoost: 0,
+      _sx: 0, _sy: 0,
     }));
+    applyNodeLayout(nodes, W, H);
     nodes.forEach((n, i) => {
       const dists = nodes.map((m, j) => ({ idx: j, d: Math.hypot(n.x - m.x, n.y - m.y) }))
         .filter(d => d.idx !== i).sort((a, b) => a.d - b.d);
-      n.connections = dists.slice(0, 2 + Math.floor(Math.random() * 2)).map(d => d.idx);
+      n.connections = dists.slice(0, i === 0 ? 5 : 3).map(d => d.idx);
     });
 
     /* dust */
@@ -207,8 +257,11 @@ export default function Home() {
         n.targetBrightness = 0.1 + nodeAwakenProg * 0.2 + proximity * 0.5;
         if (i === aNode) n.targetBrightness = 0.9;
         n.brightness += (n.targetBrightness - n.brightness) * 0.06;
+        n.targetHoverBoost = hoveredNodeRef.current === i ? 1 : 0;
+        n.hoverBoost += (n.targetHoverBoost - n.hoverBoost) * (enhancedHoverMotion ? 0.12 : 0.25);
         const b = n.brightness;
-        const s = n.baseSize + proximity * 2 + (i === aNode ? 1 : 0);
+        const hoverScale = enhancedHoverMotion ? n.hoverBoost * 2.6 : 0;
+        const s = n.baseSize + proximity * 2 + (i === aNode ? 1 : 0) + hoverScale;
 
         if (proximity > 0.05 || i === aNode || nodeAwakenProg > 0.5) {
           const lineAlpha = Math.max(proximity * 0.25, nodeAwakenProg * 0.06, i === aNode ? 0.2 : 0);
@@ -220,9 +273,9 @@ export default function Home() {
             ctx!.strokeStyle = `rgba(160,175,210,${lineAlpha})`; ctx!.lineWidth = 0.5; ctx!.stroke();
           });
         }
-        if (b > 0.25) {
+        if (b > 0.25 || n.hoverBoost > 0.1) {
           const grad = ctx!.createRadialGradient(px, py, 0, px, py, s * 12);
-          grad.addColorStop(0, `rgba(196,149,58,${b * 0.06})`);
+          grad.addColorStop(0, `rgba(196,149,58,${b * 0.06 + n.hoverBoost * 0.09})`);
           grad.addColorStop(1, "rgba(0,0,0,0)");
           ctx!.fillStyle = grad; ctx!.beginPath();
           ctx!.arc(px, py, s * 12, 0, Math.PI * 2); ctx!.fill();
@@ -254,13 +307,36 @@ export default function Home() {
 
     function onResize() {
       resize();
-      NODE_POSITIONS.forEach((pos, i) => { nodes[i].x = pos[0] * W; nodes[i].y = pos[1] * H; });
+      applyNodeLayout(nodes, W, H);
       nebulae[0].x = W * 0.72; nebulae[0].y = H * 0.35;
       nebulae[1].x = W * 0.25; nebulae[1].y = H * 0.65;
       nebulae[2].x = W * 0.55; nebulae[2].y = H * 0.2;
     }
 
-    function onMouseMove(e: MouseEvent) { mouse.x = e.clientX; mouse.y = e.clientY; }
+    function onMouseMove(e: MouseEvent) {
+      mouse.x = e.clientX;
+      mouse.y = e.clientY;
+      let hover = -1;
+      nodes.forEach((n, i) => {
+        if (Math.hypot(n._sx - e.clientX, n._sy - e.clientY) < 28) {
+          hover = i;
+        }
+      });
+      if (hover !== hoveredNodeRef.current) {
+        hoveredNodeRef.current = hover;
+        hoverStartRef.current = hover >= 0 ? performance.now() : 0;
+        hoverExpandedRef.current = false;
+      }
+      if (
+        enhancedHoverMotion &&
+        hover >= 0 &&
+        !hoverExpandedRef.current &&
+        performance.now() - hoverStartRef.current >= HOVER_EXPAND_DELAY_MS
+      ) {
+        hoverExpandedRef.current = true;
+        showConceptAtNode(hover);
+      }
+    }
 
     function onCanvasClick(e: MouseEvent) {
       let hit = -1;
@@ -269,21 +345,7 @@ export default function Home() {
       });
       if (hit >= 0) {
         if (activeNodeRef.current === hit) { closeConcept(); return; }
-        const c = nodes[hit].concept;
-        if (cLabelRef.current) cLabelRef.current.textContent = c.label;
-        if (cTitleRef.current) cTitleRef.current.textContent = c.title;
-        if (cDescRef.current) cDescRef.current.textContent = c.desc;
-        activeNodeRef.current = hit;
-        const card = conceptCardRef.current;
-        if (card) {
-          let cx = nodes[hit]._sx + 24, cy = nodes[hit]._sy - 60;
-          if (cx + 280 > W) cx = nodes[hit]._sx - 300;
-          if (cy < 20) cy = 20;
-          if (cy + 200 > H) cy = H - 220;
-          card.style.left = cx + "px"; card.style.top = cy + "px";
-          card.style.display = "block";
-          requestAnimationFrame(() => card.classList.add("active"));
-        }
+        showConceptAtNode(hit);
       } else {
         closeConcept();
       }

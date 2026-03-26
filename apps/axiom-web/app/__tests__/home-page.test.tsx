@@ -1,112 +1,61 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("motion/react", () => ({
-  motion: {
-    div: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-      <div {...props}>{children}</div>
-    ),
-    section: ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => (
-      <section {...props}>{children}</section>
-    ),
-  },
-}));
-
-vi.mock("@/components/home/home-visual-system", () => ({
-  MetisHomeLogo: () => <div data-testid="home-logo" />,
-  HomeLaunchIcon: ({ kind }: { kind: string }) => (
-    <div data-testid={`launch-icon-${kind}`} />
-  ),
-}));
-
-vi.mock("@/components/home/space-atmosphere", () => ({
-  SpaceAtmosphere: () => <div data-testid="space-atmosphere" />,
-}));
-
-vi.mock("@/components/shell/metis-companion-dock", () => ({
-  MetisCompanionDock: () => <div data-testid="companion-dock" />,
-}));
-
-vi.mock("@/components/home/home-hero-animated-copy", () => ({
-  HomeHeroAnimatedCopy: () => <div data-testid="home-hero-animated-copy" />,
-}));
-
-vi.mock("@/lib/api", () => ({
-  fetchSettings: vi.fn(),
-}));
-
-const { fetchSettings } = await import("@/lib/api");
 const { default: HomePage } = await import("../page");
 
 describe("Home page", () => {
+  let getContextSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
-    vi.clearAllMocks();
-  });
+    // JSDOM does not implement canvas rendering APIs; return null to skip draw logic.
+    getContextSpy = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue(null);
 
-  it("renders animated hero copy and redirects launch actions to setup when setup is incomplete", async () => {
-    vi.mocked(fetchSettings).mockResolvedValue({
-      basic_wizard_completed: false,
-    });
-
-    render(<HomePage />);
-
-    await waitFor(() => {
-      expect(fetchSettings).toHaveBeenCalledTimes(1);
-    });
-
-    expect(screen.getByTestId("space-atmosphere")).toBeInTheDocument();
-    expect(screen.getByTestId("home-hero-animated-copy")).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Chat" })[0]).toHaveAttribute(
-      "href",
-      "/setup",
-    );
-    expect(
-      screen.getByRole("link", { name: "Build a Neuron" }),
-    ).toHaveAttribute("href", "/setup");
-    expect(screen.getByRole("link", { name: "Explore Brain" })).toHaveAttribute(
-      "href",
-      "/setup",
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe = vi.fn();
+        unobserve = vi.fn();
+        disconnect = vi.fn();
+        takeRecords = vi.fn(() => []);
+        root = null;
+        rootMargin = "0px";
+        thresholds: number[] = [];
+      },
     );
   });
 
-  it("keeps normal launch links when setup is complete", async () => {
-    vi.mocked(fetchSettings).mockResolvedValue({
-      basic_wizard_completed: true,
-    });
+  afterEach(() => {
+    getContextSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
 
+  it("renders primary navigation links", () => {
     render(<HomePage />);
 
-    await waitFor(() => {
-      expect(fetchSettings).toHaveBeenCalledTimes(1);
-    });
-
-    expect(screen.getAllByRole("link", { name: "Chat" })[0]).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Chat" })).toHaveAttribute(
       "href",
       "/chat",
     );
-    expect(
-      screen.getByRole("link", { name: "Build a Neuron" }),
-    ).toHaveAttribute("href", "/library");
-    expect(screen.getByRole("link", { name: "Explore Brain" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
       "href",
-      "/brain",
-    );
-    expect(screen.getByRole("link", { name: "Diagnostics" })).toHaveAttribute(
-      "href",
-      "/diagnostics",
+      "/settings",
     );
   });
 
-  it("falls back to default launch links when settings fetch fails", async () => {
-    vi.mocked(fetchSettings).mockRejectedValue(new Error("network down"));
-
+  it("routes the landing CTA to chat", () => {
     render(<HomePage />);
 
-    await waitFor(() => {
-      expect(fetchSettings).toHaveBeenCalledTimes(1);
-    });
+    expect(
+      screen.getByRole("link", { name: "Explore the constellation" }),
+    ).toHaveAttribute("href", "/chat");
+  });
 
-    expect(screen.getAllByRole("link", { name: "Chat" })[0]).toHaveAttribute(
+  it("keeps the floating chat entry point", () => {
+    render(<HomePage />);
+
+    expect(screen.getByRole("link", { name: "Open chat" })).toHaveAttribute(
       "href",
       "/chat",
     );
