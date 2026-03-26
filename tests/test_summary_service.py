@@ -1,8 +1,8 @@
-"""Tests for axiom_app.services.summary_service."""
+"""Tests for metis_app.services.summary_service."""
 
 from __future__ import annotations
 
-from axiom_app.services.summary_service import (
+from metis_app.services.summary_service import (
     build_summary_chunk,
     generate_document_summary,
 )

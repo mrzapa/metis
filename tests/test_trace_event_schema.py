@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from axiom_app.models.trace_event_schema import (
+from metis_app.models.trace_event_schema import (
     EventType,
     EventStatus,
     get_event_category,
@@ -217,13 +217,13 @@ class TestCoverageCritical:
 
     def test_baseeventpayload_import(self) -> None:
         """Ensure TypedDict imports are available."""
-        from axiom_app.models.trace_event_schema import BaseEventPayload
+        from metis_app.models.trace_event_schema import BaseEventPayload
         # TypedDict is just a type hint, verify it exists
         assert BaseEventPayload is not None
 
     def test_context_typeddicts_import(self) -> None:
         """Ensure context TypedDict definitions are available."""
-        from axiom_app.models.trace_event_schema import (
+        from metis_app.models.trace_event_schema import (
             ToolEventContext,
             StageEventContext,
             CheckpointEventContext,

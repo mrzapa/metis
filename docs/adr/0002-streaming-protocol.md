@@ -5,7 +5,7 @@
 
 ## Context
 
-Axiom's local API (FastAPI) and Tauri + Next.js web UI require a framework-neutral streaming contract between the API and the UI.
+METIS's local API (FastAPI) and Tauri + Next.js web UI require a framework-neutral streaming contract between the API and the UI.
 
 This ADR is intentionally pre-decision. It defines the goal and evaluation criteria for streaming, not a final transport.
 

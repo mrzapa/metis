@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from axiom_app.models.session_types import EvidenceSource
-from axiom_app.services.response_pipeline import (
+from metis_app.models.session_types import EvidenceSource
+from metis_app.services.response_pipeline import (
     apply_claim_level_grounding,
     run_blinkist_summary_pipeline,
     run_tutor_pipeline,
 )
-from axiom_app.services.wizard_recommendation import (
+from metis_app.services.wizard_recommendation import (
     estimate_setup_cost,
     recommend_auto_settings,
 )

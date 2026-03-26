@@ -37,6 +37,6 @@ Invoke-NativeStep -Label "Running python -m pytest" -Command {
     python -m pytest
 }
 
-Invoke-NativeStep -Label "Validating axiom_app/default_settings.json" -Command {
-    python -c "import json, pathlib; path = pathlib.Path('axiom_app/default_settings.json'); json.loads(path.read_text(encoding='utf-8')); print(f'Settings JSON OK: {path}')"
+Invoke-NativeStep -Label "Validating metis_app/default_settings.json" -Command {
+    python -c "import json, pathlib; path = pathlib.Path('metis_app/default_settings.json'); json.loads(path.read_text(encoding='utf-8')); print(f'Settings JSON OK: {path}')"
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Quick validation of trace_event_schema implementation."""
 
-from axiom_app.models.trace_event_schema import (
+from metis_app.models.trace_event_schema import (
     EventType,
     EventStatus,
     get_event_category,

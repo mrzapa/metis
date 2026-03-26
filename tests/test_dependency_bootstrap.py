@@ -4,8 +4,8 @@ import logging
 import pathlib
 import subprocess
 
-import axiom_app.app as mvc_app
-from axiom_app.utils import dependency_bootstrap as bootstrap
+import metis_app.app as mvc_app
+from metis_app.utils import dependency_bootstrap as bootstrap
 
 
 def test_install_packages_skips_empty_input(monkeypatch):

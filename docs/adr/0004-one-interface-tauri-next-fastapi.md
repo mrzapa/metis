@@ -5,7 +5,7 @@
 
 ## Decision
 
-Axiom has one product interface only:
+METIS has one product interface only:
 
 - **UI Layer:** Next.js app (shipped in Tauri shell)
 - **Desktop Shell:** Tauri (wraps Next.js + FastAPI)
@@ -45,7 +45,7 @@ The Qt GUI is deprecated and removed from the product surface. Browser-only mode
 
 - Single code path for UI (Next.js)
 - Single installer for desktop distribution
-- Simpler onboarding ("download Axiom, it just works")
+- Simpler onboarding ("download METIS, it just works")
 - Reduced maintenance: one frontend stack, one backend stack
 
 ## Open Questions

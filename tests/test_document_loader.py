@@ -13,7 +13,7 @@ import pathlib
 
 import pytest
 
-from axiom_app.utils.document_loader import (
+from metis_app.utils.document_loader import (
     KREUZBERG_EXTENSIONS,
     is_kreuzberg_available,
     load_document,
@@ -59,9 +59,9 @@ class TestKreuzbergExtensions:
 class TestLoadDocumentPlainText:
     def test_reads_txt_file(self, tmp_path: pathlib.Path):
         f = tmp_path / "sample.txt"
-        f.write_text("Hello, Axiom!", encoding="utf-8")
+        f.write_text("Hello, METIS!", encoding="utf-8")
         result = load_document(f, use_kreuzberg=False)
-        assert result == "Hello, Axiom!"
+        assert result == "Hello, METIS!"
 
     def test_reads_md_file(self, tmp_path: pathlib.Path):
         f = tmp_path / "notes.md"

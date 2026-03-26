@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from axiom_app.models.session_types import EvidenceSource
+from metis_app.models.session_types import EvidenceSource
 
 qt_widgets = pytest.importorskip("PySide6.QtWidgets", reason="Qt runtime unavailable")
 qt_gui = pytest.importorskip("PySide6.QtGui", reason="Qt runtime unavailable")
@@ -35,7 +35,7 @@ def _cleanup_qt_widgets(qapp):
 
 
 def _show(process_events):
-    module = importlib.import_module("axiom_app.views.app_view")
+    module = importlib.import_module("metis_app.views.app_view")
     view = module.AppView(theme_name="space_dust")
     view.show()
     process_events()
@@ -62,7 +62,7 @@ def _sample_source() -> EvidenceSource:
 
 def _complete_chat_response(view, process_events, *, feedback_pending: bool = True) -> None:
     view.append_chat("You: hello\n")
-    view.append_chat("Axiom: here is the evidence\n")
+    view.append_chat("METIS: here is the evidence\n")
     view.render_evidence_sources([_sample_source()])
     view.set_chat_response_ui(True, feedback_pending)
     process_events()
@@ -152,12 +152,12 @@ def test_app_view_switches_between_empty_state_and_timeline_cards(qapp, process_
     _module, view = _show(process_events)
 
     view.append_chat("You: hello\n")
-    view.append_chat("Axiom: hi there\n")
+    view.append_chat("METIS: hi there\n")
     process_events()
 
     assert view._chat_state_stack.currentWidget() is view._chat_transcript_state
     assert view._chat_has_messages is True
-    assert [card._role_label.text() for card in view._chat_cards] == ["You", "Axiom"]
+    assert [card._role_label.text() for card in view._chat_cards] == ["You", "METIS"]
     assert [card._content_label.text() for card in view._chat_cards] == ["hello", "hi there"]
 
     view.clear_chat()
@@ -373,7 +373,7 @@ def test_app_view_settings_dialog_round_trip_preserves_values(qapp, process_even
             "selected_mode": "Research",
             "llm_temperature": 0.0,
             "local_gguf_gpu_layers": 0,
-            "log_dir": "axiom-logs",
+            "log_dir": "metis-logs",
         }
     )
     process_events()
@@ -429,11 +429,11 @@ def test_app_view_append_chat_compatibility_parses_legacy_prefixes(qapp, process
 
     view.append_chat("System: reindexing\n")
     view.append_chat("You: compare the drafts\n")
-    view.append_chat("Axiom: the newer one is more complete\n")
+    view.append_chat("METIS: the newer one is more complete\n")
     process_events()
 
     assert [item.role for item in view._chat_items] == ["system", "user", "assistant"]
-    assert [card._role_label.text() for card in view._chat_cards] == ["System", "You", "Axiom"]
+    assert [card._role_label.text() for card in view._chat_cards] == ["System", "You", "METIS"]
     assert view._chat_cards[-1]._content_label.text() == "the newer one is more complete"
 
 
@@ -455,7 +455,7 @@ def test_app_view_set_chat_transcript_compatibility_renders_structured_messages(
     assert view._chat_state_stack.currentWidget() is view._chat_transcript_state
     assert len(view._chat_items) == 2
     assert len(view._chat_cards) == 2
-    assert view._chat_cards[-1]._role_label.text() == "Axiom"
+    assert view._chat_cards[-1]._role_label.text() == "METIS"
     assert view._chat_cards[-1]._sources_button.isVisible() is True
     assert view._chat_cards[-1]._sources_button.text() == "1 source"
 

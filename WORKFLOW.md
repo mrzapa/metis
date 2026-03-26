@@ -1,7 +1,7 @@
 ---
 tracker:
   kind: linear
-  project_slug: "axiom-e4f355392dba"
+  project_slug: "metis-e4f355392dba"
   active_states:
     - Todo
     - In Progress
@@ -19,7 +19,7 @@ workspace:
   root: ~/code/symphony-workspaces
 hooks:
   after_create: |
-    git clone --depth 1 https://github.com/mrzapa/axiom.git .
+    git clone --depth 1 https://github.com/mrzapa/metis.git .
     python -m pip install --upgrade pip
     python -m pip install -e '.[dev]'
   before_remove: |

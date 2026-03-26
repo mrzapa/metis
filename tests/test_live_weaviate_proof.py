@@ -7,19 +7,19 @@ import os
 
 import pytest
 
-from axiom_app.cli import main as cli_main
-from axiom_app.controllers.app_controller import AppController
-from axiom_app.models.app_model import AppModel
-import axiom_app.models.app_model as app_model_module
-from axiom_app.services.index_service import load_index_manifest
-from axiom_app.services.vector_store import (
+from metis_app.cli import main as cli_main
+from metis_app.controllers.app_controller import AppController
+from metis_app.models.app_model import AppModel
+import metis_app.models.app_model as app_model_module
+from metis_app.services.index_service import load_index_manifest
+from metis_app.services.vector_store import (
     WeaviateVectorStoreAdapter,
     normalize_weaviate_settings,
     resolve_vector_store,
     weaviate_test_settings_from_env,
 )
 
-_REQUIRE_LIVE_ENV = "AXIOM_REQUIRE_LIVE_BACKENDS"
+_REQUIRE_LIVE_ENV = "METIS_REQUIRE_LIVE_BACKENDS"
 
 
 class _FakeRoot:
@@ -180,7 +180,7 @@ def test_live_weaviate_session_restore_and_follow_up_query(tmp_path, monkeypatch
             def invoke(self, _messages):
                 return _FakeMessage(content="The document states that the collection is restored from Weaviate. [S1]")
 
-        monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+        monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
 
         controller_one.on_send_prompt("How is the collection stored?")
         _drain(controller_one)
@@ -213,7 +213,7 @@ def test_live_weaviate_session_restore_and_follow_up_query(tmp_path, monkeypatch
         _drain(controller_two)
 
         assert controller_two.model.last_sources
-        assert any("Axiom [" in message for message in view_two.chat_messages)
+        assert any("METIS [" in message for message in view_two.chat_messages)
         controller_two.shutdown()
     finally:
         adapter.delete(manifest_path)
@@ -241,7 +241,7 @@ def test_live_weaviate_cli_round_trip_uses_shared_backend(tmp_path, monkeypatch,
     monkeypatch.setattr(app_model_module, "_LEGACY_CONFIG_PATH", tmp_path / "legacy.json")
 
     src = tmp_path / "cli.txt"
-    out = tmp_path / "cli.axiom-index"
+    out = tmp_path / "cli.metis-index"
     manifest_path = out / "manifest.json"
     src.write_text(
         "CLI and GUI should share the same Weaviate manifest-backed retrieval path.\n",

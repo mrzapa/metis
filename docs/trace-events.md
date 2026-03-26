@@ -2,7 +2,7 @@
 
 ## Overview
 
-Trace events are structured records emitted throughout Axiom's query and indexing pipelines. They capture:
+Trace events are structured records emitted throughout METIS's query and indexing pipelines. They capture:
 
 - **Stage transitions**: When a pipeline phase (retrieval, synthesis, validation) starts or completes
 - **Tool invocations**: When an external service (LLM, vector DB, validator) is called
@@ -97,7 +97,7 @@ All trace events follow a standardized payload structure inspired by AG-UI proto
 
 ## Backward Compatibility
 
-**No breaking changes.** Existing trace events remain unmodified in structure and persist as-is. The schema definitions in `axiom_app/models/trace_event_schema.py` are:
+**No breaking changes.** Existing trace events remain unmodified in structure and persist as-is. The schema definitions in `metis_app/models/trace_event_schema.py` are:
 
 - **Purely documentary**: Define constants and types for new event emission
 - **Additive only**: Do not alter the serialization of existing `TraceEvent` objects
@@ -111,7 +111,7 @@ All trace events follow a standardized payload structure inspired by AG-UI proto
 When emitting a new trace event, import from the schema module:
 
 ```python
-from axiom_app.models.trace_event_schema import EventType, EventStatus
+from metis_app.models.trace_event_schema import EventType, EventStatus
 
 # Emit a tool invocation
 self.trace_store.append_event(

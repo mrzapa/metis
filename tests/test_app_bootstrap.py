@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from axiom_app import app as app_module
+from metis_app import app as app_module
 
 
 class _FakeUser32:

@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-This folder holds Architecture Decision Records (ADRs) for Axiom. In this repo, an ADR is a short, iterative record of an architectural decision or a pending migration decision.
+This folder holds Architecture Decision Records (ADRs) for METIS. In this repo, an ADR is a short, iterative record of an architectural decision or a pending migration decision.
 
 Keep ADRs short, decision-ready, and iterative. Start with a draft when the direction is still being shaped, then update the same record as the decision becomes clearer.
 

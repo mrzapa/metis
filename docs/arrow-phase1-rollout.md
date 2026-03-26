@@ -10,11 +10,11 @@ This document has two concerns:
 - Sections 1-10 define rollout policy, thresholds, and operator process.
 - This section and the implementation references capture current integration details.
 
-Current direct integration status in apps/axiom-web:
+Current direct integration status in apps/metis-web:
 - Direct integration is implemented with Standard Agents Arrow scoped packages: `@arrow-js/core` and `@arrow-js/sandbox`.
-- Runtime integration for allowlisted artifact rendering lives in `apps/axiom-web/components/chat/artifacts/artifact-message-content.tsx` (Arrow template rendering and sandbox execution path).
-- Chat boundary wiring for runtime attempts and fallback behavior lives in `apps/axiom-web/components/chat/artifacts/arrow-artifact-boundary.tsx` and `apps/axiom-web/components/chat/chat-panel.tsx`.
-- Next.js must transpile Arrow packages because sandbox exports include source TypeScript; this is configured via `transpilePackages` in `apps/axiom-web/next.config.ts`.
+- Runtime integration for allowlisted artifact rendering lives in `apps/metis-web/components/chat/artifacts/artifact-message-content.tsx` (Arrow template rendering and sandbox execution path).
+- Chat boundary wiring for runtime attempts and fallback behavior lives in `apps/metis-web/components/chat/artifacts/arrow-artifact-boundary.tsx` and `apps/metis-web/components/chat/chat-panel.tsx`.
+- Next.js must transpile Arrow packages because sandbox exports include source TypeScript; this is configured via `transpilePackages` in `apps/metis-web/next.config.ts`.
 
 ## 1) Phase 1 feature scope (historical baseline)
 
@@ -254,7 +254,7 @@ Summary endpoint:
 - Query params:
   - `window_hours` (optional, default `24`, positive integer)
   - `limit` (optional, default `50000`, positive integer scan cap)
-- Auth: same as all protected API routes; requires `Authorization: Bearer <AXIOM_API_TOKEN>` when token auth is configured.
+- Auth: same as all protected API routes; requires `Authorization: Bearer <METIS_API_TOKEN>` when token auth is configured.
 
 Response shape (high level):
 - `window_hours`, `generated_at`, `sampled_event_count`
@@ -277,11 +277,11 @@ Example checks:
 ```bash
 # 24h alerting window
 curl -s "http://localhost:8000/v1/telemetry/ui/summary?window_hours=24" \
-  -H "Authorization: Bearer $AXIOM_API_TOKEN"
+  -H "Authorization: Bearer $METIS_API_TOKEN"
 
 # 7-day decision window
 curl -s "http://localhost:8000/v1/telemetry/ui/summary?window_hours=168" \
-  -H "Authorization: Bearer $AXIOM_API_TOKEN"
+  -H "Authorization: Bearer $METIS_API_TOKEN"
 ```
 
 Operator workflow:
@@ -300,19 +300,19 @@ Diagnostics console notes:
 
 ## Relevant implementation references
 
-- Frontend package declarations for direct Arrow integration: apps/axiom-web/package.json (`@arrow-js/core`, `@arrow-js/sandbox`)
-- Next.js transpile configuration for Arrow packages: apps/axiom-web/next.config.ts (`transpilePackages`)
-- Frontend boundary and fallback logic: apps/axiom-web/components/chat/artifacts/arrow-artifact-boundary.tsx
-- Frontend runtime renderer + sandbox execution path: apps/axiom-web/components/chat/artifacts/artifact-message-content.tsx
-- Frontend artifact extraction cap and validation: apps/axiom-web/lib/artifacts/extract-arrow-artifacts.ts
-- Frontend telemetry event construction and best-effort delivery: apps/axiom-web/lib/telemetry/ui-telemetry.ts
-- Chat wiring of artifactsEnabled into boundary: apps/axiom-web/components/chat/chat-panel.tsx
-- Chat setting resolution for enable_arrow_artifacts: apps/axiom-web/app/chat/page.tsx
-- API UI telemetry endpoint and request-size/auth handling: axiom_app/api/app.py
-- Telemetry schema validation and allowed event contracts: axiom_app/api/models.py
-- Safe default setting for feature flag: axiom_app/default_settings.json
-- Backend artifact extraction and flag behavior: axiom_app/engine/querying.py
-- Metadata-only artifact persistence in replay and trace paths: axiom_app/services/stream_replay.py, axiom_app/services/workspace_orchestrator.py
-- Coverage tests for boundary and extraction: apps/axiom-web/components/chat/artifacts/__tests__/arrow-artifact-boundary.test.tsx, apps/axiom-web/lib/artifacts/__tests__/extract-arrow-artifacts.test.ts
+- Frontend package declarations for direct Arrow integration: apps/metis-web/package.json (`@arrow-js/core`, `@arrow-js/sandbox`)
+- Next.js transpile configuration for Arrow packages: apps/metis-web/next.config.ts (`transpilePackages`)
+- Frontend boundary and fallback logic: apps/metis-web/components/chat/artifacts/arrow-artifact-boundary.tsx
+- Frontend runtime renderer + sandbox execution path: apps/metis-web/components/chat/artifacts/artifact-message-content.tsx
+- Frontend artifact extraction cap and validation: apps/metis-web/lib/artifacts/extract-arrow-artifacts.ts
+- Frontend telemetry event construction and best-effort delivery: apps/metis-web/lib/telemetry/ui-telemetry.ts
+- Chat wiring of artifactsEnabled into boundary: apps/metis-web/components/chat/chat-panel.tsx
+- Chat setting resolution for enable_arrow_artifacts: apps/metis-web/app/chat/page.tsx
+- API UI telemetry endpoint and request-size/auth handling: metis_app/api/app.py
+- Telemetry schema validation and allowed event contracts: metis_app/api/models.py
+- Safe default setting for feature flag: metis_app/default_settings.json
+- Backend artifact extraction and flag behavior: metis_app/engine/querying.py
+- Metadata-only artifact persistence in replay and trace paths: metis_app/services/stream_replay.py, metis_app/services/workspace_orchestrator.py
+- Coverage tests for boundary and extraction: apps/metis-web/components/chat/artifacts/__tests__/arrow-artifact-boundary.test.tsx, apps/metis-web/lib/artifacts/__tests__/extract-arrow-artifacts.test.ts
 - Coverage tests for telemetry endpoint auth and validation: tests/test_api_app.py
 - Coverage tests for stream artifact persistence behavior: tests/test_stream_replay.py, tests/test_engine_streaming.py

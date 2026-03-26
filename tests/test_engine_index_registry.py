@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import axiom_app.engine.indexing as engine_indexing
-from axiom_app.engine import get_index, list_indexes
+import metis_app.engine.indexing as engine_indexing
+from metis_app.engine import get_index, list_indexes
 
 
 def test_registry_lists_built_indexes_and_reads_metadata(tmp_path, monkeypatch) -> None:

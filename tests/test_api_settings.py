@@ -5,8 +5,8 @@ from __future__ import annotations
 from importlib import import_module
 from fastapi.testclient import TestClient
 
-api_app_module = import_module("axiom_app.api.app")
-settings_module = import_module("axiom_app.api.settings")
+api_app_module = import_module("metis_app.api.app")
+settings_module = import_module("metis_app.api.settings")
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ def test_get_settings_includes_safe_keys(monkeypatch) -> None:
 def test_post_settings_rejects_api_key_by_default(monkeypatch) -> None:
     """POST with api_key_* fields must return 403 when env flag is absent."""
     monkeypatch.setattr(settings_module._store, "load_settings", lambda: _fake_load())
-    monkeypatch.delenv("AXIOM_ALLOW_API_KEY_WRITE", raising=False)
+    monkeypatch.delenv("METIS_ALLOW_API_KEY_WRITE", raising=False)
 
     response = _client().post(
         "/v1/settings",
@@ -100,7 +100,7 @@ def test_post_settings_rejects_api_key_by_default(monkeypatch) -> None:
 def test_post_settings_rejects_any_api_key_by_default(monkeypatch) -> None:
     """All api_key_* variants are denied by default, even in a mixed update."""
     monkeypatch.setattr(settings_module._store, "load_settings", lambda: _fake_load())
-    monkeypatch.delenv("AXIOM_ALLOW_API_KEY_WRITE", raising=False)
+    monkeypatch.delenv("METIS_ALLOW_API_KEY_WRITE", raising=False)
 
     response = _client().post(
         "/v1/settings",
@@ -111,7 +111,7 @@ def test_post_settings_rejects_any_api_key_by_default(monkeypatch) -> None:
 
 
 def test_post_settings_allows_api_key_when_env_set(monkeypatch) -> None:
-    """POST with api_key_* fields succeeds when AXIOM_ALLOW_API_KEY_WRITE=1."""
+    """POST with api_key_* fields succeeds when METIS_ALLOW_API_KEY_WRITE=1."""
     saved: dict = {}
 
     def _fake_save(updates: dict) -> dict:
@@ -122,7 +122,7 @@ def test_post_settings_allows_api_key_when_env_set(monkeypatch) -> None:
 
     monkeypatch.setattr(settings_module._store, "load_settings", lambda: _fake_load())
     monkeypatch.setattr(settings_module._store, "save_settings", _fake_save)
-    monkeypatch.setenv("AXIOM_ALLOW_API_KEY_WRITE", "1")
+    monkeypatch.setenv("METIS_ALLOW_API_KEY_WRITE", "1")
 
     response = _client().post(
         "/v1/settings",
@@ -145,7 +145,7 @@ def test_post_settings_persists_safe_keys(monkeypatch) -> None:
 
     monkeypatch.setattr(settings_module._store, "load_settings", lambda: _fake_load())
     monkeypatch.setattr(settings_module._store, "save_settings", _fake_save)
-    monkeypatch.delenv("AXIOM_ALLOW_API_KEY_WRITE", raising=False)
+    monkeypatch.delenv("METIS_ALLOW_API_KEY_WRITE", raising=False)
 
     response = _client().post(
         "/v1/settings",
@@ -159,7 +159,7 @@ def test_post_settings_persists_safe_keys(monkeypatch) -> None:
 
 
 def test_post_settings_response_never_returns_api_keys(monkeypatch) -> None:
-    """Even when AXIOM_ALLOW_API_KEY_WRITE=1 the response must redact api_key_*."""
+    """Even when METIS_ALLOW_API_KEY_WRITE=1 the response must redact api_key_*."""
     def _fake_save(updates: dict) -> dict:
         merged = _fake_load()
         merged.update(updates)
@@ -167,7 +167,7 @@ def test_post_settings_response_never_returns_api_keys(monkeypatch) -> None:
 
     monkeypatch.setattr(settings_module._store, "load_settings", lambda: _fake_load())
     monkeypatch.setattr(settings_module._store, "save_settings", _fake_save)
-    monkeypatch.setenv("AXIOM_ALLOW_API_KEY_WRITE", "1")
+    monkeypatch.setenv("METIS_ALLOW_API_KEY_WRITE", "1")
 
     response = _client().post(
         "/v1/settings",
@@ -188,7 +188,7 @@ def test_post_settings_503_on_write_error(monkeypatch) -> None:
         "save_settings",
         lambda _: (_ for _ in ()).throw(OSError("disk full")),
     )
-    monkeypatch.delenv("AXIOM_ALLOW_API_KEY_WRITE", raising=False)
+    monkeypatch.delenv("METIS_ALLOW_API_KEY_WRITE", raising=False)
 
     response = _client().post(
         "/v1/settings",

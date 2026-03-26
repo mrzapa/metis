@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/mrzapa/axiom/actions/workflows/ci.yml"><img src="https://github.com/mrzapa/axiom/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/mrzapa/metis/actions/workflows/ci.yml"><img src="https://github.com/mrzapa/metis/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Alpha" />
@@ -43,13 +43,13 @@
 **macOS / Linux:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_axiom.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mrzapa/metis/main/scripts/install_metis.sh | bash
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_axiom.ps1 | iex
+irm https://raw.githubusercontent.com/mrzapa/metis/main/scripts/install_metis.ps1 | iex
 ```
 
 The installer clones the repo, sets up a virtual environment, installs dependencies, and drops a launcher on your PATH. It auto-updates on every run.
@@ -59,7 +59,7 @@ The installer clones the repo, sets up a virtual environment, installs dependenc
 **Installed launcher (recommended):**
 
 ```bash
-axiom
+metis
 ```
 
 This starts the local API plus static web UI and opens `http://127.0.0.1:3000`.
@@ -74,10 +74,10 @@ This starts the FastAPI app directly at `http://127.0.0.1:8000`.
 
 | Interface | Command |
 |-----------|---------|
-| **Web UI (installed launcher)** | `axiom` |
+| **Web UI (installed launcher)** | `metis` |
 | **Web UI (from source)** | `python main.py` |
-| **Desktop GUI** | `axiom --desktop` or `axiom --gui` |
-| **CLI** | `axiom --cli <command>` |
+| **Desktop GUI** | `metis --desktop` or `metis --gui` |
+| **CLI** | `metis --cli <command>` |
 
 ### Use
 
@@ -141,10 +141,10 @@ The CLI shares the same retrieval backend as the app — same results, no window
 
 ```bash
 # Index a file
-axiom --cli index --file docs/my_notes.txt
+metis --cli index --file docs/my_notes.txt
 
 # Query it
-axiom --cli query --file docs/my_notes.txt --question "What are the key takeaways?"
+metis --cli query --file docs/my_notes.txt --question "What are the key takeaways?"
 ```
 
 You can also run the same CLI entrypoint from source:
@@ -161,7 +161,7 @@ python main.py --cli query --file docs/my_notes.txt --question "What are the key
 ### API only
 
 ```bash
-python -m axiom_app.api
+python -m metis_app.api
 ```
 
 Runs the API at `http://127.0.0.1:8000`. Full API reference is available at `http://127.0.0.1:8000/docs` while the server is running.
@@ -189,19 +189,19 @@ This starts:
 
 ## 🔧 Configuration
 
-METIS AI ships with sensible defaults in `axiom_app/default_settings.json`. To customise, copy it to `settings.json` in the project root — METIS picks it up automatically on the next launch.
+METIS AI ships with sensible defaults in `metis_app/default_settings.json`. To customise, copy it to `settings.json` in the project root — METIS picks it up automatically on the next launch.
 
 ### Environment variables
 
 | Variable | What it does |
 |----------|-------------|
-| `NEXT_PUBLIC_AXIOM_API_BASE` | Overrides the API base URL used by the web UI during local Next.js development |
-| `AXIOM_API_TOKEN` | When set, all protected endpoints require a Bearer token |
-| `AXIOM_TEST_WEAVIATE_URL` | Weaviate endpoint for live parity tests |
-| `AXIOM_TEST_WEAVIATE_API_KEY` | Weaviate API key |
-| `AXIOM_TEST_WEAVIATE_GRPC_HOST` | Weaviate gRPC host |
-| `AXIOM_TEST_WEAVIATE_GRPC_PORT` | Weaviate gRPC port |
-| `AXIOM_TEST_WEAVIATE_GRPC_SECURE` | Enable TLS for gRPC |
+| `NEXT_PUBLIC_METIS_API_BASE` | Overrides the API base URL used by the web UI during local Next.js development |
+| `METIS_API_TOKEN` | When set, all protected endpoints require a Bearer token |
+| `METIS_TEST_WEAVIATE_URL` | Weaviate endpoint for live parity tests |
+| `METIS_TEST_WEAVIATE_API_KEY` | Weaviate API key |
+| `METIS_TEST_WEAVIATE_GRPC_HOST` | Weaviate gRPC host |
+| `METIS_TEST_WEAVIATE_GRPC_PORT` | Weaviate gRPC port |
+| `METIS_TEST_WEAVIATE_GRPC_SECURE` | Enable TLS for gRPC |
 
 ---
 
@@ -212,7 +212,7 @@ METIS AI ships with sensible defaults in `axiom_app/default_settings.json`. To c
 python -m pytest
 
 # With coverage
-python -m pytest --cov=axiom_app --cov-report=term
+python -m pytest --cov=metis_app --cov-report=term
 ```
 
 ---
@@ -220,7 +220,7 @@ python -m pytest --cov=axiom_app --cov-report=term
 ## 📁 Project Layout
 
 ```
-axiom_app/
+metis_app/
 ├── api/            # FastAPI routes (v1/*)
 ├── engine/         # Indexing + retrieval core (provider-agnostic)
 ├── models/         # BrainGraph, AppModel, session types
@@ -228,7 +228,7 @@ axiom_app/
 └── utils/          # Knowledge graph, LLM/embedding providers
 
 apps/
-├── axiom-web/      # Tauri + Next.js UI (TypeScript + Tailwind)
+├── metis-web/      # Tauri + Next.js UI (TypeScript + Tailwind)
 │   ├── app/
 │   │   ├── chat/       # Chat interface (RAG Q&A)
 │   │   ├── library/    # Document & index library
@@ -239,7 +239,7 @@ apps/
 │       ├── brain/       # BrainGraph 3D component
 │       ├── chat/        # Chat + evidence panels
 │       └── shell/       # METIS Companion dock, page chrome
-└── axiom-desktop/  # Tauri desktop shell
+└── metis-desktop/  # Tauri desktop shell
 
 scripts/            # Installers and dev scripts
 skills/             # Self-contained agentic skill workflows

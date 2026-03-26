@@ -4,13 +4,13 @@ from importlib import import_module
 
 from fastapi.testclient import TestClient
 
-from axiom_app.models.assistant_types import (
+from metis_app.models.assistant_types import (
     AssistantBrainLink,
     AssistantMemoryEntry,
     AssistantPlaybook,
 )
-from axiom_app.services.assistant_companion import AssistantCompanionService
-from axiom_app.services.assistant_repository import AssistantRepository
+from metis_app.services.assistant_companion import AssistantCompanionService
+from metis_app.services.assistant_repository import AssistantRepository
 
 
 def test_assistant_repository_persists_state_and_orders_memory(tmp_path) -> None:
@@ -39,7 +39,7 @@ def test_assistant_repository_persists_state_and_orders_memory(tmp_path) -> None
                     "link_id": "link-1",
                     "created_at": "2026-03-08T12:06:00Z",
                     "source_node_id": "memory:old-entry",
-                    "target_node_id": "assistant:axiom",
+                    "target_node_id": "assistant:metis",
                     "relation": "belongs_to",
                     "label": "Belongs To",
                 }
@@ -77,7 +77,7 @@ def test_assistant_service_snapshot_and_reflect_updates_repository(tmp_path, mon
 
     settings = {
         "assistant_identity": {
-            "assistant_id": "axiom-companion",
+            "assistant_id": "metis-companion",
             "name": "Guide",
             "archetype": "Research companion",
             "companion_enabled": True,
@@ -127,7 +127,7 @@ def test_assistant_service_snapshot_and_reflect_updates_repository(tmp_path, mon
                     "link_id": "link-1",
                     "created_at": "2026-03-08T12:32:00Z",
                     "source_node_id": "memory:memory-1",
-                    "target_node_id": "assistant:axiom",
+                    "target_node_id": "assistant:metis",
                     "relation": "belongs_to",
                     "label": "Belongs To",
                 }
@@ -238,17 +238,17 @@ def test_assistant_service_dedupes_by_context_for_non_chat_reflections(
 
 
 def test_assistant_api_routes_return_snapshot_and_reflection(monkeypatch) -> None:
-    assistant_api = import_module("axiom_app.api.assistant")
-    api_app = import_module("axiom_app.api.app")
+    assistant_api = import_module("metis_app.api.assistant")
+    api_app = import_module("metis_app.api.app")
 
     snapshot = {
         "identity": {
-            "assistant_id": "axiom-companion",
+            "assistant_id": "metis-companion",
             "name": "Guide",
             "archetype": "Research companion",
             "companion_enabled": True,
             "greeting": "Hello from the companion.",
-            "prompt_seed": "You are Axiom, a local-first companion who helps the user get oriented, suggests next steps, and records concise reflections without taking over the main chat.",
+            "prompt_seed": "You are METIS, a local-first companion who helps the user get oriented, suggests next steps, and records concise reflections without taking over the main chat.",
             "docked": True,
             "minimized": False,
         },

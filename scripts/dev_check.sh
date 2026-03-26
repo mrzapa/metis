@@ -12,5 +12,5 @@ ruff check .
 echo "==> Running python -m pytest"
 python -m pytest
 
-echo "==> Validating axiom_app/default_settings.json"
-python -c "import json, pathlib; path = pathlib.Path('axiom_app/default_settings.json'); json.loads(path.read_text(encoding='utf-8')); print(f'Settings JSON OK: {path}')"
+echo "==> Validating metis_app/default_settings.json"
+python -c "import json, pathlib; path = pathlib.Path('metis_app/default_settings.json'); json.loads(path.read_text(encoding='utf-8')); print(f'Settings JSON OK: {path}')"

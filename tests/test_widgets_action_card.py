@@ -18,12 +18,12 @@ qt_widgets = pytest.importorskip(
     exc_type=ImportError,
 )
 styles_module = pytest.importorskip(
-    "axiom_app.views.styles",
+    "metis_app.views.styles",
     reason="Qt runtime unavailable",
     exc_type=ImportError,
 )
 widgets_module = pytest.importorskip(
-    "axiom_app.views.widgets",
+    "metis_app.views.widgets",
     reason="Qt runtime unavailable",
     exc_type=ImportError,
 )

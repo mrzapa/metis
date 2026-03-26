@@ -1,0 +1,15 @@
+{
+  "name": "metis-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tauri v2 desktop shell for metis-web",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1"
+  }
+}

@@ -6,11 +6,11 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
-from axiom_app.models.brain_graph import BrainGraph
-from axiom_app.services.stream_replay import ReplayableRunStreamManager, StreamReplayStore
-from axiom_app.services.trace_store import TraceStore
+from metis_app.models.brain_graph import BrainGraph
+from metis_app.services.stream_replay import ReplayableRunStreamManager, StreamReplayStore
+from metis_app.services.trace_store import TraceStore
 
-api_app_module = import_module("axiom_app.api.app")
+api_app_module = import_module("metis_app.api.app")
 
 
 def test_healthz_returns_ok() -> None:
@@ -183,14 +183,14 @@ def test_query_rag_forwards_session_id_to_orchestrator(monkeypatch) -> None:
         "/v1/query/rag",
         json={
             "manifest_path": "/tmp/fake/manifest.json",
-            "question": "What is Axiom?",
+            "question": "What is METIS?",
             "session_id": "s1",
             "settings": {"llm_provider": "mock", "selected_mode": "Q&A"},
         },
     )
 
     assert response.status_code == 200
-    assert captured["question"] == "What is Axiom?"
+    assert captured["question"] == "What is METIS?"
     assert captured["session_id"] == "s1"
     assert fake_orchestrator.run_rag_query.call_count == 1
 
@@ -216,7 +216,7 @@ def test_query_rag_serializes_retrieval_plan_and_fallback(monkeypatch) -> None:
         "/v1/query/rag",
         json={
             "manifest_path": "/tmp/fake/manifest.json",
-            "question": "What is Axiom?",
+            "question": "What is METIS?",
             "settings": {"llm_provider": "mock", "selected_mode": "Q&A"},
         },
     )
@@ -345,7 +345,7 @@ def test_stream_rag_happy_path_includes_sse_ids(monkeypatch, tmp_path) -> None:
         "/v1/query/rag/stream",
         json={
             "manifest_path": "/tmp/fake/manifest.json",
-            "question": "What is Axiom?",
+            "question": "What is METIS?",
             "settings": {
                 "llm_provider": "mock",
                 "embedding_provider": "mock",
@@ -393,7 +393,7 @@ def test_stream_rag_replays_only_events_after_last_event_id(monkeypatch, tmp_pat
         "/v1/query/rag/stream",
         json={
             "manifest_path": "/tmp/fake/manifest.json",
-            "question": "What is Axiom?",
+            "question": "What is METIS?",
             "run_id": "r1",
             "settings": {
                 "llm_provider": "mock",
@@ -409,7 +409,7 @@ def test_stream_rag_replays_only_events_after_last_event_id(monkeypatch, tmp_pat
         headers={"Last-Event-ID": "1"},
         json={
             "manifest_path": "/tmp/fake/manifest.json",
-            "question": "What is Axiom?",
+            "question": "What is METIS?",
             "run_id": "r1",
             "settings": {
                 "llm_provider": "mock",
@@ -445,7 +445,7 @@ def test_stream_rag_reconnect_ignores_unrelated_trace_rows(monkeypatch, tmp_path
         headers={"Last-Event-ID": "1"},
         json={
             "manifest_path": "/tmp/fake/manifest.json",
-            "question": "What is Axiom?",
+            "question": "What is METIS?",
             "run_id": "run-with-trace-only",
             "settings": {
                 "llm_provider": "mock",
@@ -639,7 +639,7 @@ def test_ui_telemetry_endpoint_rejects_malformed_json() -> None:
 
 
 def test_ui_telemetry_endpoint_requires_auth_when_configured(monkeypatch) -> None:
-    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
     client = TestClient(api_app_module.create_app())
 
     response = client.post(
@@ -661,7 +661,7 @@ def test_ui_telemetry_endpoint_requires_auth_when_configured(monkeypatch) -> Non
 
 
 def test_ui_telemetry_endpoint_accepts_auth_when_configured(monkeypatch) -> None:
-    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
     client = TestClient(api_app_module.create_app())
     captured: dict[str, object] = {}
 
@@ -789,7 +789,7 @@ def test_ui_telemetry_summary_endpoint_validates_query_params() -> None:
 
 
 def test_ui_telemetry_summary_endpoint_requires_auth_when_configured(monkeypatch) -> None:
-    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
     client = TestClient(api_app_module.create_app())
 
     response = client.get("/v1/telemetry/ui/summary")
@@ -798,7 +798,7 @@ def test_ui_telemetry_summary_endpoint_requires_auth_when_configured(monkeypatch
 
 
 def test_ui_telemetry_summary_endpoint_accepts_auth_when_configured(monkeypatch) -> None:
-    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
     client = TestClient(api_app_module.create_app())
 
     class _FakeOrchestrator:
@@ -857,13 +857,13 @@ def test_brain_graph_preserves_assistant_node_types_and_scope_metadata(monkeypat
         [],
         {
             "identity": {
-                "assistant_id": "axiom-companion",
+                "assistant_id": "metis-companion",
                 "name": "Guide",
                 "companion_enabled": True,
             },
             "status": {
                 "runtime_provider": "local_gguf",
-                "runtime_model": "axiom-q4",
+                "runtime_model": "metis-q4",
                 "paused": False,
             },
             "memory": [
@@ -885,7 +885,7 @@ def test_brain_graph_preserves_assistant_node_types_and_scope_metadata(monkeypat
             "brain_links": [
                 {
                     "source_node_id": "memory:memory-1",
-                    "target_node_id": "assistant:axiom",
+                    "target_node_id": "assistant:metis",
                     "relation": "belongs_to",
                     "summary": "Captured a short next step.",
                     "confidence": 0.9,
@@ -908,8 +908,8 @@ def test_brain_graph_preserves_assistant_node_types_and_scope_metadata(monkeypat
     assert nodes["category:brain"]["metadata"]["scope"] == "workspace"
     assert nodes["category:assistant"]["node_type"] == "category"
     assert nodes["category:assistant"]["metadata"]["scope"] == "assistant_self"
-    assert nodes["assistant:axiom"]["node_type"] == "assistant"
-    assert nodes["assistant:axiom"]["metadata"]["scope"] == "assistant_self"
+    assert nodes["assistant:metis"]["node_type"] == "assistant"
+    assert nodes["assistant:metis"]["metadata"]["scope"] == "assistant_self"
     assert nodes["memory:memory-1"]["node_type"] == "memory"
     assert nodes["memory:memory-1"]["metadata"]["scope"] == "assistant_learned"
     assert nodes["playbook:playbook-1"]["node_type"] == "playbook"
@@ -917,8 +917,8 @@ def test_brain_graph_preserves_assistant_node_types_and_scope_metadata(monkeypat
     assert nodes["category:assistant:memory"]["metadata"]["scope"] == "assistant_self"
     assert nodes["category:assistant:playbooks"]["metadata"]["scope"] == "assistant_self"
     assert edges[("category:assistant", "category:brain", "category_member")]["metadata"]["scope"] == "assistant_self"
-    assert edges[("memory:memory-1", "assistant:axiom", "belongs_to")]["metadata"]["scope"] == "assistant_learned"
-    assert edges[("memory:memory-1", "assistant:axiom", "belongs_to")]["metadata"]["note"] == "derived"
+    assert edges[("memory:memory-1", "assistant:metis", "belongs_to")]["metadata"]["scope"] == "assistant_learned"
+    assert edges[("memory:memory-1", "assistant:metis", "belongs_to")]["metadata"]["note"] == "derived"
 
 
 def test_features_list_returns_known_flags() -> None:
@@ -935,7 +935,7 @@ def test_features_list_returns_known_flags() -> None:
 
 def test_features_disable_and_enable_roundtrip(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", api_app_module.WorkspaceOrchestrator)
-    import axiom_app.settings_store as _store
+    import metis_app.settings_store as _store
 
     monkeypatch.setattr(_store, "USER_PATH", tmp_path / "settings.json")
     monkeypatch.setattr(_store, "DEFAULT_PATH", tmp_path / "default_settings.json")
@@ -967,7 +967,7 @@ def test_features_disable_and_enable_roundtrip(monkeypatch, tmp_path) -> None:
 
 
 def test_features_require_auth_when_token_is_configured(monkeypatch) -> None:
-    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
     client = TestClient(api_app_module.create_app())
 
     response = client.get("/v1/features")
@@ -1008,7 +1008,7 @@ def test_openai_chat_completions_happy_path(monkeypatch) -> None:
 
     class _Result:
         run_id = "run-openai-compat"
-        answer_text = "Hello from Axiom"
+        answer_text = "Hello from METIS"
         selected_mode = "Q&A"
         llm_provider = "mock"
         llm_model = "mock-model"
@@ -1021,10 +1021,10 @@ def test_openai_chat_completions_happy_path(monkeypatch) -> None:
     response = client.post(
         "/v1/openai/chat/completions",
         json={
-            "model": "axiom",
+            "model": "metis",
             "messages": [
                 {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "What is Axiom?"},
+                {"role": "user", "content": "What is METIS?"},
             ],
         },
     )
@@ -1032,15 +1032,15 @@ def test_openai_chat_completions_happy_path(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["object"] == "chat.completion"
-    assert payload["id"].startswith("axiom-run-openai-compat")
-    assert payload["model"] == "axiom"
+    assert payload["id"].startswith("metis-run-openai-compat")
+    assert payload["model"] == "metis"
     assert isinstance(payload["created"], int)
     assert len(payload["choices"]) == 1
     choice = payload["choices"][0]
     assert choice["index"] == 0
     assert choice["finish_reason"] == "stop"
     assert choice["message"]["role"] == "assistant"
-    assert choice["message"]["content"] == "Hello from Axiom"
+    assert choice["message"]["content"] == "Hello from METIS"
     assert payload["usage"]["prompt_tokens"] == 0
     assert payload["usage"]["completion_tokens"] == 0
     assert payload["usage"]["total_tokens"] == 0
@@ -1048,7 +1048,7 @@ def test_openai_chat_completions_happy_path(monkeypatch) -> None:
     # Verify that the last user message was forwarded as the prompt.
     assert fake_orchestrator.run_direct_query.call_count == 1
     called_req = fake_orchestrator.run_direct_query.call_args[0][0]
-    assert called_req.prompt == "What is Axiom?"
+    assert called_req.prompt == "What is METIS?"
 
 
 def test_openai_chat_completions_rejects_empty_messages_list(monkeypatch) -> None:
@@ -1062,7 +1062,7 @@ def test_openai_chat_completions_rejects_empty_messages_list(monkeypatch) -> Non
 
     response = client.post(
         "/v1/openai/chat/completions",
-        json={"model": "axiom", "messages": []},
+        json={"model": "metis", "messages": []},
     )
 
     assert response.status_code == 422
@@ -1086,8 +1086,8 @@ def test_openai_chat_completions_rejects_no_user_message(monkeypatch) -> None:
 
 
 def test_openai_chat_completions_requires_auth_when_configured(monkeypatch) -> None:
-    """Auth parity: endpoint requires Bearer token when AXIOM_API_TOKEN is set."""
-    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    """Auth parity: endpoint requires Bearer token when METIS_API_TOKEN is set."""
+    monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
     monkeypatch.setattr(
         api_app_module._settings_store,
         "load_settings",
@@ -1105,7 +1105,7 @@ def test_openai_chat_completions_requires_auth_when_configured(monkeypatch) -> N
 
 def test_openai_chat_completions_accepts_auth_when_configured(monkeypatch) -> None:
     """Endpoint works with a valid Bearer token when auth is configured."""
-    monkeypatch.setenv("AXIOM_API_TOKEN", "secret-token")
+    monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
     monkeypatch.setattr(
         api_app_module._settings_store,
         "load_settings",

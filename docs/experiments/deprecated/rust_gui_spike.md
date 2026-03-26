@@ -4,7 +4,7 @@
 > 
 > This document is a historical experiment. It is not part of the current product direction.
 > 
-> **Axiom's product direction is Tauri + Next.js + FastAPI.**
+> **METIS's product direction is Tauri + Next.js + FastAPI.**
 > 
 > Qt/PySide6 is no longer part of the product surface.
 
@@ -31,12 +31,12 @@ costs:
 
 A Rust-native GUI would own the render path entirely, eliminating the WebView. The
 open question is whether the toolkit ecosystem is mature enough, and which
-Python-integration architecture best fits Axiom's constraints. **This memo does not
+Python-integration architecture best fits METIS's constraints. **This memo does not
 require a prototype to exist; its conclusions are assumption-driven and should be
 revisited once a prototype is built.**
 
 **Relationship to prior work:** This was a feasibility study from the migration era.
-Axiom now ships as Tauri + Next.js + FastAPI (see ADR 0004).
+METIS now ships as Tauri + Next.js + FastAPI (see ADR 0004).
 
 ---
 
@@ -57,7 +57,7 @@ retained widget state managed by the framework.
 - `eframe` provides a ready-made cross-platform app harness (winit + wgpu or glow)
 
 **Weaknesses**
-- Immediate-mode is ergonomically awkward for complex state machines; Axiom's
+- Immediate-mode is ergonomically awkward for complex state machines; METIS's
   multi-step RAG workflow maps more naturally to retained, event-driven UI
 - Widget set is functional but sparse: no native date-picker, no virtualized list
   with scroll anchoring, no rich-text editor widget out of the box
@@ -75,14 +75,14 @@ iced is a **retained-mode** GUI library using an Elm-inspired architecture
 the framework diffs it on each update.
 
 **Strengths**
-- Retained model fits Axiom's stateful sessions (active research run, library view,
+- Retained model fits METIS's stateful sessions (active research run, library view,
   settings) more naturally than immediate-mode
 - Richer built-in widget set: scrollables, lazy lists, text inputs with selection,
   canvas, SVG
 - `iced_accessibility` integration is in progress (built on `accesskit`); more
   active investment than egui's a11y track *— still assumption-driven; verify*
 - Async-first: `Command` and `Subscription` are built around futures/streams, which
-  maps directly onto the SSE streaming protocol used by `axiom_app.api`
+  maps directly onto the SSE streaming protocol used by `metis_app.api`
 - Active development; 1.0 milestone in progress as of 2025
 
 **Weaknesses**
@@ -100,7 +100,7 @@ the framework diffs it on each update.
 | Dimension | egui | iced |
 |-----------|------|------|
 | **Architecture** | Immediate-mode | Retained-mode (Elm) |
-| **State management fit** | Awkward for deep session state | Natural for Axiom's session model |
+| **State management fit** | Awkward for deep session state | Natural for METIS's session model |
 | **Widget richness** | Minimal; sufficient for dashboards | Richer; scrollable lists, lazy views |
 | **Accessibility** | Incomplete (accesskit in progress) | In-progress; more active investment |
 | **Async / streaming** | Manual; no built-in concept | First-class via Command/Subscription |
@@ -111,7 +111,7 @@ the framework diffs it on each update.
 | **Recommendation fit** | Prototyping, tooling, dashboards | Feature-complete desktop app |
 
 **Provisional lean:** iced's retained model and async primitives are a better
-architectural fit for Axiom. egui remains relevant if a fast throw-away prototype
+architectural fit for METIS. egui remains relevant if a fast throw-away prototype
 is needed before committing to iced's compile overhead.
 *Both conclusions are provisional until a working prototype validates them.*
 
@@ -119,12 +119,12 @@ is needed before committing to iced's compile overhead.
 
 ## 3. Python Integration Approaches
 
-The Axiom backend is Python (FastAPI + `axiom_app/services/`). Any Rust GUI must
+The METIS backend is Python (FastAPI + `metis_app/services/`). Any Rust GUI must
 either call into it or speak to it over a local channel.
 
 ### 3.1 Sidecar (HTTP / local socket)
 
-The Rust GUI launches `python -m axiom_app.api` as a child process (identical to
+The Rust GUI launches `python -m metis_app.api` as a child process (identical to
 the Tauri sidecar in WOR-14) and communicates over HTTP/SSE.
 
 ```
@@ -132,7 +132,7 @@ the Tauri sidecar in WOR-14) and communicates over HTTP/SSE.
 │  Rust GUI binary             │
 │  (egui or iced)              │
 │                              │
-│  reqwest / surf client  ──── │─── HTTP + SSE ───► python -m axiom_app.api
+│  reqwest / surf client  ──── │─── HTTP + SSE ───► python -m metis_app.api
 └─────────────────────────────┘                         (child process)
 ```
 
@@ -141,14 +141,14 @@ the Tauri sidecar in WOR-14) and communicates over HTTP/SSE.
 | Aspect | Detail |
 |--------|--------|
 | **Python engine risk** | Zero: the Python process is identical to today's sidecar |
-| **IPC overhead** | ~1 ms round-trip on localhost; negligible for Axiom's use case |
+| **IPC overhead** | ~1 ms round-trip on localhost; negligible for METIS's use case |
 | **Process footprint** | Two processes; combined idle RSS ≈ Rust binary (< 30 MB) + Python sidecar (60–100 MB) |
 | **Bundle** | Rust binary + PyInstaller-packaged Python sidecar (same as Tauri path) |
 | **Implementation complexity** | Low: `reqwest` for REST, `eventsource-client` or manual SSE parsing for streaming |
 | **Failure isolation** | GUI can restart the sidecar independently; Python crashes don't take the GUI down |
 | **Upgrade path** | Python engine evolves independently of Rust GUI; no ABI coupling |
 
-This is the **lower-risk path** and directly reuses the existing `axiom_app.api`
+This is the **lower-risk path** and directly reuses the existing `metis_app.api`
 surface that was built for WOR-14.
 
 ### 3.2 Embedding (PyO3)
@@ -166,7 +166,7 @@ functions directly in-process.
 │                                              │
 │  ╔══════════════════════════════╗            │
 │  ║  Embedded CPython interpreter║            │
-│  ║  axiom_app.engine / services ║            │
+│  ║  metis_app.engine / services ║            │
 │  ╚══════════════════════════════╝            │
 └──────────────────────────────────────────────┘
 ```
@@ -180,7 +180,7 @@ functions directly in-process.
 | **IPC overhead** | Eliminated; direct in-process calls |
 | **Bundle** | Smaller than sidecar: no separate process, but Python stdlib must still be bundled (~25–40 MB) |
 | **Implementation complexity** | High: GIL management, Python object lifetime, async bridging, packaging |
-| **Python engine changes** | Any internal refactor of `axiom_app` must consider Rust FFI call sites |
+| **Python engine changes** | Any internal refactor of `metis_app` must consider Rust FFI call sites |
 | **CI complexity** | Rust CI matrix must install matching Python dev headers |
 
 This path is **not recommended at this stage.** The implementation complexity and
@@ -265,11 +265,11 @@ not an immediate migration.
 
 **If a spike is approved:**
 
-1. **Choose iced over egui** for the prototype, given Axiom's stateful session
+1. **Choose iced over egui** for the prototype, given METIS's stateful session
    model and need for SSE streaming. Revisit if iced's compile times prove
    unacceptable in CI.
 
-2. **Use the sidecar integration pattern** (HTTP/SSE to `axiom_app.api`). Do not
+2. **Use the sidecar integration pattern** (HTTP/SSE to `metis_app.api`). Do not
    attempt PyO3 embedding in the spike.
 
 3. **Treat accessibility as a first-order concern**, not a post-hoc add-on. Wire
@@ -281,7 +281,7 @@ not an immediate migration.
    architecture and hit the success criteria above.
 
 **This recommendation is provisional.** It is based on framework documentation,
-community reports, and the existing Axiom architecture — not on a running prototype.
+community reports, and the existing METIS architecture — not on a running prototype.
 All conclusions should be treated as hypotheses until the spike is built and the
 success criteria above are measured empirically.
 

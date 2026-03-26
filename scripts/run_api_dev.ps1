@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Axiom — local API dev server (Windows).
+    METIS — local API dev server (Windows).
 
 .DESCRIPTION
     Creates .venv\ if absent, installs .[dev,api], then starts uvicorn with
@@ -11,12 +11,12 @@
         .\scripts\run_api_dev.ps1
 
     Override the Python binary:
-        $env:AXIOM_PYTHON = "python3.12"; .\scripts\run_api_dev.ps1
+        $env:METIS_PYTHON = "python3.12"; .\scripts\run_api_dev.ps1
 #>
 
 $ErrorActionPreference = "Stop"
 
-$PythonBin = if ($env:AXIOM_PYTHON) { $env:AXIOM_PYTHON } else { "python" }
+$PythonBin = if ($env:METIS_PYTHON) { $env:METIS_PYTHON } else { "python" }
 $VenvDir   = ".venv"
 $VenvPython = Join-Path $VenvDir "Scripts" "python.exe"
 $VenvPip    = Join-Path $VenvDir "Scripts" "pip.exe"
@@ -40,4 +40,4 @@ Write-Host "[run_api_dev] Installing .[dev,api]..."
 
 # ── Start dev server ──────────────────────────────────────────────────────────
 Write-Host "[run_api_dev] Starting uvicorn at http://127.0.0.1:8000 (Ctrl-C to stop)"
-& $VenvPython -m uvicorn axiom_app.api.app:app --reload --host 127.0.0.1 --port 8000
+& $VenvPython -m uvicorn metis_app.api.app:app --reload --host 127.0.0.1 --port 8000

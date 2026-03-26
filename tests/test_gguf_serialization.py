@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from axiom_app.services.gguf_serialization import (
+from metis_app.services.gguf_serialization import (
     GgufValidationError,
     build_recommendation_summary,
     extract_caveats,
@@ -324,7 +324,7 @@ class TestCrossFrameworkConsistency:
 
     def test_fastapi_and_litestar_serialize_identically(self) -> None:
         """Verify both frameworks produce identical JSON from same input."""
-        from axiom_app.api.models import GgufCatalogEntryModel
+        from metis_app.api.models import GgufCatalogEntryModel
 
         entry_dict = {
             "model_name": "Qwen2.5-7B",

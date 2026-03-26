@@ -25,7 +25,7 @@ Use concise, imperative commit messages (e.g., `Add CLI smoke test in CI`).
 
 ```bash
 python -m pytest
-python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
+python -m pytest --cov=metis_app --cov-report=xml --cov-report=term
 ```
 
 ## Developer check script

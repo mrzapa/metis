@@ -1,21 +1,21 @@
 # apps/
 
-Frontend applications for Axiom.
+Frontend applications for METIS.
 
-## axiom-web
+## metis-web
 
 Next.js web UI (TypeScript + Tailwind). Node tooling is fully isolated to this directory.
 
 ```bash
-cd apps/axiom-web
+cd apps/metis-web
 pnpm install
 pnpm dev        # starts on http://localhost:3000
 ```
 
-The web UI expects the Axiom API server at `http://127.0.0.1:8000`. Start it with:
+The web UI expects the METIS API server at `http://127.0.0.1:8000`. Start it with:
 
 ```bash
-python -m axiom_app.api
+python -m metis_app.api
 ```
 
 From the repo root you can launch both the API and the web UI together:
@@ -32,8 +32,8 @@ On Windows use:
 
 ---
 
-## axiom-desktop
+## metis-desktop
 
-The canonical Tauri desktop shell that wraps `axiom-web` in a native window.
+The canonical Tauri desktop shell that wraps `metis-web` in a native window.
 
-See [`apps/axiom-desktop/README.md`](axiom-desktop/README.md) for setup and usage.
+See [`apps/metis-desktop/README.md`](metis-desktop/README.md) for setup and usage.

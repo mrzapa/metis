@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from axiom_app.utils.llm_providers import (
+from metis_app.utils.llm_providers import (
     MockChatModel,
     _ChatMessage,
     _msg_content,

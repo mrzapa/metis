@@ -5,7 +5,7 @@ Pure-function tests — no network, no Tk, no ML libraries.
 
 from __future__ import annotations
 
-from axiom_app.utils.model_caps import get_capped_output_tokens, get_model_caps
+from metis_app.utils.model_caps import get_capped_output_tokens, get_model_caps
 
 
 # ---------------------------------------------------------------------------

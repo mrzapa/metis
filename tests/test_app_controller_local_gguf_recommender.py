@@ -4,10 +4,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from axiom_app.controllers.app_controller import AppController, _TASK_IMPORT_LOCAL_GGUF
-from axiom_app.models.app_model import AppModel
-from axiom_app.services.local_llm_recommender import ImportPlan
-from axiom_app.services.session_repository import SessionRepository
+from metis_app.controllers.app_controller import AppController, _TASK_IMPORT_LOCAL_GGUF
+from metis_app.models.app_model import AppModel
+from metis_app.services.local_llm_recommender import ImportPlan
+from metis_app.services.session_repository import SessionRepository
 
 
 class _FakeRoot:

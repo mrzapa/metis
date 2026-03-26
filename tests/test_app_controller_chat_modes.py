@@ -7,7 +7,7 @@ the background future and pumps messages through poll_and_dispatch.
 
 from __future__ import annotations
 
-from axiom_app.controllers.app_controller import AppController
+from metis_app.controllers.app_controller import AppController
 
 
 class _FakeButton:

@@ -1,8 +1,8 @@
-"""Tests for axiom_app.services.semantic_chunker."""
+"""Tests for metis_app.services.semantic_chunker."""
 
 from __future__ import annotations
 
-from axiom_app.services.semantic_chunker import chunk_text_semantic
+from metis_app.services.semantic_chunker import chunk_text_semantic
 
 
 def test_fixed_strategy_matches_original_chunk_text() -> None:

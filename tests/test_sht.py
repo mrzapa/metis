@@ -1,4 +1,4 @@
-"""tests/test_sht.py — Unit tests for axiom_app.models.sht.
+"""tests/test_sht.py — Unit tests for metis_app.models.sht.
 
 No Tk, no heavy ML dependencies.  All inputs are tiny inline strings so
 the suite runs in milliseconds.
@@ -7,7 +7,7 @@ the suite runs in milliseconds.
 from __future__ import annotations
 
 
-from axiom_app.models.sht import _stable_node_id, build_sht_tree
+from metis_app.models.sht import _stable_node_id, build_sht_tree
 
 # ---------------------------------------------------------------------------
 # Helpers

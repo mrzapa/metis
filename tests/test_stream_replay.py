@@ -4,7 +4,7 @@ import json
 import threading
 import pytest
 
-from axiom_app.services.stream_replay import ReplayableRunStreamManager, StreamReplayStore
+from metis_app.services.stream_replay import ReplayableRunStreamManager, StreamReplayStore
 
 
 def test_replayable_run_stream_manager_replays_subsequent_active_events(tmp_path) -> None:

@@ -5,9 +5,9 @@ import sys
 
 import pytest
 
-from axiom_app.cli import main as cli_main
-import axiom_app.models.app_model as app_model_module
-from axiom_app.services.index_service import (
+from metis_app.cli import main as cli_main
+import metis_app.models.app_model as app_model_module
+from metis_app.services.index_service import (
     build_index_bundle,
     load_index_manifest,
     load_index_bundle,
@@ -15,7 +15,7 @@ from axiom_app.services.index_service import (
     query_index_bundle,
     save_index_bundle,
 )
-from axiom_app.services.vector_store import resolve_vector_store
+from metis_app.services.vector_store import resolve_vector_store
 
 
 def test_index_service_round_trips_bundle_and_queries(tmp_path) -> None:
@@ -28,7 +28,7 @@ def test_index_service_round_trips_bundle_and_queries(tmp_path) -> None:
 
     settings = {"embedding_provider": "mock", "chunk_size": 60, "chunk_overlap": 10, "top_k": 2}
     bundle = build_index_bundle([str(src)], settings)
-    out_path = save_index_bundle(bundle, target_path=tmp_path / "notes.axiom-index.json")
+    out_path = save_index_bundle(bundle, target_path=tmp_path / "notes.metis-index.json")
     loaded = load_index_bundle(out_path)
     result = query_index_bundle(loaded, "Who wrote the first algorithm?", settings)
 
@@ -66,7 +66,7 @@ def test_chroma_adapter_round_trips_queries_natively(tmp_path) -> None:
 
     src = tmp_path / "chroma.txt"
     src.write_text(
-        "Axiom stores vectors in Chroma.\n"
+        "METIS stores vectors in Chroma.\n"
         "Native backend queries should still return [S1].\n",
         encoding="utf-8",
     )
@@ -89,7 +89,7 @@ def test_chroma_adapter_round_trips_queries_natively(tmp_path) -> None:
     assert result.sources[0].sid == "S1"
 def test_cli_index_and_query_use_shared_backend(tmp_path, capsys) -> None:
     src = tmp_path / "paper.txt"
-    out = tmp_path / "paper.axiom-index.json"
+    out = tmp_path / "paper.metis-index.json"
     src.write_text(
         "The installation guide explains how dependencies are installed.\n"
         "The query path reuses the same retrieval backend.\n",
@@ -113,7 +113,7 @@ def test_cli_default_index_output_is_manifest_directory(tmp_path) -> None:
 
     assert cli_main(["index", "--file", str(src)]) == 0
 
-    manifest_path = src.with_name(src.name + ".axiom-index") / "manifest.json"
+    manifest_path = src.with_name(src.name + ".metis-index") / "manifest.json"
     assert manifest_path.exists()
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import axiom_app.engine.indexing as engine_indexing
+import metis_app.engine.indexing as engine_indexing
 
 
 def test_build_index_persists_manifest_and_returns_summary(tmp_path, monkeypatch) -> None:

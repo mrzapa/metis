@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import uuid
 
-from axiom_app.engine.runs import RunEvent, make_run_id, now_iso_utc
-from axiom_app.services.trace_store import TraceStore
+from metis_app.engine.runs import RunEvent, make_run_id, now_iso_utc
+from metis_app.services.trace_store import TraceStore
 
 
 class _CustomValue:
@@ -810,7 +810,7 @@ class TestAuditEmission:
         import logging
         store = TraceStore(tmp_path)
 
-        with caplog.at_level(logging.INFO, logger="axiom.trace"):
+        with caplog.at_level(logging.INFO, logger="metis.trace"):
             store.append_event(run_id="r1", stage="synthesis", event_type="final", payload={})
 
         assert any("type=final" in r.message for r in caplog.records)
@@ -819,7 +819,7 @@ class TestAuditEmission:
         import logging
         store = TraceStore(tmp_path)
 
-        with caplog.at_level(logging.INFO, logger="axiom.trace"):
+        with caplog.at_level(logging.INFO, logger="metis.trace"):
             store.append_event(run_id="r1", stage="retrieval", event_type="run_started", payload={})
 
         assert any("type=run_started" in r.message for r in caplog.records)
@@ -828,7 +828,7 @@ class TestAuditEmission:
         import logging
         store = TraceStore(tmp_path)
 
-        with caplog.at_level(logging.WARNING, logger="axiom.trace"):
+        with caplog.at_level(logging.WARNING, logger="metis.trace"):
             store.append_event(run_id="r1", stage="error", event_type="error", payload={"status": "error"})
 
         matching = [r for r in caplog.records if r.levelno >= logging.WARNING and "type=error" in r.message]
@@ -838,7 +838,7 @@ class TestAuditEmission:
         import logging
         store = TraceStore(tmp_path)
 
-        with caplog.at_level(logging.WARNING, logger="axiom.trace"):
+        with caplog.at_level(logging.WARNING, logger="metis.trace"):
             store.append_event(run_id="r1", stage="s", event_type="validation_fail", payload={"status": "error"})
 
         matching = [r for r in caplog.records if r.levelno >= logging.WARNING and "type=validation_fail" in r.message]
@@ -848,17 +848,17 @@ class TestAuditEmission:
         import logging
         store = TraceStore(tmp_path)
 
-        with caplog.at_level(logging.DEBUG, logger="axiom.trace"):
+        with caplog.at_level(logging.DEBUG, logger="metis.trace"):
             store.append_event(run_id="r1", stage="retrieval", event_type="retrieval_complete", payload={})
 
-        axiom_trace_records = [r for r in caplog.records if r.name == "axiom.trace"]
-        assert not axiom_trace_records
+        metis_trace_records = [r for r in caplog.records if r.name == "metis.trace"]
+        assert not metis_trace_records
 
     def test_audit_log_includes_run_id_and_stage(self, tmp_path, caplog) -> None:
         import logging
         store = TraceStore(tmp_path)
 
-        with caplog.at_level(logging.INFO, logger="axiom.trace"):
+        with caplog.at_level(logging.INFO, logger="metis.trace"):
             store.append_event(run_id="my-run-99", stage="synthesis", event_type="final", payload={})
 
         record = next(r for r in caplog.records if "type=final" in r.message)
@@ -869,7 +869,7 @@ class TestAuditEmission:
         import logging
         store = TraceStore(tmp_path)
 
-        with caplog.at_level(logging.INFO, logger="axiom.trace"):
+        with caplog.at_level(logging.INFO, logger="metis.trace"):
             store.append_event(run_id="r1", stage="s", event_type="final", latency_ms=42, payload={})
 
         record = next(r for r in caplog.records if "type=final" in r.message)

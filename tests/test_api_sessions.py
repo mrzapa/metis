@@ -7,9 +7,9 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from axiom_app.api.app import create_app
-from axiom_app.api import sessions as sessions_module
-from axiom_app.services.session_repository import SessionRepository
+from metis_app.api.app import create_app
+from metis_app.api import sessions as sessions_module
+from metis_app.services.session_repository import SessionRepository
 
 
 @pytest.fixture
@@ -119,7 +119,7 @@ def test_get_session_includes_feedback(client, repo):
 
 def test_get_session_no_absolute_file_paths_in_sources(client, repo):
     """EvidenceSourceModel must not expose the file_path field."""
-    from axiom_app.models.session_types import EvidenceSource
+    from metis_app.models.session_types import EvidenceSource
 
     repo.create_session(session_id="s1")
     src = EvidenceSource(

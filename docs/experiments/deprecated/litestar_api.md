@@ -23,7 +23,7 @@ ADR 0001 considered a performance-first API variant using Litestar but deferred 
 | `CORSMiddleware(allow_origins=..., allow_origin_regex=...)` | `CORSConfig(allow_origins=...)` — no regex support; see note below |
 | `@app.exception_handler(ValueError)` decorator | `exception_handlers={ValueError: fn}` in `Litestar(...)` constructor |
 
-**CORS regex gap.** The current FastAPI app uses both `allow_origins` and `allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"`. Litestar's `CORSConfig` does not support regex. For Axiom's local-only deployment the enumerated `_DEFAULT_LOCAL_ORIGINS` list already covers every real origin; drop the regex and enumerate explicitly.
+**CORS regex gap.** The current FastAPI app uses both `allow_origins` and `allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"`. Litestar's `CORSConfig` does not support regex. For METIS's local-only deployment the enumerated `_DEFAULT_LOCAL_ORIGINS` list already covers every real origin; drop the regex and enumerate explicitly.
 
 **Error translation.** The per-endpoint `_run_engine` wrapper (`ValueError → 400`, `RuntimeError → 503`) is replaced by a single `exception_handlers` dict at app construction. This removes the wrapper entirely and makes error handling globally consistent.
 
@@ -94,10 +94,10 @@ Framework overhead is small relative to LLM round-trip time (RTT), but becomes v
 | Risk | Severity | Notes |
 |---|---|---|
 | asyncio migration complexity | High | The engine layer is entirely synchronous. Incorrect SSE wrapping can buffer all tokens before the first flush, breaking TTFT. This must be validated with an explicit wall-clock TTFT test before Stage 2 is considered passed. |
-| Ecosystem maturity | Medium | Litestar is younger than FastAPI with a smaller community and fewer third-party integrations. Axiom uses no third-party FastAPI middleware, so the direct impact is low; the risk is primarily in long-term support and community knowledge availability. |
+| Ecosystem maturity | Medium | Litestar is younger than FastAPI with a smaller community and fewer third-party integrations. METIS uses no third-party FastAPI middleware, so the direct impact is low; the risk is primarily in long-term support and community knowledge availability. |
 | Long-term maintenance | Medium | FastAPI has broader corporate backing (Tiangolo / Sebastián Ramírez + broad community). Litestar is actively maintained but has a smaller contributor base. Evaluate bus-factor risk before committing. |
 | `allow_origin_regex` gap | Low | The workaround (enumerated origins) is functionally equivalent for local-only deployment. No user-visible impact. |
-| Pydantic v2 compatibility | Low | Both frameworks fully support Pydantic v2. Existing models in `axiom_app/api/models.py` need no changes. |
+| Pydantic v2 compatibility | Low | Both frameworks fully support Pydantic v2. Existing models in `metis_app/api/models.py` need no changes. |
 | Security advisories | Low | Litestar has no published CVEs to date. FastAPI has a longer track record but the local-only deployment surface is minimal regardless of framework. Monitor both `fastapi` and `litestar` on the Python security advisory feed. |
 | Python version constraint | Unknown | Verify that the current Litestar release supports the Python version range declared in `pyproject.toml` before adding it as a dependency. |
 
@@ -107,7 +107,7 @@ Framework overhead is small relative to LLM round-trip time (RTT), but becomes v
 
 ### Stage 1 — Shadow Port
 
-Implement `axiom_app/api_litestar/` as a parallel package. Do not modify `axiom_app/api/`. The FastAPI layer remains the default and production path throughout Stage 1.
+Implement `metis_app/api_litestar/` as a parallel package. Do not modify `metis_app/api/`. The FastAPI layer remains the default and production path throughout Stage 1.
 
 Point the existing test suite (`tests/test_api_app.py`, `tests/test_api_sessions.py`, `tests/test_api_settings.py`) at the Litestar test client. All tests must pass without modification to test logic.
 
@@ -143,7 +143,7 @@ Verify behavioral equivalence between the two implementations:
 
 ### Stage 4 — Gradual Rollout
 
-If Stages 1–3 all pass, expose `AXIOM_API_BACKEND=litestar` as an environment variable that selects the Litestar app at startup. The FastAPI path remains the default.
+If Stages 1–3 all pass, expose `METIS_API_BACKEND=litestar` as an environment variable that selects the Litestar app at startup. The FastAPI path remains the default.
 
 Run both paths in parallel for one sprint. Collect real TTFT measurements from the Litestar path.
 
@@ -162,6 +162,6 @@ Run both paths in parallel for one sprint. Collect real TTFT measurements from t
 ---
 
 **See also:** [API Benchmark Harness Guide](api_bench.md) — reproducible `wrk`/`hey`
-commands, a results table template, and Axiom-specific metric definitions (SSE
+commands, a results table template, and METIS-specific metric definitions (SSE
 stability, request overhead, serialization overhead) for capturing the FastAPI
 baseline required by Stage 2 of this experiment.

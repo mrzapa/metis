@@ -10,7 +10,7 @@ import math
 
 import pytest
 
-from axiom_app.controllers.app_controller import _chunk_text, _cosine
+from metis_app.controllers.app_controller import _chunk_text, _cosine
 
 
 # ---------------------------------------------------------------------------
@@ -116,13 +116,13 @@ class TestCosine:
 
     def test_mock_embeddings_same_text_scores_1(self):
         """Sanity: embed the same string twice, cosine should be ~1."""
-        from axiom_app.utils.mock_embeddings import MockEmbeddings
+        from metis_app.utils.mock_embeddings import MockEmbeddings
         emb = MockEmbeddings(dimensions=32)
         v = emb.embed_query("hello world")
         assert math.isclose(_cosine(v, v), 1.0)
 
     def test_mock_embeddings_different_texts_score_less_than_1(self):
-        from axiom_app.utils.mock_embeddings import MockEmbeddings
+        from metis_app.utils.mock_embeddings import MockEmbeddings
         emb = MockEmbeddings(dimensions=32)
         v1 = emb.embed_query("hello world")
         v2 = emb.embed_query("completely different content xyz")

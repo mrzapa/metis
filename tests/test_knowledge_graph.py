@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from axiom_app.utils.knowledge_graph import (
+from metis_app.utils.knowledge_graph import (
     KnowledgeGraph,
     build_knowledge_graph,
     collect_graph_chunk_candidates,
