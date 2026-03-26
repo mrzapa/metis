@@ -528,7 +528,7 @@ export default function SettingsPage() {
               <TabsTrigger value="retrieval" className="glass-tab-pill">Retrieval</TabsTrigger>
               <TabsTrigger value="graph" className="glass-tab-pill">Graph</TabsTrigger>
               <TabsTrigger value="memory" className="glass-tab-pill">Memory</TabsTrigger>
-              <TabsTrigger value="model" className="glass-tab-pill">Model</TabsTrigger>
+              <TabsTrigger value="provider" className="glass-tab-pill">Provider</TabsTrigger>
               <TabsTrigger value="companion" className="glass-tab-pill">Companion</TabsTrigger>
               <TabsTrigger value="models" className="glass-tab-pill">Models</TabsTrigger>
             </TabsList>
@@ -1052,7 +1052,7 @@ export default function SettingsPage() {
               </TabsContent>
 
               {/* ── Advanced Model / Provider ──────────────────────────────── */}
-              <TabsContent value="model" className="glass-settings-pane mt-6 space-y-6">
+              <TabsContent value="provider" className="glass-settings-pane mt-6 space-y-6">
                 <section className="space-y-4">
                   <div>
                     <h2 className="text-base font-semibold">Advanced model / provider controls</h2>
