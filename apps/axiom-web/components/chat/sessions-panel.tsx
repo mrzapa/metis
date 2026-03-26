@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,47 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
     prevRefreshTokenRef.current = refreshToken;
     reload();
   }, [refreshToken, reload]);
+
+  // ── Infinite-scroll state ─────────────────────────────────────────────────
+  const DISPLAY_STEP = 20;
+  const [displayCount, setDisplayCount] = useState(DISPLAY_STEP);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  // Sync a ref so the IntersectionObserver closure always sees the latest count
+  const displayCountRef = useRef(displayCount);
+  displayCountRef.current = displayCount;
+
+  // Reset visible window whenever the underlying sessions list changes (new search)
+  useEffect(() => {
+    setDisplayCount(DISPLAY_STEP);
+  }, [sessions]);
+
+  // Wire up the IntersectionObserver to reveal more items as the user scrolls
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    // Walk up the DOM to find the Base UI scroll-area viewport that wraps us
+    const viewport = sentinel.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    if (!viewport) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && displayCountRef.current < sessions.length) {
+          setIsLoadingMore(true);
+          requestAnimationFrame(() => {
+            setDisplayCount((c) => c + DISPLAY_STEP);
+            setIsLoadingMore(false);
+          });
+        }
+      },
+      { root: viewport, rootMargin: "0px 0px 200px 0px", threshold: 0 },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [sessions]);
+
+  const visibleSessions = sessions.slice(0, displayCount);
 
   const isConnectionError = error?.toLowerCase().includes("connection error");
 
@@ -94,7 +135,7 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
             </div>
           )}
 
-          {sessions.map((s) => (
+          {visibleSessions.map((s) => (
             <button
               key={s.session_id}
               role="option"
@@ -129,6 +170,20 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
               )}
             </button>
           ))}
+
+          {/* Infinite-scroll sentinel — observed by IntersectionObserver above */}
+          <div ref={sentinelRef} className="h-1" aria-hidden="true" />
+
+          {/* Subtle loading indicator while the next batch is being revealed */}
+          {isLoadingMore && (
+            <div className="flex items-center justify-center py-3">
+              <span className="inline-flex gap-1">
+                <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:0ms]" />
+                <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:150ms]" />
+                <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:300ms]" />
+              </span>
+            </div>
+          )}
         </div>
       </ScrollArea>
 

@@ -1188,7 +1188,7 @@ export default function ChatPage() {
         runId: latestRunId,
       }}
     >
-      <div className="chat-shell-frame h-[calc(100vh-13.75rem)] min-h-176 overflow-hidden rounded-[2rem] p-2.5 sm:p-3">
+      <div className="chat-shell-frame h-[calc(100dvh-13.75rem)] min-h-176 overflow-hidden rounded-[2rem] p-2.5 sm:p-3">
         <ResizablePanels
           className="h-full"
           resetToken={shellPostureToken}

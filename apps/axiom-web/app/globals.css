@@ -1776,3 +1776,30 @@ body {
     }
   }
 }
+
+/* ── Scroll-area viewport: smooth UX + custom scrollbar ───────────────────── */
+[data-slot="scroll-area-viewport"] {
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+  /* Firefox thin scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+/* WebKit (Chrome / Safari / Edge) thin scrollbar */
+[data-slot="scroll-area-viewport"]::-webkit-scrollbar {
+  width: 4px;
+}
+
+[data-slot="scroll-area-viewport"]::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+[data-slot="scroll-area-viewport"]::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+
+[data-slot="scroll-area-viewport"]::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}

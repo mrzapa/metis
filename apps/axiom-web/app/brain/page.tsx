@@ -541,7 +541,7 @@ export default function BrainPage() {
       fullBleed
       contentClassName="rounded-none border-0 bg-transparent p-0"
     >
-      <div className="flex min-h-[calc(100vh-12.5rem)] flex-col gap-4 overflow-hidden">
+      <div className="flex min-h-[calc(100dvh-12.5rem)] flex-col gap-4 overflow-hidden">
         <div className="glass-panel rounded-[1.5rem] p-4 sm:p-5">
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
             <div className="space-y-4">

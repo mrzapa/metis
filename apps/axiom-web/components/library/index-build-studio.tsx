@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+
 import { Textarea } from "@/components/ui/textarea";
 import { StatusPill } from "@/components/shell/status-pill";
 import { useArrowState } from "@/hooks/use-arrow-state";
@@ -79,6 +79,8 @@ export function IndexBuildStudio({
   const [indexes, setIndexes] = useArrowState<IndexSummary[]>([]);
   const [loadingIndexes, setLoadingIndexes] = useArrowState(false);
   const [indexError, setIndexError] = useArrowState<string | null>(null);
+  const [displayCount, setDisplayCount] = useArrowState(15);
+  const bottomSentinelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -125,6 +127,23 @@ export function IndexBuildStudio({
   useEffect(() => {
     loadIndexes();
   }, [loadIndexes]);
+
+  // Infinite scroll for indexes list
+  useEffect(() => {
+    const sentinel = bottomSentinelRef.current;
+    if (!sentinel) return;
+    if (displayCount >= indexes.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setDisplayCount((prev) => prev + 15);
+        }
+      },
+      { root: null, rootMargin: "0px 0px 250px 0px", threshold: 0 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [displayCount, indexes.length, setDisplayCount]);
 
   async function handlePickFiles() {
     setPickError(null);
@@ -569,9 +588,9 @@ export function IndexBuildStudio({
             ) : null}
 
             {!loadingIndexes && !indexError && indexes.length > 0 ? (
-              <ScrollArea className="max-h-96">
-                <div className="space-y-3 pr-2">
-                  {indexes.map((index) => (
+              <>
+                <div className="space-y-3">
+                  {indexes.slice(0, displayCount).map((index) => (
                     <div
                       key={index.index_id}
                       className="flex flex-col gap-4 rounded-[1.4rem] border border-white/8 bg-black/10 p-4 sm:flex-row sm:items-center sm:justify-between"
@@ -601,8 +620,15 @@ export function IndexBuildStudio({
                       </Button>
                     </div>
                   ))}
+                  <div ref={bottomSentinelRef} className="h-0" aria-hidden="true" />
                 </div>
-              </ScrollArea>
+                {displayCount < indexes.length ? (
+                  <div className="mt-3 flex items-center justify-center gap-1.5 py-3 text-[11px] text-muted-foreground">
+                    <Loader2 className="size-3 animate-spin" />
+                    Loading more indexes…
+                  </div>
+                ) : null}
+              </>
             ) : null}
           </div>
         </section>

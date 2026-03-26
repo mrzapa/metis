@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useEffect, type KeyboardEvent, type RefObject } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, type KeyboardEvent, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -102,12 +102,81 @@ export function ChatPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const isKnowledgeSearchMode = queryMode === "rag" && selectedMode === "Knowledge Search";
 
-  // Auto-scroll when messages change
+  // Windowed infinite scroll state
+  const [displayFromIndex, setDisplayFromIndex] = useState(() => Math.max(0, messages.length - 50));
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const topSentinelRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLElement | null>(null);
+  const isAtBottomRef = useRef(true);
+  const displayFromIndexRef = useRef(displayFromIndex);
+  displayFromIndexRef.current = displayFromIndex;
+  const prevScrollHeightRef = useRef<number | null>(null);
+  const displayedMessages = messages.slice(displayFromIndex);
+
+  // Reset window on new session (session_id change only)
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    isAtBottomRef.current = true;
+    setDisplayFromIndex(Math.max(0, messages.length - 50));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionMeta?.session_id]);
+
+  // Auto-scroll to bottom when new messages arrive (only when already at bottom)
+  // Use 'instant' to bypass CSS scroll-behavior: smooth on the viewport, which
+  // would otherwise animate the jump and look jittery during rapid streaming.
+  useEffect(() => {
+    if (!isAtBottomRef.current) return;
+    const vp = viewportRef.current;
+    if (vp) vp.scrollTo({ top: vp.scrollHeight, behavior: "instant" });
   }, [messages]);
+
+  // Set up viewport ref, scroll tracker, and top-sentinel IntersectionObserver (once on mount)
+  useEffect(() => {
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+    const vp = scrollEl.querySelector('[data-slot="scroll-area-viewport"]') as HTMLElement | null;
+    if (!vp) return;
+    viewportRef.current = vp;
+
+    function onScroll() {
+      const distFromBottom = vp!.scrollHeight - vp!.scrollTop - vp!.clientHeight;
+      isAtBottomRef.current = distFromBottom < 60;
+    }
+    vp.addEventListener("scroll", onScroll, { passive: true });
+
+    const sentinel = topSentinelRef.current;
+    let sentinelObserver: IntersectionObserver | null = null;
+    if (sentinel) {
+      sentinelObserver = new IntersectionObserver(
+        (entries) => {
+          if (entries[0].isIntersecting && displayFromIndexRef.current > 0) {
+            prevScrollHeightRef.current = vp.scrollHeight;
+            setIsLoadingOlder(true);
+            setDisplayFromIndex((prev) => Math.max(0, prev - 25));
+          }
+        },
+        { root: vp, rootMargin: "100px 0px 0px 0px", threshold: 0 },
+      );
+      sentinelObserver.observe(sentinel);
+    }
+
+    return () => {
+      vp.removeEventListener("scroll", onScroll);
+      sentinelObserver?.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Restore scroll position after older messages are injected (prevents jump).
+  // Must use 'instant' so the correction happens synchronously before paint;
+  // CSS scroll-behavior: smooth would animate this and produce a visible scroll.
+  useLayoutEffect(() => {
+    const saved = prevScrollHeightRef.current;
+    if (saved === null) return;
+    prevScrollHeightRef.current = null;
+    const vp = viewportRef.current;
+    if (vp) vp.scrollTo({ top: vp.scrollTop + (vp.scrollHeight - saved), behavior: "instant" });
+    setIsLoadingOlder(false);
+  });
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     // Don't intercept keys while IME composition is active (CJK input, etc.)
@@ -284,6 +353,14 @@ export function ChatPanel({
       {/* Transcript */}
       <ScrollArea className="flex-1 min-h-0" ref={scrollRef as React.Ref<HTMLDivElement>}>
         <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-5 lg:p-6">
+          {/* Top sentinel – fires when user scrolls near the top to reveal older messages */}
+          <div ref={topSentinelRef} className="h-0" aria-hidden="true" />
+          {isLoadingOlder && displayFromIndex > 0 && (
+            <div className="flex items-center justify-center gap-1.5 py-2 text-[11px] text-muted-foreground">
+              <Loader2 className="size-3 animate-spin" />
+              Loading older messages…
+            </div>
+          )}
           {loading && (
             <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
               <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-6" />
@@ -318,7 +395,7 @@ export function ChatPanel({
             </div>
           )}
 
-          {!loading && !error && messages.map((msg) => (
+          {!loading && !error && displayedMessages.map((msg) => (
             <div
               key={msg.id}
               className={cn(
