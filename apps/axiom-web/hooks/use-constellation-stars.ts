@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchSettings, updateSettings } from "@/lib/api";
 import {
+  capUserStars,
   CONSTELLATION_USER_STAR_LIMIT,
+  getRemainingUserStarSlots,
   type UserStar,
   normalizeUserStar,
   parseUserStars,
@@ -50,14 +52,14 @@ export function useConstellationStars() {
 
     const local = readLocal();
     if (local.length > 0) {
-      setUserStars(local.slice(0, CONSTELLATION_USER_STAR_LIMIT));
+      setUserStars(capUserStars(local));
       return;
     }
 
     fetchSettings()
       .then((settings) => {
         const fromApi = parseUserStars(settings[SETTINGS_KEY]);
-        const capped = fromApi.slice(0, CONSTELLATION_USER_STAR_LIMIT);
+        const capped = capUserStars(fromApi);
         setUserStars(capped);
         persistLocal(capped);
       })
@@ -68,7 +70,7 @@ export function useConstellationStars() {
   }, []);
 
   const saveBoth = useCallback(async (nextStars: UserStar[]) => {
-    const capped = nextStars.slice(0, CONSTELLATION_USER_STAR_LIMIT);
+    const capped = capUserStars(nextStars);
     setUserStars(capped);
     userStarsRef.current = capped;
     persistLocal(capped);
@@ -84,7 +86,8 @@ export function useConstellationStars() {
   const addUserStar = useCallback(
     async (star: Omit<UserStar, "id" | "createdAt">) => {
       const current = userStarsRef.current;
-      if (current.length >= CONSTELLATION_USER_STAR_LIMIT) {
+      const remainingSlots = getRemainingUserStarSlots(current.length);
+      if (remainingSlots === 0) {
         return false;
       }
       const now = Date.now();
@@ -105,13 +108,14 @@ export function useConstellationStars() {
   const addUserStars = useCallback(
     async (stars: Array<Omit<UserStar, "id" | "createdAt">>) => {
       const current = userStarsRef.current;
-      const remainingSlots = CONSTELLATION_USER_STAR_LIMIT - current.length;
-      if (remainingSlots <= 0) {
+      const remainingSlots = getRemainingUserStarSlots(current.length);
+      if (remainingSlots === 0) {
         return 0;
       }
 
       const now = Date.now();
-      const nextStars = stars.slice(0, remainingSlots).map((star, index) =>
+      const starsToAdd = remainingSlots === null ? stars : stars.slice(0, remainingSlots);
+      const nextStars = starsToAdd.map((star, index) =>
         normalizeUserStar({
           ...star,
           id: `star-${now}-${index}-${Math.round(Math.random() * 100000)}`,

@@ -89,6 +89,6 @@ describe("Home page", () => {
     expect(screen.getByRole("button", { name: "Map library" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove selected" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reset added" })).toBeDisabled();
-    expect(screen.getByText("0/50 added stars")).toBeInTheDocument();
+    expect(screen.getByText("0 added stars")).toBeInTheDocument();
   });
 });

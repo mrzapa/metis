@@ -154,6 +154,10 @@ export default function Home() {
     () => availableIndexes.filter((index) => !mappedManifestPaths.has(index.manifest_path)),
     [availableIndexes, mappedManifestPaths],
   );
+  const starCountLabel = useMemo(
+    () => (starLimit === null ? `${userStars.length} added stars` : `${userStars.length}/${starLimit} added stars`),
+    [starLimit, userStars.length],
+  );
 
   const openChatWithIndex = useCallback(
     (manifestPath: string, label: string) => {
@@ -496,7 +500,7 @@ export default function Home() {
         const [nx, ny] = buildOutwardPlacement(targetX, targetY, userStars.length);
         addUserStar({ x: nx, y: ny, size: 0.8 + Math.random() * 0.7 }).then((added) => {
           if (!added) {
-            setAddMessage(`Star limit reached (${starLimit}/${starLimit}).`);
+            setAddMessage("Unable to place another star right now.");
           } else {
             setAddMessage(null);
             setSelectedUserStarId(null);
@@ -654,8 +658,8 @@ export default function Home() {
                 return;
               }
 
-              const room = Math.max(0, starLimit - userStars.length);
-              if (room === 0) {
+              const room = starLimit === null ? unmappedIndexes.length : Math.max(0, starLimit - userStars.length);
+              if (starLimit !== null && room === 0) {
                 setAddMessage(`Star limit reached (${starLimit}/${starLimit}).`);
                 return;
               }
@@ -691,7 +695,7 @@ export default function Home() {
             Map library
           </button>
         </div>
-        <div className="metis-star-controls-meta">{userStars.length}/{starLimit} added stars</div>
+        <div className="metis-star-controls-meta">{starCountLabel}</div>
         <div className="metis-star-controls-meta">{availableIndexes.length} indexed source{availableIndexes.length === 1 ? "" : "s"} detected</div>
         {addModeEnabled ? <div className="metis-star-controls-hint">Add mode is active: tap anywhere outside the core to place a white star.</div> : null}
         {selectedUserStarId ? <div className="metis-star-controls-hint">Selected star ready for removal.</div> : null}

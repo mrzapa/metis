@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getApiBase } from "@/lib/api";
 import { LaunchStage } from "@/components/shell/launch-stage";
 import { Button } from "@/components/ui/button";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { AlertCircle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
-import { useArrowState } from "@/hooks/use-arrow-state";
 
 export type DesktopReadyState = "loading" | "ready" | "error";
 
@@ -27,10 +26,10 @@ interface DesktopReadyGuardProps {
  *   - Passes through immediately (no effect)
  */
 export function DesktopReadyGuard({ children }: DesktopReadyGuardProps) {
-  const [state, setState] = useArrowState<DesktopReadyState>("loading");
-  const [errorMessage, setErrorMessage] = useArrowState<string | null>(null);
-  const [retryCount, setRetryCount] = useArrowState(0);
-  const [launchPhase, setLaunchPhase] = useArrowState(0);
+  const [state, setState] = useState<DesktopReadyState>("loading");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [launchPhase, setLaunchPhase] = useState(0);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {

@@ -1,4 +1,4 @@
-export const CONSTELLATION_USER_STAR_LIMIT = 50;
+export const CONSTELLATION_USER_STAR_LIMIT: number | null = null;
 
 export interface UserStar {
   id: string;
@@ -52,4 +52,18 @@ export function parseUserStars(value: unknown): UserStar[] {
   return value
     .filter(isUserStar)
     .map((star) => normalizeUserStar(star));
+}
+
+export function capUserStars(stars: UserStar[]): UserStar[] {
+  if (CONSTELLATION_USER_STAR_LIMIT === null) {
+    return stars;
+  }
+  return stars.slice(0, CONSTELLATION_USER_STAR_LIMIT);
+}
+
+export function getRemainingUserStarSlots(currentCount: number): number | null {
+  if (CONSTELLATION_USER_STAR_LIMIT === null) {
+    return null;
+  }
+  return Math.max(0, CONSTELLATION_USER_STAR_LIMIT - currentCount);
 }
