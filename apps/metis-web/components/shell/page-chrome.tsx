@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
 import {
   Activity,
-  Cpu,
   Home,
   LibraryBig,
   MessageSquare,
@@ -35,7 +34,6 @@ const NAV_ITEMS = [
   { href: "/", label: "Home", icon: Home },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/library", label: "Library", icon: LibraryBig },
-  { href: "/gguf", label: "Models", icon: Cpu },
   { href: "/settings", label: "Settings", icon: Settings2 },
   { href: "/diagnostics", label: "Diagnostics", icon: Activity },
 ];

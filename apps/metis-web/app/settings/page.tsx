@@ -4,12 +4,14 @@ import { useEffect, type CSSProperties, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { PageChrome } from "@/components/shell/page-chrome";
+import { GgufModelsPanel } from "@/components/gguf/gguf-models-panel";
 import {
   fetchAssistantSettings,
   fetchSettings,
@@ -221,6 +223,8 @@ function ToggleRow({
 }
 
 export default function SettingsPage() {
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab") === "models" ? "models" : "core";
   const [loading, setLoading] = useArrowState(true);
   const [loadError, setLoadError] = useArrowState<string | null>(null);
   const [saving, setSaving] = useArrowState(false);
@@ -518,16 +522,18 @@ export default function SettingsPage() {
             Loading settings…
           </div>
         ) : (
+          <Tabs defaultValue={initialTab}>
+            <TabsList className="glass-tab-rail h-auto w-full flex-wrap gap-1 p-1.5">
+              <TabsTrigger value="core" className="glass-tab-pill">Core</TabsTrigger>
+              <TabsTrigger value="retrieval" className="glass-tab-pill">Retrieval</TabsTrigger>
+              <TabsTrigger value="graph" className="glass-tab-pill">Graph</TabsTrigger>
+              <TabsTrigger value="memory" className="glass-tab-pill">Memory</TabsTrigger>
+              <TabsTrigger value="model" className="glass-tab-pill">Model</TabsTrigger>
+              <TabsTrigger value="companion" className="glass-tab-pill">Companion</TabsTrigger>
+              <TabsTrigger value="models" className="glass-tab-pill">Models</TabsTrigger>
+            </TabsList>
+
           <form onSubmit={handleSubmit(onSubmit)} className="settings-glass-form space-y-6">
-            <Tabs defaultValue="core">
-              <TabsList className="glass-tab-rail h-auto w-full flex-wrap gap-1 p-1.5">
-                <TabsTrigger value="core" className="glass-tab-pill">Core</TabsTrigger>
-                <TabsTrigger value="retrieval" className="glass-tab-pill">Retrieval</TabsTrigger>
-                <TabsTrigger value="graph" className="glass-tab-pill">Graph</TabsTrigger>
-                <TabsTrigger value="memory" className="glass-tab-pill">Memory</TabsTrigger>
-                <TabsTrigger value="model" className="glass-tab-pill">Model</TabsTrigger>
-                <TabsTrigger value="companion" className="glass-tab-pill">Companion</TabsTrigger>
-              </TabsList>
 
               {/* ── Core ──────────────────────────────────────────────────── */}
               <TabsContent value="core" className="glass-settings-pane mt-6 space-y-6">
@@ -1493,7 +1499,6 @@ export default function SettingsPage() {
                   )}
                 </section>
               </TabsContent>
-            </Tabs>
 
             {/* Save controls */}
             <div className="flex items-center gap-3 pb-8">
@@ -1517,6 +1522,12 @@ export default function SettingsPage() {
               )}
             </div>
           </form>
+
+            {/* ── Models (GGUF) ──────────────────────────────────────── */}
+            <TabsContent value="models" className="glass-settings-pane mt-6">
+              <GgufModelsPanel />
+            </TabsContent>
+          </Tabs>
         )}
       </div>
     </PageChrome>
