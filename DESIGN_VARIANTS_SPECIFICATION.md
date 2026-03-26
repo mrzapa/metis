@@ -1,4 +1,4 @@
-# Axiom Web UI Design Variants Specification
+# METIS Web UI Design Variants Specification
 
 **Current State:** Glassmorphic design with subtle depth, refined controls, motion effects, and typography density optimization.
 
@@ -10,7 +10,7 @@
 
 ### 1. CSS Changes Needed
 
-**File:** `apps/axiom-web/app/globals.css`
+**File:** `apps/metis-web/app/globals.css`
 
 #### New Utility Classes to Add:
 
@@ -392,9 +392,9 @@
 ### 2. Component Changes Needed
 
 **Files affected:**
-- `apps/axiom-web/components/chat/chat-panel.tsx`
-- `apps/axiom-web/components/chat/evidence-panel.tsx`
-- `apps/axiom-web/components/chat/resizable-panels.tsx`
+- `apps/metis-web/components/chat/chat-panel.tsx`
+- `apps/metis-web/components/chat/evidence-panel.tsx`
+- `apps/metis-web/components/chat/resizable-panels.tsx`
 - Any form/control components (`Toggle`, `Slider`, `Button` if custom)`
 
 **Changes:**
@@ -509,31 +509,31 @@
 
 ```
 ✏️ MODIFIED:
-  apps/axiom-web/app/globals.css
+  apps/metis-web/app/globals.css
     └─ +300 lines (new --bold utilities + @keyframes)
 
-  apps/axiom-web/components/chat/chat-panel.tsx
+  apps/metis-web/components/chat/chat-panel.tsx
     └─ Replace .chat-pane-surface with .chat-pane-surface--bold
     └─ Update toggle + button classes
 
-  apps/axiom-web/components/chat/evidence-panel.tsx
+  apps/metis-web/components/chat/evidence-panel.tsx
     └─ Update pane surface + divider classes
 
-  apps/axiom-web/components/chat/resizable-panels.tsx
+  apps/metis-web/components/chat/resizable-panels.tsx
     └─ Update glass-panel references if present
 
-  apps/axiom-web/components/ui/button.tsx (if custom)
+  apps/metis-web/components/ui/button.tsx (if custom)
     └─ Add .button--bold variant
 
-  apps/axiom-web/components/ui/slider.tsx (if custom)
+  apps/metis-web/components/ui/slider.tsx (if custom)
     └─ Add .glass-slider--bold variant
 
-  apps/axiom-web/components/ui/toggle.tsx (if custom)
+  apps/metis-web/components/ui/toggle.tsx (if custom)
     └─ Add .settings-toggle--bold variant
 
 📋 REFERENCE (no changes):
-  apps/axiom-web/app/tokens.css
-  apps/axiom-web/package.json
+  apps/metis-web/app/tokens.css
+  apps/metis-web/package.json
 ```
 
 ---
@@ -544,7 +544,7 @@
 
 ### 1. CSS Changes Needed
 
-**File:** `apps/axiom-web/app/globals.css`
+**File:** `apps/metis-web/app/globals.css`
 
 #### New Utility Classes to Add:
 
@@ -928,9 +928,9 @@
 ### 2. Component Changes Needed
 
 **Files affected:**
-- `apps/axiom-web/components/chat/chat-panel.tsx`
-- `apps/axiom-web/components/chat/evidence-panel.tsx`
-- `apps/axiom-web/components/chat/resizable-panels.tsx`
+- `apps/metis-web/components/chat/chat-panel.tsx`
+- `apps/metis-web/components/chat/evidence-panel.tsx`
+- `apps/metis-web/components/chat/resizable-panels.tsx`
 - Any form/control components (toggle, slider, button)
 
 **Changes:**
@@ -1038,31 +1038,31 @@
 
 ```
 ✏️ MODIFIED:
-  apps/axiom-web/app/globals.css
+  apps/metis-web/app/globals.css
     └─ +250 lines (new --refined utilities + spacing)
 
-  apps/axiom-web/components/chat/chat-panel.tsx
+  apps/metis-web/components/chat/chat-panel.tsx
     └─ Replace .chat-pane-surface with .chat-pane-surface--refined
     └─ Add .refined-spacing-* classes
 
-  apps/axiom-web/components/chat/evidence-panel.tsx
+  apps/metis-web/components/chat/evidence-panel.tsx
     └─ Update pane surface + divider with --refined
 
-  apps/axiom-web/components/chat/resizable-panels.tsx
+  apps/metis-web/components/chat/resizable-panels.tsx
     └─ Update glass-panel references + spacing
 
-  apps/axiom-web/components/ui/button.tsx
+  apps/metis-web/components/ui/button.tsx
     └─ Add .button--refined variant
 
-  apps/axiom-web/components/ui/slider.tsx
+  apps/metis-web/components/ui/slider.tsx
     └─ Add .glass-slider--refined variant
 
-  apps/axiom-web/components/ui/toggle.tsx
+  apps/metis-web/components/ui/toggle.tsx
     └─ Add .settings-toggle--refined variant
 
 📋 REFERENCE (no changes):
-  apps/axiom-web/app/tokens.css
-  apps/axiom-web/package.json
+  apps/metis-web/app/tokens.css
+  apps/metis-web/package.json
 ```
 
 ---
@@ -1073,7 +1073,7 @@
 
 ### 1. CSS Changes Needed
 
-**File:** `apps/axiom-web/app/globals.css`
+**File:** `apps/metis-web/app/globals.css`
 
 #### New Utility Classes + Animations:
 
@@ -1509,9 +1509,9 @@
 ### 2. Component Changes Needed
 
 **Files affected:**
-- `apps/axiom-web/components/chat/chat-panel.tsx`
-- `apps/axiom-web/components/chat/evidence-panel.tsx`
-- `apps/axiom-web/components/chat/resizable-panels.tsx`
+- `apps/metis-web/components/chat/chat-panel.tsx`
+- `apps/metis-web/components/chat/evidence-panel.tsx`
+- `apps/metis-web/components/chat/resizable-panels.tsx`
 
 **Changes:**
 1. Replace classes with `--motion` suffix
@@ -1619,33 +1619,33 @@
 
 ```
 ✏️ MODIFIED:
-  apps/axiom-web/app/globals.css
+  apps/metis-web/app/globals.css
     └─ +400 lines (7 @keyframes + new --motion utilities)
     └─ Enhanced @media prefers-reduced-motion
 
-  apps/axiom-web/components/chat/chat-panel.tsx
+  apps/metis-web/components/chat/chat-panel.tsx
     └─ Replace .chat-pane-surface with .chat-pane-surface--motion
     └─ Update toggle/button classes
 
-  apps/axiom-web/components/chat/evidence-panel.tsx
+  apps/metis-web/components/chat/evidence-panel.tsx
     └─ Update pane surface + divider with --motion
 
-  apps/axiom-web/components/chat/resizable-panels.tsx
+  apps/metis-web/components/chat/resizable-panels.tsx
     └─ Update glass-panel references
 
-  apps/axiom-web/components/ui/button.tsx
+  apps/metis-web/components/ui/button.tsx
     └─ Add .button--motion variant
 
-  apps/axiom-web/components/ui/slider.tsx
+  apps/metis-web/components/ui/slider.tsx
     └─ Add .glass-slider--motion variant
 
-  apps/axiom-web/components/ui/toggle.tsx
+  apps/metis-web/components/ui/toggle.tsx
     └─ Add .settings-toggle--motion variant
 
 📋 REFERENCE (no changes):
-  apps/axiom-web/app/tokens.css
-  apps/axiom-web/package.json
-  apps/axiom-web/tailwind.config.ts
+  apps/metis-web/app/tokens.css
+  apps/metis-web/package.json
+  apps/metis-web/tailwind.config.ts
 ```
 
 ---

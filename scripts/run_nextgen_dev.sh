@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Axiom - combined local API + next-gen web dev launcher.
+# METIS - combined local API + next-gen web dev launcher.
 #
 # Starts the existing API dev script and the Next.js dev server together on
 # localhost, then stops both when this script exits.
@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-WEB_DIR="${REPO_ROOT}/apps/axiom-web"
+WEB_DIR="${REPO_ROOT}/apps/metis-web"
 API_SCRIPT="${SCRIPT_DIR}/run_api_dev.sh"
 API_HOST="127.0.0.1"
 API_PORT="8000"
@@ -16,7 +16,7 @@ WEB_PORT="3000"
 API_URL="http://${API_HOST}:${API_PORT}"
 API_HEALTH_URL="${API_URL}/healthz"
 WEB_URL="http://${WEB_HOST}:${WEB_PORT}"
-PORT_CHECK_PYTHON="${AXIOM_PYTHON:-python3}"
+PORT_CHECK_PYTHON="${METIS_PYTHON:-python3}"
 API_PID=""
 WEB_PID=""
 CLEANUP_RUNNING=0
@@ -32,10 +32,10 @@ fail() {
 
 install_hint() {
     if [ -f "${WEB_DIR}/pnpm-lock.yaml" ]; then
-        printf 'cd apps/axiom-web && pnpm install'
+        printf 'cd apps/metis-web && pnpm install'
         return
     fi
-    printf 'cd apps/axiom-web && npm install'
+    printf 'cd apps/metis-web && npm install'
 }
 
 port_in_use() {
@@ -59,7 +59,7 @@ import urllib.error
 import urllib.request
 
 url = sys.argv[1]
-req = urllib.request.Request(url, headers={"User-Agent": "axiom-nextgen-dev"})
+req = urllib.request.Request(url, headers={"User-Agent": "metis-nextgen-dev"})
 try:
     with urllib.request.urlopen(req, timeout=0.5) as response:
         sys.exit(0 if 200 <= response.status < 500 else 1)
@@ -126,7 +126,7 @@ if [ ! -f "${REPO_ROOT}/pyproject.toml" ]; then
     fail "pyproject.toml not found at repo root."
 fi
 if [ ! -f "${WEB_DIR}/package.json" ]; then
-    fail "apps/axiom-web/package.json not found."
+    fail "apps/metis-web/package.json not found."
 fi
 if ! command -v "${PORT_CHECK_PYTHON}" >/dev/null 2>&1; then
     fail "Python interpreter '${PORT_CHECK_PYTHON}' is not available on PATH."
@@ -152,10 +152,10 @@ log "Starting API bootstrap via scripts/run_api_dev.sh (first run may take longe
 ) &
 API_PID=$!
 
-log "Starting Next.js dev server in apps/axiom-web..."
+log "Starting Next.js dev server in apps/metis-web..."
 (
     cd "${WEB_DIR}"
-    export NEXT_PUBLIC_AXIOM_API_BASE="${API_URL}"
+    export NEXT_PUBLIC_METIS_API_BASE="${API_URL}"
     exec "./node_modules/.bin/next" dev --hostname "${WEB_HOST}" --port "${WEB_PORT}"
 ) &
 WEB_PID=$!

@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from axiom_app.models.session_types import EvidenceSource
-from axiom_app.services.session_repository import SessionRepository
+from metis_app.models.session_types import EvidenceSource
+from metis_app.services.session_repository import SessionRepository
 
 
 def test_create_append_load_and_export_session(tmp_path) -> None:
@@ -82,7 +82,7 @@ def test_loads_monolith_compatible_schema_without_migration(tmp_path) -> None:
                 "Imported from legacy",
                 "qa-core",
                 "Q&A",
-                "axiom-legacy",
+                "metis-legacy",
                 "json",
                 "mock",
                 "mock-v1",

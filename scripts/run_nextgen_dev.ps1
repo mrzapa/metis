@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Axiom - combined local API + next-gen web dev launcher (Windows).
+    METIS - combined local API + next-gen web dev launcher (Windows).
 
 .DESCRIPTION
     Starts the existing API dev script and the Next.js dev server together on
@@ -12,7 +12,7 @@ $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $PSCommandPath
 $RepoRoot = Split-Path -Parent $ScriptDir
-$WebDir = Join-Path $RepoRoot "apps\axiom-web"
+$WebDir = Join-Path $RepoRoot "apps\metis-web"
 $ApiScript = Join-Path $ScriptDir "run_api_dev.ps1"
 $ApiHost = "127.0.0.1"
 $ApiPort = 8000
@@ -39,9 +39,9 @@ function Fail {
 
 function Get-InstallHint {
     if (Test-Path (Join-Path $WebDir "pnpm-lock.yaml")) {
-        return "cd apps/axiom-web; pnpm install"
+        return "cd apps/metis-web; pnpm install"
     }
-    return "cd apps/axiom-web; npm install"
+    return "cd apps/metis-web; npm install"
 }
 
 function Test-PortInUse {
@@ -150,7 +150,7 @@ try {
         Fail "pyproject.toml not found at repo root."
     }
     if (-not (Test-Path (Join-Path $WebDir "package.json"))) {
-        Fail "apps/axiom-web/package.json not found."
+        Fail "apps/metis-web/package.json not found."
     }
     if (-not (Test-Path $WebNext)) {
         Fail "Web dependencies are missing. Run '$(Get-InstallHint)' and retry."
@@ -169,18 +169,18 @@ try {
     Write-Info "Starting API bootstrap via scripts/run_api_dev.ps1 (first run may take longer while .venv and deps install)..."
     $ApiProcess = Start-Process -FilePath $ShellPath -ArgumentList @("-NoProfile", "-File", $ApiScript) -WorkingDirectory $RepoRoot -NoNewWindow -PassThru
 
-    $PreviousApiBase = $env:NEXT_PUBLIC_AXIOM_API_BASE
-    $env:NEXT_PUBLIC_AXIOM_API_BASE = $ApiUrl
+    $PreviousApiBase = $env:NEXT_PUBLIC_METIS_API_BASE
+    $env:NEXT_PUBLIC_METIS_API_BASE = $ApiUrl
     try {
-        Write-Info "Starting Next.js dev server in apps/axiom-web..."
+        Write-Info "Starting Next.js dev server in apps/metis-web..."
         $WebProcess = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "node_modules\\.bin\\next.cmd", "dev", "--hostname", $WebHost, "--port", "$WebPort") -WorkingDirectory $WebDir -NoNewWindow -PassThru
     }
     finally {
         if ($null -eq $PreviousApiBase) {
-            Remove-Item Env:NEXT_PUBLIC_AXIOM_API_BASE -ErrorAction SilentlyContinue
+            Remove-Item Env:NEXT_PUBLIC_METIS_API_BASE -ErrorAction SilentlyContinue
         }
         else {
-            $env:NEXT_PUBLIC_AXIOM_API_BASE = $PreviousApiBase
+            $env:NEXT_PUBLIC_METIS_API_BASE = $PreviousApiBase
         }
     }
 

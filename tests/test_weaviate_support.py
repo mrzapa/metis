@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from axiom_app.services.vector_store import (
+from metis_app.services.vector_store import (
     normalize_weaviate_settings,
     resolve_vector_store,
     weaviate_test_settings_from_env,
@@ -49,11 +49,11 @@ def test_normalize_weaviate_settings_rejects_bad_values() -> None:
 
 
 def test_weaviate_test_settings_from_env_uses_canonical_contract(monkeypatch) -> None:
-    monkeypatch.setenv("AXIOM_TEST_WEAVIATE_URL", "http://127.0.0.1:8080")
-    monkeypatch.setenv("AXIOM_TEST_WEAVIATE_GRPC_HOST", "127.0.0.1")
-    monkeypatch.setenv("AXIOM_TEST_WEAVIATE_GRPC_PORT", "50051")
-    monkeypatch.setenv("AXIOM_TEST_WEAVIATE_GRPC_SECURE", "false")
-    monkeypatch.setenv("AXIOM_TEST_WEAVIATE_API_KEY", "")
+    monkeypatch.setenv("METIS_TEST_WEAVIATE_URL", "http://127.0.0.1:8080")
+    monkeypatch.setenv("METIS_TEST_WEAVIATE_GRPC_HOST", "127.0.0.1")
+    monkeypatch.setenv("METIS_TEST_WEAVIATE_GRPC_PORT", "50051")
+    monkeypatch.setenv("METIS_TEST_WEAVIATE_GRPC_SECURE", "false")
+    monkeypatch.setenv("METIS_TEST_WEAVIATE_API_KEY", "")
 
     normalized = weaviate_test_settings_from_env(dict(os.environ))
 

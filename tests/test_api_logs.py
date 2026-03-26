@@ -6,8 +6,8 @@ from importlib import import_module
 
 from fastapi.testclient import TestClient
 
-api_app_module = import_module("axiom_app.api.app")
-logs_module = import_module("axiom_app.api.logs")
+api_app_module = import_module("metis_app.api.app")
+logs_module = import_module("metis_app.api.logs")
 
 
 def _client() -> TestClient:
@@ -36,7 +36,7 @@ def test_version_returns_string() -> None:
 
 
 def test_log_tail_missing_file(monkeypatch, tmp_path) -> None:
-    """When axiom.log does not exist, endpoint returns missing=True, empty lines."""
+    """When metis.log does not exist, endpoint returns missing=True, empty lines."""
     monkeypatch.setattr(
         logs_module._store,
         "load_settings",
@@ -53,7 +53,7 @@ def test_log_tail_missing_file(monkeypatch, tmp_path) -> None:
 
 
 def test_log_tail_returns_lines(monkeypatch, tmp_path) -> None:
-    log_file = tmp_path / "axiom.log"
+    log_file = tmp_path / "metis.log"
     log_file.write_text("line1\nline2\nline3\n", encoding="utf-8")
     monkeypatch.setattr(
         logs_module._store,
@@ -66,7 +66,7 @@ def test_log_tail_returns_lines(monkeypatch, tmp_path) -> None:
 
 
 def test_log_tail_limits_to_200_lines(monkeypatch, tmp_path) -> None:
-    log_file = tmp_path / "axiom.log"
+    log_file = tmp_path / "metis.log"
     log_file.write_text("\n".join(f"line{i}" for i in range(300)), encoding="utf-8")
     monkeypatch.setattr(
         logs_module._store,
@@ -87,7 +87,7 @@ def test_log_tail_limits_to_200_lines(monkeypatch, tmp_path) -> None:
 
 
 def test_log_tail_redacts_api_key_assignment(monkeypatch, tmp_path) -> None:
-    log_file = tmp_path / "axiom.log"
+    log_file = tmp_path / "metis.log"
     log_file.write_text("api_key_anthropic = sk-ant-secret123\n", encoding="utf-8")
     monkeypatch.setattr(
         logs_module._store,
@@ -102,7 +102,7 @@ def test_log_tail_redacts_api_key_assignment(monkeypatch, tmp_path) -> None:
 
 
 def test_log_tail_redacts_bearer_token(monkeypatch, tmp_path) -> None:
-    log_file = tmp_path / "axiom.log"
+    log_file = tmp_path / "metis.log"
     log_file.write_text("Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\n", encoding="utf-8")
     monkeypatch.setattr(
         logs_module._store,
@@ -116,7 +116,7 @@ def test_log_tail_redacts_bearer_token(monkeypatch, tmp_path) -> None:
 
 def test_log_tail_redacts_long_token(monkeypatch, tmp_path) -> None:
     secret = "a" * 32
-    log_file = tmp_path / "axiom.log"
+    log_file = tmp_path / "metis.log"
     log_file.write_text(f"some log message token={secret}\n", encoding="utf-8")
     monkeypatch.setattr(
         logs_module._store,
@@ -157,7 +157,7 @@ def test_log_tail_no_path_param(monkeypatch, tmp_path) -> None:
 
 def _make_stub_trace_store(tmp_path):
     """Return a pre-populated TraceStore in tmp_path."""
-    from axiom_app.services.trace_store import TraceStore as _RealStore
+    from metis_app.services.trace_store import TraceStore as _RealStore
 
     stub = _RealStore(tmp_path)
     stub.append_event(run_id="r1", stage="synthesis", event_type="final", payload={"status": "success"})
@@ -207,7 +207,7 @@ class TestLogsMetrics:
             assert key in dur, f"duration_ms missing key: {key}"
 
     def test_metrics_empty_store(self, monkeypatch, tmp_path) -> None:
-        from axiom_app.services.trace_store import TraceStore as _RealStore
+        from metis_app.services.trace_store import TraceStore as _RealStore
 
         empty_store = _RealStore(tmp_path)
         monkeypatch.setattr(logs_module, "TraceStore", lambda: empty_store)
@@ -219,7 +219,7 @@ class TestLogsMetrics:
 
     def test_metrics_does_not_break_log_tail(self, monkeypatch, tmp_path) -> None:
         """Verify /v1/logs/tail still works correctly after adding the metrics route."""
-        log_file = tmp_path / "axiom.log"
+        log_file = tmp_path / "metis.log"
         log_file.write_text("line1\nline2\n", encoding="utf-8")
         monkeypatch.setattr(logs_module._store, "load_settings", lambda: {"log_dir": str(tmp_path)})
 

@@ -31,7 +31,7 @@ jobs:
         run: |
           python - <<'PY'
           import json
-          with open('axiom_app/default_settings.json', encoding='utf-8') as f:
+          with open('metis_app/default_settings.json', encoding='utf-8') as f:
               json.load(f)
           print('default_settings.json is valid JSON')
           PY
@@ -40,7 +40,7 @@ jobs:
         run: ruff check .
 
       - name: Run tests with coverage
-        run: python -m pytest --cov=axiom_app --cov-report=xml --cov-report=term
+        run: python -m pytest --cov=metis_app --cov-report=xml --cov-report=term
 
       - name: CLI smoke (headless)
         run: |
@@ -55,10 +55,10 @@ jobs:
           with tempfile.TemporaryDirectory() as td:
               td_path = pathlib.Path(td)
               doc = td_path / 'smoke.txt'
-              doc.write_text('Axiom smoke test content for CLI mode.\n', encoding='utf-8')
+              doc.write_text('METIS smoke test content for CLI mode.\n', encoding='utf-8')
 
               env = dict(os.environ)
-              env['AXIOM_NEW_APP'] = '1'
+              env['METIS_NEW_APP'] = '1'
 
               cmd_index = [sys.executable, 'main.py', '--cli', 'index', '--file', str(doc)]
               cmd_query = [sys.executable, 'main.py', '--cli', 'query', '--file', str(doc), '--question', 'smoke']
@@ -109,11 +109,11 @@ jobs:
 
       - name: Run strict parity audit
         env:
-          AXIOM_TEST_WEAVIATE_URL: http://127.0.0.1:8080
-          AXIOM_TEST_WEAVIATE_GRPC_HOST: 127.0.0.1
-          AXIOM_TEST_WEAVIATE_GRPC_PORT: "50051"
-          AXIOM_TEST_WEAVIATE_GRPC_SECURE: "false"
-        run: python -m axiom_app.audit --require-live-backends
+          METIS_TEST_WEAVIATE_URL: http://127.0.0.1:8080
+          METIS_TEST_WEAVIATE_GRPC_HOST: 127.0.0.1
+          METIS_TEST_WEAVIATE_GRPC_PORT: "50051"
+          METIS_TEST_WEAVIATE_GRPC_SECURE: "false"
+        run: python -m metis_app.audit --require-live-backends
 
       - name: Show Weaviate logs on failure
         if: failure()
@@ -167,10 +167,10 @@ jobs:
           with tempfile.TemporaryDirectory() as td:
               td_path = pathlib.Path(td)
               doc = td_path / "smoke.txt"
-              doc.write_text("Axiom smoke test content for CLI mode.\n", encoding="utf-8")
+              doc.write_text("METIS smoke test content for CLI mode.\n", encoding="utf-8")
 
               env = dict(os.environ)
-              env["AXIOM_NEW_APP"] = "1"
+              env["METIS_NEW_APP"] = "1"
 
               cmd_index = [sys.executable, "main.py", "--cli", "index", "--file", str(doc)]
               cmd_query = [sys.executable, "main.py", "--cli", "query", "--file", str(doc), "--question", "smoke"]

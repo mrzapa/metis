@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from axiom_app.controllers.app_controller import AppController
-from axiom_app.models.app_model import AppModel
-from axiom_app.services.session_repository import SessionRepository
+from metis_app.controllers.app_controller import AppController
+from metis_app.models.app_model import AppModel
+from metis_app.services.session_repository import SessionRepository
 
 
 class _FakeSignal:
@@ -96,7 +96,7 @@ def test_direct_prompt_is_persisted_to_session_db(tmp_path, monkeypatch) -> None
         def invoke(self, _messages):
             return _FakeMessage(content="Direct response")
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
 
     controller.on_send_prompt("hello")
     _drain(controller)
@@ -166,7 +166,7 @@ def test_rag_prompt_persists_sources_to_session_db(tmp_path, monkeypatch) -> Non
         def invoke(self, _messages):
             return _FakeMessage(content="Answer with citation [S1]")
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
 
     controller.on_send_prompt("Who wrote the first algorithm?")
     _drain(controller)
@@ -214,7 +214,7 @@ def test_rag_prompt_shows_retrieved_context_and_grounding(tmp_path, monkeypatch)
                 content="The document states that Ada Lovelace wrote the first algorithm for Babbage's machine."
             )
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
 
     controller.on_send_prompt("Who wrote the first algorithm?")
     _drain(controller)
@@ -269,7 +269,7 @@ def test_tutor_mode_uses_structured_pipeline(tmp_path, monkeypatch) -> None:
         def invoke(self, _messages):
             return _FakeMessage(content=tutor_json)
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
 
     controller.on_send_prompt("Teach me embeddings.")
     _drain(controller)
@@ -314,7 +314,7 @@ def test_feedback_note_is_saved(tmp_path, monkeypatch) -> None:
         def invoke(self, _messages):
             return _FakeMessage(content="Direct response")
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
     monkeypatch.setattr(controller, "_get_text_input", lambda *args, **kwargs: "useful")
 
     controller.on_send_prompt("hello")
@@ -339,7 +339,7 @@ def test_open_session_restores_pending_feedback_for_latest_run(tmp_path, monkeyp
         def invoke(self, _messages):
             return _FakeMessage(content="Direct response")
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
 
     controller.on_send_prompt("hello")
     _drain(controller)
@@ -373,7 +373,7 @@ def test_feedback_submission_and_reopen_hide_pending_feedback(tmp_path, monkeypa
         def invoke(self, _messages):
             return _FakeMessage(content="Direct response")
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
     monkeypatch.setattr(controller, "_get_text_input", lambda *args, **kwargs: "")
 
     controller.on_send_prompt("hello")
@@ -408,7 +408,7 @@ def test_new_chat_is_lazy_and_next_prompt_creates_session(tmp_path, monkeypatch)
         def invoke(self, _messages):
             return _FakeMessage(content="Direct response")
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
 
     controller.on_new_chat()
 
@@ -440,7 +440,7 @@ def test_new_chat_and_delete_current_session_clear_response_ui(tmp_path, monkeyp
         def invoke(self, _messages):
             return _FakeMessage(content="Direct response")
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
 
     controller.on_send_prompt("hello")
     _drain(controller)
@@ -477,7 +477,7 @@ def test_reset_test_mode_clears_response_ui(tmp_path, monkeypatch) -> None:
         def invoke(self, _messages):
             return _FakeMessage(content="Direct response")
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
     monkeypatch.setattr(model, "save_settings", lambda _settings: None)
 
     controller.on_send_prompt("hello")

@@ -7,14 +7,14 @@ pip install pyinstaller
 pyinstaller \
   --noconfirm \
   --clean \
-  --name Axiom \
+  --name METIS \
   --windowed \
   --onefile \
   --icon logo.png \
-  --add-data "axiom_app/assets:axiom_app/assets" \
-  --add-data "axiom_app/default_settings.json:axiom_app" \
+  --add-data "metis_app/assets:metis_app/assets" \
+  --add-data "metis_app/default_settings.json:metis_app" \
   --hidden-import tkinter \
-  --collect-submodules axiom_app \
-  release/axiom_mvc_entry.py
+  --collect-submodules metis_app \
+  release/metis_mvc_entry.py
 
-echo "Built dist/Axiom (or dist/Axiom.exe on Windows)"
+echo "Built dist/METIS (or dist/METIS.exe on Windows)"

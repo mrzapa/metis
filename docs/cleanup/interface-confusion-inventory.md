@@ -14,7 +14,7 @@
 | File | Line/Section | Confusing Text/Codepath | Why Confusing | Action |
 |------|--------------|-------------------------|---------------|--------|
 | `README.md` | Line 26 | "Desktop-native. A real Qt6 app..." | Says Qt is the desktop app, contradicts one-interface decision | **REWRITE** |
-| `README.md` | Line 57 | "`axiom` opens web UI. Use `--desktop`/`--gui` for Qt" | Explicitly documents Qt as override, should be reverse | **REWRITE** |
+| `README.md` | Line 57 | "`metis` opens web UI. Use `--desktop`/`--gui` for Qt" | Explicitly documents Qt as override, should be reverse | **REWRITE** |
 | `README.md` | Lines 123-127 | Interface table with "Desktop GUI" as separate entry | Table should show web as default, Qt as deprecated | **REWRITE** |
 | `README.md` | Lines 150-160 | "Web UI (default)" vs "Desktop app" sections | Two sections imply equal status | **REWRITE** |
 | `README.md` | Line 124 | "`bash scripts/run_nextgen_dev.sh` - next-gen web UI" | "next-gen" implies experimental, should say "web UI" | **REWRITE** |
@@ -31,18 +31,18 @@
 | `docs/experiments/litestar_api.md` | Full doc | Migration eval from FastAPI to Litestar | Not relevant to one-interface | **MOVE TO DEPRECATED** |
 | `apps/README.md` | Line 3 | "Qt desktop app live at repo root" | Outdated | **REWRITE** |
 | `apps/README.md` | Line 38 | "Qt desktop app (`python main.py`) is unaffected" | Should say "legacy" | **REWRITE** |
-| `apps/axiom-desktop/README.md` | Lines 5,16 | "Independent of Qt desktop app" | Should remove Qt reference | **REWRITE** |
-| `apps/axiom-reflex/README.md` | Full doc | Alternative to Tauri, references Qt | Should be deprecated | **MOVE TO DEPRECATED** |
-| `apps/axiom-reflex/README.md` | Line 61 | "`python main.py` (Qt desktop app)" | Should be removed | **DELETE** |
-| `apps/axiom-web/README.md` | Lines 35,80,89 | References to "web UI" | Keep but simplify | **KEEP (DEV-ONLY)** |
-| `axiom_app/engine/README.md` | Lines 5,19,261 | "Qt", "PySide6" references | Should say "any non-Qt frontend" | **REWRITE** |
-| `axiom_app/api/README.md` | Line 6 | "Does not import Qt" | Should say positive, not negative | **REWRITE** |
+| `apps/metis-desktop/README.md` | Lines 5,16 | "Independent of Qt desktop app" | Should remove Qt reference | **REWRITE** |
+| `apps/metis-reflex/README.md` | Full doc | Alternative to Tauri, references Qt | Should be deprecated | **MOVE TO DEPRECATED** |
+| `apps/metis-reflex/README.md` | Line 61 | "`python main.py` (Qt desktop app)" | Should be removed | **DELETE** |
+| `apps/metis-web/README.md` | Lines 35,80,89 | References to "web UI" | Keep but simplify | **KEEP (DEV-ONLY)** |
+| `metis_app/engine/README.md` | Lines 5,19,261 | "Qt", "PySide6" references | Should say "any non-Qt frontend" | **REWRITE** |
+| `metis_app/api/README.md` | Line 6 | "Does not import Qt" | Should say positive, not negative | **REWRITE** |
 | `AGENTS.md` | Line 7 | "runs as a desktop GUI or headless CLI" | Says GUI, should say "web UI" | **REWRITE** |
-| `AGENTS.md` | Line 13-14 | "PySide6 MVC app", "AXIOM_NEW_APP=0" | AXIOM_NEW_APP is dead code | **REWRITE** |
-| `AGENTS.md` | Lines 35-36,43 | "python main.py" references | Should say "axiom --cli" | **REWRITE** |
+| `AGENTS.md` | Line 13-14 | "PySide6 MVC app", "METIS_NEW_APP=0" | METIS_NEW_APP is dead code | **REWRITE** |
+| `AGENTS.md` | Lines 35-36,43 | "python main.py" references | Should say "metis --cli" | **REWRITE** |
 | `.agents/skills/launch-app/SKILL.md` | Lines 24,30,37 | "python main.py" references | Should update | **REWRITE** |
-| `scripts/install_axiom.sh` | Line 69 | "--web" flag handling | Legacy, documented as no-op | **KEEP (DEV-ONLY)** |
-| `scripts/install_axiom.ps1` | Lines 64,122 | "--web" comments | Legacy, documented as no-op | **KEEP (DEV-ONLY)** |
+| `scripts/install_metis.sh` | Line 69 | "--web" flag handling | Legacy, documented as no-op | **KEEP (DEV-ONLY)** |
+| `scripts/install_metis.ps1` | Lines 64,122 | "--web" comments | Legacy, documented as no-op | **KEEP (DEV-ONLY)** |
 
 ---
 
@@ -54,20 +54,20 @@
 
 2. **docs/migration/qt_to_web_container.md** - Delete entirely. Migration story is over - we have one interface now.
 
-3. **AGENTS.md** - Remove references to `AXIOM_NEW_APP` and "Qt". Update to web-first.
+3. **AGENTS.md** - Remove references to `METIS_NEW_APP` and "Qt". Update to web-first.
 
 ### P1 - Deprecate/Quarantine
 
 4. **docs/adr/0001-local-api-and-web-ui.md** - Mark superseded by 0004
 5. **docs/experiments/rust_gui_spike.md** - Move to deprecated experiments folder
 6. **docs/experiments/litestar_api.md** - Move to deprecated experiments folder
-7. **apps/axiom-reflex/README.md** - Move to deprecated
+7. **apps/metis-reflex/README.md** - Move to deprecated
 
 ### P2 - Minor Fixes
 
 8. **apps/README.md** - Update Qt references
-9. **apps/axiom-desktop/README.md** - Remove Qt comparison
-10. **axiom_app/engine/README.md** - Update Qt references
+9. **apps/metis-desktop/README.md** - Remove Qt comparison
+10. **metis_app/engine/README.md** - Update Qt references
 
 ---
 
@@ -75,7 +75,7 @@
 
 1. Delete `docs/migration/` folder - migration is over
 2. Rewrite README.md to lead with Tauri + Next.js
-3. Update AGENTS.md to remove Qt/AXIOM_NEW_APP references
+3. Update AGENTS.md to remove Qt/METIS_NEW_APP references
 4. Mark 0001 and 0003 ADRs as superseded
 5. Move experiment docs to `docs/experiments/deprecated/`
 

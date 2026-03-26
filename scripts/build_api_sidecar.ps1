@@ -1,21 +1,21 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Build the axiom-api sidecar binary for Tauri desktop bundling (WOR-14).
+    Build the metis-api sidecar binary for Tauri desktop bundling (WOR-14).
 
 .DESCRIPTION
-    Produces a standalone one-file console binary of axiom_app.api and places it
-    at apps/axiom-desktop/src-tauri/binaries/axiom-api-{target-triple}.exe, which
+    Produces a standalone one-file console binary of metis_app.api and places it
+    at apps/metis-desktop/src-tauri/binaries/metis-api-{target-triple}.exe, which
     is the naming convention Tauri v2 requires for externalBin sidecar binaries.
 
-    Prerequisites: Python environment with axiom-app[api] installed, Rust toolchain
+    Prerequisites: Python environment with metis-app[api] installed, Rust toolchain
     Usage: powershell -File scripts/build_api_sidecar.ps1
 #>
 $ErrorActionPreference = "Stop"
 
 # ── Resolve paths ────────────────────────────────────────────────────────────
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$OutDir   = Join-Path $RepoRoot "apps" "axiom-desktop" "src-tauri" "binaries"
+$OutDir   = Join-Path $RepoRoot "apps" "metis-desktop" "src-tauri" "binaries"
 
 # ── Detect Rust target triple ───────────────────────────────────────────────
 try {
@@ -56,9 +56,9 @@ if (Test-Path $BuildDir) {
 }
 
 # ── Build sidecar binary ────────────────────────────────────────────────────
-$AssetsData       = "${RepoRoot}\axiom_app\assets;axiom_app/assets"
-$SettingsData     = "${RepoRoot}\axiom_app\default_settings.json;axiom_app"
-$EntryPoint       = Join-Path $RepoRoot "axiom_app" "api" "__main__.py"
+$AssetsData       = "${RepoRoot}\metis_app\assets;metis_app/assets"
+$SettingsData     = "${RepoRoot}\metis_app\default_settings.json;metis_app"
+$EntryPoint       = Join-Path $RepoRoot "metis_app" "api" "__main__.py"
 
 if (-not (Test-Path $EntryPoint)) {
     Write-Error "Entry point not found: $EntryPoint"
@@ -68,10 +68,10 @@ if (-not (Test-Path $EntryPoint)) {
 Write-Host "[build_api_sidecar] Building sidecar binary..."
 pyinstaller `
     --noconfirm `
-    --name axiom-api `
+    --name metis-api `
     --onefile `
     --console `
-    --collect-submodules axiom_app `
+    --collect-submodules metis_app `
     --add-data $AssetsData `
     --add-data $SettingsData `
     $EntryPoint
@@ -82,7 +82,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ── Validate output ─────────────────────────────────────────────────────────
-$SourceBinary = Join-Path $DistDir "axiom-api.exe"
+$SourceBinary = Join-Path $DistDir "metis-api.exe"
 if (-not (Test-Path $SourceBinary)) {
     Write-Error "PyInstaller did not produce expected output: $SourceBinary"
     exit 1
@@ -93,7 +93,7 @@ if (-not (Test-Path $OutDir)) {
     New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 }
 
-$DestBinary = Join-Path $OutDir "axiom-api-${TargetTriple}.exe"
+$DestBinary = Join-Path $OutDir "metis-api-${TargetTriple}.exe"
 
 Copy-Item -Path $SourceBinary -Destination $DestBinary -Force
 

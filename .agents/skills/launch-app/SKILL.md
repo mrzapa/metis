@@ -1,11 +1,11 @@
 ---
 name: launch-app
-description: Launch the Axiom app for runtime validation and testing.
+description: Launch the METIS app for runtime validation and testing.
 ---
 
 # Launch App
 
-Axiom is primarily a PySide6 desktop app with a shared CLI entrypoint.
+METIS is primarily a PySide6 desktop app with a shared CLI entrypoint.
 
 ## Setup
 

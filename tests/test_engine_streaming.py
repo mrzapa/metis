@@ -1,14 +1,14 @@
-"""Tests for axiom_app.engine.streaming.stream_rag_answer."""
+"""Tests for metis_app.engine.streaming.stream_rag_answer."""
 
 from __future__ import annotations
 
 import json
 import uuid
 
-import axiom_app.engine.indexing as engine_indexing
-import axiom_app.engine.streaming as engine_streaming
-from axiom_app.engine.querying import RagQueryRequest
-from axiom_app.engine.streaming import stream_rag_answer
+import metis_app.engine.indexing as engine_indexing
+import metis_app.engine.streaming as engine_streaming
+from metis_app.engine.querying import RagQueryRequest
+from metis_app.engine.streaming import stream_rag_answer
 
 
 def _build_test_index(tmp_path, monkeypatch):
@@ -528,7 +528,7 @@ def test_stream_non_agentic_no_agentic_events(tmp_path, monkeypatch) -> None:
 
 def test_dedup_sources_removes_duplicates() -> None:
     """_dedup_sources removes entries with the same chunk_id."""
-    from axiom_app.engine.streaming import _dedup_sources
+    from metis_app.engine.streaming import _dedup_sources
 
     sources = [
         {"chunk_id": "c1", "snippet": "foo"},
@@ -543,7 +543,7 @@ def test_dedup_sources_removes_duplicates() -> None:
 
 def test_identify_gaps_returns_list(tmp_path, monkeypatch) -> None:
     """_identify_gaps returns a list and handles LLM failures gracefully."""
-    from axiom_app.engine.streaming import _identify_gaps
+    from metis_app.engine.streaming import _identify_gaps
 
     class _MockLLM:
         def invoke(self, messages: list) -> object:

@@ -10,8 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from axiom_app.controllers.app_controller import AppController
-from axiom_app.models.app_model import AppModel
+from metis_app.controllers.app_controller import AppController
+from metis_app.models.app_model import AppModel
 
 
 # ---------------------------------------------------------------------------
@@ -104,12 +104,12 @@ def test_local_gguf_valid_settings_generate_response(monkeypatch) -> None:
             return _FakeMessage(content="generated output")
 
     monkeypatch.setattr(
-        "axiom_app.utils.llm_providers.create_llm",
+        "metis_app.utils.llm_providers.create_llm",
         lambda _s: _FakeLLM(),
     )
     # Also patch the controller-level import.
     monkeypatch.setattr(
-        "axiom_app.controllers.app_controller.create_llm",
+        "metis_app.controllers.app_controller.create_llm",
         lambda _s: _FakeLLM(),
     )
 
@@ -171,7 +171,7 @@ def test_local_gguf_backend_is_reused(monkeypatch) -> None:
         calls["create"] += 1
         return _FakeLLM()
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", _factory)
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", _factory)
 
     controller.on_send_prompt("first")
     _drain(controller)
@@ -195,7 +195,7 @@ def test_local_gguf_runtime_error_appends_actionable_telemetry_line(monkeypatch,
     def _factory(settings: dict):
         raise RuntimeError("llama-cpp backend init failed")
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", _factory)
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", _factory)
 
     controller.on_send_prompt("prompt")
     _drain(controller)
@@ -220,7 +220,7 @@ def test_local_gguf_success_appends_telemetry_line(monkeypatch) -> None:
         def invoke(self, messages: Any) -> _FakeMessage:
             return _FakeMessage(content="generated output")
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", lambda _s: _FakeLLM())
 
     controller.on_send_prompt("hello")
     _drain(controller)
@@ -243,7 +243,7 @@ def test_local_gguf_generic_init_exception_is_concise_for_user_and_logged(monkey
     def _factory(settings: dict):
         raise ValueError("unexpected init failure details")
 
-    monkeypatch.setattr("axiom_app.controllers.app_controller.create_llm", _factory)
+    monkeypatch.setattr("metis_app.controllers.app_controller.create_llm", _factory)
 
     controller.on_send_prompt("prompt")
     _drain(controller)

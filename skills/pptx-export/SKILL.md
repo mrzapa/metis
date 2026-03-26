@@ -1,7 +1,7 @@
 ---
 id: pptx-export
 name: PPTX Export (PptxGenJS)
-description: Prepare Axiom RAG and Evidence Pack outputs as slide-ready content for PowerPoint export using PptxGenJS.
+description: Prepare METIS RAG and Evidence Pack outputs as slide-ready content for PowerPoint export using PptxGenJS.
 enabled_by_default: true
 priority: 100
 triggers:
@@ -52,7 +52,7 @@ Produce content in slide-oriented chunks:
 - Evidence/citations: include inline tags like [S1], [S2] per factual bullet.
 - Speaker note text: optional 1-2 sentence expansion per slide.
 
-For Axiom Evidence Pack and RAG outputs:
+For METIS Evidence Pack and RAG outputs:
 - Group by claims, timeline steps, risks, decisions, or recommendations.
 - Keep one idea per slide; split dense sections into multiple slides.
 - Preserve uncertainty explicitly (for example: "Insufficient evidence", "Conflicting sources").

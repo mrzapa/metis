@@ -15,17 +15,17 @@ The canonical version lives in `VERSION` at the repo root. All consumers derive 
 
 | Component | Version Source |
 |----------|---------------|
-| Python config | `axiom_app/config.py` reads from `VERSION` |
+| Python config | `metis_app/config.py` reads from `VERSION` |
 | FastAPI | `GET /v1/version` returns `APP_VERSION` |
-| Tauri shell | `apps/axiom-desktop/src-tauri/tauri.conf.json` |
-| Frontend | `apps/axiom-web/app/diagnostics/page.tsx` (hardcoded `WEB_VERSION`) |
+| Tauri shell | `apps/metis-desktop/src-tauri/tauri.conf.json` |
+| Frontend | `apps/metis-web/app/diagnostics/page.tsx` (hardcoded `WEB_VERSION`) |
 
 > **Note:** The frontend version is currently hardcoded. Future: derive from build process or `VERSION`.
 
 ### Schema Versioning
 
 **Settings schema:** Integer `schema_version` in `settings.json` (defaults to 1).
-- Migration hook exists in `axiom_app/settings_store.py`
+- Migration hook exists in `metis_app/settings_store.py`
 - Migrations run automatically on load
 - See `_run_migrations()` for available migrations
 
@@ -38,13 +38,13 @@ The canonical version lives in `VERSION` at the repo root. All consumers derive 
 
 ## Overview
 
-The Axiom desktop distribution packages three components together:
+The METIS desktop distribution packages three components together:
 
 | Component | What it is | Where it lives |
 |-----------|-----------|----------------|
-| **Desktop container** | Tauri v2 shell (Rust + WebView) | `apps/axiom-desktop/` |
-| **Web bundle** | Next.js static export | built from `apps/axiom-web/`, embedded in the container at build time |
-| **API sidecar** | PyInstaller-packaged Python API server | `apps/axiom-desktop/src-tauri/binaries/axiom-api-<target>` |
+| **Desktop container** | Tauri v2 shell (Rust + WebView) | `apps/metis-desktop/` |
+| **Web bundle** | Next.js static export | built from `apps/metis-web/`, embedded in the container at build time |
+| **API sidecar** | PyInstaller-packaged Python API server | `apps/metis-desktop/src-tauri/binaries/metis-api-<target>` |
 
 These three ship as **one release unit**. They share a single version string.
 
@@ -57,7 +57,7 @@ These three ship as **one release unit**. They share a single version string.
 The authoritative version lives in:
 
 ```
-apps/axiom-desktop/src-tauri/tauri.conf.json  →  "version": "x.y.z"
+apps/metis-desktop/src-tauri/tauri.conf.json  →  "version": "x.y.z"
 ```
 
 When a release is cut:
@@ -180,7 +180,7 @@ To activate the updater in the future:
 
 ## Related
 
-- `apps/axiom-desktop/src-tauri/tauri.conf.json` — container config and updater placeholder
+- `apps/metis-desktop/src-tauri/tauri.conf.json` — container config and updater placeholder
 - `scripts/build_api_sidecar.sh` — sidecar build script
-- `apps/axiom-desktop/src-tauri/src/lib.rs` — sidecar spawn and port negotiation
+- `apps/metis-desktop/src-tauri/src/lib.rs` — sidecar spawn and port negotiation
 - `docs/adr/0001-local-api-and-web-ui.md` — architectural context

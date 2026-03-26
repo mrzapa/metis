@@ -1,8 +1,8 @@
-"""Tests for axiom_app.services.reranker."""
+"""Tests for metis_app.services.reranker."""
 
 from __future__ import annotations
 
-from axiom_app.services.reranker import (
+from metis_app.services.reranker import (
     bm25_score_chunks,
     reciprocal_rank_fusion,
     rerank_hits,

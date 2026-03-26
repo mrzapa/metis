@@ -2,13 +2,13 @@
 
 - **Status**: Draft
 - **Date**: 2026-03-15
-- **Scope**: Reproducible local benchmark commands for the Axiom FastAPI sidecar.
+- **Scope**: Reproducible local benchmark commands for the METIS FastAPI sidecar.
   Docs-only; no new endpoints or dependencies introduced.
 
 ## Overview
 
 This guide gives you copy-pastable commands for `wrk` and `hey`, a results
-capture template, and Axiom-specific metric definitions. It is designed for
+capture template, and METIS-specific metric definitions. It is designed for
 reproducibility on any developer machine, not universal thresholds — raw numbers
 will vary with hardware.
 
@@ -54,7 +54,7 @@ sudo dnf install wrk
 
 ```bash
 # From the repo root
-python -m axiom_app.api
+python -m metis_app.api
 ```
 
 The server starts on a dynamic port and prints it to stdout, e.g.:
@@ -66,7 +66,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8765 (Press CTRL+C to quit)
 Export the port so you can paste the commands below unchanged:
 
 ```bash
-export AXIOM_PORT=8765   # replace with the port printed above
+export METIS_PORT=8765   # replace with the port printed above
 ```
 
 ---
@@ -82,19 +82,19 @@ framework + uvicorn per-request overhead.
 **wrk — 30 s, 4 threads, 50 connections**
 
 ```bash
-wrk -t4 -c50 -d30s http://127.0.0.1:$AXIOM_PORT/healthz
+wrk -t4 -c50 -d30s http://127.0.0.1:$METIS_PORT/healthz
 ```
 
 **hey — 200 requests, 20 concurrent**
 
 ```bash
-hey -n 200 -c 20 http://127.0.0.1:$AXIOM_PORT/healthz
+hey -n 200 -c 20 http://127.0.0.1:$METIS_PORT/healthz
 ```
 
 **hey — sustained 10 s at 20 concurrent**
 
 ```bash
-hey -z 10s -c 20 http://127.0.0.1:$AXIOM_PORT/healthz
+hey -z 10s -c 20 http://127.0.0.1:$METIS_PORT/healthz
 ```
 
 ---
@@ -106,9 +106,9 @@ between `/healthz` and `/v1/version` isolates the cost of one additional Python
 function call and a slightly larger response body.
 
 ```bash
-wrk -t4 -c50 -d30s http://127.0.0.1:$AXIOM_PORT/v1/version
+wrk -t4 -c50 -d30s http://127.0.0.1:$METIS_PORT/v1/version
 
-hey -z 10s -c 20 http://127.0.0.1:$AXIOM_PORT/v1/version
+hey -z 10s -c 20 http://127.0.0.1:$METIS_PORT/v1/version
 ```
 
 ---
@@ -120,9 +120,9 @@ or populated from `rag_sessions.db`). The delta between `/v1/sessions` and
 `/v1/version` isolates Pydantic v2 list serialization + SQLite read cost.
 
 ```bash
-wrk -t4 -c50 -d30s http://127.0.0.1:$AXIOM_PORT/v1/sessions
+wrk -t4 -c50 -d30s http://127.0.0.1:$METIS_PORT/v1/sessions
 
-hey -z 10s -c 20 http://127.0.0.1:$AXIOM_PORT/v1/sessions
+hey -z 10s -c 20 http://127.0.0.1:$METIS_PORT/v1/sessions
 ```
 
 > **Note:** Run this on both an empty `rag_sessions.db` and a seeded one (e.g.,
@@ -148,7 +148,7 @@ following approaches:
 time curl -s -N \
   -H "Content-Type: application/json" \
   -d '{"query": "test", "index_name": "default", "session_id": null}' \
-  http://127.0.0.1:$AXIOM_PORT/v1/query/rag/stream \
+  http://127.0.0.1:$METIS_PORT/v1/query/rag/stream \
   | head -n 1
 ```
 
@@ -159,7 +159,7 @@ for i in $(seq 1 20); do
   { time curl -s -N \
       -H "Content-Type: application/json" \
       -d '{"query": "test", "index_name": "default", "session_id": null}' \
-      http://127.0.0.1:$AXIOM_PORT/v1/query/rag/stream \
+      http://127.0.0.1:$METIS_PORT/v1/query/rag/stream \
       | head -n 1 ; } 2>&1 | grep real
 done
 ```
@@ -177,7 +177,7 @@ wrk.body = '{"query":"test","index_name":"default","session_id":null}'
 
 ```bash
 wrk -t2 -c10 -d30s -s bench/rag_stream.lua \
-  http://127.0.0.1:$AXIOM_PORT/v1/query/rag/stream
+  http://127.0.0.1:$METIS_PORT/v1/query/rag/stream
 ```
 
 > **Interpreting wrk SSE results:** `wrk` closes the connection as soon as the
@@ -197,7 +197,7 @@ for i in $(seq 1 $TOTAL); do
   GOT=$(curl -s -N \
         -H "Content-Type: application/json" \
         -d '{"query":"test","index_name":"default","session_id":null}' \
-        http://127.0.0.1:$AXIOM_PORT/v1/query/rag/stream \
+        http://127.0.0.1:$METIS_PORT/v1/query/rag/stream \
         | grep -c "event: token" || true)
   [ "$GOT" -eq 0 ] && DROPS=$((DROPS+1))
 done
@@ -217,7 +217,7 @@ benchmark run. Fill in one row per endpoint per tool.
 **Machine:** <!-- e.g. MacBook Pro M3, 16 GB RAM -->
 **OS:** <!-- e.g. macOS 15.3 / Ubuntu 24.04 -->
 **Python:** <!-- python --version -->
-**Axiom commit:** <!-- git rev-parse --short HEAD -->
+**METIS commit:** <!-- git rev-parse --short HEAD -->
 **Uvicorn workers:** <!-- default: 1 -->
 
 | Endpoint | Tool | Requests | Concurrency | RPS | p50 ms | p90 ms | p99 ms | Errors |
@@ -233,7 +233,7 @@ benchmark run. Fill in one row per endpoint per tool.
 
 ---
 
-## Axiom-Specific Metric Definitions
+## METIS-Specific Metric Definitions
 
 ### SSE Stability
 
@@ -308,8 +308,8 @@ Stage 2 of the Litestar evaluation.
 ## Quick-start Checklist
 
 ```
-[ ] python -m axiom_app.api is running; note the port
-[ ] export AXIOM_PORT=<port>
+[ ] python -m metis_app.api is running; note the port
+[ ] export METIS_PORT=<port>
 [ ] wrk and hey are installed
 [ ] Run GET /healthz with wrk and hey; record results
 [ ] Run GET /v1/version with wrk; record the delta vs /healthz

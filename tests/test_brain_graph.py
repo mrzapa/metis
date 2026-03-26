@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from axiom_app.models.brain_graph import BrainGraph
-from axiom_app.models.session_types import SessionSummary
+from metis_app.models.brain_graph import BrainGraph
+from metis_app.models.session_types import SessionSummary
 
 
 def _session(
@@ -122,7 +122,7 @@ def test_brain_graph_can_preserve_positions_from_previous_graph() -> None:
 def test_brain_graph_embeds_assistant_subgraph_with_metadata_and_links() -> None:
     assistant_payload = {
         "identity": {
-            "assistant_id": "axiom-companion",
+            "assistant_id": "metis-companion",
             "name": "Guide",
             "archetype": "Research companion",
             "greeting": "Hello from the companion.",
@@ -130,7 +130,7 @@ def test_brain_graph_embeds_assistant_subgraph_with_metadata_and_links() -> None
         },
         "status": {
             "runtime_provider": "local_gguf",
-            "runtime_model": "axiom-q4",
+            "runtime_model": "metis-q4",
             "paused": True,
             "latest_summary": "A short reflection.",
         },
@@ -161,7 +161,7 @@ def test_brain_graph_embeds_assistant_subgraph_with_metadata_and_links() -> None
         "brain_links": [
             {
                 "source_node_id": "memory:memory-1",
-                "target_node_id": "assistant:axiom",
+                "target_node_id": "assistant:metis",
                 "relation": "belongs_to",
                 "label": "Belongs To",
                 "summary": "Captured a short next step.",
@@ -174,7 +174,7 @@ def test_brain_graph_embeds_assistant_subgraph_with_metadata_and_links() -> None
     graph = BrainGraph().build_from_indexes_and_sessions([], [], assistant_payload)
 
     assert "category:assistant" in graph.nodes
-    assert "assistant:axiom" in graph.nodes
+    assert "assistant:metis" in graph.nodes
     assert "category:assistant:memory" in graph.nodes
     assert "category:assistant:playbooks" in graph.nodes
     assert graph.get_node("category:assistant").node_type == "category"
@@ -189,19 +189,19 @@ def test_brain_graph_embeds_assistant_subgraph_with_metadata_and_links() -> None
     assert graph.get_node("category:assistant:playbooks").metadata["scope"] == "assistant_self"
     assert graph.get_node("category:assistant:playbooks").metadata["member_ids"] == ["playbook:playbook-1"]
     assert graph.get_node("category:assistant:playbooks").metadata["member_count"] == 1
-    assert graph.get_node("assistant:axiom").node_type == "assistant"
-    assert graph.get_node("assistant:axiom").metadata["scope"] == "assistant_self"
-    assert graph.get_node("assistant:axiom").metadata["runtime_provider"] == "local_gguf"
-    assert graph.get_node("assistant:axiom").metadata["runtime_model"] == "axiom-q4"
-    assert graph.get_node("assistant:axiom").metadata["paused"] is True
-    assert graph.get_node("assistant:axiom").metadata["latest_summary"] == "A short reflection."
+    assert graph.get_node("assistant:metis").node_type == "assistant"
+    assert graph.get_node("assistant:metis").metadata["scope"] == "assistant_self"
+    assert graph.get_node("assistant:metis").metadata["runtime_provider"] == "local_gguf"
+    assert graph.get_node("assistant:metis").metadata["runtime_model.*== "metis-q4"
+    assert graph.get_node("assistant:metis").metadata["paused"] is True
+    assert graph.get_node("assistant:metis").metadata["latest_summary"] == "A short reflection."
     assert graph.get_node("memory:memory-1").node_type == "memory"
     assert graph.get_node("memory:memory-1").metadata["scope"] == "assistant_learned"
     assert graph.get_node("playbook:playbook-1").node_type == "playbook"
     assert graph.get_node("playbook:playbook-1").metadata["scope"] == "assistant_self"
     assert any(
         edge.edge_type == "category_member"
-        and edge.source_id == "assistant:axiom"
+        and edge.source_id == "assistant:metis"
         and edge.target_id == "category:assistant"
         and edge.metadata["scope"] == "assistant_self"
         for edge in graph.edges
@@ -216,7 +216,7 @@ def test_brain_graph_embeds_assistant_subgraph_with_metadata_and_links() -> None
     assert any(
         edge.edge_type == "belongs_to"
         and edge.source_id == "memory:memory-1"
-        and edge.target_id == "assistant:axiom"
+        and edge.target_id == "assistant:metis"
         and edge.metadata["note"] == "derived"
         and edge.metadata["scope"] == "assistant_learned"
         for edge in graph.edges
@@ -231,4 +231,4 @@ def test_brain_graph_skips_assistant_subgraph_when_disabled() -> None:
     )
 
     assert "category:assistant" not in graph.nodes
-    assert "assistant:axiom" not in graph.nodes
+    assert "assistant:metis" not in graph.nodes

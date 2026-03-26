@@ -12,8 +12,8 @@ from urllib import request
 
 UPSTREAM_MODELS_URL = "https://raw.githubusercontent.com/AlexsJones/llmfit/main/data/hf_models.json"
 UPSTREAM_COMMIT_URL = "https://api.github.com/repos/AlexsJones/llmfit/commits/main"
-OUTPUT_PATH = Path(__file__).resolve().parents[1] / "axiom_app" / "assets" / "llmfit_gguf_catalog.json"
-USER_AGENT = "AxiomCatalogRefresh/1.0"
+OUTPUT_PATH = Path(__file__).resolve().parents[1] / "metis_app" / "assets" / "llmfit_gguf_catalog.json"
+USER_AGENT = "MetisCatalogRefresh/1.0"
 MULTIMODAL_HINTS = ("vision", "vl", "vlm", "multimodal")
 
 

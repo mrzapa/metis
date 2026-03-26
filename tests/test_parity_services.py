@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 
-import axiom_app.models.app_model as app_model_module
-from axiom_app.models.app_model import AppModel
-from axiom_app.models.parity_types import SkillDefinition, SkillSessionState
-from axiom_app.services.local_model_registry import LocalModelRegistryService
-from axiom_app.services.runtime_resolution import resolve_runtime_settings
-from axiom_app.services.skill_repository import SkillRepository, parse_skill_file
+import metis_app.models.app_model as app_model_module
+from metis_app.models.app_model import AppModel
+from metis_app.models.parity_types import SkillDefinition, SkillSessionState
+from metis_app.services.local_model_registry import LocalModelRegistryService
+from metis_app.services.runtime_resolution import resolve_runtime_settings
+from metis_app.services.skill_repository import SkillRepository, parse_skill_file
 
 
 def _write_skill(

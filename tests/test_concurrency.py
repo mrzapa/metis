@@ -24,7 +24,7 @@ class TestSettingsAtomicWrite:
 
     def test_atomic_write_creates_valid_file(self, tmp_path: pathlib.Path) -> None:
         """Verify atomic write produces a valid, readable file."""
-        from axiom_app import settings_store
+        from metis_app import settings_store
 
         settings_file = tmp_path / "settings.json"
 
@@ -47,7 +47,7 @@ class TestSettingsAtomicWrite:
 
     def test_atomic_write_overwrites_existing(self, tmp_path: pathlib.Path) -> None:
         """Verify atomic write correctly overwrites existing file."""
-        from axiom_app import settings_store
+        from metis_app import settings_store
 
         settings_file = tmp_path / "settings.json"
         settings_file.write_text('{"old": "value"}')
@@ -63,7 +63,7 @@ class TestSettingsAtomicWrite:
     )
     def test_concurrent_writes_produce_valid_json(self, tmp_path: pathlib.Path) -> None:
         """Multiple processes writing concurrently should not corrupt the file."""
-        from axiom_app import settings_store
+        from metis_app import settings_store
 
         settings_file = tmp_path / "settings.json"
         settings_file.write_text("{}")
@@ -95,7 +95,7 @@ class TestSessionRepositoryConcurrency:
 
     def test_wal_mode_enabled(self, tmp_path: pathlib.Path) -> None:
         """Verify WAL mode is enabled for new connections."""
-        from axiom_app.services.session_repository import SessionRepository
+        from metis_app.services.session_repository import SessionRepository
 
         repo = SessionRepository(db_path=tmp_path / "test.db")
         repo.init_db()
@@ -107,7 +107,7 @@ class TestSessionRepositoryConcurrency:
 
     def test_concurrent_append_uses_transaction(self, tmp_path: pathlib.Path) -> None:
         """Verify append_message uses explicit transactions."""
-        from axiom_app.services.session_repository import SessionRepository
+        from metis_app.services.session_repository import SessionRepository
 
         repo = SessionRepository(db_path=tmp_path / "test.db")
         repo.init_db()
@@ -143,7 +143,7 @@ class TestIndexBundleAtomicStaging:
 
     def test_atomic_dir_stage_creates_directory(self, tmp_path: pathlib.Path) -> None:
         """Verify atomic staging creates a complete directory."""
-        from axiom_app.services import index_service
+        from metis_app.services import index_service
 
         target = tmp_path / "index"
         stage_files = {
@@ -161,7 +161,7 @@ class TestIndexBundleAtomicStaging:
 
     def test_atomic_dir_stage_atomic_replacement(self, tmp_path: pathlib.Path) -> None:
         """Verify atomic staging atomically replaces existing directory."""
-        from axiom_app.services import index_service
+        from metis_app.services import index_service
 
         target = tmp_path / "index"
         target.mkdir()
@@ -185,7 +185,7 @@ class TestSingleInstanceGuard:
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Verify lock file is created when acquiring."""
-        import axiom_app.api.__main__ as api_main
+        import metis_app.api.__main__ as api_main
 
         monkeypatch.setattr(api_main, "_LOCK_FILE", tmp_path / ".lock")
 
@@ -197,7 +197,7 @@ class TestSingleInstanceGuard:
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Verify second instance is rejected when lock is held."""
-        import axiom_app.api.__main__ as api_main
+        import metis_app.api.__main__ as api_main
 
         lock_file = tmp_path / ".lock"
         monkeypatch.setattr(api_main, "_LOCK_FILE", lock_file)
@@ -211,7 +211,7 @@ class TestSingleInstanceGuard:
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Verify lock is released on exit."""
-        import axiom_app.api.__main__ as api_main
+        import metis_app.api.__main__ as api_main
 
         lock_file = tmp_path / ".lock"
         monkeypatch.setattr(api_main, "_LOCK_FILE", lock_file)

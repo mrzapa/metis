@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import uuid
 
-import axiom_app.engine.indexing as engine_indexing
-from axiom_app.engine.querying import (
+import metis_app.engine.indexing as engine_indexing
+from metis_app.engine.querying import (
     DirectQueryRequest,
     KnowledgeSearchRequest,
     RagQueryRequest,
@@ -197,7 +197,7 @@ def test_query_rag_no_answer_fallback_returns_message_without_synthesis(
         def invoke(self, messages):
             raise AssertionError("query_rag should skip synthesis on no_answer fallback")
 
-    monkeypatch.setattr("axiom_app.engine.querying.create_llm", lambda settings: _ExplodingLLM())
+    monkeypatch.setattr("metis_app.engine.querying.create_llm", lambda settings: _ExplodingLLM())
 
     result = query_rag(
         RagQueryRequest(

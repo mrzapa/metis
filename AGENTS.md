@@ -1,8 +1,8 @@
-# Axiom Agents
+# METIS Agents
 
-Axiom is a local-first AI workspace that runs entirely on your machine.  The
-primary interface is the **Tauri + Next.js web application** (`apps/axiom-web/`)
-backed by a **FastAPI** service (`axiom_app/api/`).
+METIS is a local-first AI workspace that runs entirely on your machine.  The
+primary interface is the **Tauri + Next.js web application** (`apps/metis-web/`)
+backed by a **FastAPI** service (`metis_app/api/`).
 
 ---
 
@@ -23,14 +23,14 @@ python main.py --cli query --file my_docs/ --question "What are the key findings
 
 ```
 main.py                  Entry point — starts FastAPI + opens browser
-axiom_app/
+metis_app/
   api/                   FastAPI routes (v1/*)
   engine/                Indexing + retrieval core (provider-agnostic)
   models/                BrainGraph, AppModel, session types
   services/              Session repository, index service, pipeline
   utils/                 Knowledge graph, LLM/embedding providers
 
-apps/axiom-web/          Tauri + Next.js frontend
+apps/metis-web/          Tauri + Next.js frontend
   app/
     chat/                Chat interface (RAG Q&A)
     library/             Document & index library
@@ -58,7 +58,7 @@ apps/axiom-web/          Tauri + Next.js frontend
 
 ### Recursive agent (Research mode)
 
-When `agentic_mode` is enabled, Axiom iterates over its own output to refine
+When `agentic_mode` is enabled, METIS iterates over its own output to refine
 answers.  The loop:
 
 1. Initial retrieval + synthesis
@@ -120,5 +120,5 @@ Key endpoints:
 
 ## Security
 
-When `AXIOM_API_TOKEN` is set, all protected endpoints require a Bearer token.
+When `METIS_API_TOKEN` is set, all protected endpoints require a Bearer token.
 In the default local-only mode no token is required.

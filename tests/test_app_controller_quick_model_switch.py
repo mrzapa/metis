@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from axiom_app.controllers.app_controller import AppController
-from axiom_app.models.app_model import AppModel
-from axiom_app.services.session_repository import SessionRepository
+from metis_app.controllers.app_controller import AppController
+from metis_app.models.app_model import AppModel
+from metis_app.services.session_repository import SessionRepository
 
 
 class _FakeButton:

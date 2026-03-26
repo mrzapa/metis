@@ -5,15 +5,15 @@
 
 ## Context
 
-Axiom currently runs as a local-first PySide6/Qt MVC desktop app with a shared CLI and shared backend services. The repo roadmap already points to a possible next step: add a local API layer, put a meta-framework web UI on top of it, and package both inside a desktop container.
+METIS currently runs as a local-first PySide6/Qt MVC desktop app with a shared CLI and shared backend services. The repo roadmap already points to a possible next step: add a local API layer, put a meta-framework web UI on top of it, and package both inside a desktop container.
 
 This draft treats that direction as additive. The target is to complement the current PySide6 UI and CLI during migration, not to assume an immediate replacement.
 
 ## Proposed Direction
 
-Introduce a local API layer that reuses the existing backend capabilities in `axiom_app/services`, then build a meta-framework web UI against that API and distribute the combined experience inside a desktop container.
+Introduce a local API layer that reuses the existing backend capabilities in `metis_app/services`, then build a meta-framework web UI against that API and distribute the combined experience inside a desktop container.
 
-The near-term goal is to create a migration seam between the current PySide6 MVC shell and a future web-based shell without changing Axiom's local-first product shape.
+The near-term goal is to create a migration seam between the current PySide6 MVC shell and a future web-based shell without changing METIS's local-first product shape.
 
 ## Constraints
 

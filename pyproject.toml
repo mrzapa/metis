@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "axiom-app"
+name = "metis-app"
 version = "0.1.0"
 description = "METIS AI — Local-first frontier AI workspace with RAG, knowledge graphs, and an always-on companion"
 readme = "README.md"
@@ -80,18 +80,18 @@ all = [
 ]
 
 [project.scripts]
-axiom-parity-audit = "axiom_app.audit:main"
-axiom-api = "axiom_app.api.__main__:main"
+metis-parity-audit = "metis_app.audit:main"
+metis-api = "metis_app.api.__main__:main"
 
 [tool.setuptools]
 license-files = ["LICENSE"]
 
 [tool.setuptools.packages.find]
-# Only package axiom_app; exclude the legacy monolith and test tree.
-include = ["axiom_app*"]
+# Only package metis_app; exclude the legacy monolith and test tree.
+include = ["metis_app*"]
 
 [tool.setuptools.package-data]
-"axiom_app.assets" = ["logo.png", "llmfit_gguf_catalog.json"]
+"metis_app.assets" = ["logo.png", "llmfit_gguf_catalog.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

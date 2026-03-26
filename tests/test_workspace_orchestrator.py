@@ -13,11 +13,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from axiom_app.engine.querying import DirectQueryRequest, RagQueryRequest
-from axiom_app.models.brain_graph import BrainGraph
-from axiom_app.models.parity_types import SkillDefinition
-from axiom_app.models.session_types import SessionDetail, SessionSummary
-from axiom_app.services.workspace_orchestrator import WorkspaceOrchestrator
+from metis_app.engine.querying import DirectQueryRequest, RagQueryRequest
+from metis_app.models.brain_graph import BrainGraph
+from metis_app.models.parity_types import SkillDefinition
+from metis_app.models.session_types import SessionDetail, SessionSummary
+from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ class TestIngestDocuments:
             return result
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.WorkspaceOrchestrator.build_index",
+            "metis_app.services.workspace_orchestrator.WorkspaceOrchestrator.build_index",
             _fake_build_index,
         )
 
@@ -131,7 +131,7 @@ class TestIngestDocuments:
             return MagicMock()
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.build_index",
+            "metis_app.services.workspace_orchestrator.build_index",
             _fake_build_index,
         )
 
@@ -157,11 +157,11 @@ class TestBuildIndex:
             return result
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.build_index",
+            "metis_app.services.workspace_orchestrator.build_index",
             _fake_build_index,
         )
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            "metis_app.services.workspace_orchestrator._settings_store.load_settings",
             lambda: {},
         )
 
@@ -198,7 +198,7 @@ class TestBuildIndex:
             return MagicMock()
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.build_index",
+            "metis_app.services.workspace_orchestrator.build_index",
             _fake_build_index,
         )
 
@@ -357,7 +357,7 @@ class TestListIndexes:
             return fake_indexes
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.list_indexes",
+            "metis_app.services.workspace_orchestrator.list_indexes",
             _fake_list,
         )
 
@@ -375,7 +375,7 @@ class TestGetIndex:
             return None
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.get_index",
+            "metis_app.services.workspace_orchestrator.get_index",
             _fake_get,
         )
 
@@ -404,15 +404,15 @@ class TestRunRagQuery:
             return fake_result
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.query_rag",
+            "metis_app.services.workspace_orchestrator.query_rag",
             _fake_query_rag,
         )
 
-        from axiom_app.engine.querying import RagQueryRequest
+        from metis_app.engine.querying import RagQueryRequest
 
         req = RagQueryRequest(
             manifest_path="/tmp/manifest.json",
-            question="What is Axiom?",
+            question="What is METIS?",
             settings={},
         )
         orch = _make_orchestrator()
@@ -474,7 +474,7 @@ class TestRunRagQuery:
         orch._trace_store.append_event = trace_append  # type: ignore[method-assign]
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            "metis_app.services.workspace_orchestrator._settings_store.load_settings",
             lambda: {
                 "selected_mode": "Q&A",
                 "llm_provider": "mock",
@@ -488,13 +488,13 @@ class TestRunRagQuery:
             },
         )
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.list_indexes",
+            "metis_app.services.workspace_orchestrator.list_indexes",
             lambda index_dir=None: [
                 {"manifest_path": "/tmp/manifest.json", "index_id": "idx-1"}
             ],
         )
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.query_rag",
+            "metis_app.services.workspace_orchestrator.query_rag",
             lambda req: fake_result,
         )
 
@@ -514,7 +514,7 @@ class TestRunRagQuery:
         }
         req = RagQueryRequest(
             manifest_path="/tmp/manifest.json",
-            question="What is Axiom?",
+            question="What is METIS?",
             settings={"selected_mode": "Q&A"},
         )
         result = orch.run_rag_query(req, session_id="s1")
@@ -522,7 +522,7 @@ class TestRunRagQuery:
         assert result is fake_result
         session_repo.upsert_session.assert_called_once()
         upsert_kwargs = session_repo.upsert_session.call_args.kwargs
-        assert upsert_kwargs["title"] == "What is Axiom?"
+        assert upsert_kwargs["title"] == "What is METIS?"
         assert upsert_kwargs["index_id"] == "idx-1"
         assert upsert_kwargs["llm_provider"] == "mock"
         assert upsert_kwargs["llm_model"] == "model-x"
@@ -531,7 +531,7 @@ class TestRunRagQuery:
         assert session_repo.append_message.call_args_list[0].args == ("s1",)
         assert session_repo.append_message.call_args_list[0].kwargs == {
             "role": "user",
-            "content": "What is Axiom?",
+            "content": "What is METIS?",
             "run_id": "",
             "sources": [],
         }
@@ -565,11 +565,11 @@ class TestRunDirectQuery:
             return fake_result
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.query_direct",
+            "metis_app.services.workspace_orchestrator.query_direct",
             _fake_query_direct,
         )
 
-        from axiom_app.engine.querying import DirectQueryRequest
+        from metis_app.engine.querying import DirectQueryRequest
 
         req = DirectQueryRequest(prompt="Hello", settings={})
         orch = _make_orchestrator()
@@ -599,7 +599,7 @@ class TestRunDirectQuery:
         orch._trace_store.append_event = trace_append  # type: ignore[method-assign]
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            "metis_app.services.workspace_orchestrator._settings_store.load_settings",
             lambda: {
                 "selected_mode": "Tutor",
                 "llm_provider": "mock",
@@ -613,7 +613,7 @@ class TestRunDirectQuery:
             },
         )
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.query_direct",
+            "metis_app.services.workspace_orchestrator.query_direct",
             lambda req: fake_result,
         )
 
@@ -656,7 +656,7 @@ class TestRunKnowledgeSearch:
     def test_session_id_persists_search_summary_and_sources(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from axiom_app.engine.querying import KnowledgeSearchRequest
+        from metis_app.engine.querying import KnowledgeSearchRequest
 
         fake_result = MagicMock(
             run_id="run-search-1",
@@ -677,7 +677,7 @@ class TestRunKnowledgeSearch:
         orch._trace_store.append_event = trace_append  # type: ignore[method-assign]
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            "metis_app.services.workspace_orchestrator._settings_store.load_settings",
             lambda: {
                 "selected_mode": "Knowledge Search",
                 "llm_provider": "mock",
@@ -685,7 +685,7 @@ class TestRunKnowledgeSearch:
             },
         )
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.knowledge_search",
+            "metis_app.services.workspace_orchestrator.knowledge_search",
             lambda req: fake_result,
         )
 
@@ -705,7 +705,7 @@ class TestRunKnowledgeSearch:
     def test_records_retrieval_plan_stages_before_completion(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from axiom_app.engine.querying import KnowledgeSearchRequest
+        from metis_app.engine.querying import KnowledgeSearchRequest
 
         fake_result = MagicMock(
             run_id="run-search-2",
@@ -755,11 +755,11 @@ class TestRunKnowledgeSearch:
         orch._trace_store.append_event = trace_append  # type: ignore[method-assign]
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            "metis_app.services.workspace_orchestrator._settings_store.load_settings",
             lambda: {"selected_mode": "Knowledge Search", "llm_provider": "mock"},
         )
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.knowledge_search",
+            "metis_app.services.workspace_orchestrator.knowledge_search",
             lambda req: fake_result,
         )
 
@@ -791,11 +791,11 @@ class TestStreamRagQuery:
             return iter(events)
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.stream_rag_answer",
+            "metis_app.services.workspace_orchestrator.stream_rag_answer",
             _fake_stream,
         )
 
-        from axiom_app.engine.querying import RagQueryRequest
+        from metis_app.engine.querying import RagQueryRequest
 
         req = RagQueryRequest(manifest_path="/tmp/m.json", question="?", settings={})
         result = list(_make_orchestrator().stream_rag_query(req))
@@ -815,11 +815,11 @@ class TestStreamRagQuery:
         orch._trace_store.append_event = trace_append  # type: ignore[method-assign]
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            "metis_app.services.workspace_orchestrator._settings_store.load_settings",
             lambda: {"selected_mode": "Q&A", "llm_provider": "mock"},
         )
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.stream_rag_answer",
+            "metis_app.services.workspace_orchestrator.stream_rag_answer",
             lambda req, cancel_token=None: iter(
                 [
                     {"type": "retrieval_complete", "run_id": "run-3", "sources": [{"sid": "S1", "source": "doc", "snippet": "evidence"}]},
@@ -853,7 +853,7 @@ class TestStreamRagQuery:
     def test_retrieval_augmented_updates_pending_sources_for_final_message(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from axiom_app.engine.querying import RagQueryRequest
+        from metis_app.engine.querying import RagQueryRequest
 
         session_repo = MagicMock()
         session_repo.get_session.return_value = None
@@ -866,11 +866,11 @@ class TestStreamRagQuery:
         orch._trace_store.append_event = trace_append  # type: ignore[method-assign]
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            "metis_app.services.workspace_orchestrator._settings_store.load_settings",
             lambda: {"selected_mode": "Research", "llm_provider": "mock"},
         )
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.stream_rag_answer",
+            "metis_app.services.workspace_orchestrator.stream_rag_answer",
             lambda req, cancel_token=None: iter(
                 [
                     {
@@ -996,7 +996,7 @@ class TestReflectionHooks:
         orch = _make_orchestrator(assistant_service=assistant_service)
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            "metis_app.services.workspace_orchestrator._settings_store.load_settings",
             lambda: {"selected_mode": "Tutor", "llm_provider": "mock"},
         )
 
@@ -1034,7 +1034,7 @@ class TestGetWorkspaceGraph:
         fake_indexes = [{"index_id": "idx-1", "backend": "json"}]
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.list_indexes",
+            "metis_app.services.workspace_orchestrator.list_indexes",
             lambda index_dir=None: fake_indexes,
         )
 
@@ -1059,7 +1059,7 @@ class TestGetWorkspaceGraph:
         assistant_service = MagicMock()
         assistant_service.get_snapshot.return_value = {"identity": {"companion_enabled": False}}
 
-        with patch("axiom_app.services.workspace_orchestrator.list_indexes", return_value=[]):
+        with patch("metis_app.services.workspace_orchestrator.list_indexes", return_value=[]):
             orch = _make_orchestrator(
                 session_repo=session_repo,
                 assistant_service=assistant_service,
@@ -1221,7 +1221,7 @@ class TestSettings:
     def test_load_settings_delegates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fake = {"llm_provider": "mock"}
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator._settings_store.load_settings",
+            "metis_app.services.workspace_orchestrator._settings_store.load_settings",
             lambda: fake,
         )
         assert _make_orchestrator().load_settings() == fake
@@ -1234,7 +1234,7 @@ class TestSettings:
             return merged
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator._settings_store.save_settings",
+            "metis_app.services.workspace_orchestrator._settings_store.save_settings",
             _fake_save,
         )
         result = _make_orchestrator().save_settings({"llm_provider": "openai"})
@@ -1245,7 +1245,7 @@ class TestSettings:
             return {k: v for k, v in settings.items() if not k.startswith("api_key_")}
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator._settings_store.safe_settings",
+            "metis_app.services.workspace_orchestrator._settings_store.safe_settings",
             _fake_safe,
         )
         payload = {"llm_provider": "openai", "api_key_openai": "sk-secret"}
@@ -1267,7 +1267,7 @@ class TestApiBrainGraphUsesOrchestrator:
 
         from fastapi.testclient import TestClient
 
-        api_module = import_module("axiom_app.api.app")
+        api_module = import_module("metis_app.api.app")
 
         # Patch out the orchestrator's graph builder
         fake_graph = BrainGraph()
@@ -1276,7 +1276,7 @@ class TestApiBrainGraphUsesOrchestrator:
             return fake_graph
 
         monkeypatch.setattr(
-            "axiom_app.services.workspace_orchestrator.WorkspaceOrchestrator.get_workspace_graph",
+            "metis_app.services.workspace_orchestrator.WorkspaceOrchestrator.get_workspace_graph",
             _fake_graph,
         )
 

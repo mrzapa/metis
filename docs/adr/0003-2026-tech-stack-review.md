@@ -18,13 +18,13 @@ We audited the codebase against each recommendation. All five are now complete.
 
 ### 1. Keep Python + FastAPI; consider Reflex or Litestar — Complete
 
-- FastAPI is the production backend (`axiom_app/api/app.py`) with routers for sessions, settings, logs, RAG queries, and SSE streaming.
-- A Reflex proof-of-concept exists at `apps/axiom-reflex/`.
+- FastAPI is the production backend (`metis_app/api/app.py`) with routers for sessions, settings, logs, RAG queries, and SSE streaming.
+- A Reflex proof-of-concept exists at `apps/metis-reflex/`.
 - Litestar/Falcon were not adopted (no performance need identified).
 
 ### 2. Adopt a meta-framework instead of bare Vite — Complete
 
-- Next.js 16.1.6 is the primary frontend (`apps/axiom-web/`).
+- Next.js 16.1.6 is the primary frontend (`apps/metis-web/`).
 - React 19.2.3 with TypeScript 5.
 - Static export (`output: 'export'`) configured for Tauri desktop bundling.
 
@@ -34,7 +34,7 @@ We audited the codebase against each recommendation. All five are now complete.
 - Design tokens extracted to a dedicated `app/tokens.css` (CSS variables, OKLch color space, light + dark) and `app/tokens.json` (W3C DTCG format for tooling and cross-project synchronization).
 - Registry 2.0 configured in `components.json` with upstream shadcn registry URL. Smart versioning enabled via `npm run ui:diff` (`npx shadcn diff`).
 - Local component manifest at `registry.json` catalogs all 11 UI components with their dependencies and base shadcn version.
-- Cross-framework Web Component export deferred by design: axiom-web (React) is the only production frontend; axiom-web-lite (Astro) consumes React natively; axiom-reflex (Python) generates its own UI. The shared `tokens.css`/`tokens.json` files provide the real cross-project shared layer.
+- Cross-framework Web Component export deferred by design: metis-web (React) is the only production frontend; metis-web-lite (Astro) consumes React natively; metis-reflex (Python) generates its own UI. The shared `tokens.css`/`tokens.json` files provide the real cross-project shared layer.
 
 ### 4. Build for streaming and agentic AI interactions — Complete
 
@@ -43,11 +43,11 @@ We audited the codebase against each recommendation. All five are now complete.
   - `chat-panel.tsx` — streaming status, agentic mode toggle.
   - `use-chat-transcript.ts` — token buffering with 50ms debounced rendering.
 - Backend SSE streaming (`engine/streaming.py`) with structured events and replay support (`services/stream_replay.py`).
-- Astro present minimally at `apps/axiom-web-lite/`; Qwik not adopted (both optional).
+- Astro present minimally at `apps/metis-web-lite/`; Qwik not adopted (both optional).
 
 ### 5. Retain Tauri — Complete
 
-- Tauri v2 is the canonical desktop shell (`apps/axiom-desktop/`).
+- Tauri v2 is the canonical desktop shell (`apps/metis-desktop/`).
 - Electron is not used.
 - PySide6/Qt is no longer part of the product surface (historical only).
 

@@ -7,7 +7,7 @@ the deterministic SHA-256-based vectors.
 from __future__ import annotations
 
 
-from axiom_app.utils.mock_embeddings import MockEmbeddings
+from metis_app.utils.mock_embeddings import MockEmbeddings
 
 # ---------------------------------------------------------------------------
 # Dimension

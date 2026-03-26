@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Axiom — local API dev server
+# METIS — local API dev server
 #
 # Usage (from repo root):
 #   bash scripts/run_api_dev.sh
@@ -9,11 +9,11 @@
 # hot-reload on http://127.0.0.1:8000.
 #
 # Override the Python binary:
-#   AXIOM_PYTHON=python3.12 bash scripts/run_api_dev.sh
+#   METIS_PYTHON=python3.12 bash scripts/run_api_dev.sh
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-PYTHON="${AXIOM_PYTHON:-python3}"
+PYTHON="${METIS_PYTHON:-python3}"
 VENV_DIR=".venv"
 
 # ── Sanity check ──────────────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ printf '[run_api_dev] Installing .[dev,api]...\n'
 
 # ── Start dev server ──────────────────────────────────────────────────────────
 printf '[run_api_dev] Starting uvicorn at http://127.0.0.1:8000 (Ctrl-C to stop)\n'
-exec "$VENV_DIR/bin/python" -m uvicorn axiom_app.api.app:app \
+exec "$VENV_DIR/bin/python" -m uvicorn metis_app.api.app:app \
     --reload \
     --host 127.0.0.1 \
     --port 8000

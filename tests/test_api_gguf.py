@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from axiom_app.api import gguf as gguf_module
-from axiom_app.api.app import create_app
+from metis_app.api import gguf as gguf_module
+from metis_app.api.app import create_app
 
 
 @pytest.fixture
@@ -144,7 +144,7 @@ def test_installed_returns_empty_when_no_models(client, mock_registry_operations
 def test_installed_returns_registered_models(
     client, mock_registry_operations, mock_registry
 ):
-    from axiom_app.models.parity_types import LocalModelEntry
+    from metis_app.models.parity_types import LocalModelEntry
 
     mock_entry = MagicMock(spec=LocalModelEntry)
     mock_entry.entry_id = "test-id-123"

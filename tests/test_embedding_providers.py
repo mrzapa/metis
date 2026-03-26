@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from axiom_app.utils.embedding_providers import (
+from metis_app.utils.embedding_providers import (
     _resolve_embedding_model,
     create_embeddings,
 )
@@ -52,13 +52,13 @@ class TestResolveEmbeddingModel:
 
 class TestCreateEmbeddingsMock:
     def test_mock_provider(self):
-        from axiom_app.utils.mock_embeddings import MockEmbeddings
+        from metis_app.utils.mock_embeddings import MockEmbeddings
 
         emb = create_embeddings({"embedding_provider": "mock"})
         assert isinstance(emb, MockEmbeddings)
 
     def test_empty_provider_defaults_to_mock(self):
-        from axiom_app.utils.mock_embeddings import MockEmbeddings
+        from metis_app.utils.mock_embeddings import MockEmbeddings
 
         emb = create_embeddings({})
         assert isinstance(emb, MockEmbeddings)

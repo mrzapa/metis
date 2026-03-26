@@ -1,4 +1,4 @@
-name: Release Axiom Installer
+name: Release METIS Installer
 
 on:
   push:
@@ -24,11 +24,11 @@ jobs:
 
       - name: Build web UI static export
         run: |
-          cd apps/axiom-web
+          cd apps/metis-web
           npm install --silent
           npm run build
           # Package the static export so end users can skip the Node.js requirement
-          tar -czf ../../axiom-web-dist.tar.gz -C out .
+          tar -czf ../../metis-web-dist.tar.gz -C out .
         continue-on-error: true
 
       - name: Prepare release artifacts
@@ -36,33 +36,33 @@ jobs:
           mkdir -p release-artifacts
 
           # Copy installer scripts
-          cp scripts/install_axiom.sh  release-artifacts/install_axiom.sh
-          cp scripts/install_axiom.ps1 release-artifacts/install_axiom.ps1
-          chmod +x release-artifacts/install_axiom.sh
+          cp scripts/install_metis.sh  release-artifacts/install_metis.sh
+          cp scripts/install_metis.ps1 release-artifacts/install_metis.ps1
+          chmod +x release-artifacts/install_metis.sh
 
           # Include pre-built web UI if the build succeeded
-          if [ -f axiom-web-dist.tar.gz ]; then
-            cp axiom-web-dist.tar.gz release-artifacts/axiom-web-dist.tar.gz
+          if [ -f metis-web-dist.tar.gz ]; then
+            cp metis-web-dist.tar.gz release-artifacts/metis-web-dist.tar.gz
           fi
 
           # Create a one-liner bootstrap wrapper for curl|bash convenience
           cat > release-artifacts/install.sh <<'BOOTSTRAP'
           #!/usr/bin/env bash
-          # Axiom quick-install bootstrap
-          # Usage: curl -fsSL https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_axiom.sh | bash
+          # METIS quick-install bootstrap
+          # Usage: curl -fsSL https://raw.githubusercontent.com/mrzapa/metis/main/scripts/install_metis.sh | bash
           set -euo pipefail
           TMPDIR=$(mktemp -d)
           trap 'rm -rf "$TMPDIR"' EXIT
-          curl -fsSL https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_axiom.sh -o "$TMPDIR/install_axiom.sh"
-          chmod +x "$TMPDIR/install_axiom.sh"
-          exec "$TMPDIR/install_axiom.sh" "$@"
+          curl -fsSL https://raw.githubusercontent.com/mrzapa/metis/main/scripts/install_metis.sh -o "$TMPDIR/install_metis.sh"
+          chmod +x "$TMPDIR/install_metis.sh"
+          exec "$TMPDIR/install_metis.sh" "$@"
           BOOTSTRAP
           chmod +x release-artifacts/install.sh
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: axiom-installer
+          name: metis-installer
           path: release-artifacts/
 
       - name: Attach installers to GitHub release
@@ -70,23 +70,23 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-artifacts/install_axiom.sh
-            release-artifacts/install_axiom.ps1
+            release-artifacts/install_metis.sh
+            release-artifacts/install_metis.ps1
             release-artifacts/install.sh
-            release-artifacts/axiom-web-dist.tar.gz
+            release-artifacts/metis-web-dist.tar.gz
           body: |
-            ## Axiom Installer Release
+            ## METIS Installer Release
 
             ### Quick Install
 
             **macOS / Linux:**
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_axiom.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/mrzapa/metis/main/scripts/install_metis.sh | bash
             ```
 
             **Windows (PowerShell):**
             ```powershell
-            irm https://raw.githubusercontent.com/mrzapa/axiom/main/scripts/install_axiom.ps1 | iex
+            irm https://raw.githubusercontent.com/mrzapa/metis/main/scripts/install_metis.ps1 | iex
             ```
 
             ### Manual Install
@@ -97,7 +97,7 @@ jobs:
             |------|-------------|
             | `--install` | Fresh install (default) |
             | `--reinstall` | Remove venv and reinstall from scratch |
-            | `--uninstall` | Remove Axiom completely |
+            | `--uninstall` | Remove METIS completely |
             | `--update` | Pull latest code and update deps |
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -121,38 +121,38 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller
 
-      - name: Build Axiom MVC executable
+      - name: Build METIS MVC executable
         shell: bash
         run: |
           pyinstaller \
             --noconfirm \
             --clean \
-            --name Axiom \
+            --name METIS \
             --windowed \
             --onefile \
             --icon logo.png \
-            --add-data "axiom_app/default_settings.json;axiom_app" \
-            --collect-submodules axiom_app \
-            release/axiom_mvc_entry.py
+            --add-data "metis_app/default_settings.json;metis_app" \
+            --collect-submodules metis_app \
+            release/metis_mvc_entry.py
 
       - name: Create release archive
         shell: bash
         run: |
           mkdir -p release-artifacts
-          cp dist/Axiom.exe release-artifacts/Axiom.exe
+          cp dist/METIS.exe release-artifacts/METIS.exe
           cd release-artifacts
-          7z a Axiom-windows-x64.zip Axiom.exe
+          7z a METIS-windows-x64.zip METIS.exe
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Axiom-windows-x64
-          path: release-artifacts/Axiom-windows-x64.zip
+          name: METIS-windows-x64
+          path: release-artifacts/METIS-windows-x64.zip
 
       - name: Attach EXE to GitHub release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: release-artifacts/Axiom-windows-x64.zip
+          files: release-artifacts/METIS-windows-x64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

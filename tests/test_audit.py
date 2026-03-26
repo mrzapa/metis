@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from axiom_app import audit
+from metis_app import audit
 
 
 def test_build_audit_command_defaults_to_fast_targets() -> None:
@@ -17,7 +17,7 @@ def test_build_audit_command_adds_live_targets_when_required() -> None:
     env = audit.build_audit_env(require_live_backends=True)
 
     assert "tests/test_live_weaviate_proof.py" in command
-    assert env["AXIOM_REQUIRE_LIVE_BACKENDS"] == "1"
+    assert env["METIS_REQUIRE_LIVE_BACKENDS"] == "1"
 
 
 def test_live_weaviate_ci_job_installs_required_extra() -> None:
