@@ -19,12 +19,6 @@ export interface BrainSceneNode {
   x?: number;
   y?: number;
   z?: number;
-  /** Fixed x position – prevents force simulation from moving the node. */
-  fx?: number;
-  /** Fixed y position – prevents force simulation from moving the node. */
-  fy?: number;
-  /** Fixed z position – prevents force simulation from moving the node. */
-  fz?: number;
 }
 
 export interface BrainSceneLink {
@@ -51,29 +45,6 @@ export function createActiveScopeSet(activeScopes: BrainScope[] = ALL_BRAIN_SCOP
   return new Set<BrainScope>(activeScopes.length > 0 ? activeScopes : ALL_BRAIN_SCOPES);
 }
 
-/**
- * Map node types to anatomically-inspired brain regions.
- *
- * Each region is defined by a centre (x,y,z) and a spread radius.  Nodes of
- * a given type are scattered within their designated region so that the
- * force-directed layout seeds them in a meaningful location:
- *
- *  - category  → Prefrontal cortex (front-top): executive/organisational
- *  - index     → Temporal lobes (sides): information storage & retrieval
- *  - session   → Hippocampus (center-lower): recent memory / conversation
- *  - assistant → Thalamus (center): core identity relay
- *  - memory    → Parietal lobe (upper-back): long-term memory
- *  - playbook  → Cerebellum (lower-back): procedural / learned routines
- */
-const BRAIN_REGION: Record<BrainNode["node_type"], { cx: number; cy: number; cz: number; spread: number }> = {
-  category:  { cx:  0,   cy:  35,  cz:  40,  spread: 25 },
-  index:     { cx:  0,   cy: -5,   cz:  0,   spread: 30 },
-  session:   { cx:  0,   cy: -15,  cz:  10,  spread: 20 },
-  assistant: { cx:  0,   cy:  5,   cz:  0,   spread: 15 },
-  memory:    { cx:  0,   cy:  25,  cz: -30,  spread: 25 },
-  playbook:  { cx:  0,   cy: -35,  cz: -25,  spread: 20 },
-};
-
 /** Simple seeded deterministic hash for consistent per-node jitter. */
 function simpleHash(str: string): number {
   let h = 0;
@@ -83,26 +54,23 @@ function simpleHash(str: string): number {
   return h;
 }
 
-/** Map a node to an initial position inside its brain-region. */
-function brainRegionPosition(
-  node: BrainNode,
-  typeIndex: number,
-): { x: number; y: number; z: number } {
-  const region = BRAIN_REGION[node.node_type] ?? BRAIN_REGION.index;
+/**
+ * Deterministic neutral seed for force-layout startup.
+ *
+ * This intentionally avoids anatomy-inspired regions so final topology is
+ * driven by links and force simulation rather than fixed semantic buckets.
+ */
+function initialNodePosition(node: BrainNode, index: number): { x: number; y: number; z: number } {
   const h = simpleHash(node.node_id);
+  const azimuth = ((h & 0xffff) / 0xffff) * Math.PI * 2;
+  const elevation = ((((h >>> 8) & 0xffff) / 0xffff) - 0.5) * Math.PI;
+  const radial = 28 + ((((h >>> 16) & 0xffff) / 0xffff) * 34) + (index % 5) * 1.2;
 
-  // Deterministic but varied offset based on node id and type index
-  const angle = ((h & 0xffff) / 0xffff) * Math.PI * 2;
-  const r = region.spread * (0.3 + 0.7 * (((h >>> 16) & 0xffff) / 0xffff));
-  const verticalJitter = ((typeIndex * 7 + (h & 0xff)) % 17 - 8) * 1.5;
-
-  // For indexes, alternate left/right hemisphere placement
-  const sideSign = node.node_type === "index" ? (typeIndex % 2 === 0 ? 1 : -1) : 1;
-
+  const cosEl = Math.cos(elevation);
   return {
-    x: region.cx + Math.cos(angle) * r * sideSign,
-    y: region.cy + verticalJitter,
-    z: region.cz + Math.sin(angle) * r,
+    x: Math.cos(azimuth) * cosEl * radial,
+    y: Math.sin(elevation) * radial * 0.7,
+    z: Math.sin(azimuth) * cosEl * radial,
   };
 }
 
@@ -116,9 +84,6 @@ export function buildBrainSceneGraph(
   const visibleNodeIds = new Set<string>();
   const visibleNodeById = new Map<string, BrainNode>();
 
-  // Track per-type index for position variation
-  const typeCounters: Record<string, number> = {};
-
   for (const node of data.nodes) {
     const scope = scopeFromMetadata(node.metadata);
     if (!activeScopeSet.has(scope)) continue;
@@ -127,10 +92,7 @@ export function buildBrainSceneGraph(
     visibleNodeIds.add(node.node_id);
     visibleNodeById.set(node.node_id, node);
 
-    const typeIdx = typeCounters[node.node_type] ?? 0;
-    typeCounters[node.node_type] = typeIdx + 1;
-
-    const pos = brainRegionPosition(node, typeIdx);
+    const pos = initialNodePosition(node, nodes.length);
 
     nodes.push({
       id: node.node_id,
@@ -141,9 +103,6 @@ export function buildBrainSceneGraph(
       x: pos.x,
       y: pos.y,
       z: pos.z,
-      fx: pos.x,
-      fy: pos.y,
-      fz: pos.z,
     });
   }
 
