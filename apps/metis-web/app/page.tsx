@@ -494,7 +494,7 @@ export default function Home() {
 
     function onCanvasPress(e: PointerEvent) {
       if (addModeRef.current) {
-        const rect = canvas.getBoundingClientRect();
+        const rect = canvas!.getBoundingClientRect();
         const targetX = (e.clientX - rect.left) / rect.width;
         const targetY = (e.clientY - rect.top) / rect.height;
         const [nx, ny] = buildOutwardPlacement(targetX, targetY, userStars.length);
@@ -508,7 +508,7 @@ export default function Home() {
         });
         return;
       }
-      const rect = canvas.getBoundingClientRect();
+      const rect = canvas!.getBoundingClientRect();
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
       let selectedId: string | null = null;
