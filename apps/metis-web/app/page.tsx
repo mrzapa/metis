@@ -1009,18 +1009,9 @@ export default function Home() {
 
       <div className="metis-hero-overlay">
         <div className="metis-hero-shell">
-          <div className="metis-hero-kicker">METIS AI</div>
           <h1 className="metis-hero-headline">Discover<br />everything.</h1>
-          <p className="metis-hero-copy">
-            Build a private sky of sources, pull new stars into orbit, and move straight into grounded chat.
-          </p>
           <div className="metis-hero-actions">
             <a href="#build-map" className="metis-cta-btn">Build the constellation</a>
-            <Link href="/chat" className="metis-secondary-link">Jump to chat</Link>
-          </div>
-          <div className="metis-field-guide" aria-live="polite">
-            <span className="metis-field-guide-label">Field note</span>
-            <span className="metis-field-guide-text">{fieldGuideMessage}</span>
           </div>
         </div>
       </div>
@@ -1030,147 +1021,6 @@ export default function Home() {
           {toastMessage}
         </div>
       ) : null}
-
-      <section className="metis-build-section" id="build-map">
-        <div className="metis-build-intro">
-          <span className="metis-section-kicker">Orbit control</span>
-          <h2 className="metis-section-title">Select stars in the sky to ingest, inspect, and route your sources.</h2>
-          <p className="metis-section-copy">
-            Each star now opens its own observatory. New stars launch upload and build, while existing stars reveal linked-index context, chat routing, and star metadata without a separate library workspace.
-          </p>
-        </div>
-
-        <div className="metis-build-toolbar" role="region" aria-label="Constellation controls">
-          <div className="metis-build-stats">
-            <span className="metis-build-stat">{starCountLabel}</span>
-            <span className="metis-build-stat">
-              {availableIndexes.length} indexed source{availableIndexes.length === 1 ? "" : "s"} detected
-            </span>
-            {!indexesLoading ? (
-              <span className="metis-build-stat">
-                {unmappedIndexes.length} ready to map
-              </span>
-            ) : (
-              <span className="metis-build-stat">Scanning indexed sources</span>
-            )}
-          </div>
-
-          <div className="metis-star-controls-actions">
-            <button
-              type="button"
-              className="metis-star-btn"
-              onClick={() => {
-                void mapIndexedSources();
-              }}
-              disabled={indexesLoading}
-            >
-              Map indexed sources
-            </button>
-            <button
-              type="button"
-              className="metis-star-btn"
-              onClick={() => {
-                if (selectedUserStarId) {
-                  void removeUserStarById(selectedUserStarId);
-                  setSelectedUserStarId(null);
-                  setPendingDialogStar(null);
-                  setQueuedObservatoryMode(null);
-                  setStarDialogOpen(false);
-                }
-                setAddMessage(null);
-              }}
-              disabled={!selectedUserStarId}
-            >
-              Remove selected
-            </button>
-            <button
-              type="button"
-              className="metis-star-btn danger"
-              onClick={() => {
-                if (userStars.length > 0 && !window.confirm("Remove all added stars?")) {
-                  return;
-                }
-                void resetUserStars();
-                setSelectedUserStarId(null);
-                setPendingDialogStar(null);
-                setQueuedObservatoryMode(null);
-                setStarDialogOpen(false);
-                setAddMessage(null);
-              }}
-              disabled={userStars.length === 0}
-            >
-              Reset orbit
-            </button>
-          </div>
-        </div>
-
-        {selectedUserStar ? (
-          <div className="metis-build-note accent">
-            {selectedUserStar.label || (selectedUserStar.linkedManifestPath ? "Mapped star" : "Selected star")} is in focus. Reopen its observatory to inspect the linked index, upload new material, rename it, or launch grounded chat.
-          </div>
-        ) : (
-          <div className="metis-build-note accent">
-            Hover one of the softly glinting background stars to preview the connection, then click to add it. Any selected star opens an observatory for build, linking, and index overview.
-          </div>
-        )}
-
-        {!indexesLoading && unmappedIndexes.length > 0 ? (
-          <div className="metis-build-note accent">
-            {unmappedIndexes.length} indexed source{unmappedIndexes.length === 1 ? "" : "s"} can still be mapped into orbit.
-          </div>
-        ) : null}
-        {selectedUserStar ? (
-          <div className="metis-star-controls-actions">
-            <button
-              type="button"
-              className="metis-star-btn"
-              onClick={() => openStarObservatory(selectedUserStar, "existing")}
-            >
-              Open observatory
-            </button>
-            <button
-              type="button"
-              className="metis-star-btn"
-              onClick={() => {
-                if (!selectedUserStar.linkedManifestPath) {
-                  return;
-                }
-                const linkedIndex = availableIndexes.find(
-                  (index) => index.manifest_path === selectedUserStar.linkedManifestPath,
-                );
-                openChatWithIndex(
-                  selectedUserStar.linkedManifestPath,
-                  linkedIndex?.index_id || selectedUserStar.label || "Mapped constellation star",
-                );
-              }}
-              disabled={!selectedUserStar.linkedManifestPath}
-            >
-              Open linked chat
-            </button>
-          </div>
-        ) : null}
-        {indexLoadError ? <div className="metis-build-note error">{indexLoadError}</div> : null}
-        {syncError ? <div className="metis-build-note error">Sync fallback active. Stars are still saved locally.</div> : null}
-        {addMessage ? <div className={`metis-build-note ${addMessageTone}`}>{addMessage}</div> : null}
-      </section>
-
-      <div className="metis-cards-section">
-        <div className="metis-card">
-          <span className="metis-card-label">Private</span>
-          <h3 className="metis-card-title">Fully Local<br />RAG Engine</h3>
-          <p className="metis-card-desc">Provider-agnostic retrieval running entirely on your machine. No API keys needed, and the constellation stays yours from ingestion to answer.</p>
-        </div>
-        <div className="metis-card">
-          <span className="metis-card-label">Grounded</span>
-          <h3 className="metis-card-title">Indexes, Graphs<br />&amp; Modes</h3>
-          <p className="metis-card-desc">Turn source material into indexed knowledge, then move through Q&amp;A, Summary, Tutor, Research, and Evidence Pack with traceable grounding.</p>
-        </div>
-        <div className="metis-card">
-          <span className="metis-card-label">Persistent</span>
-          <h3 className="metis-card-title">Sessions, Agents<br />&amp; Memory</h3>
-          <p className="metis-card-desc">Carry context forward with saved sessions, companion memory, and structure-aware ingestion across PDF, DOCX, Markdown, HTML, and text.</p>
-        </div>
-      </div>
 
       <StarObservatoryDialog
         open={starDialogOpen}
