@@ -451,26 +451,26 @@ export default function SettingsPage() {
         </div>
 
         {/* Guardrail: API keys not editable */}
-        <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+        <div className="flex gap-3 rounded-[1rem] border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-sm text-amber-300/90 backdrop-blur-sm">
           <AnimatedLucideIcon icon={TriangleAlert} mode="idlePulse" className="mt-0.5 size-4 shrink-0" />
           <div>
             <p className="font-medium">API keys are not editable here</p>
             <p className="mt-0.5">
-              The backend blocks <code className="rounded bg-amber-100 px-1 dark:bg-amber-900/50">api_key_*</code> updates
+              The backend blocks <code className="rounded bg-amber-500/15 px-1">api_key_*</code> updates
               via this UI to prevent accidental exposure. To set API keys, edit{" "}
-              <code className="rounded bg-amber-100 px-1 dark:bg-amber-900/50">settings.json</code> at the repo root directly.
+              <code className="rounded bg-amber-500/15 px-1">settings.json</code> at the repo root directly.
             </p>
           </div>
         </div>
 
         {/* Settings hint */}
-        <div className="flex gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-400">
+        <div className="flex gap-3 rounded-[1rem] border border-sky-500/20 bg-sky-500/8 px-4 py-3 text-sm text-sky-300/90 backdrop-blur-sm">
           <AnimatedLucideIcon icon={Info} mode="hoverLift" className="mt-0.5 size-4 shrink-0" />
           <div>
             <p className="font-medium">Low-level settings</p>
             <p className="mt-0.5">
               Hardware overrides, vector DB connection strings, and GGUF model paths
-              must be set in <code className="rounded bg-blue-100 px-1 dark:bg-blue-900/50">settings.json</code> at
+              must be set in <code className="rounded bg-sky-500/15 px-1">settings.json</code> at
               the repo root. Changes take effect on next server restart.
             </p>
           </div>

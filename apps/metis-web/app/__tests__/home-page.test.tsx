@@ -16,13 +16,15 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
+vi.mock("@/components/constellation/star-observatory-dialog", () => ({
+  StarObservatoryDialog: () => null,
+}));
+
 const { default: HomePage } = await import("../page");
 
 async function renderHomePage() {
   render(<HomePage />);
-  await waitFor(() => {
-    expect(screen.getByRole("button", { name: "Map indexed sources" })).not.toBeDisabled();
-  });
+  await screen.findByRole("button", { name: "Seed indexed sources" });
 }
 
 describe("Home page", () => {
@@ -91,15 +93,16 @@ describe("Home page", () => {
     await renderHomePage();
 
     expect(screen.queryByRole("button", { name: "Add star" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Map indexed sources" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Seed indexed sources" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Remove selected" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reset orbit" })).toBeDisabled();
     expect(screen.getByText("0 added stars")).toBeInTheDocument();
-    expect(screen.queryByText("Bring in your source material")).not.toBeInTheDocument();
-    expect(screen.queryByText("Build your first index")).not.toBeInTheDocument();
-    expect(screen.queryByText("Existing indexes")).not.toBeInTheDocument();
+    expect(screen.getByText("0 indexed sources detected")).toBeInTheDocument();
+    expect(screen.getByText("0 sources ready to map")).toBeInTheDocument();
+    expect(screen.getByText("0 attachments in orbit")).toBeInTheDocument();
+    expect(screen.getAllByText(/Follow the faculty ring/i).length).toBeGreaterThan(0);
     expect(
-      screen.getByText(/Each star now opens its own observatory/i),
+      screen.getByText(/Each star opens its own observatory/i),
     ).toBeInTheDocument();
   });
 
@@ -119,14 +122,31 @@ describe("Home page", () => {
 
     await waitFor(() => {
       expect(screen.getByText("1 indexed source detected")).toBeInTheDocument();
-      expect(screen.getByText("1 ready to map")).toBeInTheDocument();
+      expect(screen.getByText("1 source ready to map")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Seed indexed sources" })).not.toBeDisabled();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Map indexed sources" }));
+    fireEvent.click(screen.getByRole("button", { name: "Seed indexed sources" }));
 
     await waitFor(() => {
       expect(screen.getByText(/1(\/\d+)? added stars/)).toBeInTheDocument();
-      expect(screen.getByText("0 ready to map")).toBeInTheDocument();
+      expect(screen.getByText("0 sources ready to map")).toBeInTheDocument();
+      expect(screen.getByText("1 attachment in orbit")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      const stored = window.localStorage.getItem("metis_constellation_user_stars");
+      expect(stored).not.toBeNull();
+      expect(JSON.parse(stored ?? "[]")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            label: "Orbit dossier",
+            primaryDomainId: "knowledge",
+            stage: "seed",
+            linkedManifestPath: "/tmp/orbit-dossier.json",
+          }),
+        ]),
+      );
     });
   });
 });

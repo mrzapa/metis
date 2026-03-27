@@ -9,14 +9,17 @@ import { fetchIndexes, type IndexBuildResult, type IndexSummary } from "@/lib/ap
 import {
   ADD_CANDIDATE_HIT_RADIUS_PX,
   MOBILE_ADD_CANDIDATE_HIT_RADIUS_PX,
+  CONSTELLATION_FACULTIES,
   CORE_CENTER_X,
   CORE_CENTER_Y,
   CORE_EXCLUSION_RADIUS,
   buildOutwardPlacement,
   findHoveredAddCandidate,
   getPreviewConnectionNodes,
+  inferConstellationFaculty,
   isAddableBackgroundStar,
   projectBackgroundStar,
+  type ConstellationFacultyMetadata,
   type ConstellationFieldStar,
   type ConstellationNodePoint,
 } from "@/lib/constellation-home";
@@ -24,43 +27,38 @@ import type { UserStar } from "@/lib/constellation-types";
 
 /* ────────────────────────────── constants ────────────────────────────── */
 
-const CONCEPTS = [
-  { label: "Module I", title: "Reasoning", desc: "Multi-dimensional inference engine that synthesizes information across domains to produce coherent analytical frameworks." },
-  { label: "Module II", title: "Foresight", desc: "Predictive architecture modeling probability cascades across branching temporal pathways." },
-  { label: "Module III", title: "Strategy", desc: "Adaptive decision synthesis balancing competing objectives through recursive optimization." },
-  { label: "Module IV", title: "Knowledge", desc: "Distributed semantic graph encoding relationships across billions of conceptual vertices." },
-  { label: "Module V", title: "Memory", desc: "Persistent state architecture maintaining context coherence across extended interaction horizons." },
-  { label: "Module VI", title: "Execution", desc: "Real-time action coordination translating strategic intent into precise operational sequences." },
-  { label: "Module VII", title: "Perception", desc: "Multimodal sensory integration processing structured and unstructured information streams." },
-  { label: "Module VIII", title: "Synthesis", desc: "Cross-domain fusion layer combining disparate insights into unified intelligence products." },
-  { label: "Module IX", title: "Autonomy", desc: "Self-directed operational protocol enabling independent goal formation and pursuit." },
-  { label: "Module X", title: "Ethics", desc: "Constraint-aware decision boundary system ensuring alignment with sovereign principles." },
-  { label: "Module XI", title: "Emergence", desc: "Recursive self-improvement pathway generating novel capabilities from existing substrates." },
-];
-
-const NODE_LAYOUT: [number, number][] = [
-  [0, 0],
-  [0.16, -0.02],
-  [0.06, 0.14],
-  [-0.14, 0.14],
-  [-0.2, -0.06],
-  [0.14, -0.2],
-  [0.34, 0.04],
-  [0.28, 0.24],
-  [0.04, 0.34],
-  [-0.26, 0.24],
-  [-0.36, -0.04],
-];
+const FACULTY_CONCEPTS = CONSTELLATION_FACULTIES.map((faculty, index) => ({
+  faculty,
+  label: `Faculty ${String(index + 1).padStart(2, "0")}`,
+  title: faculty.label,
+  desc: faculty.description,
+}));
+const FACULTY_PALETTE: Record<string, [number, number, number]> = {
+  perception: [119, 181, 235],
+  knowledge: [232, 184, 74],
+  memory: [160, 133, 228],
+  reasoning: [129, 220, 198],
+  skills: [104, 219, 170],
+  strategy: [232, 128, 103],
+  personality: [232, 144, 198],
+  values: [214, 108, 120],
+  synthesis: [136, 209, 238],
+  autonomy: [199, 218, 121],
+  emergence: [148, 153, 239],
+};
+const KNOWLEDGE_FACULTY = CONSTELLATION_FACULTIES.find((faculty) => faculty.id === "knowledge") ?? CONSTELLATION_FACULTIES[1];
 const HOVER_EXPAND_DELAY_MS = 600;
+const DRAG_DISTANCE_PX = 6;
 
 /* ────────────────────────────── helpers ──────────────────────────────── */
 
 type StarData = ConstellationFieldStar;
+type FacultyConcept = typeof FACULTY_CONCEPTS[number];
 
 interface NodeData extends ConstellationNodePoint {
   baseSize: number;
   brightness: number; targetBrightness: number;
-  concept: typeof CONCEPTS[number]; connections: number[];
+  concept: FacultyConcept; connections: number[];
   awakenDelay: number; parallax: number;
   hoverBoost: number; targetHoverBoost: number;
   _sx: number; _sy: number;
@@ -142,13 +140,82 @@ function mergeFetchedIndexes(
   return next;
 }
 
+function getCountLabel(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function getStarManifestPaths(star: UserStar): string[] {
+  if (star.linkedManifestPaths && star.linkedManifestPaths.length > 0) {
+    return star.linkedManifestPaths;
+  }
+  return star.linkedManifestPath ? [star.linkedManifestPath] : [];
+}
+
+function getStarAttachmentCount(star: UserStar): number {
+  return getStarManifestPaths(star).length;
+}
+
+function getFacultyColor(facultyId?: string): [number, number, number] {
+  if (facultyId && FACULTY_PALETTE[facultyId]) {
+    return FACULTY_PALETTE[facultyId];
+  }
+  return [208, 216, 232];
+}
+
+function getFacultyById(facultyId?: string): ConstellationFacultyMetadata | null {
+  if (!facultyId) {
+    return null;
+  }
+  return CONSTELLATION_FACULTIES.find((faculty) => faculty.id === facultyId) ?? null;
+}
+
+function resolveStarFaculty(star: Pick<UserStar, "x" | "y" | "primaryDomainId">) {
+  const inferred = inferConstellationFaculty({ x: star.x, y: star.y });
+  return getFacultyById(star.primaryDomainId) ?? inferred.primary.faculty;
+}
+
+function getStageRingCount(stage: UserStar["stage"]): number {
+  switch (stage) {
+    case "integrated":
+      return 3;
+    case "growing":
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+function clampPointToOrbit(x: number, y: number): [number, number] {
+  const clampedX = Math.min(0.96, Math.max(0.04, x));
+  const clampedY = Math.min(0.95, Math.max(0.06, y));
+  const dx = clampedX - CORE_CENTER_X;
+  const dy = clampedY - CORE_CENTER_Y;
+  const distance = Math.hypot(dx, dy);
+  if (distance >= CORE_EXCLUSION_RADIUS + 0.02) {
+    return [clampedX, clampedY];
+  }
+  const fallbackAngle = distance === 0 ? -Math.PI / 2 : Math.atan2(dy, dx);
+  return buildOutwardPlacement(
+    CORE_CENTER_X + Math.cos(fallbackAngle) * (CORE_EXCLUSION_RADIUS + 0.045),
+    CORE_CENTER_Y + Math.sin(fallbackAngle) * (CORE_EXCLUSION_RADIUS + 0.045),
+    0,
+  );
+}
+
+function describeFacultyDrop(faculty: ConstellationFacultyMetadata, bridgeFaculty: ConstellationFacultyMetadata | null): string {
+  if (bridgeFaculty) {
+    return `${faculty.label} primary with a bridge toward ${bridgeFaculty.label}. Release to persist the reassignment.`;
+  }
+  return `${faculty.label} now leads this star. Release to anchor it here.`;
+}
+
 function applyNodeLayout(nodes: NodeData[], W: number, H: number) {
-  const cx = W * 0.56;
-  const cy = H * 0.43;
-  const scale = Math.min(W, H) * 0.78;
-  NODE_LAYOUT.forEach(([nx, ny], i) => {
-    nodes[i].x = cx + nx * scale;
-    nodes[i].y = cy + ny * scale;
+  FACULTY_CONCEPTS.forEach((concept, i) => {
+    if (!nodes[i]) {
+      return;
+    }
+    nodes[i].x = concept.faculty.x * W;
+    nodes[i].y = concept.faculty.y * H;
   });
 }
 
@@ -177,6 +244,7 @@ export default function Home() {
   const [indexesLoading, setIndexesLoading] = useState(true);
   const [indexLoadError, setIndexLoadError] = useState<string | null>(null);
   const [hoveredAddCandidateId, setHoveredAddCandidateId] = useState<string | null>(null);
+  const [dragMessage, setDragMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastTone, setToastTone] = useState<"default" | "error">("default");
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -197,6 +265,16 @@ export default function Home() {
   const availableIndexesRef = useRef<IndexSummary[]>(availableIndexes);
   const optimisticIndexKeysRef = useRef<Set<string>>(new Set());
   const conceptHideTimeoutRef = useRef<number | null>(null);
+  const dragPreviewPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const dragStateRef = useRef<{
+    pointerId: number;
+    starId: string;
+    startClientX: number;
+    startClientY: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null>(null);
 
   useEffect(() => {
     userStarsRef.current = userStars;
@@ -210,6 +288,16 @@ export default function Home() {
     selectedUserStarIdRef.current = selectedUserStarId;
   }, [selectedUserStarId]);
 
+  useEffect(() => {
+    const previewPositions = dragPreviewPositionsRef.current;
+    const validIds = new Set(userStars.map((star) => star.id));
+    [...previewPositions.keys()].forEach((starId) => {
+      if (!validIds.has(starId)) {
+        previewPositions.delete(starId);
+      }
+    });
+  }, [userStars]);
+
   useEffect(() => () => {
     if (conceptHideTimeoutRef.current !== null) {
       window.clearTimeout(conceptHideTimeoutRef.current);
@@ -222,46 +310,84 @@ export default function Home() {
   );
   const observatoryStar = selectedUserStar ?? pendingDialogStar;
   const mappedManifestPaths = useMemo(
-    () => new Set(userStars.map((star) => star.linkedManifestPath).filter(Boolean)),
+    () =>
+      new Set(
+        userStars.flatMap((star) => getStarManifestPaths(star)).filter(Boolean),
+      ),
     [userStars],
   );
   const unmappedIndexes = useMemo(
     () => availableIndexes.filter((index) => !mappedManifestPaths.has(index.manifest_path)),
     [availableIndexes, mappedManifestPaths],
   );
+  const attachmentCount = useMemo(
+    () => userStars.reduce((sum, star) => sum + getStarAttachmentCount(star), 0),
+    [userStars],
+  );
+  const selectedStarAttachmentCount = useMemo(
+    () => (selectedUserStar ? getStarAttachmentCount(selectedUserStar) : 0),
+    [selectedUserStar],
+  );
+  const selectedStarFaculty = useMemo(
+    () => (selectedUserStar ? resolveStarFaculty(selectedUserStar) : null),
+    [selectedUserStar],
+  );
   const starCountLabel = useMemo(
     () => (starLimit === null ? `${userStars.length} added stars` : `${userStars.length}/${starLimit} added stars`),
     [starLimit, userStars.length],
   );
+  const detectedSourceCountLabel = useMemo(
+    () => getCountLabel(availableIndexes.length, "indexed source"),
+    [availableIndexes.length],
+  );
+  const readyToMapCountLabel = useMemo(
+    () => `${getCountLabel(unmappedIndexes.length, "source")} ready to map`,
+    [unmappedIndexes.length],
+  );
+  const attachmentsCountLabel = useMemo(
+    () => getCountLabel(attachmentCount, "attachment"),
+    [attachmentCount],
+  );
   const fieldGuideMessage = useMemo(() => {
+    if (dragMessage) {
+      return dragMessage;
+    }
+
     if (starLimit !== null && userStars.length >= starLimit) {
       return "Constellation at capacity. Remove a star or reset the orbit to pull in another.";
     }
 
     if (hoveredAddCandidateId) {
-      return "Field star acquired. Click once to pull it in and open its observatory.";
+      return "Field star acquired. Click once to claim it, then give it meaning in its observatory.";
     }
 
-    if (selectedUserStar?.linkedManifestPath) {
-      return "Selected star in focus. Open its observatory to inspect the linked index, rename it, or launch grounded chat.";
-    }
-
-    if (selectedUserStar) {
-      return "Selected star ready. Open its observatory to upload files, build an index, or attach an existing source.";
+    if (selectedUserStar && selectedStarFaculty) {
+      if (selectedStarAttachmentCount > 0) {
+        return `${selectedUserStar.label ?? "Selected star"} currently leans into ${selectedStarFaculty.label}. Open its observatory to inspect attached sources or launch grounded chat.`;
+      }
+      return `${selectedUserStar.label ?? "Selected star"} is orbiting ${selectedStarFaculty.label}. Drag it toward another faculty or open its observatory to feed it.`;
     }
 
     if (!indexesLoading && unmappedIndexes.length > 0) {
-      return `${unmappedIndexes.length} indexed source${unmappedIndexes.length === 1 ? "" : "s"} are ready to map into orbit from the control rail below.`;
+      return `${getCountLabel(unmappedIndexes.length, "indexed source")} ${unmappedIndexes.length === 1 ? "is" : "are"} ready to seed into Knowledge from the control rail below.`;
     }
 
-    return "Look for the softly glinting field stars beyond the core ring, then click one to open its observatory.";
-  }, [hoveredAddCandidateId, indexesLoading, selectedUserStar, starLimit, unmappedIndexes.length, userStars.length]);
+    return "Follow the faculty ring: claim a field star, drag it toward the faculty it should strengthen, and let the observatory deepen it.";
+  }, [dragMessage, hoveredAddCandidateId, indexesLoading, selectedStarAttachmentCount, selectedStarFaculty, selectedUserStar, starLimit, unmappedIndexes.length, userStars.length]);
+  const selectedStarSummary = useMemo(() => {
+    if (!selectedUserStar || !selectedStarFaculty) {
+      return "No star selected. Click a claimed star to open its observatory, or drag one to reassign its faculty.";
+    }
+    return `${selectedUserStar.label ?? "Selected star"} is aligned with ${selectedStarFaculty.label} and holds ${getCountLabel(selectedStarAttachmentCount, "attached source")}.`;
+  }, [selectedStarAttachmentCount, selectedStarFaculty, selectedUserStar]);
   const addMessageTone = useMemo(() => {
     if (!addMessage) {
       return "accent";
     }
     return /unable|failed|error|limit/i.test(addMessage) ? "error" : "accent";
   }, [addMessage]);
+  const buildNoteTone = indexLoadError ? "error" : addMessage ? addMessageTone : "accent";
+  const buildNoteMessage = indexLoadError ?? addMessage ?? fieldGuideMessage;
 
   const openChatWithIndex = useCallback(
     (manifestPath: string, label: string) => {
@@ -362,7 +488,9 @@ export default function Home() {
       indexesForMapping = refreshedIndexes;
     }
 
-    const currentMappedPaths = new Set(userStars.map((star) => star.linkedManifestPath).filter(Boolean));
+    const currentMappedPaths = new Set(
+      userStars.flatMap((star) => getStarManifestPaths(star)).filter(Boolean),
+    );
     const candidateIndexes = indexesForMapping.filter((index) => !currentMappedPaths.has(index.manifest_path));
 
     if (candidateIndexes.length === 0) {
@@ -382,10 +510,11 @@ export default function Home() {
 
     const starsToAdd = candidateIndexes.slice(0, room).map((index, indexOffset) => {
       const orbitIndex = userStars.length + indexOffset;
-      const shell = Math.floor(orbitIndex / 10) + 1;
-      const slot = orbitIndex % 10;
-      const angle = -Math.PI / 2 + (slot / 10) * Math.PI * 2;
-      const radius = CORE_EXCLUSION_RADIUS + 0.08 + shell * 0.07;
+      const shell = Math.floor(orbitIndex / 6) + 1;
+      const slot = orbitIndex % 6;
+      const sweep = -0.42 + (slot / 5) * 0.84;
+      const angle = KNOWLEDGE_FACULTY.angle + sweep;
+      const radius = CORE_EXCLUSION_RADIUS + 0.08 + shell * 0.055;
       const targetX = CORE_CENTER_X + Math.cos(angle) * radius;
       const targetY = CORE_CENTER_Y + Math.sin(angle) * radius * 0.82;
       const [x, y] = buildOutwardPlacement(targetX, targetY, orbitIndex);
@@ -395,6 +524,11 @@ export default function Home() {
         y,
         size: 0.95,
         label: index.index_id,
+        primaryDomainId: KNOWLEDGE_FACULTY.id,
+        stage: "seed" as const,
+        intent: "Seeded from indexed source",
+        linkedManifestPaths: [index.manifest_path],
+        activeManifestPath: index.manifest_path,
         linkedManifestPath: index.manifest_path,
       };
     });
@@ -403,7 +537,7 @@ export default function Home() {
     if (addedCount > 0) {
       setAddMessage(null);
       setToastTone("default");
-      setToastMessage(`Mapped ${addedCount} indexed source${addedCount === 1 ? "" : "s"} into the constellation.`);
+      setToastMessage(`Seeded ${addedCount} indexed source${addedCount === 1 ? "" : "s"} into the constellation.`);
     }
   }, [addUserStars, availableIndexes, refreshAvailableIndexes, starLimit, userStars]);
 
@@ -516,7 +650,7 @@ export default function Home() {
     }
 
     /* nodes */
-    const nodes: NodeData[] = CONCEPTS.map((concept) => ({
+    const nodes: NodeData[] = FACULTY_CONCEPTS.map((concept) => ({
       x: 0, y: 0,
       baseSize: 1.5 + Math.random() * 1.5,
       brightness: 0.15, targetBrightness: 0.15,
@@ -630,22 +764,63 @@ export default function Home() {
     function drawUserStars(t: number) {
       const currentUserStars = userStarsRef.current;
       const currentSelectedStarId = selectedUserStarIdRef.current;
+      const previewPositions = dragPreviewPositionsRef.current;
 
       currentUserStars.forEach((s, i) => {
-        const px = s.x * W + (mouse.x - W / 2) * 0.006;
-        const py = s.y * H + (mouse.y - H / 2) * 0.006;
+        const previewPosition = previewPositions.get(s.id);
+        const starX = previewPosition?.x ?? s.x;
+        const starY = previewPosition?.y ?? s.y;
+        const faculty = resolveStarFaculty({ x: starX, y: starY, primaryDomainId: s.primaryDomainId });
+        const [r, g, b] = getFacultyColor(faculty.id);
+        const px = starX * W + (mouse.x - W / 2) * 0.006;
+        const py = starY * H + (mouse.y - H / 2) * 0.006;
         const twinkle = 0.75 + Math.sin(t * 0.003 + i * 1.7) * 0.15;
         const selected = currentSelectedStarId === s.id;
-        const sz = s.size * 1.35 + (selected ? 1.4 : 0);
+        const attachmentCount = getStarAttachmentCount(s);
+        const ringCount = getStageRingCount(s.stage);
+        const dragging = dragStateRef.current?.starId === s.id && dragStateRef.current.moved;
+        const sz = s.size * 1.4 + (selected ? 1.2 : 0) + (dragging ? 0.8 : 0);
+        const halo = ctx!.createRadialGradient(px, py, 0, px, py, sz * 5.2);
+        halo.addColorStop(0, `rgba(${r},${g},${b},${selected ? 0.22 : 0.12})`);
+        halo.addColorStop(1, "rgba(0,0,0,0)");
+        ctx!.fillStyle = halo;
+        ctx!.beginPath();
+        ctx!.arc(px, py, sz * 5.2, 0, Math.PI * 2);
+        ctx!.fill();
+
+        const fill = ctx!.createRadialGradient(px - sz * 0.35, py - sz * 0.35, sz * 0.15, px, py, sz * 1.3);
+        fill.addColorStop(0, "rgba(255,255,255,0.96)");
+        fill.addColorStop(0.28, `rgba(${r},${g},${b},0.92)`);
+        fill.addColorStop(1, `rgba(${Math.max(20, r - 78)},${Math.max(20, g - 78)},${Math.max(28, b - 78)},0.98)`);
+        ctx!.fillStyle = fill;
         ctx!.beginPath();
         ctx!.arc(px, py, sz, 0, Math.PI * 2);
-        ctx!.fillStyle = `rgba(230,238,255,${twinkle})`;
         ctx!.fill();
+
+        for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
+          const ringRadius = sz + 4 + ringIndex * 4.5;
+          ctx!.beginPath();
+          ctx!.arc(px, py, ringRadius, 0, Math.PI * 2);
+          ctx!.strokeStyle = `rgba(${r},${g},${b},${0.22 + ringIndex * 0.07})`;
+          ctx!.lineWidth = ringIndex === ringCount - 1 && selected ? 1.25 : 0.85;
+          ctx!.stroke();
+        }
+
+        const satelliteCount = Math.min(attachmentCount, 3);
+        for (let satelliteIndex = 0; satelliteIndex < satelliteCount; satelliteIndex += 1) {
+          const angle = t * 0.001 + (Math.PI * 2 * satelliteIndex) / Math.max(1, satelliteCount);
+          const orbitRadius = sz + 11 + satelliteIndex * 2;
+          const satelliteX = px + Math.cos(angle) * orbitRadius;
+          const satelliteY = py + Math.sin(angle) * orbitRadius * 0.8;
+          ctx!.beginPath();
+          ctx!.arc(satelliteX, satelliteY, 1.3 + satelliteIndex * 0.25, 0, Math.PI * 2);
+          ctx!.fillStyle = `rgba(${r},${g},${b},0.85)`;
+          ctx!.fill();
+        }
+
         ctx!.beginPath();
-        ctx!.arc(px, py, sz * 2.2, 0, Math.PI * 2);
-        ctx!.fillStyle = selected
-          ? `rgba(246,252,255,${twinkle * 0.17})`
-          : `rgba(220,230,255,${twinkle * 0.05})`;
+        ctx!.arc(px, py, sz * 0.34, 0, Math.PI * 2);
+        ctx!.fillStyle = `rgba(255,255,255,${0.88 + twinkle * 0.08})`;
         ctx!.fill();
       });
     }
@@ -665,6 +840,7 @@ export default function Home() {
       const aNode = activeNodeRef.current;
       const hasAddCandidate = hoveredAddCandidateRef.current !== null;
       nodes.forEach((n, i) => {
+        const [r, g, bl] = getFacultyColor(n.concept.faculty.id);
         const px = n.x + (mouse.x - W / 2) * n.parallax;
         const py = n.y + (mouse.y - H / 2) * n.parallax;
         const dx = px - mouse.x, dy = py - mouse.y, dist = Math.sqrt(dx * dx + dy * dy);
@@ -694,18 +870,22 @@ export default function Home() {
         }
         if (b > 0.25 || n.hoverBoost > 0.1) {
           const grad = ctx!.createRadialGradient(px, py, 0, px, py, s * 12);
-          grad.addColorStop(0, `rgba(196,149,58,${b * 0.06 + n.hoverBoost * 0.09})`);
+          grad.addColorStop(0, `rgba(${r},${g},${bl},${b * 0.08 + n.hoverBoost * 0.12})`);
           grad.addColorStop(1, "rgba(0,0,0,0)");
           ctx!.fillStyle = grad; ctx!.beginPath();
           ctx!.arc(px, py, s * 12, 0, Math.PI * 2); ctx!.fill();
         }
         ctx!.beginPath(); ctx!.arc(px, py, s, 0, Math.PI * 2);
-        ctx!.fillStyle = b > 0.4 ? `rgba(232,184,74,${b})` : `rgba(200,210,230,${b})`;
+        ctx!.fillStyle = b > 0.36 ? `rgba(${r},${g},${bl},${Math.max(0.42, b)})` : `rgba(200,210,230,${b})`;
         ctx!.fill();
         if (proximity > 0.2) {
           ctx!.beginPath(); ctx!.arc(px, py, s + 4 + proximity * 4, 0, Math.PI * 2);
-          ctx!.strokeStyle = `rgba(196,149,58,${proximity * 0.2})`; ctx!.lineWidth = 0.5; ctx!.stroke();
+          ctx!.strokeStyle = `rgba(${r},${g},${bl},${proximity * 0.22})`; ctx!.lineWidth = 0.5; ctx!.stroke();
         }
+        ctx!.font = '11px "Space Grotesk", sans-serif';
+        ctx!.textAlign = "center";
+        ctx!.fillStyle = `rgba(${r},${g},${bl},${0.36 + b * 0.22})`;
+        ctx!.fillText(n.concept.title, px, py + s + 18);
         n._sx = px; n._sy = py;
       });
     }
@@ -798,9 +978,70 @@ export default function Home() {
       nebulae[2].x = W * 0.55; nebulae[2].y = H * 0.2;
     }
 
+    function getHitStar(clientX: number, clientY: number): UserStar | null {
+      const rect = canvas!.getBoundingClientRect();
+      const cx = clientX - rect.left;
+      const cy = clientY - rect.top;
+      const previewPositions = dragPreviewPositionsRef.current;
+      const hitRadiusBoost = coarsePointerRef.current ? 12 : 0;
+      let selectedStar: UserStar | null = null;
+      let hitDistance = Infinity;
+
+      userStarsRef.current.forEach((star) => {
+        const previewPosition = previewPositions.get(star.id);
+        const px = (previewPosition?.x ?? star.x) * rect.width;
+        const py = (previewPosition?.y ?? star.y) * rect.height;
+        const hitRadius = star.size * 10 + 8 + hitRadiusBoost;
+        const distance = Math.hypot(px - cx, py - cy);
+        if (distance < hitRadius && distance < hitDistance) {
+          selectedStar = star;
+          hitDistance = distance;
+        }
+      });
+
+      return selectedStar;
+    }
+
+    function clearDragState(clearMessage = false) {
+      const currentDrag = dragStateRef.current;
+      if (currentDrag) {
+        dragPreviewPositionsRef.current.delete(currentDrag.starId);
+      }
+      dragStateRef.current = null;
+      if (clearMessage) {
+        setDragMessage(null);
+      }
+    }
+
     function onPointerMove(e: PointerEvent) {
       mouse.x = e.clientX;
       mouse.y = e.clientY;
+
+      const dragState = dragStateRef.current;
+      if (dragState && dragState.pointerId === e.pointerId) {
+        const rect = canvas!.getBoundingClientRect();
+        const nx = (e.clientX - rect.left) / rect.width;
+        const ny = (e.clientY - rect.top) / rect.height;
+        const travelDistance = Math.hypot(e.clientX - dragState.startClientX, e.clientY - dragState.startClientY);
+        if (!dragState.moved && travelDistance >= DRAG_DISTANCE_PX) {
+          dragState.moved = true;
+        }
+        if (!dragState.moved) {
+          return;
+        }
+        const [nextX, nextY] = clampPointToOrbit(nx, ny);
+        dragPreviewPositionsRef.current.set(dragState.starId, { x: nextX, y: nextY });
+        const inference = inferConstellationFaculty({ x: nextX, y: nextY });
+        setDragMessage(
+          describeFacultyDrop(
+            inference.primary.faculty,
+            inference.bridgeSuggestion?.faculty ?? null,
+          ),
+        );
+        clearHoveredCandidate();
+        closeConcept();
+        return;
+      }
 
       const topElement = document.elementFromPoint(e.clientX, e.clientY);
       const pointerOnCanvas = topElement === canvas;
@@ -857,37 +1098,73 @@ export default function Home() {
       }
     }
 
-    function onCanvasPress(e: PointerEvent) {
-      const rect = canvas!.getBoundingClientRect();
-      const cx = e.clientX - rect.left;
-      const cy = e.clientY - rect.top;
-      const currentUserStars = userStarsRef.current;
-      const currentSelectedStarId = selectedUserStarIdRef.current;
-      let selectedId: string | null = null;
-      const hitRadiusBoost = coarsePointerRef.current ? 12 : 0;
-      currentUserStars.forEach((s) => {
-        const px = s.x * rect.width;
-        const py = s.y * rect.height;
-        const hitRadius = s.size * 10 + 8 + hitRadiusBoost;
-        if (Math.hypot(px - cx, py - cy) < hitRadius) {
-          selectedId = s.id;
-        }
-      });
-      if (selectedId) {
-        const selectedStar = currentUserStars.find((star) => star.id === selectedId);
-        if (selectedStar) {
-          openStarObservatory(selectedStar, "existing");
-        } else {
-          setSelectedUserStarId(selectedId);
-        }
-        setAddMessage(null);
-        clearHoveredCandidate();
-        closeConcept();
+    function onCanvasPointerDown(e: PointerEvent) {
+      const hitStar = getHitStar(e.clientX, e.clientY);
+      if (!hitStar) {
         return;
       }
 
-      const canAddMoreStars = starLimit === null || currentUserStars.length < starLimit;
-      const candidate = canAddMoreStars
+      dragStateRef.current = {
+        pointerId: e.pointerId,
+        starId: hitStar.id,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startX: hitStar.x,
+        startY: hitStar.y,
+        moved: false,
+      };
+      setSelectedUserStarId(hitStar.id);
+      setPendingDialogStar(null);
+      setQueuedObservatoryMode(null);
+      setAddMessage(null);
+      setDragMessage(null);
+      clearHoveredCandidate();
+      closeConcept();
+      try {
+        canvas!.setPointerCapture(e.pointerId);
+      } catch {
+        // Ignore capture failures; drag still works via document listeners.
+      }
+    }
+
+    function onCanvasPress(e: PointerEvent) {
+      const dragState = dragStateRef.current;
+      if (dragState && dragState.pointerId === e.pointerId) {
+        const selectedStar = userStarsRef.current.find((star) => star.id === dragState.starId) ?? null;
+        const previewPosition = dragPreviewPositionsRef.current.get(dragState.starId);
+
+        if (dragState.moved && selectedStar && previewPosition) {
+          const inference = inferConstellationFaculty(previewPosition);
+          void updateUserStarById(dragState.starId, {
+            x: previewPosition.x,
+            y: previewPosition.y,
+            primaryDomainId: inference.primary.faculty.id,
+            relatedDomainIds: inference.bridgeSuggestion ? [inference.bridgeSuggestion.faculty.id] : undefined,
+          });
+          setToastTone("default");
+          setToastMessage(
+            `${selectedStar.label ?? "Star"} settled into ${inference.primary.faculty.label}.`,
+          );
+          setAddMessage(null);
+          clearDragState(true);
+          return;
+        }
+
+        clearDragState(true);
+        if (selectedStar) {
+          openStarObservatory(selectedStar, "existing");
+        }
+        return;
+      }
+
+      const topElement = document.elementFromPoint(e.clientX, e.clientY);
+      if (topElement !== canvas) {
+        return;
+      }
+
+      const currentUserStars = userStarsRef.current;
+      const currentSelectedStarId = selectedUserStarIdRef.current;
+      const candidate = (starLimit === null || currentUserStars.length < starLimit)
         ? findHoveredAddCandidate(
             stars,
             nodes,
@@ -910,10 +1187,14 @@ export default function Home() {
           return;
         }
 
+        const inference = inferConstellationFaculty({ x: candidate.nx, y: candidate.ny });
         addUserStar({
           x: candidate.nx,
           y: candidate.ny,
           size: 0.82 + Math.random() * 0.55,
+          primaryDomainId: inference.primary.faculty.id,
+          relatedDomainIds: inference.bridgeSuggestion ? [inference.bridgeSuggestion.faculty.id] : undefined,
+          stage: "seed",
         }).then((createdStar) => {
           if (!createdStar) {
             setAddMessage(
@@ -954,26 +1235,37 @@ export default function Home() {
     }
 
     function onPointerLeave() {
+      if (dragStateRef.current) {
+        return;
+      }
       hoveredNodeRef.current = -1;
       hoverExpandedRef.current = false;
       clearHoveredCandidate();
+      setDragMessage(null);
+    }
+
+    function onBlur() {
+      clearDragState(true);
+      onPointerLeave();
     }
 
     window.addEventListener("resize", onResize);
+    canvas.addEventListener("pointerdown", onCanvasPointerDown);
     document.addEventListener("pointermove", onPointerMove);
-    canvas.addEventListener("pointerup", onCanvasPress);
+    window.addEventListener("pointerup", onCanvasPress);
     canvas.addEventListener("pointerleave", onPointerLeave);
-    window.addEventListener("blur", onPointerLeave);
+    window.addEventListener("blur", onBlur);
 
     return () => {
       cancelAnimationFrame(animFrame);
       window.removeEventListener("resize", onResize);
+      canvas.removeEventListener("pointerdown", onCanvasPointerDown);
       document.removeEventListener("pointermove", onPointerMove);
-      canvas.removeEventListener("pointerup", onCanvasPress);
+      window.removeEventListener("pointerup", onCanvasPress);
       canvas.removeEventListener("pointerleave", onPointerLeave);
-      window.removeEventListener("blur", onPointerLeave);
+      window.removeEventListener("blur", onBlur);
     };
-  }, [addUserStar, closeConcept, openStarObservatory, starLimit]);
+  }, [addUserStar, closeConcept, openStarObservatory, starLimit, updateUserStarById]);
 
   /* card scroll animation */
   useEffect(() => {
@@ -1009,12 +1301,124 @@ export default function Home() {
 
       <div className="metis-hero-overlay">
         <div className="metis-hero-shell">
-          <h1 className="metis-hero-headline">Discover<br />everything.</h1>
+          <div className="metis-hero-kicker">Cognitive Constellation</div>
+          <h1 className="metis-hero-headline">Give the night sky a mind.</h1>
+          <p className="metis-hero-copy">
+            METIS now arranges the landing field around cognitive faculties. Seed knowledge,
+            drag stars into the faculty they should strengthen, and keep the observatory magic
+            while every claim starts to mean something.
+          </p>
           <div className="metis-hero-actions">
             <a href="#build-map" className="metis-cta-btn">Build the constellation</a>
+            <Link href="/chat" className="metis-secondary-link">Enter chat</Link>
+          </div>
+          <div className="metis-field-guide">
+            <div className="metis-field-guide-label">Field guide</div>
+            <div className="metis-field-guide-text">{fieldGuideMessage}</div>
           </div>
         </div>
       </div>
+
+      <section id="build-map" className="metis-build-section">
+        <div className="metis-build-intro">
+          <div className="metis-section-kicker">Build And Control</div>
+          <h2 className="metis-section-title">Tune the faculties METIS keeps in orbit.</h2>
+          <p className="metis-section-copy">
+            Indexed sources now seed into <span className="metis-inline-accent">Knowledge</span> by
+            default. Claimed stars can be dragged across the faculty ring to persist a new domain,
+            while observatories still handle naming, source attachment, and grounded chat.
+          </p>
+        </div>
+
+        <div className="metis-build-toolbar">
+          <div className="metis-build-stats">
+            <div className="metis-build-stat">{detectedSourceCountLabel} detected</div>
+            <div className="metis-build-stat">{readyToMapCountLabel}</div>
+            <div className="metis-build-stat">{starCountLabel}</div>
+            <div className="metis-build-stat">{attachmentsCountLabel} in orbit</div>
+          </div>
+
+          <div className="metis-star-controls-actions">
+            <button
+              type="button"
+              className="metis-star-btn"
+              onClick={() => void mapIndexedSources()}
+              disabled={indexesLoading || unmappedIndexes.length === 0}
+            >
+              Seed indexed sources
+            </button>
+            <button
+              type="button"
+              className="metis-star-btn danger"
+              onClick={() => {
+                if (!selectedUserStarId) {
+                  return;
+                }
+                void removeUserStarById(selectedUserStarId).then(() => {
+                  setSelectedUserStarId(null);
+                  setPendingDialogStar(null);
+                  setQueuedObservatoryMode(null);
+                  setToastTone("default");
+                  setToastMessage("Selected star removed from the constellation.");
+                });
+              }}
+              disabled={!selectedUserStarId}
+            >
+              Remove selected
+            </button>
+            <button
+              type="button"
+              className="metis-star-btn"
+              onClick={() => {
+                void resetUserStars().then(() => {
+                  setSelectedUserStarId(null);
+                  setPendingDialogStar(null);
+                  setQueuedObservatoryMode(null);
+                  setToastTone("default");
+                  setToastMessage("Orbit reset. The field is open again.");
+                });
+              }}
+              disabled={userStars.length === 0}
+            >
+              Reset orbit
+            </button>
+          </div>
+        </div>
+
+        <div className={`metis-build-note ${buildNoteTone}`}>
+          {buildNoteMessage}
+        </div>
+        <div className="metis-build-note">
+          {selectedStarSummary}
+        </div>
+      </section>
+
+      <section className="metis-cards-section" aria-label="Constellation guide">
+        <article className="metis-card">
+          <div className="metis-card-label">Seed</div>
+          <h3 className="metis-card-title">Knowledge enters first</h3>
+          <p className="metis-card-desc">
+            Indexed sources map in as seed stars inside the Knowledge arc so the constellation starts
+            from evidence, not abstraction.
+          </p>
+        </article>
+        <article className="metis-card">
+          <div className="metis-card-label">Steer</div>
+          <h3 className="metis-card-title">Move stars toward the right faculty</h3>
+          <p className="metis-card-desc">
+            Drag a claimed star until the field guide feels right. Drop to persist the new faculty,
+            with soft bridge hints when a star sits between domains.
+          </p>
+        </article>
+        <article className="metis-card">
+          <div className="metis-card-label">Claim</div>
+          <h3 className="metis-card-title">Each star opens its own observatory</h3>
+          <p className="metis-card-desc">
+            Click-to-claim remains intact. Every star can still be named, fed, linked to sources,
+            and opened directly into grounded chat.
+          </p>
+        </article>
+      </section>
 
       {toastMessage ? (
         <div className={`metis-toast ${toastTone === "error" ? "error" : ""}`} aria-live="polite">
@@ -1304,6 +1708,9 @@ body {
   font-size: 15px;
   line-height: 1.8;
   color: var(--text-mid);
+}
+.metis-inline-accent {
+  color: rgba(236, 204, 128, 0.98);
 }
 .metis-build-toolbar {
   margin-top: 28px;

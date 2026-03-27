@@ -154,7 +154,26 @@ export function useConstellationStars() {
   }, [saveBoth]);
 
   const updateUserStarById = useCallback(
-    async (starId: string, updates: Partial<Pick<UserStar, "label" | "linkedManifestPath" | "size" | "x" | "y">>) => {
+    async (
+      starId: string,
+      updates: Partial<
+        Pick<
+          UserStar,
+          | "label"
+          | "primaryDomainId"
+          | "relatedDomainIds"
+          | "stage"
+          | "intent"
+          | "notes"
+          | "linkedManifestPaths"
+          | "activeManifestPath"
+          | "linkedManifestPath"
+          | "size"
+          | "x"
+          | "y"
+        >
+      >,
+    ) => {
       const current = userStarsRef.current;
       let changed = false;
       const next = current.map((star) => {

@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
+import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SetupGuard } from "@/components/setup-guard";
 import { DesktopReadyGuard } from "@/components/desktop-ready";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
+const spaceGrotesk = Space_Grotesk({ subsets: ["latin"], variable: "--font-display" });
 
 const uiVariantBootstrap = `(() => {
   try {
@@ -37,7 +41,7 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: uiVariantBootstrap }} />
       </head>
-      <body className="min-h-screen bg-background font-sans text-foreground antialiased">
+      <body className={`${inter.variable} ${spaceGrotesk.variable} min-h-screen bg-background font-sans text-foreground antialiased`}>
         {/* Persistent deep-space starfield — always behind all page content */}
         <div
           aria-hidden="true"

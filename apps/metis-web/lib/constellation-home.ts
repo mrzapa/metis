@@ -7,6 +7,10 @@ export const CORE_CENTER_Y = 0.43;
 export const CORE_EXCLUSION_RADIUS = 0.21;
 export const ADD_CANDIDATE_HIT_RADIUS_PX = 26;
 export const MOBILE_ADD_CANDIDATE_HIT_RADIUS_PX = 38;
+export const CONSTELLATION_FACULTY_CENTER_X = 0.5;
+export const CONSTELLATION_FACULTY_CENTER_Y = 0.5;
+export const CONSTELLATION_FACULTY_RING_RADIUS = 0.34;
+export const CONSTELLATION_FACULTY_BRIDGE_RATIO = 1.15;
 
 const ADDABLE_EDGE_INSET_X = 0.03;
 const ADDABLE_EDGE_INSET_Y = 0.04;
@@ -15,6 +19,15 @@ const ADDABLE_USER_STAR_BUFFER = 0.05;
 const ADDABLE_NODE_BUFFER = 0.04;
 
 export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface ConstellationFacultyMetadata {
+  id: string;
+  label: string;
+  description: string;
+  angle: number;
   x: number;
   y: number;
 }
@@ -38,6 +51,47 @@ export interface ConstellationNodePoint {
   y: number;
 }
 
+export interface ConstellationFacultyMatch {
+  faculty: ConstellationFacultyMetadata;
+  distance: number;
+}
+
+export interface ConstellationFacultyInference {
+  primary: ConstellationFacultyMatch;
+  secondary: ConstellationFacultyMatch | null;
+  bridgeSuggestion: ConstellationFacultyMatch | null;
+}
+
+function createConstellationFaculty(
+  id: string,
+  label: string,
+  description: string,
+  angle: number,
+): ConstellationFacultyMetadata {
+  return {
+    id,
+    label,
+    description,
+    angle,
+    x: CONSTELLATION_FACULTY_CENTER_X + Math.cos(angle) * CONSTELLATION_FACULTY_RING_RADIUS,
+    y: CONSTELLATION_FACULTY_CENTER_Y + Math.sin(angle) * CONSTELLATION_FACULTY_RING_RADIUS,
+  };
+}
+
+export const CONSTELLATION_FACULTIES: ConstellationFacultyMetadata[] = [
+  createConstellationFaculty("perception", "Perception", "Sensory intake, pattern detection, and direct observation.", -Math.PI / 2),
+  createConstellationFaculty("knowledge", "Knowledge", "Structured facts, concepts, and durable associations.", -Math.PI / 2 + (Math.PI * 2) / 11),
+  createConstellationFaculty("memory", "Memory", "Retention, recall, and context continuity.", -Math.PI / 2 + (Math.PI * 4) / 11),
+  createConstellationFaculty("reasoning", "Reasoning", "Inference, logic, and evidence-driven judgment.", -Math.PI / 2 + (Math.PI * 6) / 11),
+  createConstellationFaculty("skills", "Skills", "Procedural capability, practiced technique, and execution fluency.", -Math.PI / 2 + (Math.PI * 8) / 11),
+  createConstellationFaculty("strategy", "Strategy", "Planning, tradeoffs, and directional choice.", -Math.PI / 2 + (Math.PI * 10) / 11),
+  createConstellationFaculty("personality", "Personality", "Style, temperament, and expressive posture.", -Math.PI / 2 + (Math.PI * 12) / 11),
+  createConstellationFaculty("values", "Values", "Principles, priorities, and constraints.", -Math.PI / 2 + (Math.PI * 14) / 11),
+  createConstellationFaculty("synthesis", "Synthesis", "Cross-domain integration and meaning-making.", -Math.PI / 2 + (Math.PI * 16) / 11),
+  createConstellationFaculty("autonomy", "Autonomy", "Independent intent, self-direction, and self-governance.", -Math.PI / 2 + (Math.PI * 18) / 11),
+  createConstellationFaculty("emergence", "Emergence", "Novel capability, adaptation, and new structure from existing parts.", -Math.PI / 2 + (Math.PI * 20) / 11),
+];
+
 function getMinimumAddableStarSize(layer: number): number {
   if (layer <= 0) {
     return 0.38;
@@ -46,6 +100,15 @@ function getMinimumAddableStarSize(layer: number): number {
     return 0.44;
   }
   return 0.5;
+}
+
+function getConstellationFacultyMatches(point: Point): ConstellationFacultyMatch[] {
+  return [...CONSTELLATION_FACULTIES]
+    .map((faculty) => ({
+      faculty,
+      distance: Math.hypot(point.x - faculty.x, point.y - faculty.y),
+    }))
+    .sort((left, right) => left.distance - right.distance);
 }
 
 export function buildOutwardPlacement(
@@ -63,6 +126,24 @@ export function buildOutwardPlacement(
   const nx = Math.min(0.96, Math.max(0.04, CORE_CENTER_X + Math.cos(angle) * radius));
   const ny = Math.min(0.95, Math.max(0.06, CORE_CENTER_Y + Math.sin(angle) * radius));
   return [nx, ny];
+}
+
+export function inferConstellationFaculty(point: Point): ConstellationFacultyInference {
+  const [primary, secondary = null] = getConstellationFacultyMatches(point);
+  const bridgeSuggestion =
+    secondary && primary.distance > 0 && secondary.distance / primary.distance <= CONSTELLATION_FACULTY_BRIDGE_RATIO
+      ? secondary
+      : null;
+
+  return {
+    primary,
+    secondary,
+    bridgeSuggestion,
+  };
+}
+
+export function getConstellationBridgeSuggestion(point: Point): ConstellationFacultyMatch | null {
+  return inferConstellationFaculty(point).bridgeSuggestion;
 }
 
 export function projectBackgroundStar(

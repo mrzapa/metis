@@ -174,7 +174,7 @@ export function MetisCompanionDock({
       aria-label="METIS companion"
     >
       <div className={cn(
-        "glass-panel-strong border border-white/10 shadow-2xl shadow-black/30",
+        "home-liquid-glass border border-white/10 shadow-2xl shadow-black/40",
         minimized ? "rounded-full" : "rounded-[1.6rem]",
       )}>
         <div className={cn(
@@ -236,7 +236,7 @@ export function MetisCompanionDock({
                 </div>
 
                 {latestMemory?.why || snapshot?.status.latest_why ? (
-                  <div className="rounded-[1.15rem] border border-white/8 bg-black/10 px-3 py-2.5">
+                  <div className="rounded-[1.15rem] border border-white/8 bg-white/4 px-3 py-2.5 backdrop-blur-sm">
                     <button
                       type="button"
                       onClick={() => setShowWhy((current) => !current)}
@@ -317,7 +317,7 @@ export function MetisCompanionDock({
                 {snapshot &&
                 snapshot.status.runtime_source !== "dedicated_local" &&
                 snapshot.status.recommended_model_name ? (
-                  <div className="rounded-[1.2rem] border border-primary/20 bg-primary/8 px-3 py-3">
+                  <div className="rounded-[1.2rem] border border-primary/20 bg-primary/6 px-3 py-3 backdrop-blur-sm">
                     <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">
                       Lightweight local runtime
                     </p>

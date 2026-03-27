@@ -65,77 +65,6 @@ export function PageChrome({
       )}
     >
       <div className="relative z-10 flex min-h-screen">
-        {/* ── Sidebar (xl+) ───────────────────────────────────────── */}
-        <aside className="hidden w-64 shrink-0 p-3 xl:block">
-          {/* top-3 + bottom p-3 = 1.5rem total vertical padding → min-h = 100dvh - 1.5rem */}
-          <nav
-            className={cn(
-              "home-liquid-glass sticky top-3 flex min-h-[calc(100dvh-1.5rem)] flex-col rounded-2xl p-4",
-            )}
-          >
-            <Link href="/" className="mb-6 flex items-center gap-2.5 px-2">
-              <span
-                className={cn(
-                  "flex size-8 items-center justify-center rounded-lg",
-                  isStarscape
-                    ? "page-chrome-brand-mark"
-                    : "bg-primary/14 text-primary",
-                )}
-              >
-                <Home className="size-4" />
-              </span>
-              <span
-                className={cn(
-                  "text-base font-semibold tracking-tight",
-                  isStarscape ? "page-chrome-wordmark" : "text-foreground",
-                )}
-              >
-                METIS
-              </span>
-            </Link>
-
-            <div className="space-y-1">
-              {NAV_ITEMS.map((item) => {
-                const Icon = item.icon;
-                const active = isActive(pathname, item.href);
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    data-active={active ? "true" : "false"}
-                    className={
-                      isStarscape
-                        ? "page-chrome-nav-link flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-colors duration-150"
-                        : cn(
-                            "flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-colors duration-150",
-                            active
-                              ? "bg-primary/12 font-medium text-foreground"
-                              : "text-muted-foreground hover:bg-white/6 hover:text-foreground",
-                          )
-                    }
-                  >
-                    <Icon className={cn("size-4", active && !isStarscape && "text-primary")} />
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div>
-
-            <div className="mt-auto px-2 pt-6">
-              <p
-                className={cn(
-                  "text-[11px] uppercase tracking-[0.18em]",
-                  isStarscape
-                    ? "page-chrome-footer-note"
-                    : "text-muted-foreground/60",
-                )}
-              >
-                Local-first · Private by default
-              </p>
-            </div>
-          </nav>
-        </aside>
-
         {/* ── Main content ────────────────────────────────────────── */}
         <div className="flex min-w-0 flex-1 flex-col p-3 sm:p-4">
           {/* Topbar */}
@@ -144,35 +73,36 @@ export function PageChrome({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.35, ease: "easeOut" }}
             className={cn(
-              "home-liquid-glass-rail sticky top-0 z-50 flex items-center gap-3 px-6 py-3 rounded-full mx-4 mt-3",
+              "sticky top-0 z-50 -mx-3 sm:-mx-4 flex items-center px-10 py-7 bg-transparent",
             )}
           >
-            <Link
-              href="/"
-              className={cn(
-                "text-base font-semibold tracking-tight xl:hidden",
-                isStarscape ? "page-chrome-wordmark" : "text-foreground",
-              )}
-            >
-              METIS
+            <Link href="/">
+              <span
+                style={{
+                  fontFamily: "var(--font-display, 'Space Grotesk', inherit)",
+                  fontSize: "15px",
+                  fontWeight: 600,
+                  letterSpacing: "0.2em",
+                  textTransform: "uppercase",
+                  color: "oklch(0.92 0.01 248)",
+                }}
+              >
+                METIS<sup style={{ fontSize: "8px", opacity: 0.4, verticalAlign: "super", marginLeft: "2px" }}>AI</sup>
+              </span>
             </Link>
 
-            <nav className="ml-auto flex items-center gap-1">
+            <nav className="ml-10 flex items-center gap-8">
               {NAV_ITEMS.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
                   data-active={isActive(pathname, item.href) ? "true" : "false"}
-                  className={
-                    isStarscape
-                      ? "page-chrome-top-link hidden rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors sm:inline-flex"
-                      : cn(
-                          "hidden rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors sm:inline-flex",
-                          isActive(pathname, item.href)
-                            ? "bg-primary/14 text-primary"
-                            : "text-muted-foreground hover:bg-white/6 hover:text-foreground",
-                        )
-                  }
+                  className={cn(
+                    "hidden text-[13px] font-normal tracking-[0.03em] transition-colors duration-300 sm:inline-flex",
+                    isActive(pathname, item.href)
+                      ? "text-foreground"
+                      : "text-muted-foreground/60 hover:text-foreground",
+                  )}
                 >
                   {item.label}
                 </Link>
@@ -198,7 +128,7 @@ export function PageChrome({
                   <p
                     className={cn(
                       "text-xs font-medium uppercase tracking-[0.2em]",
-                      isStarscape ? "page-chrome-eyebrow" : "text-primary/80",
+                      isStarscape ? "page-chrome-eyebrow" : "eyebrow-gold",
                     )}
                   >
                     {eyebrow}
@@ -235,7 +165,7 @@ export function PageChrome({
                     <div
                       className={cn(
                         "min-h-full rounded-2xl px-5 py-4 sm:px-6 sm:py-5",
-                        isStarscape ? "page-chrome-hero-aside" : "glass-panel",
+                        isStarscape ? "page-chrome-hero-aside" : "home-liquid-glass",
                       )}
                     >
                       {heroAside}
@@ -247,7 +177,7 @@ export function PageChrome({
               {/* Main content area */}
               <section
                 className={cn(
-                  fullBleed ? "" : "glass-panel rounded-2xl p-4 sm:p-6",
+                  fullBleed ? "" : "home-liquid-glass rounded-2xl p-4 sm:p-6",
                   contentClassName,
                 )}
               >

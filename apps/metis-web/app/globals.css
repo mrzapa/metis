@@ -122,10 +122,10 @@ body {
   .glass-panel {
     position: relative;
     background:
-      linear-gradient(180deg, color-mix(in oklch, var(--card) 82%, transparent), color-mix(in oklch, var(--card) 68%, transparent)),
+      linear-gradient(180deg, color-mix(in oklch, var(--card) 74%, transparent), color-mix(in oklch, var(--card) 64%, transparent)),
       color-mix(in oklch, var(--card) 72%, transparent);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(26px) saturate(150%);
+    -webkit-backdrop-filter: blur(26px) saturate(150%);
     box-shadow:
       0 28px 88px -44px color-mix(in oklch, black 66%, transparent),
       0 8px 30px -18px color-mix(in oklch, var(--primary) 18%, transparent),
@@ -150,7 +150,7 @@ body {
 
   .glass-panel-strong {
     background:
-      linear-gradient(180deg, color-mix(in oklch, var(--card) 88%, transparent), color-mix(in oklch, var(--card) 76%, transparent)),
+      linear-gradient(180deg, color-mix(in oklch, var(--card) 78%, transparent), color-mix(in oklch, var(--card) 68%, transparent)),
       color-mix(in oklch, var(--card) 84%, transparent);
     backdrop-filter: blur(30px);
     -webkit-backdrop-filter: blur(30px);
@@ -219,7 +219,7 @@ body {
     padding: 1.1rem 1.15rem;
     background:
       radial-gradient(circle at 8% 0%, color-mix(in oklch, white 10%, transparent) 0%, transparent 22%),
-      linear-gradient(180deg, color-mix(in oklch, var(--card) 78%, transparent), color-mix(in oklch, var(--card) 62%, transparent));
+      linear-gradient(180deg, color-mix(in oklch, var(--card) 64%, transparent), color-mix(in oklch, var(--card) 50%, transparent));
     backdrop-filter: blur(20px) saturate(142%);
     -webkit-backdrop-filter: blur(20px) saturate(142%);
     box-shadow:
@@ -1925,29 +1925,31 @@ body {
 :root .chat-starscape-theme.chat-shell-frame {
   border: 1px solid var(--chat-starscape-border);
   background:
-    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.08) 0%, transparent 22%),
-    radial-gradient(circle at 86% 100%, rgba(42, 90, 158, 0.12) 0%, transparent 34%),
-    linear-gradient(180deg, rgba(9, 13, 25, 0.6), rgba(7, 10, 20, 0.46));
-  backdrop-filter: blur(22px) saturate(118%);
-  -webkit-backdrop-filter: blur(22px) saturate(118%);
+    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.06) 0%, transparent 22%),
+    radial-gradient(circle at 86% 100%, rgba(42, 90, 158, 0.08) 0%, transparent 34%),
+    linear-gradient(180deg, rgba(9, 13, 25, 0.32), rgba(7, 10, 20, 0.18));
+  backdrop-filter: blur(32px) saturate(128%);
+  -webkit-backdrop-filter: blur(32px) saturate(128%);
   box-shadow:
-    0 36px 110px -58px rgba(0, 0, 0, 0.86),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    0 36px 110px -58px rgba(0, 0, 0, 0.82),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.025);
 }
 
 :root .chat-starscape-theme .chat-pane-surface {
   position: relative;
   border: 1px solid var(--chat-starscape-border);
   background:
-    radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.07) 0%, transparent 24%),
-    linear-gradient(180deg, rgba(11, 17, 32, 0.88), rgba(8, 12, 24, 0.76));
+    radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.06) 0%, transparent 24%),
+    linear-gradient(180deg, rgba(11, 17, 32, 0.44), rgba(8, 12, 24, 0.34));
   color: var(--chat-starscape-text);
+  backdrop-filter: blur(24px) saturate(138%);
+  -webkit-backdrop-filter: blur(24px) saturate(138%);
   box-shadow:
-    0 24px 76px -54px rgba(0, 0, 0, 0.88),
-    0 12px 28px -24px rgba(42, 90, 158, 0.18),
+    0 24px 76px -54px rgba(0, 0, 0, 0.84),
+    0 12px 28px -24px rgba(42, 90, 158, 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.025);
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
@@ -1979,11 +1981,13 @@ body {
 
 :root .chat-starscape-theme .glass-strip {
   background:
-    linear-gradient(180deg, rgba(15, 22, 41, 0.92), rgba(10, 14, 28, 0.78)),
-    rgba(8, 12, 24, 0.7);
+    linear-gradient(180deg, rgba(15, 22, 41, 0.58), rgba(10, 14, 28, 0.44)),
+    rgba(8, 12, 24, 0.34);
+  backdrop-filter: blur(18px) saturate(130%);
+  -webkit-backdrop-filter: blur(18px) saturate(130%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+    inset 0 -1px 0 rgba(255, 255, 255, 0.025);
 }
 
 :root .chat-starscape-theme .glass-micro-surface,
@@ -1991,10 +1995,12 @@ body {
   border: 1px solid var(--chat-starscape-border);
   background:
     radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.05) 0%, transparent 24%),
-    linear-gradient(180deg, rgba(14, 20, 38, 0.84), rgba(10, 14, 28, 0.76));
+    linear-gradient(180deg, rgba(14, 20, 38, 0.58), rgba(10, 14, 28, 0.46));
+  backdrop-filter: blur(14px) saturate(130%);
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 16px 28px -28px rgba(0, 0, 0, 0.76);
+    0 16px 28px -28px rgba(0, 0, 0, 0.72);
 }
 
 :root .chat-starscape-theme .glass-tab-rail {
@@ -2148,4 +2154,10 @@ body {
 
 :root .chat-starscape-theme [data-slot="card"] .bg-muted {
   background: rgba(18, 27, 50, 0.72);
+}
+
+/* ── Gold eyebrow accent (for page-chrome eyebrow text) ── */
+.eyebrow-gold {
+  color: oklch(0.78 0.11 78);
+  letter-spacing: 0.2em;
 }

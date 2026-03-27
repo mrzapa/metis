@@ -1,32 +1,22 @@
-import type { ComponentProps, ReactNode } from "react";
+import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type { IndexBuildResult, IndexSummary } from "@/lib/api";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { IndexSummary } from "@/lib/api";
 import type { UserStar } from "@/lib/constellation-types";
-
-vi.mock("lucide-react", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("lucide-react")>();
-  const Icon = () => null;
-  return {
-    ...actual,
-    Circle: Icon,
-    Orbit: Icon,
-    Sparkles: Icon,
-  };
-});
 
 vi.mock("@/components/ui/dialog", () => ({
   Dialog: ({
     open,
     children,
-  }: {
-    open: boolean;
-    children: ReactNode;
-  }) => (open ? <div>{children}</div> : null),
-  DialogContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  DialogDescription: ({ children }: { children: ReactNode }) => <p>{children}</p>,
-  DialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+  }: React.PropsWithChildren<{ open: boolean; onOpenChange?: (open: boolean) => void }>) => (
+    open ? <div data-testid="dialog-root">{children}</div> : null
+  ),
+  DialogContent: ({ children }: React.PropsWithChildren<{ className?: string; showCloseButton?: boolean }>) => (
+    <div>{children}</div>
+  ),
+  DialogDescription: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  DialogHeader: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  DialogTitle: ({ children }: React.PropsWithChildren) => <h1>{children}</h1>,
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -39,174 +29,233 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-import { buildIndexStream, fetchSettings } from "@/lib/api";
-import { StarObservatoryDialog } from "../star-observatory-dialog";
+const { buildIndexStream, fetchSettings } = await import("@/lib/api");
+const { StarObservatoryDialog } = await import("../star-observatory-dialog");
 
-const baseStar: UserStar = {
-  id: "star-1",
-  x: 0.3,
-  y: 0.4,
-  size: 1.2,
-  createdAt: 1710000000000,
-};
+function makeIndex(overrides: Partial<IndexSummary> = {}): IndexSummary {
+  return {
+    index_id: "Atlas A",
+    manifest_path: "/indexes/atlas-a.json",
+    document_count: 4,
+    chunk_count: 16,
+    backend: "faiss",
+    created_at: "2026-03-26T12:00:00.000Z",
+    embedding_signature: "embed-a",
+    ...overrides,
+  };
+}
 
-const linkedIndex: IndexSummary = {
-  index_id: "Atlas notes",
-  manifest_path: "/indexes/atlas.json",
-  document_count: 8,
-  chunk_count: 64,
-  backend: "faiss",
-  created_at: "2026-03-26T12:00:00.000Z",
-  embedding_signature: "embed-a",
-};
+function makeStar(overrides: Partial<UserStar> = {}): UserStar {
+  return {
+    id: "star-1",
+    x: 0.2,
+    y: 0.3,
+    size: 0.95,
+    createdAt: 1,
+    ...overrides,
+  };
+}
 
-const alternateIndex: IndexSummary = {
-  index_id: "Observatory log",
-  manifest_path: "/indexes/observatory.json",
-  document_count: 5,
-  chunk_count: 21,
-  backend: "faiss",
-  created_at: "2026-03-25T12:00:00.000Z",
-  embedding_signature: "embed-b",
-};
-
-function renderDialog(
-  overrides: Partial<ComponentProps<typeof StarObservatoryDialog>> = {},
-) {
-  const onOpenChange = vi.fn();
-  const onIndexBuilt = vi.fn();
-  const onUpdateStar = vi.fn().mockResolvedValue(true);
-  const onRemoveStar = vi.fn().mockResolvedValue(undefined);
-  const onOpenChat = vi.fn();
-
+function renderDialog({
+  star = makeStar(),
+  entryMode = "existing" as const,
+  availableIndexes = [] as IndexSummary[],
+  indexesLoading = false,
+  onIndexBuilt = vi.fn(),
+  onUpdateStar = vi.fn().mockResolvedValue(true),
+  onRemoveStar = vi.fn().mockResolvedValue(undefined),
+  onOpenChat = vi.fn(),
+} = {}) {
   render(
     <StarObservatoryDialog
       open
-      onOpenChange={onOpenChange}
-      star={baseStar}
-      entryMode="new"
-      availableIndexes={[linkedIndex, alternateIndex]}
-      indexesLoading={false}
+      onOpenChange={vi.fn()}
+      star={star}
+      entryMode={entryMode}
+      closeLockedUntil={0}
+      availableIndexes={availableIndexes}
+      indexesLoading={indexesLoading}
       onIndexBuilt={onIndexBuilt}
       onUpdateStar={onUpdateStar}
       onRemoveStar={onRemoveStar}
       onOpenChat={onOpenChat}
-      {...overrides}
     />,
   );
 
-  return {
-    onOpenChange,
-    onIndexBuilt,
-    onUpdateStar,
-    onRemoveStar,
-    onOpenChat,
-  };
+  return { onIndexBuilt, onUpdateStar, onRemoveStar, onOpenChat };
 }
 
-afterEach(() => {
-  vi.clearAllMocks();
-});
-
 describe("StarObservatoryDialog", () => {
-  it("starts new stars in build mode and builds then links a new index", async () => {
-    const buildResult: IndexBuildResult = {
-      index_id: "Northern archive",
-      manifest_path: "/indexes/northern-archive.json",
-      document_count: 4,
-      chunk_count: 18,
-      embedding_signature: "embed-build",
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(fetchSettings).mockResolvedValue({});
+  });
+
+  it("builds a new index and attaches it to a new star", async () => {
+    const builtIndex = {
+      index_id: "Orbit dossier",
+      manifest_path: "/tmp/orbit-dossier.json",
+      document_count: 3,
+      chunk_count: 12,
+      embedding_signature: "embed-orbit",
       vector_backend: "faiss",
     };
-
-    vi.mocked(fetchSettings).mockResolvedValue({});
     vi.mocked(buildIndexStream).mockImplementation(async (_paths, _settings, onEvent) => {
-      onEvent({ type: "status", text: "embedding documents" });
-      return buildResult;
+      onEvent({ type: "status", text: "embedding" });
+      return builtIndex;
     });
 
-    const { onIndexBuilt, onUpdateStar } = renderDialog();
-
-    expect(screen.getByText("New star selected")).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Feed this star" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Build and link" })).toBeDisabled();
+    const { onIndexBuilt, onUpdateStar } = renderDialog({
+      star: makeStar({ label: undefined, stage: "seed" }),
+      entryMode: "new",
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Local paths" }));
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: "I understand these paths must be accessible to the local API.",
-      }),
-    );
-    fireEvent.change(
-      screen.getByPlaceholderText(/\/home\/user\/docs\/report\.pdf/),
-      { target: { value: "/docs/a.md\n/docs/b.md" } },
-    );
+    fireEvent.click(screen.getByRole("checkbox", { name: /I understand these paths/i }));
+    fireEvent.change(screen.getByPlaceholderText(/report\.pdf/), {
+      target: { value: "/docs/field-notes.md\n/docs/summary.pdf" },
+    });
 
-    fireEvent.click(screen.getByRole("button", { name: "Build and link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Build and attach" }));
 
     await waitFor(() => {
       expect(buildIndexStream).toHaveBeenCalledWith(
-        ["/docs/a.md", "/docs/b.md"],
+        ["/docs/field-notes.md", "/docs/summary.pdf"],
         {},
         expect.any(Function),
       );
     });
+    expect(onIndexBuilt).toHaveBeenCalledWith(builtIndex);
 
     await waitFor(() => {
-      expect(onIndexBuilt).toHaveBeenCalledWith(buildResult);
-      expect(onUpdateStar).toHaveBeenCalledWith(baseStar.id, {
-        label: "Northern archive",
-        linkedManifestPath: "/indexes/northern-archive.json",
-      });
-      expect(screen.getByText("Built Northern archive and linked it to this star.")).toBeInTheDocument();
-      expect(screen.getByText("Latest build")).toBeInTheDocument();
-      expect(screen.getByDisplayValue("Northern archive")).toBeInTheDocument();
+      expect(onUpdateStar).toHaveBeenCalledWith(
+        "star-1",
+        expect.objectContaining({
+          label: "Orbit dossier",
+          linkedManifestPaths: ["/tmp/orbit-dossier.json"],
+          activeManifestPath: "/tmp/orbit-dossier.json",
+          linkedManifestPath: "/tmp/orbit-dossier.json",
+        }),
+      );
     });
+
+    const payload = vi.mocked(onUpdateStar).mock.calls[0]?.[1];
+    expect(payload?.stage).toBeUndefined();
+    expect(await screen.findByText(/Built Orbit dossier and attached it/i)).toBeInTheDocument();
   });
 
-  it("starts linked existing stars in overview mode and saves metadata changes", async () => {
-    const star: UserStar = {
-      ...baseStar,
-      label: "Atlas star",
-      linkedManifestPath: linkedIndex.manifest_path,
-    };
+  it("saves meaning, switches the active index, and opens chat from the active orbit", async () => {
+    const atlasA = makeIndex();
+    const atlasB = makeIndex({
+      index_id: "Atlas B",
+      manifest_path: "/indexes/atlas-b.json",
+      document_count: 6,
+      chunk_count: 22,
+      embedding_signature: "embed-b",
+    });
+    const atlasC = makeIndex({
+      index_id: "Atlas C",
+      manifest_path: "/indexes/atlas-c.json",
+      document_count: 2,
+      chunk_count: 8,
+      embedding_signature: "embed-c",
+    });
+
     const { onOpenChat, onUpdateStar } = renderDialog({
-      star,
-      entryMode: "existing",
+      star: makeStar({
+        label: "Pattern Atlas",
+        primaryDomainId: "knowledge",
+        relatedDomainIds: ["memory"],
+        stage: "growing",
+        intent: "Compare signals",
+        notes: "Initial pass",
+        linkedManifestPaths: [atlasA.manifest_path, atlasB.manifest_path],
+        activeManifestPath: atlasA.manifest_path,
+        linkedManifestPath: atlasA.manifest_path,
+      }),
+      availableIndexes: [atlasA, atlasB, atlasC],
     });
 
-    expect(screen.getByText("Existing star selected")).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Star observatory" }),
-    ).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Atlas star")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Atlas notes" })).toBeInTheDocument();
-    expect(screen.getAllByText("8").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("64").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Set active" }));
+    fireEvent.change(screen.getByPlaceholderText("knowledge"), {
+      target: { value: "synthesis" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("memory, strategy"), {
+      target: { value: "reasoning, memory" },
+    });
+    const stageSelect = screen
+      .getAllByRole("combobox")
+      .find((element) => element.tagName === "SELECT");
+    expect(stageSelect).toBeTruthy();
+    fireEvent.change(stageSelect as HTMLSelectElement, {
+      target: { value: "seed" },
+    });
+    fireEvent.change(screen.getByLabelText("What is this star for?"), {
+      target: { value: "Connect research patterns across active sources." },
+    });
+    fireEvent.change(screen.getByLabelText("Supporting notes"), {
+      target: { value: "Use the active atlas for the next chat launch." },
+    });
 
-    fireEvent.change(screen.getByLabelText("Star label"), {
-      target: { value: "Atlas revised" },
-    });
-    fireEvent.change(screen.getByLabelText("Linked index"), {
-      target: { value: alternateIndex.manifest_path },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save star" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save meaning" }));
 
     await waitFor(() => {
-      expect(onUpdateStar).toHaveBeenCalledWith(baseStar.id, {
-        label: "Atlas revised",
-        linkedManifestPath: alternateIndex.manifest_path,
-      });
-      expect(screen.getByText("Star details updated.")).toBeInTheDocument();
+      expect(onUpdateStar).toHaveBeenCalledWith(
+        "star-1",
+        expect.objectContaining({
+          label: "Pattern Atlas",
+          primaryDomainId: "synthesis",
+          relatedDomainIds: ["reasoning", "memory"],
+          stage: "seed",
+          intent: "Connect research patterns across active sources.",
+          notes: "Use the active atlas for the next chat launch.",
+          linkedManifestPaths: [atlasA.manifest_path, atlasB.manifest_path],
+          activeManifestPath: atlasB.manifest_path,
+          linkedManifestPath: atlasB.manifest_path,
+        }),
+      );
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Open linked chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open active chat" }));
 
-    expect(onOpenChat).toHaveBeenCalledWith(
-      alternateIndex.manifest_path,
-      "Atlas revised",
-    );
+    expect(onOpenChat).toHaveBeenCalledWith(atlasB.manifest_path, "Pattern Atlas");
+    expect(screen.getByText(/Star details updated/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Atlas C").length).toBeGreaterThan(0);
+  });
+
+  it("detaches an attached index and keeps the remaining orbit active", async () => {
+    const atlasA = makeIndex();
+    const atlasB = makeIndex({
+      index_id: "Atlas B",
+      manifest_path: "/indexes/atlas-b.json",
+      document_count: 6,
+      chunk_count: 22,
+      embedding_signature: "embed-b",
+    });
+
+    const { onUpdateStar } = renderDialog({
+      star: makeStar({
+        label: "Orbit map",
+        linkedManifestPaths: [atlasA.manifest_path, atlasB.manifest_path],
+        activeManifestPath: atlasA.manifest_path,
+        linkedManifestPath: atlasA.manifest_path,
+      }),
+      availableIndexes: [atlasA, atlasB],
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Detach" })[0]);
+
+    await waitFor(() => {
+      expect(onUpdateStar).toHaveBeenCalledWith(
+        "star-1",
+        expect.objectContaining({
+          linkedManifestPaths: [atlasB.manifest_path],
+          activeManifestPath: atlasB.manifest_path,
+          linkedManifestPath: atlasB.manifest_path,
+        }),
+      );
+    });
+
+    expect(screen.getByText(/Atlas A detached/i)).toBeInTheDocument();
   });
 });

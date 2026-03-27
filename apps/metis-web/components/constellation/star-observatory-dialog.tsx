@@ -31,13 +31,50 @@ import {
   type IndexBuildResult,
   type IndexSummary,
 } from "@/lib/api";
-import type { UserStar } from "@/lib/constellation-types";
+import { CONSTELLATION_FACULTIES } from "@/lib/constellation-home";
+import type { UserStar, UserStarStage } from "@/lib/constellation-types";
 import { cn } from "@/lib/utils";
 
 type BuildStep = "idle" | "active" | "done";
 type EntryMode = "new" | "existing";
 type StarDialogView = "build" | "overview";
 type DialogTone = "default" | "error";
+
+type ObservatoryStar = UserStar & {
+  primaryDomainId?: string;
+  relatedDomainIds?: string[];
+  stage?: UserStarStage;
+  intent?: string;
+  notes?: string;
+  linkedManifestPaths?: string[];
+  activeManifestPath?: string;
+};
+
+type StarUpdatePayload = Partial<
+  Pick<
+    UserStar,
+    | "label"
+    | "primaryDomainId"
+    | "relatedDomainIds"
+    | "stage"
+    | "intent"
+    | "notes"
+    | "linkedManifestPaths"
+    | "activeManifestPath"
+    | "linkedManifestPath"
+  >
+>;
+
+type AttachedIndexSummary = {
+  manifest_path: string;
+  index_id: string;
+  document_count: number;
+  chunk_count: number;
+  backend: string;
+  created_at?: string;
+  embedding_signature?: string;
+  source: "available" | "build" | "unresolved";
+};
 
 interface ProgressState {
   reading: BuildStep;
@@ -51,6 +88,24 @@ const INITIAL_PROGRESS: ProgressState = {
   saved: "idle",
 };
 
+const STAGE_OPTIONS: Array<{ value: UserStarStage; label: string; description: string }> = [
+  {
+    value: "seed",
+    label: "Seed",
+    description: "A new possibility that is just entering the constellation.",
+  },
+  {
+    value: "growing",
+    label: "Growing",
+    description: "Actively collecting sources, notes, or applied meaning.",
+  },
+  {
+    value: "integrated",
+    label: "Integrated",
+    description: "A mature star drawing on multiple attached sources.",
+  },
+];
+
 interface StarObservatoryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -60,10 +115,7 @@ interface StarObservatoryDialogProps {
   availableIndexes: IndexSummary[];
   indexesLoading: boolean;
   onIndexBuilt: (result: IndexBuildResult) => void;
-  onUpdateStar: (
-    starId: string,
-    updates: Partial<Pick<UserStar, "label" | "linkedManifestPath">>,
-  ) => Promise<boolean>;
+  onUpdateStar: (starId: string, updates: StarUpdatePayload) => Promise<boolean>;
   onRemoveStar: (starId: string) => Promise<void>;
   onOpenChat: (manifestPath: string, label: string) => void;
 }
@@ -78,6 +130,33 @@ function formatDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+function uniqueStrings(values: Array<string | undefined | null>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  values.forEach((value) => {
+    const trimmed = value?.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      return;
+    }
+    seen.add(trimmed);
+    result.push(trimmed);
+  });
+  return result;
+}
+
+function resolveDefaultStage(
+  linkedManifestPaths: string[],
+  notes: string | undefined,
+): UserStarStage {
+  if (linkedManifestPaths.length >= 2) {
+    return "integrated";
+  }
+  if (linkedManifestPaths.length === 1 || notes?.trim()) {
+    return "growing";
+  }
+  return "seed";
 }
 
 export function StarObservatoryDialog({
@@ -113,7 +192,13 @@ export function StarObservatoryDialog({
   const [buildResult, setBuildResult] = useState<IndexBuildResult | null>(null);
 
   const [labelDraft, setLabelDraft] = useState("");
-  const [linkedManifestPath, setLinkedManifestPath] = useState("");
+  const [primaryDomainIdDraft, setPrimaryDomainIdDraft] = useState("");
+  const [relatedDomainIdsDraft, setRelatedDomainIdsDraft] = useState("");
+  const [manualStageOverride, setManualStageOverride] = useState<UserStarStage | "">("");
+  const [intentDraft, setIntentDraft] = useState("");
+  const [notesDraft, setNotesDraft] = useState("");
+  const [attachedManifestPaths, setAttachedManifestPaths] = useState<string[]>([]);
+  const [activeManifestPath, setActiveManifestPath] = useState("");
   const [view, setView] = useState<StarDialogView>("build");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<DialogTone>("default");
@@ -132,8 +217,29 @@ export function StarObservatoryDialog({
       return;
     }
 
-    setLabelDraft(star.label ?? "");
-    setLinkedManifestPath(star.linkedManifestPath ?? "");
+    const activeStar = star as ObservatoryStar;
+    const nextAttachedManifestPaths = uniqueStrings([
+      ...(activeStar.linkedManifestPaths ?? []),
+      activeStar.activeManifestPath,
+      activeStar.linkedManifestPath,
+    ]);
+
+    setLabelDraft(activeStar.label ?? "");
+    setPrimaryDomainIdDraft(activeStar.primaryDomainId ?? "");
+    setRelatedDomainIdsDraft((activeStar.relatedDomainIds ?? []).join(", "));
+    const derivedStage = resolveDefaultStage(nextAttachedManifestPaths, activeStar.notes);
+    setManualStageOverride(
+      activeStar.stage && activeStar.stage !== derivedStage ? activeStar.stage : "",
+    );
+    setIntentDraft(activeStar.intent ?? "");
+    setNotesDraft(activeStar.notes ?? "");
+    setAttachedManifestPaths(nextAttachedManifestPaths);
+    setActiveManifestPath(
+      activeStar.activeManifestPath
+        || nextAttachedManifestPaths[nextAttachedManifestPaths.length - 1]
+        || activeStar.linkedManifestPath
+        || "",
+    );
     setStatusMessage(null);
     setStatusTone("default");
     setBuildError(null);
@@ -146,7 +252,7 @@ export function StarObservatoryDialog({
     setUploadError(null);
     setPickError(null);
     setPathsConsent(false);
-    setView(entryMode === "new" || !star.linkedManifestPath ? "build" : "overview");
+    setView(entryMode === "new" || nextAttachedManifestPaths.length === 0 ? "build" : "overview");
   }, [entryMode, open, star]);
 
   const readyPaths = useMemo(
@@ -163,16 +269,54 @@ export function StarObservatoryDialog({
     [desktopPaths, rawPaths, tab, uploadedPaths],
   );
 
-  const linkedIndex = useMemo(
-    () => availableIndexes.find((index) => index.manifest_path === linkedManifestPath) ?? null,
-    [availableIndexes, linkedManifestPath],
+  const activeManifestPathForChat = activeManifestPath
+    || attachedManifestPaths[attachedManifestPaths.length - 1]
+    || buildResult?.manifest_path
+    || "";
+  const derivedStage = resolveDefaultStage(attachedManifestPaths, notesDraft);
+  const effectiveStage = manualStageOverride || derivedStage;
+
+  const resolveAttachedIndex = useCallback((manifestPath: string): AttachedIndexSummary => {
+    const foundIndex = availableIndexes.find((index) => index.manifest_path === manifestPath);
+    if (foundIndex) {
+      return { ...foundIndex, source: "available" };
+    }
+
+    if (buildResult?.manifest_path === manifestPath) {
+      return {
+        manifest_path: buildResult.manifest_path,
+        index_id: buildResult.index_id,
+        document_count: buildResult.document_count,
+        chunk_count: buildResult.chunk_count,
+        backend: buildResult.vector_backend,
+        created_at: undefined,
+        embedding_signature: buildResult.embedding_signature,
+        source: "build",
+      };
+    }
+
+    return {
+      manifest_path: manifestPath,
+      index_id: manifestPath,
+      document_count: 0,
+      chunk_count: 0,
+      backend: "unknown",
+      source: "unresolved",
+    };
+  }, [availableIndexes, buildResult]);
+
+  const activeIndex = activeManifestPathForChat ? resolveAttachedIndex(activeManifestPathForChat) : null;
+  const attachedIndexes = useMemo(
+    () => attachedManifestPaths.map((manifestPath) => resolveAttachedIndex(manifestPath)),
+    [attachedManifestPaths, resolveAttachedIndex],
   );
   const suggestedIndexes = useMemo(
     () => availableIndexes
-      .filter((index) => index.manifest_path !== linkedManifestPath)
+      .filter((index) => !attachedManifestPaths.includes(index.manifest_path))
       .slice(0, 5),
-    [availableIndexes, linkedManifestPath],
+    [availableIndexes, attachedManifestPaths],
   );
+
   const handleOpenChange = useCallback((nextOpen: boolean) => {
     if (!nextOpen && (building || uploading)) {
       return;
@@ -186,7 +330,91 @@ export function StarObservatoryDialog({
   if (!star) {
     return null;
   }
-  const activeStar = star;
+
+  const activeStar = star as ObservatoryStar;
+
+  function buildStarUpdate(
+    nextAttachedManifestPaths = attachedManifestPaths,
+    nextActiveManifestPath = activeManifestPath,
+    labelOverride?: string,
+  ): StarUpdatePayload {
+    const label = (labelOverride ?? labelDraft.trim()) || activeStar.label || undefined;
+    const notes = notesDraft.trim() || undefined;
+    const relatedDomainIds = uniqueStrings(relatedDomainIdsDraft.split(/[\n,]/g));
+    const linkedManifestPaths = uniqueStrings([
+      ...nextAttachedManifestPaths,
+      nextActiveManifestPath,
+    ]);
+    const activePath = nextActiveManifestPath || linkedManifestPaths[linkedManifestPaths.length - 1] || undefined;
+
+    return {
+      label,
+      primaryDomainId: primaryDomainIdDraft.trim() || undefined,
+      relatedDomainIds: relatedDomainIds.length > 0 ? relatedDomainIds : undefined,
+      stage: manualStageOverride || undefined,
+      intent: intentDraft.trim() || undefined,
+      notes,
+      linkedManifestPaths: linkedManifestPaths.length > 0 ? linkedManifestPaths : undefined,
+      activeManifestPath: activePath,
+      linkedManifestPath: activePath,
+    };
+  }
+
+  async function commitStarUpdate({
+    nextAttachedManifestPaths = attachedManifestPaths,
+    nextActiveManifestPath = activeManifestPath,
+    labelOverride,
+    successMessage = "Star details updated.",
+    showSavingState = true,
+  }: {
+    nextAttachedManifestPaths?: string[];
+    nextActiveManifestPath?: string;
+    labelOverride?: string;
+    successMessage?: string;
+    showSavingState?: boolean;
+  } = {}) {
+    if (showSavingState) {
+      setSavingMeta(true);
+    }
+
+    try {
+      const payload = buildStarUpdate(nextAttachedManifestPaths, nextActiveManifestPath, labelOverride);
+      const updated = await onUpdateStar(activeStar.id, payload as Parameters<typeof onUpdateStar>[1]);
+      if (!updated) {
+        throw new Error("This star is no longer available.");
+      }
+
+      setLabelDraft(payload.label ?? "");
+      setPrimaryDomainIdDraft(payload.primaryDomainId ?? "");
+      setRelatedDomainIdsDraft((payload.relatedDomainIds ?? []).join(", "));
+      setIntentDraft(payload.intent ?? "");
+      setNotesDraft(payload.notes ?? "");
+      setAttachedManifestPaths(payload.linkedManifestPaths ?? []);
+      setActiveManifestPath(payload.activeManifestPath ?? "");
+      const nextDerivedStage = resolveDefaultStage(payload.linkedManifestPaths ?? [], payload.notes);
+      setManualStageOverride(
+        payload.stage && payload.stage !== nextDerivedStage ? payload.stage : "",
+      );
+      setStatusTone("default");
+      setStatusMessage(successMessage);
+      return true;
+    } catch (error) {
+      setStatusTone("error");
+      setStatusMessage(error instanceof Error ? error.message : "Unable to save star details.");
+      return false;
+    } finally {
+      if (showSavingState) {
+        setSavingMeta(false);
+      }
+    }
+  }
+
+  function handleSetActiveManifestPath(manifestPath: string) {
+    setActiveManifestPath(manifestPath);
+    const summary = resolveAttachedIndex(manifestPath);
+    setStatusTone("default");
+    setStatusMessage(`Active chat index staged to ${summary.index_id}. Save to keep it.`);
+  }
 
   async function handlePickFiles() {
     setPickError(null);
@@ -219,46 +447,49 @@ export function StarObservatoryDialog({
     }
   }
 
-  async function handleSaveMeta(nextLinkedManifestPath = linkedManifestPath) {
-    setSavingMeta(true);
-    const trimmedLabel = labelDraft.trim();
-    try {
-      const updated = await onUpdateStar(activeStar.id, {
-        label: trimmedLabel || undefined,
-        linkedManifestPath: nextLinkedManifestPath || undefined,
-      });
-      if (!updated) {
-        throw new Error("This star is no longer available.");
-      }
-      setLinkedManifestPath(nextLinkedManifestPath);
-      setStatusTone("default");
-      setStatusMessage("Star details updated.");
-    } catch (error) {
-      setStatusTone("error");
-      setStatusMessage(error instanceof Error ? error.message : "Unable to save star details.");
-    } finally {
-      setSavingMeta(false);
-    }
+  async function handleSaveMeta() {
+    await commitStarUpdate();
   }
 
   async function handleLinkExistingIndex(index: IndexSummary) {
     const nextLabel = labelDraft.trim() || activeStar.label || index.index_id;
-    try {
-      const updated = await onUpdateStar(activeStar.id, {
-        label: nextLabel || undefined,
-        linkedManifestPath: index.manifest_path,
-      });
-      if (!updated) {
-        throw new Error("This star is no longer available.");
-      }
-      setLabelDraft(nextLabel);
-      setLinkedManifestPath(index.manifest_path);
+    const nextAttachedManifestPaths = uniqueStrings([
+      ...attachedManifestPaths.filter((manifestPath) => manifestPath !== index.manifest_path),
+      index.manifest_path,
+    ]);
+    const updated = await commitStarUpdate({
+      nextAttachedManifestPaths,
+      nextActiveManifestPath: index.manifest_path,
+      labelOverride: nextLabel,
+      successMessage: `${index.index_id} is now attached and active.`,
+      showSavingState: false,
+    });
+
+    if (updated) {
       setView("overview");
-      setStatusTone("default");
-      setStatusMessage(`Linked ${index.index_id} to this star.`);
-    } catch (error) {
-      setStatusTone("error");
-      setStatusMessage(error instanceof Error ? error.message : "Unable to link index.");
+    }
+  }
+
+  async function handleDetachIndex(manifestPath: string) {
+    const nextAttachedManifestPaths = attachedManifestPaths.filter(
+      (attachedManifestPath) => attachedManifestPath !== manifestPath,
+    );
+    const nextActiveManifestPath = manifestPath === activeManifestPathForChat
+      ? (nextAttachedManifestPaths[nextAttachedManifestPaths.length - 1] ?? "")
+      : activeManifestPathForChat;
+    const detachedIndex = resolveAttachedIndex(manifestPath);
+    const updated = await commitStarUpdate({
+      nextAttachedManifestPaths,
+      nextActiveManifestPath,
+      successMessage:
+        nextAttachedManifestPaths.length > 0
+          ? `${detachedIndex.index_id} detached. Remaining sources stay in orbit.`
+          : `${detachedIndex.index_id} detached. This star is ready for new material.`,
+      showSavingState: false,
+    });
+
+    if (updated && nextAttachedManifestPaths.length === 0) {
+      setView("build");
     }
   }
 
@@ -290,20 +521,23 @@ export function StarObservatoryDialog({
       onIndexBuilt(result);
 
       const nextLabel = labelDraft.trim() || activeStar.label || result.index_id;
-      const updated = await onUpdateStar(activeStar.id, {
-        label: nextLabel || undefined,
-        linkedManifestPath: result.manifest_path,
+      const nextAttachedManifestPaths = uniqueStrings([
+        ...attachedManifestPaths.filter((manifestPath) => manifestPath !== result.manifest_path),
+        result.manifest_path,
+      ]);
+      const updated = await commitStarUpdate({
+        nextAttachedManifestPaths,
+        nextActiveManifestPath: result.manifest_path,
+        labelOverride: nextLabel,
+        successMessage: `Built ${result.index_id} and attached it to this star.`,
+        showSavingState: false,
       });
       if (!updated) {
         throw new Error("Index built, but the star could not be linked.");
       }
 
       setProgress({ reading: "done", embedding: "done", saved: "done" });
-      setLabelDraft(nextLabel);
-      setLinkedManifestPath(result.manifest_path);
       setView("overview");
-      setStatusTone("default");
-      setStatusMessage(`Built ${result.index_id} and linked it to this star.`);
     } catch (error) {
       setBuildError(error instanceof Error ? error.message : "Build failed");
       setProgress((current) =>
@@ -332,13 +566,13 @@ export function StarObservatoryDialog({
     ? (entryMode === "new" ? "Feed this star" : "Bring new material into orbit")
     : "Star observatory";
   const dialogDescription = view === "build"
-    ? "Upload files, add local paths, or attach an existing index to turn this star into a grounded workspace."
-    : "Rename the star, inspect its linked index, or launch straight into grounded chat.";
+    ? "Upload files, add local paths, or attach an existing index to deepen this star's memory."
+    : "Edit the star's meaning, switch the active chat index, or bring in more attached indexes.";
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="max-h-[calc(100vh-2rem)] gap-0 overflow-hidden p-0 sm:max-w-5xl"
+        className="max-h-[calc(100vh-2rem)] gap-0 overflow-hidden p-0 sm:max-w-6xl"
         showCloseButton={!building && !uploading}
       >
         <div className="border-b border-white/10 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(10,13,23,0.92))] px-6 py-5">
@@ -361,6 +595,13 @@ export function StarObservatoryDialog({
                 <div className="text-[11px] uppercase tracking-[0.28em] text-[#d6b361]">Star</div>
                 <div className="mt-1 text-sm font-medium text-white">
                   {labelDraft.trim() || activeStar.label || (entryMode === "new" ? "Unnamed arrival" : "Mapped star")}
+                </div>
+                <div className="mt-1 text-[11px] tracking-[0.18em] text-slate-300">
+                  {effectiveStage}
+                  {" · "}
+                  {attachedManifestPaths.length > 0
+                    ? `${attachedManifestPaths.length} attached`
+                    : "No attachments yet"}
                 </div>
               </div>
             </div>
@@ -394,7 +635,7 @@ export function StarObservatoryDialog({
           </DialogHeader>
         </div>
 
-        <div className="grid max-h-[calc(100vh-11rem)] gap-0 overflow-hidden lg:grid-cols-[minmax(0,1.08fr)_minmax(320px,0.92fr)]">
+        <div className="grid max-h-[calc(100vh-11rem)] gap-0 overflow-hidden lg:grid-cols-[minmax(0,1.08fr)_minmax(336px,0.92fr)]">
           <div className="overflow-y-auto px-6 py-6">
             {view === "build" ? (
               <div className="space-y-6">
@@ -601,7 +842,7 @@ export function StarObservatoryDialog({
                         Build index
                       </h4>
                       <p className="mt-2 text-sm leading-7 text-slate-300">
-                        Turn the selected material into a searchable index and link it straight to this star.
+                        Turn the selected material into a searchable index and attach it to this star.
                       </p>
                     </div>
                     <Badge variant="outline" className="border-white/12 bg-white/6 text-slate-200">
@@ -612,17 +853,17 @@ export function StarObservatoryDialog({
                   <div className="mt-5 flex flex-wrap gap-3">
                     <Button onClick={handleBuild} disabled={building || readyPaths.length === 0} className="gap-2">
                       {building ? <Loader2 className="size-4 animate-spin" /> : <Database className="size-4" />}
-                      {building ? "Building..." : "Build and link"}
+                      {building ? "Building..." : "Build and attach"}
                     </Button>
                     {buildResult ? (
                       <Button
                         variant="outline"
                         onClick={() => {
-                          const nextLabel = labelDraft.trim() || buildResult.index_id;
-                          onOpenChat(buildResult.manifest_path, nextLabel);
+                          const nextLabel = labelDraft.trim() || activeStar.label || buildResult.index_id;
+                          onOpenChat(activeManifestPathForChat || buildResult.manifest_path, nextLabel);
                         }}
                       >
-                        Open in chat
+                        Open active chat
                       </Button>
                     ) : null}
                   </div>
@@ -662,97 +903,151 @@ export function StarObservatoryDialog({
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.7fr)]">
-                  <label className="space-y-2">
-                    <span className="text-[11px] uppercase tracking-[0.26em] text-slate-400">Star label</span>
-                    <Input
-                      value={labelDraft}
-                      onChange={(event) => setLabelDraft(event.target.value)}
-                      placeholder="Name this star"
-                    />
-                  </label>
-
-                  <label className="space-y-2">
-                    <span className="text-[11px] uppercase tracking-[0.26em] text-slate-400">Linked index</span>
-                    <select
-                      value={linkedManifestPath}
-                      onChange={(event) => setLinkedManifestPath(event.target.value)}
-                      className="h-9 w-full rounded-xl border border-input/80 bg-card/70 px-3 text-sm text-white outline-none transition-[border-color,box-shadow] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
-                    >
-                      <option value="">Unlinked</option>
-                      {availableIndexes.map((index) => (
-                        <option key={index.manifest_path} value={index.manifest_path}>
-                          {index.index_id}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                  <Button onClick={() => void handleSaveMeta()} disabled={savingMeta} className="gap-2">
-                    {savingMeta ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-                    Save star
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      if (!linkedManifestPath) {
-                        return;
-                      }
-                      const linkedLabel = labelDraft.trim() || linkedIndex?.index_id || "Mapped star";
-                      onOpenChat(linkedManifestPath, linkedLabel);
-                    }}
-                    disabled={!linkedManifestPath}
-                  >
-                    Open linked chat
-                  </Button>
-                  <Button variant="outline" onClick={() => setView("build")}>
-                    Build another index
-                  </Button>
-                  <Button variant="destructive" onClick={() => void handleRemoveStar()} disabled={removing}>
-                    {removing ? "Removing..." : "Remove star"}
-                  </Button>
-                </div>
-
-                {linkedIndex ? (
-                  <div className="rounded-[1.6rem] border border-white/10 bg-black/18 p-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.28em] text-slate-400">Index overview</div>
-                        <h3 className="mt-2 font-display text-2xl font-semibold tracking-[-0.04em] text-white">
-                          {linkedIndex.index_id}
-                        </h3>
+                {attachedIndexes.length > 0 ? (
+                  <div className="space-y-6">
+                    <div className="rounded-[1.6rem] border border-white/10 bg-black/18 p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.28em] text-slate-400">Active chat index</div>
+                          <h3 className="mt-2 font-display text-2xl font-semibold tracking-[-0.04em] text-white">
+                            {activeIndex?.index_id || activeManifestPathForChat || "No active index"}
+                          </h3>
+                        </div>
+                        {activeIndex ? (
+                          <Badge variant="outline" className="border-white/12 bg-white/6 text-slate-200">
+                            Active
+                          </Badge>
+                        ) : null}
                       </div>
-                      <Badge variant="outline" className="border-white/12 bg-white/6 text-slate-200">
-                        {linkedIndex.backend}
-                      </Badge>
+
+                      {activeIndex ? (
+                        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                          <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+                            <div className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Documents</div>
+                            <div className="mt-2 text-2xl font-semibold text-white">{activeIndex.document_count}</div>
+                          </div>
+                          <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+                            <div className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Chunks</div>
+                            <div className="mt-2 text-2xl font-semibold text-white">{activeIndex.chunk_count}</div>
+                          </div>
+                          <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+                            <div className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Backend</div>
+                            <div className="mt-2 text-base font-medium text-white">{activeIndex.backend}</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-5 rounded-2xl border border-dashed border-white/12 bg-black/10 px-4 py-4 text-sm leading-7 text-slate-300">
+                          No active index is selected yet. Pick one from the attached rail to launch grounded chat.
+                        </div>
+                      )}
+
+                      <p className="mt-5 text-sm leading-7 text-slate-300">
+                        This star routes chat through one active index at a time, while keeping every attached source in orbit.
+                      </p>
                     </div>
 
-                    <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                      <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Documents</div>
-                        <div className="mt-2 text-2xl font-semibold text-white">{linkedIndex.document_count}</div>
+                    <div className="rounded-[1.6rem] border border-white/10 bg-black/18 p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.28em] text-slate-400">Attached indexes</div>
+                          <div className="mt-2 text-sm text-slate-300">
+                            {attachedIndexes.length} source{attachedIndexes.length === 1 ? "" : "s"} are attached to this star.
+                          </div>
+                        </div>
+                        <Badge variant="outline" className="border-white/12 bg-white/6 text-slate-200">
+                          {attachedIndexes.length}
+                        </Badge>
                       </div>
-                      <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Chunks</div>
-                        <div className="mt-2 text-2xl font-semibold text-white">{linkedIndex.chunk_count}</div>
-                      </div>
-                      <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Created</div>
-                        <div className="mt-2 text-base font-medium text-white">{formatDate(linkedIndex.created_at)}</div>
+
+                      <div className="mt-4 space-y-2">
+                        {attachedIndexes.map((index) => {
+                          const isActive = index.manifest_path === activeManifestPathForChat;
+                          return (
+                            <div
+                              key={index.manifest_path}
+                              className={cn(
+                                "flex items-start justify-between gap-3 rounded-2xl border px-4 py-3 transition-colors",
+                                isActive
+                                  ? "border-[#d6b361]/30 bg-[#d6b361]/8"
+                                  : "border-white/8 bg-white/4 hover:border-primary/30 hover:bg-primary/8",
+                              )}
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate font-medium text-white">{index.index_id}</div>
+                                <div className="mt-1 flex flex-wrap gap-3 text-xs text-slate-400">
+                                  <span>{index.document_count} docs</span>
+                                  <span>{index.chunk_count} chunks</span>
+                                  {index.created_at ? <span>{formatDate(index.created_at)}</span> : null}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetActiveManifestPath(index.manifest_path)}
+                                  className={cn(
+                                    "rounded-full px-3 py-1.5 text-xs transition-all",
+                                    isActive
+                                      ? "bg-[#d6b361]/18 text-[#f5d899]"
+                                      : "bg-white/8 text-slate-200 hover:bg-white/12",
+                                  )}
+                                >
+                                  {isActive ? "Active" : "Set active"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDetachIndex(index.manifest_path)}
+                                  className="rounded-full bg-white/8 px-3 py-1.5 text-xs text-slate-200 transition-all hover:bg-white/12 hover:text-white"
+                                >
+                                  Detach
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
 
-                    <p className="mt-5 text-sm leading-7 text-slate-300">
-                      This star is now a routed entry point into grounded chat. Re-link it, rename it, or build a fresh index if this orbit needs a new source cluster.
-                    </p>
+                    {suggestedIndexes.length > 0 ? (
+                      <div className="rounded-[1.6rem] border border-white/10 bg-black/18 p-5">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[11px] uppercase tracking-[0.28em] text-slate-400">More to attach</div>
+                            <div className="mt-2 text-sm text-slate-300">
+                              Add one of these indexes to the star without replacing anything already attached.
+                            </div>
+                          </div>
+                          <Badge variant="outline" className="border-white/12 bg-white/6 text-slate-200">
+                            {suggestedIndexes.length}
+                          </Badge>
+                        </div>
+
+                        <div className="mt-4 space-y-2">
+                          {suggestedIndexes.map((index) => (
+                            <button
+                              key={index.manifest_path}
+                              type="button"
+                              onClick={() => void handleLinkExistingIndex(index)}
+                              className="flex w-full items-start justify-between gap-3 rounded-2xl border border-white/8 bg-black/18 px-4 py-3 text-left transition-colors hover:border-primary/30 hover:bg-primary/8"
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate font-medium text-white">{index.index_id}</div>
+                                <div className="mt-1 flex flex-wrap gap-3 text-xs text-slate-400">
+                                  <span>{index.document_count} docs</span>
+                                  <span>{index.chunk_count} chunks</span>
+                                </div>
+                              </div>
+                              <span className="text-xs text-primary">Attach</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="rounded-[1.6rem] border border-dashed border-white/12 bg-black/18 p-5">
                     <div className="flex items-center gap-3 text-white">
                       <Orbit className="size-5 text-[#d6b361]" />
-                      <span className="font-medium">This star is not linked to an index yet.</span>
+                      <span className="font-medium">This star is not attached to an index yet.</span>
                     </div>
                     <p className="mt-3 text-sm leading-7 text-slate-300">
                       Build a new index or attach one of the indexed sources from the observatory rail.
@@ -766,6 +1061,114 @@ export function StarObservatoryDialog({
           <aside className="border-t border-white/10 bg-[linear-gradient(180deg,rgba(12,16,28,0.98),rgba(8,11,20,0.96))] px-6 py-6 lg:border-t-0 lg:border-l">
             <div className="space-y-5">
               <div className="rounded-[1.5rem] border border-white/10 bg-white/4 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.28em] text-slate-400">Star meaning</div>
+                    <div className="mt-2 text-sm text-slate-300">
+                      Label the star, give it a domain, and describe the kind of thinking it should hold.
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="border-white/12 bg-white/6 text-slate-200">
+                    {activeManifestPathForChat ? "Grounded" : "Unbound"}
+                  </Badge>
+                </div>
+
+                <div className="mt-4 space-y-4">
+                  <label className="space-y-2">
+                    <span className="text-[11px] uppercase tracking-[0.26em] text-slate-400">Star label</span>
+                    <Input
+                      value={labelDraft}
+                      onChange={(event) => setLabelDraft(event.target.value)}
+                      placeholder="Name this star"
+                    />
+                  </label>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="text-[11px] uppercase tracking-[0.26em] text-slate-400">What part of METIS does this strengthen?</span>
+                      <Input
+                        value={primaryDomainIdDraft}
+                        onChange={(event) => setPrimaryDomainIdDraft(event.target.value)}
+                        placeholder="knowledge"
+                        list="constellation-faculties"
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-[11px] uppercase tracking-[0.26em] text-slate-400">Growth stage</span>
+                      <select
+                        value={effectiveStage}
+                        onChange={(event) => {
+                          const nextStage = event.target.value as UserStarStage;
+                          setManualStageOverride(nextStage === derivedStage ? "" : nextStage);
+                        }}
+                        className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm text-white shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      >
+                        {STAGE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value} className="bg-slate-950 text-white">
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-xs leading-6 text-slate-400">
+                        {STAGE_OPTIONS.find((option) => option.value === effectiveStage)?.description}
+                      </p>
+                    </label>
+                  </div>
+
+                  <label className="space-y-2">
+                    <span className="text-[11px] uppercase tracking-[0.26em] text-slate-400">Bridge faculties</span>
+                    <Input
+                      value={relatedDomainIdsDraft}
+                      onChange={(event) => setRelatedDomainIdsDraft(event.target.value)}
+                      placeholder="memory, strategy"
+                      list="constellation-faculties"
+                    />
+                    <p className="text-xs leading-6 text-slate-400">
+                      Optional bridge faculties, comma-separated. Use one when a star should sit between domains.
+                    </p>
+                  </label>
+
+                  <label className="space-y-2">
+                    <span className="text-[11px] uppercase tracking-[0.26em] text-slate-400">What is this star for?</span>
+                    <Textarea
+                      value={intentDraft}
+                      onChange={(event) => setIntentDraft(event.target.value)}
+                      rows={3}
+                      placeholder="What should this star help you decide, remember, or compare?"
+                    />
+                  </label>
+
+                  <label className="space-y-2">
+                    <span className="text-[11px] uppercase tracking-[0.26em] text-slate-400">Supporting notes</span>
+                    <Textarea
+                      value={notesDraft}
+                      onChange={(event) => setNotesDraft(event.target.value)}
+                      rows={4}
+                      placeholder="Extra reminders, caveats, or context that keeps the star grounded."
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Badge variant="outline" className="border-white/12 bg-white/6 text-slate-200">
+                    {attachedManifestPaths.length} attached
+                  </Badge>
+                  <Badge variant="outline" className="border-white/12 bg-white/6 text-slate-200">
+                    {activeManifestPathForChat ? "Active chat selected" : "No active chat"}
+                  </Badge>
+                </div>
+
+                <datalist id="constellation-faculties">
+                  {CONSTELLATION_FACULTIES.map((faculty) => (
+                    <option key={faculty.id} value={faculty.id}>
+                      {faculty.label}
+                    </option>
+                  ))}
+                </datalist>
+              </div>
+
+              <div className="rounded-[1.5rem] border border-white/10 bg-white/4 p-4">
                 <div className="text-[11px] uppercase tracking-[0.28em] text-slate-400">Observatory rail</div>
                 <div className="mt-3 flex items-center gap-3">
                   <div className="size-3 rounded-full bg-[#d6b361] shadow-[0_0_24px_rgba(214,179,97,0.7)]" />
@@ -774,7 +1177,7 @@ export function StarObservatoryDialog({
                       {labelDraft.trim() || star.label || "Untitled star"}
                     </div>
                     <div className="text-sm text-slate-300">
-                      {linkedIndex ? "Linked and chat-ready" : "Awaiting an index"}
+                      {activeIndex ? "Linked and chat-ready" : "Awaiting an index"}
                     </div>
                   </div>
                 </div>
@@ -800,6 +1203,9 @@ export function StarObservatoryDialog({
                   <div className="mt-3 flex flex-wrap gap-3 text-sm text-emerald-100/90">
                     <span>{buildResult.document_count} docs</span>
                     <span>{buildResult.chunk_count} chunks</span>
+                  </div>
+                  <div className="mt-4 text-sm leading-7 text-emerald-100/85">
+                    This build is attached to the star and set active until you choose another orbit.
                   </div>
                 </div>
               ) : null}
@@ -844,6 +1250,32 @@ export function StarObservatoryDialog({
                       : "No other indexed sources are available yet. Build one in this observatory to give the star grounded memory."}
                   </p>
                 )}
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <Button onClick={() => void handleSaveMeta()} disabled={savingMeta} className="gap-2">
+                  {savingMeta ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                  Save meaning
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (!activeManifestPathForChat) {
+                      return;
+                    }
+                    const linkedLabel = labelDraft.trim() || activeStar.label || activeIndex?.index_id || "Mapped star";
+                    onOpenChat(activeManifestPathForChat, linkedLabel);
+                  }}
+                  disabled={!activeManifestPathForChat}
+                >
+                  Open active chat
+                </Button>
+                <Button variant="outline" onClick={() => setView("build")}>
+                  Build another index
+                </Button>
+                <Button variant="destructive" onClick={() => void handleRemoveStar()} disabled={removing}>
+                  {removing ? "Removing..." : "Remove star"}
+                </Button>
               </div>
             </div>
           </aside>

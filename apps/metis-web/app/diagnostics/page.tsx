@@ -284,17 +284,19 @@ function StatCard({
   label,
   value,
   caption,
+  delay = 0,
 }: {
   label: string;
   value: string;
   caption: string;
+  delay?: number;
 }) {
   return (
     <motion.div
-      className="glass-panel rounded-[1.2rem] border-white/10 px-4 py-3"
+      className="home-liquid-glass rounded-[1.2rem] px-4 py-3"
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: "easeOut" }}
+      transition={{ duration: 0.4, delay, ease: [0.22, 1, 0.36, 1] }}
     >
       <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
         {label}
@@ -472,11 +474,13 @@ export default function DiagnosticsPage() {
             label="Web"
             value={versions?.web ?? "1.0"}
             caption="Frontend build version."
+            delay={0}
           />
           <StatCard
             label="API"
             value={versions?.api ?? "—"}
             caption="Backend service version."
+            delay={0.08}
           />
           <StatCard
             label="Desktop"
@@ -486,6 +490,7 @@ export default function DiagnosticsPage() {
                 ? "Browser mode or no desktop bridge."
                 : "Tauri shell version."
             }
+            delay={0.16}
           />
         </section>
 
