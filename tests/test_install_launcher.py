@@ -203,6 +203,18 @@ class TestReadmeDocs:
         content = README.read_text(encoding="utf-8")
         assert "--cli" in content, "README should document --cli"
 
+    def test_readme_mentions_constellation_home(self) -> None:
+        """README should describe the landing page as the constellation home."""
+        content = README.read_text(encoding="utf-8")
+        assert "Constellation home" in content
+        assert "landing page" in content
+
+    def test_readme_documents_latest_chat_modes(self) -> None:
+        """README should include newer chat modes like Knowledge Search."""
+        content = README.read_text(encoding="utf-8")
+        assert "Knowledge Search" in content
+        assert "Evidence Pack" in content
+
     def test_readme_no_stale_gui_mode_reference(self) -> None:
         """README should not say 'metis' alone opens GUI (stale reference)."""
         content = README.read_text(encoding="utf-8")

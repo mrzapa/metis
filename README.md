@@ -20,9 +20,10 @@
 - **Fully local.** Run with a local GGUF model and you don't even need an internet connection.
 - **Swap anything.** LLM, embeddings, vector store. Change providers in a config file. Today it's OpenAI, tomorrow it's a model on your laptop.
 - **Desktop-native.** Built with Tauri for a native window experience with no Electron bloat.
-- **Five ways to think.** Q&A, Summary, Tutor, Research, and Evidence Pack modes give you different lenses on the same documents.
+- **Constellation home.** The landing page is a live workspace surface for bringing documents into orbit, linking indexes, and jumping into grounded chat.
+- **Six ways to think.** Q&A, Summary, Tutor, Research, Evidence Pack, and Knowledge Search modes give you different lenses on the same documents.
 - **METIS Companion.** An always-on AI companion that learns from your sessions, reflects on conversations, and grows with your workspace.
-- **Brain Graph.** An interactive 3D visualisation of your workspace including indexes, sessions, companion memory, and their relationships.
+- **Evidence-first chat.** Review retrieved sources, inspect trace events, and export grounded answers as JSON or PowerPoint.
 
 <br />
 
@@ -70,17 +71,17 @@ This starts the FastAPI app directly at `http://127.0.0.1:8000`.
 
 | Interface | Command |
 |-----------|---------|
-| **Web UI (installed launcher)** | `metis` |
+| **Web UI** | `metis` |
 | **Web UI (from source)** | `python main.py` |
 | **Desktop GUI** | `metis --desktop` or `metis --gui` |
 | **CLI** | `metis --cli <command>` |
 
 ### Use
 
-1. **Add documents**: bring files into the Home constellation flow or use the CLI
-2. **Ask questions**: select a mode (Q&A, Summary, Tutor, Research, Evidence Pack) and chat
-3. **Explore the Brain**: navigate the 3D graph to see how your workspace connects
-4. **Persist sessions**: conversations auto-save to SQLite
+1. **Build an index from the landing page**: upload files, add folders, or pull an existing index into the Home constellation flow
+2. **Ask grounded questions**: switch between Q&A, Summary, Tutor, Research, Evidence Pack, and Knowledge Search in chat
+3. **Inspect the answer**: review sources, follow the retrieval trace, or export the current result as an evidence pack or PowerPoint
+4. **Keep working in context**: sessions persist to SQLite, while the companion dock and settings flows stay available across the app
 
 ---
 
@@ -96,7 +97,15 @@ Most RAG apps hardcode their stack. METIS AI treats every layer as a plug-in. Sw
 | **Embeddings** | Voyage · Sentence Transformers · **local GGUF** | Yes, with GGUF or ST |
 | **Vector store** | In-memory JSON · ChromaDB · Weaviate | Yes, all run locally |
 
-### Five ways to read a document
+### Constellation home
+
+The landing page is no longer a static launcher. It is a constellation-style workspace where indexed sources become stars you can map, relink, inspect, and send directly into grounded chat. Build new indexes from uploads, filesystem paths, or existing manifests without leaving Home.
+
+### Chat workspace
+
+Chat is a split-panel workspace with persistent sessions on the left, the live conversation in the middle, and evidence plus trace panels on the right. Research runs stream in progressively, can resume after reconnects, and can export their grounded output as JSON or PPTX.
+
+### Six ways to read a document
 
 | Mode | What it's for |
 |------|--------------|
@@ -105,20 +114,15 @@ Most RAG apps hardcode their stack. METIS AI treats every layer as a plug-in. Sw
 | **Tutor** | Socratic-style back-and-forth to help you learn |
 | **Research** | Deep dives with sub-query expansion and reranking |
 | **Evidence Pack** | Structured claim-level grounding with source citations |
+| **Knowledge Search** | Retrieval-first exploration when you want to inspect what the index knows before synthesising |
 
 ### METIS Companion
 
 An always-on AI companion that lives in the workspace shell. It bootstraps an identity, reflects on active sessions, stores learned memories and playbooks, and surfaces contextual hints as you work. The companion is always available from the floating dock at the bottom of every page.
 
-### Brain Graph
+### Setup, settings, and the companion
 
-An interactive 3D force-directed graph visualising your entire workspace (indexes, sessions, the METIS Self, and learned companion memory) as glowing neural nodes connected by animated edges. Rotate, zoom, and click any node to inspect it.
-
-| Scope | What it shows |
-|-------|--------------|
-| **Workspace** | Indexes, sessions, and structural categories |
-| **METIS Self** | The companion's identity and self-structure |
-| **Assistant-Learned** | Memories, playbooks, and learned links |
+The first-run setup flow now walks you through model provider choice, credentials, embeddings, a first index build, and staged starter prompts before dropping you into chat. From there, the settings surface exposes both simple controls and deep retrieval/model options, while the floating METIS Companion dock can reflect on work, surface memory, and stay docked across pages.
 
 ### Everything else
 
