@@ -3,7 +3,7 @@
 <p align="center">
   <strong>The private, provider-agnostic AI workspace that runs entirely on your machine.</strong><br />
   Index your documents. Ask questions. Get grounded answers.<br />
-  No API keys required — bring a local model and go fully offline.
+  No API keys required. Bring a local model and go fully offline.
 </p>
 
 <p align="center">
@@ -15,14 +15,14 @@
 
 <br />
 
-**METIS AI** is a **local-first frontier AI workspace** built with Tauri + Next.js + FastAPI. It runs entirely on your machine — your files never leave your device.
+**METIS AI** is a **local-first frontier AI workspace** built with Tauri + Next.js + FastAPI. It runs entirely on your machine. Your files never leave your device.
 
 - **Fully local.** Run with a local GGUF model and you don't even need an internet connection.
-- **Swap anything.** LLM, embeddings, vector store — change providers in a config file. Today it's OpenAI, tomorrow it's a model on your laptop.
-- **Desktop-native.** Built with Tauri for a native window experience — no Electron bloat.
+- **Swap anything.** LLM, embeddings, vector store. Change providers in a config file. Today it's OpenAI, tomorrow it's a model on your laptop.
+- **Desktop-native.** Built with Tauri for a native window experience with no Electron bloat.
 - **Five ways to think.** Q&A, Summary, Tutor, Research, and Evidence Pack modes give you different lenses on the same documents.
 - **METIS Companion.** An always-on AI companion that learns from your sessions, reflects on conversations, and grows with your workspace.
-- **Brain Graph.** An interactive 3D visualisation of your workspace — indexes, sessions, companion memory, and their relationships.
+- **Brain Graph.** An interactive 3D visualisation of your workspace including indexes, sessions, companion memory, and their relationships.
 
 <br />
 
@@ -77,18 +77,18 @@ This starts the FastAPI app directly at `http://127.0.0.1:8000`.
 
 ### Use
 
-1. **Add documents** — bring files into the Home constellation flow or use the CLI
-2. **Ask questions** — select a mode (Q&A, Summary, Tutor, Research, Evidence Pack) and chat
-3. **Explore the Brain** — navigate the 3D graph to see how your workspace connects
-4. **Persist sessions** — conversations auto-save to SQLite
+1. **Add documents**: bring files into the Home constellation flow or use the CLI
+2. **Ask questions**: select a mode (Q&A, Summary, Tutor, Research, Evidence Pack) and chat
+3. **Explore the Brain**: navigate the 3D graph to see how your workspace connects
+4. **Persist sessions**: conversations auto-save to SQLite
 
 ---
 
 ## ✨ Features
 
-### Zero lock-in — swap every layer
+### Zero lock-in: swap every layer
 
-Most RAG apps hardcode their stack. METIS AI treats every layer as a plug-in. Switch providers in `settings.json` and restart — that's it.
+Most RAG apps hardcode their stack. METIS AI treats every layer as a plug-in. Switch providers in `settings.json` and restart. That's it.
 
 | Layer | Options | Go fully offline? |
 |-------|---------|:-----------------:|
@@ -112,7 +112,7 @@ An always-on AI companion that lives in the workspace shell. It bootstraps an id
 
 ### Brain Graph
 
-An interactive 3D force-directed graph visualising your entire workspace — indexes, sessions, the METIS Self, and learned companion memory — as glowing neural nodes connected by animated edges. Rotate, zoom, and click any node to inspect it.
+An interactive 3D force-directed graph visualising your entire workspace (indexes, sessions, the METIS Self, and learned companion memory) as glowing neural nodes connected by animated edges. Rotate, zoom, and click any node to inspect it.
 
 | Scope | What it shows |
 |-------|--------------|
@@ -122,18 +122,18 @@ An interactive 3D force-directed graph visualising your entire workspace — ind
 
 ### Everything else
 
-- **Knowledge graphs** — automatic entity extraction and relationship linking
-- **Persistent sessions** — SQLite-backed conversations that auto-save
-- **Agent profiles** — save different configurations for different projects
-- **Structure-aware ingestion** — parses PDFs, DOCX, Markdown, HTML, and plain text
-- **Background processing** — indexing and queries run in threads; the UI never freezes
-- **Theming** — Space Dust, Light, and Dark themes
+- **Knowledge graphs**: automatic entity extraction and relationship linking
+- **Persistent sessions**: SQLite-backed conversations that auto-save
+- **Agent profiles**: save different configurations for different projects
+- **Structure-aware ingestion**: parses PDFs, DOCX, Markdown, HTML, and plain text
+- **Background processing**: indexing and queries run in threads; the UI never freezes
+- **Theming**: Space Dust, Light, and Dark themes
 
 ---
 
 ## 💻 CLI
 
-The CLI shares the same retrieval backend as the app — same results, no window.
+The CLI shares the same retrieval backend as the app: same results, no window.
 
 ```bash
 # Index a file
@@ -185,7 +185,7 @@ This starts:
 
 ## 🔧 Configuration
 
-METIS AI ships with sensible defaults in `metis_app/default_settings.json`. To customise, copy it to `settings.json` in the project root — METIS picks it up automatically on the next launch.
+METIS AI ships with sensible defaults in `metis_app/default_settings.json`. To customise, copy it to `settings.json` in the project root. METIS picks it up automatically on the next launch.
 
 ### Environment variables
 
