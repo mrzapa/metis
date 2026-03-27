@@ -46,14 +46,16 @@ const INITIAL_PROGRESS: ProgressState = {
 interface IndexBuildStudioProps {
   settingsOverrides?: Record<string, unknown>;
   showExistingIndexes?: boolean;
-  onBuildComplete?: (result: IndexBuildResult) => void;
+  onIndexBuilt?: (result: IndexBuildResult) => void;
+  successMode?: "default" | "onboarding";
   className?: string;
 }
 
 export function IndexBuildStudio({
   settingsOverrides,
   showExistingIndexes = true,
-  onBuildComplete,
+  onIndexBuilt,
+  successMode = "default",
   className,
 }: IndexBuildStudioProps) {
   const router = useRouter();
@@ -197,7 +199,7 @@ export function IndexBuildStudio({
 
       setProgress({ reading: "done", embedding: "done", saved: "done" });
       setBuildResult(result);
-      onBuildComplete?.(result);
+      onIndexBuilt?.(result);
       loadIndexes();
     } catch (err) {
       setBuildError(err instanceof Error ? err.message : "Build failed");
@@ -518,7 +520,7 @@ export function IndexBuildStudio({
                   {buildResult.document_count} document{buildResult.document_count === 1 ? "" : "s"} and{" "}
                   {buildResult.chunk_count} chunks are available.
                 </p>
-                {onBuildComplete ? (
+                {successMode === "onboarding" ? (
                   <p className="mt-3 text-sm text-emerald-100/85">
                     This index is ready for the final launch step.
                   </p>

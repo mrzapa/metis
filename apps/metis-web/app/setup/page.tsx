@@ -110,7 +110,7 @@ export default function SetupPage() {
       .catch(() => {
         // The onboarding flow can still proceed with sane defaults.
       });
-  }, []);
+  }, [setBaselineSettings, setEmbeddingProvider, setLlmProvider]);
 
   const starterPrompts = builtIndex ? STARTER_PROMPTS_WITH_INDEX : STARTER_PROMPTS_DIRECT;
 
@@ -121,7 +121,7 @@ export default function SetupPage() {
       }
       return starterPrompts[0];
     });
-  }, [starterPrompts]);
+  }, [setSelectedPrompt, starterPrompts]);
 
   const buildSettings = useMemo(() => {
     const nextSettings: Record<string, unknown> = {
@@ -323,7 +323,8 @@ export default function SetupPage() {
         <IndexBuildStudio
           settingsOverrides={buildSettings}
           showExistingIndexes={false}
-          onBuildComplete={setBuiltIndex}
+          onIndexBuilt={setBuiltIndex}
+          successMode="onboarding"
         />
       ),
       hint: STEP_HINTS[3],

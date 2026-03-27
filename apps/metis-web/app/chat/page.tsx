@@ -1175,9 +1175,18 @@ export default function ChatPage() {
       eyebrow="Chat"
       title="Ask questions, get grounded answers"
       description="Switch between direct reasoning and retrieval-augmented mode. Inspect evidence, trace data, and manage sessions."
+      backdropVariant="starscape"
+      tone="starscape"
       actions={
         <>
-          {activeIndexLabel ? <Badge variant="outline">Index: {activeIndexLabel}</Badge> : null}
+          {activeIndexLabel ? (
+            <Badge
+              variant="outline"
+              className="border-[rgba(196,149,58,0.16)] bg-[rgba(10,14,28,0.58)] text-[rgba(222,229,241,0.84)]"
+            >
+              Index: {activeIndexLabel}
+            </Badge>
+          ) : null}
         </>
       }
       heroAside={undefined}
@@ -1188,7 +1197,7 @@ export default function ChatPage() {
         runId: latestRunId,
       }}
     >
-      <div className="chat-shell-frame h-[calc(100dvh-13.75rem)] min-h-176 overflow-hidden rounded-[2rem] p-2.5 sm:p-3">
+      <div className="chat-starscape-theme chat-shell-frame h-[calc(100dvh-13.75rem)] min-h-176 overflow-hidden rounded-[2rem] p-2.5 sm:p-3">
         <ResizablePanels
           className="h-full"
           resetToken={shellPostureToken}

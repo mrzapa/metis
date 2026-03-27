@@ -243,13 +243,13 @@ export function ChatPanel({
             type="button"
             onClick={() => onAgenticModeChange?.(!agenticMode)}
             disabled={agenticModeSaving}
+            aria-pressed={agenticMode}
             className={cn(
               "chat-control-pill flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium transition-colors",
               agenticMode
                 ? "border-sky-400/25 bg-sky-500/14 text-sky-100 hover:bg-sky-500/18"
                 : "text-muted-foreground hover:bg-white/10",
             )}
-            aria-pressed={agenticMode}
           >
             <AnimatedLucideIcon icon={Bot} mode="hoverLift" className="size-3" />
             Agentic {agenticMode ? "on" : "off"}
@@ -379,7 +379,7 @@ export function ChatPanel({
           )}
 
           {!loading && !error && messages.length === 0 && (
-            <div className="glass-panel mx-auto flex max-w-3xl flex-col items-center justify-center rounded-[1.8rem] px-8 py-16 text-center text-muted-foreground">
+            <div className="chat-empty-state glass-panel mx-auto flex max-w-3xl flex-col items-center justify-center rounded-[1.8rem] px-8 py-16 text-center text-muted-foreground">
               <p className="font-display text-3xl font-semibold tracking-[-0.04em] text-foreground">
                 Start with a question that feels specific.
               </p>
@@ -416,10 +416,10 @@ export function ChatPanel({
               ) : (
                 <div
                   className={cn(
-                      "max-w-[84%] rounded-[1.35rem] border px-4 py-3 text-sm leading-[1.72] shadow-lg shadow-black/10",
+                    "chat-message-surface max-w-[84%] rounded-[1.35rem] border px-4 py-3 text-sm leading-[1.72] shadow-lg shadow-black/10",
                     msg.role === "user"
-                      ? "border-primary/30 bg-primary/92 text-primary-foreground shadow-primary/20"
-                      : "glass-micro-surface border-white/10 bg-white/7 text-foreground/96"
+                      ? "chat-message-surface--user border-primary/30 bg-primary/92 text-primary-foreground shadow-primary/20"
+                      : "chat-message-surface--assistant glass-micro-surface border-white/10 bg-white/7 text-foreground/96"
                   )}
                 >
                   {msg.role === "assistant" ? (
@@ -522,6 +522,7 @@ export function ChatPanel({
             <button
               type="button"
               onClick={() => setQueryMode("direct")}
+              data-active={queryMode === "direct" ? "true" : "false"}
               className={cn(
                 "chat-control-pill rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
                 queryMode === "direct"
@@ -534,6 +535,7 @@ export function ChatPanel({
             <button
               type="button"
               onClick={() => setQueryMode("rag")}
+              data-active={queryMode === "rag" ? "true" : "false"}
               className={cn(
                 "chat-control-pill rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
                 queryMode === "rag"

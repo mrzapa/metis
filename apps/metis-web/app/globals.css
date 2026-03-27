@@ -1803,3 +1803,349 @@ body {
 [data-slot="scroll-area-viewport"]::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.28);
 }
+
+/* ── Landing-aligned chat shell ──────────────────────────────────────────── */
+:root .page-chrome--starscape {
+  --starscape-accent: rgba(232, 184, 74, 0.82);
+  --starscape-accent-strong: rgba(232, 184, 74, 0.96);
+  --starscape-accent-soft: rgba(196, 149, 58, 0.24);
+  --starscape-text: rgba(222, 229, 241, 0.92);
+  --starscape-muted: rgba(186, 196, 214, 0.68);
+  --starscape-muted-strong: rgba(198, 208, 224, 0.82);
+  --starscape-border: rgba(200, 210, 225, 0.09);
+}
+
+:root .page-chrome--starscape .page-chrome-sidebar,
+:root .page-chrome--starscape .page-chrome-topbar,
+:root .page-chrome--starscape .page-chrome-hero-panel,
+:root .page-chrome--starscape .page-chrome-hero-aside {
+  position: relative;
+  border: 1px solid var(--starscape-border);
+  background:
+    radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.08) 0%, transparent 24%),
+    linear-gradient(180deg, rgba(12, 18, 35, 0.8), rgba(7, 11, 22, 0.72));
+  backdrop-filter: blur(24px) saturate(122%);
+  -webkit-backdrop-filter: blur(24px) saturate(122%);
+  box-shadow:
+    0 28px 88px -48px rgba(0, 0, 0, 0.82),
+    0 8px 28px -18px rgba(42, 90, 158, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+:root .page-chrome--starscape .page-chrome-sidebar::before,
+:root .page-chrome--starscape .page-chrome-topbar::before,
+:root .page-chrome--starscape .page-chrome-hero-panel::before,
+:root .page-chrome--starscape .page-chrome-hero-aside::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, transparent 30%);
+  opacity: 0.72;
+}
+
+:root .page-chrome--starscape .page-chrome-sidebar > *,
+:root .page-chrome--starscape .page-chrome-topbar > *,
+:root .page-chrome--starscape .page-chrome-hero-panel > *,
+:root .page-chrome--starscape .page-chrome-hero-aside > * {
+  position: relative;
+  z-index: 1;
+}
+
+:root .page-chrome--starscape .page-chrome-brand-mark {
+  background: radial-gradient(circle at 34% 26%, rgba(232, 184, 74, 0.2), rgba(21, 33, 66, 0.95));
+  color: var(--starscape-accent);
+  border: 1px solid rgba(196, 149, 58, 0.18);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 10px 24px -16px rgba(196, 149, 58, 0.32);
+}
+
+:root .page-chrome--starscape .page-chrome-wordmark,
+:root .page-chrome--starscape .page-chrome-title {
+  color: var(--starscape-text);
+}
+
+:root .page-chrome--starscape .page-chrome-eyebrow {
+  color: var(--starscape-accent);
+  letter-spacing: 0.28em;
+}
+
+:root .page-chrome--starscape .page-chrome-description,
+:root .page-chrome--starscape .page-chrome-footer-note {
+  color: var(--starscape-muted);
+}
+
+:root .page-chrome--starscape .page-chrome-nav-link,
+:root .page-chrome--starscape .page-chrome-top-link {
+  color: var(--starscape-muted);
+  border: 1px solid transparent;
+}
+
+:root .page-chrome--starscape .page-chrome-nav-link svg {
+  color: rgba(180, 190, 210, 0.58);
+  transition: color 180ms ease;
+}
+
+:root .page-chrome--starscape .page-chrome-nav-link:hover,
+:root .page-chrome--starscape .page-chrome-top-link:hover {
+  color: var(--starscape-text);
+  background: rgba(16, 24, 46, 0.52);
+  border-color: rgba(200, 210, 225, 0.08);
+}
+
+:root .page-chrome--starscape .page-chrome-nav-link[data-active="true"],
+:root .page-chrome--starscape .page-chrome-top-link[data-active="true"] {
+  color: var(--starscape-text);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(232, 184, 74, 0.12), transparent 42%),
+    rgba(16, 24, 46, 0.78);
+  border-color: rgba(196, 149, 58, 0.18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 14px 24px -24px rgba(196, 149, 58, 0.7);
+}
+
+:root .page-chrome--starscape .page-chrome-nav-link[data-active="true"] svg {
+  color: var(--starscape-accent);
+}
+
+:root .chat-starscape-theme {
+  --chat-starscape-text: rgba(225, 232, 242, 0.92);
+  --chat-starscape-muted: rgba(184, 194, 210, 0.7);
+  --chat-starscape-muted-soft: rgba(184, 194, 210, 0.52);
+  --chat-starscape-border: rgba(200, 210, 225, 0.09);
+  --chat-starscape-border-strong: rgba(196, 149, 58, 0.18);
+  --chat-starscape-panel: rgba(10, 14, 28, 0.74);
+  --chat-starscape-panel-strong: rgba(8, 11, 22, 0.82);
+}
+
+:root .chat-starscape-theme.chat-shell-frame {
+  border: 1px solid var(--chat-starscape-border);
+  background:
+    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.08) 0%, transparent 22%),
+    radial-gradient(circle at 86% 100%, rgba(42, 90, 158, 0.12) 0%, transparent 34%),
+    linear-gradient(180deg, rgba(9, 13, 25, 0.6), rgba(7, 10, 20, 0.46));
+  backdrop-filter: blur(22px) saturate(118%);
+  -webkit-backdrop-filter: blur(22px) saturate(118%);
+  box-shadow:
+    0 36px 110px -58px rgba(0, 0, 0, 0.86),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+:root .chat-starscape-theme .chat-pane-surface {
+  position: relative;
+  border: 1px solid var(--chat-starscape-border);
+  background:
+    radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.07) 0%, transparent 24%),
+    linear-gradient(180deg, rgba(11, 17, 32, 0.88), rgba(8, 12, 24, 0.76));
+  color: var(--chat-starscape-text);
+  box-shadow:
+    0 24px 76px -54px rgba(0, 0, 0, 0.88),
+    0 12px 28px -24px rgba(42, 90, 158, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+:root .chat-starscape-theme .chat-pane-surface::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, transparent 30%);
+  opacity: 0.72;
+}
+
+:root .chat-starscape-theme .chat-pane-surface > * {
+  position: relative;
+  z-index: 1;
+}
+
+:root .chat-starscape-theme .chat-pane-surface:hover,
+:root .chat-starscape-theme .chat-pane-surface:focus-within {
+  border-color: rgba(200, 210, 225, 0.12);
+  box-shadow:
+    0 28px 84px -56px rgba(0, 0, 0, 0.9),
+    0 16px 30px -22px rgba(196, 149, 58, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  transform: none;
+}
+
+:root .chat-starscape-theme .glass-strip {
+  background:
+    linear-gradient(180deg, rgba(15, 22, 41, 0.92), rgba(10, 14, 28, 0.78)),
+    rgba(8, 12, 24, 0.7);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+}
+
+:root .chat-starscape-theme .glass-micro-surface,
+:root .chat-starscape-theme [data-slot="card"] {
+  border: 1px solid var(--chat-starscape-border);
+  background:
+    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.05) 0%, transparent 24%),
+    linear-gradient(180deg, rgba(14, 20, 38, 0.84), rgba(10, 14, 28, 0.76));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 16px 28px -28px rgba(0, 0, 0, 0.76);
+}
+
+:root .chat-starscape-theme .glass-tab-rail {
+  border-color: rgba(200, 210, 225, 0.08);
+  background:
+    linear-gradient(180deg, rgba(16, 23, 42, 0.88), rgba(10, 14, 28, 0.78)),
+    rgba(9, 13, 24, 0.74);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+:root .chat-starscape-theme .glass-tab-rail [data-slot="tabs-trigger"] {
+  color: var(--chat-starscape-muted);
+}
+
+:root .chat-starscape-theme .glass-tab-rail [data-slot="tabs-trigger"][data-active] {
+  color: rgba(241, 224, 183, 0.95);
+  border-color: var(--chat-starscape-border-strong);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(232, 184, 74, 0.14), transparent 40%),
+    rgba(17, 25, 48, 0.82);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 16px 28px -24px rgba(196, 149, 58, 0.46);
+}
+
+:root .chat-starscape-theme .chat-pane-divider {
+  border-color: rgba(196, 149, 58, 0.12);
+  background: linear-gradient(180deg, rgba(196, 149, 58, 0.08), rgba(36, 56, 110, 0.22), rgba(196, 149, 58, 0.08));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 10px 24px -20px rgba(196, 149, 58, 0.4);
+}
+
+:root .chat-starscape-theme .chat-pane-divider:hover,
+:root .chat-starscape-theme .chat-pane-divider:focus-visible {
+  border-color: rgba(196, 149, 58, 0.22);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 0 20px -12px rgba(196, 149, 58, 0.7),
+    0 12px 28px -18px rgba(196, 149, 58, 0.48);
+}
+
+:root .chat-starscape-theme .chat-control-pill {
+  border: 1px solid rgba(200, 210, 225, 0.1);
+  background: rgba(15, 22, 41, 0.82);
+  color: var(--chat-starscape-muted);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+:root .chat-starscape-theme .chat-control-pill:hover {
+  border-color: rgba(200, 210, 225, 0.14);
+  color: var(--chat-starscape-text);
+  background: rgba(19, 28, 51, 0.88);
+}
+
+:root .chat-starscape-theme .chat-control-pill[data-active="true"],
+:root .chat-starscape-theme .chat-control-pill[aria-pressed="true"] {
+  border-color: var(--chat-starscape-border-strong);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(232, 184, 74, 0.16), transparent 42%),
+    rgba(20, 29, 54, 0.92);
+  color: rgba(242, 228, 193, 0.96);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 16px 28px -24px rgba(196, 149, 58, 0.58);
+}
+
+:root .chat-starscape-theme .chat-send-button {
+  border: 1px solid rgba(196, 149, 58, 0.22);
+  background:
+    radial-gradient(circle at 30% 22%, rgba(232, 184, 74, 0.22), transparent 42%),
+    linear-gradient(180deg, rgba(24, 36, 70, 0.96), rgba(14, 20, 40, 0.98));
+  color: rgba(236, 240, 247, 0.94);
+  box-shadow:
+    0 18px 42px -16px rgba(12, 20, 40, 0.8),
+    0 10px 24px -12px rgba(196, 149, 58, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+:root .chat-starscape-theme .chat-send-button:hover {
+  border-color: rgba(232, 184, 74, 0.32);
+  box-shadow:
+    0 22px 48px -16px rgba(12, 20, 40, 0.86),
+    0 14px 28px -12px rgba(196, 149, 58, 0.5),
+    0 0 28px -18px rgba(232, 184, 74, 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+:root .chat-starscape-theme input.glass-micro-surface,
+:root .chat-starscape-theme textarea.glass-micro-surface,
+:root .chat-starscape-theme select.glass-micro-surface,
+:root .chat-starscape-theme select.chat-control-pill {
+  color-scheme: dark;
+  border-color: rgba(200, 210, 225, 0.11);
+  background:
+    linear-gradient(180deg, rgba(16, 23, 42, 0.88), rgba(11, 16, 31, 0.82)),
+    rgba(10, 14, 28, 0.76);
+  color: var(--chat-starscape-text);
+}
+
+:root .chat-starscape-theme input.glass-micro-surface::placeholder,
+:root .chat-starscape-theme textarea.glass-micro-surface::placeholder {
+  color: var(--chat-starscape-muted-soft);
+}
+
+:root .chat-starscape-theme input.glass-micro-surface:focus,
+:root .chat-starscape-theme textarea.glass-micro-surface:focus,
+:root .chat-starscape-theme select.glass-micro-surface:focus,
+:root .chat-starscape-theme select.chat-control-pill:focus {
+  border-color: rgba(196, 149, 58, 0.26);
+  box-shadow:
+    0 0 0 1px rgba(196, 149, 58, 0.16),
+    0 0 28px -22px rgba(196, 149, 58, 0.78);
+}
+
+:root .chat-starscape-theme button[role="option"][aria-selected="true"] {
+  border-color: rgba(196, 149, 58, 0.18);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(232, 184, 74, 0.12), transparent 42%),
+    linear-gradient(180deg, rgba(18, 27, 50, 0.92), rgba(11, 16, 31, 0.84));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 18px 30px -28px rgba(196, 149, 58, 0.82);
+}
+
+:root .chat-starscape-theme .chat-empty-state,
+:root .chat-starscape-theme .chat-message-surface--assistant {
+  border-color: rgba(200, 210, 225, 0.08);
+  background:
+    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.06) 0%, transparent 24%),
+    linear-gradient(180deg, rgba(12, 18, 35, 0.88), rgba(8, 12, 24, 0.82));
+  color: var(--chat-starscape-text);
+  box-shadow:
+    0 22px 48px -40px rgba(0, 0, 0, 0.82),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+:root .chat-starscape-theme .chat-message-surface--user {
+  border-color: rgba(196, 149, 58, 0.18);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(232, 184, 74, 0.12), transparent 42%),
+    linear-gradient(180deg, rgba(23, 33, 61, 0.96), rgba(14, 20, 38, 0.96));
+  color: rgba(237, 241, 247, 0.96);
+  box-shadow:
+    0 22px 48px -38px rgba(0, 0, 0, 0.86),
+    0 14px 28px -24px rgba(196, 149, 58, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+:root .chat-starscape-theme [data-slot="card"] .bg-muted {
+  background: rgba(18, 27, 50, 0.72);
+}

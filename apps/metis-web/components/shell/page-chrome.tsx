@@ -7,12 +7,12 @@ import { motion } from "motion/react";
 import {
   Activity,
   Home,
-  LibraryBig,
   MessageSquare,
   Settings2,
 } from "lucide-react";
 import { AmbientBackdrop } from "@/components/shell/ambient-backdrop";
 import { MetisCompanionDock } from "@/components/shell/metis-companion-dock";
+import { StarscapeBackdrop } from "@/components/shell/starscape-backdrop";
 import { cn } from "@/lib/utils";
 
 interface PageChromeProps {
@@ -24,6 +24,8 @@ interface PageChromeProps {
   children: ReactNode;
   contentClassName?: string;
   fullBleed?: boolean;
+  backdropVariant?: "ambient" | "starscape";
+  tone?: "default" | "starscape";
   companionContext?: {
     sessionId?: string | null;
     runId?: string | null;
@@ -33,7 +35,6 @@ interface PageChromeProps {
 const NAV_ITEMS = [
   { href: "/", label: "Home", icon: Home },
   { href: "/chat", label: "Chat", icon: MessageSquare },
-  { href: "/library", label: "Library", icon: LibraryBig },
   { href: "/settings", label: "Settings", icon: Settings2 },
   { href: "/diagnostics", label: "Diagnostics", icon: Activity },
 ];
@@ -52,23 +53,48 @@ export function PageChrome({
   children,
   contentClassName,
   fullBleed = false,
+  backdropVariant = "ambient",
+  tone = "default",
   companionContext,
 }: PageChromeProps) {
   const pathname = usePathname();
+  const isStarscape = tone === "starscape";
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
-      <AmbientBackdrop />
+    <div
+      className={cn(
+        "page-chrome relative min-h-screen overflow-hidden",
+        isStarscape && "page-chrome--starscape",
+      )}
+    >
+      {backdropVariant === "starscape" ? <StarscapeBackdrop /> : <AmbientBackdrop />}
       <div className="relative z-10 flex min-h-screen">
         {/* ── Sidebar (xl+) ───────────────────────────────────────── */}
         <aside className="hidden w-64 shrink-0 p-3 xl:block">
           {/* top-3 + bottom p-3 = 1.5rem total vertical padding → min-h = 100dvh - 1.5rem */}
-          <nav className="glass-panel-strong sticky top-3 flex min-h-[calc(100dvh-1.5rem)] flex-col rounded-2xl p-4">
+          <nav
+            className={cn(
+              "sticky top-3 flex min-h-[calc(100dvh-1.5rem)] flex-col rounded-2xl p-4",
+              isStarscape ? "page-chrome-sidebar" : "glass-panel-strong",
+            )}
+          >
             <Link href="/" className="mb-6 flex items-center gap-2.5 px-2">
-              <span className="flex size-8 items-center justify-center rounded-lg bg-primary/14 text-primary">
+              <span
+                className={cn(
+                  "flex size-8 items-center justify-center rounded-lg",
+                  isStarscape
+                    ? "page-chrome-brand-mark"
+                    : "bg-primary/14 text-primary",
+                )}
+              >
                 <Home className="size-4" />
               </span>
-              <span className="text-base font-semibold tracking-tight text-foreground">
+              <span
+                className={cn(
+                  "text-base font-semibold tracking-tight",
+                  isStarscape ? "page-chrome-wordmark" : "text-foreground",
+                )}
+              >
                 METIS
               </span>
             </Link>
@@ -81,14 +107,19 @@ export function PageChrome({
                   <Link
                     key={item.href}
                     href={item.href}
-                    className={cn(
-                      "flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-colors duration-150",
-                      active
-                        ? "bg-primary/12 font-medium text-foreground"
-                        : "text-muted-foreground hover:bg-white/6 hover:text-foreground",
-                    )}
+                    data-active={active ? "true" : "false"}
+                    className={
+                      isStarscape
+                        ? "page-chrome-nav-link flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-colors duration-150"
+                        : cn(
+                            "flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-colors duration-150",
+                            active
+                              ? "bg-primary/12 font-medium text-foreground"
+                              : "text-muted-foreground hover:bg-white/6 hover:text-foreground",
+                          )
+                    }
                   >
-                    <Icon className={cn("size-4", active && "text-primary")} />
+                    <Icon className={cn("size-4", active && !isStarscape && "text-primary")} />
                     {item.label}
                   </Link>
                 );
@@ -96,7 +127,14 @@ export function PageChrome({
             </div>
 
             <div className="mt-auto px-2 pt-6">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground/60">
+              <p
+                className={cn(
+                  "text-[11px] uppercase tracking-[0.18em]",
+                  isStarscape
+                    ? "page-chrome-footer-note"
+                    : "text-muted-foreground/60",
+                )}
+              >
                 Local-first · Private by default
               </p>
             </div>
@@ -110,11 +148,17 @@ export function PageChrome({
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.35, ease: "easeOut" }}
-            className="glass-panel sticky top-3 z-20 flex items-center gap-3 rounded-xl px-4 py-2.5 sm:top-4 sm:px-5"
+            className={cn(
+              "sticky top-3 z-20 flex items-center gap-3 rounded-xl px-4 py-2.5 sm:top-4 sm:px-5",
+              isStarscape ? "page-chrome-topbar" : "glass-panel",
+            )}
           >
             <Link
               href="/"
-              className="text-base font-semibold tracking-tight text-foreground xl:hidden"
+              className={cn(
+                "text-base font-semibold tracking-tight xl:hidden",
+                isStarscape ? "page-chrome-wordmark" : "text-foreground",
+              )}
             >
               METIS
             </Link>
@@ -124,12 +168,17 @@ export function PageChrome({
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={cn(
-                    "hidden rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors sm:inline-flex",
-                    isActive(pathname, item.href)
-                      ? "bg-primary/14 text-primary"
-                      : "text-muted-foreground hover:bg-white/6 hover:text-foreground",
-                  )}
+                  data-active={isActive(pathname, item.href) ? "true" : "false"}
+                  className={
+                    isStarscape
+                      ? "page-chrome-top-link hidden rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors sm:inline-flex"
+                      : cn(
+                          "hidden rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors sm:inline-flex",
+                          isActive(pathname, item.href)
+                            ? "bg-primary/14 text-primary"
+                            : "text-muted-foreground hover:bg-white/6 hover:text-foreground",
+                        )
+                  }
                 >
                   {item.label}
                 </Link>
@@ -147,14 +196,34 @@ export function PageChrome({
             >
               {/* Page header */}
               <section className="mb-4 grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.95fr)] xl:items-stretch">
-                <div className="glass-panel flex h-full flex-col rounded-2xl px-5 py-5 sm:px-6 sm:py-6">
-                  <p className="text-xs font-medium uppercase tracking-[0.2em] text-primary/80">
+                <div
+                  className={cn(
+                    "flex h-full flex-col rounded-2xl px-5 py-5 sm:px-6 sm:py-6",
+                    isStarscape ? "page-chrome-hero-panel" : "glass-panel",
+                  )}
+                >
+                  <p
+                    className={cn(
+                      "text-xs font-medium uppercase tracking-[0.2em]",
+                      isStarscape ? "page-chrome-eyebrow" : "text-primary/80",
+                    )}
+                  >
                     {eyebrow}
                   </p>
-                  <h1 className="mt-2 text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+                  <h1
+                    className={cn(
+                      "mt-2 text-balance text-3xl font-semibold tracking-tight sm:text-4xl",
+                      isStarscape ? "page-chrome-title" : "text-foreground",
+                    )}
+                  >
                     {title}
                   </h1>
-                  <p className="mt-2 max-w-2xl text-pretty text-sm leading-relaxed text-muted-foreground">
+                  <p
+                    className={cn(
+                      "mt-2 max-w-2xl text-pretty text-sm leading-relaxed",
+                      isStarscape ? "page-chrome-description" : "text-muted-foreground",
+                    )}
+                  >
                     {description}
                   </p>
                   {actions && !heroAside ? (
@@ -170,7 +239,12 @@ export function PageChrome({
                         {actions}
                       </div>
                     ) : null}
-                    <div className="glass-panel min-h-full rounded-2xl px-5 py-4 sm:px-6 sm:py-5">
+                    <div
+                      className={cn(
+                        "min-h-full rounded-2xl px-5 py-4 sm:px-6 sm:py-5",
+                        isStarscape ? "page-chrome-hero-aside" : "glass-panel",
+                      )}
+                    >
                       {heroAside}
                     </div>
                   </div>
