@@ -35,7 +35,7 @@ function readLocal(): UserStar[] {
 }
 
 export function useConstellationStars() {
-  const [userStars, setUserStars] = useState<UserStar[]>([]);
+  const [userStars, setUserStars] = useState<UserStar[]>(() => capUserStars(readLocal()));
   const [syncError, setSyncError] = useState<string | null>(null);
   const initializedRef = useRef(false);
   const userStarsRef = useRef<UserStar[]>([]);
@@ -50,9 +50,7 @@ export function useConstellationStars() {
     }
     initializedRef.current = true;
 
-    const local = readLocal();
-    if (local.length > 0) {
-      setUserStars(capUserStars(local));
+    if (userStarsRef.current.length > 0) {
       return;
     }
 
@@ -88,19 +86,20 @@ export function useConstellationStars() {
       const current = userStarsRef.current;
       const remainingSlots = getRemainingUserStarSlots(current.length);
       if (remainingSlots === 0) {
-        return false;
+        return null;
       }
       const now = Date.now();
+      const createdStar = normalizeUserStar({
+        ...star,
+        id: `star-${now}-${Math.round(Math.random() * 100000)}`,
+        createdAt: now,
+      });
       const next = [
         ...current,
-        normalizeUserStar({
-          ...star,
-          id: `star-${now}-${Math.round(Math.random() * 100000)}`,
-          createdAt: now,
-        }),
+        createdStar,
       ];
       await saveBoth(next);
-      return true;
+      return createdStar;
     },
     [saveBoth],
   );

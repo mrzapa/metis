@@ -2,9 +2,25 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { StarObservatoryDialog } from "@/components/constellation/star-observatory-dialog";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
-import { fetchIndexes, type IndexSummary } from "@/lib/api";
+import { fetchIndexes, type IndexBuildResult, type IndexSummary } from "@/lib/api";
+import {
+  ADD_CANDIDATE_HIT_RADIUS_PX,
+  MOBILE_ADD_CANDIDATE_HIT_RADIUS_PX,
+  CORE_CENTER_X,
+  CORE_CENTER_Y,
+  CORE_EXCLUSION_RADIUS,
+  buildOutwardPlacement,
+  findHoveredAddCandidate,
+  getPreviewConnectionNodes,
+  isAddableBackgroundStar,
+  projectBackgroundStar,
+  type ConstellationFieldStar,
+  type ConstellationNodePoint,
+} from "@/lib/constellation-home";
+import type { UserStar } from "@/lib/constellation-types";
 
 /* ────────────────────────────── constants ────────────────────────────── */
 
@@ -36,33 +52,13 @@ const NODE_LAYOUT: [number, number][] = [
   [-0.36, -0.04],
 ];
 const HOVER_EXPAND_DELAY_MS = 600;
-const CORE_CENTER_X = 0.56;
-const CORE_CENTER_Y = 0.43;
-const CORE_EXCLUSION_RADIUS = 0.21;
-
-function buildOutwardPlacement(targetX: number, targetY: number, existingStars: number): [number, number] {
-  const dx = targetX - CORE_CENTER_X;
-  const dy = targetY - CORE_CENTER_Y;
-  const angle = Math.atan2(dy, dx);
-  const dist = Math.hypot(dx, dy);
-  const shell = Math.floor(existingStars / 8) + 1;
-  const minRadius = CORE_EXCLUSION_RADIUS + shell * 0.055;
-  const radius = Math.max(minRadius, dist);
-  const nx = Math.min(0.96, Math.max(0.04, CORE_CENTER_X + Math.cos(angle) * radius));
-  const ny = Math.min(0.95, Math.max(0.06, CORE_CENTER_Y + Math.sin(angle) * radius));
-  return [nx, ny];
-}
 
 /* ────────────────────────────── helpers ──────────────────────────────── */
 
-interface StarData {
-  x: number; y: number; layer: number; baseSize: number;
-  brightness: number; twinkle: boolean; twinkleSpeed: number;
-  twinklePhase: number; parallaxFactor: number; hasDiffraction: boolean;
-}
+type StarData = ConstellationFieldStar;
 
-interface NodeData {
-  x: number; y: number; baseSize: number;
+interface NodeData extends ConstellationNodePoint {
+  baseSize: number;
   brightness: number; targetBrightness: number;
   concept: typeof CONCEPTS[number]; connections: number[];
   awakenDelay: number; parallax: number;
@@ -75,10 +71,14 @@ interface DustData {
   size: number; opacity: number;
 }
 
-function makeStar(W: number, H: number, layer: number): StarData {
+function makeStar(layer: number, index: number): StarData {
   const baseSize = Math.random() * (layer === 0 ? 1.2 : layer === 1 ? 0.8 : 0.5) + 0.2;
   return {
-    x: Math.random() * W, y: Math.random() * H, layer, baseSize,
+    id: `field-star-${layer}-${index}`,
+    nx: Math.random(),
+    ny: Math.random(),
+    layer,
+    baseSize,
     brightness: Math.random() * 0.4 + 0.1,
     twinkle: Math.random() > 0.92,
     twinkleSpeed: Math.random() * 0.02 + 0.005,
@@ -94,6 +94,52 @@ function makeDust(W: number, H: number): DustData {
     vx: (Math.random() - 0.5) * 0.15, vy: (Math.random() - 0.5) * 0.1,
     size: Math.random() * 1.2 + 0.3, opacity: Math.random() * 0.06 + 0.02,
   };
+}
+
+function buildOptimisticIndexSummary(result: IndexBuildResult): IndexSummary {
+  return {
+    index_id: result.index_id,
+    manifest_path: result.manifest_path,
+    document_count: result.document_count,
+    chunk_count: result.chunk_count,
+    backend: result.vector_backend,
+    created_at: new Date().toISOString(),
+    embedding_signature: result.embedding_signature,
+  };
+}
+
+function upsertIndexSummary(current: IndexSummary[], next: IndexSummary): IndexSummary[] {
+  return [
+    next,
+    ...current.filter(
+      (index) => index.manifest_path !== next.manifest_path && index.index_id !== next.index_id,
+    ),
+  ];
+}
+
+function getIndexSummaryKey(index: Pick<IndexSummary, "index_id" | "manifest_path">): string {
+  return `${index.manifest_path}::${index.index_id}`;
+}
+
+function mergeFetchedIndexes(
+  current: IndexSummary[],
+  fetched: IndexSummary[],
+  optimisticKeys: Set<string>,
+): IndexSummary[] {
+  let next = fetched;
+
+  current.forEach((index) => {
+    const key = getIndexSummaryKey(index);
+    if (optimisticKeys.has(key) && !next.some((item) => getIndexSummaryKey(item) === key)) {
+      next = upsertIndexSummary(next, index);
+    }
+  });
+
+  fetched.forEach((index) => {
+    optimisticKeys.delete(getIndexSummaryKey(index));
+  });
+
+  return next;
 }
 
 function applyNodeLayout(nodes: NodeData[], W: number, H: number) {
@@ -120,14 +166,16 @@ export default function Home() {
     updateUserStarById,
     starLimit,
   } = useConstellationStars();
-  const [addModeEnabled, setAddModeEnabled] = useState(false);
   const [addMessage, setAddMessage] = useState<string | null>(null);
   const [selectedUserStarId, setSelectedUserStarId] = useState<string | null>(null);
-  const [selectedStarLabel, setSelectedStarLabel] = useState("");
-  const [selectedStarManifestPath, setSelectedStarManifestPath] = useState("");
+  const [starDialogOpen, setStarDialogOpen] = useState(false);
+  const [starDialogMode, setStarDialogMode] = useState<"new" | "existing">("new");
+  const [pendingDialogStar, setPendingDialogStar] = useState<UserStar | null>(null);
+  const [queuedObservatoryMode, setQueuedObservatoryMode] = useState<"new" | "existing" | null>(null);
   const [availableIndexes, setAvailableIndexes] = useState<IndexSummary[]>([]);
   const [indexesLoading, setIndexesLoading] = useState(true);
   const [indexLoadError, setIndexLoadError] = useState<string | null>(null);
+  const [hoveredAddCandidateId, setHoveredAddCandidateId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastTone, setToastTone] = useState<"default" | "error">("default");
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -139,13 +187,39 @@ export default function Home() {
   const hoveredNodeRef = useRef(-1);
   const hoverStartRef = useRef(0);
   const hoverExpandedRef = useRef(false);
-  const addModeRef = useRef(false);
   const coarsePointerRef = useRef(false);
   const mouseRef = useRef({ x: -1000, y: -1000 });
+  const userStarsRef = useRef<UserStar[]>(userStars);
+  const selectedUserStarIdRef = useRef<string | null>(selectedUserStarId);
+  const hoveredAddCandidateRef = useRef<StarData | null>(null);
+  const armedAddCandidateIdRef = useRef<string | null>(null);
+  const availableIndexesRef = useRef<IndexSummary[]>(availableIndexes);
+  const optimisticIndexKeysRef = useRef<Set<string>>(new Set());
+  const conceptHideTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    userStarsRef.current = userStars;
+  }, [userStars]);
+
+  useEffect(() => {
+    availableIndexesRef.current = availableIndexes;
+  }, [availableIndexes]);
+
+  useEffect(() => {
+    selectedUserStarIdRef.current = selectedUserStarId;
+  }, [selectedUserStarId]);
+
+  useEffect(() => () => {
+    if (conceptHideTimeoutRef.current !== null) {
+      window.clearTimeout(conceptHideTimeoutRef.current);
+    }
+  }, []);
+
   const selectedUserStar = useMemo(
     () => userStars.find((star) => star.id === selectedUserStarId) ?? null,
     [selectedUserStarId, userStars],
   );
+  const observatoryStar = selectedUserStar ?? pendingDialogStar;
   const mappedManifestPaths = useMemo(
     () => new Set(userStars.map((star) => star.linkedManifestPath).filter(Boolean)),
     [userStars],
@@ -158,6 +232,35 @@ export default function Home() {
     () => (starLimit === null ? `${userStars.length} added stars` : `${userStars.length}/${starLimit} added stars`),
     [starLimit, userStars.length],
   );
+  const fieldGuideMessage = useMemo(() => {
+    if (starLimit !== null && userStars.length >= starLimit) {
+      return "Constellation at capacity. Remove a star or reset the orbit to pull in another.";
+    }
+
+    if (hoveredAddCandidateId) {
+      return "Field star acquired. Click once to pull it in and open its observatory.";
+    }
+
+    if (selectedUserStar?.linkedManifestPath) {
+      return "Selected star in focus. Open its observatory to inspect the linked index, rename it, or launch grounded chat.";
+    }
+
+    if (selectedUserStar) {
+      return "Selected star ready. Open its observatory to upload files, build an index, or attach an existing source.";
+    }
+
+    if (!indexesLoading && unmappedIndexes.length > 0) {
+      return `${unmappedIndexes.length} indexed source${unmappedIndexes.length === 1 ? "" : "s"} are ready to map into orbit from the control rail below.`;
+    }
+
+    return "Look for the softly glinting field stars beyond the core ring, then click one to open its observatory.";
+  }, [hoveredAddCandidateId, indexesLoading, selectedUserStar, starLimit, unmappedIndexes.length, userStars.length]);
+  const addMessageTone = useMemo(() => {
+    if (!addMessage) {
+      return "accent";
+    }
+    return /unable|failed|error|limit/i.test(addMessage) ? "error" : "accent";
+  }, [addMessage]);
 
   const openChatWithIndex = useCallback(
     (manifestPath: string, label: string) => {
@@ -171,55 +274,146 @@ export default function Home() {
   );
 
   const closeConcept = useCallback(() => {
+    if (conceptHideTimeoutRef.current !== null) {
+      window.clearTimeout(conceptHideTimeoutRef.current);
+      conceptHideTimeoutRef.current = null;
+    }
+
+    activeNodeRef.current = -1;
     const el = conceptCardRef.current;
     if (el) {
       el.classList.remove("active");
-      activeNodeRef.current = -1;
-      setTimeout(() => { el.style.display = "none"; }, 400);
+      conceptHideTimeoutRef.current = window.setTimeout(() => {
+        el.style.display = "none";
+        conceptHideTimeoutRef.current = null;
+      }, 400);
     }
   }, []);
 
-  useEffect(() => {
-    addModeRef.current = addModeEnabled;
-    if (addModeEnabled) {
-      closeConcept();
+  const refreshAvailableIndexes = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setIndexesLoading(true);
     }
-  }, [addModeEnabled, closeConcept]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setIndexesLoading(true);
     setIndexLoadError(null);
 
-    fetchIndexes()
-      .then((indexes) => {
-        if (cancelled) {
-          return;
-        }
-        setAvailableIndexes(indexes);
-      })
-      .catch((error) => {
-        console.error("Failed to load library indexes for the constellation", error);
-        if (cancelled) {
-          return;
-        }
-        setIndexLoadError(error instanceof Error ? error.message : "Failed to load indexed sources.");
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIndexesLoading(false);
-        }
-      });
+    try {
+      const indexes = await fetchIndexes();
+      const mergedIndexes = mergeFetchedIndexes(
+        availableIndexesRef.current,
+        indexes,
+        optimisticIndexKeysRef.current,
+      );
+      availableIndexesRef.current = mergedIndexes;
+      setAvailableIndexes(mergedIndexes);
+      return mergedIndexes;
+    } catch (error) {
+      console.error("Failed to refresh indexed sources for the constellation", error);
+      setIndexLoadError(error instanceof Error ? error.message : "Failed to load indexed sources.");
+      return null;
+    } finally {
+      if (!silent) {
+        setIndexesLoading(false);
+      }
+    }
+  }, []);
 
-    return () => {
-      cancelled = true;
-    };
+  const handleIndexBuilt = useCallback((result: IndexBuildResult) => {
+    const optimisticIndex = buildOptimisticIndexSummary(result);
+    optimisticIndexKeysRef.current.add(getIndexSummaryKey(optimisticIndex));
+    setIndexLoadError(null);
+    setAddMessage(null);
+    setAvailableIndexes((current) => {
+      const next = upsertIndexSummary(current, optimisticIndex);
+      availableIndexesRef.current = next;
+      return next;
+    });
+    setToastTone("default");
+    setToastMessage(`Index ready: ${result.index_id}. It is now available to map into orbit.`);
+    void refreshAvailableIndexes({ silent: true });
+  }, [refreshAvailableIndexes]);
+  const openStarObservatory = useCallback((star: UserStar, mode: "new" | "existing") => {
+    setPendingDialogStar(star);
+    setSelectedUserStarId(star.id);
+    setStarDialogMode(mode);
+    setQueuedObservatoryMode(mode);
   }, []);
 
   useEffect(() => {
-    setSelectedStarLabel(selectedUserStar?.label ?? "");
-    setSelectedStarManifestPath(selectedUserStar?.linkedManifestPath ?? "");
-  }, [selectedUserStar]);
+    if (!queuedObservatoryMode || !observatoryStar) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setStarDialogMode(queuedObservatoryMode);
+      setStarDialogOpen(true);
+      setQueuedObservatoryMode((current) => (current === queuedObservatoryMode ? null : current));
+    }, 180);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [observatoryStar, queuedObservatoryMode]);
+
+  const mapIndexedSources = useCallback(async () => {
+    let indexesForMapping = availableIndexes;
+    const refreshedIndexes = await refreshAvailableIndexes();
+    if (refreshedIndexes) {
+      indexesForMapping = refreshedIndexes;
+    }
+
+    const currentMappedPaths = new Set(userStars.map((star) => star.linkedManifestPath).filter(Boolean));
+    const candidateIndexes = indexesForMapping.filter((index) => !currentMappedPaths.has(index.manifest_path));
+
+    if (candidateIndexes.length === 0) {
+      setAddMessage(
+        indexesForMapping.length === 0
+          ? "No indexed sources are available to map yet."
+          : "All indexed sources already have constellation stars.",
+      );
+      return;
+    }
+
+    const room = starLimit === null ? candidateIndexes.length : Math.max(0, starLimit - userStars.length);
+    if (starLimit !== null && room === 0) {
+      setAddMessage(`Star limit reached (${starLimit}/${starLimit}).`);
+      return;
+    }
+
+    const starsToAdd = candidateIndexes.slice(0, room).map((index, indexOffset) => {
+      const orbitIndex = userStars.length + indexOffset;
+      const shell = Math.floor(orbitIndex / 10) + 1;
+      const slot = orbitIndex % 10;
+      const angle = -Math.PI / 2 + (slot / 10) * Math.PI * 2;
+      const radius = CORE_EXCLUSION_RADIUS + 0.08 + shell * 0.07;
+      const targetX = CORE_CENTER_X + Math.cos(angle) * radius;
+      const targetY = CORE_CENTER_Y + Math.sin(angle) * radius * 0.82;
+      const [x, y] = buildOutwardPlacement(targetX, targetY, orbitIndex);
+
+      return {
+        x,
+        y,
+        size: 0.95,
+        label: index.index_id,
+        linkedManifestPath: index.manifest_path,
+      };
+    });
+
+    const addedCount = await addUserStars(starsToAdd);
+    if (addedCount > 0) {
+      setAddMessage(null);
+      setToastTone("default");
+      setToastMessage(`Mapped ${addedCount} indexed source${addedCount === 1 ? "" : "s"} into the constellation.`);
+    }
+  }, [addUserStars, availableIndexes, refreshAvailableIndexes, starLimit, userStars]);
+
+  useEffect(() => {
+    void refreshAvailableIndexes();
+  }, [refreshAvailableIndexes]);
+
+  useEffect(() => {
+    if (selectedUserStar && pendingDialogStar?.id === selectedUserStar.id) {
+      setPendingDialogStar(null);
+    }
+  }, [pendingDialogStar, selectedUserStar]);
 
   useEffect(() => {
     if (!syncError && !addMessage) {
@@ -238,6 +432,14 @@ export default function Home() {
   }, [addMessage, syncError]);
 
   useEffect(() => {
+    if (starLimit !== null && userStars.length >= starLimit) {
+      hoveredAddCandidateRef.current = null;
+      armedAddCandidateIdRef.current = null;
+      setHoveredAddCandidateId(null);
+    }
+  }, [starLimit, userStars.length]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -253,9 +455,9 @@ export default function Home() {
 
     /* build stars */
     const stars: StarData[] = [];
-    for (let i = 0; i < 400; i++) stars.push(makeStar(W, H, 2));
-    for (let i = 0; i < 200; i++) stars.push(makeStar(W, H, 1));
-    for (let i = 0; i < 60; i++) stars.push(makeStar(W, H, 0));
+    for (let i = 0; i < 400; i++) stars.push(makeStar(2, i));
+    for (let i = 0; i < 200; i++) stars.push(makeStar(1, i));
+    for (let i = 0; i < 60; i++) stars.push(makeStar(0, i));
 
     /* nebulae */
     const nebulae = [
@@ -269,6 +471,25 @@ export default function Home() {
     const enhancedHoverMotion = motionPreviewEnabled && !reducedMotion;
     coarsePointerRef.current = window.matchMedia("(pointer: coarse)").matches;
 
+    function syncHoveredCandidate(candidate: StarData | null) {
+      const nextId = candidate?.id ?? null;
+      if (hoveredAddCandidateRef.current?.id === nextId) {
+        hoveredAddCandidateRef.current = candidate;
+        return;
+      }
+      hoveredAddCandidateRef.current = candidate;
+      if (!candidate) {
+        armedAddCandidateIdRef.current = null;
+      }
+      setHoveredAddCandidateId((current) => (current === nextId ? current : nextId));
+    }
+
+    function clearHoveredCandidate() {
+      hoveredAddCandidateRef.current = null;
+      armedAddCandidateIdRef.current = null;
+      setHoveredAddCandidateId((current) => (current === null ? current : null));
+    }
+
     function showConceptAtNode(idx: number) {
       const c = nodes[idx].concept;
       if (cLabelRef.current) cLabelRef.current.textContent = c.label;
@@ -277,6 +498,10 @@ export default function Home() {
       activeNodeRef.current = idx;
       const card = conceptCardRef.current;
       if (!card) return;
+      if (conceptHideTimeoutRef.current !== null) {
+        window.clearTimeout(conceptHideTimeoutRef.current);
+        conceptHideTimeoutRef.current = null;
+      }
       let cx = nodes[idx]._sx + 24;
       let cy = nodes[idx]._sy - 60;
       if (cx + 280 > W) cx = nodes[idx]._sx - 300;
@@ -289,7 +514,7 @@ export default function Home() {
     }
 
     /* nodes */
-    const nodes: NodeData[] = CONCEPTS.map((concept, i) => ({
+    const nodes: NodeData[] = CONCEPTS.map((concept) => ({
       x: 0, y: 0,
       baseSize: 1.5 + Math.random() * 1.5,
       brightness: 0.15, targetBrightness: 0.15,
@@ -337,15 +562,55 @@ export default function Home() {
     }
 
     function drawStar(s: StarData, t: number) {
-      const px = s.x + (mouse.x - W / 2) * s.parallaxFactor;
-      const py = s.y + (mouse.y - H / 2) * s.parallaxFactor;
+      const projected = projectBackgroundStar(s, W, H, mouse);
+      const px = projected.x;
+      const py = projected.y;
+      const addable = isAddableBackgroundStar(s, nodes, userStarsRef.current, W, H);
+      const hoveredCandidate = hoveredAddCandidateRef.current?.id === s.id;
       let b = s.brightness;
       if (s.twinkle) b += Math.sin(t * s.twinkleSpeed + s.twinklePhase) * 0.15;
+      if (addable) {
+        const beaconPulse = reducedMotion ? 0.58 : 0.54 + Math.sin(t * 0.0018 + s.twinklePhase) * 0.1;
+        b += hoveredCandidate ? 0.22 : 0.08 + beaconPulse * 0.04;
+      }
       b = Math.max(0.05, Math.min(1, b));
       let sz = s.baseSize;
       const dx = px - mouse.x, dy = py - mouse.y, dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < 200) { const prox = 1 - dist / 200; b += prox * 0.3; sz += prox * 0.5; }
-      const r = 180 + Math.round(b * 40), g = 195 + Math.round(b * 30), bl = 220 + Math.round(b * 20);
+      if (addable) {
+        sz += hoveredCandidate ? 0.45 : 0.18;
+      }
+      const r = addable
+        ? 194 + Math.round(b * 36)
+        : 180 + Math.round(b * 40);
+      const g = addable
+        ? 202 + Math.round(b * 28)
+        : 195 + Math.round(b * 30);
+      const bl = addable
+        ? 222 + Math.round(b * 14)
+        : 220 + Math.round(b * 20);
+      if (addable) {
+        const beaconPulse = reducedMotion ? 0.58 : 0.54 + Math.sin(t * 0.0018 + s.twinklePhase) * 0.1;
+        const beaconRadius = sz * (hoveredCandidate ? 13 : 8.5) + beaconPulse * 3;
+        const candidateGlow = ctx!.createRadialGradient(px, py, 0, px, py, beaconRadius);
+        candidateGlow.addColorStop(
+          0,
+          `rgba(215,187,112,${hoveredCandidate ? 0.18 + beaconPulse * 0.05 : 0.06 + beaconPulse * 0.04})`,
+        );
+        candidateGlow.addColorStop(1, "rgba(0,0,0,0)");
+        ctx!.fillStyle = candidateGlow;
+        ctx!.beginPath();
+        ctx!.arc(px, py, beaconRadius, 0, Math.PI * 2);
+        ctx!.fill();
+
+        if (!hoveredCandidate && sz > 0.5) {
+          ctx!.beginPath();
+          ctx!.arc(px, py, sz * 2.1 + beaconPulse * 1.3, 0, Math.PI * 2);
+          ctx!.strokeStyle = `rgba(219,193,132,${0.08 + beaconPulse * 0.05})`;
+          ctx!.lineWidth = 0.4;
+          ctx!.stroke();
+        }
+      }
       ctx!.beginPath(); ctx!.arc(px, py, sz, 0, Math.PI * 2);
       ctx!.fillStyle = `rgba(${r},${g},${bl},${b})`; ctx!.fill();
       if (b > 0.4) {
@@ -361,11 +626,14 @@ export default function Home() {
     }
 
     function drawUserStars(t: number) {
-      userStars.forEach((s, i) => {
+      const currentUserStars = userStarsRef.current;
+      const currentSelectedStarId = selectedUserStarIdRef.current;
+
+      currentUserStars.forEach((s, i) => {
         const px = s.x * W + (mouse.x - W / 2) * 0.006;
         const py = s.y * H + (mouse.y - H / 2) * 0.006;
         const twinkle = 0.75 + Math.sin(t * 0.003 + i * 1.7) * 0.15;
-        const selected = selectedUserStarId === s.id;
+        const selected = currentSelectedStarId === s.id;
         const sz = s.size * 1.35 + (selected ? 1.4 : 0);
         ctx!.beginPath();
         ctx!.arc(px, py, sz, 0, Math.PI * 2);
@@ -393,6 +661,7 @@ export default function Home() {
 
     function drawNodes(t: number) {
       const aNode = activeNodeRef.current;
+      const hasAddCandidate = hoveredAddCandidateRef.current !== null;
       nodes.forEach((n, i) => {
         const px = n.x + (mouse.x - W / 2) * n.parallax;
         const py = n.y + (mouse.y - H / 2) * n.parallax;
@@ -405,7 +674,7 @@ export default function Home() {
         n.targetBrightness = 0.1 + nodeAwakenProg * 0.2 + proximity * 0.5;
         if (i === aNode) n.targetBrightness = 0.9;
         n.brightness += (n.targetBrightness - n.brightness) * 0.06;
-        n.targetHoverBoost = hoveredNodeRef.current === i ? 1 : 0;
+        n.targetHoverBoost = hasAddCandidate ? 0 : hoveredNodeRef.current === i ? 1 : 0;
         n.hoverBoost += (n.targetHoverBoost - n.hoverBoost) * (enhancedHoverMotion ? 0.12 : 0.25);
         const b = n.brightness;
         const hoverScale = enhancedHoverMotion ? n.hoverBoost * 2.6 : 0;
@@ -439,6 +708,70 @@ export default function Home() {
       });
     }
 
+    function drawAddCandidatePreview(ts: number) {
+      const candidate = hoveredAddCandidateRef.current;
+      if (!candidate) {
+        return;
+      }
+
+      const previewNodes = getPreviewConnectionNodes(candidate, nodes, W, H);
+      const projected = projectBackgroundStar(candidate, W, H, mouse);
+      const px = projected.x;
+      const py = projected.y;
+      const pulse = reducedMotion ? 0.72 : 0.7 + Math.sin(ts * 0.008) * 0.18;
+
+      ctx!.save();
+      if (!reducedMotion) {
+        ctx!.setLineDash([8, 10]);
+        ctx!.lineDashOffset = -ts * 0.018;
+      }
+
+      previewNodes.forEach((node, index) => {
+        const grad = ctx!.createLinearGradient(node._sx, node._sy, px, py);
+        grad.addColorStop(0, `rgba(232,184,74,${0.18 + pulse * 0.08})`);
+        grad.addColorStop(1, `rgba(240,244,255,${0.28 + pulse * 0.12})`);
+        ctx!.strokeStyle = grad;
+        ctx!.lineWidth = index === 0 ? 1.15 : 0.75;
+        ctx!.beginPath();
+        ctx!.moveTo(node._sx, node._sy);
+        ctx!.lineTo(px, py);
+        ctx!.stroke();
+      });
+      ctx!.restore();
+
+      const halo = candidate.baseSize * 10 + 12 + pulse * 4;
+      const glow = ctx!.createRadialGradient(px, py, 0, px, py, halo);
+      glow.addColorStop(0, `rgba(240,244,255,${0.34 + pulse * 0.12})`);
+      glow.addColorStop(0.45, `rgba(196,149,58,${0.18 + pulse * 0.08})`);
+      glow.addColorStop(1, "rgba(0,0,0,0)");
+      ctx!.fillStyle = glow;
+      ctx!.beginPath();
+      ctx!.arc(px, py, halo, 0, Math.PI * 2);
+      ctx!.fill();
+
+      ctx!.beginPath();
+      ctx!.arc(px, py, candidate.baseSize + 2 + pulse * 0.8, 0, Math.PI * 2);
+      ctx!.fillStyle = `rgba(245,248,255,${0.9})`;
+      ctx!.fill();
+
+      ctx!.beginPath();
+      ctx!.arc(px, py, candidate.baseSize * 3.5 + pulse * 2.5, 0, Math.PI * 2);
+      ctx!.strokeStyle = `rgba(196,149,58,${0.32 + pulse * 0.12})`;
+      ctx!.lineWidth = 0.8;
+      ctx!.stroke();
+
+      if (!reducedMotion && previewNodes.length > 0) {
+        const lead = previewNodes[0];
+        const travel = (Math.sin(ts * 0.004) + 1) / 2;
+        const sparkX = lead._sx + (px - lead._sx) * travel;
+        const sparkY = lead._sy + (py - lead._sy) * travel;
+        ctx!.beginPath();
+        ctx!.arc(sparkX, sparkY, 1.6, 0, Math.PI * 2);
+        ctx!.fillStyle = "rgba(255,246,222,0.92)";
+        ctx!.fill();
+      }
+    }
+
     function render(ts: number) {
       ctx!.fillStyle = "rgba(6,8,14,1)";
       ctx!.fillRect(0, 0, W, H);
@@ -447,9 +780,10 @@ export default function Home() {
       }
       drawNebulae();
       stars.forEach(s => drawStar(s, ts));
-      drawUserStars(ts);
       drawDust();
       drawNodes(ts);
+      drawAddCandidatePreview(ts);
+      drawUserStars(ts);
       animFrame = requestAnimationFrame(render);
     }
     animFrame = requestAnimationFrame(render);
@@ -465,11 +799,40 @@ export default function Home() {
     function onPointerMove(e: PointerEvent) {
       mouse.x = e.clientX;
       mouse.y = e.clientY;
-      if (addModeRef.current) {
+
+      const topElement = document.elementFromPoint(e.clientX, e.clientY);
+      const pointerOnCanvas = topElement === canvas;
+      if (!pointerOnCanvas) {
         hoveredNodeRef.current = -1;
         hoverExpandedRef.current = false;
+        clearHoveredCandidate();
         return;
       }
+
+      const canAddMoreStars = starLimit === null || userStarsRef.current.length < starLimit;
+      if (canAddMoreStars) {
+        const candidate = findHoveredAddCandidate(
+          stars,
+          nodes,
+          userStarsRef.current,
+          { x: e.clientX, y: e.clientY },
+          mouse,
+          W,
+          H,
+          coarsePointerRef.current ? MOBILE_ADD_CANDIDATE_HIT_RADIUS_PX : ADD_CANDIDATE_HIT_RADIUS_PX,
+        );
+
+        syncHoveredCandidate(candidate);
+        if (candidate) {
+          hoveredNodeRef.current = -1;
+          hoverExpandedRef.current = false;
+          closeConcept();
+          return;
+        }
+      } else {
+        clearHoveredCandidate();
+      }
+
       let hover = -1;
       nodes.forEach((n, i) => {
         if (Math.hypot(n._sx - e.clientX, n._sy - e.clientY) < 28) {
@@ -493,27 +856,14 @@ export default function Home() {
     }
 
     function onCanvasPress(e: PointerEvent) {
-      if (addModeRef.current) {
-        const rect = canvas!.getBoundingClientRect();
-        const targetX = (e.clientX - rect.left) / rect.width;
-        const targetY = (e.clientY - rect.top) / rect.height;
-        const [nx, ny] = buildOutwardPlacement(targetX, targetY, userStars.length);
-        addUserStar({ x: nx, y: ny, size: 0.8 + Math.random() * 0.7 }).then((added) => {
-          if (!added) {
-            setAddMessage("Unable to place another star right now.");
-          } else {
-            setAddMessage(null);
-            setSelectedUserStarId(null);
-          }
-        });
-        return;
-      }
       const rect = canvas!.getBoundingClientRect();
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
+      const currentUserStars = userStarsRef.current;
+      const currentSelectedStarId = selectedUserStarIdRef.current;
       let selectedId: string | null = null;
       const hitRadiusBoost = coarsePointerRef.current ? 12 : 0;
-      userStars.forEach((s) => {
+      currentUserStars.forEach((s) => {
         const px = s.x * rect.width;
         const py = s.y * rect.height;
         const hitRadius = s.size * 10 + 8 + hitRadiusBoost;
@@ -522,23 +872,71 @@ export default function Home() {
         }
       });
       if (selectedId) {
-        const selectedStar = userStars.find((star) => star.id === selectedId);
-        if (
-          selectedUserStarId === selectedId &&
-          selectedStar?.linkedManifestPath
-        ) {
-          openChatWithIndex(
-            selectedStar.linkedManifestPath,
-            selectedStar.label || "Mapped constellation star",
-          );
-          return;
+        const selectedStar = currentUserStars.find((star) => star.id === selectedId);
+        if (selectedStar) {
+          openStarObservatory(selectedStar, "existing");
+        } else {
+          setSelectedUserStarId(selectedId);
         }
-        setSelectedUserStarId((prev) => (prev === selectedId ? null : selectedId));
+        setAddMessage(null);
+        clearHoveredCandidate();
         closeConcept();
         return;
       }
-      if (selectedUserStarId) {
+
+      const canAddMoreStars = starLimit === null || currentUserStars.length < starLimit;
+      const candidate = canAddMoreStars
+        ? findHoveredAddCandidate(
+            stars,
+            nodes,
+            currentUserStars,
+            { x: e.clientX, y: e.clientY },
+            mouse,
+            W,
+            H,
+            coarsePointerRef.current ? MOBILE_ADD_CANDIDATE_HIT_RADIUS_PX : ADD_CANDIDATE_HIT_RADIUS_PX,
+          )
+        : null;
+
+      if (candidate) {
+        if (coarsePointerRef.current && armedAddCandidateIdRef.current !== candidate.id) {
+          armedAddCandidateIdRef.current = candidate.id;
+          hoveredAddCandidateRef.current = candidate;
+          setHoveredAddCandidateId((current) => (current === candidate.id ? current : candidate.id));
+          setAddMessage("Tap the same star again to pull it in and open its observatory.");
+          closeConcept();
+          return;
+        }
+
+        addUserStar({
+          x: candidate.nx,
+          y: candidate.ny,
+          size: 0.82 + Math.random() * 0.55,
+        }).then((createdStar) => {
+          if (!createdStar) {
+            setAddMessage(
+              starLimit !== null && userStarsRef.current.length >= starLimit
+                ? `Star limit reached (${starLimit}/${starLimit}).`
+                : "Unable to place another star right now.",
+            );
+            return;
+          }
+
+          setAddMessage(null);
+          setToastTone("default");
+          setToastMessage("Star added to the constellation. Its observatory is open.");
+          openStarObservatory(createdStar, "new");
+          clearHoveredCandidate();
+        });
+        closeConcept();
+        return;
+      }
+
+      armedAddCandidateIdRef.current = null;
+      if (currentSelectedStarId) {
         setSelectedUserStarId(null);
+        setPendingDialogStar(null);
+        setQueuedObservatoryMode(null);
       }
       let hit = -1;
       nodes.forEach((n, i) => {
@@ -553,17 +951,27 @@ export default function Home() {
       }
     }
 
+    function onPointerLeave() {
+      hoveredNodeRef.current = -1;
+      hoverExpandedRef.current = false;
+      clearHoveredCandidate();
+    }
+
     window.addEventListener("resize", onResize);
     document.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerdown", onCanvasPress);
+    canvas.addEventListener("pointerleave", onPointerLeave);
+    window.addEventListener("blur", onPointerLeave);
 
     return () => {
       cancelAnimationFrame(animFrame);
       window.removeEventListener("resize", onResize);
       document.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerdown", onCanvasPress);
+      canvas.removeEventListener("pointerleave", onPointerLeave);
+      window.removeEventListener("blur", onPointerLeave);
     };
-  }, [addUserStar, closeConcept, openChatWithIndex, selectedUserStarId, starLimit, userStars]);
+  }, [addUserStar, closeConcept, openStarObservatory, starLimit]);
 
   /* card scroll animation */
   useEffect(() => {
@@ -598,191 +1006,22 @@ export default function Home() {
       <canvas ref={canvasRef} id="universe" className="metis-universe" />
 
       <div className="metis-hero-overlay">
-        <h1 className="metis-hero-headline">Discover<br />everything.</h1>
-        <Link href="/chat" className="metis-cta-btn">Explore the constellation</Link>
-      </div>
-
-      <div className="metis-star-controls" role="region" aria-label="Constellation controls">
-        <div className="metis-star-controls-head">Infinite Constellation</div>
-        <p className="metis-star-controls-copy">Core stars stay gold. Add white stars beyond the core ring to build the future library map.</p>
-        <div className="metis-star-controls-actions">
-          <button
-            type="button"
-            className={`metis-star-btn ${addModeEnabled ? "active" : ""}`}
-            onClick={() => {
-              setAddModeEnabled((v) => !v);
-              setAddMessage(null);
-            }}
-          >
-            {addModeEnabled ? "Exit add mode" : "Add star"}
-          </button>
-          <button
-            type="button"
-            className="metis-star-btn"
-            onClick={() => {
-              if (selectedUserStarId) {
-                removeUserStarById(selectedUserStarId);
-                setSelectedUserStarId(null);
-              }
-              setAddMessage(null);
-            }}
-            disabled={!selectedUserStarId}
-          >
-            Remove selected
-          </button>
-          <button
-            type="button"
-            className="metis-star-btn danger"
-            onClick={() => {
-              if (userStars.length > 0 && !window.confirm("Remove all added stars?")) {
-                return;
-              }
-              resetUserStars();
-              setSelectedUserStarId(null);
-              setAddMessage(null);
-            }}
-            disabled={userStars.length === 0}
-          >
-            Reset added
-          </button>
-          <button
-            type="button"
-            className="metis-star-btn"
-            onClick={async () => {
-              if (unmappedIndexes.length === 0) {
-                setAddMessage(
-                  availableIndexes.length === 0
-                    ? "No indexed sources are available to map yet."
-                    : "All indexed sources already have constellation stars.",
-                );
-                return;
-              }
-
-              const room = starLimit === null ? unmappedIndexes.length : Math.max(0, starLimit - userStars.length);
-              if (starLimit !== null && room === 0) {
-                setAddMessage(`Star limit reached (${starLimit}/${starLimit}).`);
-                return;
-              }
-
-              const starsToAdd = unmappedIndexes.slice(0, room).map((index, indexOffset) => {
-                const orbitIndex = userStars.length + indexOffset;
-                const shell = Math.floor(orbitIndex / 10) + 1;
-                const slot = orbitIndex % 10;
-                const angle = -Math.PI / 2 + (slot / 10) * Math.PI * 2;
-                const radius = CORE_EXCLUSION_RADIUS + 0.08 + shell * 0.07;
-                const targetX = CORE_CENTER_X + Math.cos(angle) * radius;
-                const targetY = CORE_CENTER_Y + Math.sin(angle) * radius * 0.82;
-                const [x, y] = buildOutwardPlacement(targetX, targetY, orbitIndex);
-
-                return {
-                  x,
-                  y,
-                  size: 0.95,
-                  label: index.index_id,
-                  linkedManifestPath: index.manifest_path,
-                };
-              });
-
-              const addedCount = await addUserStars(starsToAdd);
-              if (addedCount > 0) {
-                setAddMessage(null);
-                setToastTone("default");
-                setToastMessage(`Mapped ${addedCount} indexed source${addedCount === 1 ? "" : "s"} into the constellation.`);
-              }
-            }}
-            disabled={indexesLoading}
-          >
-            Map library
-          </button>
-        </div>
-        <div className="metis-star-controls-meta">{starCountLabel}</div>
-        <div className="metis-star-controls-meta">{availableIndexes.length} indexed source{availableIndexes.length === 1 ? "" : "s"} detected</div>
-        {addModeEnabled ? <div className="metis-star-controls-hint">Add mode is active: tap anywhere outside the core to place a white star.</div> : null}
-        {selectedUserStarId ? <div className="metis-star-controls-hint">Selected star ready for removal.</div> : null}
-        {!indexesLoading && unmappedIndexes.length > 0 ? <div className="metis-star-controls-hint">{unmappedIndexes.length} indexed source{unmappedIndexes.length === 1 ? "" : "s"} can still be mapped into orbit.</div> : null}
-        {indexLoadError ? <div className="metis-star-controls-error">{indexLoadError}</div> : null}
-        {syncError ? <div className="metis-star-controls-error">Sync fallback active. Stars are still saved locally.</div> : null}
-        {addMessage ? <div className="metis-star-controls-error">{addMessage}</div> : null}
-
-        {selectedUserStar ? (
-          <div className="metis-star-editor">
-            <div className="metis-star-editor-head">Selected Star</div>
-            <label className="metis-star-field">
-              <span className="metis-star-field-label">Label</span>
-              <input
-                type="text"
-                value={selectedStarLabel}
-                onChange={(event) => setSelectedStarLabel(event.target.value)}
-                placeholder="Name this star"
-                className="metis-star-input"
-              />
-            </label>
-            <label className="metis-star-field">
-              <span className="metis-star-field-label">Linked index</span>
-              <select
-                value={selectedStarManifestPath}
-                onChange={(event) => setSelectedStarManifestPath(event.target.value)}
-                className="metis-star-input"
-              >
-                <option value="">Unlinked</option>
-                {availableIndexes.map((index) => (
-                  <option key={index.manifest_path} value={index.manifest_path}>
-                    {index.index_id}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="metis-star-controls-actions">
-              <button
-                type="button"
-                className="metis-star-btn"
-                onClick={async () => {
-                  await updateUserStarById(selectedUserStar.id, {
-                    label: selectedStarLabel.trim() || undefined,
-                    linkedManifestPath: selectedStarManifestPath || undefined,
-                  });
-                  setToastTone("default");
-                  setToastMessage("Star metadata updated.");
-                }}
-              >
-                Save star
-              </button>
-              <button
-                type="button"
-                className="metis-star-btn"
-                onClick={() => {
-                  if (!selectedStarManifestPath) {
-                    return;
-                  }
-                  const linkedIndex = availableIndexes.find(
-                    (index) => index.manifest_path === selectedStarManifestPath,
-                  );
-                  openChatWithIndex(
-                    selectedStarManifestPath,
-                    linkedIndex?.index_id || selectedStarLabel || "Mapped constellation star",
-                  );
-                }}
-                disabled={!selectedStarManifestPath}
-              >
-                Open linked chat
-              </button>
-            </div>
+        <div className="metis-hero-shell">
+          <div className="metis-hero-kicker">METIS AI</div>
+          <h1 className="metis-hero-headline">Discover<br />everything.</h1>
+          <p className="metis-hero-copy">
+            Build a private sky of sources, pull new stars into orbit, and move straight into grounded chat.
+          </p>
+          <div className="metis-hero-actions">
+            <a href="#build-map" className="metis-cta-btn">Build the constellation</a>
+            <Link href="/chat" className="metis-secondary-link">Jump to chat</Link>
           </div>
-        ) : null}
-      </div>
-
-      {addModeEnabled ? (
-        <div className="metis-add-mode-banner" aria-live="polite">
-          <span>Tap the field to place a star</span>
-          <button
-            type="button"
-            className="metis-add-mode-exit"
-            onClick={() => setAddModeEnabled(false)}
-          >
-            Done
-          </button>
+          <div className="metis-field-guide" aria-live="polite">
+            <span className="metis-field-guide-label">Field note</span>
+            <span className="metis-field-guide-text">{fieldGuideMessage}</span>
+          </div>
         </div>
-      ) : null}
+      </div>
 
       {toastMessage ? (
         <div className={`metis-toast ${toastTone === "error" ? "error" : ""}`} aria-live="polite">
@@ -790,23 +1029,166 @@ export default function Home() {
         </div>
       ) : null}
 
+      <section className="metis-build-section" id="build-map">
+        <div className="metis-build-intro">
+          <span className="metis-section-kicker">Orbit control</span>
+          <h2 className="metis-section-title">Select stars in the sky to ingest, inspect, and route your sources.</h2>
+          <p className="metis-section-copy">
+            Each star now opens its own observatory. New stars launch upload and build, while existing stars reveal linked-index context, chat routing, and star metadata without a separate library workspace.
+          </p>
+        </div>
+
+        <div className="metis-build-toolbar" role="region" aria-label="Constellation controls">
+          <div className="metis-build-stats">
+            <span className="metis-build-stat">{starCountLabel}</span>
+            <span className="metis-build-stat">
+              {availableIndexes.length} indexed source{availableIndexes.length === 1 ? "" : "s"} detected
+            </span>
+            {!indexesLoading ? (
+              <span className="metis-build-stat">
+                {unmappedIndexes.length} ready to map
+              </span>
+            ) : (
+              <span className="metis-build-stat">Scanning indexed sources</span>
+            )}
+          </div>
+
+          <div className="metis-star-controls-actions">
+            <button
+              type="button"
+              className="metis-star-btn"
+              onClick={() => {
+                void mapIndexedSources();
+              }}
+              disabled={indexesLoading}
+            >
+              Map indexed sources
+            </button>
+            <button
+              type="button"
+              className="metis-star-btn"
+              onClick={() => {
+                if (selectedUserStarId) {
+                  void removeUserStarById(selectedUserStarId);
+                  setSelectedUserStarId(null);
+                  setPendingDialogStar(null);
+                  setQueuedObservatoryMode(null);
+                  setStarDialogOpen(false);
+                }
+                setAddMessage(null);
+              }}
+              disabled={!selectedUserStarId}
+            >
+              Remove selected
+            </button>
+            <button
+              type="button"
+              className="metis-star-btn danger"
+              onClick={() => {
+                if (userStars.length > 0 && !window.confirm("Remove all added stars?")) {
+                  return;
+                }
+                void resetUserStars();
+                setSelectedUserStarId(null);
+                setPendingDialogStar(null);
+                setQueuedObservatoryMode(null);
+                setStarDialogOpen(false);
+                setAddMessage(null);
+              }}
+              disabled={userStars.length === 0}
+            >
+              Reset orbit
+            </button>
+          </div>
+        </div>
+
+        {selectedUserStar ? (
+          <div className="metis-build-note accent">
+            {selectedUserStar.label || (selectedUserStar.linkedManifestPath ? "Mapped star" : "Selected star")} is in focus. Reopen its observatory to inspect the linked index, upload new material, rename it, or launch grounded chat.
+          </div>
+        ) : (
+          <div className="metis-build-note accent">
+            Hover one of the softly glinting background stars to preview the connection, then click to add it. Any selected star opens an observatory for build, linking, and index overview.
+          </div>
+        )}
+
+        {!indexesLoading && unmappedIndexes.length > 0 ? (
+          <div className="metis-build-note accent">
+            {unmappedIndexes.length} indexed source{unmappedIndexes.length === 1 ? "" : "s"} can still be mapped into orbit.
+          </div>
+        ) : null}
+        {selectedUserStar ? (
+          <div className="metis-star-controls-actions">
+            <button
+              type="button"
+              className="metis-star-btn"
+              onClick={() => openStarObservatory(selectedUserStar, "existing")}
+            >
+              Open observatory
+            </button>
+            <button
+              type="button"
+              className="metis-star-btn"
+              onClick={() => {
+                if (!selectedUserStar.linkedManifestPath) {
+                  return;
+                }
+                const linkedIndex = availableIndexes.find(
+                  (index) => index.manifest_path === selectedUserStar.linkedManifestPath,
+                );
+                openChatWithIndex(
+                  selectedUserStar.linkedManifestPath,
+                  linkedIndex?.index_id || selectedUserStar.label || "Mapped constellation star",
+                );
+              }}
+              disabled={!selectedUserStar.linkedManifestPath}
+            >
+              Open linked chat
+            </button>
+          </div>
+        ) : null}
+        {indexLoadError ? <div className="metis-build-note error">{indexLoadError}</div> : null}
+        {syncError ? <div className="metis-build-note error">Sync fallback active. Stars are still saved locally.</div> : null}
+        {addMessage ? <div className={`metis-build-note ${addMessageTone}`}>{addMessage}</div> : null}
+      </section>
+
       <div className="metis-cards-section">
         <div className="metis-card">
           <span className="metis-card-label">Private</span>
           <h3 className="metis-card-title">Fully Local<br />RAG Engine</h3>
-          <p className="metis-card-desc">Provider-agnostic retrieval running entirely on your machine. No API keys needed — bring a local model and go fully offline.</p>
+          <p className="metis-card-desc">Provider-agnostic retrieval running entirely on your machine. No API keys needed, and the constellation stays yours from ingestion to answer.</p>
         </div>
         <div className="metis-card">
-          <span className="metis-card-label">Intelligent</span>
-          <h3 className="metis-card-title">Knowledge Graphs<br />&amp; Modes</h3>
-          <p className="metis-card-desc">Automatic entity extraction and relationship linking. Five built-in modes — Q&amp;A, Summary, Tutor, Research, Evidence Pack.</p>
+          <span className="metis-card-label">Grounded</span>
+          <h3 className="metis-card-title">Indexes, Graphs<br />&amp; Modes</h3>
+          <p className="metis-card-desc">Turn source material into indexed knowledge, then move through Q&amp;A, Summary, Tutor, Research, and Evidence Pack with traceable grounding.</p>
         </div>
         <div className="metis-card">
           <span className="metis-card-label">Persistent</span>
-          <h3 className="metis-card-title">Sessions, Agents<br />&amp; Ingestion</h3>
-          <p className="metis-card-desc">SQLite-backed conversations that auto-save. Agent profiles per project. Structure-aware parsing of PDF, DOCX, Markdown, HTML, and plain text.</p>
+          <h3 className="metis-card-title">Sessions, Agents<br />&amp; Memory</h3>
+          <p className="metis-card-desc">Carry context forward with saved sessions, companion memory, and structure-aware ingestion across PDF, DOCX, Markdown, HTML, and text.</p>
         </div>
       </div>
+
+      <StarObservatoryDialog
+        open={starDialogOpen}
+        onOpenChange={setStarDialogOpen}
+        star={observatoryStar}
+        entryMode={starDialogMode}
+        availableIndexes={availableIndexes}
+        indexesLoading={indexesLoading}
+        onIndexBuilt={handleIndexBuilt}
+        onUpdateStar={updateUserStarById}
+        onRemoveStar={async (starId) => {
+          await removeUserStarById(starId);
+          setSelectedUserStarId((current) => (current === starId ? null : current));
+          setPendingDialogStar((current) => (current?.id === starId ? null : current));
+          setQueuedObservatoryMode(null);
+          setToastTone("default");
+          setToastMessage("Star removed from the constellation.");
+        }}
+        onOpenChat={openChatWithIndex}
+      />
 
       {/* Concept tooltip card */}
       <div ref={conceptCardRef} className="metis-concept-card" id="conceptCard">
@@ -863,6 +1245,10 @@ const metisStyles = `
   --text-bright: rgba(220, 228, 240, 0.85);
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   background: var(--bg-deep) !important;
   color: var(--text-mid);
@@ -898,168 +1284,11 @@ body {
 .metis-nav-link:hover { color: var(--text-bright); }
 .metis-nav-right { display: flex; align-items: center; gap: 32px; }
 
-.metis-star-controls {
-  position: fixed;
-  top: 90px;
-  right: 26px;
-  width: min(340px, calc(100vw - 32px));
-  z-index: 130;
-  background: rgba(10, 14, 28, 0.76);
-  border: 1px solid rgba(196,149,58,0.18);
-  border-radius: 14px;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  padding: 14px;
-  box-shadow: 0 12px 34px rgba(0,0,0,0.22);
-}
-.metis-star-controls-head {
-  font-family: 'Space Grotesk', sans-serif;
-  color: var(--text-bright);
-  font-size: 14px;
-  letter-spacing: 0.4px;
-}
-.metis-star-controls-copy {
-  margin-top: 6px;
-  color: var(--text-mid);
-  font-size: 12px;
-  line-height: 1.45;
-}
-.metis-star-controls-actions {
-  margin-top: 10px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.metis-star-btn {
-  border: 1px solid rgba(200, 210, 225, 0.16);
-  background: rgba(17, 24, 46, 0.56);
-  color: var(--text-bright);
-  border-radius: 999px;
-  padding: 7px 12px;
-  font-size: 11px;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: all 0.25s ease;
-}
-.metis-star-btn:hover:not(:disabled) {
-  border-color: rgba(196,149,58,0.34);
-  color: var(--gold-bright);
-}
-.metis-star-btn.active {
-  border-color: rgba(196,149,58,0.4);
-  color: var(--gold-bright);
-}
-.metis-star-btn.danger:hover:not(:disabled) {
-  border-color: rgba(255,120,120,0.45);
-  color: rgba(255,180,180,0.95);
-}
-.metis-star-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.metis-star-controls-meta,
-.metis-star-controls-hint,
-.metis-star-controls-error {
-  margin-top: 8px;
-  font-size: 11px;
-  line-height: 1.45;
-}
-.metis-star-controls-meta { color: var(--text-mid); }
-.metis-star-controls-hint { color: rgba(196,149,58,0.86); }
-.metis-star-controls-error { color: rgba(255,168,168,0.95); }
-
-.metis-star-editor {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(200, 210, 225, 0.08);
-}
-
-.metis-star-editor-head,
-.metis-star-field-label {
-  color: var(--text-bright);
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.metis-star-field {
-  display: grid;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.metis-star-input {
-  width: 100%;
-  border: 1px solid rgba(200, 210, 225, 0.12);
-  background: rgba(15, 22, 40, 0.78);
-  color: var(--text-bright);
-  border-radius: 10px;
-  padding: 9px 11px;
-  font-size: 12px;
-  outline: none;
-}
-
-.metis-star-input:focus {
-  border-color: rgba(196,149,58,0.4);
-  box-shadow: 0 0 0 1px rgba(196,149,58,0.16);
-}
-
-@media (max-width: 900px) {
-  .metis-star-controls {
-    top: auto;
-    right: 12px;
-    bottom: 96px;
-    width: calc(100vw - 24px);
-  }
-
-  .metis-add-mode-banner {
-    bottom: 18px;
-    width: calc(100vw - 24px);
-    justify-content: space-between;
-  }
-
-  .metis-toast {
-    top: 78px;
-  }
-}
-
 /* HERO CANVAS */
 .metis-universe {
   position: fixed; top: 0; left: 0;
   width: 100vw; height: 100vh; z-index: 0;
   touch-action: none;
-}
-
-.metis-add-mode-banner {
-  position: fixed;
-  left: 50%;
-  bottom: 28px;
-  transform: translateX(-50%);
-  z-index: 145;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border-radius: 999px;
-  background: rgba(10, 14, 28, 0.9);
-  border: 1px solid rgba(196,149,58,0.22);
-  color: var(--text-bright);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 12px 30px rgba(0,0,0,0.24);
-}
-
-.metis-add-mode-exit {
-  border: 1px solid rgba(200,210,225,0.16);
-  background: rgba(20, 28, 50, 0.75);
-  color: var(--gold-bright);
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .metis-toast {
@@ -1091,9 +1320,24 @@ body {
 /* HERO OVERLAY */
 .metis-hero-overlay {
   position: relative; z-index: 10;
-  min-height: 100vh; display: flex;
-  flex-direction: column; justify-content: flex-end;
-  padding: 0 48px 80px; pointer-events: none;
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 48px 88px;
+  pointer-events: none;
+}
+.metis-hero-shell {
+  max-width: 620px;
+}
+.metis-hero-kicker {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.44em;
+  text-transform: uppercase;
+  color: rgba(232,184,74,0.75);
+  opacity: 0;
+  transform: translateY(16px);
+  animation: metis-fadeUp 1.2s ease 2.25s forwards;
 }
 .metis-hero-headline {
   font-family: 'Outfit', sans-serif;
@@ -1103,9 +1347,31 @@ body {
   opacity: 0; transform: translateY(20px);
   animation: metis-fadeUp 1.8s ease 2.8s forwards;
   max-width: 560px; letter-spacing: -0.5px;
+  margin-top: 12px;
+}
+.metis-hero-copy {
+  margin-top: 20px;
+  max-width: 520px;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text-mid);
+  opacity: 0;
+  transform: translateY(16px);
+  animation: metis-fadeUp 1.4s ease 3.25s forwards;
+}
+.metis-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+  margin-top: 30px;
+  pointer-events: all;
+  opacity: 0;
+  transform: translateY(16px);
+  animation: metis-fadeUp 1.25s ease 3.7s forwards;
 }
 .metis-cta-btn {
-  display: inline-block; margin-top: 32px;
+  display: inline-block;
   padding: 12px 32px;
   border: 1px solid rgba(200, 210, 225, 0.1);
   border-radius: 40px; color: var(--text-mid);
@@ -1113,8 +1379,6 @@ body {
   letter-spacing: 1.5px; text-transform: uppercase;
   text-decoration: none; pointer-events: all;
   transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-  opacity: 0; transform: translateY(12px);
-  animation: metis-fadeUp 1.4s ease 3.8s forwards;
   background: rgba(20, 30, 60, 0.35);
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
   cursor: pointer; font-family: 'Inter', sans-serif;
@@ -1125,6 +1389,188 @@ body {
   background: rgba(25, 38, 75, 0.45);
   box-shadow: 0 0 40px rgba(196,149,58,0.08), inset 0 1px 0 rgba(255,255,255,0.06);
   transform: translateY(-1px);
+}
+.metis-secondary-link {
+  color: var(--text-mid);
+  text-decoration: none;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  transition: color 0.3s ease, opacity 0.3s ease;
+}
+.metis-secondary-link:hover {
+  color: var(--text-bright);
+}
+.metis-field-guide {
+  margin-top: 22px;
+  max-width: 470px;
+  display: grid;
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(16px);
+  animation: metis-fadeUp 1.25s ease 4.05s forwards;
+}
+.metis-field-guide-label,
+.metis-section-kicker,
+.metis-star-editor-head,
+.metis-star-field-label {
+  color: rgba(232,184,74,0.82);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+}
+.metis-field-guide-text {
+  color: var(--text-mid);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* BUILD SECTION */
+.metis-build-section {
+  position: relative;
+  z-index: 10;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 48px 96px;
+}
+.metis-build-intro {
+  max-width: 820px;
+}
+.metis-section-title {
+  margin-top: 12px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: clamp(32px, 3vw, 48px);
+  line-height: 1.08;
+  color: var(--text-bright);
+  letter-spacing: -0.04em;
+}
+.metis-section-copy {
+  margin-top: 16px;
+  max-width: 760px;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text-mid);
+}
+.metis-build-toolbar {
+  margin-top: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px 24px;
+  padding: 20px 0 24px;
+  border-top: 1px solid rgba(200,210,225,0.09);
+  border-bottom: 1px solid rgba(200,210,225,0.09);
+}
+.metis-build-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.metis-build-stat {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(200,210,225,0.1);
+  background: rgba(10,14,28,0.38);
+  color: var(--text-mid);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.metis-star-controls-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.metis-star-btn {
+  border: 1px solid rgba(200, 210, 225, 0.16);
+  background: rgba(17, 24, 46, 0.56);
+  color: var(--text-bright);
+  border-radius: 999px;
+  padding: 8px 13px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+.metis-star-btn:hover:not(:disabled) {
+  border-color: rgba(196,149,58,0.34);
+  color: var(--gold-bright);
+}
+.metis-star-btn.danger:hover:not(:disabled) {
+  border-color: rgba(255,120,120,0.45);
+  color: rgba(255,180,180,0.95);
+}
+.metis-star-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.metis-build-note {
+  margin-top: 14px;
+  padding: 13px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(200,210,225,0.08);
+  background: rgba(10,14,28,0.46);
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-mid);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.metis-build-note.accent {
+  border-color: rgba(196,149,58,0.18);
+  color: rgba(236,221,188,0.96);
+}
+.metis-build-note.error {
+  border-color: rgba(255,120,120,0.24);
+  color: rgba(255,214,214,0.98);
+}
+.metis-star-editor {
+  margin-top: 18px;
+  padding: 22px 0 0;
+  border-top: 1px solid rgba(200,210,225,0.08);
+}
+.metis-star-editor-copy {
+  margin-top: 10px;
+  max-width: 780px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-mid);
+}
+.metis-star-editor-grid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.metis-star-field {
+  display: grid;
+  gap: 6px;
+}
+.metis-star-input {
+  width: 100%;
+  border: 1px solid rgba(200, 210, 225, 0.12);
+  background: rgba(15, 22, 40, 0.78);
+  color: var(--text-bright);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+  outline: none;
+}
+.metis-star-input:focus {
+  border-color: rgba(196,149,58,0.4);
+  box-shadow: 0 0 0 1px rgba(196,149,58,0.16);
+}
+.metis-build-studio-shell {
+  position: relative;
+  margin-top: 26px;
+  z-index: 2;
 }
 
 /* CARDS */
@@ -1177,7 +1623,7 @@ body {
   background: rgba(8,12,24,0.92);
   backdrop-filter: blur(20px);
   border: 1px solid rgba(196,149,58,0.12);
-  border-radius: 4px; padding: 32px 36px;
+  border-radius: 14px; padding: 28px 30px;
   max-width: 280px; pointer-events: all;
   opacity: 0; transform: translateY(8px) scale(0.97);
   transition: all 0.5s cubic-bezier(0.16,1,0.3,1);
@@ -1224,6 +1670,62 @@ body {
 }
 @keyframes metis-celestialSpin { from { rotate: 0deg; } to { rotate: 360deg; } }
 @keyframes metis-fadeUp { to { opacity: 1; transform: translateY(0); } }
+
+@media (max-width: 1100px) {
+  .metis-star-editor-grid,
+  .metis-cards-section {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .metis-nav {
+    padding: 22px 18px;
+  }
+
+  .metis-nav-left {
+    gap: 22px;
+  }
+
+  .metis-hero-overlay {
+    padding: 0 20px 48px;
+  }
+
+  .metis-hero-copy,
+  .metis-field-guide,
+  .metis-section-copy {
+    max-width: none;
+  }
+
+  .metis-hero-actions {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .metis-toast {
+    top: 78px;
+  }
+
+  .metis-build-section,
+  .metis-cards-section {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  .metis-build-toolbar {
+    flex-direction: column;
+  }
+
+  .metis-star-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metis-chat-bubble {
+    bottom: 20px;
+    right: 20px;
+  }
+}
 
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }

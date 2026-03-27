@@ -81,7 +81,7 @@ This starts the FastAPI app directly at `http://127.0.0.1:8000`.
 
 ### Use
 
-1. **Add documents** — drag files into the Library or use the CLI
+1. **Add documents** — bring files into the Home constellation flow or use the CLI
 2. **Ask questions** — select a mode (Q&A, Summary, Tutor, Research, Evidence Pack) and chat
 3. **Explore the Brain** — navigate the 3D graph to see how your workspace connects
 4. **Persist sessions** — conversations auto-save to SQLite
@@ -231,7 +231,6 @@ apps/
 ├── metis-web/      # Tauri + Next.js UI (TypeScript + Tailwind)
 │   ├── app/
 │   │   ├── chat/       # Chat interface (RAG Q&A)
-│   │   ├── library/    # Document & index library
 │   │   ├── brain/      # Interactive Brain Graph visualisation
 │   │   ├── setup/      # First-run onboarding wizard
 │   │   └── settings/   # Provider and model configuration

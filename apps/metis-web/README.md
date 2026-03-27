@@ -1,6 +1,6 @@
 # metis-web
 
-Next.js web UI for METIS. Provides a browser-based interface for chat, document library management, and settings — backed by the local METIS API server.
+Next.js web UI for METIS. Provides a browser-based interface for the constellation home surface, grounded chat, and settings — backed by the local METIS API server.
 
 ## Stack
 
@@ -72,7 +72,6 @@ On Windows (PowerShell):
 |-------|-------------|
 | `/` | Home / landing |
 | `/chat` | Chat with your indexed documents |
-| `/library` | Manage indexed document library |
 | `/settings` | Configure LLM provider, embeddings, and vector store |
 
 ## Configuration

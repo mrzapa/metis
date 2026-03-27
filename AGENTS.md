@@ -33,7 +33,6 @@ metis_app/
 apps/metis-web/          Tauri + Next.js frontend
   app/
     chat/                Chat interface (RAG Q&A)
-    library/             Document & index library
     brain/               Interactive brain graph visualisation
     settings/            Provider and model configuration
   components/
