@@ -2,9 +2,9 @@
 import Shell from "../layouts/Shell.astro";
 ---
 
-<Shell title="Library — axiom-web-lite">
+<Shell title="Library — metis-web-lite">
   <h2 class="page-title">Library</h2>
-  <p class="page-subtitle">Browse indexes built by the Axiom engine.</p>
+  <p class="page-subtitle">Browse indexes built by the METIS engine.</p>
 
   <div id="index-list"></div>
   <p id="status" class="status-msg"></p>
@@ -42,7 +42,7 @@ import Shell from "../layouts/Shell.astro";
       const indexes: IndexSummary[] = await res.json();
 
       if (indexes.length === 0) {
-        listEl.innerHTML = '<p style="color:var(--muted);font-size:0.85rem;">No indexes found. Use the API or axiom-web to build one.</p>';
+        listEl.innerHTML = '<p style="color:var(--muted);font-size:0.85rem;">No indexes found. Use the API or metis-web to build one.</p>';
         return;
       }
 

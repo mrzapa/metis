@@ -1,5 +1,5 @@
-/* Design tokens — OKLCh-based, adapted from axiom-web/app/tokens.css.
-   This is the dark-only minimal subset used by axiom-web-lite. */
+/* Design tokens — OKLCh-based, adapted from metis-web/app/tokens.css.
+   This is the dark-only minimal subset used by metis-web-lite. */
 
 :root {
   --background: oklch(0.145 0 0);

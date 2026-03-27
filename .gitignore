@@ -46,3 +46,6 @@ node_modules/
 # Temp / CI artifacts
 .cache/
 .playwright-cli/
+
+# Test output / screenshots
+output/

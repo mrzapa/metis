@@ -6,7 +6,7 @@ interface Props {
   title?: string;
 }
 
-const { title = "axiom-web-lite" } = Astro.props;
+const { title = "metis-web-lite" } = Astro.props;
 const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 ---
 
@@ -20,7 +20,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
   </head>
   <body>
     <header class="shell-header">
-      <h1>axiom-web-lite</h1>
+      <h1>metis-web-lite</h1>
       <span class="badge">experimental</span>
       <nav class="shell-nav">
         <a href="/">Home</a>
@@ -36,7 +36,7 @@ const apiBase = import.meta.env.PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
     </main>
 
     <footer class="shell-footer">
-      Full UI: <a href="http://localhost:3000" target="_blank" rel="noopener">axiom-web</a>
+      Full UI: <a href="http://localhost:3000" target="_blank" rel="noopener">metis-web</a>
       &nbsp;&middot;&nbsp; WOR-23 prototype
     </footer>
   </body>

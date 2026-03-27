@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="logo.png" alt="METIS AI" width="160" />
-</p>
-
 <h1 align="center">METIS AI</h1>
 
 <p align="center">

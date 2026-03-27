@@ -73,7 +73,8 @@ The sidecar starts the API on a dynamically selected free port (or port 8000 if
 
 ```bash
 # From apps/metis-desktop (after pnpm install):
-pnpm tauri icon ../../logo.png
+# Supply a square PNG (1024×1024 recommended) as the source icon:
+pnpm tauri icon <path-to-icon.png>
 ```
 
 ### 3. Bundle

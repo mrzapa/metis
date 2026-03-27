@@ -2,7 +2,7 @@
 import Shell from "../layouts/Shell.astro";
 ---
 
-<Shell title="Chat — axiom-web-lite">
+<Shell title="Chat — metis-web-lite">
   <div class="chat-controls">
     <label>
       Index
@@ -11,7 +11,7 @@ import Shell from "../layouts/Shell.astro";
       </select>
       <span id="index-empty" class="empty-state" style="display:none;">
         No indexes found. Build one first in
-        <a href="http://localhost:3000/library" target="_blank" rel="noopener">axiom-web</a>.
+        <a href="http://localhost:3000/library" target="_blank" rel="noopener">metis-web</a>.
       </span>
     </label>
 
@@ -77,7 +77,7 @@ import Shell from "../layouts/Shell.astro";
     } catch {
       indexSelect.innerHTML = '<option value="">Could not reach API</option>';
       submitBtn.disabled = true;
-      setStatus("API unreachable — is `python -m axiom_app.api` running?", true);
+      setStatus("API unreachable — is `python -m metis_app.api` running?", true);
     }
   }
 
