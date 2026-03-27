@@ -10,9 +10,7 @@ import {
   MessageSquare,
   Settings2,
 } from "lucide-react";
-import { AmbientBackdrop } from "@/components/shell/ambient-backdrop";
 import { MetisCompanionDock } from "@/components/shell/metis-companion-dock";
-import { StarscapeBackdrop } from "@/components/shell/starscape-backdrop";
 import { cn } from "@/lib/utils";
 
 interface PageChromeProps {
@@ -53,7 +51,6 @@ export function PageChrome({
   children,
   contentClassName,
   fullBleed = false,
-  backdropVariant = "ambient",
   tone = "default",
   companionContext,
 }: PageChromeProps) {
@@ -63,19 +60,17 @@ export function PageChrome({
   return (
     <div
       className={cn(
-        "page-chrome relative min-h-screen overflow-hidden",
+        "page-chrome relative min-h-screen overflow-hidden bg-transparent",
         isStarscape && "page-chrome--starscape",
       )}
     >
-      {backdropVariant === "starscape" ? <StarscapeBackdrop /> : <AmbientBackdrop />}
       <div className="relative z-10 flex min-h-screen">
         {/* ── Sidebar (xl+) ───────────────────────────────────────── */}
         <aside className="hidden w-64 shrink-0 p-3 xl:block">
           {/* top-3 + bottom p-3 = 1.5rem total vertical padding → min-h = 100dvh - 1.5rem */}
           <nav
             className={cn(
-              "sticky top-3 flex min-h-[calc(100dvh-1.5rem)] flex-col rounded-2xl p-4",
-              isStarscape ? "page-chrome-sidebar" : "glass-panel-strong",
+              "home-liquid-glass sticky top-3 flex min-h-[calc(100dvh-1.5rem)] flex-col rounded-2xl p-4",
             )}
           >
             <Link href="/" className="mb-6 flex items-center gap-2.5 px-2">
@@ -149,8 +144,7 @@ export function PageChrome({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.35, ease: "easeOut" }}
             className={cn(
-              "sticky top-3 z-20 flex items-center gap-3 rounded-xl px-4 py-2.5 sm:top-4 sm:px-5",
-              isStarscape ? "page-chrome-topbar" : "glass-panel",
+              "home-liquid-glass-rail sticky top-0 z-50 flex items-center gap-3 px-6 py-3 rounded-full mx-4 mt-3",
             )}
           >
             <Link
@@ -198,8 +192,7 @@ export function PageChrome({
               <section className="mb-4 grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.95fr)] xl:items-stretch">
                 <div
                   className={cn(
-                    "flex h-full flex-col rounded-2xl px-5 py-5 sm:px-6 sm:py-6",
-                    isStarscape ? "page-chrome-hero-panel" : "glass-panel",
+                    "home-liquid-glass flex h-full flex-col rounded-2xl px-5 py-5 sm:px-6 sm:py-6",
                   )}
                 >
                   <p

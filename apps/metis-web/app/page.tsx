@@ -1140,7 +1140,7 @@ body {
 /* HERO CANVAS */
 .metis-universe {
   position: fixed; top: 0; left: 0;
-  width: 100vw; height: 100vh; z-index: 0;
+  width: 100vw; height: 100vh; z-index: 1;
   touch-action: none;
 }
 
