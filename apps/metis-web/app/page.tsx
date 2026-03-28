@@ -350,12 +350,7 @@ function getRagManifestPath(source: BrainGraphRagActivity["sources"][number]): s
 }
 
 function getIndexFacultyId(index: IndexSummary): string | null {
-  const maybeBrainPass = index.brain_pass && typeof index.brain_pass === "object"
-    ? index.brain_pass as Record<string, unknown>
-    : null;
-  const placement = maybeBrainPass?.placement && typeof maybeBrainPass.placement === "object"
-    ? maybeBrainPass.placement as Record<string, unknown>
-    : null;
+  const placement = index.brain_pass?.placement;
   return normalizeText(placement?.faculty_id);
 }
 
