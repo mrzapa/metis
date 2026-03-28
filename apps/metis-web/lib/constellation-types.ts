@@ -14,6 +14,7 @@ export interface UserStar {
   stage?: UserStarStage;
   intent?: string;
   notes?: string;
+  connectedUserStarIds?: string[];
   linkedManifestPaths?: string[];
   activeManifestPath?: string;
   linkedManifestPath?: string;
@@ -82,6 +83,9 @@ export function normalizeUserStar(input: Partial<UserStar> & { id: string }): Us
   const primaryDomainId = normalizeString(input.primaryDomainId);
   const intent = normalizeString(input.intent);
   const notes = normalizeString(input.notes);
+  const connectedUserStarIds = normalizeStringList(input.connectedUserStarIds).filter(
+    (linkedStarId) => linkedStarId !== input.id,
+  );
   const activeManifestPath = normalizeString(input.activeManifestPath);
   const legacyManifestPath = normalizeString(input.linkedManifestPath);
   const linkedManifestPaths = normalizeStringList(input.linkedManifestPaths);
@@ -118,6 +122,7 @@ export function normalizeUserStar(input: Partial<UserStar> & { id: string }): Us
     stage: resolveStarStage(input.stage, normalizedLinkedManifestPaths, notes),
     intent,
     notes,
+    connectedUserStarIds: connectedUserStarIds.length > 0 ? connectedUserStarIds : undefined,
     linkedManifestPaths: normalizedLinkedManifestPaths.length > 0 ? normalizedLinkedManifestPaths : undefined,
     activeManifestPath: resolvedActiveManifestPath,
     linkedManifestPath: resolvedLinkedManifestPath,
@@ -141,6 +146,7 @@ export function isUserStar(value: unknown): value is UserStar {
     (candidate.stage === undefined || typeof candidate.stage === "string") &&
     (candidate.intent === undefined || typeof candidate.intent === "string") &&
     (candidate.notes === undefined || typeof candidate.notes === "string") &&
+    (candidate.connectedUserStarIds === undefined || Array.isArray(candidate.connectedUserStarIds)) &&
     (candidate.linkedManifestPaths === undefined || Array.isArray(candidate.linkedManifestPaths)) &&
     (candidate.activeManifestPath === undefined || typeof candidate.activeManifestPath === "string") &&
     (candidate.linkedManifestPath === undefined || typeof candidate.linkedManifestPath === "string")

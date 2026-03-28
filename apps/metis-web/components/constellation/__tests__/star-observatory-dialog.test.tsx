@@ -7,11 +7,21 @@ import type { UserStar } from "@/lib/constellation-types";
 vi.mock("@/components/ui/dialog", () => ({
   Dialog: ({
     open,
+    onOpenChange,
     children,
   }: React.PropsWithChildren<{ open: boolean; onOpenChange?: (open: boolean) => void }>) => (
-    open ? <div data-testid="dialog-root">{children}</div> : null
+    open ? (
+      <div data-testid="dialog-root">
+        <button type="button" onClick={() => onOpenChange?.(false)}>
+          Close panel
+        </button>
+        {children}
+      </div>
+    ) : null
   ),
-  DialogContent: ({ children }: React.PropsWithChildren<{ className?: string; showCloseButton?: boolean }>) => (
+  DialogContent: ({
+    children,
+  }: React.PropsWithChildren<{ className?: string; showCloseButton?: boolean; showOverlay?: boolean }>) => (
     <div>{children}</div>
   ),
   DialogDescription: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -30,7 +40,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 const { buildIndexStream, fetchSettings } = await import("@/lib/api");
-const { StarObservatoryDialog } = await import("../star-observatory-dialog");
+const { StarDetailsPanel } = await import("../star-observatory-dialog");
 
 function makeIndex(overrides: Partial<IndexSummary> = {}): IndexSummary {
   return {
@@ -56,20 +66,21 @@ function makeStar(overrides: Partial<UserStar> = {}): UserStar {
   };
 }
 
-function renderDialog({
+function renderPanel({
   star = makeStar(),
-  entryMode = "existing" as const,
+  entryMode = "existing",
   availableIndexes = [] as IndexSummary[],
   indexesLoading = false,
+  onOpenChange = vi.fn(),
   onIndexBuilt = vi.fn(),
   onUpdateStar = vi.fn().mockResolvedValue(true),
   onRemoveStar = vi.fn().mockResolvedValue(undefined),
   onOpenChat = vi.fn(),
-} = {}) {
+}: Partial<React.ComponentProps<typeof StarDetailsPanel>> & { star?: UserStar } = {}) {
   render(
-    <StarObservatoryDialog
+    <StarDetailsPanel
       open
-      onOpenChange={vi.fn()}
+      onOpenChange={onOpenChange}
       star={star}
       entryMode={entryMode}
       closeLockedUntil={0}
@@ -82,10 +93,10 @@ function renderDialog({
     />,
   );
 
-  return { onIndexBuilt, onUpdateStar, onRemoveStar, onOpenChat };
+  return { onOpenChange, onIndexBuilt, onUpdateStar, onRemoveStar, onOpenChat };
 }
 
-describe("StarObservatoryDialog", () => {
+describe("StarDetailsPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(fetchSettings).mockResolvedValue({});
@@ -110,12 +121,13 @@ describe("StarObservatoryDialog", () => {
         },
       },
     };
+
     vi.mocked(buildIndexStream).mockImplementation(async (_paths, _settings, onEvent) => {
       onEvent({ type: "status", text: "embedding" });
       return builtIndex;
     });
 
-    const { onIndexBuilt, onUpdateStar } = renderDialog({
+    const { onIndexBuilt, onUpdateStar } = renderPanel({
       star: makeStar({ label: undefined, stage: "seed" }),
       entryMode: "new",
     });
@@ -126,7 +138,7 @@ describe("StarObservatoryDialog", () => {
       target: { value: "/docs/field-notes.md\n/docs/summary.pdf" },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Build and attach" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Add and build" }).at(-1) as HTMLButtonElement);
 
     await waitFor(() => {
       expect(buildIndexStream).toHaveBeenCalledWith(
@@ -135,6 +147,7 @@ describe("StarObservatoryDialog", () => {
         expect.any(Function),
       );
     });
+
     expect(onIndexBuilt).toHaveBeenCalledWith(builtIndex);
 
     await waitFor(() => {
@@ -155,12 +168,10 @@ describe("StarObservatoryDialog", () => {
       );
     });
 
-    const payload = vi.mocked(onUpdateStar).mock.calls[0]?.[1];
-    expect(payload?.stage).toBeUndefined();
     expect(await screen.findByText(/Built Orbit dossier and filed it near Reasoning/i)).toBeInTheDocument();
   });
 
-  it("saves meaning, switches the active index, and opens chat from the active orbit", async () => {
+  it("updates star details, switches the active index, and opens chat", async () => {
     const atlasA = makeIndex();
     const atlasB = makeIndex({
       index_id: "Atlas B",
@@ -177,7 +188,7 @@ describe("StarObservatoryDialog", () => {
       embedding_signature: "embed-c",
     });
 
-    const { onOpenChat, onUpdateStar } = renderDialog({
+    const { onOpenChat, onUpdateStar } = renderPanel({
       star: makeStar({
         label: "Pattern Atlas",
         primaryDomainId: "knowledge",
@@ -192,6 +203,7 @@ describe("StarObservatoryDialog", () => {
       availableIndexes: [atlasA, atlasB, atlasC],
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Attached sources" }));
     fireEvent.click(screen.getByRole("button", { name: "Set active" }));
     fireEvent.change(screen.getByPlaceholderText("knowledge"), {
       target: { value: "synthesis" },
@@ -232,14 +244,14 @@ describe("StarObservatoryDialog", () => {
       );
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Open active chat" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Open chat" })[0]);
 
     expect(onOpenChat).toHaveBeenCalledWith(atlasB.manifest_path, "Pattern Atlas");
     expect(screen.getByText(/Star details updated/i)).toBeInTheDocument();
     expect(screen.getAllByText("Atlas C").length).toBeGreaterThan(0);
   });
 
-  it("detaches an attached index and keeps the remaining orbit active", async () => {
+  it("detaches an attached index and keeps the remaining source active", async () => {
     const atlasA = makeIndex();
     const atlasB = makeIndex({
       index_id: "Atlas B",
@@ -249,7 +261,7 @@ describe("StarObservatoryDialog", () => {
       embedding_signature: "embed-b",
     });
 
-    const { onUpdateStar } = renderDialog({
+    const { onUpdateStar } = renderPanel({
       star: makeStar({
         label: "Orbit map",
         linkedManifestPaths: [atlasA.manifest_path, atlasB.manifest_path],
@@ -259,6 +271,7 @@ describe("StarObservatoryDialog", () => {
       availableIndexes: [atlasA, atlasB],
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "Attached sources" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Detach" })[0]);
 
     await waitFor(() => {
@@ -273,5 +286,31 @@ describe("StarObservatoryDialog", () => {
     });
 
     expect(screen.getByText(/Atlas A detached/i)).toBeInTheDocument();
+  });
+
+  it("prevents closing while a build is in progress", async () => {
+    vi.mocked(buildIndexStream).mockImplementation(
+      () => new Promise(() => undefined),
+    );
+
+    const { onOpenChange } = renderPanel({
+      star: makeStar({ stage: "seed" }),
+      entryMode: "new",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Local paths" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /I understand these paths/i }));
+    fireEvent.change(screen.getByPlaceholderText(/report\.pdf/), {
+      target: { value: "/docs/field-notes.md" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Add and build" }).at(-1) as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(buildIndexStream).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 });

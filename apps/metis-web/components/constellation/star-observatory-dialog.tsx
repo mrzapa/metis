@@ -45,7 +45,7 @@ type EntryMode = "new" | "existing";
 type StarDialogView = "build" | "overview";
 type DialogTone = "default" | "error";
 
-type ObservatoryStar = UserStar & {
+type DetailStar = UserStar & {
   primaryDomainId?: string;
   relatedDomainIds?: string[];
   stage?: UserStarStage;
@@ -113,7 +113,7 @@ const STAGE_OPTIONS: Array<{ value: UserStarStage; label: string; description: s
   },
 ];
 
-interface StarObservatoryDialogProps {
+interface StarDetailsPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   star: UserStar | null;
@@ -166,7 +166,7 @@ function resolveDefaultStage(
   return "seed";
 }
 
-export function StarObservatoryDialog({
+export function StarDetailsPanel({
   open,
   onOpenChange,
   star,
@@ -178,7 +178,7 @@ export function StarObservatoryDialog({
   onUpdateStar,
   onRemoveStar,
   onOpenChat,
-}: StarObservatoryDialogProps) {
+}: StarDetailsPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDesktop, setIsDesktop] = useState(false);
   const [tab, setTab] = useState<"upload" | "paths" | "desktop">("upload");
@@ -224,7 +224,7 @@ export function StarObservatoryDialog({
       return;
     }
 
-    const activeStar = star as ObservatoryStar;
+    const activeStar = star as DetailStar;
     const nextAttachedManifestPaths = uniqueStrings([
       ...(activeStar.linkedManifestPaths ?? []),
       activeStar.activeManifestPath,
@@ -282,24 +282,44 @@ export function StarObservatoryDialog({
     || "";
   const derivedStage = resolveDefaultStage(attachedManifestPaths, notesDraft);
   const effectiveStage = manualStageOverride || derivedStage;
-
-  const resolveAttachedIndex = useCallback((manifestPath: string): AttachedIndexSummary => {
-    const foundIndex = availableIndexes.find((index) => index.manifest_path === manifestPath);
-    if (foundIndex) {
-      return { ...foundIndex, source: "available" };
+  const attachedManifestPathSet = useMemo(
+    () => new Set(attachedManifestPaths),
+    [attachedManifestPaths],
+  );
+  const availableIndexByManifestPath = useMemo(
+    () => new Map(
+      availableIndexes.map((index) => [
+        index.manifest_path,
+        { ...index, source: "available" as const },
+      ]),
+    ),
+    [availableIndexes],
+  );
+  const buildResultSummary = useMemo<AttachedIndexSummary | null>(() => {
+    if (!buildResult) {
+      return null;
     }
 
-    if (buildResult?.manifest_path === manifestPath) {
-      return {
-        manifest_path: buildResult.manifest_path,
-        index_id: buildResult.index_id,
-        document_count: buildResult.document_count,
-        chunk_count: buildResult.chunk_count,
-        backend: buildResult.vector_backend,
-        created_at: undefined,
-        embedding_signature: buildResult.embedding_signature,
-        source: "build",
-      };
+    return {
+      manifest_path: buildResult.manifest_path,
+      index_id: buildResult.index_id,
+      document_count: buildResult.document_count,
+      chunk_count: buildResult.chunk_count,
+      backend: buildResult.vector_backend,
+      created_at: undefined,
+      embedding_signature: buildResult.embedding_signature,
+      source: "build",
+    };
+  }, [buildResult]);
+
+  const resolveAttachedIndex = useCallback((manifestPath: string): AttachedIndexSummary => {
+    const foundIndex = availableIndexByManifestPath.get(manifestPath);
+    if (foundIndex) {
+      return foundIndex;
+    }
+
+    if (buildResultSummary?.manifest_path === manifestPath) {
+      return buildResultSummary;
     }
 
     return {
@@ -310,7 +330,7 @@ export function StarObservatoryDialog({
       backend: "unknown",
       source: "unresolved",
     };
-  }, [availableIndexes, buildResult]);
+  }, [availableIndexByManifestPath, buildResultSummary]);
 
   const activeIndex = activeManifestPathForChat ? resolveAttachedIndex(activeManifestPathForChat) : null;
   const attachedIndexes = useMemo(
@@ -319,9 +339,9 @@ export function StarObservatoryDialog({
   );
   const suggestedIndexes = useMemo(
     () => availableIndexes
-      .filter((index) => !attachedManifestPaths.includes(index.manifest_path))
+      .filter((index) => !attachedManifestPathSet.has(index.manifest_path))
       .slice(0, 5),
-    [availableIndexes, attachedManifestPaths],
+    [attachedManifestPathSet, availableIndexes],
   );
 
   const handleOpenChange = useCallback((nextOpen: boolean) => {
@@ -338,7 +358,7 @@ export function StarObservatoryDialog({
     return null;
   }
 
-  const activeStar = star as ObservatoryStar;
+  const activeStar = star as DetailStar;
 
   function buildStarUpdate(
     nextAttachedManifestPaths = attachedManifestPaths,
@@ -600,8 +620,8 @@ export function StarObservatoryDialog({
   }
 
   const dialogTitle = view === "build"
-    ? (entryMode === "new" ? "Feed this star" : "Bring new material into orbit")
-    : "Star observatory";
+    ? (entryMode === "new" ? "Add to this star" : "Attach sources")
+    : "Star details";
   const dialogDescription = view === "build"
     ? "Upload files, add local paths, or attach an existing index to deepen this star's memory."
     : "Edit the star's meaning, switch the active chat index, or bring in more attached indexes.";
@@ -609,10 +629,12 @@ export function StarObservatoryDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="max-h-[calc(100vh-2rem)] gap-0 overflow-hidden p-0 sm:max-w-6xl"
+        className="left-1/2 top-auto bottom-3 max-h-[calc(100vh-1.5rem)] w-[calc(100%-1.5rem)] max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-0 gap-0 overflow-hidden rounded-[1.75rem] border-white/12 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(8,11,20,0.96))] p-0 sm:left-auto sm:right-4 sm:top-4 sm:bottom-4 sm:w-[min(460px,calc(100vw-2rem))] sm:max-w-[460px] sm:translate-x-0 sm:translate-y-0"
+        data-testid="star-details-panel"
         showCloseButton={!building && !uploading}
+        showOverlay={false}
       >
-        <div className="border-b border-white/10 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(10,13,23,0.92))] px-6 py-5">
+        <div className="border-b border-white/10 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(10,13,23,0.92))] px-5 py-5 sm:px-6">
           <DialogHeader className="gap-3">
             <div className="flex items-start justify-between gap-4 pr-10">
               <div className="space-y-2">
@@ -654,7 +676,7 @@ export function StarObservatoryDialog({
                     : "bg-white/6 text-slate-300 hover:bg-white/10 hover:text-white",
                 )}
               >
-                Upload and build
+                Add and build
               </button>
               <button
                 type="button"
@@ -666,14 +688,14 @@ export function StarObservatoryDialog({
                     : "bg-white/6 text-slate-300 hover:bg-white/10 hover:text-white",
                 )}
               >
-                Index overview
+                Attached sources
               </button>
             </div>
           </DialogHeader>
         </div>
 
-        <div className="grid max-h-[calc(100vh-11rem)] gap-0 overflow-hidden lg:grid-cols-[minmax(0,1.08fr)_minmax(336px,0.92fr)]">
-          <div className="overflow-y-auto px-6 py-6">
+        <div className="grid max-h-[calc(100vh-10rem)] gap-0 overflow-hidden sm:max-h-[calc(100vh-8rem)] sm:grid-cols-1 lg:max-h-[calc(100vh-8rem)]">
+          <div className="overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
             {view === "build" ? (
               <div className="space-y-6">
                 <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
@@ -890,7 +912,7 @@ export function StarObservatoryDialog({
                   <div className="mt-5 flex flex-wrap gap-3">
                     <Button onClick={handleBuild} disabled={building || readyPaths.length === 0} className="gap-2">
                       {building ? <Loader2 className="size-4 animate-spin" /> : <Database className="size-4" />}
-                      {building ? "Building..." : "Build and attach"}
+                      {building ? "Building..." : "Add and build"}
                     </Button>
                     {buildResult ? (
                       <Button
@@ -900,7 +922,7 @@ export function StarObservatoryDialog({
                           onOpenChat(activeManifestPathForChat || buildResult.manifest_path, nextLabel);
                         }}
                       >
-                        Open active chat
+                        Open chat
                       </Button>
                     ) : null}
                   </div>
@@ -1087,7 +1109,7 @@ export function StarObservatoryDialog({
                       <span className="font-medium">This star is not attached to an index yet.</span>
                     </div>
                     <p className="mt-3 text-sm leading-7 text-slate-300">
-                      Build a new index or attach one of the indexed sources from the observatory rail.
+                      Build a new index or attach one of the indexed sources from the source rail.
                     </p>
                   </div>
                 )}
@@ -1095,7 +1117,7 @@ export function StarObservatoryDialog({
             )}
           </div>
 
-          <aside className="border-t border-white/10 bg-[linear-gradient(180deg,rgba(12,16,28,0.98),rgba(8,11,20,0.96))] px-6 py-6 lg:border-t-0 lg:border-l">
+          <aside className="border-t border-white/10 bg-[linear-gradient(180deg,rgba(12,16,28,0.98),rgba(8,11,20,0.96))] px-5 py-5 sm:px-6 sm:py-6">
             <div className="space-y-5">
               <div className="rounded-[1.5rem] border border-white/10 bg-white/4 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1206,7 +1228,7 @@ export function StarObservatoryDialog({
               </div>
 
               <div className="rounded-[1.5rem] border border-white/10 bg-white/4 p-4">
-                <div className="text-[11px] uppercase tracking-[0.28em] text-slate-400">Observatory rail</div>
+                <div className="text-[11px] uppercase tracking-[0.28em] text-slate-400">Source rail</div>
                 <div className="mt-3 flex items-center gap-3">
                   <div className="size-3 rounded-full bg-[#d6b361] shadow-[0_0_24px_rgba(214,179,97,0.7)]" />
                   <div>
@@ -1284,7 +1306,7 @@ export function StarObservatoryDialog({
                   <p className="mt-4 text-sm leading-7 text-slate-300">
                     {indexesLoading
                       ? "Loading indexed sources."
-                      : "No other indexed sources are available yet. Build one in this observatory to give the star grounded memory."}
+                      : "No other indexed sources are available yet. Build one here to give the star grounded memory."}
                   </p>
                 )}
               </div>
@@ -1305,10 +1327,10 @@ export function StarObservatoryDialog({
                   }}
                   disabled={!activeManifestPathForChat}
                 >
-                  Open active chat
+                  Open chat
                 </Button>
                 <Button variant="outline" onClick={() => setView("build")}>
-                  Build another index
+                  Add another source
                 </Button>
                 <Button variant="destructive" onClick={() => void handleRemoveStar()} disabled={removing}>
                   {removing ? "Removing..." : "Remove star"}

@@ -140,7 +140,19 @@ export function useConstellationStars() {
 
   const removeUserStarById = useCallback(
     async (starId: string) => {
-      const next = userStars.filter((star) => star.id !== starId);
+      const next = userStars
+        .filter((star) => star.id !== starId)
+        .map((star) => {
+          if (!star.connectedUserStarIds?.includes(starId)) {
+            return star;
+          }
+          return normalizeUserStar({
+            ...star,
+            connectedUserStarIds: star.connectedUserStarIds.filter((linkedStarId) => linkedStarId !== starId),
+            id: star.id,
+            createdAt: star.createdAt,
+          });
+        });
       if (next.length === userStars.length) {
         return;
       }
@@ -165,6 +177,7 @@ export function useConstellationStars() {
           | "stage"
           | "intent"
           | "notes"
+          | "connectedUserStarIds"
           | "linkedManifestPaths"
           | "activeManifestPath"
           | "linkedManifestPath"
