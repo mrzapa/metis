@@ -13,6 +13,7 @@ import type { RagStreamEvent } from "@/lib/api";
 import type { EvidenceSource } from "@/lib/chat-types";
 import { useChatTranscript } from "@/app/chat/use-chat-transcript";
 import { useArrowState } from "@/hooks/use-arrow-state";
+import { emitBrainGraphRagActivity } from "@/lib/brain-graph-rag-activity";
 import {
   clearResumableRagRun,
   loadResumableRagRun,
@@ -992,6 +993,13 @@ export default function ChatPage() {
             sessionId,
           });
           setLatestFallback(result.fallback ?? null);
+          emitBrainGraphRagActivity({
+            runId: result.run_id,
+            sessionId,
+            manifestPath: activeIndexPath,
+            sources: result.sources,
+            timestamp: Date.now(),
+          });
           appendCompletedRunMessage(
             createMessage({
               role: "assistant",

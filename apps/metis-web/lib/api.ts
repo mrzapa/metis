@@ -4,6 +4,7 @@ import type {
   ChatMessageContent,
   EvidenceSource,
 } from "@/lib/chat-types";
+import { emitBrainGraphRagActivity } from "@/lib/brain-graph-rag-activity";
 
 // Resolves the API base URL once and caches the result.
 // In a Tauri desktop build the sidecar negotiates a dynamic port and exposes
@@ -1034,6 +1035,13 @@ export async function queryRagStream(
       parsedEvent.type === "retrieval_augmented" ||
       parsedEvent.type === "refinement_retrieval"
     ) {
+      emitBrainGraphRagActivity({
+        runId: parsedEvent.run_id,
+        sessionId: options.sessionId ?? null,
+        manifestPath: manifest_path,
+        sources: parsedEvent.sources,
+        timestamp: Date.now(),
+      });
       emitCompanionActivity({
         source: "rag_stream",
         state: "running",
@@ -1042,6 +1050,13 @@ export async function queryRagStream(
         timestamp: Date.now(),
       });
     } else if (parsedEvent.type === "final") {
+      emitBrainGraphRagActivity({
+        runId: parsedEvent.run_id,
+        sessionId: options.sessionId ?? null,
+        manifestPath: manifest_path,
+        sources: parsedEvent.sources,
+        timestamp: Date.now(),
+      });
       emitCompanionActivity({
         source: "rag_stream",
         state: "completed",
@@ -1391,6 +1406,7 @@ export interface BrainGraphEdge {
   target_id: string;
   edge_type: string;
   metadata: Record<string, unknown>;
+  weight: number;
 }
 
 export interface BrainGraphResponse {
@@ -1398,11 +1414,43 @@ export interface BrainGraphResponse {
   edges: BrainGraphEdge[];
 }
 
+export interface BrainScaffoldPair {
+  birth: number;
+  death: number;
+  dimension: number;
+  node_ids: string[];
+}
+
+export interface BrainScaffoldEdge {
+  source_id: string;
+  target_id: string;
+  persistence_weight: number;
+  frequency_weight: number;
+}
+
+export interface BrainScaffoldResponse {
+  betti_0: number;
+  betti_1: number;
+  h0_pairs: BrainScaffoldPair[];
+  h1_pairs: BrainScaffoldPair[];
+  scaffold_edges: BrainScaffoldEdge[];
+  summary: string;
+}
+
 export async function fetchBrainGraph(): Promise<BrainGraphResponse> {
   const res = await apiFetch(`${await getApiBase()}/v1/brain/graph`);
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Failed to fetch brain graph (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function fetchBrainScaffold(): Promise<BrainScaffoldResponse> {
+  const res = await apiFetch(`${await getApiBase()}/v1/brain/scaffold`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch brain scaffold (${res.status}): ${detail}`);
   }
   return res.json();
 }

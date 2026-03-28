@@ -25,6 +25,7 @@ import metis_app.settings_store as _settings_store
 from metis_app.engine import list_indexes
 from metis_app.engine.querying import _normalize_run_id
 from metis_app.services.stream_replay import ReplayableRunStreamManager
+from metis_app.services.topo_scaffold import compute_scaffold, scaffold_to_payload
 from metis_app.services.trace_store import TraceStore
 from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
 from metis_app.utils.feature_flags import FeatureFlag, get_feature_statuses
@@ -63,6 +64,8 @@ _DEFAULT_LOCAL_ORIGINS = [
 
 _RAG_STREAM_MANAGER = ReplayableRunStreamManager()
 _MAX_UI_TELEMETRY_REQUEST_BYTES = 16_384
+_BRAIN_SCAFFOLD_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_BRAIN_SCAFFOLD_TTL_SECONDS = 30.0
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -171,10 +174,29 @@ def create_app() -> FastAPI:
                     "target_id": edge.target_id,
                     "edge_type": edge.edge_type,
                     "metadata": edge.metadata,
+                    "weight": edge.weight,
                 }
                 for edge in graph.edges
             ],
         }
+
+    @app.get("/v1/brain/scaffold", dependencies=_auth)
+    def api_brain_scaffold() -> dict[str, Any]:
+        graph = WorkspaceOrchestrator().get_workspace_graph()
+        cache_key = _brain_graph_cache_key(graph)
+        now = time.time()
+        cached = _BRAIN_SCAFFOLD_CACHE.get(cache_key)
+        if cached is not None:
+            cached_at, payload = cached
+            if now - cached_at <= _BRAIN_SCAFFOLD_TTL_SECONDS:
+                return payload
+
+        payload = scaffold_to_payload(compute_scaffold(graph))
+        _BRAIN_SCAFFOLD_CACHE[cache_key] = (now, payload)
+        if len(_BRAIN_SCAFFOLD_CACHE) > 16:
+            oldest_key = min(_BRAIN_SCAFFOLD_CACHE.items(), key=lambda item: item[1][0])[0]
+            _BRAIN_SCAFFOLD_CACHE.pop(oldest_key, None)
+        return payload
 
     @app.post("/v1/files/upload", dependencies=_auth)
     async def api_upload_files(
@@ -477,6 +499,22 @@ def _run_engine(func: Any, *args: Any, **kwargs: Any) -> Any:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _brain_graph_cache_key(graph: Any) -> str:
+    payload = {
+        "nodes": sorted(str(node_id) for node_id in graph.nodes.keys()),
+        "edges": sorted(
+            (
+                str(edge.source_id),
+                str(edge.target_id),
+                str(edge.edge_type),
+                round(float(edge.weight or 0.0), 6),
+            )
+            for edge in graph.edges
+        ),
+    }
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 
 app = create_app()

@@ -12,6 +12,11 @@ import {
   getConstellationPlacementDecision,
 } from "@/lib/constellation-brain";
 import {
+  DEFAULT_BRAIN_GRAPH_HIGHLIGHT_TTL_MS,
+  subscribeBrainGraphRagActivity,
+  type BrainGraphRagActivity,
+} from "@/lib/brain-graph-rag-activity";
+import {
   ADD_CANDIDATE_HIT_RADIUS_PX,
   buildOutwardPlacement,
   clampBackgroundZoomFactor,
@@ -128,6 +133,15 @@ interface WorldStarData {
   parallaxFactor: number;
   hasDiffraction: boolean;
   revealZoomFactor: number;
+}
+
+interface HomeRagPulseState {
+  startedAt: number;
+  expiresAt: number;
+  ttlMs: number;
+  manifestPaths: Set<string>;
+  facultyIds: Set<string>;
+  starIds: Set<string>;
 }
 
 function nextDeterministicSeed(seed: number): number {
@@ -313,6 +327,47 @@ function getStarManifestPaths(star: UserStar): string[] {
     return star.linkedManifestPaths;
   }
   return star.linkedManifestPath ? [star.linkedManifestPath] : [];
+}
+
+function normalizeText(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function getRagManifestPath(source: BrainGraphRagActivity["sources"][number]): string | null {
+  const metadata = source.metadata && typeof source.metadata === "object"
+    ? source.metadata as Record<string, unknown>
+    : null;
+  return (
+    normalizeText(metadata?.manifest_path)
+    ?? normalizeText(metadata?.source_manifest_path)
+    ?? normalizeText(metadata?.file_path)
+    ?? normalizeText(source.file_path)
+  );
+}
+
+function getIndexFacultyId(index: IndexSummary): string | null {
+  const maybeBrainPass = index.brain_pass && typeof index.brain_pass === "object"
+    ? index.brain_pass as Record<string, unknown>
+    : null;
+  const placement = maybeBrainPass?.placement && typeof maybeBrainPass.placement === "object"
+    ? maybeBrainPass.placement as Record<string, unknown>
+    : null;
+  return normalizeText(placement?.faculty_id);
+}
+
+function getHomeRagPulseStrength(pulseState: HomeRagPulseState | null, nowMs: number): number {
+  if (!pulseState || nowMs >= pulseState.expiresAt) {
+    return 0;
+  }
+
+  const remainingMs = Math.max(0, pulseState.expiresAt - nowMs);
+  const decay = remainingMs / Math.max(1, pulseState.ttlMs);
+  const pulse = 0.82 + 0.18 * Math.sin(nowMs / 160);
+  return Math.max(0, Math.min(1, decay * pulse));
 }
 
 function getStarAttachmentCount(star: UserStar): number {
@@ -523,6 +578,7 @@ export default function Home() {
   const starTooltipHideTimeoutRef = useRef<number | null>(null);
   const zoomInteractionTimeoutRef = useRef<number | null>(null);
   const dragPreviewPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const ragPulseStateRef = useRef<HomeRagPulseState | null>(null);
   const starfieldRevisionRef = useRef(0);
   const dragStateRef = useRef<{
     pointerId: number;
@@ -1065,6 +1121,62 @@ export default function Home() {
   }, [starLimit, userStars.length]);
 
   useEffect(() => {
+    return subscribeBrainGraphRagActivity((activity) => {
+      const timestamp = Number.isFinite(activity.timestamp) ? activity.timestamp : Date.now();
+      const ttlMs = Math.max(1500, Math.round(activity.ttlMs ?? DEFAULT_BRAIN_GRAPH_HIGHLIGHT_TTL_MS));
+      const manifestPaths = new Set<string>();
+      const facultyIds = new Set<string>();
+      const starIds = new Set<string>();
+
+      const topLevelManifestPath = normalizeText(activity.manifestPath);
+      if (topLevelManifestPath) {
+        manifestPaths.add(topLevelManifestPath);
+      }
+
+      for (const source of activity.sources) {
+        const manifestPath = getRagManifestPath(source);
+        if (manifestPath) {
+          manifestPaths.add(manifestPath);
+        }
+      }
+
+      if (manifestPaths.size === 0) {
+        ragPulseStateRef.current = null;
+        return;
+      }
+
+      for (const star of userStarsRef.current) {
+        const starManifestPaths = getStarManifestPaths(star);
+        if (!starManifestPaths.some((manifestPath) => manifestPaths.has(manifestPath))) {
+          continue;
+        }
+
+        starIds.add(star.id);
+        facultyIds.add(resolveStarFaculty(star).id);
+      }
+
+      for (const index of availableIndexesRef.current) {
+        if (!manifestPaths.has(index.manifest_path)) {
+          continue;
+        }
+        const facultyId = getIndexFacultyId(index);
+        if (facultyId) {
+          facultyIds.add(facultyId);
+        }
+      }
+
+      ragPulseStateRef.current = {
+        startedAt: timestamp,
+        expiresAt: timestamp + ttlMs,
+        ttlMs,
+        manifestPaths,
+        facultyIds,
+        starIds,
+      };
+    });
+  }, []);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -1538,6 +1650,8 @@ export default function Home() {
         fadeIn: number;
       }>();
       const renderTimeMs = getRenderEpochMs(ts);
+      const ragPulseState = ragPulseStateRef.current;
+      const ragPulseStrength = getHomeRagPulseStrength(ragPulseState, renderTimeMs);
       const edgeBreath = reducedMotion
         ? 1
         : 1 + USER_STAR_EDGE_BREATH_AMPLITUDE * Math.sin((Math.PI * 2 * ts) / USER_STAR_EDGE_BREATH_PERIOD_MS);
@@ -1578,13 +1692,16 @@ export default function Home() {
         );
 
         edgeNodes.forEach((node, index) => {
+          const ragHighlighted = ragPulseStrength > 0
+            && (ragPulseState?.starIds.has(s.id) || ragPulseState?.facultyIds.has(node.concept.faculty.id));
+          const ragBoost = ragHighlighted ? ragPulseStrength : 0;
           const alphaMultiplier = Math.max(0, Math.min(1, fadeIn * edgeBreath));
           const [facultyR, facultyG, facultyB] = getFacultyColor(node.concept.faculty.id);
           const grad = ctx!.createLinearGradient(node._sx, node._sy, px, py);
-          grad.addColorStop(0, `rgba(${facultyR},${facultyG},${facultyB},${0.19 * alphaMultiplier})`);
-          grad.addColorStop(1, `rgba(${mixedR},${mixedG},${mixedB},${0.25 * alphaMultiplier})`);
+          grad.addColorStop(0, `rgba(${facultyR},${facultyG},${facultyB},${(0.19 + ragBoost * 0.32) * alphaMultiplier})`);
+          grad.addColorStop(1, `rgba(${mixedR},${mixedG},${mixedB},${(0.25 + ragBoost * 0.36) * alphaMultiplier})`);
           ctx!.strokeStyle = grad;
-          ctx!.lineWidth = index === 0 ? 1.05 : 0.7;
+          ctx!.lineWidth = (index === 0 ? 1.05 : 0.7) + ragBoost * (index === 0 ? 1.6 : 1.1);
           ctx!.beginPath();
           ctx!.moveTo(node._sx, node._sy);
           ctx!.lineTo(px, py);
@@ -1614,11 +1731,14 @@ export default function Home() {
           renderedLinks.add(edgeKey);
 
           const alphaMultiplier = Math.max(0, Math.min(1, Math.min(from.fadeIn, to.fadeIn) * edgeBreath));
+          const ragHighlighted = ragPulseStrength > 0
+            && (ragPulseState?.starIds.has(star.id) || ragPulseState?.starIds.has(linkedStarId));
+          const ragBoost = ragHighlighted ? ragPulseStrength : 0;
           const gradient = ctx!.createLinearGradient(from.px, from.py, to.px, to.py);
-          gradient.addColorStop(0, `rgba(${from.mixed[0]},${from.mixed[1]},${from.mixed[2]},${0.21 * alphaMultiplier})`);
-          gradient.addColorStop(1, `rgba(${to.mixed[0]},${to.mixed[1]},${to.mixed[2]},${0.21 * alphaMultiplier})`);
+          gradient.addColorStop(0, `rgba(${from.mixed[0]},${from.mixed[1]},${from.mixed[2]},${(0.21 + ragBoost * 0.34) * alphaMultiplier})`);
+          gradient.addColorStop(1, `rgba(${to.mixed[0]},${to.mixed[1]},${to.mixed[2]},${(0.21 + ragBoost * 0.34) * alphaMultiplier})`);
           ctx!.strokeStyle = gradient;
-          ctx!.lineWidth = 0.95;
+          ctx!.lineWidth = 0.95 + ragBoost * 1.35;
           ctx!.beginPath();
           ctx!.moveTo(from.px, from.py);
           ctx!.lineTo(to.px, to.py);
@@ -1633,6 +1753,8 @@ export default function Home() {
       const previewPositions = dragPreviewPositionsRef.current;
       const backgroundCamera = readBackgroundCamera();
       const renderTimeMs = getRenderEpochMs(t);
+      const ragPulseState = ragPulseStateRef.current;
+      const ragPulseStrength = getHomeRagPulseStrength(ragPulseState, renderTimeMs);
       const constellationScale = getConstellationCameraScale(backgroundCamera.zoomFactor);
       const userStarScale = Math.max(0.58, 0.36 + Math.pow(constellationScale, 0.72) * 0.64);
       projectedUserStarTargets.length = 0;
@@ -1665,18 +1787,27 @@ export default function Home() {
         const py = projectedHitTarget.y;
         const twinkle = 0.75 + Math.sin(t * 0.003 + i * 1.7) * 0.15;
         const selected = currentSelectedStarId === s.id;
+        const ragHighlighted = ragPulseStrength > 0 && Boolean(ragPulseState?.starIds.has(s.id));
         const attachmentCount = getStarAttachmentCount(s);
         const ringCount = getStageRingCount(s.stage);
         const dragging = dragStateRef.current?.starId === s.id && dragStateRef.current.moved;
         const sz = (s.size * 1.5 + (selected ? 1.2 : 0) + (dragging ? 0.8 : 0)) * userStarScale;
         const fadeIn = getStarFadeProgress(s, renderTimeMs);
         const halo = ctx!.createRadialGradient(px, py, 0, px, py, sz * 5.2);
-        halo.addColorStop(0, `rgba(${r},${g},${b},${(selected ? 0.22 : 0.12) * fadeIn})`);
+        halo.addColorStop(0, `rgba(${r},${g},${b},${(selected ? 0.22 : 0.12 + (ragHighlighted ? ragPulseStrength * 0.2 : 0)) * fadeIn})`);
         halo.addColorStop(1, "rgba(0,0,0,0)");
         ctx!.fillStyle = halo;
         ctx!.beginPath();
         ctx!.arc(px, py, sz * 5.2, 0, Math.PI * 2);
         ctx!.fill();
+
+        if (ragHighlighted) {
+          ctx!.beginPath();
+          ctx!.arc(px, py, sz * (4.1 + ragPulseStrength * 1.1), 0, Math.PI * 2);
+          ctx!.strokeStyle = `rgba(${r},${g},${b},${0.26 + ragPulseStrength * 0.34})`;
+          ctx!.lineWidth = 1.15 + ragPulseStrength * 0.7;
+          ctx!.stroke();
+        }
 
         const fill = ctx!.createRadialGradient(px - sz * 0.35, py - sz * 0.35, sz * 0.15, px, py, sz * 1.3);
         fill.addColorStop(0, `rgba(255,255,255,${0.96 * fadeIn})`);
@@ -1736,10 +1867,14 @@ export default function Home() {
     function drawNodes(t: number) {
       const aNode = activeNodeRef.current;
       const hasAddCandidate = hoveredAddCandidateRef.current !== null;
+      const renderTimeMs = getRenderEpochMs(t);
+      const ragPulseState = ragPulseStateRef.current;
+      const ragPulseStrength = getHomeRagPulseStrength(ragPulseState, renderTimeMs);
       const nodeGalaxyScale = getZoomResponsiveNodeScale(backgroundZoomRef.current);
       const lineWidth = 0.38 + nodeGalaxyScale * 0.34;
       const labelFontSize = 10 + nodeGalaxyScale * 3.4;
       nodes.forEach((n, i) => {
+        const ragFacultyHighlighted = ragPulseStrength > 0 && Boolean(ragPulseState?.facultyIds.has(n.concept.faculty.id));
         const [r, g, bl] = getFacultyColor(n.concept.faculty.id);
         const px = n.x + (mouse.x - W / 2) * n.parallax;
         const py = n.y + (mouse.y - H / 2) * n.parallax;
@@ -1750,6 +1885,9 @@ export default function Home() {
           nodeAwakenProg = Math.min(1, (t - awakenStart - n.awakenDelay) / 1500);
         }
         n.targetBrightness = 0.1 + nodeAwakenProg * 0.2 + proximity * 0.5;
+        if (ragFacultyHighlighted) {
+          n.targetBrightness = Math.max(n.targetBrightness, 0.56 + ragPulseStrength * 0.34);
+        }
         if (i === aNode) n.targetBrightness = 0.9;
         n.brightness += (n.targetBrightness - n.brightness) * 0.06;
         n.targetHoverBoost = hasAddCandidate ? 0 : hoveredNodeRef.current === i ? 1 : 0;
@@ -1758,15 +1896,23 @@ export default function Home() {
         const hoverScale = enhancedHoverMotion ? n.hoverBoost * 2.6 : 0;
         const s = (n.baseSize * 2.9 + proximity * 2.6 + (i === aNode ? 1.35 : 0) + hoverScale) * nodeGalaxyScale;
 
-        if (proximity > 0.05 || i === aNode || nodeAwakenProg > 0.5) {
-          const lineAlpha = Math.max(proximity * 0.25, nodeAwakenProg * 0.06, i === aNode ? 0.2 : 0);
+        if (proximity > 0.05 || i === aNode || nodeAwakenProg > 0.5 || ragFacultyHighlighted) {
+          const lineAlpha = Math.max(
+            proximity * 0.25,
+            nodeAwakenProg * 0.06,
+            i === aNode ? 0.2 : 0,
+            ragFacultyHighlighted ? 0.22 + ragPulseStrength * 0.42 : 0,
+          );
           n.connections.forEach(ci => {
             const cn = nodes[ci];
             const cpx = cn.x + (mouse.x - W / 2) * cn.parallax;
             const cpy = cn.y + (mouse.y - H / 2) * cn.parallax;
+            const ragLineHighlighted = ragPulseStrength > 0
+              && (ragPulseState?.facultyIds.has(n.concept.faculty.id) || ragPulseState?.facultyIds.has(cn.concept.faculty.id));
+            const ragBoost = ragLineHighlighted ? ragPulseStrength : 0;
             ctx!.beginPath(); ctx!.moveTo(px, py); ctx!.lineTo(cpx, cpy);
-            ctx!.strokeStyle = `rgba(${r},${g},${bl},${lineAlpha * 0.68})`;
-            ctx!.lineWidth = lineWidth;
+            ctx!.strokeStyle = `rgba(${r},${g},${bl},${Math.min(0.9, lineAlpha * (0.68 + ragBoost * 0.74))})`;
+            ctx!.lineWidth = lineWidth + ragBoost * 1.2;
             ctx!.stroke();
           });
         }
@@ -2429,12 +2575,8 @@ export default function Home() {
       }
     }
 
-    function onPointerLeave(e: PointerEvent) {
+    function clearPointerHoverState() {
       if (dragStateRef.current) {
-        return;
-      }
-      const relatedTarget = e.relatedTarget instanceof Element ? e.relatedTarget : null;
-      if (relatedTarget?.closest("#starTooltipCard")) {
         return;
       }
       hoveredNodeRef.current = -1;
@@ -2444,9 +2586,17 @@ export default function Home() {
       setDragMessage(null);
     }
 
+    function onPointerLeave(e: PointerEvent) {
+      const relatedTarget = e.relatedTarget instanceof Element ? e.relatedTarget : null;
+      if (relatedTarget?.closest("#starTooltipCard")) {
+        return;
+      }
+      clearPointerHoverState();
+    }
+
     function onBlur() {
       clearDragState(true);
-      onPointerLeave();
+      clearPointerHoverState();
     }
 
     function onWheel(e: WheelEvent) {

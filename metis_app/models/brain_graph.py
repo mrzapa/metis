@@ -8,6 +8,14 @@ import math
 from typing import Any
 
 
+def _as_mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _as_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
 @dataclass(slots=True)
 class BrainNode:
     node_id: str
@@ -24,6 +32,7 @@ class BrainEdge:
     target_id: str
     edge_type: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    weight: float = 1.0
 
 
 class BrainGraph:
@@ -138,6 +147,10 @@ class BrainGraph:
                 continue
             label = str(row.get("index_id") or row.get("collection_name") or index_id)
             node_id = f"index:{index_id}"
+            brain_pass = _as_mapping(row.get("brain_pass"))
+            placement = _as_mapping(brain_pass.get("placement"))
+            faculty_id = _as_text(placement.get("faculty_id"))
+            secondary_faculty_id = _as_text(placement.get("secondary_faculty_id"))
             metadata = {
                 "path": str(row.get("path", "") or ""),
                 "vector_backend": str(row.get("vector_backend", "") or ""),
@@ -149,8 +162,13 @@ class BrainGraph:
                 "source_files": list(row.get("source_files") or []),
                 "manifest_path": str(row.get("manifest_path", "") or ""),
                 "legacy_compat": bool(row.get("legacy_compat", False)),
+                "brain_pass": brain_pass,
                 "scope": "workspace",
             }
+            if faculty_id:
+                metadata["faculty_id"] = faculty_id
+            if secondary_faculty_id:
+                metadata["secondary_faculty_id"] = secondary_faculty_id
             self.add_node(
                 BrainNode(
                     node_id=node_id,
@@ -257,11 +275,43 @@ class BrainGraph:
                 self.add_edge(BrainEdge(node_id, target_index_id, "uses_index", metadata={"scope": "workspace"}))
 
         self._add_assistant_subgraph(dict(assistant_payload or {}), root.node_id)
+        self.compute_edge_weights()
 
         self._refresh_category_metadata()
         self._seed_positions()
         self.apply_force_layout()
         return self
+
+    def compute_edge_weights(self) -> None:
+        """Derive edge weights from usage frequency and confidence metadata."""
+        index_session_counts: dict[str, set[str]] = {}
+        category_session_counts: dict[str, set[str]] = {}
+
+        for edge in self.edges:
+            if edge.edge_type == "uses_index" and edge.source_id.startswith("session:"):
+                index_session_counts.setdefault(edge.target_id, set()).add(edge.source_id)
+            if edge.edge_type == "category_member" and edge.source_id.startswith("session:"):
+                category_session_counts.setdefault(edge.target_id, set()).add(edge.source_id)
+
+        for edge in self.edges:
+            if edge.edge_type == "uses_index":
+                edge.weight = float(max(1, len(index_session_counts.get(edge.target_id, set()))))
+                continue
+
+            if edge.edge_type == "category_member" and edge.source_id.startswith("session:"):
+                edge.weight = float(max(1, len(category_session_counts.get(edge.target_id, set()))))
+                continue
+
+            confidence = edge.metadata.get("confidence")
+            try:
+                confidence_value = float(confidence)
+            except (TypeError, ValueError):
+                confidence_value = 0.0
+
+            if confidence_value > 0:
+                edge.weight = max(0.05, confidence_value)
+            else:
+                edge.weight = 1.0
 
     def _add_assistant_subgraph(self, assistant_payload: dict[str, Any], root_id: str) -> None:
         identity = dict(assistant_payload.get("identity") or {})

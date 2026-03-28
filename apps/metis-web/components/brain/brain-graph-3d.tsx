@@ -19,6 +19,7 @@ import {
   useRef,
 } from "react";
 import { useArrowState } from "@/hooks/use-arrow-state";
+import { subscribeBrainGraphRagActivity, type BrainGraphRagActivity } from "@/lib/brain-graph-rag-activity";
 import ForceGraph3D, { type ForceGraphMethods } from "react-force-graph-3d";
 import * as THREE from "three";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
@@ -34,6 +35,8 @@ import {
 } from "./brain-graph";
 import {
   buildBrainSceneGraph,
+  buildHighlightStateFromRagActivity,
+  type BrainGraphHighlightState,
   type BrainSceneGraph,
   type BrainSceneLink,
   type BrainSceneNode,
@@ -478,6 +481,7 @@ export interface BrainGraph3DProps {
   onSelectedNodeIdChange?: (nodeId: string | null) => void;
   onNodeSelect?: (node: BrainNode | null) => void;
   companionSignal?: BrainCompanionSignal | null;
+  ragActivity?: BrainGraphRagActivity | null;
   onModelLoadError?: (message: string) => void;
   modelUrl?: string;
   className?: string;
@@ -500,6 +504,7 @@ export default function BrainGraph3D({
   onSelectedNodeIdChange,
   onNodeSelect,
   companionSignal = null,
+  ragActivity = null,
   className = "",
 }: BrainGraph3DProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -517,6 +522,8 @@ export default function BrainGraph3D({
     directionalSpeed: 0.005,
     directionalWidth: 2.0,
   });
+  const [highlightState, setHighlightState] = useArrowState<BrainGraphHighlightState | null>(null);
+  const [highlightNowMs, setHighlightNowMs] = useArrowState(Date.now());
   const lastSignalTsRef = useRef(0);
 
   // Bloom post-processing pass ref (added to the library's internal composer)
@@ -613,6 +620,62 @@ export default function BrainGraph3D({
       window.removeEventListener("focus", onWindowFocus);
     };
   }, [recoverGraphViewport]);
+
+  useEffect(() => {
+    const applyActivity = (activity: BrainGraphRagActivity) => {
+      const next = buildHighlightStateFromRagActivity(data, activity);
+      if (!next) {
+        return;
+      }
+      setHighlightState(next);
+      setHighlightNowMs(Date.now());
+      bloomBoostRef.current = Math.max(bloomBoostRef.current, BLOOM_PULSE_BOOST + 0.08);
+    };
+
+    const unsubscribe = subscribeBrainGraphRagActivity(applyActivity, {
+      replayLatest: true,
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [data, setHighlightNowMs, setHighlightState]);
+
+  useEffect(() => {
+    if (!ragActivity) {
+      return;
+    }
+
+    const next = buildHighlightStateFromRagActivity(data, ragActivity);
+    if (!next) {
+      return;
+    }
+
+    setHighlightState(next);
+    setHighlightNowMs(Date.now());
+  }, [data, ragActivity, setHighlightNowMs, setHighlightState]);
+
+  useEffect(() => {
+    if (!highlightState) {
+      return;
+    }
+
+    const tick = () => {
+      const now = Date.now();
+      if (now >= highlightState.expiresAt) {
+        setHighlightState(null);
+        setHighlightNowMs(now);
+        return;
+      }
+      setHighlightNowMs(now);
+    };
+
+    tick();
+    const timer = window.setInterval(tick, 120);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [highlightState, setHighlightNowMs, setHighlightState]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -830,8 +893,34 @@ export default function BrainGraph3D({
 
   // -- Build filtered graph data -------------------------------------------
   const graphData = useMemo<BrainSceneGraph>(
-    () => buildBrainSceneGraph(data, { filter, activeScopes }),
-    [data, filter, activeScopes],
+    () => buildBrainSceneGraph(data, {
+      filter,
+      activeScopes,
+      highlight: highlightState,
+      nowMs: highlightNowMs,
+    }),
+    [activeScopes, data, filter, highlightNowMs, highlightState],
+  );
+
+  const facultyLegend = useMemo(
+    () => {
+      const entries = new Map<string, { id: string; label: string; color: string }>();
+      for (const node of graphData.nodes) {
+        if (!node.facultyId || !node.facultyLabel) {
+          continue;
+        }
+        if (entries.has(node.facultyId)) {
+          continue;
+        }
+        entries.set(node.facultyId, {
+          id: node.facultyId,
+          label: node.facultyLabel,
+          color: node.baseColor,
+        });
+      }
+      return [...entries.values()].slice(0, 6);
+    },
+    [graphData.nodes],
   );
 
   const graphTopology = useMemo(() => {
@@ -1165,16 +1254,21 @@ export default function BrainGraph3D({
     createdObjectsRef.current.push(group);
 
     const isSelected = node.id === selectedNodeId;
+    const isActive = node.activeStrength > 0;
     const r = node.radius;
     const color = new THREE.Color(node.color);
 
     // --- Tight additive aura – crisp glow without a diffuse halo ---
     if (!node.dimmed) {
-      const auraGeo = new THREE.SphereGeometry(r * (isSelected ? 1.8 : 1.45), 16, 16);
+      const auraGeo = new THREE.SphereGeometry(
+        r * (isSelected ? 1.8 : isActive ? 1.65 : 1.45),
+        16,
+        16,
+      );
       const auraMat = new THREE.MeshBasicMaterial({
         color,
         transparent: true,
-        opacity: isSelected ? 0.07 : 0.035,
+        opacity: isSelected ? 0.07 : isActive ? 0.06 : 0.035,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       });
@@ -1205,7 +1299,7 @@ export default function BrainGraph3D({
     const nucleusMat = new THREE.MeshPhongMaterial({
       color: 0xffffff,
       emissive: color,
-      emissiveIntensity: isSelected ? 1.0 : 0.80,
+      emissiveIntensity: isSelected ? 1.0 : isActive ? 0.94 : 0.80,
       shininess: 120,
       transparent: true,
       opacity: node.dimmed ? 0.12 : 0.95,
@@ -1217,7 +1311,7 @@ export default function BrainGraph3D({
     const mat = new THREE.MeshPhysicalMaterial({
       color,
       emissive: color,
-      emissiveIntensity: isSelected ? 0.55 : 0.42,
+      emissiveIntensity: isSelected ? 0.55 : isActive ? 0.62 : 0.42,
       roughness: 0.22,
       metalness: 0.10,
       clearcoat: 0.65,
@@ -1352,7 +1446,13 @@ export default function BrainGraph3D({
         nodeThreeObjectExtend={false}
         /* Link styling — refined for Apple-level polish */
         linkColor={(link: BrainSceneLink) => link.color}
-        linkWidth={(link: BrainSceneLink) => link.width * 1.8}
+        linkWidth={(link: BrainSceneLink) => {
+          if (link.activeStrength <= 0) {
+            return link.width * 1.8;
+          }
+          const pulse = 1 + Math.max(0, link.activeStrength) * 0.2 * (1 + Math.sin(highlightNowMs / 125));
+          return link.width * 1.8 * pulse;
+        }}
         linkOpacity={0.45}
         linkCurvature={0.15}
         linkCurveRotation={0}
@@ -1406,6 +1506,24 @@ export default function BrainGraph3D({
             <span className="text-[10px] font-medium tracking-wide text-white/55">{label}</span>
           </div>
         ))}
+        {facultyLegend.length > 0 && (
+          <>
+            <div className="mx-0 my-1.5 border-t border-white/8" />
+            <p className="mb-0.5 text-[9px] font-semibold uppercase tracking-[0.22em] text-white/35">
+              Faculty hues
+            </p>
+            {facultyLegend.map((faculty) => (
+              <div key={faculty.id} className="flex items-center gap-2">
+                <span
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: faculty.color, boxShadow: `0 0 7px ${faculty.color}` }}
+                />
+                <span className="text-[10px] font-medium tracking-wide text-white/62">{faculty.label}</span>
+              </div>
+            ))}
+            <p className="pt-1 text-[9px] text-white/35">Faculty colors override type colors when brain-pass metadata is available.</p>
+          </>
+        )}
         <div className="mx-0 my-1.5 border-t border-white/8" />
         <div className="flex items-center gap-2">
           <span className="size-1.5 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.85)]" />

@@ -12,7 +12,7 @@ import {
   NODE_RADIUS_3D,
   SCOPE_LINK_COLOR,
 } from "../brain-graph";
-import { buildBrainSceneGraph } from "../brain-graph-view-model";
+import { buildBrainSceneGraph, buildHighlightStateFromRagActivity } from "../brain-graph-view-model";
 
 const graphData: BrainGraphData = {
   nodes: [
@@ -105,5 +105,86 @@ describe("BrainGraph scope filtering", () => {
     expect(sceneGraph.visibleNodeIds.has("learned-1")).toBe(false);
     expect(sceneGraph.nodes.find((node) => node.id === "workspace-1")?.dimmed).toBe(false);
     expect(sceneGraph.nodes.find((node) => node.id === "assistant-1")?.dimmed).toBe(true);
+  });
+
+  it("falls back to default node color when faculty metadata is missing or invalid", () => {
+    const sceneGraph = buildBrainSceneGraph({
+      nodes: [
+        {
+          node_id: "index:invalid-faculty",
+          node_type: "index",
+          label: "Invalid faculty",
+          x: 0,
+          y: 0,
+          metadata: {
+            faculty_id: "not-a-real-faculty",
+            brain_pass: {
+              placement: {
+                faculty_id: "also-invalid",
+              },
+            },
+          },
+        },
+      ],
+      edges: [],
+    });
+
+    const node = sceneGraph.nodes[0];
+    expect(node.facultyId).toBeUndefined();
+    expect(node.facultyLabel).toBeUndefined();
+    expect(node.color).toBe(NODE_COLOR_HEX.index);
+    expect(node.baseColor).toBe(NODE_COLOR_HEX.index);
+  });
+
+  it("activates highlight immediately and deactivates after ttl expiry", () => {
+    const data: BrainGraphData = {
+      nodes: [
+        {
+          node_id: "index:books",
+          node_type: "index",
+          label: "books",
+          x: 0,
+          y: 0,
+          metadata: { index_id: "books" },
+        },
+      ],
+      edges: [],
+    };
+
+    const startedAt = 10_000;
+    const highlight = buildHighlightStateFromRagActivity(data, {
+      runId: "run-ttl",
+      sessionId: "",
+      manifestPath: "",
+      timestamp: startedAt,
+      ttlMs: 1,
+      sources: [
+        {
+          sid: "S1",
+          source: "books",
+          snippet: "example",
+          title: "books",
+          score: 0.8,
+          breadcrumb: "",
+          section_hint: "",
+          metadata: { index_id: "books" },
+        },
+      ],
+    });
+
+    expect(highlight).not.toBeNull();
+    expect(highlight?.nodeIds.has("index:books")).toBe(true);
+
+    const initialScene = buildBrainSceneGraph(data, {
+      highlight,
+      nowMs: startedAt,
+    });
+    expect(initialScene.nodes[0].activeStrength).toBeGreaterThan(0);
+
+    const expiredScene = buildBrainSceneGraph(data, {
+      highlight,
+      nowMs: (highlight?.expiresAt ?? startedAt) + 1,
+    });
+    expect(expiredScene.nodes[0].activeStrength).toBe(0);
   });
 });

@@ -507,6 +507,29 @@ def test_brain_graph_returns_nodes_and_edges(monkeypatch) -> None:
     assert "category:brain" in node_ids
     assert "category:indexes" in node_ids
     assert "category:sessions" in node_ids
+    assert all("weight" in edge for edge in payload["edges"])
+
+
+def test_brain_scaffold_returns_topology_payload(monkeypatch) -> None:
+    client = TestClient(api_app_module.create_app())
+    fake_orchestrator = MagicMock()
+    fake_orchestrator.get_workspace_graph.return_value = BrainGraph().build_from_indexes_and_sessions([], [])
+    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+
+    response = client.get("/v1/brain/scaffold")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload.keys()) == {
+        "betti_0",
+        "betti_1",
+        "h0_pairs",
+        "h1_pairs",
+        "scaffold_edges",
+        "summary",
+    }
+    assert payload["betti_0"] >= 1
+    assert payload["betti_1"] >= 0
 
 
 def test_ui_telemetry_endpoint_accepts_valid_events(monkeypatch) -> None:

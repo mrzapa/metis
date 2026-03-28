@@ -22,6 +22,7 @@ export interface BrainEdge {
   target_id: string;
   edge_type: string;
   metadata: Record<string, unknown>;
+  weight: number;
 }
 
 export interface BrainGraphData {

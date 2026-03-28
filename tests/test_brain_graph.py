@@ -107,6 +107,56 @@ def test_brain_graph_links_sessions_to_indexes_modes_and_skills() -> None:
     )
 
 
+def test_brain_graph_computes_edge_weights_from_usage_and_confidence() -> None:
+    indexes = [{"index_id": "books", "collection_name": "BooksCollection"}]
+    sessions = [
+        _session("sess-1", title="A", index_id="books"),
+        _session("sess-2", title="B", index_id="BooksCollection"),
+    ]
+    assistant_payload = {
+        "identity": {"companion_enabled": True},
+        "memory": [
+            {
+                "entry_id": "memory-1",
+                "title": "M1",
+                "summary": "S",
+            }
+        ],
+        "brain_links": [
+            {
+                "source_node_id": "memory:memory-1",
+                "target_node_id": "category:brain",
+                "relation": "learned_from_session",
+                "confidence": 0.42,
+                "metadata": {"scope": "assistant_learned"},
+            }
+        ],
+    }
+
+    graph = BrainGraph().build_from_indexes_and_sessions(indexes, sessions, assistant_payload)
+    uses_index_edge = next(
+        edge
+        for edge in graph.edges
+        if edge.edge_type == "uses_index" and edge.target_id == "index:books"
+    )
+    session_mode_edge = next(
+        edge
+        for edge in graph.edges
+        if edge.edge_type == "category_member"
+        and edge.source_id == "session:sess-1"
+        and edge.target_id == "category:mode:research"
+    )
+    learned_edge = next(
+        edge
+        for edge in graph.edges
+        if edge.edge_type == "learned_from_session"
+    )
+
+    assert uses_index_edge.weight == 2.0
+    assert session_mode_edge.weight == 2.0
+    assert learned_edge.weight == 0.42
+
+
 def test_brain_graph_can_preserve_positions_from_previous_graph() -> None:
     previous = BrainGraph().build_from_indexes_and_sessions([], [_session("sess-1", title="Read notes")])
     previous.nodes["session:sess-1"].x = 420.0
@@ -192,7 +242,7 @@ def test_brain_graph_embeds_assistant_subgraph_with_metadata_and_links() -> None
     assert graph.get_node("assistant:metis").node_type == "assistant"
     assert graph.get_node("assistant:metis").metadata["scope"] == "assistant_self"
     assert graph.get_node("assistant:metis").metadata["runtime_provider"] == "local_gguf"
-    assert graph.get_node("assistant:metis").metadata["runtime_model.*== "metis-q4"
+    assert graph.get_node("assistant:metis").metadata["runtime_model"] == "metis-q4"
     assert graph.get_node("assistant:metis").metadata["paused"] is True
     assert graph.get_node("assistant:metis").metadata["latest_summary"] == "A short reflection."
     assert graph.get_node("memory:memory-1").node_type == "memory"
@@ -232,3 +282,26 @@ def test_brain_graph_skips_assistant_subgraph_when_disabled() -> None:
 
     assert "category:assistant" not in graph.nodes
     assert "assistant:metis" not in graph.nodes
+
+
+def test_brain_graph_carries_faculty_metadata_from_brain_pass() -> None:
+    graph = BrainGraph().build_from_indexes_and_sessions(
+        [
+            {
+                "index_id": "faculty-index",
+                "brain_pass": {
+                    "placement": {
+                        "faculty_id": "knowledge",
+                        "secondary_faculty_id": "reasoning",
+                    }
+                },
+            }
+        ],
+        [],
+    )
+
+    node = graph.get_node("index:faculty-index")
+    assert node is not None
+    assert node.metadata["faculty_id"] == "knowledge"
+    assert node.metadata["secondary_faculty_id"] == "reasoning"
+    assert node.metadata["brain_pass"]["placement"]["faculty_id"] == "knowledge"
