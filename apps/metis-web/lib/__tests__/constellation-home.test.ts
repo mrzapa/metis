@@ -169,6 +169,24 @@ describe("parseUserStars", () => {
     expect(stars).toHaveLength(1);
     expect(stars[0].linkedManifestPaths).toEqual(["/indexes/source.json"]);
   });
+
+  it("round-trips connectedUserStarIds while filtering self-links", () => {
+    const normalized = normalizeUserStar({
+      id: "self",
+      x: 0.2,
+      y: 0.3,
+      size: 1,
+      createdAt: 2,
+      connectedUserStarIds: [" self ", "peer", "peer", " peer-2 "],
+    });
+
+    expect(normalized.connectedUserStarIds).toEqual(["peer", "peer-2"]);
+
+    const parsed = parseUserStars([normalized]);
+
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].connectedUserStarIds).toEqual(["peer", "peer-2"]);
+  });
 });
 
 describe("findHoveredAddCandidate", () => {

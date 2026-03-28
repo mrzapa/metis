@@ -132,15 +132,17 @@ export function useConstellationStars() {
   );
 
   const removeLastUserStar = useCallback(async () => {
-    if (userStars.length === 0) {
+    const current = userStarsRef.current;
+    if (current.length === 0) {
       return;
     }
-    await saveBoth(userStars.slice(0, -1));
-  }, [saveBoth, userStars]);
+    await saveBoth(current.slice(0, -1));
+  }, [saveBoth]);
 
   const removeUserStarById = useCallback(
     async (starId: string) => {
-      const next = userStars
+      const current = userStarsRef.current;
+      const next = current
         .filter((star) => star.id !== starId)
         .map((star) => {
           if (!star.connectedUserStarIds?.includes(starId)) {
@@ -153,12 +155,12 @@ export function useConstellationStars() {
             createdAt: star.createdAt,
           });
         });
-      if (next.length === userStars.length) {
+      if (next.length === current.length) {
         return;
       }
       await saveBoth(next);
     },
-    [saveBoth, userStars],
+    [saveBoth],
   );
 
   const resetUserStars = useCallback(async () => {

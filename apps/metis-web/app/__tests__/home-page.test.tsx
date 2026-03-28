@@ -121,7 +121,12 @@ describe("Home page", () => {
 
     getContextSpy = vi
       .spyOn(HTMLCanvasElement.prototype, "getContext")
-      .mockReturnValue(createCanvasContext());
+      .mockImplementation(((contextId: string) => {
+        if (contextId === "2d") {
+          return createCanvasContext();
+        }
+        return null;
+      }) as HTMLCanvasElement["getContext"]);
 
     vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
