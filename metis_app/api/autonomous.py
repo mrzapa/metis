@@ -44,4 +44,5 @@ def trigger_autonomous_research() -> dict[str, Any]:
         return {"ok": True, "result": result}
     except Exception as exc:
         _log.error("manual autonomous research trigger failed: %s", exc)
-        return {"ok": False, "error": str(exc)}
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(exc))

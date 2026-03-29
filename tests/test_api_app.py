@@ -1222,4 +1222,29 @@ def test_autonomous_trigger_returns_ok(monkeypatch) -> None:
 
     assert response.status_code == 200
     data = response.json()
-    assert "ok" in data
+    assert data["ok"] is True
+
+
+def test_autonomous_trigger_returns_500_on_error(monkeypatch) -> None:
+    """POST /v1/autonomous/trigger returns 500 when research raises."""
+    from metis_app.api import autonomous as _autonomous_module
+
+    monkeypatch.setattr(
+        _autonomous_module._settings_store,
+        "load_settings",
+        lambda: {},
+    )
+
+    class BrokenOrchestrator:
+        def run_autonomous_research(self, settings):
+            raise RuntimeError("research failed")
+
+    monkeypatch.setattr(
+        _autonomous_module,
+        "WorkspaceOrchestrator",
+        lambda: BrokenOrchestrator(),
+    )
+    client = TestClient(api_app_module.create_app())
+
+    response = client.post("/v1/autonomous/trigger")
+    assert response.status_code == 500
