@@ -36,7 +36,7 @@ import {
   buildFacultyAnchoredPlacement,
   getConstellationPlacementDecision,
 } from "@/lib/constellation-brain";
-import { CONSTELLATION_FACULTIES } from "@/lib/constellation-home";
+import { CONSTELLATION_FACULTIES, getAutoStarFaculty, isAutonomousStar } from "@/lib/constellation-home";
 import type { UserStar, UserStarStage } from "@/lib/constellation-types";
 import { cn } from "@/lib/utils";
 
@@ -648,6 +648,17 @@ export function StarDetailsPanel({
                 <DialogDescription className="max-w-2xl text-sm leading-7 text-slate-300">
                   {dialogDescription}
                 </DialogDescription>
+                {isAutonomousStar(activeIndex?.index_id) && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-violet-300/80">
+                    <span>✦</span>
+                    <span>
+                      Added autonomously by METIS
+                      {getAutoStarFaculty(activeIndex?.index_id)
+                        ? ` · ${getAutoStarFaculty(activeIndex?.index_id)}`
+                        : ""}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="rounded-full border border-[#d6b361]/30 bg-[#d6b361]/10 px-4 py-2 text-right">

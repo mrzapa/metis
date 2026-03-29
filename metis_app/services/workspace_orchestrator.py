@@ -146,6 +146,7 @@ class WorkspaceOrchestrator:
             trigger="index_build",
             settings=resolved_settings,
             context_id=f"index:{result.index_id}",
+            _orchestrator=self,
         )
         return result
 
@@ -235,6 +236,7 @@ class WorkspaceOrchestrator:
                 settings=resolved_settings,
                 session_id=session_id,
                 run_id=result.run_id,
+                _orchestrator=self,
             )
         return result
 
@@ -288,6 +290,7 @@ class WorkspaceOrchestrator:
                 settings=resolved_settings,
                 session_id=session_id,
                 run_id=result.run_id,
+                _orchestrator=self,
             )
         return result
 
@@ -354,6 +357,7 @@ class WorkspaceOrchestrator:
                 settings=resolved_settings,
                 session_id=session_id,
                 run_id=result.run_id,
+                _orchestrator=self,
             )
         return result
 
@@ -436,6 +440,7 @@ class WorkspaceOrchestrator:
                         settings=resolved_settings,
                         session_id=session_id,
                         run_id=final_run_id,
+                        _orchestrator=self,
                     )
                 yield event
 
@@ -644,7 +649,36 @@ class WorkspaceOrchestrator:
             kwargs["context_id"] = context_id
         return self._assistant_service.reflect(
             **kwargs,
+            _orchestrator=self,
         )
+
+    def run_autonomous_research(self, settings: dict[str, Any]) -> dict[str, Any] | None:
+        """Run one autonomous research cycle: find sparse faculty → web search → synthesize → index.
+
+        Returns result dict with {faculty_id, index_id, title, sources} or None if skipped.
+        Called from the companion reflection loop when autonomous_research_enabled is True.
+        """
+        from metis_app.models.assistant_types import AssistantPolicy
+        from metis_app.services.autonomous_research_service import AutonomousResearchService
+        from metis_app.utils.web_search import create_web_search
+
+        # Read policy from the incoming settings directly (not from resolved/disk settings)
+        # _resolve_query_settings clobbers assistant_policy with on-disk values
+        raw_policy = (settings or {}).get("assistant_policy") or {}
+        policy = AssistantPolicy.from_payload(raw_policy)
+        if not policy.autonomous_research_enabled:
+            return None
+
+        # Resolve LLM/embedding settings for the research service
+        resolved = self._resolve_query_settings(settings)
+
+        index_dicts = self.list_indexes()
+        index_list = [
+            {"index_id": idx.get("index_id", ""), "document_count": idx.get("document_count", 0)}
+            for idx in index_dicts
+        ]
+        svc = AutonomousResearchService(web_search=create_web_search(resolved))
+        return svc.run(settings=resolved, indexes=index_list, orchestrator=self)
 
     # ------------------------------------------------------------------
     # Internal helpers

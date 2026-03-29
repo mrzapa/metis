@@ -111,6 +111,8 @@ class AssistantPolicy:
     trigger_on_index_build: bool = True
     trigger_on_completed_run: bool = True
     allow_automatic_writes: bool = True
+    autonomous_research_enabled: bool = False
+    autonomous_research_provider: str = "tavily"
 
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
@@ -129,6 +131,8 @@ class AssistantPolicy:
             trigger_on_index_build=bool(data.get("trigger_on_index_build", True)),
             trigger_on_completed_run=bool(data.get("trigger_on_completed_run", True)),
             allow_automatic_writes=bool(data.get("allow_automatic_writes", True)),
+            autonomous_research_enabled=bool(data.get("autonomous_research_enabled", False)),
+            autonomous_research_provider=str(data.get("autonomous_research_provider") or "tavily"),
         )
 
 

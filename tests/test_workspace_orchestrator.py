@@ -9,7 +9,7 @@ mock objects so that no real disk I/O or LLM calls are made.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -289,6 +289,7 @@ class TestBuildIndex:
             trigger="index_build",
             settings=req.settings,
             context_id="index:idx-new",
+            _orchestrator=ANY,
         )
 
     def test_passes_progress_callback(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -774,6 +775,7 @@ class TestRunRagQuery:
             "settings": expected_settings,
             "session_id": "s1",
             "run_id": "run-1",
+            "_orchestrator": ANY,
         }
         assert [call.kwargs["event_type"] for call in trace_append.call_args_list] == [
             "retrieval_complete",
@@ -1098,6 +1100,7 @@ class TestRunDirectQuery:
             },
             "session_id": "s2",
             "run_id": "run-2",
+            "_orchestrator": ANY,
         }
         assert trace_append.call_count == 1
 
@@ -1573,6 +1576,7 @@ class TestReflectionHooks:
             session_id="s9",
             run_id="r9",
             force=True,
+            _orchestrator=orch,
         )
 
 
@@ -1810,6 +1814,58 @@ class TestSettings:
         result = _make_orchestrator().safe_settings(payload)
         assert "api_key_openai" not in result
         assert result["llm_provider"] == "openai"
+
+
+# ---------------------------------------------------------------------------
+# API integration — brain graph uses orchestrator
+# ---------------------------------------------------------------------------
+
+
+def test_run_autonomous_research_returns_none_when_disabled(tmp_path):
+    """run_autonomous_research returns None when autonomous_research_enabled is False."""
+    from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
+    orc = WorkspaceOrchestrator()
+    settings = {
+        "assistant_policy": {"autonomous_research_enabled": False},
+        "llm_provider": "mock",
+    }
+    result = orc.run_autonomous_research(settings)
+    assert result is None
+
+
+def test_run_autonomous_research_returns_result_when_enabled():
+    """run_autonomous_research propagates AutonomousResearchService.run result."""
+    import unittest.mock as um
+    from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
+
+    expected = {
+        "faculty_id": "emergence",
+        "index_id": "auto_emergence_abc12345",
+        "title": "Emergence in Complex Systems",
+        "sources": ["http://example.com"],
+    }
+
+    settings = {
+        "assistant_policy": {"autonomous_research_enabled": True},
+        "llm_provider": "mock",
+    }
+
+    orc = WorkspaceOrchestrator()
+
+    mock_svc_instance = um.MagicMock()
+    mock_svc_instance.run.return_value = expected
+    MockSvcClass = um.MagicMock(return_value=mock_svc_instance)
+
+    with um.patch(
+        "metis_app.services.autonomous_research_service.AutonomousResearchService",
+        MockSvcClass,
+    ), um.patch(
+        "metis_app.utils.web_search.create_web_search",
+        return_value=um.MagicMock(),
+    ), um.patch.object(orc, "list_indexes", return_value=[]):
+        result = orc.run_autonomous_research(settings)
+
+    assert result == expected
 
 
 # ---------------------------------------------------------------------------

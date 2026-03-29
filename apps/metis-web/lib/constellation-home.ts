@@ -152,6 +152,18 @@ export function getInfluenceColors(
   return uniqueDomainIds.map((domainId) => getFacultyColor(domainId));
 }
 
+/** Returns true if this index was autonomously created by the METIS Companion */
+export function isAutonomousStar(indexId?: string): boolean {
+  return typeof indexId === "string" && indexId.startsWith("auto_");
+}
+
+/** Extract faculty from an auto-generated index ID like "auto_emergence_abc123" */
+export function getAutoStarFaculty(indexId?: string): string | undefined {
+  if (!isAutonomousStar(indexId)) return undefined;
+  const parts = (indexId ?? "").split("_");
+  return parts.length >= 2 ? parts[1] : undefined;
+}
+
 export function mixConstellationColors(
   colors: readonly ConstellationFacultyColor[],
 ): ConstellationFacultyColor {

@@ -886,6 +886,8 @@ class AssistantPolicyModel(BaseModel):
     trigger_on_index_build: bool
     trigger_on_completed_run: bool
     allow_automatic_writes: bool
+    autonomous_research_enabled: bool
+    autonomous_research_provider: str
 
 
 class AssistantStatusModel(BaseModel):

@@ -166,6 +166,7 @@ class AssistantCompanionService:
         session_id: str = "",
         run_id: str = "",
         force: bool = False,
+        _orchestrator: Any | None = None,
     ) -> dict[str, Any]:
         active_settings = dict(settings or settings_store.load_settings())
         identity = resolve_assistant_identity(active_settings)
@@ -316,6 +317,35 @@ class AssistantCompanionService:
         status.latest_why = memory_entry.why
         self.repository.update_status(status)
 
+        # Spawn autonomous research in background daemon thread if enabled
+        if policy.autonomous_research_enabled and _orchestrator is not None:
+            import threading
+
+            def _research_task() -> None:
+                try:
+                    result = _orchestrator.run_autonomous_research(active_settings)
+                    if result:
+                        research_entry = AssistantMemoryEntry.create(
+                            kind="autonomous_research",
+                            title=f"Added star: {result['title']}",
+                            summary=(
+                                f"I noticed the {result['faculty_id']} constellation was thin. "
+                                f"I researched and added a new star: {result['title']}."
+                            ),
+                            details=f"Sources: {', '.join(result.get('sources', [])[:3])}",
+                            why="Autonomous research cycle detected sparse faculty coverage.",
+                            confidence=0.7,
+                            trigger="autonomous_research",
+                            tags=[result["faculty_id"], "autonomous"],
+                        )
+                        self.repository.add_memory_entry(
+                            research_entry, max_entries=policy.max_memory_entries
+                        )
+                except Exception as _exc:
+                    log.warning("autonomous_research background task failed: %s", _exc)
+
+            threading.Thread(target=_research_task, daemon=True).start()
+
         return {
             "ok": True,
             "status": status.to_payload(),
@@ -333,6 +363,7 @@ class AssistantCompanionService:
             "onboarding": bool(policy.trigger_on_onboarding),
             "index_build": bool(policy.trigger_on_index_build),
             "completed_run": bool(policy.trigger_on_completed_run),
+            "autonomous_research": bool(policy.autonomous_research_enabled),
         }
         return trigger_flags.get(normalized, True)
 
