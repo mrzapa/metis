@@ -278,6 +278,8 @@ def test_assistant_api_routes_return_snapshot_and_reflection(monkeypatch) -> Non
             "trigger_on_index_build": True,
             "trigger_on_completed_run": True,
             "allow_automatic_writes": True,
+            "autonomous_research_enabled": False,
+            "autonomous_research_provider": "tavily",
         },
         "status": {
             "state": "ready",
