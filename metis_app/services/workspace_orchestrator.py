@@ -137,6 +137,7 @@ class WorkspaceOrchestrator:
             trigger="index_build",
             settings=resolved_settings,
             context_id=f"index:{result.index_id}",
+            _orchestrator=self,
         )
         return result
 
@@ -215,6 +216,7 @@ class WorkspaceOrchestrator:
                 settings=resolved_settings,
                 session_id=session_id,
                 run_id=result.run_id,
+                _orchestrator=self,
             )
         return result
 
@@ -257,6 +259,7 @@ class WorkspaceOrchestrator:
                 settings=resolved_settings,
                 session_id=session_id,
                 run_id=result.run_id,
+                _orchestrator=self,
             )
         return result
 
@@ -323,6 +326,7 @@ class WorkspaceOrchestrator:
                 settings=resolved_settings,
                 session_id=session_id,
                 run_id=result.run_id,
+                _orchestrator=self,
             )
         return result
 
@@ -384,6 +388,7 @@ class WorkspaceOrchestrator:
                         settings=resolved_settings,
                         session_id=session_id,
                         run_id=final_run_id,
+                        _orchestrator=self,
                     )
                 yield event
 

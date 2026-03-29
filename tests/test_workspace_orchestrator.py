@@ -9,7 +9,7 @@ mock objects so that no real disk I/O or LLM calls are made.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -188,6 +188,7 @@ class TestBuildIndex:
             trigger="index_build",
             settings=req.settings,
             context_id="index:idx-new",
+            _orchestrator=ANY,
         )
 
     def test_passes_progress_callback(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -543,6 +544,7 @@ class TestRunRagQuery:
             "settings": expected_settings,
             "session_id": "s1",
             "run_id": "run-1",
+            "_orchestrator": ANY,
         }
         assert [call.kwargs["event_type"] for call in trace_append.call_args_list] == [
             "retrieval_complete",
@@ -648,6 +650,7 @@ class TestRunDirectQuery:
             },
             "session_id": "s2",
             "run_id": "run-2",
+            "_orchestrator": ANY,
         }
         assert trace_append.call_count == 1
 
