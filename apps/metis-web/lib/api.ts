@@ -87,6 +87,12 @@ export interface IndexSummary {
   brain_pass?: BrainPassMetadata;
 }
 
+export interface IndexDeleteResult {
+  deleted: boolean;
+  manifest_path: string;
+  index_id: string;
+}
+
 export interface NyxCatalogFileSummary {
   path: string;
   file_type: string;
@@ -1111,6 +1117,18 @@ export async function updateSettings(
 export async function fetchIndexes(): Promise<IndexSummary[]> {
   const res = await apiFetch(`${await getApiBase()}/v1/index/list`);
   if (!res.ok) throw new Error(`Failed to fetch indexes: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteIndex(manifestPath: string): Promise<IndexDeleteResult> {
+  const params = new URLSearchParams({ manifest_path: manifestPath });
+  const res = await apiFetch(`${await getApiBase()}/v1/index?${params.toString()}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to delete index (${res.status}): ${detail}`);
+  }
   return res.json();
 }
 

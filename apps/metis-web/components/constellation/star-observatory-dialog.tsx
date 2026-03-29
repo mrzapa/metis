@@ -10,6 +10,7 @@ import {
   Loader2,
   Orbit,
   Sparkles,
+  Trash2,
   UploadCloud,
   X,
 } from "lucide-react";
@@ -24,13 +25,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  buildIndexStream,
-  fetchSettings,
-  uploadFiles,
-  type IndexBuildResult,
-  type IndexSummary,
-} from "@/lib/api";
+import { buildIndexStream, fetchSettings, uploadFiles } from "@/lib/api";
+import type { IndexBuildResult, IndexSummary } from "@/lib/api";
 import {
   buildBrainPlacementIntent,
   buildFacultyAnchoredPlacement,
@@ -123,7 +119,7 @@ interface StarDetailsPanelProps {
   indexesLoading: boolean;
   onIndexBuilt: (result: IndexBuildResult) => void;
   onUpdateStar: (starId: string, updates: StarUpdatePayload) => Promise<boolean>;
-  onRemoveStar: (starId: string) => Promise<void>;
+  onRemoveStar: (payload: { starId: string; manifestPaths: string[] }) => Promise<void>;
   onOpenChat: (manifestPath: string, label: string) => void;
 }
 
@@ -211,6 +207,7 @@ export function StarDetailsPanel({
   const [statusTone, setStatusTone] = useState<DialogTone>("default");
   const [savingMeta, setSavingMeta] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -259,6 +256,7 @@ export function StarDetailsPanel({
     setUploadError(null);
     setPickError(null);
     setPathsConsent(false);
+    setDeleteConfirmOpen(false);
     setView(entryMode === "new" || nextAttachedManifestPaths.length === 0 ? "build" : "overview");
   }, [entryMode, open, star]);
 
@@ -345,14 +343,14 @@ export function StarDetailsPanel({
   );
 
   const handleOpenChange = useCallback((nextOpen: boolean) => {
-    if (!nextOpen && (building || uploading)) {
+    if (!nextOpen && (building || uploading || removing)) {
       return;
     }
     if (!nextOpen && Date.now() < closeLockedUntil) {
       return;
     }
     onOpenChange(nextOpen);
-  }, [building, closeLockedUntil, onOpenChange, uploading]);
+  }, [building, closeLockedUntil, onOpenChange, removing, uploading]);
 
   if (!star) {
     return null;
@@ -612,8 +610,17 @@ export function StarDetailsPanel({
   async function handleRemoveStar() {
     setRemoving(true);
     try {
-      await onRemoveStar(activeStar.id);
-      onOpenChange(false);
+      await onRemoveStar({
+        starId: activeStar.id,
+        manifestPaths: uniqueStrings([
+          ...attachedManifestPaths,
+          activeManifestPathForChat,
+        ]),
+      });
+      setDeleteConfirmOpen(false);
+    } catch (error) {
+      setStatusTone("error");
+      setStatusMessage(error instanceof Error ? error.message : "Unable to delete this star right now.");
     } finally {
       setRemoving(false);
     }
@@ -629,9 +636,9 @@ export function StarDetailsPanel({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="left-1/2 top-auto bottom-3 max-h-[calc(100vh-1.5rem)] w-[calc(100%-1.5rem)] max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-0 gap-0 overflow-hidden rounded-[1.75rem] border-white/12 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(8,11,20,0.96))] p-0 sm:left-auto sm:right-4 sm:top-4 sm:bottom-4 sm:w-[min(460px,calc(100vw-2rem))] sm:max-w-[460px] sm:translate-x-0 sm:translate-y-0"
+        className="left-1/2 top-auto bottom-3 flex h-[calc(100vh-1.5rem)] max-h-[calc(100vh-1.5rem)] w-[calc(100%-1.5rem)] max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-0 flex-col gap-0 overflow-hidden rounded-[1.75rem] border-white/12 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(8,11,20,0.96))] p-0 sm:left-auto sm:right-4 sm:top-4 sm:bottom-4 sm:h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-2rem)] sm:w-[min(460px,calc(100vw-2rem))] sm:max-w-[460px] sm:translate-x-0 sm:translate-y-0"
         data-testid="star-details-panel"
-        showCloseButton={!building && !uploading}
+        showCloseButton={!building && !uploading && !removing}
         showOverlay={false}
       >
         <div className="border-b border-white/10 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(10,13,23,0.92))] px-5 py-5 sm:px-6">
@@ -705,8 +712,9 @@ export function StarDetailsPanel({
           </DialogHeader>
         </div>
 
-        <div className="grid max-h-[calc(100vh-10rem)] gap-0 overflow-hidden sm:max-h-[calc(100vh-8rem)] sm:grid-cols-1 lg:max-h-[calc(100vh-8rem)]">
-          <div className="overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="px-5 py-5 sm:px-6 sm:py-6">
             {view === "build" ? (
               <div className="space-y-6">
                 <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
@@ -1322,35 +1330,82 @@ export function StarDetailsPanel({
                 )}
               </div>
 
-              <div className="flex flex-wrap gap-3">
-                <Button onClick={() => void handleSaveMeta()} disabled={savingMeta} className="gap-2">
-                  {savingMeta ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-                  Save meaning
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    if (!activeManifestPathForChat) {
-                      return;
-                    }
-                    const linkedLabel = labelDraft.trim() || activeStar.label || activeIndex?.index_id || "Mapped star";
-                    onOpenChat(activeManifestPathForChat, linkedLabel);
-                  }}
-                  disabled={!activeManifestPathForChat}
-                >
-                  Open chat
-                </Button>
-                <Button variant="outline" onClick={() => setView("build")}>
-                  Add another source
-                </Button>
-                <Button variant="destructive" onClick={() => void handleRemoveStar()} disabled={removing}>
-                  {removing ? "Removing..." : "Remove star"}
-                </Button>
-              </div>
             </div>
           </aside>
+          </div>
+
+          <div
+            className="border-t border-white/10 bg-[linear-gradient(180deg,rgba(12,16,28,0.98),rgba(8,11,20,0.98))] px-5 py-4 sm:px-6"
+            data-testid="star-details-actions"
+          >
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={() => void handleSaveMeta()} disabled={savingMeta || removing} className="gap-2">
+                {savingMeta ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                Save meaning
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (!activeManifestPathForChat) {
+                    return;
+                  }
+                  const linkedLabel = labelDraft.trim() || activeStar.label || activeIndex?.index_id || "Mapped star";
+                  onOpenChat(activeManifestPathForChat, linkedLabel);
+                }}
+                disabled={!activeManifestPathForChat || removing}
+              >
+                Open chat
+              </Button>
+              <Button variant="outline" onClick={() => setView("build")} disabled={removing}>
+                Add another source
+              </Button>
+              {entryMode === "existing" ? (
+                <Button
+                  variant="destructive"
+                  onClick={() => setDeleteConfirmOpen(true)}
+                  disabled={removing}
+                  className="gap-2"
+                >
+                  <Trash2 className="size-4" />
+                  Delete star and sources
+                </Button>
+              ) : null}
+            </div>
+          </div>
         </div>
       </DialogContent>
+
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent className="max-w-md" data-testid="star-delete-confirmation">
+          <DialogHeader className="gap-3">
+            <DialogTitle className="font-display text-2xl tracking-[-0.04em] text-white">
+              Delete this star and its sources?
+            </DialogTitle>
+            <DialogDescription className="text-sm leading-7 text-slate-300">
+              This will delete the star and purge every METIS-managed index attached to it. Your original local files will remain on disk, but the indexed sources and chat-ready artifacts will be removed permanently.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-[1.3rem] border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm leading-7 text-rose-100">
+            This action cannot be undone.
+          </div>
+
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)} disabled={removing}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void handleRemoveStar()}
+              disabled={removing}
+              className="gap-2"
+            >
+              {removing ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+              {removing ? "Deleting..." : "Delete star and sources"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

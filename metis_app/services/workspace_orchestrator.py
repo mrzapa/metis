@@ -27,6 +27,7 @@ from typing import Any
 import metis_app.settings_store as _settings_store
 from metis_app.engine import (
     build_index,
+    delete_index,
     get_index,
     knowledge_search,
     list_indexes,
@@ -157,6 +158,10 @@ class WorkspaceOrchestrator:
     def get_index(self, index_id: str) -> dict[str, Any] | None:
         """Return metadata for a single index, or ``None`` if not found."""
         return get_index(index_id, self._index_dir)
+
+    def delete_index(self, manifest_path: str | pathlib.Path) -> dict[str, Any]:
+        """Delete a persisted index by manifest or legacy bundle path."""
+        return delete_index(manifest_path)
 
     # ------------------------------------------------------------------
     # Retrieval

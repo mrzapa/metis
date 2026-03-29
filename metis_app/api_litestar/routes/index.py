@@ -2,11 +2,11 @@
 
 from typing import Any
 
-from litestar import get, post
+from litestar import delete, get, post
 from litestar.exceptions import HTTPException as LitestarHTTPException
 
-from metis_app.engine import build_index, list_indexes
-from metis_app.api.models import IndexBuildRequestModel, IndexBuildResultModel
+from metis_app.engine import build_index, delete_index, list_indexes
+from metis_app.api.models import IndexBuildRequestModel, IndexBuildResultModel, IndexDeleteResultModel
 
 
 async def _run_engine(func: Any, *args: Any) -> Any:
@@ -30,3 +30,13 @@ async def api_list_indexes() -> list[dict[str, Any]]:
     """List all available indexes."""
     result = await _run_engine(list_indexes)
     return result
+
+
+@delete("/v1/index", status_code=200)
+async def api_delete_index(manifest_path: str) -> dict[str, Any]:
+    """Delete a persisted index by manifest path."""
+    try:
+        result = await _run_engine(delete_index, manifest_path)
+    except FileNotFoundError as exc:
+        raise LitestarHTTPException(status_code=404, detail="Index not found.") from exc
+    return IndexDeleteResultModel(**result).model_dump()

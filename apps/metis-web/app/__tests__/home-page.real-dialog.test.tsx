@@ -39,6 +39,7 @@ function createCanvasContext(): CanvasRenderingContext2D {
     rotate: vi.fn(),
     scale: vi.fn(),
     fillText: vi.fn(),
+    measureText: vi.fn((text: string) => ({ width: text.length * 8 })),
     clearRect: vi.fn(),
     closePath: vi.fn(),
     setLineDash: vi.fn(),

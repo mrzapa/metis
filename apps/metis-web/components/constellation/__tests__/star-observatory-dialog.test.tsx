@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IndexSummary } from "@/lib/api";
 import type { UserStar } from "@/lib/constellation-types";
@@ -20,9 +20,13 @@ vi.mock("@/components/ui/dialog", () => ({
     ) : null
   ),
   DialogContent: ({
+    className: _className,
+    showCloseButton: _showCloseButton,
+    showOverlay: _showOverlay,
     children,
+    ...rest
   }: React.PropsWithChildren<{ className?: string; showCloseButton?: boolean; showOverlay?: boolean }>) => (
-    <div>{children}</div>
+    <div {...rest}>{children}</div>
   ),
   DialogDescription: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   DialogHeader: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -312,5 +316,72 @@ describe("StarDetailsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
 
     expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps the existing-star footer actions visible and exposes cascade delete", () => {
+    renderPanel({
+      star: makeStar({
+        label: "Mapped star",
+        linkedManifestPaths: ["/indexes/atlas-a.json"],
+        activeManifestPath: "/indexes/atlas-a.json",
+        linkedManifestPath: "/indexes/atlas-a.json",
+      }),
+    });
+
+    const actions = screen.getByTestId("star-details-actions");
+    expect(within(actions).getByRole("button", { name: "Save meaning" })).toBeInTheDocument();
+    expect(within(actions).getByRole("button", { name: "Open chat" })).toBeInTheDocument();
+    expect(within(actions).getByRole("button", { name: "Add another source" })).toBeInTheDocument();
+    expect(within(actions).getByRole("button", { name: "Delete star and sources" })).toBeInTheDocument();
+  });
+
+  it("opens a delete confirmation and cancels without removing the star", async () => {
+    const { onRemoveStar } = renderPanel({
+      star: makeStar({
+        label: "Mapped star",
+        linkedManifestPaths: ["/indexes/atlas-a.json"],
+        activeManifestPath: "/indexes/atlas-a.json",
+        linkedManifestPath: "/indexes/atlas-a.json",
+      }),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete star and sources" }));
+
+    expect(screen.getByTestId("star-delete-confirmation")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("star-delete-confirmation")).not.toBeInTheDocument();
+    });
+    expect(onRemoveStar).not.toHaveBeenCalled();
+  });
+
+  it("confirms cascade delete with the star id and attached manifest paths", async () => {
+    const atlasA = makeIndex({ manifest_path: "/indexes/atlas-a.json" });
+    const atlasB = makeIndex({
+      index_id: "Atlas B",
+      manifest_path: "/indexes/atlas-b.json",
+      embedding_signature: "embed-b",
+    });
+    const { onRemoveStar } = renderPanel({
+      star: makeStar({
+        id: "star-delete",
+        label: "Mapped star",
+        linkedManifestPaths: [atlasA.manifest_path, atlasB.manifest_path],
+        activeManifestPath: atlasB.manifest_path,
+        linkedManifestPath: atlasB.manifest_path,
+      }),
+      availableIndexes: [atlasA, atlasB],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete star and sources" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete star and sources" }).at(-1) as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(onRemoveStar).toHaveBeenCalledWith({
+        starId: "star-delete",
+        manifestPaths: [atlasA.manifest_path, atlasB.manifest_path],
+      });
+    });
   });
 });

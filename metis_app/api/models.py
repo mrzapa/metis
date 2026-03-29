@@ -72,6 +72,12 @@ class IndexBuildResultModel(BaseModel):
         )
 
 
+class IndexDeleteResultModel(BaseModel):
+    deleted: bool
+    manifest_path: str
+    index_id: str
+
+
 class RagQueryRequestModel(BaseModel):
     manifest_path: str
     question: str

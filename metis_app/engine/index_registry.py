@@ -6,7 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from metis_app.models.parity_types import IndexManifest
-from metis_app.services.index_service import _DEFAULT_INDEX_DIR, list_index_manifests
+from metis_app.services.index_service import (
+    _DEFAULT_INDEX_DIR,
+    delete_persisted_index,
+    list_index_manifests,
+)
 
 _DEFAULT_INDEX_STORAGE_DIR = _DEFAULT_INDEX_DIR
 
@@ -50,4 +54,10 @@ def get_index(index_id: str, index_dir: Path | str | None = None) -> dict[str, A
     return None
 
 
-__all__ = ["get_index", "list_indexes"]
+def delete_index(manifest_path: str | Path) -> dict[str, Any]:
+    """Delete a persisted index by manifest or bundle path."""
+
+    return delete_persisted_index(manifest_path)
+
+
+__all__ = ["delete_index", "get_index", "list_indexes"]

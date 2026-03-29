@@ -1,7 +1,7 @@
 """Public engine entrypoints."""
 
 from metis_app.engine.indexing import IndexBuildRequest, IndexBuildResult, build_index
-from metis_app.engine.index_registry import get_index, list_indexes
+from metis_app.engine.index_registry import delete_index, get_index, list_indexes
 from metis_app.engine.querying import (
     DirectQueryRequest,
     DirectQueryResult,
@@ -25,6 +25,7 @@ __all__ = [
     "RagQueryRequest",
     "RagQueryResult",
     "build_index",
+    "delete_index",
     "get_index",
     "knowledge_search",
     "list_indexes",

@@ -10,7 +10,7 @@ import {
 } from "@/components/home/landing-starfield-webgl";
 import { StarDetailsPanel } from "@/components/constellation/star-observatory-dialog";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
-import { fetchIndexes, type IndexBuildResult, type IndexSummary } from "@/lib/api";
+import { deleteIndex, fetchIndexes } from "@/lib/api";
 import {
   buildBrainPlacementIntent,
   buildFacultyAnchoredPlacement,
@@ -71,6 +71,12 @@ import {
   buildLandingStarSpatialHash,
   findClosestLandingStarHitTarget,
 } from "@/lib/landing-stars/landing-star-spatial-index";
+import {
+  buildCanvasFont,
+  measureSingleLineTextWidth,
+  quantizeFontSize,
+} from "@/lib/pretext-labels";
+import type { IndexBuildResult, IndexSummary } from "@/lib/api";
 import type {
   LandingStarHitTarget,
   LandingStarSpatialHash,
@@ -99,7 +105,14 @@ const USER_STAR_LINK_MAX_DISTANCE = 0.34;
 const USER_STAR_FADE_IN_DURATION_MS = 850;
 const USER_STAR_EDGE_BREATH_PERIOD_MS = 6200;
 const USER_STAR_EDGE_BREATH_AMPLITUDE = 0.14;
+const NODE_LABEL_FONT_FAMILY = '"Space Grotesk", sans-serif';
+const NODE_LABEL_FONT_WEIGHT = "400";
+const NODE_LABEL_PADDING_X = 12;
+const NODE_LABEL_PADDING_Y = 8;
+const NODE_LABEL_EDGE_MARGIN_PX = 14;
+const NODE_LABEL_CENTER_OFFSET_RATIO = 0.28;
 
+type CanvasTool = "select" | "grab";
 type StarFocusPhase = "idle" | "focusing" | "details-open" | "returning";
 
 interface CanvasBounds {
@@ -128,6 +141,10 @@ interface NodeData extends ConstellationNodePoint {
   concept: FacultyConcept; connections: number[];
   awakenDelay: number; parallax: number;
   hoverBoost: number; targetHoverBoost: number;
+  _labelBottom: number;
+  _labelLeft: number;
+  _labelRight: number;
+  _labelTop: number;
   _sx: number; _sy: number;
 }
 
@@ -218,6 +235,16 @@ function createTileSeed(tileX: number, tileY: number, layer: number, index: numb
   seed = Math.imul(seed, 2246822519) >>> 0;
 
   return seed >>> 0;
+}
+
+function clampToRange(value: number, min: number, max: number): number {
+  if (value < min) {
+    return min;
+  }
+  if (value > max) {
+    return max;
+  }
+  return value;
 }
 
 function sampleDeterministicRatio(seed: number): [number, number] {
@@ -366,11 +393,65 @@ function getCountLabel(count: number, singular: string, plural = `${singular}s`)
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
+function uniqueManifestPaths(values: Array<string | undefined | null>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  values.forEach((value) => {
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (!trimmed || seen.has(trimmed)) {
+      return;
+    }
+    seen.add(trimmed);
+    result.push(trimmed);
+  });
+
+  return result;
+}
+
 function getStarManifestPaths(star: UserStar): string[] {
-  if (star.linkedManifestPaths && star.linkedManifestPaths.length > 0) {
-    return star.linkedManifestPaths;
+  return uniqueManifestPaths([
+    ...(star.linkedManifestPaths ?? []),
+    star.activeManifestPath,
+    star.linkedManifestPath,
+  ]);
+}
+
+function removeDeletedManifestPathsFromStar(
+  star: UserStar,
+  deletedManifestPaths: ReadonlySet<string>,
+): UserStar {
+  const nextManifestPaths = getStarManifestPaths(star).filter(
+    (manifestPath) => !deletedManifestPaths.has(manifestPath),
+  );
+  const nextActiveManifestPath =
+    star.activeManifestPath && !deletedManifestPaths.has(star.activeManifestPath)
+      ? star.activeManifestPath
+      : (nextManifestPaths.at(-1) ?? undefined);
+
+  return {
+    ...star,
+    linkedManifestPaths: nextManifestPaths.length > 0 ? nextManifestPaths : undefined,
+    activeManifestPath: nextActiveManifestPath,
+    linkedManifestPath: nextManifestPaths.at(-1) ?? undefined,
+  };
+}
+
+function clearPersistedActiveIndexIfDeleted(deletedManifestPaths: ReadonlySet<string>) {
+  try {
+    const raw = window.localStorage.getItem("metis_active_index");
+    if (!raw) {
+      return;
+    }
+    const parsed = JSON.parse(raw) as { manifest_path?: unknown };
+    const manifestPath =
+      typeof parsed?.manifest_path === "string" ? parsed.manifest_path : "";
+    if (manifestPath && deletedManifestPaths.has(manifestPath)) {
+      window.localStorage.removeItem("metis_active_index");
+    }
+  } catch {
+    window.localStorage.removeItem("metis_active_index");
   }
-  return star.linkedManifestPath ? [star.linkedManifestPath] : [];
 }
 
 function normalizeText(value: unknown): string | null {
@@ -602,7 +683,9 @@ export default function Home() {
   const [hoveredUserStarId, setHoveredUserStarId] = useState<string | null>(null);
   const [dragMessage, setDragMessage] = useState<string | null>(null);
   const [toastState, setToastState] = useState<HomeToastState | null>(null);
+  const [activeCanvasTool, setActiveCanvasTool] = useState<CanvasTool>("select");
   const [backgroundZoomFactor, setBackgroundZoomFactor] = useState(1);
+  const [isCanvasPanning, setIsCanvasPanning] = useState(false);
   const [zoomInteracting, setZoomInteracting] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const conceptCardRef = useRef<HTMLDivElement>(null);
@@ -670,6 +753,14 @@ export default function Home() {
     starId: string;
     startClientX: number;
     startClientY: number;
+    moved: boolean;
+  } | null>(null);
+  const panStateRef = useRef<{
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    startOrigin: Point;
+    zoomFactor: number;
     moved: boolean;
   } | null>(null);
 
@@ -840,6 +931,14 @@ export default function Home() {
     [attachmentCount],
   );
   const fieldGuideMessage = useMemo(() => {
+    if (activeCanvasTool === "grab") {
+      if (isCanvasPanning) {
+        return "Panning constellation. Release to stop, then switch back to Select to claim or move stars.";
+      }
+
+      return "Hand tool active. Drag the constellation to pan, then switch back to Select to claim, inspect, or reposition stars.";
+    }
+
     if (dragMessage) {
       return dragMessage;
     }
@@ -864,7 +963,7 @@ export default function Home() {
     }
 
     return "Follow the faculty ring: claim a field star, drag it toward the faculty it should strengthen, and let its attached sources deepen it.";
-  }, [dragMessage, hoveredAddCandidateId, indexesLoading, selectedStarAttachmentCount, selectedStarFaculty, selectedUserStar, starLimit, unmappedIndexes.length, userStars.length]);
+  }, [activeCanvasTool, dragMessage, hoveredAddCandidateId, indexesLoading, isCanvasPanning, selectedStarAttachmentCount, selectedStarFaculty, selectedUserStar, starLimit, unmappedIndexes.length, userStars.length]);
   const selectedStarSummary = useMemo(() => {
     if (!selectedUserStar || !selectedStarFaculty) {
       return "No star selected. Click a claimed star to open its details, or drag one to reassign its faculty.";
@@ -931,6 +1030,20 @@ export default function Home() {
     closeStarTooltip();
     closeConcept();
   }, [closeConcept, closeStarTooltip]);
+
+  useEffect(() => {
+    const currentDrag = dragStateRef.current;
+    if (currentDrag) {
+      dragPreviewPositionsRef.current.delete(currentDrag.starId);
+      dragStateRef.current = null;
+    }
+
+    panStateRef.current = null;
+    setIsCanvasPanning(false);
+    clearConstellationHoverState();
+    setAddMessage(null);
+    setDragMessage(null);
+  }, [activeCanvasTool, clearConstellationHoverState]);
 
   const registerZoomInteraction = useCallback(() => {
     setZoomInteracting(true);
@@ -1226,6 +1339,81 @@ export default function Home() {
     void refreshAvailableIndexes({ silent: true });
   }, [refreshAvailableIndexes, showToast]);
 
+  const handleDeleteStarAndSources = useCallback(async ({
+    starId,
+    manifestPaths,
+  }: {
+    starId: string;
+    manifestPaths: string[];
+  }) => {
+    const currentStars = userStarsRef.current;
+    const starToDelete = currentStars.find((star) => star.id === starId) ?? null;
+    if (!starToDelete) {
+      throw new Error("This star is no longer available.");
+    }
+
+    const manifestPathsToDelete = uniqueManifestPaths(manifestPaths);
+    const deletedManifestPaths = new Set<string>();
+
+    try {
+      for (const manifestPath of manifestPathsToDelete) {
+        const result = await deleteIndex(manifestPath);
+        deletedManifestPaths.add(result.manifest_path);
+      }
+    } catch (error) {
+      if (deletedManifestPaths.size > 0) {
+        await replaceUserStars(
+          userStarsRef.current.map((star) =>
+            removeDeletedManifestPathsFromStar(star, deletedManifestPaths)
+          ),
+        );
+        clearPersistedActiveIndexIfDeleted(deletedManifestPaths);
+        setAvailableIndexes((current) => {
+          current.forEach((index) => {
+            if (deletedManifestPaths.has(index.manifest_path)) {
+              optimisticIndexKeysRef.current.delete(getIndexSummaryKey(index));
+            }
+          });
+          const next = current.filter(
+            (index) => !deletedManifestPaths.has(index.manifest_path),
+          );
+          availableIndexesRef.current = next;
+          return next;
+        });
+        void refreshAvailableIndexes({ silent: true });
+      }
+      throw error;
+    }
+
+    await replaceUserStars(
+      currentStars
+        .filter((star) => star.id !== starId)
+        .map((star) => removeDeletedManifestPathsFromStar(star, deletedManifestPaths)),
+    );
+    clearPersistedActiveIndexIfDeleted(deletedManifestPaths);
+    setAvailableIndexes((current) => {
+      current.forEach((index) => {
+        if (deletedManifestPaths.has(index.manifest_path)) {
+          optimisticIndexKeysRef.current.delete(getIndexSummaryKey(index));
+        }
+      });
+      const next = current.filter(
+        (index) => !deletedManifestPaths.has(index.manifest_path),
+      );
+      availableIndexesRef.current = next;
+      return next;
+    });
+    closeStarDetails({ clearSelection: true, restoreCamera: "jump" });
+    setAddMessage(null);
+    setDragMessage(null);
+    showToast({
+      dismissMs: 3200,
+      message: `${starToDelete.label ?? "Star"} and ${getCountLabel(deletedManifestPaths.size, "attached source")} deleted.`,
+      tone: "default",
+    });
+    await refreshAvailableIndexes({ silent: true });
+  }, [closeStarDetails, refreshAvailableIndexes, replaceUserStars, showToast]);
+
   const mapIndexedSources = useCallback(async () => {
     let indexesForMapping = availableIndexes;
     const refreshedIndexes = await refreshAvailableIndexes();
@@ -1431,6 +1619,18 @@ export default function Home() {
         y: clientY - bounds.top,
       };
     }
+
+    function getPointerTargetElement(eventTarget: EventTarget | null, clientX: number, clientY: number): Element | null {
+      if (eventTarget instanceof Element) {
+        return eventTarget;
+      }
+
+      if (typeof document.elementFromPoint === "function") {
+        return document.elementFromPoint(clientX, clientY);
+      }
+
+      return null;
+    }
     resize();
 
     const tileCache = new Map<string, WorldStarData[]>();
@@ -1468,6 +1668,38 @@ export default function Home() {
       setHoveredAddCandidateId((current) => (current === null ? current : null));
     }
 
+    function isPointInsideNodeLabel(node: NodeData, clientX: number, clientY: number): boolean {
+      return clientX >= node._labelLeft
+        && clientX <= node._labelRight
+        && clientY >= node._labelTop
+        && clientY <= node._labelBottom;
+    }
+
+    function isPointInsideNodeTarget(
+      node: NodeData,
+      clientX: number,
+      clientY: number,
+      nodeHitRadius: number,
+    ): boolean {
+      if (Math.hypot(node._sx - clientX, node._sy - clientY) < nodeHitRadius) {
+        return true;
+      }
+
+      return isPointInsideNodeLabel(node, clientX, clientY);
+    }
+
+    function getHitNodeIndex(clientX: number, clientY: number): number {
+      let hit = -1;
+      nodes.forEach((node, index) => {
+        const nodeHitRadius = coarsePointerRef.current ? 34 : 24;
+        if (isPointInsideNodeTarget(node, clientX, clientY, nodeHitRadius)) {
+          hit = index;
+        }
+      });
+
+      return hit;
+    }
+
     function showConceptAtNode(idx: number) {
       const c = nodes[idx].concept;
       if (cLabelRef.current) cLabelRef.current.textContent = c.label;
@@ -1503,13 +1735,65 @@ export default function Home() {
       parallax: 0.015,
       hoverBoost: 0,
       targetHoverBoost: 0,
+      _labelBottom: 0,
+      _labelLeft: 0,
+      _labelRight: 0,
+      _labelTop: 0,
       _sx: 0, _sy: 0,
     }));
+
+    function syncNodeLabelLayout(
+      node: NodeData,
+      screenX: number,
+      screenY: number,
+      nodeRadius: number,
+      nodeGalaxyScale: number,
+    ) {
+      const labelFontSize = quantizeFontSize(10 + nodeGalaxyScale * 3.4);
+      const labelFont = buildCanvasFont(labelFontSize, NODE_LABEL_FONT_FAMILY, NODE_LABEL_FONT_WEIGHT);
+      const labelLineHeight = Math.max(
+        labelFontSize + NODE_LABEL_PADDING_Y * 2,
+        Math.ceil(labelFontSize * 1.45),
+      );
+      const labelWidth = measureSingleLineTextWidth(node.concept.title, labelFont);
+      const labelHalfWidth = labelWidth / 2 + NODE_LABEL_PADDING_X;
+      const labelY = screenY + nodeRadius + 18 * nodeGalaxyScale;
+      const labelX = clampToRange(
+        screenX,
+        labelHalfWidth + NODE_LABEL_EDGE_MARGIN_PX,
+        W - labelHalfWidth - NODE_LABEL_EDGE_MARGIN_PX,
+      );
+      const labelCenterY = labelY - labelFontSize * NODE_LABEL_CENTER_OFFSET_RATIO;
+      const labelHalfHeight = labelLineHeight / 2;
+
+      node._labelBottom = labelCenterY + labelHalfHeight;
+      node._labelLeft = labelX - labelHalfWidth;
+      node._labelRight = labelX + labelHalfWidth;
+      node._labelTop = labelCenterY - labelHalfHeight;
+      node._sx = screenX;
+      node._sy = screenY;
+
+      return {
+        font: labelFont,
+        x: labelX,
+        y: labelY,
+      };
+    }
+
+    function syncStaticNodeHitZones() {
+      const nodeGalaxyScale = getZoomResponsiveNodeScale(backgroundZoomRef.current);
+      nodes.forEach((node) => {
+        const nodeRadius = node.baseSize * 2.9 * nodeGalaxyScale;
+        syncNodeLabelLayout(node, node.x, node.y, nodeRadius, nodeGalaxyScale);
+      });
+    }
+
     applyNodeLayout(nodes, W, H, {
       x: backgroundCameraOriginRef.current.x,
       y: backgroundCameraOriginRef.current.y,
       zoomFactor: backgroundZoomRef.current,
     });
+    syncStaticNodeHitZones();
     nodes.forEach((n, i) => {
       const dists = nodes.map((m, j) => ({ idx: j, d: Math.hypot(n.anchorX - m.anchorX, n.anchorY - m.anchorY) }))
         .filter(d => d.idx !== i).sort((a, b) => a.d - b.d);
@@ -1574,6 +1858,7 @@ export default function Home() {
       }
 
       applyNodeLayout(nodes, W, H, backgroundCamera);
+      syncStaticNodeHitZones();
       lastConstellationProjectionWidth = W;
       lastConstellationProjectionHeight = H;
       lastConstellationProjectionZoom = backgroundCamera.zoomFactor;
@@ -2121,7 +2406,6 @@ export default function Home() {
       const ragPulseStrength = getHomeRagPulseStrength(ragPulseState, renderTimeMs);
       const nodeGalaxyScale = getZoomResponsiveNodeScale(backgroundZoomRef.current);
       const lineWidth = 0.38 + nodeGalaxyScale * 0.34;
-      const labelFontSize = 10 + nodeGalaxyScale * 3.4;
       nodes.forEach((n, i) => {
         const ragFacultyHighlighted = ragPulseStrength > 0 && Boolean(ragPulseState?.facultyIds.has(n.concept.faculty.id));
         const [r, g, bl] = getFacultyColor(n.concept.faculty.id);
@@ -2183,11 +2467,12 @@ export default function Home() {
           ctx!.beginPath(); ctx!.arc(px, py, s + 4 + proximity * 4, 0, Math.PI * 2);
           ctx!.strokeStyle = `rgba(${r},${g},${bl},${proximity * 0.22})`; ctx!.lineWidth = 0.5; ctx!.stroke();
         }
-        ctx!.font = `${labelFontSize}px "Space Grotesk", sans-serif`;
+        const labelLayout = syncNodeLabelLayout(n, px, py, s, nodeGalaxyScale);
+
+        ctx!.font = labelLayout.font;
         ctx!.textAlign = "center";
         ctx!.fillStyle = `rgba(${r},${g},${bl},${0.48 + b * 0.24})`;
-        ctx!.fillText(n.concept.title, px, py + s + 18 * nodeGalaxyScale);
-        n._sx = px; n._sy = py;
+        ctx!.fillText(n.concept.title, labelLayout.x, labelLayout.y);
       });
     }
 
@@ -2401,6 +2686,7 @@ export default function Home() {
         y: backgroundCameraOriginRef.current.y,
         zoomFactor: backgroundZoomRef.current,
       });
+      syncStaticNodeHitZones();
       nebulae[0].x = W * 0.72; nebulae[0].y = H * 0.35;
       nebulae[1].x = W * 0.25; nebulae[1].y = H * 0.65;
       nebulae[2].x = W * 0.55; nebulae[2].y = H * 0.2;
@@ -2578,9 +2864,40 @@ export default function Home() {
       }
     }
 
+    function clearPanState() {
+      panStateRef.current = null;
+      setIsCanvasPanning(false);
+    }
+
     function onPointerMove(e: PointerEvent) {
       mouse.x = e.clientX;
       mouse.y = e.clientY;
+
+      const panState = panStateRef.current;
+      if (panState && panState.pointerId === e.pointerId) {
+        const travelDistance = Math.hypot(e.clientX - panState.startClientX, e.clientY - panState.startClientY);
+        if (!panState.moved && travelDistance >= DRAG_DISTANCE_PX) {
+          panState.moved = true;
+          setIsCanvasPanning(true);
+          clearHoveredCandidate();
+          hideStarTooltip();
+          closeConcept();
+          setDragMessage(null);
+        }
+        if (!panState.moved) {
+          return;
+        }
+
+        registerZoomInteraction();
+        const scale = getBackgroundCameraScale(panState.zoomFactor);
+        const nextOrigin = {
+          x: panState.startOrigin.x - (e.clientX - panState.startClientX) / scale,
+          y: panState.startOrigin.y - (e.clientY - panState.startClientY) / scale,
+        };
+        backgroundCameraOriginRef.current = nextOrigin;
+        backgroundCameraTargetOriginRef.current = nextOrigin;
+        return;
+      }
 
       const dragState = dragStateRef.current;
       if (dragState && dragState.pointerId === e.pointerId) {
@@ -2613,6 +2930,15 @@ export default function Home() {
         return;
       }
 
+      if (activeCanvasTool === "grab") {
+        hoveredNodeRef.current = -1;
+        hoverExpandedRef.current = false;
+        clearHoveredCandidate();
+        hideStarTooltip();
+        closeConcept();
+        return;
+      }
+
       if (starFocusPhaseRef.current !== "idle") {
         hoveredNodeRef.current = -1;
         hoverExpandedRef.current = false;
@@ -2629,7 +2955,7 @@ export default function Home() {
         return;
       }
 
-      const targetElement = e.target instanceof Element ? e.target : null;
+      const targetElement = getPointerTargetElement(e.target, e.clientX, e.clientY);
       const pointerOnCanvas = targetElement === canvas;
       const pointerOnStarTooltip = Boolean(targetElement?.closest("#starTooltipCard"));
       if (!pointerOnCanvas && !pointerOnStarTooltip) {
@@ -2676,7 +3002,7 @@ export default function Home() {
 
       let hover = -1;
       nodes.forEach((n, i) => {
-        if (Math.hypot(n._sx - e.clientX, n._sy - e.clientY) < 28) {
+        if (isPointInsideNodeTarget(n, e.clientX, e.clientY, 28)) {
           hover = i;
         }
       });
@@ -2698,6 +3024,37 @@ export default function Home() {
 
     function onCanvasPointerDown(e: PointerEvent) {
       if (starFocusPhaseRef.current !== "idle") {
+        return;
+      }
+
+      if (activeCanvasTool === "grab") {
+        const currentCamera = readBackgroundCamera();
+        const snappedOrigin = { x: currentCamera.x, y: currentCamera.y };
+
+        backgroundCameraOriginRef.current = snappedOrigin;
+        backgroundCameraTargetOriginRef.current = snappedOrigin;
+        backgroundZoomTargetRef.current = currentCamera.zoomFactor;
+        setBackgroundZoomFactor((current) => (
+          Math.abs(current - currentCamera.zoomFactor) < 0.001 ? current : currentCamera.zoomFactor
+        ));
+        panStateRef.current = {
+          pointerId: e.pointerId,
+          startClientX: e.clientX,
+          startClientY: e.clientY,
+          startOrigin: snappedOrigin,
+          zoomFactor: currentCamera.zoomFactor,
+          moved: false,
+        };
+        setAddMessage(null);
+        setDragMessage(null);
+        clearHoveredCandidate();
+        hideStarTooltip();
+        closeConcept();
+        try {
+          canvas!.setPointerCapture(e.pointerId);
+        } catch {
+          // Ignore capture failures; pan still works via document listeners.
+        }
         return;
       }
 
@@ -2730,6 +3087,18 @@ export default function Home() {
     function onCanvasPress(e: PointerEvent) {
       if (starFocusPhaseRef.current !== "idle") {
         clearDragState(true);
+        clearPanState();
+        return;
+      }
+
+      const panState = panStateRef.current;
+      if (panState && panState.pointerId === e.pointerId) {
+        clearPanState();
+        return;
+      }
+
+      if (activeCanvasTool === "grab") {
+        clearPanState();
         return;
       }
 
@@ -2766,13 +3135,29 @@ export default function Home() {
       if (!isClientPointInsideCanvas(e.clientX, e.clientY)) {
         return;
       }
-      const targetElement = e.target instanceof Element ? e.target : null;
+      const targetElement = getPointerTargetElement(e.target, e.clientX, e.clientY);
       if (targetElement !== canvas) {
         return;
       }
 
       const currentUserStars = userStarsRef.current;
       const currentSelectedStarId = selectedUserStarIdRef.current;
+      const hitNodeIndex = getHitNodeIndex(e.clientX, e.clientY);
+
+      if (hitNodeIndex >= 0) {
+        armedAddCandidateIdRef.current = null;
+        if (currentSelectedStarId) {
+          setSelectedUserStarId(null);
+          setPendingDetailStar(null);
+        }
+        if (activeNodeRef.current === hitNodeIndex) {
+          closeConcept();
+          return;
+        }
+        showConceptAtNode(hitNodeIndex);
+        return;
+      }
+
       const candidate = (starLimit === null || currentUserStars.length < starLimit)
         ? getHoveredCandidate(e.clientX, e.clientY)
         : null;
@@ -2834,21 +3219,11 @@ export default function Home() {
         setSelectedUserStarId(null);
         setPendingDetailStar(null);
       }
-      let hit = -1;
-      nodes.forEach((n, i) => {
-        const nodeHitRadius = coarsePointerRef.current ? 34 : 24;
-        if (Math.hypot(n._sx - e.clientX, n._sy - e.clientY) < nodeHitRadius) hit = i;
-      });
-      if (hit >= 0) {
-        if (activeNodeRef.current === hit) { closeConcept(); return; }
-        showConceptAtNode(hit);
-      } else {
-        closeConcept();
-      }
+      closeConcept();
     }
 
     function clearPointerHoverState() {
-      if (dragStateRef.current) {
+      if (dragStateRef.current || panStateRef.current) {
         return;
       }
       hoveredNodeRef.current = -1;
@@ -2868,11 +3243,12 @@ export default function Home() {
 
     function onBlur() {
       clearDragState(true);
+      clearPanState();
       clearPointerHoverState();
     }
 
     function onWheel(e: WheelEvent) {
-      if (dragStateRef.current || starFocusPhaseRef.current !== "idle") {
+      if (dragStateRef.current || panStateRef.current || starFocusPhaseRef.current !== "idle") {
         return;
       }
 
@@ -2936,6 +3312,7 @@ export default function Home() {
       window.removeEventListener("blur", onBlur);
     };
   }, [
+    activeCanvasTool,
     addUserStar,
     clearConstellationHoverState,
     closeConcept,
@@ -2990,8 +3367,10 @@ export default function Home() {
         ref={canvasRef}
         id="universe"
         className="metis-universe"
+        data-canvas-tool={activeCanvasTool}
         data-focus-phase={starFocusPhase}
         data-details-open={starDetailsOpen ? "true" : "false"}
+        data-pan-active={isCanvasPanning ? "true" : "false"}
       />
 
       <div className="metis-hero-overlay">
@@ -3002,6 +3381,30 @@ export default function Home() {
 
       <div className={`metis-zoom-pill ${zoomInteracting || canvasInteractionsLocked ? "is-muted" : ""}`} aria-live="polite">
         <div className="metis-zoom-pill-value">{backgroundZoomLabel}</div>
+        <div className="metis-zoom-pill-tools" role="toolbar" aria-label="Constellation tools">
+          <button
+            type="button"
+            className={`metis-zoom-pill-btn metis-zoom-pill-tool-btn ${activeCanvasTool === "select" ? "is-active" : ""}`}
+            onClick={() => setActiveCanvasTool("select")}
+            disabled={canvasInteractionsLocked}
+            aria-label="Select tool"
+            aria-pressed={activeCanvasTool === "select"}
+            title="Select stars and concepts"
+          >
+            Select
+          </button>
+          <button
+            type="button"
+            className={`metis-zoom-pill-btn metis-zoom-pill-tool-btn ${activeCanvasTool === "grab" ? "is-active" : ""}`}
+            onClick={() => setActiveCanvasTool("grab")}
+            disabled={canvasInteractionsLocked}
+            aria-label="Grab tool"
+            aria-pressed={activeCanvasTool === "grab"}
+            title="Hand tool for dragging the constellation"
+          >
+            Hand
+          </button>
+        </div>
         <div className="metis-zoom-pill-actions">
           <button
             type="button"
@@ -3135,11 +3538,7 @@ export default function Home() {
         indexesLoading={indexesLoading}
         onIndexBuilt={handleIndexBuilt}
         onUpdateStar={updateUserStarById}
-        onRemoveStar={async (starId) => {
-          await removeStarWithUndo(starId, {
-            afterRemove: () => closeStarDetails({ clearSelection: true, restoreCamera: "jump" }),
-          });
-        }}
+        onRemoveStar={handleDeleteStarAndSources}
         onOpenChat={openChatWithIndex}
       />
 
@@ -3277,7 +3676,16 @@ body {
   position: fixed; top: 0; left: 0;
   width: 100vw; height: 100vh; z-index: 2;
   background: transparent;
+  cursor: crosshair;
   touch-action: none;
+}
+
+.metis-universe[data-canvas-tool="grab"] {
+  cursor: grab;
+}
+
+.metis-universe[data-pan-active="true"] {
+  cursor: grabbing;
 }
 
 .metis-toast {
@@ -3364,6 +3772,7 @@ body {
   z-index: 140;
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 14px;
   min-width: 0;
   max-width: calc(100vw - 120px);
@@ -3395,11 +3804,19 @@ body {
   line-height: 1;
   color: rgba(240,244,255,0.96);
   letter-spacing: -0.05em;
+  flex-shrink: 0;
   white-space: nowrap;
+}
+.metis-zoom-pill-tools {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
 }
 .metis-zoom-pill-actions {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 6px;
 }
 .metis-zoom-pill-btn {
@@ -3419,6 +3836,20 @@ body {
   cursor: pointer;
   pointer-events: auto;
   transition: border-color 0.24s ease, color 0.24s ease, transform 0.24s ease, background 0.24s ease;
+}
+.metis-zoom-pill-tool-btn {
+  width: auto;
+  min-width: 56px;
+  padding: 0 12px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.metis-zoom-pill-tool-btn.is-active {
+  border-color: rgba(232,184,74,0.34);
+  color: rgba(255,246,222,0.98);
+  background: rgba(36, 48, 88, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(232,184,74,0.08);
 }
 .metis-zoom-pill-btn:hover:not(:disabled) {
   border-color: rgba(232,184,74,0.34);

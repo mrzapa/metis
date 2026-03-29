@@ -69,7 +69,7 @@ def create_app() -> Litestar:
     cors_config = CORSConfig(
         allow_origins=_cors_origins_from_env(),
         allow_credentials=True,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
     )
 
@@ -91,6 +91,7 @@ def create_app() -> Litestar:
             healthz.healthz,
             version.api_version,
             index.api_build_index,
+            index.api_delete_index,
             index.api_list_indexes,
             gguf.list_catalog,
             gguf.get_hardware,

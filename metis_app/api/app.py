@@ -47,6 +47,7 @@ from .models import (
     DirectQueryRequestModel,
     DirectQueryResultModel,
     IndexBuildRequestModel,
+    IndexDeleteResultModel,
     IndexBuildResultModel,
     KnowledgeSearchRequestModel,
     KnowledgeSearchResultModel,
@@ -274,6 +275,15 @@ def create_app() -> FastAPI:
     @app.get("/v1/index/list", dependencies=_auth)
     def api_list_indexes() -> list[dict[str, Any]]:
         return _run_engine(list_indexes)
+
+    @app.delete("/v1/index", response_model=IndexDeleteResultModel, dependencies=_auth)
+    def api_delete_index(manifest_path: str) -> IndexDeleteResultModel:
+        orchestrator = WorkspaceOrchestrator()
+        try:
+            result = _run_engine(orchestrator.delete_index, manifest_path)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Index not found.") from exc
+        return IndexDeleteResultModel(**result)
 
     @app.get(
         "/v1/nyx/catalog",

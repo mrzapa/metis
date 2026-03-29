@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from litestar import Litestar
 from litestar.testing import TestClient
 from fastapi.testclient import TestClient as FastAPITestClient
+from metis_app.services.index_service import build_index_bundle, save_index_bundle
 
 
 def test_app_creation():
@@ -46,6 +47,42 @@ def test_index_list():
         response = client.get("/v1/index/list")
         assert response.status_code == 200
         assert isinstance(response.json(), list)
+
+
+def test_delete_index_removes_manifest_directory(tmp_path):
+    """Test /v1/index deletes a persisted manifest directory."""
+    from metis_app.api_litestar import create_app
+
+    src = tmp_path / "notes.txt"
+    src.write_text("Delete the index artifacts but keep the source.\n", encoding="utf-8")
+    bundle = build_index_bundle([str(src)], {"embedding_provider": "mock", "vector_db_type": "json"})
+    manifest_path = save_index_bundle(bundle, index_dir=tmp_path / "indexes")
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete("/v1/index", params={"manifest_path": str(manifest_path)})
+        assert response.status_code == 200
+        assert response.json() == {
+            "deleted": True,
+            "manifest_path": str(manifest_path.resolve()),
+            "index_id": bundle.index_id,
+        }
+
+    assert not manifest_path.exists()
+    assert not manifest_path.parent.exists()
+    assert src.exists()
+
+
+def test_delete_index_returns_404_for_missing_manifest(tmp_path):
+    """Test /v1/index returns 404 for an unknown manifest path."""
+    from metis_app.api_litestar import create_app
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete(
+            "/v1/index",
+            params={"manifest_path": str(tmp_path / "missing" / "manifest.json")},
+        )
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Index not found."
 
 
 def test_gguf_hardware():

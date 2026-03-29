@@ -105,6 +105,14 @@ class _ManifestCache:
 _manifest_cache = _ManifestCache()
 
 
+def _is_within_directory(path: pathlib.Path, parent: pathlib.Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     if chunk_size <= 0:
         raise ValueError("chunk_size must be > 0")
@@ -925,6 +933,43 @@ def load_index_bundle(path: str | pathlib.Path) -> IndexBundle:
     bundle = IndexBundle.from_payload(payload if isinstance(payload, dict) else {})
     bundle.index_path = str(candidate)
     return bundle
+
+
+def delete_persisted_index(path: str | pathlib.Path) -> dict[str, Any]:
+    candidate = pathlib.Path(path)
+    manifest = load_index_manifest(candidate)
+    manifest_path = pathlib.Path(manifest.manifest_path)
+    index_target = manifest_path.parent if manifest_path.name == _MANIFEST_FILE else manifest_path
+    index_root = index_target.parent if index_target.is_file() else index_target
+
+    if not index_target.exists():
+        raise FileNotFoundError(f"Persisted index not found: {manifest_path}")
+
+    adapter_settings = {
+        **dict(manifest.metadata or {}),
+        "vector_db_type": str(manifest.backend or "json"),
+    }
+    external_vector_target: pathlib.Path | None = None
+    if manifest.vector_store_path:
+        resolved_vector_target = _resolve_from_manifest_root(
+            index_root,
+            manifest.vector_store_path,
+        )
+        if not _is_within_directory(resolved_vector_target, index_root):
+            external_vector_target = resolved_vector_target
+
+    from metis_app.services.vector_store import JsonVectorStoreAdapter, resolve_vector_store
+
+    resolve_vector_store(adapter_settings).delete(index_target)
+    if external_vector_target and external_vector_target.exists():
+        JsonVectorStoreAdapter().delete(external_vector_target)
+
+    _manifest_cache.invalidate(manifest_path)
+    return {
+        "deleted": True,
+        "manifest_path": str(manifest_path),
+        "index_id": str(manifest.index_id or ""),
+    }
 
 
 def build_index_bundle(

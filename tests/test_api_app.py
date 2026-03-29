@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from metis_app.models.brain_graph import BrainGraph
+from metis_app.services.index_service import build_index_bundle, save_index_bundle
 from metis_app.services import nyx_catalog as nyx_catalog_module
 from metis_app.services.nyx_catalog import NyxCatalogComponentNotFoundError
 from metis_app.services.stream_replay import ReplayableRunStreamManager, StreamReplayStore
@@ -146,6 +147,55 @@ def test_stream_build_index_uses_orchestrator_and_progress_callback(monkeypatch)
     assert captured["index_id"] == "idx-stream"
     assert callable(captured["progress_cb"])
     assert fake_orchestrator.build_index.call_count == 1
+
+
+def test_delete_index_removes_manifest_directory_and_preserves_sources(tmp_path) -> None:
+    client = TestClient(api_app_module.create_app())
+    src = tmp_path / "notes.txt"
+    src.write_text("Delete the METIS index but keep the source file.\n", encoding="utf-8")
+    bundle = build_index_bundle([str(src)], {"embedding_provider": "mock", "vector_db_type": "json"})
+    manifest_path = save_index_bundle(bundle, index_dir=tmp_path / "indexes")
+
+    response = client.delete("/v1/index", params={"manifest_path": str(manifest_path)})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "deleted": True,
+        "manifest_path": str(manifest_path.resolve()),
+        "index_id": bundle.index_id,
+    }
+    assert not manifest_path.exists()
+    assert not manifest_path.parent.exists()
+    assert src.exists()
+
+
+def test_delete_index_removes_legacy_bundle_and_preserves_sources(tmp_path) -> None:
+    client = TestClient(api_app_module.create_app())
+    src = tmp_path / "legacy.txt"
+    src.write_text("Legacy index bundles should delete through the API.\n", encoding="utf-8")
+    bundle = build_index_bundle([str(src)], {"embedding_provider": "mock"})
+    bundle_path = save_index_bundle(bundle, target_path=tmp_path / "legacy.metis-index.json")
+
+    response = client.delete("/v1/index", params={"manifest_path": str(bundle_path)})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "deleted": True,
+        "manifest_path": str(bundle_path.resolve()),
+        "index_id": bundle.index_id,
+    }
+    assert not bundle_path.exists()
+    assert src.exists()
+
+
+def test_delete_index_returns_404_for_missing_manifest(tmp_path) -> None:
+    client = TestClient(api_app_module.create_app())
+    missing_manifest = tmp_path / "missing" / "manifest.json"
+
+    response = client.delete("/v1/index", params={"manifest_path": str(missing_manifest)})
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Index not found."
 
 
 def test_search_nyx_catalog_uses_orchestrator(monkeypatch) -> None:

@@ -10,6 +10,7 @@ import metis_app.models.app_model as app_model_module
 from metis_app.engine.index_registry import list_indexes as list_engine_indexes
 from metis_app.services.index_service import (
     build_index_bundle,
+    delete_persisted_index,
     load_index_manifest,
     load_index_bundle,
     list_index_manifests,
@@ -126,6 +127,46 @@ def test_chroma_adapter_round_trips_queries_natively(tmp_path) -> None:
     assert manifest.collection_name
     assert result.sources
     assert result.sources[0].sid == "S1"
+
+
+def test_delete_persisted_index_removes_manifest_directory_and_preserves_sources(tmp_path) -> None:
+    src = tmp_path / "notes.txt"
+    src.write_text("Delete the persisted index, not the original document.\n", encoding="utf-8")
+
+    bundle = build_index_bundle([str(src)], {"embedding_provider": "mock", "vector_db_type": "json"})
+    manifest_path = save_index_bundle(bundle, index_dir=tmp_path / "indexes")
+    index_dir = manifest_path.parent
+
+    result = delete_persisted_index(manifest_path)
+
+    assert result == {
+        "deleted": True,
+        "manifest_path": str(manifest_path.resolve()),
+        "index_id": bundle.index_id,
+    }
+    assert not manifest_path.exists()
+    assert not index_dir.exists()
+    assert src.exists()
+
+
+def test_delete_persisted_index_removes_legacy_bundle_and_preserves_sources(tmp_path) -> None:
+    src = tmp_path / "legacy.txt"
+    src.write_text("Legacy single-file indexes should still delete cleanly.\n", encoding="utf-8")
+
+    bundle = build_index_bundle([str(src)], {"embedding_provider": "mock"})
+    bundle_path = save_index_bundle(bundle, target_path=tmp_path / "legacy.metis-index.json")
+
+    result = delete_persisted_index(bundle_path)
+
+    assert result == {
+        "deleted": True,
+        "manifest_path": str(bundle_path.resolve()),
+        "index_id": bundle.index_id,
+    }
+    assert not bundle_path.exists()
+    assert src.exists()
+
+
 def test_cli_index_and_query_use_shared_backend(tmp_path, capsys) -> None:
     src = tmp_path / "paper.txt"
     out = tmp_path / "paper.metis-index.json"
