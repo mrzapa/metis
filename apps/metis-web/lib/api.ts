@@ -530,6 +530,7 @@ export interface AssistantPolicy {
   trigger_on_index_build: boolean;
   trigger_on_completed_run: boolean;
   allow_automatic_writes: boolean;
+  autonomous_research_enabled?: boolean;
 }
 
 export interface AssistantStatus {
@@ -1585,4 +1586,26 @@ export async function clearAssistantMemory(limit = 10): Promise<Record<string, u
     throw new Error(`Failed to clear assistant memory (${res.status}): ${detail}`);
   }
   return res.json();
+}
+
+// ─── Autonomous Research ────────────────────────────────────────────────────
+
+export interface AutonomousStatus {
+  enabled: boolean;
+  provider: string;
+  web_search_api_key_set: boolean;
+}
+
+export async function fetchAutonomousStatus(): Promise<AutonomousStatus> {
+  const base = await getApiBase();
+  const res = await fetch(`${base}/v1/autonomous/status`);
+  if (!res.ok) throw new Error(`autonomous status: ${res.status}`);
+  return res.json() as Promise<AutonomousStatus>;
+}
+
+export async function triggerAutonomousResearch(): Promise<{ ok: boolean; result?: unknown }> {
+  const base = await getApiBase();
+  const res = await fetch(`${base}/v1/autonomous/trigger`, { method: "POST" });
+  if (!res.ok) throw new Error(`autonomous trigger: ${res.status}`);
+  return res.json() as Promise<{ ok: boolean; result?: unknown }>;
 }

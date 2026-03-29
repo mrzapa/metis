@@ -36,6 +36,7 @@ from . import logs as _logs
 from . import sessions as _sessions
 from . import settings as _settings
 from . import assistant as _assistant
+from . import autonomous as _autonomous
 from .models import (
     DirectQueryRequestModel,
     DirectQueryResultModel,
@@ -120,6 +121,7 @@ def create_app() -> FastAPI:
     app.include_router(_logs.router, dependencies=_auth)
     app.include_router(_gguf.router, dependencies=_auth)
     app.include_router(_assistant.router, dependencies=_auth)
+    app.include_router(_autonomous.router, dependencies=_auth)
     app.include_router(_features.router, dependencies=_auth)
 
     @app.get("/v1/version")

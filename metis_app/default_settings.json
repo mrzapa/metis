@@ -61,7 +61,9 @@
     "trigger_on_onboarding": true,
     "trigger_on_index_build": true,
     "trigger_on_completed_run": true,
-    "allow_automatic_writes": true
+    "allow_automatic_writes": true,
+    "autonomous_research_enabled": false,
+    "autonomous_research_provider": "tavily"
   },
   "skills": {
     "enabled": {}
@@ -101,6 +103,7 @@
   "api_key_huggingface": "",
   "api_key_fireworks": "",
   "api_key_perplexity": "",
+  "web_search_api_key": "",
   "chunk_size": 1000,
   "chunk_overlap": 100,
   "parent_chunk_size": 2800,

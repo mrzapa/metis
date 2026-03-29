@@ -278,6 +278,8 @@ def test_assistant_api_routes_return_snapshot_and_reflection(monkeypatch) -> Non
             "trigger_on_index_build": True,
             "trigger_on_completed_run": True,
             "allow_automatic_writes": True,
+            "autonomous_research_enabled": False,
+            "autonomous_research_provider": "tavily",
         },
         "status": {
             "state": "ready",
@@ -350,3 +352,64 @@ def test_assistant_api_routes_return_snapshot_and_reflection(monkeypatch) -> Non
     assert reflect_response.status_code == 200
     assert reflect_response.json()["status"]["state"] == "reflected"
     assert captured == {"trigger": "completed_run", "session_id": "sess-1", "run_id": "run-1", "force": True}
+
+
+def test_assistant_policy_autonomous_fields_default_to_false():
+    from metis_app.models.assistant_types import AssistantPolicy
+    policy = AssistantPolicy()
+    assert policy.autonomous_research_enabled is False
+    assert policy.autonomous_research_provider == "tavily"
+
+
+def test_assistant_policy_roundtrip_autonomous_fields():
+    from metis_app.models.assistant_types import AssistantPolicy
+    policy = AssistantPolicy(
+        autonomous_research_enabled=True,
+        autonomous_research_provider="duckduckgo",
+    )
+    restored = AssistantPolicy.from_payload(policy.to_payload())
+    assert restored.autonomous_research_enabled is True
+    assert restored.autonomous_research_provider == "duckduckgo"
+
+
+def test_reflect_triggers_autonomous_research_when_enabled(tmp_path):
+    """After reflect(), autonomous research runs in background when policy enables it."""
+    import threading
+    from metis_app.services.assistant_companion import AssistantCompanionService
+    from metis_app.services.assistant_repository import AssistantRepository
+
+    research_called = threading.Event()
+
+    class MockOrchestrator:
+        def run_autonomous_research(self, settings):
+            research_called.set()
+            return {
+                "faculty_id": "emergence",
+                "index_id": "auto_emergence_abc",
+                "title": "Emergence Research",
+                "sources": ["http://example.com"],
+            }
+
+    settings = {
+        "assistant_identity": {"companion_enabled": True},
+        "assistant_policy": {
+            "reflection_enabled": True,
+            "autonomous_research_enabled": True,
+            "allow_automatic_writes": True,
+        },
+        "llm_provider": "mock",
+    }
+
+    svc = AssistantCompanionService(
+        repository=AssistantRepository(tmp_path / "state.json")
+    )
+    svc.reflect(
+        trigger="manual",
+        settings=settings,
+        force=True,
+        _orchestrator=MockOrchestrator(),
+    )
+
+    # Wait for the daemon thread to call the orchestrator (up to 5s timeout)
+    fired = research_called.wait(timeout=5.0)
+    assert fired, "autonomous research daemon thread did not fire within 5 seconds"

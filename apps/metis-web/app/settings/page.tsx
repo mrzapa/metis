@@ -149,6 +149,7 @@ const ASSISTANT_DEFAULT_VALUES: AssistantFormValues = {
     trigger_on_index_build: true,
     trigger_on_completed_run: true,
     allow_automatic_writes: true,
+    autonomous_research_enabled: false,
   },
 };
 
@@ -1440,6 +1441,13 @@ export default function SettingsPage() {
                             description="Allow the assistant to summarise and reflect on completed work."
                             checked={watchAssistant("assistant_policy.reflection_enabled")}
                             onChange={(v) => setAssistantValue("assistant_policy.reflection_enabled", v)}
+                          />
+                          <ToggleRow
+                            id="assistant_policy.autonomous_research_enabled"
+                            label="Autonomous Research"
+                            description="Allow METIS to research sparse areas of your constellation and add new stars independently."
+                            checked={watchAssistant("assistant_policy.autonomous_research_enabled") ?? false}
+                            onChange={(v) => setAssistantValue("assistant_policy.autonomous_research_enabled", v)}
                           />
                           <ToggleRow
                             id="assistant_policy.trigger_on_onboarding"

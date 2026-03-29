@@ -28,8 +28,10 @@ import {
   getBackgroundViewportWorldBounds,
   getConstellationCameraScale,
   getFacultyColor,
+  getAutoStarFaculty,
   getInfluenceColors,
   getPreviewConnectionNodes,
+  isAutonomousStar,
   inferConstellationFaculty,
   isAddableBackgroundStar,
   MAX_BACKGROUND_ZOOM_FACTOR,
@@ -830,6 +832,10 @@ export default function Home() {
     }
     return `${selectedUserStar.label ?? "Selected star"} is aligned with ${selectedStarFaculty.label} and holds ${getCountLabel(selectedStarAttachmentCount, "attached source")}.`;
   }, [selectedStarAttachmentCount, selectedStarFaculty, selectedUserStar]);
+  const selectedStarActiveIndex = useMemo(() => {
+    if (!selectedUserStar?.activeManifestPath) return null;
+    return availableIndexes.find((idx) => idx.manifest_path === selectedUserStar.activeManifestPath) ?? null;
+  }, [availableIndexes, selectedUserStar]);
   const addMessageTone = useMemo(() => {
     if (!addMessage) {
       return "accent";
@@ -3032,6 +3038,14 @@ export default function Home() {
           <div className="metis-star-editor">
             <div className="metis-star-editor-head">Star details</div>
             <p className="metis-star-editor-copy">{selectedStarSummary}</p>
+            {isAutonomousStar(selectedStarActiveIndex?.index_id) && (
+              <p className="metis-star-editor-copy" style={{ color: "rgb(196, 181, 253)", fontSize: "0.75rem" }}>
+                ✦ Added autonomously by METIS
+                {getAutoStarFaculty(selectedStarActiveIndex?.index_id)
+                  ? ` · ${getAutoStarFaculty(selectedStarActiveIndex?.index_id)}`
+                  : ""}
+              </p>
+            )}
             <p className="metis-star-editor-copy">
               Follow the faculty ring when you drag or seed stars. Claimed stars keep their own
               source context, so uploads, attachments, and grounded chat remain aligned to the same
