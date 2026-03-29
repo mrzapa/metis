@@ -571,6 +571,7 @@ class WorkspaceOrchestrator:
             kwargs["context_id"] = context_id
         return self._assistant_service.reflect(
             **kwargs,
+            _orchestrator=self,
         )
 
     def run_autonomous_research(self, settings: dict[str, Any]) -> dict[str, Any] | None:

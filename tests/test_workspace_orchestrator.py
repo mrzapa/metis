@@ -1021,6 +1021,7 @@ class TestReflectionHooks:
             session_id="s9",
             run_id="r9",
             force=True,
+            _orchestrator=orch,
         )
 
 
