@@ -573,6 +573,29 @@ class WorkspaceOrchestrator:
             **kwargs,
         )
 
+    def run_autonomous_research(self, settings: dict[str, Any]) -> dict[str, Any] | None:
+        """Run one autonomous research cycle: find sparse faculty → web search → synthesize → index.
+
+        Returns result dict with {faculty_id, index_id, title, sources} or None if skipped.
+        Called from the companion reflection loop when autonomous_research_enabled is True.
+        """
+        from metis_app.models.assistant_types import AssistantPolicy
+        from metis_app.services.autonomous_research_service import AutonomousResearchService
+        from metis_app.utils.web_search import create_web_search
+
+        resolved = self._resolve_query_settings(settings)
+        policy = AssistantPolicy.from_payload(resolved.get("assistant_policy") or {})
+        if not policy.autonomous_research_enabled:
+            return None
+
+        index_dicts = self.list_indexes()
+        index_list = [
+            {"index_id": idx.get("index_id", ""), "document_count": idx.get("document_count", 0)}
+            for idx in index_dicts
+        ]
+        svc = AutonomousResearchService(web_search=create_web_search(resolved))
+        return svc.run(settings=resolved, indexes=index_list, orchestrator=self)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

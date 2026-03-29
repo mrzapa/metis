@@ -1259,6 +1259,23 @@ class TestSettings:
 # ---------------------------------------------------------------------------
 
 
+def test_run_autonomous_research_returns_none_when_disabled(tmp_path):
+    """run_autonomous_research returns None when autonomous_research_enabled is False."""
+    from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
+    orc = WorkspaceOrchestrator()
+    settings = {
+        "assistant_policy": {"autonomous_research_enabled": False},
+        "llm_provider": "mock",
+    }
+    result = orc.run_autonomous_research(settings)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# API integration — brain graph uses orchestrator
+# ---------------------------------------------------------------------------
+
+
 class TestApiBrainGraphUsesOrchestrator:
     """Smoke-test that GET /v1/brain/graph goes through WorkspaceOrchestrator."""
 
