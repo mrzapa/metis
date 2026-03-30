@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { GgufModelsPanel } from "@/components/gguf/gguf-models-panel";
 import {
@@ -19,7 +21,7 @@ import {
   updateSettings,
   type AssistantSettings,
 } from "@/lib/api";
-import { AlertCircle, CheckCircle2, Info, Loader2, TriangleAlert } from "lucide-react";
+import { AlertCircle, CheckCircle2, HelpCircle, Info, Loader2, RotateCcw, Search, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useArrowState } from "@/hooks/use-arrow-state";
 
@@ -170,16 +172,149 @@ function assistantToForm(values: AssistantSettings): AssistantFormValues {
   };
 }
 
+/** Default form values used for the "Reset to defaults" action. */
+const FORM_DEFAULT_VALUES: FormValues = {
+  llm_provider: "anthropic",
+  llm_model: "claude-opus-4-6",
+  chat_path: "RAG",
+  selected_mode: "Q&A",
+  output_style: "Default answer",
+  chat_history_max_turns: 6,
+  show_retrieved_context: false,
+  verbose_mode: false,
+  chunk_size: 1000,
+  chunk_overlap: 100,
+  parent_chunk_size: 2800,
+  parent_chunk_overlap: 320,
+  retrieval_k: 25,
+  top_k: 5,
+  knowledge_search_top_k: 8,
+  retrieval_mode: "flat",
+  search_type: "similarity",
+  mmr_lambda: 0.5,
+  retrieval_min_score: 0.15,
+  fallback_strategy: "synthesize_anyway",
+  fallback_message:
+    "I couldn't find enough grounded evidence in the selected index to answer confidently. Try Knowledge Search, increase retrieval depth, or rephrase the question.",
+  use_reranker: true,
+  use_sub_queries: true,
+  enable_summarizer: true,
+  agentic_mode: false,
+  agentic_max_iterations: 2,
+  subquery_max_docs: 200,
+  document_loader: "auto",
+  structure_aware_ingestion: false,
+  semantic_layout_ingestion: false,
+  deepread_mode: false,
+  build_digest_index: true,
+  build_comprehension_index: false,
+  comprehension_extraction_depth: "Standard",
+  prefer_comprehension_index: true,
+  kg_query_mode: "hybrid",
+  enable_langextract: false,
+  enable_structured_extraction: false,
+  enable_recursive_retrieval: false,
+  enable_recursive_memory: false,
+  enable_citation_v2: true,
+  enable_claim_level_grounding_citefix_lite: false,
+  system_instructions: "",
+  llm_temperature: 0.0,
+  llm_max_tokens: 1024,
+  embedding_provider: "voyage",
+  embedding_model: "voyage-4-large",
+  local_llm_url: "http://localhost:1234/v1",
+  agent_lightning_enabled: false,
+};
+
+/** Search index metadata for all settings fields. Used by the search bar. */
+const SEARCH_INDEX = [
+  // ── Core ──
+  { tab: "core", label: "LLM provider", description: "The AI provider used for chat (e.g. anthropic, openai, local)." },
+  { tab: "core", label: "LLM model", description: "The model identifier for the primary LLM." },
+  { tab: "core", label: "Query path", description: "RAG uses retrieved document context; Direct sends prompts straight to the LLM." },
+  { tab: "core", label: "Skill mode", description: "Controls how the assistant approaches your questions (Q&A, Research, Tutor, etc.)." },
+  { tab: "core", label: "Output style", description: "Format preference for generated answers." },
+  { tab: "core", label: "History turns", description: "Number of past conversation turns included in each new request." },
+  { tab: "core", label: "Show retrieved context", description: "Display the retrieved document chunks alongside answers in chat." },
+  { tab: "core", label: "Verbose mode", description: "Log additional diagnostic information to the server console." },
+  // ── Retrieval ──
+  { tab: "retrieval", label: "Chunk size", description: "Token size of each ingested document chunk." },
+  { tab: "retrieval", label: "Chunk overlap", description: "Overlap between consecutive chunks to avoid cutting context mid-sentence." },
+  { tab: "retrieval", label: "Parent chunk size", description: "Size of the parent chunk used in hierarchical retrieval." },
+  { tab: "retrieval", label: "Parent chunk overlap", description: "Overlap for parent chunks." },
+  { tab: "retrieval", label: "Retrieval k", description: "Number of candidate chunks fetched from the vector store before ranking." },
+  { tab: "retrieval", label: "Top k", description: "Number of final chunks passed to the LLM after ranking." },
+  { tab: "retrieval", label: "Knowledge Search top k", description: "Result limit for the Knowledge Search skill." },
+  { tab: "retrieval", label: "Retrieval mode", description: "flat, mmr, hybrid, or hierarchical retrieval strategy." },
+  { tab: "retrieval", label: "Search type", description: "Vector similarity or MMR-based search." },
+  { tab: "retrieval", label: "MMR lambda", description: "Diversity vs relevance trade-off for MMR retrieval (0 = max diversity, 1 = max relevance)." },
+  { tab: "retrieval", label: "Retrieval min score", description: "Minimum similarity score required to include a chunk." },
+  { tab: "retrieval", label: "Fallback strategy", description: "What to do when no high-quality chunks are found." },
+  { tab: "retrieval", label: "Fallback message", description: "Message shown when retrieval quality is below the minimum score threshold." },
+  { tab: "retrieval", label: "Use reranker", description: "Re-rank retrieved chunks for better relevance before generating answers." },
+  { tab: "retrieval", label: "Use sub-queries", description: "Decompose complex questions into sub-queries for broader coverage." },
+  { tab: "retrieval", label: "Enable summariser", description: "Summarise long context windows before passing to the LLM." },
+  { tab: "retrieval", label: "Agentic mode", description: "Allow the system to iterate and self-correct using tool use loops." },
+  { tab: "retrieval", label: "Agentic max iterations", description: "Maximum refinement cycles when agentic mode is on." },
+  { tab: "retrieval", label: "Sub-query max docs", description: "Maximum documents fetched per sub-query expansion." },
+  { tab: "retrieval", label: "Document loader", description: "Loader used to parse documents during ingestion." },
+  { tab: "retrieval", label: "Structure-aware ingestion", description: "Parse document structure (headings, tables) during ingestion for better chunking." },
+  { tab: "retrieval", label: "Semantic layout ingestion", description: "Use layout analysis to understand document spatial structure during ingestion." },
+  { tab: "retrieval", label: "Deep-read mode", description: "Enable multi-pass deep reading for complex documents." },
+  { tab: "retrieval", label: "Build digest index", description: "Build a fast summary digest index alongside the main vector index." },
+  { tab: "retrieval", label: "Build comprehension index", description: "Build a deep comprehension index for richer retrieval (slower to build)." },
+  { tab: "retrieval", label: "Comprehension depth", description: "How deeply to analyse documents when building the comprehension index." },
+  { tab: "retrieval", label: "Prefer comprehension index", description: "Use the comprehension index when both indexes are available." },
+  // ── Graph ──
+  { tab: "graph", label: "Knowledge graph query mode", description: "hybrid combines vector + keyword; vector uses embeddings only; keyword uses BM25 only." },
+  { tab: "graph", label: "Language extraction", description: "Enable language-aware extraction pipeline for multi-lingual documents." },
+  { tab: "graph", label: "Structured extraction", description: "Extract structured data (tables, entities) from documents during ingestion." },
+  { tab: "graph", label: "Recursive retrieval", description: "Recursively follow graph edges to retrieve additional related context." },
+  // ── Memory ──
+  { tab: "memory", label: "Citation v2", description: "Use the improved citation pipeline with claim-level source mapping." },
+  { tab: "memory", label: "Claim-level grounding", description: "Post-process answers to verify and fix citation anchors at the claim level." },
+  { tab: "memory", label: "Recursive memory", description: "Persist and recall prior conversation context across sessions." },
+  { tab: "memory", label: "System instructions", description: "Override the default system prompt sent to the LLM." },
+  // ── Provider ──
+  { tab: "provider", label: "Temperature", description: "Controls output randomness. 0 = deterministic, 2 = highly creative." },
+  { tab: "provider", label: "Max tokens", description: "Maximum tokens the LLM may generate in a single response." },
+  { tab: "provider", label: "Embedding provider", description: "Provider for text embeddings used in vector search." },
+  { tab: "provider", label: "Embedding model", description: "Embedding model identifier." },
+  { tab: "provider", label: "Local LLM URL", description: "OpenAI-compatible endpoint for local models (e.g. LM Studio, Ollama)." },
+  { tab: "provider", label: "Agent lightning mode", description: "Enable fast-path agent execution for simple queries." },
+] as const;
+
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
   return <p className="mt-0.5 text-xs text-destructive">{message}</p>;
 }
 
-function FieldLabel({ htmlFor, children }: { htmlFor: string; children: ReactNode }) {
+function FieldLabel({ htmlFor, children, tooltip }: { htmlFor: string; children: ReactNode; tooltip?: string }) {
+  if (!tooltip) {
+    return (
+      <label htmlFor={htmlFor} className="text-sm font-medium">
+        {children}
+      </label>
+    );
+  }
   return (
-    <label htmlFor={htmlFor} className="text-sm font-medium">
-      {children}
-    </label>
+    <div className="flex items-center gap-1.5">
+      <label htmlFor={htmlFor} className="text-sm font-medium">
+        {children}
+      </label>
+      <Tooltip>
+        <TooltipTrigger render={
+          <button
+            type="button"
+            aria-label={`Help for ${typeof children === "string" ? children : htmlFor}`}
+            className="text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+          >
+            <HelpCircle className="size-3.5" aria-hidden="true" />
+          </button>
+        } />
+        <TooltipContent side="right">{tooltip}</TooltipContent>
+      </Tooltip>
+    </div>
   );
 }
 
@@ -237,6 +372,7 @@ export default function SettingsPage() {
   const [assistantSaveError, setAssistantSaveError] = useArrowState<string | null>(null);
   const [assistantSaved, setAssistantSaved] = useArrowState(false);
   const [uiVariant, setUiVariant] = useArrowState<UiVariant>("refined");
+  const [searchQuery, setSearchQuery] = useArrowState("");
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -437,19 +573,90 @@ export default function SettingsPage() {
   const mmrLambda = watch("mmr_lambda");
   const llmTemp = watch("llm_temperature");
 
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return null;
+    return SEARCH_INDEX.filter(
+      (entry) =>
+        entry.label.toLowerCase().includes(q) ||
+        entry.description.toLowerCase().includes(q) ||
+        entry.tab.toLowerCase().includes(q),
+    );
+  }, [searchQuery]);
+
+  function resetToDefaults() {
+    reset(FORM_DEFAULT_VALUES);
+  }
+
   return (
     <PageChrome
       eyebrow="Settings"
       title="Configure your workspace"
       description="Fine-tune model providers, retrieval parameters, graph behaviour, memory settings, and the companion assistant."
     >
+      <TooltipProvider>
       <div className="mx-auto max-w-3xl space-y-8">
-        <div>
-          <h1 className="text-lg font-semibold">Settings</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Core defaults, retrieval controls, graph, memory, model, and companion settings.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-lg font-semibold">Settings</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Core defaults, retrieval controls, graph, memory, model, and companion settings.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={resetToDefaults}
+            className="gap-1.5 text-xs"
+          >
+            <RotateCcw className="size-3.5" />
+            Reset to defaults
+          </Button>
         </div>
+
+        {/* Search bar */}
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/60" />
+          <Input
+            type="search"
+            placeholder="Search settings…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+            aria-label="Search settings"
+          />
+        </div>
+
+        {/* Search results overlay */}
+        {searchResults !== null && (
+          <div className="glass-settings-pane rounded-[1.35rem] space-y-2">
+            {searchResults.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                No settings matched <strong>&ldquo;{searchQuery}&rdquo;</strong>.
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-muted-foreground pb-1">
+                  {searchResults.length} result{searchResults.length !== 1 ? "s" : ""} for &ldquo;{searchQuery}&rdquo;
+                </p>
+                <ul className="divide-y divide-white/6">
+                  {searchResults.map((entry) => (
+                    <li key={`${entry.tab}-${entry.label}`} className="flex items-start gap-3 py-3">
+                      <span className="mt-0.5 shrink-0 rounded-full bg-primary/12 px-2 py-0.5 text-xs uppercase tracking-[0.14em] text-primary/80">
+                        {entry.tab}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{entry.label}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{entry.description}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Guardrail: API keys not editable */}
         <div className="flex gap-3 rounded-[1rem] border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-sm text-amber-300/90 backdrop-blur-sm">
@@ -549,19 +756,19 @@ export default function SettingsPage() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="llm_provider">LLM provider</FieldLabel>
+                      <FieldLabel htmlFor="llm_provider" tooltip="The AI provider used for chat responses (e.g. anthropic, openai, local).">LLM provider</FieldLabel>
                       <Input id="llm_provider" type="text" {...register("llm_provider")} />
                       <FieldError message={errors.llm_provider?.message} />
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="llm_model">LLM model</FieldLabel>
+                      <FieldLabel htmlFor="llm_model" tooltip="The model identifier for the primary LLM (e.g. claude-opus-4-6, gpt-4o).">LLM model</FieldLabel>
                       <Input id="llm_model" type="text" {...register("llm_model")} />
                       <FieldError message={errors.llm_model?.message} />
                     </div>
                   </div>
 
                   <div className="space-y-1.5">
-                    <FieldLabel htmlFor="chat_path_rag">Query path</FieldLabel>
+                    <FieldLabel htmlFor="chat_path_rag" tooltip="RAG grounds answers in your documents via retrieval. Direct sends prompts straight to the LLM without any context.">Query path</FieldLabel>
                     <div className="flex gap-4">
                       {(["RAG", "Direct"] as const).map((path) => (
                         <label key={path} htmlFor={`chat_path_${path}`} className="flex cursor-pointer items-center gap-2 text-sm">
@@ -579,7 +786,7 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <FieldLabel htmlFor="selected_mode">Skill mode</FieldLabel>
+                    <FieldLabel htmlFor="selected_mode" tooltip="Q&A gives direct cited answers. Research adds sub-query expansion and graph traversal. Tutor uses Socratic back-and-forth. Evidence Pack grounds each claim.">Skill mode</FieldLabel>
                     <div className="flex flex-wrap gap-3">
                       {SKILL_MODES.map((mode) => (
                         <label key={mode} htmlFor={`mode_${mode}`} className="flex cursor-pointer items-center gap-2 text-sm">
@@ -601,7 +808,7 @@ export default function SettingsPage() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="output_style">Output style</FieldLabel>
+                      <FieldLabel htmlFor="output_style" tooltip="Affects the format and length of generated answers.">Output style</FieldLabel>
                       <select
                         id="output_style"
                         {...register("output_style")}
@@ -613,7 +820,7 @@ export default function SettingsPage() {
                       </select>
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="chat_history_max_turns">History turns</FieldLabel>
+                      <FieldLabel htmlFor="chat_history_max_turns" tooltip="Number of past conversation turns included in each new request. Higher values give more context but cost more tokens.">History turns</FieldLabel>
                       <Input
                         id="chat_history_max_turns"
                         type="number"
@@ -657,7 +864,7 @@ export default function SettingsPage() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="chunk_size">Chunk size</FieldLabel>
+                      <FieldLabel htmlFor="chunk_size" tooltip="Token size of each ingested document chunk. Smaller chunks improve precision; larger chunks preserve more context.">Chunk size</FieldLabel>
                       <Input
                         id="chunk_size"
                         type="number"
@@ -668,7 +875,7 @@ export default function SettingsPage() {
                       <FieldError message={errors.chunk_size?.message} />
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="chunk_overlap">Chunk overlap</FieldLabel>
+                      <FieldLabel htmlFor="chunk_overlap" tooltip="Overlap between consecutive chunks to avoid cutting context mid-sentence. Typically 10–20% of chunk size.">Chunk overlap</FieldLabel>
                       <Input
                         id="chunk_overlap"
                         type="number"
@@ -679,7 +886,7 @@ export default function SettingsPage() {
                       <FieldError message={errors.chunk_overlap?.message} />
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="parent_chunk_size">Parent chunk size</FieldLabel>
+                      <FieldLabel htmlFor="parent_chunk_size" tooltip="Size of the parent chunk in hierarchical retrieval — a larger window of context surrounding the matched child chunk.">Parent chunk size</FieldLabel>
                       <Input
                         id="parent_chunk_size"
                         type="number"
@@ -690,7 +897,7 @@ export default function SettingsPage() {
                       <FieldError message={errors.parent_chunk_size?.message} />
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="parent_chunk_overlap">Parent chunk overlap</FieldLabel>
+                      <FieldLabel htmlFor="parent_chunk_overlap" tooltip="Overlap for parent chunks in hierarchical retrieval.">Parent chunk overlap</FieldLabel>
                       <Input
                         id="parent_chunk_overlap"
                         type="number"
@@ -701,7 +908,7 @@ export default function SettingsPage() {
                       <FieldError message={errors.parent_chunk_overlap?.message} />
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="retrieval_k">
+                      <FieldLabel htmlFor="retrieval_k" tooltip="Number of candidate chunks fetched from the vector store before ranking. A higher value retrieves more candidates for reranking but is slower.">
                         Retrieval k{" "}
                         <span className="font-normal text-muted-foreground">(candidates)</span>
                       </FieldLabel>
@@ -715,7 +922,7 @@ export default function SettingsPage() {
                       <FieldError message={errors.retrieval_k?.message} />
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="top_k">
+                      <FieldLabel htmlFor="top_k" tooltip="Number of final chunks passed to the LLM after ranking. Keep lower for concise answers; raise for comprehensive coverage.">
                         Top k{" "}
                         <span className="font-normal text-muted-foreground">(returned)</span>
                       </FieldLabel>
@@ -729,7 +936,7 @@ export default function SettingsPage() {
                       <FieldError message={errors.top_k?.message} />
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="knowledge_search_top_k">
+                      <FieldLabel htmlFor="knowledge_search_top_k" tooltip="Result limit for the Knowledge Search skill — how many items are surfaced in a direct knowledge-graph query.">
                         Knowledge Search top k
                       </FieldLabel>
                       <Input
@@ -745,7 +952,7 @@ export default function SettingsPage() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="retrieval_mode">Retrieval mode</FieldLabel>
+                      <FieldLabel htmlFor="retrieval_mode" tooltip="flat — basic similarity; mmr — diverse results; hybrid — combines vector + keyword; hierarchical — parent/child chunk retrieval.">Retrieval mode</FieldLabel>
                       <select
                         id="retrieval_mode"
                         {...register("retrieval_mode")}
@@ -757,7 +964,7 @@ export default function SettingsPage() {
                       </select>
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="search_type">Search type</FieldLabel>
+                      <FieldLabel htmlFor="search_type" tooltip="similarity — direct vector cosine search; mmr — Maximal Marginal Relevance to balance relevance and diversity.">Search type</FieldLabel>
                       <select
                         id="search_type"
                         {...register("search_type")}
@@ -769,7 +976,7 @@ export default function SettingsPage() {
                       </select>
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="retrieval_min_score">Retrieval min score</FieldLabel>
+                      <FieldLabel htmlFor="retrieval_min_score" tooltip="Minimum cosine similarity score (0–1) required to include a chunk in results. Raise to filter out weak matches; lower to retrieve more broadly.">Retrieval min score</FieldLabel>
                       <Input
                         id="retrieval_min_score"
                         type="number"
@@ -781,7 +988,7 @@ export default function SettingsPage() {
                       <FieldError message={errors.retrieval_min_score?.message} />
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="fallback_strategy">Fallback strategy</FieldLabel>
+                      <FieldLabel htmlFor="fallback_strategy" tooltip="synthesize_anyway — generate an answer even with weak retrieval; no_answer — refuse and show the fallback message.">Fallback strategy</FieldLabel>
                       <select
                         id="fallback_strategy"
                         {...register("fallback_strategy")}
@@ -795,7 +1002,7 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <FieldLabel htmlFor="mmr_lambda">
+                    <FieldLabel htmlFor="mmr_lambda" tooltip="Maximal Marginal Relevance trade-off. 0 maximises diversity among retrieved chunks; 1 maximises relevance to the query.">
                       MMR lambda{" "}
                       <span className="font-normal text-muted-foreground">
                         (diversity ↔ relevance) — {Number(mmrLambda).toFixed(2)}
@@ -819,7 +1026,7 @@ export default function SettingsPage() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="subquery_max_docs">Sub-query max docs</FieldLabel>
+                      <FieldLabel htmlFor="subquery_max_docs" tooltip="Maximum total documents fetched across all sub-queries during an agentic research pass.">Sub-query max docs</FieldLabel>
                       <Input
                         id="subquery_max_docs"
                         type="number"
@@ -830,12 +1037,12 @@ export default function SettingsPage() {
                       <FieldError message={errors.subquery_max_docs?.message} />
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="document_loader">Document loader</FieldLabel>
+                      <FieldLabel htmlFor="document_loader" tooltip="auto — detect format automatically; alternatives: pymupdf, unstructured, pptx, etc.">Document loader</FieldLabel>
                       <Input id="document_loader" type="text" {...register("document_loader")} />
                       <FieldError message={errors.document_loader?.message} />
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="comprehension_extraction_depth">Comprehension depth</FieldLabel>
+                      <FieldLabel htmlFor="comprehension_extraction_depth" tooltip="Standard — quick single-pass analysis; Deep — multi-pass with cross-referencing; Exhaustive — maximum depth (slowest, highest quality).">Comprehension depth</FieldLabel>
                       <select
                         id="comprehension_extraction_depth"
                         {...register("comprehension_extraction_depth")}
@@ -847,7 +1054,7 @@ export default function SettingsPage() {
                       </select>
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="agentic_max_iterations">Agentic max iterations</FieldLabel>
+                      <FieldLabel htmlFor="agentic_max_iterations" tooltip="Maximum refinement cycles when agentic mode is enabled. More iterations can improve quality at the cost of latency.">Agentic max iterations</FieldLabel>
                       <Input
                         id="agentic_max_iterations"
                         type="number"
@@ -860,12 +1067,11 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <FieldLabel htmlFor="fallback_message">Fallback message</FieldLabel>
-                    <textarea
+                    <FieldLabel htmlFor="fallback_message" tooltip="The message shown to the user when retrieval quality falls below the minimum score threshold.">Fallback message</FieldLabel>
+                    <Textarea
                       id="fallback_message"
                       rows={3}
                       {...register("fallback_message")}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring resize-y"
                       placeholder="Shown when the retrieval score falls below the configured threshold."
                     />
                     <p className="text-xs text-muted-foreground">
@@ -960,7 +1166,7 @@ export default function SettingsPage() {
                   <Separator />
 
                   <div className="space-y-1.5">
-                    <FieldLabel htmlFor="kg_query_mode">Knowledge graph query mode</FieldLabel>
+                    <FieldLabel htmlFor="kg_query_mode" tooltip="hybrid — combines vector similarity and keyword BM25; vector — embedding-only search; keyword — BM25 only (fast, no embeddings needed).">Knowledge graph query mode</FieldLabel>
                     <select
                       id="kg_query_mode"
                       {...register("kg_query_mode")}
@@ -1037,12 +1243,11 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <FieldLabel htmlFor="system_instructions">System instructions</FieldLabel>
-                    <textarea
+                    <FieldLabel htmlFor="system_instructions" tooltip="Custom system prompt that shapes the LLM's behaviour and persona. Leave blank to use the built-in METIS default.">System instructions</FieldLabel>
+                    <Textarea
                       id="system_instructions"
                       rows={5}
                       {...register("system_instructions")}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring resize-y"
                       placeholder="Override the default system prompt sent to the LLM. Leave blank to use the built-in default."
                     />
                     <p className="text-xs text-muted-foreground">
@@ -1064,7 +1269,7 @@ export default function SettingsPage() {
                   <Separator />
 
                   <div className="space-y-1.5">
-                    <FieldLabel htmlFor="llm_temperature">
+                    <FieldLabel htmlFor="llm_temperature" tooltip="Controls output randomness. 0 = fully deterministic (best for factual Q&A). 1 = balanced. 2 = highly creative and variable.">
                       Temperature{" "}
                       <span className="font-normal text-muted-foreground">
                         — {Number(llmTemp).toFixed(1)}
@@ -1088,7 +1293,7 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <FieldLabel htmlFor="llm_max_tokens">Max tokens</FieldLabel>
+                    <FieldLabel htmlFor="llm_max_tokens" tooltip="Maximum tokens the LLM may generate in a single response. Raise for longer answers; lower to reduce cost and latency.">Max tokens</FieldLabel>
                     <Input
                       id="llm_max_tokens"
                       type="number"
@@ -1102,19 +1307,19 @@ export default function SettingsPage() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="embedding_provider">Embedding provider</FieldLabel>
+                      <FieldLabel htmlFor="embedding_provider" tooltip="Provider used to generate text embeddings for vector search (e.g. voyage, openai, local).">Embedding provider</FieldLabel>
                       <Input id="embedding_provider" type="text" {...register("embedding_provider")} />
                       <FieldError message={errors.embedding_provider?.message} />
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="embedding_model">Embedding model</FieldLabel>
+                      <FieldLabel htmlFor="embedding_model" tooltip="Embedding model identifier (e.g. voyage-4-large, text-embedding-3-small).">Embedding model</FieldLabel>
                       <Input id="embedding_model" type="text" {...register("embedding_model")} />
                       <FieldError message={errors.embedding_model?.message} />
                     </div>
                   </div>
 
                   <div className="space-y-1.5">
-                    <FieldLabel htmlFor="local_llm_url">Local LLM URL</FieldLabel>
+                    <FieldLabel htmlFor="local_llm_url" tooltip="OpenAI-compatible REST endpoint for local LLM inference, e.g. LM Studio (http://localhost:1234/v1) or Ollama (http://localhost:11434/v1).">Local LLM URL</FieldLabel>
                     <Input
                       id="local_llm_url"
                       type="text"
@@ -1207,12 +1412,11 @@ export default function SettingsPage() {
                         </div>
 
                         <div className="space-y-1.5">
-                          <FieldLabel htmlFor="assistant_identity.prompt_seed">Prompt seed</FieldLabel>
-                          <textarea
+                          <FieldLabel htmlFor="assistant_identity.prompt_seed" tooltip="Seed prompt used to shape the companion's personality, tone, and boundaries.">Prompt seed</FieldLabel>
+                          <Textarea
                             id="assistant_identity.prompt_seed"
                             rows={5}
                             {...registerAssistant("assistant_identity.prompt_seed")}
-                            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring resize-y"
                             placeholder="Seed prompt used to shape the companion's tone and behaviour."
                           />
                         </div>
@@ -1508,8 +1712,8 @@ export default function SettingsPage() {
                 </section>
               </TabsContent>
 
-            {/* Save controls */}
-            <div className="flex items-center gap-3 pb-8">
+            {/* Save controls — sticky at bottom */}
+            <div className="sticky bottom-0 z-10 flex items-center gap-3 rounded-b-[1.35rem] border-t border-white/8 bg-card/90 px-4 py-3 backdrop-blur-md">
               <Button type="submit" disabled={saving} className="gap-1.5">
                 {saving && <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />}
                 {saving ? "Saving…" : "Save settings"}
@@ -1538,6 +1742,7 @@ export default function SettingsPage() {
           </Tabs>
         )}
       </div>
+      </TooltipProvider>
     </PageChrome>
   );
 }
