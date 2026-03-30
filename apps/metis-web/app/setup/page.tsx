@@ -10,7 +10,12 @@ import { MetisCompanionDock } from "@/components/shell/metis-companion-dock";
 import { OnboardingStep } from "@/components/shell/onboarding-step";
 import { StatusPill } from "@/components/shell/status-pill";
 import { IndexBuildStudio } from "@/components/library/index-build-studio";
-import { fetchSettings, reflectAssistant, updateSettings, type IndexBuildResult } from "@/lib/api";
+import {
+  fetchSettings,
+  reflectAssistant,
+  updateSettings,
+  type IndexBuildResult,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import {
@@ -29,7 +34,8 @@ const LLM_PROVIDERS = [
   {
     value: "anthropic",
     label: "Anthropic",
-    description: "Strong writing quality and research synthesis out of the box.",
+    description:
+      "Strong writing quality and research synthesis out of the box.",
   },
   {
     value: "openai",
@@ -39,7 +45,8 @@ const LLM_PROVIDERS = [
   {
     value: "local",
     label: "Local model",
-    description: "Keep inference on-device when you prefer a fully local stack.",
+    description:
+      "Keep inference on-device when you prefer a fully local stack.",
   },
 ] as const;
 
@@ -57,11 +64,11 @@ const EMBEDDING_PROVIDERS = [
 ] as const;
 
 const STEP_HINTS = [
-  "I’ll start with the model provider that best fits your comfort level with cloud or local inference. You can still change this later in Settings.",
-  "Only add credentials when they are needed. If you choose a local provider, you can leave this blank and keep going.",
-  "Embedding choice controls how documents are indexed and retrieved. I care more about the privacy posture here than the brand name.",
-  "Building a small first index gives you an immediate win: you’ll land in chat with something grounded to ask against.",
-  "The finish step stages a starter prompt without auto-sending anything, so you stay in control while I keep things moving.",
+  "Choose your chat model provider. You can change it later in Settings.",
+  "Add credentials only if needed. Local mode can stay blank.",
+  "Choose how documents are embedded for indexing and retrieval.",
+  "Optional: build a first index now for grounded chat.",
+  "Choose a starter prompt. It is staged, not auto-sent.",
 ];
 
 const STARTER_PROMPTS_WITH_INDEX = [
@@ -84,8 +91,12 @@ export default function SetupPage() {
   const [apiKey, setApiKey] = useArrowState("");
   const [embeddingProvider, setEmbeddingProvider] =
     useArrowState<(typeof EMBEDDING_PROVIDERS)[number]["value"]>("openai");
-  const [baselineSettings, setBaselineSettings] = useArrowState<Record<string, unknown>>({});
-  const [builtIndex, setBuiltIndex] = useArrowState<IndexBuildResult | null>(null);
+  const [baselineSettings, setBaselineSettings] = useArrowState<
+    Record<string, unknown>
+  >({});
+  const [builtIndex, setBuiltIndex] = useArrowState<IndexBuildResult | null>(
+    null,
+  );
   const [selectedPrompt, setSelectedPrompt] = useArrowState<string>("");
   const [saving, setSaving] = useArrowState(false);
   const [error, setError] = useArrowState<string | null>(null);
@@ -97,13 +108,19 @@ export default function SetupPage() {
         if (typeof settings.llm_provider === "string") {
           const candidate = settings.llm_provider as string;
           if (LLM_PROVIDERS.some((provider) => provider.value === candidate)) {
-            setLlmProvider(candidate as (typeof LLM_PROVIDERS)[number]["value"]);
+            setLlmProvider(
+              candidate as (typeof LLM_PROVIDERS)[number]["value"],
+            );
           }
         }
         if (typeof settings.embedding_provider === "string") {
           const candidate = settings.embedding_provider as string;
-          if (EMBEDDING_PROVIDERS.some((provider) => provider.value === candidate)) {
-            setEmbeddingProvider(candidate as (typeof EMBEDDING_PROVIDERS)[number]["value"]);
+          if (
+            EMBEDDING_PROVIDERS.some((provider) => provider.value === candidate)
+          ) {
+            setEmbeddingProvider(
+              candidate as (typeof EMBEDDING_PROVIDERS)[number]["value"],
+            );
           }
         }
       })
@@ -112,7 +129,9 @@ export default function SetupPage() {
       });
   }, [setBaselineSettings, setEmbeddingProvider, setLlmProvider]);
 
-  const starterPrompts = builtIndex ? STARTER_PROMPTS_WITH_INDEX : STARTER_PROMPTS_DIRECT;
+  const starterPrompts = builtIndex
+    ? STARTER_PROMPTS_WITH_INDEX
+    : STARTER_PROMPTS_DIRECT;
 
   useEffect(() => {
     setSelectedPrompt((current) => {
@@ -197,9 +216,9 @@ export default function SetupPage() {
 
   const steps = [
     {
-      title: "Let me pick the primary model provider",
+      title: "Choose the primary model provider",
       description:
-        "I’ll use this provider for direct chat and synthesis. It sets the tone for the rest of onboarding, but you can still adjust it later.",
+        "This provider is used for direct chat and synthesis. You can change it later.",
       content: (
         <div className="grid gap-4 md:grid-cols-3">
           {LLM_PROVIDERS.map((provider) => {
@@ -220,7 +239,9 @@ export default function SetupPage() {
                   <span className="font-display text-2xl font-semibold tracking-[-0.04em] text-foreground">
                     {provider.label}
                   </span>
-                  {active ? <CheckCircle2 className="size-5 text-primary" /> : null}
+                  {active ? (
+                    <CheckCircle2 className="size-5 text-primary" />
+                  ) : null}
                 </div>
                 <p className="mt-3 text-sm leading-7 text-muted-foreground">
                   {provider.description}
@@ -237,13 +258,20 @@ export default function SetupPage() {
       description:
         llmProvider === "local"
           ? "Local model mode does not require a hosted API key. You can continue immediately or add one later if you switch providers."
-          : "Paste the API key for the provider you chose. I’ll pass it through to settings and use it for chat and research workflows.",
+          : "Paste the API key for the selected provider. You can also add it later in settings.",
       content: (
         <div className="space-y-5">
           <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
             <div className="space-y-3">
-              <label htmlFor="api_key" className="text-sm font-medium text-foreground">
-                {llmProvider === "anthropic" ? "Anthropic API key" : llmProvider === "openai" ? "OpenAI API key" : "Optional API key"}
+              <label
+                htmlFor="api_key"
+                className="text-sm font-medium text-foreground"
+              >
+                {llmProvider === "anthropic"
+                  ? "Anthropic API key"
+                  : llmProvider === "openai"
+                    ? "OpenAI API key"
+                    : "Optional API key"}
               </label>
               <Input
                 id="api_key"
@@ -260,10 +288,17 @@ export default function SetupPage() {
             </div>
 
             <div className="rounded-[1.45rem] border border-white/8 bg-black/10 p-4">
-              <AnimatedLucideIcon icon={KeyRound} mode="hoverLift" className="size-5 text-primary" />
-              <p className="mt-3 font-medium text-foreground">Credential posture</p>
+              <AnimatedLucideIcon
+                icon={KeyRound}
+                mode="hoverLift"
+                className="size-5 text-primary"
+              />
+              <p className="mt-3 font-medium text-foreground">
+                Credential posture
+              </p>
               <p className="mt-2 text-sm leading-7 text-muted-foreground">
-                Keys are not echoed back in the UI. They are only forwarded to the backend settings update when you finish onboarding.
+                Keys are not echoed back in the UI. They are only forwarded to
+                the backend settings update when you finish onboarding.
               </p>
             </div>
           </div>
@@ -297,13 +332,18 @@ export default function SetupPage() {
                       icon={BetweenHorizontalEnd}
                       mode={active ? "idlePulse" : "hoverLift"}
                       active={active || undefined}
-                      className={cn("size-4", active ? "text-primary" : "text-muted-foreground")}
+                      className={cn(
+                        "size-4",
+                        active ? "text-primary" : "text-muted-foreground",
+                      )}
                     />
                     <span className="font-display text-2xl font-semibold tracking-[-0.04em] text-foreground">
                       {provider.label}
                     </span>
                   </div>
-                  {active ? <CheckCircle2 className="size-5 text-primary" /> : null}
+                  {active ? (
+                    <CheckCircle2 className="size-5 text-primary" />
+                  ) : null}
                 </div>
                 <p className="mt-3 text-sm leading-7 text-muted-foreground">
                   {provider.description}
@@ -316,7 +356,7 @@ export default function SetupPage() {
       hint: STEP_HINTS[2],
     },
     {
-      title: "Build the first knowledge base with me",
+      title: "Build the first knowledge base",
       description:
         "Indexing a small set of documents here makes the app feel useful immediately. You can skip this and import more later, but a quick first index is the smoothest path into chat.",
       content: (
@@ -330,9 +370,9 @@ export default function SetupPage() {
       hint: STEP_HINTS[3],
     },
     {
-      title: "I’ll stage your first question",
+      title: "Stage your first question",
       description:
-        "I’ll open chat with a starter prompt ready in the composer. Nothing is auto-sent, so you can review and change the wording before you run it.",
+        "A starter prompt is placed in the composer. Nothing is auto-sent.",
       content: (
         <div className="space-y-6">
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -353,8 +393,16 @@ export default function SetupPage() {
                       )}
                     >
                       <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm leading-7 text-foreground">{prompt}</p>
-                        {active ? <AnimatedLucideIcon icon={Sparkles} mode="idlePulse" className="size-4 text-primary" /> : null}
+                        <p className="text-sm leading-7 text-foreground">
+                          {prompt}
+                        </p>
+                        {active ? (
+                          <AnimatedLucideIcon
+                            icon={Sparkles}
+                            mode="idlePulse"
+                            className="size-4 text-primary"
+                          />
+                        ) : null}
                       </div>
                     </button>
                   );
@@ -390,14 +438,17 @@ export default function SetupPage() {
               </div>
 
               <div className="mt-5 flex flex-wrap gap-2">
-                <StatusPill label={builtIndex ? "RAG ready" : "Direct chat ready"} tone={builtIndex ? "connected" : "neutral"} />
+                <StatusPill
+                  label={builtIndex ? "RAG ready" : "Direct chat ready"}
+                  tone={builtIndex ? "connected" : "neutral"}
+                />
                 <StatusPill label="Starter prompt staged" tone="neutral" />
               </div>
 
               <p className="mt-4 text-sm leading-7 text-muted-foreground">
                 {builtIndex
-                  ? "I’ll land you in chat with this index preselected and a grounded starter prompt in the composer."
-                  : "I’ll land you in direct chat mode with a prompt that helps you orient yourself inside the workspace."}
+                  ? "Opens chat with this index preselected and a starter prompt staged."
+                  : "Opens direct chat with a starter prompt staged."}
               </p>
             </div>
           </div>
@@ -418,14 +469,19 @@ export default function SetupPage() {
               METIS Setup
             </p>
             <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
-              Guided first run
+              Setup
             </p>
           </div>
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            <StatusPill label={`Step ${step + 1} of ${steps.length}`} tone="checking" />
+            <StatusPill
+              label={`Step ${step + 1} of ${steps.length}`}
+              tone="checking"
+            />
             <Link href="/">
-              <Button variant="outline" size="sm">Back to home</Button>
+              <Button variant="outline" size="sm">
+                Back to home
+              </Button>
             </Link>
           </div>
         </header>
@@ -434,13 +490,14 @@ export default function SetupPage() {
           <section className="mb-6">
             <div className="glass-panel rounded-2xl px-5 py-5 sm:px-6">
               <p className="text-xs font-medium uppercase tracking-[0.2em] text-primary/80">
-                I’ll guide you through this
+                Quick setup
               </p>
               <h1 className="mt-2 text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-                Set up your workspace with me
+                Set up your workspace
               </h1>
               <p className="mt-2 max-w-2xl text-pretty text-sm leading-relaxed text-muted-foreground">
-                I’ll help you choose a model provider, set embeddings, and optionally import your first documents. This usually takes about two minutes.
+                Choose providers, add an optional API key, and optionally build
+                your first index.
               </p>
             </div>
           </section>
@@ -491,21 +548,42 @@ export default function SetupPage() {
                   Back
                 </Button>
                 {step === 3 ? (
-                  <Button type="button" variant="ghost" onClick={() => setStep(4)}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setStep(4)}
+                  >
                     Skip indexing for now
                   </Button>
                 ) : null}
               </div>
 
               {step < steps.length - 1 ? (
-                <Button type="button" onClick={() => setStep((current) => Math.min(current + 1, steps.length - 1))} className="gap-2">
+                <Button
+                  type="button"
+                  onClick={() =>
+                    setStep((current) =>
+                      Math.min(current + 1, steps.length - 1),
+                    )
+                  }
+                  className="gap-2"
+                >
                   Continue
                   <ArrowRight className="size-4" />
                 </Button>
               ) : (
-                <Button type="button" onClick={handleFinish} disabled={saving} className="gap-2">
+                <Button
+                  type="button"
+                  onClick={handleFinish}
+                  disabled={saving}
+                  className="gap-2"
+                >
                   {saving ? (
-                    <AnimatedLucideIcon icon={Database} mode="idlePulse" className="size-4" />
+                    <AnimatedLucideIcon
+                      icon={Database}
+                      mode="idlePulse"
+                      className="size-4"
+                    />
                   ) : (
                     <BrainIcon size={16} className="shrink-0" />
                   )}
