@@ -110,7 +110,7 @@ describe("DiagnosticsPage", () => {
 
     render(<DiagnosticsPage />);
 
-    expect(await screen.findByText(/Arrow rollout console/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Artifact rollout console/i)).toBeInTheDocument();
     expect(await screen.findByText(/Recommendation: rollback runtime/i)).toBeInTheDocument();
     expect(await screen.findByText(/Recommendation: go/i)).toBeInTheDocument();
     expect(
@@ -159,7 +159,7 @@ describe("DiagnosticsPage", () => {
 
     render(<DiagnosticsPage />);
 
-    const button = await screen.findByRole("button", { name: /Disable Arrow runtime/i });
+    const button = await screen.findByRole("button", { name: /Disable artifact runtime/i });
     fireEvent.click(button);
 
     await waitFor(() => {
@@ -195,7 +195,7 @@ describe("DiagnosticsPage", () => {
 
     render(<DiagnosticsPage />);
 
-    const button = await screen.findByRole("button", { name: /Disable Arrow artifacts/i });
+    const button = await screen.findByRole("button", { name: /Disable artifacts/i });
     fireEvent.click(button);
 
     await waitFor(() => {
