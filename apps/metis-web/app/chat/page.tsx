@@ -1,14 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useRef } from "react";
 import { ResizablePanels } from "@/components/chat/resizable-panels";
 import { SessionsPanel } from "@/components/chat/sessions-panel";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { EvidencePanel } from "@/components/chat/evidence-panel";
-import { NyxChatEntry } from "@/components/library/nyx-chat-entry";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { createSession, fetchSession, fetchSettings, queryDirect, queryKnowledgeSearch, queryRagStream, submitRunAction, updateSettings } from "@/lib/api";
 import type { RetrievalFallback, SessionSummary, TraceEvent } from "@/lib/api";
@@ -1335,15 +1332,8 @@ export default function ChatPage() {
               Index: {activeIndexLabel}
             </Badge>
           ) : null}
-          <Link
-            href="/library"
-            className={`${buttonVariants({ size: "sm", variant: "outline" })} border-[rgba(196,149,58,0.16)] bg-[rgba(10,14,28,0.58)] text-[rgba(222,229,241,0.84)] hover:border-[rgba(196,149,58,0.3)] hover:bg-[rgba(18,24,44,0.76)]`}
-          >
-            Browse Nyx UI
-          </Link>
         </>
       }
-      heroAside={<NyxChatEntry />}
       fullBleed
       contentClassName="rounded-none border-0 bg-transparent p-0"
       companionContext={{
