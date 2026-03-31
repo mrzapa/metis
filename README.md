@@ -19,7 +19,7 @@
 
 - **Fully local.** Run with a local GGUF model and you don't even need an internet connection.
 - **Swap anything.** LLM, embeddings, vector store. Change providers in a config file. Today it's OpenAI, tomorrow it's a model on your laptop.
-- **Desktop-native.** Built with Tauri for a native window experience with no Electron bloat.
+- **Native shell available.** The same app can be packaged in Tauri for a native window experience with no Electron layer.
 - **Constellation home.** The landing page is a live workspace surface for bringing documents into orbit, linking indexes, and jumping into grounded chat.
 - **Six ways to think.** Q&A, Summary, Tutor, Research, Evidence Pack, and Knowledge Search modes give you different lenses on the same documents.
 - **METIS Companion.** An always-on AI companion that learns from your sessions, reflects on conversations, and grows with your workspace.
@@ -67,14 +67,16 @@ This starts the local API plus static web UI and opens `http://127.0.0.1:3000`.
 python main.py
 ```
 
-This starts the FastAPI app directly at `http://127.0.0.1:8000`.
+This starts the local API at `http://127.0.0.1:8000` and opens the web UI in your browser.
+
+Native desktop packaging lives in `apps/metis-desktop/`. The repo launcher intentionally opens the local web UI; use the Tauri shell when you need a native packaged build.
 
 | Interface | Command |
 |-----------|---------|
-| **Web UI** | `metis` |
-| **Web UI (from source)** | `python main.py` |
-| **Desktop GUI** | `metis --desktop` or `metis --gui` |
+| **Local UI** | `metis` |
+| **Local UI (from source)** | `python main.py` |
 | **CLI** | `metis --cli <command>` |
+| **Native desktop shell** | See `apps/metis-desktop/README.md` |
 
 ### Use
 
@@ -191,6 +193,22 @@ This starts:
 
 METIS AI ships with sensible defaults in `metis_app/default_settings.json`. To customise, copy it to `settings.json` in the project root. METIS picks it up automatically on the next launch.
 
+### Brain pass native text gating
+
+`enable_brain_pass` keeps METIS's placement and source-normalisation pass enabled. `brain_pass_native_enabled` allows native Tribev2 analysis when the runtime is installed, and `brain_pass_native_text_enabled` keeps text-backed sources on the native path by default.
+
+```json
+{
+  "enable_brain_pass": true,
+  "brain_pass_native_enabled": true,
+  "brain_pass_native_text_enabled": true
+}
+```
+
+Set `brain_pass_native_text_enabled` to `false` if you want text, document, or image uploads to stay on the lightweight fallback path. Audio and video inputs can still use native analysis when `brain_pass_native_enabled` is on and the runtime is available.
+
+For the native text proxy path, METIS now prefers local system synthesis backends (Windows System.Speech, Linux `espeak`, macOS `say`, or `pyttsx3`) before falling back to gTTS.
+
 ### Environment variables
 
 | Variable | What it does |
@@ -228,7 +246,7 @@ metis_app/
 └── utils/          # Knowledge graph, LLM/embedding providers
 
 apps/
-├── metis-web/      # Tauri + Next.js UI (TypeScript + Tailwind)
+├── metis-web/      # Next.js web UI (TypeScript + Tailwind)
 │   ├── app/
 │   │   ├── chat/       # Chat interface (RAG Q&A)
 │   │   ├── brain/      # Interactive Brain Graph visualisation
@@ -238,7 +256,7 @@ apps/
 │       ├── brain/       # BrainGraph 3D component
 │       ├── chat/        # Chat + evidence panels
 │       └── shell/       # METIS Companion dock, page chrome
-└── metis-desktop/  # Tauri desktop shell
+└── metis-desktop/  # Tauri desktop shell around metis-web
 
 scripts/            # Installers and dev scripts
 skills/             # Self-contained agentic skill workflows

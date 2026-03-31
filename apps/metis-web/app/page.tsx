@@ -10,7 +10,7 @@ import {
 } from "@/components/home/landing-starfield-webgl";
 import { StarDetailsPanel } from "@/components/constellation/star-observatory-dialog";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
-import { deleteIndex, fetchIndexes } from "@/lib/api";
+import { deleteIndex, fetchIndexes, previewLearningRoute } from "@/lib/api";
 import {
   buildBrainPlacementIntent,
   buildFacultyAnchoredPlacement,
@@ -76,12 +76,21 @@ import {
   measureSingleLineTextWidth,
   quantizeFontSize,
 } from "@/lib/pretext-labels";
-import type { IndexBuildResult, IndexSummary } from "@/lib/api";
+import type {
+  IndexBuildResult,
+  IndexSummary,
+  LearningRoutePreviewRequest,
+} from "@/lib/api";
 import type {
   LandingStarHitTarget,
   LandingStarSpatialHash,
 } from "@/lib/landing-stars/landing-star-types";
-import type { UserStar } from "@/lib/constellation-types";
+import type {
+  LearningRoute,
+  LearningRouteStep,
+  LearningRouteStepStatus,
+  UserStar,
+} from "@/lib/constellation-types";
 
 /* ────────────────────────────── constants ────────────────────────────── */
 
@@ -203,6 +212,23 @@ interface ProjectedUserStarRenderState {
   star: UserStar;
   stellarProfile: StellarProfile;
   target: ProjectedUserStarHitTarget;
+}
+
+interface ChatLaunchPayload {
+  manifestPath: string;
+  label: string;
+  selectedMode?: string;
+  draft?: string;
+}
+
+interface LearningRouteOverlayStop {
+  current: boolean;
+  done: boolean;
+  id: string;
+  title: string;
+  unavailable: boolean;
+  x: number;
+  y: number;
 }
 
 function nextDeterministicSeed(seed: number): number {
@@ -417,6 +443,105 @@ function getStarManifestPaths(star: UserStar): string[] {
   ]);
 }
 
+function convertLearningRoutePreviewToRoute(
+  preview: Awaited<ReturnType<typeof previewLearningRoute>>,
+): LearningRoute {
+  return {
+    id: preview.route_id,
+    title: preview.title,
+    originStarId: preview.origin_star_id,
+    createdAt: preview.created_at,
+    updatedAt: preview.updated_at,
+    steps: preview.steps.map((step) => ({
+      id: step.id,
+      kind: step.kind,
+      title: step.title,
+      objective: step.objective,
+      rationale: step.rationale,
+      manifestPath: step.manifest_path,
+      sourceStarId: step.source_star_id ?? undefined,
+      tutorPrompt: step.tutor_prompt,
+      estimatedMinutes: step.estimated_minutes,
+      status: "todo",
+    })),
+  };
+}
+
+function cloneLearningRoute(route: LearningRoute): LearningRoute {
+  return {
+    ...route,
+    steps: route.steps.map((step) => ({ ...step })),
+  };
+}
+
+function hasEligibleCourseSource(star: UserStar | null): boolean {
+  return star !== null && getStarManifestPaths(star).length > 0;
+}
+
+function buildLearningRoutePreviewRequest(
+  star: UserStar,
+  allStars: readonly UserStar[],
+  indexes: readonly IndexSummary[],
+): LearningRoutePreviewRequest {
+  const connectedStars = (star.connectedUserStarIds ?? [])
+    .map((starId) => allStars.find((candidate) => candidate.id === starId) ?? null)
+    .filter((candidate): candidate is UserStar => candidate !== null);
+  const relevantManifestPathSet = new Set<string>([
+    ...getStarManifestPaths(star),
+    ...connectedStars.flatMap((connectedStar) => uniqueManifestPaths([connectedStar.activeManifestPath])),
+  ]);
+
+  return {
+    origin_star: {
+      id: star.id,
+      label: star.label,
+      intent: star.intent,
+      notes: star.notes,
+      active_manifest_path: star.activeManifestPath,
+      linked_manifest_paths: star.linkedManifestPaths ?? [],
+      connected_user_star_ids: star.connectedUserStarIds ?? [],
+    },
+    connected_stars: connectedStars.map((connectedStar) => ({
+      id: connectedStar.id,
+      label: connectedStar.label,
+      intent: connectedStar.intent,
+      notes: connectedStar.notes,
+      active_manifest_path: connectedStar.activeManifestPath,
+      linked_manifest_paths: connectedStar.linkedManifestPaths ?? [],
+      connected_user_star_ids: connectedStar.connectedUserStarIds ?? [],
+    })),
+    indexes: indexes
+      .filter((index) => relevantManifestPathSet.has(index.manifest_path))
+      .map((index) => ({
+        index_id: index.index_id,
+        manifest_path: index.manifest_path,
+        document_count: index.document_count,
+        chunk_count: index.chunk_count,
+        created_at: index.created_at,
+        embedding_signature: index.embedding_signature,
+        brain_pass: index.brain_pass,
+      })),
+  };
+}
+
+function getCurrentLearningRouteStepId(route: LearningRoute | null): string | null {
+  if (!route || route.steps.length === 0) {
+    return null;
+  }
+  return route.steps.find((step) => step.status !== "done")?.id ?? route.steps[0]?.id ?? null;
+}
+
+function buildLearningRouteWaypoint(origin: Point, stepIndex: number, totalSteps: number): Point {
+  const safeTotalSteps = Math.max(1, totalSteps);
+  const angle = (-Math.PI / 2.4) + (stepIndex / safeTotalSteps) * Math.PI * 0.92;
+  const radius = 0.075 + stepIndex * 0.028;
+
+  return {
+    x: clampToRange(origin.x + Math.cos(angle) * radius, 0.08, 0.92),
+    y: clampToRange(origin.y + Math.sin(angle) * radius, 0.08, 0.92),
+  };
+}
+
 function removeDeletedManifestPathsFromStar(
   star: UserStar,
   deletedManifestPaths: ReadonlySet<string>,
@@ -576,6 +701,7 @@ function cloneUserStarSnapshot(stars: readonly UserStar[]): UserStar[] {
   return stars.map((star) => ({
     ...star,
     connectedUserStarIds: star.connectedUserStarIds ? [...star.connectedUserStarIds] : undefined,
+    learningRoute: star.learningRoute ? cloneLearningRoute(star.learningRoute) : undefined,
     linkedManifestPaths: star.linkedManifestPaths ? [...star.linkedManifestPaths] : undefined,
     relatedDomainIds: star.relatedDomainIds ? [...star.relatedDomainIds] : undefined,
   }));
@@ -687,6 +813,10 @@ export default function Home() {
   const [backgroundZoomFactor, setBackgroundZoomFactor] = useState(1);
   const [isCanvasPanning, setIsCanvasPanning] = useState(false);
   const [zoomInteracting, setZoomInteracting] = useState(false);
+  const [learningRoutePreview, setLearningRoutePreview] = useState<LearningRoute | null>(null);
+  const [learningRoutePreviewStarId, setLearningRoutePreviewStarId] = useState<string | null>(null);
+  const [learningRouteLoading, setLearningRouteLoading] = useState(false);
+  const [learningRouteError, setLearningRouteError] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const conceptCardRef = useRef<HTMLDivElement>(null);
   const starTooltipCardRef = useRef<HTMLDivElement>(null);
@@ -748,6 +878,7 @@ export default function Home() {
   const dragPreviewPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const ragPulseStateRef = useRef<HomeRagPulseState | null>(null);
   const starfieldRevisionRef = useRef(0);
+  const learningRouteRequestIdRef = useRef(0);
   const dragStateRef = useRef<{
     pointerId: number;
     starId: string;
@@ -974,6 +1105,81 @@ export default function Home() {
     if (!selectedUserStar?.activeManifestPath) return null;
     return availableIndexes.find((idx) => idx.manifest_path === selectedUserStar.activeManifestPath) ?? null;
   }, [availableIndexes, selectedUserStar]);
+  const activeLearningRoutePreview = useMemo(() => {
+    if (!detailsStar || learningRoutePreviewStarId !== detailsStar.id) {
+      return null;
+    }
+    return learningRoutePreview;
+  }, [detailsStar, learningRoutePreview, learningRoutePreviewStarId]);
+  const displayedLearningRoute = activeLearningRoutePreview ?? detailsStar?.learningRoute ?? null;
+  const displayedLearningRouteUnavailableManifestPaths = useMemo(() => (
+    new Set(
+      (displayedLearningRoute?.steps ?? [])
+        .map((step) => step.manifestPath)
+        .filter((manifestPath) => !availableIndexes.some((index) => index.manifest_path === manifestPath)),
+    )
+  ), [availableIndexes, displayedLearningRoute]);
+  const learningRouteOverlay = useMemo(() => {
+    if (!starDetailsOpen || !detailsStar || !displayedLearningRoute) {
+      return null;
+    }
+
+    const viewportWidth = canvasBoundsRef.current.width || window.innerWidth;
+    const viewportHeight = canvasBoundsRef.current.height || window.innerHeight;
+    if (viewportWidth <= 0 || viewportHeight <= 0) {
+      return null;
+    }
+
+    const backgroundCamera: BackgroundCameraState = {
+      x: backgroundCameraOriginRef.current.x,
+      y: backgroundCameraOriginRef.current.y,
+      zoomFactor: backgroundZoomRef.current,
+    };
+    const previewPositions = dragPreviewPositionsRef.current;
+    const connectedStarIds = new Set(detailsStar.connectedUserStarIds ?? []);
+    const originPoint = getResolvedStarPoint(detailsStar, previewPositions, detailsStar.id);
+    const currentStepId = getCurrentLearningRouteStepId(displayedLearningRoute);
+    const origin = projectConstellationPoint(originPoint, viewportWidth, viewportHeight, backgroundCamera);
+    const stops: LearningRouteOverlayStop[] = displayedLearningRoute.steps.map((step, index) => {
+      const connectedStar = step.sourceStarId && connectedStarIds.has(step.sourceStarId)
+        ? userStars.find((candidate) =>
+          candidate.id === step.sourceStarId
+          && candidate.activeManifestPath === step.manifestPath,
+        ) ?? null
+        : null;
+      const waypoint = connectedStar
+        ? getResolvedStarPoint(connectedStar, previewPositions, connectedStar.id)
+        : buildLearningRouteWaypoint(originPoint, index, displayedLearningRoute.steps.length);
+      const projected = projectConstellationPoint(waypoint, viewportWidth, viewportHeight, backgroundCamera);
+
+      return {
+        current: currentStepId === step.id,
+        done: step.status === "done",
+        id: step.id,
+        title: step.title,
+        unavailable: displayedLearningRouteUnavailableManifestPaths.has(step.manifestPath),
+        x: projected.x,
+        y: projected.y,
+      };
+    });
+
+    return { origin, stops };
+  }, [
+    backgroundZoomFactor,
+    detailsStar,
+    displayedLearningRoute,
+    displayedLearningRouteUnavailableManifestPaths,
+    starDetailsOpen,
+    userStars,
+  ]);
+
+  const clearLearningRoutePreview = useCallback(() => {
+    learningRouteRequestIdRef.current += 1;
+    setLearningRoutePreview(null);
+    setLearningRoutePreviewStarId(null);
+    setLearningRouteLoading(false);
+    setLearningRouteError(null);
+  }, []);
   const addMessageTone = useMemo(() => {
     if (!addMessage) {
       return "accent";
@@ -1057,11 +1263,21 @@ export default function Home() {
   }, []);
 
   const openChatWithIndex = useCallback(
-    (manifestPath: string, label: string) => {
+    ({ manifestPath, label, draft, selectedMode }: ChatLaunchPayload) => {
       window.localStorage.setItem(
         "metis_active_index",
         JSON.stringify({ manifest_path: manifestPath, label }),
       );
+      if (draft && draft.trim().length > 0) {
+        window.localStorage.setItem("metis_chat_seed_prompt", draft.trim());
+      } else {
+        window.localStorage.removeItem("metis_chat_seed_prompt");
+      }
+      if (selectedMode && selectedMode.trim().length > 0) {
+        window.localStorage.setItem("metis_chat_seed_mode", selectedMode.trim());
+      } else {
+        window.localStorage.removeItem("metis_chat_seed_mode");
+      }
       router.push("/chat");
     },
     [router],
@@ -1467,6 +1683,18 @@ export default function Home() {
   }, [pendingDetailStar, selectedUserStar]);
 
   useEffect(() => {
+    const detailStarId = detailsStar?.id ?? null;
+    if (!detailStarId) {
+      clearLearningRoutePreview();
+      return;
+    }
+
+    if (learningRoutePreviewStarId && learningRoutePreviewStarId !== detailStarId) {
+      clearLearningRoutePreview();
+    }
+  }, [clearLearningRoutePreview, detailsStar, learningRoutePreviewStarId]);
+
+  useEffect(() => {
     const focusedStarId = starFocusSessionRef.current.starId;
     if (!focusedStarId) {
       return;
@@ -1500,6 +1728,141 @@ export default function Home() {
       setHoveredAddCandidateId(null);
     }
   }, [starLimit, userStars.length]);
+
+  const requestLearningRoutePreview = useCallback(async (star: UserStar) => {
+    if (!hasEligibleCourseSource(star)) {
+      setLearningRouteError("Attach a source to this star before starting a course.");
+      return;
+    }
+
+    const requestId = learningRouteRequestIdRef.current + 1;
+    learningRouteRequestIdRef.current = requestId;
+    setLearningRoutePreviewStarId(star.id);
+    setLearningRouteLoading(true);
+    setLearningRouteError(null);
+
+    try {
+      const preview = await previewLearningRoute(
+        buildLearningRoutePreviewRequest(
+          star,
+          userStarsRef.current,
+          availableIndexesRef.current,
+        ),
+      );
+      if (learningRouteRequestIdRef.current !== requestId) {
+        return;
+      }
+      setLearningRoutePreview(convertLearningRoutePreviewToRoute(preview));
+    } catch (error) {
+      if (learningRouteRequestIdRef.current !== requestId) {
+        return;
+      }
+      console.error("Failed to preview learning route", error);
+      setLearningRoutePreview(null);
+      setLearningRouteError(
+        error instanceof Error ? error.message : "Unable to plot a course right now.",
+      );
+    } finally {
+      if (learningRouteRequestIdRef.current === requestId) {
+        setLearningRouteLoading(false);
+      }
+    }
+  }, []);
+
+  const handleStartCourse = useCallback(() => {
+    if (!detailsStar) {
+      return;
+    }
+    void requestLearningRoutePreview(detailsStar);
+  }, [detailsStar, requestLearningRoutePreview]);
+
+  const handleSaveLearningRoutePreview = useCallback(async () => {
+    if (!detailsStar || !activeLearningRoutePreview) {
+      return;
+    }
+
+    const savedRoute = {
+      ...cloneLearningRoute(activeLearningRoutePreview),
+      updatedAt: new Date().toISOString(),
+    };
+    const updated = await updateUserStarById(detailsStar.id, {
+      learningRoute: savedRoute,
+    });
+    if (!updated) {
+      showToast({
+        dismissMs: 3200,
+        message: "Unable to save this learning route. Try again in a moment.",
+        tone: "error",
+      });
+      return;
+    }
+
+    clearLearningRoutePreview();
+    showToast({
+      dismissMs: 2400,
+      message: "Learning route saved to this star.",
+      tone: "default",
+    });
+  }, [
+    activeLearningRoutePreview,
+    clearLearningRoutePreview,
+    detailsStar,
+    showToast,
+    updateUserStarById,
+  ]);
+
+  const handleRegenerateLearningRoute = useCallback(() => {
+    if (!detailsStar) {
+      return;
+    }
+    void requestLearningRoutePreview(detailsStar);
+  }, [detailsStar, requestLearningRoutePreview]);
+
+  const handleLaunchLearningRouteStep = useCallback((step: LearningRouteStep) => {
+    const sourceIndex = availableIndexesRef.current.find(
+      (index) => index.manifest_path === step.manifestPath,
+    );
+    openChatWithIndex({
+      manifestPath: step.manifestPath,
+      label: sourceIndex?.index_id ?? detailsStar?.label ?? "Course source",
+      selectedMode: "Tutor",
+      draft: step.tutorPrompt,
+    });
+  }, [detailsStar, openChatWithIndex]);
+
+  const handleSetLearningRouteStepStatus = useCallback(async (
+    stepId: string,
+    status: LearningRouteStepStatus,
+  ) => {
+    if (!detailsStar?.learningRoute) {
+      return;
+    }
+
+    const completedAt = status === "done" ? new Date().toISOString() : undefined;
+    const nextRoute = {
+      ...cloneLearningRoute(detailsStar.learningRoute),
+      updatedAt: completedAt ?? new Date().toISOString(),
+      steps: detailsStar.learningRoute.steps.map((step) => (
+        step.id === stepId
+          ? {
+            ...step,
+            status,
+            completedAt,
+          }
+          : step
+      )),
+    };
+    const updated = await updateUserStarById(detailsStar.id, {
+      learningRoute: nextRoute,
+    });
+    if (!updated) {
+      showToast({
+        dismissMs: 3200,
+        message: "Unable to update route progress right now.",
+        tone: "error",
+      });
+    }
+  }, [detailsStar, showToast, updateUserStarById]);
 
   useEffect(() => {
     return subscribeBrainGraphRagActivity((activity) => {
@@ -2853,19 +3216,35 @@ export default function Home() {
         ?? null;
     }
 
-    function clearDragState(clearMessage = false) {
+    function releaseCanvasPointerCapture(pointerId?: number | null) {
+      if (pointerId === undefined || pointerId === null || !canvas) {
+        return;
+      }
+
+      try {
+        canvas.releasePointerCapture(pointerId);
+      } catch {
+        // Ignore release failures when the pointer is already gone.
+      }
+    }
+
+    function clearDragState(clearMessage = false, pointerId?: number | null) {
       const currentDrag = dragStateRef.current;
+      const nextPointerId = pointerId ?? currentDrag?.pointerId;
       if (currentDrag) {
         dragPreviewPositionsRef.current.delete(currentDrag.starId);
       }
       dragStateRef.current = null;
+      releaseCanvasPointerCapture(nextPointerId);
       if (clearMessage) {
         setDragMessage(null);
       }
     }
 
-    function clearPanState() {
+    function clearPanState(pointerId?: number | null) {
+      const nextPointerId = pointerId ?? panStateRef.current?.pointerId;
       panStateRef.current = null;
+      releaseCanvasPointerCapture(nextPointerId);
       setIsCanvasPanning(false);
     }
 
@@ -2888,7 +3267,6 @@ export default function Home() {
           return;
         }
 
-        registerZoomInteraction();
         const scale = getBackgroundCameraScale(panState.zoomFactor);
         const nextOrigin = {
           x: panState.startOrigin.x - (e.clientX - panState.startClientX) / scale,
@@ -3241,6 +3619,32 @@ export default function Home() {
       clearPointerHoverState();
     }
 
+    function onPointerCancel(e: PointerEvent) {
+      const isDragPointer = dragStateRef.current?.pointerId === e.pointerId;
+      const isPanPointer = panStateRef.current?.pointerId === e.pointerId;
+
+      if (!isDragPointer && !isPanPointer) {
+        return;
+      }
+
+      clearDragState(true, e.pointerId);
+      clearPanState(e.pointerId);
+      clearPointerHoverState();
+    }
+
+    function onCanvasLostPointerCapture(e: PointerEvent) {
+      const isDragPointer = dragStateRef.current?.pointerId === e.pointerId;
+      const isPanPointer = panStateRef.current?.pointerId === e.pointerId;
+
+      if (!isDragPointer && !isPanPointer) {
+        return;
+      }
+
+      clearDragState(true, e.pointerId);
+      clearPanState(e.pointerId);
+      clearPointerHoverState();
+    }
+
     function onBlur() {
       clearDragState(true);
       clearPanState();
@@ -3295,7 +3699,9 @@ export default function Home() {
 
     window.addEventListener("resize", onResize);
     canvas.addEventListener("pointerdown", onCanvasPointerDown);
+    canvas.addEventListener("lostpointercapture", onCanvasLostPointerCapture);
     document.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointercancel", onPointerCancel);
     window.addEventListener("pointerup", onCanvasPress);
     canvas.addEventListener("pointerleave", onPointerLeave);
     window.addEventListener("wheel", onWheel, { passive: false });
@@ -3305,7 +3711,9 @@ export default function Home() {
       cancelAnimationFrame(animFrame);
       window.removeEventListener("resize", onResize);
       canvas.removeEventListener("pointerdown", onCanvasPointerDown);
+      canvas.removeEventListener("lostpointercapture", onCanvasLostPointerCapture);
       document.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointercancel", onPointerCancel);
       window.removeEventListener("pointerup", onCanvasPress);
       canvas.removeEventListener("pointerleave", onPointerLeave);
       window.removeEventListener("wheel", onWheel);
@@ -3379,7 +3787,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div className={`metis-zoom-pill ${zoomInteracting || canvasInteractionsLocked ? "is-muted" : ""}`} aria-live="polite">
+      <div className={`metis-zoom-pill ${canvasInteractionsLocked ? "is-muted" : ""}`} aria-live="polite">
         <div className="metis-zoom-pill-value">{backgroundZoomLabel}</div>
         <div className="metis-zoom-pill-tools" role="toolbar" aria-label="Constellation tools">
           <button
@@ -3528,6 +3936,66 @@ export default function Home() {
         </div>
       ) : null}
 
+      {learningRouteOverlay ? (
+        <svg
+          aria-hidden="true"
+          data-testid="learning-route-overlay"
+          style={{
+            inset: 0,
+            pointerEvents: "none",
+            position: "fixed",
+            zIndex: 12,
+          }}
+        >
+          <polyline
+            fill="none"
+            points={[
+              `${learningRouteOverlay.origin.x},${learningRouteOverlay.origin.y}`,
+              ...learningRouteOverlay.stops.map((stop) => `${stop.x},${stop.y}`),
+            ].join(" ")}
+            stroke="rgba(214, 179, 97, 0.5)"
+            strokeDasharray="8 10"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+          />
+          {learningRouteOverlay.stops.map((stop, index) => (
+            <g key={stop.id} data-testid={`learning-route-marker-${index + 1}`}>
+              <circle
+                cx={stop.x}
+                cy={stop.y}
+                fill={stop.done ? "rgba(52, 211, 153, 0.7)" : stop.current ? "rgba(214, 179, 97, 0.9)" : "rgba(15, 23, 42, 0.82)"}
+                opacity={stop.unavailable ? 0.48 : 1}
+                r={stop.current ? 18 : 14}
+                stroke={stop.unavailable ? "rgba(251, 191, 36, 0.5)" : "rgba(255, 255, 255, 0.24)"}
+                strokeWidth={stop.current ? 2.5 : 1.5}
+              />
+              {stop.current ? (
+                <circle
+                  cx={stop.x}
+                  cy={stop.y}
+                  fill="none"
+                  r={26}
+                  stroke="rgba(214, 179, 97, 0.28)"
+                  strokeWidth={3}
+                />
+              ) : null}
+              <text
+                fill="white"
+                fontFamily='"Space Grotesk", sans-serif'
+                fontSize={12}
+                fontWeight={600}
+                textAnchor="middle"
+                x={stop.x}
+                y={stop.y + 4}
+              >
+                {index + 1}
+              </text>
+            </g>
+          ))}
+        </svg>
+      ) : null}
+
       <StarDetailsPanel
         open={starDetailsOpen}
         onOpenChange={handleStarDetailsOpenChange}
@@ -3540,6 +4008,15 @@ export default function Home() {
         onUpdateStar={updateUserStarById}
         onRemoveStar={handleDeleteStarAndSources}
         onOpenChat={openChatWithIndex}
+        learningRoutePreview={activeLearningRoutePreview}
+        learningRouteLoading={learningRouteLoading}
+        learningRouteError={learningRouteError}
+        onStartCourse={handleStartCourse}
+        onSaveLearningRoutePreview={handleSaveLearningRoutePreview}
+        onDiscardLearningRoutePreview={clearLearningRoutePreview}
+        onRegenerateLearningRoute={handleRegenerateLearningRoute}
+        onLaunchLearningRouteStep={handleLaunchLearningRouteStep}
+        onSetLearningRouteStepStatus={handleSetLearningRouteStepStatus}
       />
 
       {/* Concept tooltip card */}

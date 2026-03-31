@@ -187,7 +187,7 @@ export function isNyxInstallActionResult(
   value: unknown,
 ): value is NyxInstallActionResult {
   return (
-    Boolean(value) &&
+    value !== null &&
     typeof value === "object" &&
     "action_type" in value &&
     (value as { action_type?: unknown }).action_type === "nyx_install"

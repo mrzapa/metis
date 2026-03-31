@@ -129,6 +129,43 @@ def test_skill_repository_reports_invalid_skill_frontmatter(tmp_path) -> None:
     assert repository.lint_errors()
 
 
+def test_repo_symphony_setup_skill_frontmatter_is_valid() -> None:
+    skill = parse_skill_file("skills/symphony-setup/SKILL.md")
+
+    assert skill.valid is True
+    assert skill.skill_id == "symphony-setup"
+    assert skill.enabled_by_default is False
+
+
+def test_skill_repository_accepts_metadata_wrapped_frontmatter(tmp_path) -> None:
+    skill_dir = tmp_path / "metadata-skill"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: Metadata Skill\n"
+        "description: Wrapped metadata skill.\n"
+        "metadata:\n"
+        "  id: metadata-skill\n"
+        "  enabled_by_default: false\n"
+        "  priority: 10\n"
+        "  triggers:\n"
+        "    keywords: []\n"
+        "    modes: []\n"
+        "    file_types: []\n"
+        "    output_styles: []\n"
+        "  runtime_overrides: {}\n"
+        "---\n"
+        "Wrapped body.\n",
+        encoding="utf-8",
+    )
+
+    skill = parse_skill_file(skill_dir / "SKILL.md")
+
+    assert skill.valid is True
+    assert skill.skill_id == "metadata-skill"
+    assert skill.name == "Metadata Skill"
+
+
 def test_runtime_resolution_uses_skill_precedence_and_conflicts() -> None:
     settings = {
         "selected_mode": "Q&A",

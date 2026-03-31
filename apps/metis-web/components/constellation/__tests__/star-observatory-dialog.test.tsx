@@ -2,7 +2,7 @@ import React from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IndexSummary } from "@/lib/api";
-import type { UserStar } from "@/lib/constellation-types";
+import type { LearningRoute, UserStar } from "@/lib/constellation-types";
 
 vi.mock("@/components/ui/dialog", () => ({
   Dialog: ({
@@ -19,15 +19,19 @@ vi.mock("@/components/ui/dialog", () => ({
       </div>
     ) : null
   ),
-  DialogContent: ({
-    className: _className,
-    showCloseButton: _showCloseButton,
-    showOverlay: _showOverlay,
-    children,
-    ...rest
-  }: React.PropsWithChildren<{ className?: string; showCloseButton?: boolean; showOverlay?: boolean }>) => (
-    <div {...rest}>{children}</div>
-  ),
+  DialogContent: (
+    props: React.PropsWithChildren<{
+      className?: string;
+      showCloseButton?: boolean;
+      showOverlay?: boolean;
+    }>,
+  ) => {
+    const { children, ...rest } = props;
+    const contentProps = { ...rest };
+    delete contentProps.showCloseButton;
+    delete contentProps.showOverlay;
+    return <div {...contentProps}>{children}</div>;
+  },
   DialogDescription: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   DialogHeader: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   DialogTitle: ({ children }: React.PropsWithChildren) => <h1>{children}</h1>,
@@ -80,6 +84,15 @@ function renderPanel({
   onUpdateStar = vi.fn().mockResolvedValue(true),
   onRemoveStar = vi.fn().mockResolvedValue(undefined),
   onOpenChat = vi.fn(),
+  learningRoutePreview = null,
+  learningRouteLoading = false,
+  learningRouteError = null,
+  onStartCourse = vi.fn(),
+  onSaveLearningRoutePreview = vi.fn(),
+  onDiscardLearningRoutePreview = vi.fn(),
+  onRegenerateLearningRoute = vi.fn(),
+  onLaunchLearningRouteStep = vi.fn(),
+  onSetLearningRouteStepStatus = vi.fn(),
 }: Partial<React.ComponentProps<typeof StarDetailsPanel>> & { star?: UserStar } = {}) {
   render(
     <StarDetailsPanel
@@ -94,10 +107,67 @@ function renderPanel({
       onUpdateStar={onUpdateStar}
       onRemoveStar={onRemoveStar}
       onOpenChat={onOpenChat}
+      learningRoutePreview={learningRoutePreview}
+      learningRouteLoading={learningRouteLoading}
+      learningRouteError={learningRouteError}
+      onStartCourse={onStartCourse}
+      onSaveLearningRoutePreview={onSaveLearningRoutePreview}
+      onDiscardLearningRoutePreview={onDiscardLearningRoutePreview}
+      onRegenerateLearningRoute={onRegenerateLearningRoute}
+      onLaunchLearningRouteStep={onLaunchLearningRouteStep}
+      onSetLearningRouteStepStatus={onSetLearningRouteStepStatus}
     />,
   );
 
-  return { onOpenChange, onIndexBuilt, onUpdateStar, onRemoveStar, onOpenChat };
+  return {
+    onOpenChange,
+    onIndexBuilt,
+    onUpdateStar,
+    onRemoveStar,
+    onOpenChat,
+    onStartCourse,
+    onSaveLearningRoutePreview,
+    onDiscardLearningRoutePreview,
+    onRegenerateLearningRoute,
+    onLaunchLearningRouteStep,
+    onSetLearningRouteStepStatus,
+  };
+}
+
+function makeLearningRoute(overrides: Partial<LearningRoute> = {}): LearningRoute {
+  return {
+    id: "route-1",
+    title: "Route Through the Stars: Pattern Atlas",
+    originStarId: "star-1",
+    createdAt: "2026-03-31T10:00:00+00:00",
+    updatedAt: "2026-03-31T10:00:00+00:00",
+    steps: [
+      {
+        id: "step-1",
+        kind: "orient",
+        title: "Orient Around Pattern Atlas",
+        objective: "Get the lay of the land.",
+        rationale: "Start broad before specializing.",
+        manifestPath: "/indexes/atlas-a.json",
+        tutorPrompt: "Tutor me through the overview.",
+        estimatedMinutes: 12,
+        status: "todo",
+      },
+      {
+        id: "step-2",
+        kind: "foundations",
+        title: "Lay the Foundations",
+        objective: "Build the core concepts.",
+        rationale: "Anchor the route.",
+        manifestPath: "/indexes/atlas-b.json",
+        tutorPrompt: "Tutor me through the foundations.",
+        estimatedMinutes: 18,
+        status: "done",
+        completedAt: "2026-03-31T10:20:00+00:00",
+      },
+    ],
+    ...overrides,
+  };
 }
 
 describe("StarDetailsPanel", () => {
@@ -250,7 +320,10 @@ describe("StarDetailsPanel", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Open chat" })[0]);
 
-    expect(onOpenChat).toHaveBeenCalledWith(atlasB.manifest_path, "Pattern Atlas");
+    expect(onOpenChat).toHaveBeenCalledWith({
+      manifestPath: atlasB.manifest_path,
+      label: "Pattern Atlas",
+    });
     expect(screen.getByText(/Star details updated/i)).toBeInTheDocument();
     expect(screen.getAllByText("Atlas C").length).toBeGreaterThan(0);
   });
@@ -333,6 +406,133 @@ describe("StarDetailsPanel", () => {
     expect(within(actions).getByRole("button", { name: "Open chat" })).toBeInTheDocument();
     expect(within(actions).getByRole("button", { name: "Add another source" })).toBeInTheDocument();
     expect(within(actions).getByRole("button", { name: "Delete star and sources" })).toBeInTheDocument();
+  });
+
+  it("shows Start course only when the selected star has an attached source", () => {
+    const { rerender } = render(
+      <StarDetailsPanel
+        open
+        onOpenChange={vi.fn()}
+        star={makeStar({
+          label: "Mapped star",
+          linkedManifestPaths: ["/indexes/atlas-a.json"],
+          activeManifestPath: "/indexes/atlas-a.json",
+          linkedManifestPath: "/indexes/atlas-a.json",
+        })}
+        entryMode="existing"
+        closeLockedUntil={0}
+        availableIndexes={[makeIndex()]}
+        indexesLoading={false}
+        onIndexBuilt={vi.fn()}
+        onUpdateStar={vi.fn().mockResolvedValue(true)}
+        onRemoveStar={vi.fn().mockResolvedValue(undefined)}
+        onOpenChat={vi.fn()}
+        learningRoutePreview={null}
+        learningRouteLoading={false}
+        learningRouteError={null}
+        onStartCourse={vi.fn()}
+        onSaveLearningRoutePreview={vi.fn()}
+        onDiscardLearningRoutePreview={vi.fn()}
+        onRegenerateLearningRoute={vi.fn()}
+        onLaunchLearningRouteStep={vi.fn()}
+        onSetLearningRouteStepStatus={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Start course" })).toBeInTheDocument();
+
+    rerender(
+      <StarDetailsPanel
+        open
+        onOpenChange={vi.fn()}
+        star={makeStar({ label: "Unbound star" })}
+        entryMode="existing"
+        closeLockedUntil={0}
+        availableIndexes={[]}
+        indexesLoading={false}
+        onIndexBuilt={vi.fn()}
+        onUpdateStar={vi.fn().mockResolvedValue(true)}
+        onRemoveStar={vi.fn().mockResolvedValue(undefined)}
+        onOpenChat={vi.fn()}
+        learningRoutePreview={null}
+        learningRouteLoading={false}
+        learningRouteError={null}
+        onStartCourse={vi.fn()}
+        onSaveLearningRoutePreview={vi.fn()}
+        onDiscardLearningRoutePreview={vi.fn()}
+        onRegenerateLearningRoute={vi.fn()}
+        onLaunchLearningRouteStep={vi.fn()}
+        onSetLearningRouteStepStatus={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Start course" })).toBeDisabled();
+  });
+
+  it("renders saved routes and lets the user launch Tutor or toggle completion", async () => {
+    const route = makeLearningRoute();
+    const { onLaunchLearningRouteStep, onSetLearningRouteStepStatus } = renderPanel({
+      star: makeStar({
+        label: "Pattern Atlas",
+        linkedManifestPaths: ["/indexes/atlas-a.json", "/indexes/atlas-b.json"],
+        activeManifestPath: "/indexes/atlas-a.json",
+        linkedManifestPath: "/indexes/atlas-a.json",
+        learningRoute: route,
+      }),
+      availableIndexes: [
+        makeIndex({ manifest_path: "/indexes/atlas-a.json" }),
+        makeIndex({ manifest_path: "/indexes/atlas-b.json", index_id: "Atlas B" }),
+      ],
+    });
+
+    expect(screen.getByText("Route Through the Stars: Pattern Atlas")).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Open in Tutor" })[0]);
+    expect(onLaunchLearningRouteStep).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "step-1", tutorPrompt: "Tutor me through the overview." }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark complete" }));
+    expect(onSetLearningRouteStepStatus).toHaveBeenCalledWith("step-1", "done");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reopen step" }));
+    expect(onSetLearningRouteStepStatus).toHaveBeenCalledWith("step-2", "todo");
+  });
+
+  it("renders preview actions and wires save or discard callbacks", () => {
+    const preview = makeLearningRoute({
+      id: "preview-route-1",
+      title: "Route Through the Stars: Preview",
+      steps: [
+        {
+          id: "preview-step-1",
+          kind: "orient",
+          title: "Orient Around Preview",
+          objective: "Preview the path.",
+          rationale: "Get the feel of the course.",
+          manifestPath: "/indexes/atlas-a.json",
+          tutorPrompt: "Tutor me through the preview.",
+          estimatedMinutes: 10,
+          status: "todo",
+        },
+      ],
+    });
+    const { onSaveLearningRoutePreview, onDiscardLearningRoutePreview } = renderPanel({
+      star: makeStar({
+        label: "Pattern Atlas",
+        linkedManifestPaths: ["/indexes/atlas-a.json"],
+        activeManifestPath: "/indexes/atlas-a.json",
+        linkedManifestPath: "/indexes/atlas-a.json",
+      }),
+      availableIndexes: [makeIndex()],
+      learningRoutePreview: preview,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save route" }));
+    expect(onSaveLearningRoutePreview).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(onDiscardLearningRoutePreview).toHaveBeenCalledTimes(1);
   });
 
   it("opens a delete confirmation and cancels without removing the star", async () => {

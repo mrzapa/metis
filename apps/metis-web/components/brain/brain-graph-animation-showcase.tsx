@@ -10,7 +10,7 @@
 
 import { useCallback } from "react";
 import { useArrowState } from "@/hooks/use-arrow-state";
-import BrainGraph3D, { type BrainGraph3DProps } from "./brain-graph-3d";
+import type { BrainGraph3DProps } from "./brain-graph-3d";
 import { BrainGraphAnimatedWrapper } from "./brain-graph-animated-wrapper";
 import { AnimatedEvidencePanel, type EvidenceItem } from "./animated-evidence-panel";
 import {
@@ -146,23 +146,23 @@ export function BrainGraphAnimationShowcase({
       setIsExpanding(false);
       setIteration(2);
     }, 6000);
-  }, []);
+  }, [setIsExpanding, setIsResearchMode, setIteration, setSubQueries]);
 
   const handleStopResearch = useCallback(() => {
     setIsResearchMode(false);
     setSubQueries([]);
     setHighlightedEvidenceId(null);
-  }, []);
+  }, [setHighlightedEvidenceId, setIsResearchMode, setSubQueries]);
 
   const handleEvidenceClick = useCallback((item: EvidenceItem) => {
     setHighlightedEvidenceId(item.id);
     console.log("Evidence clicked:", item);
-  }, []);
+  }, [setHighlightedEvidenceId]);
 
   const handleTriggerExpansion = useCallback(() => {
     setIsExpanding(true);
     setTimeout(() => setIsExpanding(false), 3000);
-  }, []);
+  }, [setIsExpanding]);
 
   return (
     <div className="relative h-full w-full flex flex-col">

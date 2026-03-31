@@ -1,6 +1,8 @@
 import Link from "next/link";
 
-import { buildNyxComponentHref } from "@/components/library/nyx-shared";
+import {
+  getNyxComponentPreviewHref,
+} from "@/components/library/nyx-shared";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import type { NormalizedArrowArtifact } from "@/lib/artifacts/extract-arrow-artifacts";
@@ -325,11 +327,15 @@ function NyxActionLinks({
   registryUrl: string;
   sourceRepo?: string;
 }) {
+  const previewHref = getNyxComponentPreviewHref(componentName);
+
   return (
     <div className="flex flex-wrap gap-2">
-      <Link href={buildNyxComponentHref(componentName)} className={ACTION_LINK_CLASS_NAME}>
-        Open detail
-      </Link>
+      {previewHref ? (
+        <Link href={previewHref} className={ACTION_LINK_CLASS_NAME}>
+          Open detail
+        </Link>
+      ) : null}
       {registryUrl ? (
         <a
           href={registryUrl}
@@ -631,11 +637,19 @@ function NyxDependencyReportArtifact({ artifact }: { artifact: NormalizedArrowAr
                       <div className="mt-2 space-y-1">
                         <p className={LABEL_CLASS_NAME}>Used by</p>
                         <div className="flex flex-wrap gap-1.5">
-                          {entry.required_by.map((componentName) => (
-                            <Badge key={`${entry.package_name}:${componentName}`} variant="outline">
-                              <Link href={buildNyxComponentHref(componentName)}>{componentName}</Link>
-                            </Badge>
-                          ))}
+                          {entry.required_by.map((componentName) => {
+                            const previewHref = getNyxComponentPreviewHref(componentName);
+
+                            return (
+                              <Badge key={`${entry.package_name}:${componentName}`} variant="outline">
+                                {previewHref ? (
+                                  <Link href={previewHref}>{componentName}</Link>
+                                ) : (
+                                  componentName
+                                )}
+                              </Badge>
+                            );
+                          })}
                         </div>
                       </div>
                     ) : null}

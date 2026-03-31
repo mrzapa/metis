@@ -118,11 +118,11 @@ export function ShinyText({
 
   const handleMouseEnter = useCallback(() => {
     if (pauseOnHover) setIsPaused(true);
-  }, [pauseOnHover]);
+  }, [pauseOnHover, setIsPaused]);
 
   const handleMouseLeave = useCallback(() => {
     if (pauseOnHover) setIsPaused(false);
-  }, [pauseOnHover]);
+  }, [pauseOnHover, setIsPaused]);
 
   const gradientStyle: React.CSSProperties = {
     backgroundImage: `linear-gradient(${spread}deg, ${color} 0%, ${color} 35%, ${shineColor} 50%, ${color} 65%, ${color} 100%)`,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { motion } from "motion/react";
 import { AlertCircle, CheckCircle2, ClipboardCopy, Loader2, RotateCcw, ShieldAlert, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -320,7 +320,7 @@ export default function DiagnosticsPage() {
   const [summary24h, setSummary24h] = useArrowState<SummaryState>({ loading: true, data: null, error: null });
   const [summary168h, setSummary168h] = useArrowState<SummaryState>({ loading: true, data: null, error: null });
 
-  async function loadBaseDiagnostics() {
+  const loadBaseDiagnostics = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -358,9 +358,9 @@ export default function DiagnosticsPage() {
     }
 
     setLoading(false);
-  }
+  }, [setCompatibility, setError, setLoading, setLogTail, setSettings, setVersions]);
 
-  async function loadSummary(windowHours: UiTelemetrySummaryWindowHours) {
+  const loadSummary = useCallback(async (windowHours: UiTelemetrySummaryWindowHours) => {
     const setState = windowHours === 24 ? setSummary24h : setSummary168h;
     setState({ loading: true, data: null, error: null });
 
@@ -374,7 +374,7 @@ export default function DiagnosticsPage() {
         error: err instanceof Error ? err.message : `Failed to load ${windowHours}h summary`,
       });
     }
-  }
+  }, [setSummary168h, setSummary24h]);
 
   async function refreshRolloutConsole() {
     setActionError(null);
@@ -391,7 +391,7 @@ export default function DiagnosticsPage() {
   useEffect(() => {
     void loadBaseDiagnostics();
     void Promise.all(SUMMARY_WINDOWS.map((windowHours) => loadSummary(windowHours)));
-  }, []);
+  }, [loadBaseDiagnostics, loadSummary]);
 
   async function handleCopy() {
     const bundle = {

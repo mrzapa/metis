@@ -184,3 +184,5 @@ export const GlassContainer: React.FC<GlassContainerProps & React.HTMLAttributes
     </div>
   );
 });
+
+GlassContainer.displayName = 'GlassContainer';

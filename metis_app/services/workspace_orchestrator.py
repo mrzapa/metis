@@ -52,6 +52,12 @@ from metis_app.models.session_types import (
     SessionSummary,
 )
 from metis_app.services.assistant_companion import AssistantCompanionService
+from metis_app.services.learning_route_service import (
+    LearningRouteIndexSummary,
+    LearningRoutePreviewRequest,
+    LearningRouteStarSnapshot,
+    plan_learning_route_preview,
+)
 from metis_app.services.nyx_catalog import (
     NyxCatalogBroker,
     NyxCatalogComponentDetail,
@@ -684,6 +690,24 @@ class WorkspaceOrchestrator:
         ]
         svc = AutonomousResearchService(web_search=create_web_search(resolved))
         return svc.run(settings=resolved, indexes=index_list, orchestrator=self)
+
+    def preview_learning_route(
+        self,
+        *,
+        origin_star: LearningRouteStarSnapshot,
+        connected_stars: list[LearningRouteStarSnapshot],
+        indexes: list[LearningRouteIndexSummary],
+    ) -> dict[str, Any]:
+        resolved_settings = self._resolve_query_settings({})
+        preview = plan_learning_route_preview(
+            LearningRoutePreviewRequest(
+                origin_star=origin_star,
+                connected_stars=list(connected_stars),
+                indexes=list(indexes),
+            ),
+            settings=resolved_settings,
+        )
+        return preview.to_dict()
 
     # ------------------------------------------------------------------
     # Internal helpers

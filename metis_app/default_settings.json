@@ -1,7 +1,7 @@
 {
-  "_comment": "METIS default settings. Copy to settings.json in the repo root to override.",
+  "_comment": "METIS default settings. Copy to settings.json in the repo root to override. Native Tribev2 for text-backed sources is enabled by default; set brain_pass_native_text_enabled to false to stay on the lightweight fallback path.",
   "schema_version": 1,
-  "ui_backend": "pyside6",
+  "ui_backend": "tauri",
   "theme": "space_dust",
   "startup_mode_setting": "basic",
   "api_port": 0,
@@ -142,6 +142,7 @@
   "enable_structured_extraction": false,
   "enable_brain_pass": true,
   "brain_pass_native_enabled": true,
+  "brain_pass_native_text_enabled": true,
   "brain_pass_allow_fallback": true,
   "brain_pass_model_id": "facebook/tribev2",
   "brain_pass_cache_dir": ".metis_cache/tribev2",

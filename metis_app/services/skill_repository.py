@@ -24,6 +24,7 @@ FRONTMATTER_REQUIRED_KEYS = {
     "triggers",
     "runtime_overrides",
 }
+FRONTMATTER_OPTIONAL_KEYS = {"metadata"}
 TRIGGER_KEYS = {"keywords", "modes", "file_types", "output_styles"}
 RUNTIME_OVERRIDE_KEYS = {
     "selected_mode",
@@ -94,15 +95,33 @@ def parse_skill_file(path: str | pathlib.Path) -> SkillDefinition:
         payload = {}
 
     payload = dict(payload or {})
-    keys = set(payload)
-    missing = sorted(FRONTMATTER_REQUIRED_KEYS - keys)
-    unknown = sorted(keys - FRONTMATTER_REQUIRED_KEYS)
-    if missing:
-        errors.append("Missing frontmatter keys: " + ", ".join(missing))
+    metadata_raw = payload.get("metadata") or {}
+    if metadata_raw and not isinstance(metadata_raw, dict):
+        errors.append("'metadata' must be a mapping when provided.")
+        metadata_raw = {}
+
+    payload_keys = set(payload)
+    unknown = sorted(payload_keys - FRONTMATTER_REQUIRED_KEYS - FRONTMATTER_OPTIONAL_KEYS)
     if unknown:
         errors.append("Unknown frontmatter keys: " + ", ".join(unknown))
 
-    triggers_raw = payload.get("triggers") or {}
+    metadata_keys = set(metadata_raw)
+    unknown_metadata_keys = sorted(metadata_keys - FRONTMATTER_REQUIRED_KEYS)
+    if unknown_metadata_keys:
+        errors.append("Unknown metadata keys: " + ", ".join(unknown_metadata_keys))
+
+    effective_payload = dict(metadata_raw)
+    for key, value in payload.items():
+        if key == "metadata":
+            continue
+        effective_payload[key] = value
+
+    effective_keys = set(effective_payload)
+    missing = sorted(FRONTMATTER_REQUIRED_KEYS - effective_keys)
+    if missing:
+        errors.append("Missing frontmatter keys: " + ", ".join(missing))
+
+    triggers_raw = effective_payload.get("triggers") or {}
     if not isinstance(triggers_raw, dict):
         errors.append("'triggers' must be a mapping.")
         triggers_raw = {}
@@ -118,7 +137,7 @@ def parse_skill_file(path: str | pathlib.Path) -> SkillDefinition:
         for key in sorted(TRIGGER_KEYS)
     }
 
-    overrides_raw = payload.get("runtime_overrides") or {}
+    overrides_raw = effective_payload.get("runtime_overrides") or {}
     if not isinstance(overrides_raw, dict):
         errors.append("'runtime_overrides' must be a mapping.")
         overrides_raw = {}
@@ -145,20 +164,20 @@ def parse_skill_file(path: str | pathlib.Path) -> SkillDefinition:
         else:
             runtime_overrides[key] = str(value or "").strip()
 
-    skill_id = str(payload.get("id") or "").strip()
+    skill_id = str(effective_payload.get("id") or "").strip()
     if not skill_id:
         errors.append("'id' must be a non-empty string.")
         skill_id = skill_path.parent.name or skill_path.stem
     if skill_path.parent.name and skill_path.parent.name != skill_id:
         errors.append(f"Skill id '{skill_id}' must match parent directory '{skill_path.parent.name}'.")
 
-    name = str(payload.get("name") or "").strip()
+    name = str(effective_payload.get("name") or "").strip()
     if not name:
         errors.append("'name' must be a non-empty string.")
-    description = str(payload.get("description") or "").strip()
-    enabled_by_default = bool(payload.get("enabled_by_default", False))
+    description = str(effective_payload.get("description") or "").strip()
+    enabled_by_default = bool(effective_payload.get("enabled_by_default", False))
     try:
-        priority = int(payload.get("priority", 0) or 0)
+        priority = int(effective_payload.get("priority", 0) or 0)
     except (TypeError, ValueError):
         priority = 0
         errors.append("'priority' must be an integer.")

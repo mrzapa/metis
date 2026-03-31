@@ -235,4 +235,64 @@ describe("ArtifactMessageContent runtime integration", () => {
 
     expect(sandbox).not.toHaveBeenCalled();
   });
+
+  it("omits Nyx detail links when a component has no exported preview route", async () => {
+    sandbox.mockClear();
+
+    const artifact: NormalizedArrowArtifact = {
+      id: "nyx_component_selection_non_featured",
+      type: "nyx_component_selection",
+      summary: "Nyx selection",
+      path: "nyx/component-selection",
+      mime_type: "application/vnd.metis.nyx+json",
+      payload: {
+        query: "Use Scanner in a capture flow",
+        intent_type: "ui_layout_request",
+        confidence: 0.74,
+        selection_reason: "NyxUI candidates were resolved from the live prompt.",
+        matched_signals: ["explicit_nyx", "pattern:capture"],
+        selected_components: [
+          {
+            component_name: "scanner",
+            title: "Scanner",
+            description: "A scanner component.",
+            curated_description: "Compact scanning interface for capture-heavy flows.",
+            component_type: "registry:ui",
+            install_target: "@nyx/scanner",
+            registry_url: "https://nyxui.com/r/scanner.json",
+            source_repo: "https://github.com/MihirJaiswal/nyxui",
+            match_score: 28,
+            match_reason: "query hint: scan",
+            match_reasons: ["query hint: scan"],
+            preview_targets: ["components/ui/scanner.tsx"],
+            targets: ["components/ui/scanner.tsx"],
+            file_count: 1,
+            required_dependencies: ["react-aria-components"],
+            dependencies: ["react-aria-components"],
+            dev_dependencies: [],
+            registry_dependencies: [],
+          },
+        ],
+      },
+      payload_bytes: 0,
+      payload_truncated: false,
+      render_kind: "structured",
+      runtime_eligible: false,
+      runtime_skip_reason: undefined,
+    };
+
+    render(<ArtifactMessageContent artifacts={[artifact]} runtimeEnabled={true} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("nyx-component-selection-artifact")).toBeInTheDocument();
+      expect(screen.getByText("Scanner")).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Open detail" })).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Registry JSON" })).toHaveAttribute(
+        "href",
+        "https://nyxui.com/r/scanner.json",
+      );
+    });
+
+    expect(sandbox).not.toHaveBeenCalled();
+  });
 });

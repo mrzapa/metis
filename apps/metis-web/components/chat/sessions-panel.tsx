@@ -32,17 +32,19 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
 
   // ── Infinite-scroll state ─────────────────────────────────────────────────
   const DISPLAY_STEP = 20;
-  const [displayCount, setDisplayCount] = useState(DISPLAY_STEP);
+  const [displayState, setDisplayState] = useState(() => ({
+    search,
+    count: DISPLAY_STEP,
+  }));
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const displayCount = displayState.search === search ? displayState.count : DISPLAY_STEP;
   // Sync a ref so the IntersectionObserver closure always sees the latest count
   const displayCountRef = useRef(displayCount);
-  displayCountRef.current = displayCount;
 
-  // Reset visible window whenever the underlying sessions list changes (new search)
   useEffect(() => {
-    setDisplayCount(DISPLAY_STEP);
-  }, [sessions]);
+    displayCountRef.current = displayCount;
+  }, [displayCount]);
 
   // Wire up the IntersectionObserver to reveal more items as the user scrolls
   useEffect(() => {
@@ -57,7 +59,10 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
         if (entries[0].isIntersecting && displayCountRef.current < sessions.length) {
           setIsLoadingMore(true);
           requestAnimationFrame(() => {
-            setDisplayCount((c) => c + DISPLAY_STEP);
+            setDisplayState((current) => ({
+              search,
+              count: (current.search === search ? current.count : DISPLAY_STEP) + DISPLAY_STEP,
+            }));
             setIsLoadingMore(false);
           });
         }
@@ -67,7 +72,7 @@ export function SessionsPanel({ selectedId, onSelect, onNewChat, refreshToken }:
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [sessions]);
+  }, [search, sessions]);
 
   const visibleSessions = sessions.slice(0, displayCount);
 

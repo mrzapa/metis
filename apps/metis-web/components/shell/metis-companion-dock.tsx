@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   bootstrapAssistant,
   clearAssistantMemory,
@@ -43,7 +43,7 @@ export function MetisCompanionDock({
   const requestIdRef = useRef(0);
   const previousContextRef = useRef<{ sessionId?: string | null; runId?: string | null } | null>(null);
 
-  async function load(autoBootstrap = true) {
+  const load = useCallback(async (autoBootstrap = true) => {
     const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
@@ -74,13 +74,13 @@ export function MetisCompanionDock({
         setLoading(false);
       }
     }
-  }
+  }, [setError, setLoading, setSnapshot]);
 
   useEffect(() => {
     const hasPreviousContext = previousContextRef.current !== null;
     previousContextRef.current = { sessionId, runId };
     void load(!hasPreviousContext);
-  }, [sessionId, runId]);
+  }, [load, sessionId, runId]);
 
   const latestMemory = useMemo(
     () => snapshot?.memory?.[0] ?? null,

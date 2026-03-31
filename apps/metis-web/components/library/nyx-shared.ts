@@ -24,7 +24,19 @@ export const FEATURED_NYX_COMPONENTS = [
   },
 ] as const satisfies readonly FeaturedNyxComponent[];
 
+const FEATURED_NYX_COMPONENT_NAME_SET: ReadonlySet<string> = new Set(
+  FEATURED_NYX_COMPONENTS.map((component) => component.componentName),
+);
+
 export const NYX_CHAT_SEED_STORAGE_KEY = "metis_chat_seed_prompt";
+
+export function getStableNyxComponentParams(): Array<{ componentName: string }> {
+  return FEATURED_NYX_COMPONENTS.map(({ componentName }) => ({ componentName }));
+}
+
+export function hasStableNyxComponentPreview(componentName: string): boolean {
+  return FEATURED_NYX_COMPONENT_NAME_SET.has(componentName);
+}
 
 type NyxChatSeedSource = Pick<
   NyxCatalogComponentSummary,
@@ -61,6 +73,12 @@ export function buildNyxChatSeed(component: NyxChatSeedSource): string {
 
 export function buildNyxComponentHref(componentName: string): string {
   return `/library/${encodeURIComponent(componentName)}`;
+}
+
+export function getNyxComponentPreviewHref(componentName: string): string | null {
+  return hasStableNyxComponentPreview(componentName)
+    ? buildNyxComponentHref(componentName)
+    : null;
 }
 
 export function seedNyxChatPrompt(prompt: string): void {

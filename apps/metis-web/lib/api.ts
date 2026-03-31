@@ -5,6 +5,7 @@ import type {
   EvidenceSource,
   NyxInstallAction,
   NyxInstallActionInstaller,
+  NyxInstallActionPayload,
   NyxInstallActionResult,
   NyxInstallProposal,
   NyxInstallProposalComponent,
@@ -91,6 +92,52 @@ export interface IndexDeleteResult {
   deleted: boolean;
   manifest_path: string;
   index_id: string;
+}
+
+export interface LearningRoutePreviewStarSnapshot {
+  id: string;
+  label?: string;
+  intent?: string;
+  notes?: string;
+  active_manifest_path?: string;
+  linked_manifest_paths?: string[];
+  connected_user_star_ids?: string[];
+}
+
+export interface LearningRoutePreviewStep {
+  id: string;
+  kind: "orient" | "foundations" | "synthesis" | "apply";
+  title: string;
+  objective: string;
+  rationale: string;
+  manifest_path: string;
+  source_star_id?: string | null;
+  tutor_prompt: string;
+  estimated_minutes: number;
+}
+
+export interface LearningRoutePreview {
+  route_id: string;
+  title: string;
+  origin_star_id: string;
+  created_at: string;
+  updated_at: string;
+  steps: LearningRoutePreviewStep[];
+}
+
+export interface LearningRoutePreviewRequest {
+  origin_star: LearningRoutePreviewStarSnapshot;
+  connected_stars: LearningRoutePreviewStarSnapshot[];
+  indexes: Pick<
+    IndexSummary,
+    | "index_id"
+    | "manifest_path"
+    | "document_count"
+    | "chunk_count"
+    | "created_at"
+    | "embedding_signature"
+    | "brain_pass"
+  >[];
 }
 
 export interface NyxCatalogFileSummary {
@@ -1120,6 +1167,21 @@ export async function fetchIndexes(): Promise<IndexSummary[]> {
   return res.json();
 }
 
+export async function previewLearningRoute(
+  payload: LearningRoutePreviewRequest,
+): Promise<LearningRoutePreview> {
+  const res = await apiFetch(`${await getApiBase()}/v1/learning-routes/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to preview learning route (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
 export async function deleteIndex(manifestPath: string): Promise<IndexDeleteResult> {
   const params = new URLSearchParams({ manifest_path: manifestPath });
   const res = await apiFetch(`${await getApiBase()}/v1/index?${params.toString()}`, {
@@ -1428,7 +1490,7 @@ export async function submitRunAction(
     action_id?: string;
     action_type?: string;
     proposal_token?: string;
-    payload?: Record<string, unknown>;
+    payload?: NyxInstallActionPayload | Record<string, unknown>;
   },
 ): Promise<RunActionResponse> {
   const res = await apiFetch(

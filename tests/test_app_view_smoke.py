@@ -1,4 +1,4 @@
-"""Smoke tests for the redesigned PySide6 AppView workspace shell."""
+"""Legacy Windows-only smoke tests for the deprecated PySide6 AppView shell."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ QTabWidget = qt_widgets.QTabWidget
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "win32",
-    reason="Qt smoke runs on Windows CI only.",
+    reason="Legacy Qt smoke runs on Windows CI only.",
 )
 
 

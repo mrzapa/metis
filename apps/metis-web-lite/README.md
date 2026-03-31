@@ -2,6 +2,8 @@
 
 **Status:** Experimental prototype — WOR-23
 
+> Archived experiment. `metis-web-lite` is not a shipped METIS product surface and should not be read as an alternative to `apps/metis-web` plus `apps/metis-desktop`.
+
 A minimal streaming shell experiment focused on *perceived performance* rather than
 full design parity with `apps/metis-web`. The goal is a fast proof-of-concept that
 validates the SSE streaming path end-to-end in a browser.

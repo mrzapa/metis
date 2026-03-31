@@ -1,4 +1,6 @@
-# metis-reflex — Proof-of-concept Reflex UI
+# metis-reflex — Archived Proof-of-Concept Reflex UI
+
+> Archived experimental frontend. This is not a shipped METIS product surface, is not part of the one-interface direction in ADR 0004, and should be treated as historical reference code only.
 
 Minimal [Reflex](https://reflex.dev) prototype that wires up to the existing
 `metis_app` core: lists sessions from the repo-root SQLite database and
@@ -57,7 +59,7 @@ Open <http://localhost:3000> in your browser.
 
 ## What this is NOT
 
-This is a **prototype only**.  It does not replace:
+This is an **archived prototype only**. It does not replace:
 - `python main.py` (canonical entrypoint — starts FastAPI + opens web UI)
 - `python -m metis_app.api` (FastAPI backend for metis-web)
 

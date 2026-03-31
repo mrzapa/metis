@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { LearningRoutePanel } from "@/components/constellation/learning-route-panel";
 import {
   Dialog,
   DialogContent,
@@ -33,7 +34,13 @@ import {
   getConstellationPlacementDecision,
 } from "@/lib/constellation-brain";
 import { CONSTELLATION_FACULTIES, getAutoStarFaculty, isAutonomousStar } from "@/lib/constellation-home";
-import type { UserStar, UserStarStage } from "@/lib/constellation-types";
+import type {
+  LearningRoute,
+  LearningRouteStep,
+  LearningRouteStepStatus,
+  UserStar,
+  UserStarStage,
+} from "@/lib/constellation-types";
 import { cn } from "@/lib/utils";
 
 type BuildStep = "idle" | "active" | "done";
@@ -120,7 +127,21 @@ interface StarDetailsPanelProps {
   onIndexBuilt: (result: IndexBuildResult) => void;
   onUpdateStar: (starId: string, updates: StarUpdatePayload) => Promise<boolean>;
   onRemoveStar: (payload: { starId: string; manifestPaths: string[] }) => Promise<void>;
-  onOpenChat: (manifestPath: string, label: string) => void;
+  onOpenChat: (payload: {
+    manifestPath: string;
+    label: string;
+    selectedMode?: string;
+    draft?: string;
+  }) => void;
+  learningRoutePreview: LearningRoute | null;
+  learningRouteLoading: boolean;
+  learningRouteError: string | null;
+  onStartCourse: () => void;
+  onSaveLearningRoutePreview: () => void;
+  onDiscardLearningRoutePreview: () => void;
+  onRegenerateLearningRoute: () => void;
+  onLaunchLearningRouteStep: (step: LearningRouteStep) => void;
+  onSetLearningRouteStepStatus: (stepId: string, status: LearningRouteStepStatus) => void;
 }
 
 function formatDate(iso: string): string {
@@ -174,6 +195,15 @@ export function StarDetailsPanel({
   onUpdateStar,
   onRemoveStar,
   onOpenChat,
+  learningRoutePreview,
+  learningRouteLoading,
+  learningRouteError,
+  onStartCourse,
+  onSaveLearningRoutePreview,
+  onDiscardLearningRoutePreview,
+  onRegenerateLearningRoute,
+  onLaunchLearningRouteStep,
+  onSetLearningRouteStepStatus,
 }: StarDetailsPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDesktop, setIsDesktop] = useState(false);
@@ -280,10 +310,6 @@ export function StarDetailsPanel({
     || "";
   const derivedStage = resolveDefaultStage(attachedManifestPaths, notesDraft);
   const effectiveStage = manualStageOverride || derivedStage;
-  const attachedManifestPathSet = useMemo(
-    () => new Set(attachedManifestPaths),
-    [attachedManifestPaths],
-  );
   const availableIndexByManifestPath = useMemo(
     () => new Map(
       availableIndexes.map((index) => [
@@ -335,6 +361,10 @@ export function StarDetailsPanel({
     () => attachedManifestPaths.map((manifestPath) => resolveAttachedIndex(manifestPath)),
     [attachedManifestPaths, resolveAttachedIndex],
   );
+  const attachedManifestPathSet = useMemo(
+    () => new Set(attachedManifestPaths),
+    [attachedManifestPaths],
+  );
   const suggestedIndexes = useMemo(
     () => availableIndexes
       .filter((index) => !attachedManifestPathSet.has(index.manifest_path))
@@ -357,6 +387,14 @@ export function StarDetailsPanel({
   }
 
   const activeStar = star as DetailStar;
+  const savedLearningRoute = activeStar.learningRoute ?? null;
+  const displayedLearningRoute = learningRoutePreview ?? savedLearningRoute;
+  const hasCourseSource = Boolean(activeManifestPathForChat) || attachedManifestPaths.length > 0;
+  const unavailableManifestPaths = new Set(
+    (displayedLearningRoute?.steps ?? [])
+      .map((step) => step.manifestPath)
+      .filter((manifestPath) => resolveAttachedIndex(manifestPath).source === "unresolved"),
+  );
 
   function buildStarUpdate(
     nextAttachedManifestPaths = attachedManifestPaths,
@@ -938,7 +976,10 @@ export function StarDetailsPanel({
                         variant="outline"
                         onClick={() => {
                           const nextLabel = labelDraft.trim() || activeStar.label || buildResult.index_id;
-                          onOpenChat(activeManifestPathForChat || buildResult.manifest_path, nextLabel);
+                          onOpenChat({
+                            manifestPath: activeManifestPathForChat || buildResult.manifest_path,
+                            label: nextLabel,
+                          });
                         }}
                       >
                         Open chat
@@ -1261,6 +1302,21 @@ export function StarDetailsPanel({
                 </div>
               </div>
 
+              <LearningRoutePanel
+                route={displayedLearningRoute}
+                previewActive={learningRoutePreview !== null}
+                eligible={hasCourseSource}
+                loading={learningRouteLoading}
+                error={learningRouteError}
+                unavailableManifestPaths={unavailableManifestPaths}
+                onStartCourse={onStartCourse}
+                onSaveRoute={onSaveLearningRoutePreview}
+                onDiscardPreview={onDiscardLearningRoutePreview}
+                onRegenerateRoute={onRegenerateLearningRoute}
+                onLaunchStep={onLaunchLearningRouteStep}
+                onSetStepStatus={onSetLearningRouteStepStatus}
+              />
+
               {statusMessage ? (
                 <div
                   className={cn(
@@ -1350,7 +1406,10 @@ export function StarDetailsPanel({
                     return;
                   }
                   const linkedLabel = labelDraft.trim() || activeStar.label || activeIndex?.index_id || "Mapped star";
-                  onOpenChat(activeManifestPathForChat, linkedLabel);
+                  onOpenChat({
+                    manifestPath: activeManifestPathForChat,
+                    label: linkedLabel,
+                  });
                 }}
                 disabled={!activeManifestPathForChat || removing}
               >

@@ -1,6 +1,31 @@
 export const CONSTELLATION_USER_STAR_LIMIT: number | null = null;
 
 export type UserStarStage = "seed" | "growing" | "integrated";
+export type LearningRouteStepKind = "orient" | "foundations" | "synthesis" | "apply";
+export type LearningRouteStepStatus = "todo" | "done";
+
+export interface LearningRouteStep {
+  id: string;
+  kind: LearningRouteStepKind;
+  title: string;
+  objective: string;
+  rationale: string;
+  manifestPath: string;
+  sourceStarId?: string;
+  tutorPrompt: string;
+  estimatedMinutes: number;
+  status: LearningRouteStepStatus;
+  completedAt?: string;
+}
+
+export interface LearningRoute {
+  id: string;
+  title: string;
+  originStarId: string;
+  createdAt: string;
+  updatedAt: string;
+  steps: LearningRouteStep[];
+}
 
 export interface UserStar {
   id: string;
@@ -18,6 +43,7 @@ export interface UserStar {
   linkedManifestPaths?: string[];
   activeManifestPath?: string;
   linkedManifestPath?: string;
+  learningRoute?: LearningRoute;
 }
 
 export function clamp(value: number, min: number, max: number): number {
@@ -26,6 +52,19 @@ export function clamp(value: number, min: number, max: number): number {
 
 function isUserStarStage(value: unknown): value is UserStarStage {
   return value === "seed" || value === "growing" || value === "integrated";
+}
+
+function isLearningRouteStepKind(value: unknown): value is LearningRouteStepKind {
+  return (
+    value === "orient"
+    || value === "foundations"
+    || value === "synthesis"
+    || value === "apply"
+  );
+}
+
+function isLearningRouteStepStatus(value: unknown): value is LearningRouteStepStatus {
+  return value === "todo" || value === "done";
 }
 
 interface UserStarManifestFields {
@@ -61,6 +100,14 @@ function normalizeStringList(value: unknown): string[] {
   return next;
 }
 
+function normalizeEstimatedMinutes(value: unknown, fallback: number): number {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized)) {
+    return fallback;
+  }
+  return clamp(Math.round(normalized), 5, 90);
+}
+
 function moveValueToFront(values: string[], value: string): string[] {
   const next = values.filter((entry) => entry !== value);
   next.unshift(value);
@@ -76,6 +123,80 @@ function normalizeLabel(value: unknown): string | undefined {
 
 function sortStrings(values: string[]): string[] {
   return [...values].sort();
+}
+
+function normalizeLearningRouteStep(value: unknown): LearningRouteStep | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const id = normalizeString(candidate.id);
+  const title = normalizeString(candidate.title);
+  const objective = normalizeString(candidate.objective);
+  const rationale = normalizeString(candidate.rationale);
+  const manifestPath = normalizeString(candidate.manifestPath);
+  const tutorPrompt = normalizeString(candidate.tutorPrompt);
+
+  if (
+    !id
+    || !isLearningRouteStepKind(candidate.kind)
+    || !title
+    || !objective
+    || !rationale
+    || !manifestPath
+    || !tutorPrompt
+  ) {
+    return undefined;
+  }
+
+  const status = isLearningRouteStepStatus(candidate.status) ? candidate.status : "todo";
+  const completedAt = status === "done" ? normalizeString(candidate.completedAt) : undefined;
+
+  return {
+    id,
+    kind: candidate.kind,
+    title,
+    objective,
+    rationale,
+    manifestPath,
+    sourceStarId: normalizeString(candidate.sourceStarId),
+    tutorPrompt,
+    estimatedMinutes: normalizeEstimatedMinutes(candidate.estimatedMinutes, 15),
+    status,
+    completedAt,
+  };
+}
+
+function normalizeLearningRoute(value: unknown): LearningRoute | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const id = normalizeString(candidate.id);
+  const title = normalizeString(candidate.title);
+  const originStarId = normalizeString(candidate.originStarId);
+  const createdAt = normalizeString(candidate.createdAt);
+  const updatedAt = normalizeString(candidate.updatedAt) ?? createdAt;
+  const steps = Array.isArray(candidate.steps)
+    ? candidate.steps
+        .map((step) => normalizeLearningRouteStep(step))
+        .filter((step): step is LearningRouteStep => step !== undefined)
+    : [];
+
+  if (!id || !title || !originStarId || !createdAt || !updatedAt || steps.length === 0) {
+    return undefined;
+  }
+
+  return {
+    id,
+    title,
+    originStarId,
+    createdAt,
+    updatedAt,
+    steps,
+  };
 }
 
 function resolveManifestState(
@@ -155,6 +276,7 @@ export function normalizeUserStar(input: Partial<UserStar> & { id: string }): Us
   const relatedDomainIds = normalizeStringList(input.relatedDomainIds).filter(
     (domainId) => domainId !== primaryDomainId,
   );
+  const learningRoute = normalizeLearningRoute(input.learningRoute);
 
   return {
     id: input.id,
@@ -172,6 +294,7 @@ export function normalizeUserStar(input: Partial<UserStar> & { id: string }): Us
     linkedManifestPaths: manifestState.linkedManifestPaths.length > 0 ? manifestState.linkedManifestPaths : undefined,
     activeManifestPath: manifestState.activeManifestPath,
     linkedManifestPath: manifestState.linkedManifestPath,
+    learningRoute,
   };
 }
 
@@ -195,7 +318,8 @@ export function isUserStar(value: unknown): value is UserStar {
     (candidate.connectedUserStarIds === undefined || Array.isArray(candidate.connectedUserStarIds)) &&
     (candidate.linkedManifestPaths === undefined || Array.isArray(candidate.linkedManifestPaths)) &&
     (candidate.activeManifestPath === undefined || typeof candidate.activeManifestPath === "string") &&
-    (candidate.linkedManifestPath === undefined || typeof candidate.linkedManifestPath === "string")
+    (candidate.linkedManifestPath === undefined || typeof candidate.linkedManifestPath === "string") &&
+    (candidate.learningRoute === undefined || typeof candidate.learningRoute === "object")
   );
 }
 
@@ -321,6 +445,7 @@ function isParsableUserStar(value: unknown): value is ParsableUserStar {
     (candidate.linkedManifestPaths === undefined || Array.isArray(candidate.linkedManifestPaths)) &&
     (candidate.activeManifestPath === undefined || typeof candidate.activeManifestPath === "string") &&
     (candidate.linkedManifestPath === undefined || typeof candidate.linkedManifestPath === "string") &&
+    (candidate.learningRoute === undefined || typeof candidate.learningRoute === "object") &&
     hasParsableStarIdentity(candidate)
   );
 }

@@ -240,4 +240,63 @@ describe("useConstellationStars", () => {
       expect(result.current.userStars).toEqual([fullyPopulatedStar]);
     });
   });
+
+  it("persists saved learning routes through star updates and settings sync", async () => {
+    seedLocalStars([
+      {
+        id: "star-1",
+        x: 0.2,
+        y: 0.3,
+        size: 1,
+        createdAt: 1,
+        label: "Route star",
+      },
+    ]);
+
+    const { result } = renderHook(() => useConstellationStars());
+
+    await act(async () => {
+      const updated = await result.current.updateUserStarById("star-1", {
+        learningRoute: {
+          id: "route-1",
+          title: "Route Through the Stars: Route star",
+          originStarId: "star-1",
+          createdAt: "2026-03-31T10:00:00+00:00",
+          updatedAt: "2026-03-31T10:00:00+00:00",
+          steps: [
+            {
+              id: "step-1",
+              kind: "orient",
+              title: "Orient Around Route star",
+              objective: "Map the route.",
+              rationale: "Start broad.",
+              manifestPath: "/indexes/atlas-a.json",
+              tutorPrompt: "Tutor me through the route.",
+              estimatedMinutes: 12,
+              status: "todo",
+            },
+          ],
+        },
+      });
+      expect(updated).toBe(true);
+    });
+
+    expect(result.current.userStars[0]?.learningRoute).toEqual(
+      expect.objectContaining({
+        id: "route-1",
+        steps: [expect.objectContaining({ id: "step-1", status: "todo" })],
+      }),
+    );
+    expect(vi.mocked(updateSettings)).toHaveBeenLastCalledWith({
+      [SETTINGS_KEY]: [
+        expect.objectContaining({
+          id: "star-1",
+          learningRoute: expect.objectContaining({
+            id: "route-1",
+            steps: [expect.objectContaining({ id: "step-1" })],
+          }),
+        }),
+      ],
+    });
+  });
 });

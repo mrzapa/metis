@@ -7,6 +7,7 @@ vi.stubGlobal("window", { ...globalThis.window });
 const {
   fetchNyxCatalog,
   fetchNyxComponentDetail,
+  previewLearningRoute,
   fetchSessions,
   fetchSettings,
   fetchUiTelemetrySummary,
@@ -72,6 +73,69 @@ describe("fetchSettings", () => {
 
     const result = await fetchSettings();
     expect(result).toEqual(mockSettings);
+  });
+});
+
+describe("previewLearningRoute", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("posts the compact star and index snapshot to the preview endpoint", async () => {
+    const preview = {
+      route_id: "learning-route-1",
+      title: "Route Through the Stars: Graph Thinking",
+      origin_star_id: "star-1",
+      created_at: "2026-03-31T10:00:00+00:00",
+      updated_at: "2026-03-31T10:00:00+00:00",
+      steps: [
+        {
+          id: "step-1",
+          kind: "orient",
+          title: "Orient Around Graph Thinking",
+          objective: "Get a quick map.",
+          rationale: "Start broad.",
+          manifest_path: "/indexes/atlas-a.json",
+          source_star_id: null,
+          tutor_prompt: "Tutor me through the overview.",
+          estimated_minutes: 12,
+        },
+      ],
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(preview),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await previewLearningRoute({
+      origin_star: {
+        id: "star-1",
+        label: "Graph Thinking",
+        active_manifest_path: "/indexes/atlas-a.json",
+        linked_manifest_paths: ["/indexes/atlas-a.json"],
+      },
+      connected_stars: [],
+      indexes: [
+        {
+          index_id: "Atlas A",
+          manifest_path: "/indexes/atlas-a.json",
+          document_count: 4,
+          chunk_count: 16,
+          created_at: "2026-03-31T10:00:00+00:00",
+          embedding_signature: "embed-a",
+          brain_pass: { provider: "fallback" },
+        },
+      ],
+    });
+
+    expect(result).toEqual(preview);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/v1/learning-routes/preview");
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
   });
 });
 

@@ -197,6 +197,7 @@ export function useConstellationStars() {
           | "linkedManifestPaths"
           | "activeManifestPath"
           | "linkedManifestPath"
+          | "learningRoute"
           | "size"
           | "x"
           | "y"

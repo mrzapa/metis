@@ -263,6 +263,59 @@ class KnowledgeSearchResultModel(BaseModel):
         )
 
 
+class LearningRouteStarSnapshotModel(BaseModel):
+    id: str
+    label: str = ""
+    intent: str = ""
+    notes: str = ""
+    active_manifest_path: str = ""
+    linked_manifest_paths: list[str] = Field(default_factory=list)
+    connected_user_star_ids: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LearningRouteIndexSummaryModel(BaseModel):
+    index_id: str
+    manifest_path: str
+    document_count: int = 0
+    chunk_count: int = 0
+    created_at: str = ""
+    embedding_signature: str = ""
+    brain_pass: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LearningRoutePreviewRequestModel(BaseModel):
+    origin_star: LearningRouteStarSnapshotModel
+    connected_stars: list[LearningRouteStarSnapshotModel] = Field(default_factory=list)
+    indexes: list[LearningRouteIndexSummaryModel] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LearningRoutePreviewStepModel(BaseModel):
+    id: str
+    kind: Literal["orient", "foundations", "synthesis", "apply"]
+    title: str
+    objective: str
+    rationale: str
+    manifest_path: str
+    source_star_id: str | None = None
+    tutor_prompt: str
+    estimated_minutes: int
+
+
+class LearningRoutePreviewModel(BaseModel):
+    route_id: str
+    title: str
+    origin_star_id: str
+    created_at: str
+    updated_at: str
+    steps: list[LearningRoutePreviewStepModel] = Field(min_length=4, max_length=4)
+
+
 class DirectQueryRequestModel(BaseModel):
     prompt: str
     settings: dict[str, Any]

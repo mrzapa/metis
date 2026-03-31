@@ -58,7 +58,7 @@ export function IndexPickerDialog({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, setError, setIndexes]);
 
   function handleSelect(idx: IndexSummary) {
     onSelect(idx.manifest_path, idx.index_id);

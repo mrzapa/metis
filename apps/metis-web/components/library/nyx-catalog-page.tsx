@@ -8,6 +8,7 @@ import {
   buildNyxChatSeed,
   buildNyxComponentHref,
   FEATURED_NYX_COMPONENTS,
+  getNyxComponentPreviewHref,
   seedNyxChatPrompt,
 } from "@/components/library/nyx-shared";
 import { PageChrome } from "@/components/shell/page-chrome";
@@ -85,7 +86,7 @@ function CatalogHeroAside({
             {isLoading ? "…" : matched}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Filtered results ready to preview or seed into chat.
+            Filtered results ready to inspect or seed into chat.
           </p>
         </div>
       </div>
@@ -192,7 +193,7 @@ export function NyxCatalogPage() {
     <PageChrome
       eyebrow="Library"
       title="Browse Nyx UI inside Metis"
-      description="Search the curated Nyx subset, inspect what Metis can install today, and open stable preview routes for individual components."
+      description="Search the curated Nyx subset, inspect what Metis can install today, and open featured preview routes for selected demo components."
       actions={
         <>
           <Badge variant="outline">
@@ -224,9 +225,9 @@ export function NyxCatalogPage() {
               Curated Nyx catalog
             </h2>
             <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-              This surface is backed by Metis&apos;s local Nyx API. Open any card to
-              preview install targets, dependencies, and file footprint before
-              you prompt for integration work.
+              This surface is backed by Metis&apos;s local Nyx API. Inspect each card
+              for install targets, dependencies, and file footprint before you
+              prompt for integration work.
             </p>
           </div>
 
@@ -292,64 +293,74 @@ export function NyxCatalogPage() {
 
         {hasResults ? (
           <div className="grid gap-4 xl:grid-cols-2">
-            {catalog?.items.map((component) => (
-              <Card key={component.component_name} className="h-full">
-                <CardHeader>
-                  <div>
-                    <CardTitle>{component.title}</CardTitle>
-                    <CardDescription className="mt-1">
-                      {component.curated_description || component.description}
-                    </CardDescription>
-                  </div>
-                  <CardAction>
-                    <Badge variant="outline">{component.component_type}</Badge>
-                  </CardAction>
-                </CardHeader>
+            {catalog?.items.map((component) => {
+              const previewHref = getNyxComponentPreviewHref(component.component_name);
 
-                <CardContent className="space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
-                      <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary/80">
-                        Install target
-                      </p>
-                      <p className="mt-2 break-all font-mono text-xs text-foreground">
-                        {component.install_target}
-                      </p>
+              return (
+                <Card key={component.component_name} className="h-full">
+                  <CardHeader>
+                    <div>
+                      <CardTitle>{component.title}</CardTitle>
+                      <CardDescription className="mt-1">
+                        {component.curated_description || component.description}
+                      </CardDescription>
                     </div>
-                    <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
-                      <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary/80">
-                        File targets
-                      </p>
-                      <p className="mt-2 text-sm text-foreground">
-                        {component.file_count} file{component.file_count === 1 ? "" : "s"}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {component.targets.slice(0, 2).join(" • ") || "No target metadata"}
-                      </p>
+                    <CardAction>
+                      <Badge variant="outline">{component.component_type}</Badge>
+                    </CardAction>
+                  </CardHeader>
+
+                  <CardContent className="space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+                        <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary/80">
+                          Install target
+                        </p>
+                        <p className="mt-2 break-all font-mono text-xs text-foreground">
+                          {component.install_target}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-black/10 px-3 py-3">
+                        <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary/80">
+                          File targets
+                        </p>
+                        <p className="mt-2 text-sm text-foreground">
+                          {component.file_count} file{component.file_count === 1 ? "" : "s"}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {component.targets.slice(0, 2).join(" • ") || "No target metadata"}
+                        </p>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary/80">
-                      Required dependencies
-                    </p>
-                    {renderDependencyBadges(component.required_dependencies)}
-                  </div>
-                </CardContent>
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary/80">
+                        Required dependencies
+                      </p>
+                      {renderDependencyBadges(component.required_dependencies)}
+                    </div>
+                  </CardContent>
 
-                <CardFooter className="justify-between gap-3">
-                  <Link
-                    href={buildNyxComponentHref(component.component_name)}
-                    className={buttonVariants({ size: "sm", variant: "outline" })}
-                  >
-                    Preview component
-                  </Link>
-                  <Button type="button" size="sm" onClick={() => handleUseInChat(component)}>
-                    Use in chat
-                  </Button>
-                </CardFooter>
-              </Card>
-            ))}
+                  <CardFooter className="justify-between gap-3">
+                    {previewHref ? (
+                      <Link
+                        href={previewHref}
+                        className={buttonVariants({ size: "sm", variant: "outline" })}
+                      >
+                        Preview component
+                      </Link>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Preview routes are generated for featured components only.
+                      </p>
+                    )}
+                    <Button type="button" size="sm" onClick={() => handleUseInChat(component)}>
+                      Use in chat
+                    </Button>
+                  </CardFooter>
+                </Card>
+              );
+            })}
           </div>
         ) : null}
       </div>

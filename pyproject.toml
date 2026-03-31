@@ -12,7 +12,7 @@ license = { file = "LICENSE" }
 authors = [
   { name = "mrzapa" },
 ]
-keywords = ["rag", "llm", "desktop", "pyside6", "qt", "cli"]
+keywords = ["rag", "llm", "desktop", "tauri", "web", "cli"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -27,13 +27,16 @@ classifiers = [
 # Runtime dependencies are intentionally minimal; heavy ML libs (LangChain,
 # sentence-transformers, llama-cpp-python) are optional/user-installed unless
 # the installer opts into the pinned runtime-all bundle.
-dependencies = ["PySide6>=6.6", "psutil>=6", "PyYAML>=6"]
+dependencies = ["psutil>=6", "PyYAML>=6"]
 
 [project.optional-dependencies]
 api = [
     "fastapi==0.135.1",
     "python-multipart==0.0.22",
     "uvicorn[standard]==0.42.0",
+]
+legacy-pyside6 = [
+    "PySide6>=6.6",
 ]
 dev = [
     "pytest>=8",
@@ -100,8 +103,3 @@ include = ["metis_app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts   = "-q --tb=short"
-
-[tool.ruff]
-exclude = [
-  "agentic_rag_gui.py",
-]
