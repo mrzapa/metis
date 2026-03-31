@@ -1,7 +1,0 @@
-Join-Path : A positional parameter cannot be found that accepts argument 'python.exe'.
-At C:\Users\samwe\Documents\metis\scripts\run_api_dev.ps1:21 char:15
-+ $VenvPython = Join-Path $VenvDir "Scripts" "python.exe"
-+               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidArgument: (:) [Join-Path], ParentContainsErrorRecordException
-    + FullyQualifiedErrorId : PositionalParameterNotFound,Microsoft.PowerShell.Commands.JoinPathCommand
- 

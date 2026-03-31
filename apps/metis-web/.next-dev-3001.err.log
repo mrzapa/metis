@@ -1,8 +1,0 @@
-⨯ Another next dev server is already running.
-
-- Local:        http://localhost:3000
-- PID:          28644
-- Dir:          C:\Users\samwe\Documents\metis\apps\metis-web
-- Log:          .next\dev\logs\next-development.log
-
-Run taskkill /PID 28644 /F to stop it.

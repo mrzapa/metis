@@ -1,6 +1,0 @@
-app/__tests__/home-page.test.tsx(124,24): error TS2345: Argument of type 'CanvasRenderingContext2D' is not assignable to parameter of type 'GPUCanvasContext'.
-  Type 'CanvasRenderingContext2D' is missing the following properties from type 'GPUCanvasContext': __brand, configure, unconfigure, getConfiguration, getCurrentTexture
-app/gguf/page.test.tsx(20,13): error TS2786: 'GgufPage' cannot be used as a JSX component.
-  Its type '() => void' is not a valid JSX element type.
-    Type '() => void' is not assignable to type '(props: any) => ReactNode | Promise<ReactNode>'.
-      Type 'void' is not assignable to type 'ReactNode | Promise<ReactNode>'.

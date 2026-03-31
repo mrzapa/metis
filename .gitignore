@@ -47,12 +47,22 @@ node_modules/
 .cache/
 .playwright-cli/
 
+# Runtime state / lock files
+.metis_api.lock
+
+# Coverage reports
+.coverage
+htmlcov/
+coverage.xml
+
+# Log files
+*.log
+.codex-*.log
+.next-dev-*.log
+
 # Test output / screenshots
 output/
-
-.metis_cache/
-
-.metis_cache/
+langextract_grounding_*.html
 
 .metis_cache/
 *.ckpt
