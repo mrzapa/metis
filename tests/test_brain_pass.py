@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 import types
 
+import pytest
+
 from metis_app.services import brain_pass
 
 
@@ -298,7 +300,7 @@ def test_run_brain_pass_native_failure_without_fallback_uses_disabled_provider_a
 
 def test_resolve_tribev2_runtime_device_returns_cpu_without_accelerator(monkeypatch) -> None:
     # Simulate an environment with no GPU.
-    import torch
+    torch = pytest.importorskip("torch", reason="torch not installed")
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     if hasattr(torch.backends, "mps"):
@@ -381,9 +383,7 @@ def test_run_native_tribev2_text_uses_audio_proxy_path(monkeypatch, tmp_path) ->
     class _FakeModel:
         def predict(self, events, *, verbose=True):
             predict_calls.append(events)
-            import numpy as np
-
-            return np.zeros((1, 10)), []
+            return [], []
 
     monkeypatch.setattr(brain_pass, "_load_tribev2_model", lambda *_a, **_kw: _FakeModel())
     monkeypatch.setattr(brain_pass, "_synthesize_text_to_audio_windows", lambda *_a, **_kw: False)
@@ -408,7 +408,9 @@ def test_run_native_tribev2_text_uses_audio_proxy_path(monkeypatch, tmp_path) ->
     fake_gtts_mod.gTTS = _FakegTTS  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "gtts", fake_gtts_mod)
 
-    import pandas as pd
+    fake_pandas_mod = types.ModuleType("pandas")
+    fake_pandas_mod.DataFrame = lambda data: data  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pandas", fake_pandas_mod)
 
     fake_neuralset = types.ModuleType("neuralset")
     fake_neuralset_events = types.ModuleType("neuralset.events")

@@ -568,7 +568,7 @@ class LocalLlmRecommenderService:
         encoded_repo = parse.quote(plan.source_repo, safe="")
         encoded_filename = parse.quote(plan.filename)
         url = f"https://huggingface.co/{encoded_repo}/resolve/main/{encoded_filename}?download=true"
-        req = request.Request(url, headers={"User-Agent.*METIS/1.0"})
+        req = request.Request(url, headers={"User-Agent": "METIS/1.0"})
         if part_path.exists():
             part_path.unlink()
         downloaded = 0
@@ -721,7 +721,7 @@ class LocalLlmRecommenderService:
 
     @staticmethod
     def _read_json(url: str) -> Any:
-        req = request.Request(url, headers={"User-Agent.*METIS/1.0"})
+        req = request.Request(url, headers={"User-Agent": "METIS/1.0"})
         with request.urlopen(req, timeout=30) as response:
             return json.loads(response.read().decode("utf-8"))
 

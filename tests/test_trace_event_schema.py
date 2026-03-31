@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from metis_app.models.trace_event_schema import (
     EventType,
     EventStatus,

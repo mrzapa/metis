@@ -73,9 +73,10 @@ Native desktop packaging lives in `apps/metis-desktop/`. The repo launcher inten
 
 | Interface | Command |
 |-----------|---------|
-| **Local UI** | `metis` |
-| **Local UI (from source)** | `python main.py` |
+| **Web UI** | `metis` |
+| **Web UI (from source)** | `python main.py` |
 | **CLI** | `metis --cli <command>` |
+| **Desktop GUI** | `metis --desktop` / `metis --gui` |
 | **Native desktop shell** | See `apps/metis-desktop/README.md` |
 
 ### Use

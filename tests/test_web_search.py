@@ -1,6 +1,6 @@
 # tests/test_web_search.py
 from __future__ import annotations
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from metis_app.utils.web_search import create_web_search, WebSearchResult
 
 def test_create_web_search_returns_callable_without_api_key():
@@ -45,7 +45,6 @@ def test_tavily_search_falls_back_to_ddg_on_client_error(monkeypatch):
         def __init__(self, api_key): pass
         def search(self, *a, **kw): raise RuntimeError("rate limit")
 
-    import metis_app.utils.web_search as ws
     # Temporarily replace TavilyClient inside the module
     import sys
     fake_tavily_mod = type(sys)("tavily")
