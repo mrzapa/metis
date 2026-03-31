@@ -13,16 +13,20 @@ surfaces can explain why a source was filed into a particular faculty.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from functools import lru_cache
 import hashlib
+import io
 import logging
 import os
 import pathlib
+import shutil
+import subprocess
 import sys
 import tempfile
 from typing import Any, Callable
+import warnings
 
 from metis_app.utils.document_loader import load_document
 
@@ -166,6 +170,55 @@ def _brain_pass_temp_dir() -> pathlib.Path:
     return root
 
 
+@contextmanager
+def _temporary_env(overrides: dict[str, str]) -> None:
+    original = {key: os.environ.get(key) for key in overrides}
+    for key, value in overrides.items():
+        os.environ[key] = value
+    try:
+        yield
+    finally:
+        for key, previous in original.items():
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
+
+
+@contextmanager
+def _quiet_tribev2_runtime() -> None:
+    logger_names = (
+        "huggingface_hub",
+        "huggingface_hub.file_download",
+        "huggingface_hub.utils._http",
+        "neuralset",
+        "neuralset.extractors.base",
+        "tribev2",
+        "tribev2.demo_utils",
+        "tribev2.main",
+    )
+    sink = io.StringIO()
+    levels: dict[str, int] = {}
+    with ExitStack() as stack:
+        stack.enter_context(_temporary_env({"HF_HUB_DISABLE_PROGRESS_BARS": "1"}))
+        stack.enter_context(warnings.catch_warnings())
+        warnings.filterwarnings("ignore", message=r".*event_types has not been set.*")
+        warnings.filterwarnings("ignore", message=r".*torch\.cuda\.amp\.autocast.*deprecated.*")
+        warnings.filterwarnings("ignore", message=r".*DataLoader will create .* worker processes.*")
+        warnings.filterwarnings("ignore", message=r".*unauthenticated requests to the HF Hub.*")
+        stack.enter_context(redirect_stdout(sink))
+        stack.enter_context(redirect_stderr(sink))
+        for name in logger_names:
+            logger = logging.getLogger(name)
+            levels[name] = logger.level
+            logger.setLevel(logging.ERROR)
+        try:
+            yield
+        finally:
+            for name, level in levels.items():
+                logging.getLogger(name).setLevel(level)
+
+
 def _write_text_proxy(source_path: pathlib.Path, text: str) -> str:
     digest = hashlib.sha1(
         f"{source_path.resolve()}::{len(text)}::{source_path.stat().st_mtime if source_path.exists() else 0}".encode(
@@ -191,7 +244,8 @@ def _download_tribev2_snapshot(
     }
     if cache_folder:
         snapshot_kwargs["cache_dir"] = str(pathlib.Path(cache_folder).expanduser())
-    return str(snapshot_download(**snapshot_kwargs))
+    with _quiet_tribev2_runtime():
+        return str(snapshot_download(**snapshot_kwargs))
 
 
 def _looks_like_remote_tribev2_model(model_id: str) -> bool:
@@ -517,7 +571,8 @@ def _remap_tribev2_feature_devices(model: Any, device: str) -> None:
 
 def _native_tribev2_available() -> bool:
     try:
-        from tribev2 import TribeModel  # noqa: F401
+        with _quiet_tribev2_runtime():
+            from tribev2 import TribeModel  # noqa: F401
     except Exception:
         return False
     return True
@@ -526,14 +581,21 @@ def _native_tribev2_available() -> bool:
 @lru_cache(maxsize=2)
 def _load_tribev2_model(model_id: str, cache_folder: str, device: str):
     resolved = _resolve_tribev2_runtime_device(device)
-    from tribev2 import TribeModel
+    config_update = {
+        "data.num_workers": 0,
+        "data.subject_id.event_types": ["Audio", "Video", "Text", "Word"],
+        "data.subject_id.treat_missing_as_separate_class": True,
+    }
+    with _quiet_tribev2_runtime():
+        from tribev2 import TribeModel
 
     checkpoint_dir = _resolve_tribev2_checkpoint_dir(model_id, cache_folder)
-    with _windows_posixpath_compat():
+    with _quiet_tribev2_runtime(), _windows_posixpath_compat():
         model = TribeModel.from_pretrained(
             checkpoint_dir,
             cache_folder=cache_folder,
             device=resolved,
+            config_update=config_update,
         )
     _remap_tribev2_feature_devices(model, resolved)
     return model
@@ -626,7 +688,7 @@ def _normalize_text_backed_source(
     modality: str,
     *,
     use_kreuzberg: bool,
-    native_available: bool,
+    native_text_enabled: bool,
 ) -> NormalizedSource:
     extracted_text = ""
     extraction_method = ""
@@ -645,7 +707,7 @@ def _normalize_text_backed_source(
         )
         extraction_method = "placeholder"
 
-    tribev2_input_modality = "text" if native_available and extracted_text.strip() else "none"
+    tribev2_input_modality = "text" if native_text_enabled and extracted_text.strip() else "none"
     normalized_path = ""
     if tribev2_input_modality == "text":
         normalized_path = (
@@ -715,6 +777,7 @@ def _normalize_source(
     *,
     use_kreuzberg: bool,
     native_available: bool,
+    native_text_enabled: bool,
 ) -> NormalizedSource:
     modality = detect_source_modality(source_path)
     if modality in {"text", "document", "image"}:
@@ -722,7 +785,7 @@ def _normalize_source(
             source_path,
             modality,
             use_kreuzberg=use_kreuzberg,
-            native_available=native_available,
+            native_text_enabled=native_text_enabled,
         )
     if modality in {"audio", "video"}:
         return _normalize_media_source(
@@ -731,6 +794,14 @@ def _normalize_source(
             native_available=native_available,
         )
     return _normalize_unknown_source(source_path)
+
+
+def _has_text_backed_native_candidates(normalized_sources: list[NormalizedSource]) -> bool:
+    return any(
+        item.source_modality in {"text", "document", "image"}
+        and bool((item.extracted_text or "").strip())
+        for item in normalized_sources
+    )
 
 
 def _native_inputs_by_source(
@@ -789,15 +860,131 @@ def _aggregate_native_analyses(native_results: list[dict[str, Any]]) -> dict[str
     }
 
 
+def _synthesize_text_to_audio_windows(text: str, target_path: pathlib.Path) -> bool:
+    if sys.platform != "win32":
+        return False
+
+    shell = shutil.which("powershell") or shutil.which("pwsh")
+    if not shell:
+        return False
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    encoded_text = text.encode("utf-8").hex()
+    script = (
+        "Add-Type -AssemblyName System.Speech; "
+        "$target = $args[0]; "
+        "$hex = $args[1]; "
+        "$bytes = for ($i = 0; $i -lt $hex.Length; $i += 2) { [Convert]::ToByte($hex.Substring($i, 2), 16) }; "
+        "$text = [System.Text.Encoding]::UTF8.GetString($bytes); "
+        "$voice = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+        "try { $voice.SetOutputToWaveFile($target); $voice.Speak($text) } finally { $voice.Dispose() }"
+    )
+
+    try:
+        completed = subprocess.run(
+            [shell, "-NoProfile", "-Command", script, str(target_path), encoded_text],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _LOG.debug("Windows system TTS unavailable for Tribev2 proxy audio: %s", exc)
+        return False
+
+    return completed.returncode == 0 and target_path.exists() and target_path.stat().st_size > 0
+
+
+def _synthesize_text_to_audio_linux(text: str, target_path: pathlib.Path) -> bool:
+    if not sys.platform.startswith("linux"):
+        return False
+
+    for exe in ("espeak-ng", "espeak"):
+        bin_path = shutil.which(exe)
+        if not bin_path:
+            continue
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            completed = subprocess.run(
+                [bin_path, "-w", str(target_path), text],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _LOG.debug("%s unavailable for Tribev2 proxy audio: %s", exe, exc)
+            continue
+        if completed.returncode == 0 and target_path.exists() and target_path.stat().st_size > 0:
+            return True
+    return False
+
+
+def _synthesize_text_to_audio_macos(text: str, target_path: pathlib.Path) -> bool:
+    if sys.platform != "darwin":
+        return False
+
+    say_path = shutil.which("say")
+    if not say_path:
+        return False
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        completed = subprocess.run(
+            [say_path, "-o", str(target_path), text],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _LOG.debug("macOS say unavailable for Tribev2 proxy audio: %s", exc)
+        return False
+
+    return completed.returncode == 0 and target_path.exists() and target_path.stat().st_size > 0
+
+
+def _synthesize_text_to_audio_pyttsx3(text: str, target_path: pathlib.Path) -> bool:
+    try:
+        import pyttsx3  # type: ignore[import-not-found]
+    except Exception:
+        return False
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        engine = pyttsx3.init()
+        engine.save_to_file(text, str(target_path))
+        engine.runAndWait()
+        engine.stop()
+    except Exception as exc:  # noqa: BLE001
+        _LOG.debug("pyttsx3 unavailable for Tribev2 proxy audio: %s", exc)
+        return False
+
+    return target_path.exists() and target_path.stat().st_size > 0
+
+
+def _synthesize_text_to_audio_local(
+    text: str,
+    *,
+    wav_path: pathlib.Path,
+    aiff_path: pathlib.Path,
+) -> str | None:
+    if _synthesize_text_to_audio_windows(text, wav_path):
+        return str(wav_path)
+    if _synthesize_text_to_audio_linux(text, wav_path):
+        return str(wav_path)
+    if _synthesize_text_to_audio_pyttsx3(text, wav_path):
+        return str(wav_path)
+    if _synthesize_text_to_audio_macos(text, aiff_path):
+        return str(aiff_path)
+    return None
+
+
 def _text_to_audio_proxy(text: str, cache_folder: str) -> str:
-    """Synthesise *text* to an MP3 via gTTS and return the file path.
+    """Synthesise *text* to audio and return the file path.
 
     Output is cached by a hash of the text content so repeated calls for the
-    same document skip re-synthesis.  Falls back to ``"en"`` when langdetect
-    is unavailable or cannot detect the language.
+    same document skip re-synthesis.  METIS first attempts local synthesis
+    backends (Windows System.Speech, Linux ``espeak``, pyttsx3, macOS ``say``)
+    and only falls back to gTTS when no local path is available.
     """
-    from gtts import gTTS
-
     try:
         from langdetect import detect
         lang_raw = detect(text[:500]) or "en"
@@ -810,6 +997,25 @@ def _text_to_audio_proxy(text: str, cache_folder: str) -> str:
     digest = hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()[:16]
     proxy_dir = pathlib.Path(cache_folder) / "tts_proxy"
     proxy_dir.mkdir(parents=True, exist_ok=True)
+
+    wav_path = proxy_dir / f"tts-{digest}-{lang_code}.wav"
+    aiff_path = proxy_dir / f"tts-{digest}-{lang_code}.aiff"
+    if wav_path.exists():
+        return str(wav_path)
+    if aiff_path.exists():
+        return str(aiff_path)
+
+    local_audio_path = _synthesize_text_to_audio_local(
+        text,
+        wav_path=wav_path,
+        aiff_path=aiff_path,
+    )
+    if local_audio_path:
+        _LOG.debug("Local TTS proxy audio saved to %s", local_audio_path)
+        return local_audio_path
+
+    from gtts import gTTS
+
     mp3_path = proxy_dir / f"tts-{digest}-{lang_code}.mp3"
     if not mp3_path.exists():
         gTTS(text=text, lang=lang_code).save(str(mp3_path))
@@ -846,23 +1052,24 @@ def _run_native_tribev2(
 
             text_content = pathlib.Path(input_path).read_text(encoding="utf-8", errors="replace")
             proxy_mp3 = _text_to_audio_proxy(text_content, cache_folder)
-            events = standardize_events(
-                pd.DataFrame(
-                    [
-                        {
-                            "type": "Audio",
-                            "filepath": proxy_mp3,
-                            "start": 0.0,
-                            "timeline": "default",
-                            "subject": "default",
-                        }
-                    ]
+            with _quiet_tribev2_runtime():
+                events = standardize_events(
+                    pd.DataFrame(
+                        [
+                            {
+                                "type": "Audio",
+                                "filepath": proxy_mp3,
+                                "start": 0.0,
+                                "timeline": "default",
+                                "subject": "default",
+                            }
+                        ]
+                    )
                 )
-            )
             # Keep the whisperx compat patch active during predict() so that
             # the audio extractor's internal transcription also uses the
             # bundled FFmpeg shim and CPU-safe compute_type.
-            with _tribev2_whisperx_compat(device):
+            with _quiet_tribev2_runtime(), _tribev2_whisperx_compat(device):
                 preds, _segments = model.predict(events=events, verbose=False)
             effective_input_mode = "text-via-audio-proxy"
         except Exception as _proxy_exc:  # noqa: BLE001
@@ -870,24 +1077,27 @@ def _run_native_tribev2(
                 "gTTS audio proxy failed for text input (%s); falling back to native text path.",
                 _proxy_exc,
             )
-            with _tribev2_whisperx_compat(device):
+            with _quiet_tribev2_runtime(), _tribev2_whisperx_compat(device):
                 events = model.get_events_dataframe(text_path=input_path)
-            preds, _segments = model.predict(events=events, verbose=False)
+            with _quiet_tribev2_runtime():
+                preds, _segments = model.predict(events=events, verbose=False)
             effective_input_mode = "text"
     else:
-        with _tribev2_whisperx_compat(device):
+        with _quiet_tribev2_runtime(), _tribev2_whisperx_compat(device):
             events = model.get_events_dataframe(**{f"{input_mode}_path": input_path})
-        preds, _segments = model.predict(events=events, verbose=False)
+        with _quiet_tribev2_runtime():
+            preds, _segments = model.predict(events=events, verbose=False)
         effective_input_mode = input_mode
 
     top_rois: list[str] = []
     try:
-        import numpy as np
-        from tribev2.utils import get_topk_rois
+        with _quiet_tribev2_runtime():
+            import numpy as np
+            from tribev2.utils import get_topk_rois
 
-        preds_array = np.asarray(preds)
-        summary_signal = preds_array.mean(axis=0) if preds_array.ndim > 1 else preds_array
-        top_rois = [str(item) for item in get_topk_rois(summary_signal, k=5)]
+            preds_array = np.asarray(preds)
+            summary_signal = preds_array.mean(axis=0) if preds_array.ndim > 1 else preds_array
+            top_rois = [str(item) for item in get_topk_rois(summary_signal, k=5)]
     except Exception as exc:  # noqa: BLE001
         _LOG.debug("Unable to summarize Tribev2 ROIs for %s: %s", input_path, exc)
 
@@ -1069,16 +1279,31 @@ def run_brain_pass(
     if callable(post_message):
         post_message({"type": "status", "text": "Running METIS brain pass…"})
 
+    source_paths = [pathlib.Path(path) for path in document_paths]
+    source_modalities = [detect_source_modality(path) for path in source_paths]
     use_kreuzberg = str(settings.get("document_loader", "auto") or "auto") != "plain"
     native_requested = _parse_boolish(settings.get("brain_pass_native_enabled", True), True)
-    native_available = native_requested and _native_tribev2_available()
+    native_text_requested = _parse_boolish(
+        settings.get("brain_pass_native_text_enabled", True),
+        True,
+    )
+    native_candidate_requested = any(modality in {"audio", "video"} for modality in source_modalities) or (
+        native_text_requested and any(modality in {"text", "document", "image"} for modality in source_modalities)
+    )
+    native_available = (
+        native_requested
+        and native_candidate_requested
+        and _native_tribev2_available()
+    )
+    native_text_enabled = native_available and native_text_requested
     normalized_sources = [
         _normalize_source(
-            pathlib.Path(path),
+            source_path,
             use_kreuzberg=use_kreuzberg,
             native_available=native_available,
+            native_text_enabled=native_text_enabled,
         )
-        for path in document_paths
+        for source_path in source_paths
     ]
 
     native_analysis: dict[str, Any] | None = None
@@ -1146,12 +1371,23 @@ def run_brain_pass(
                 analysis["native_error"] = "; ".join(item["error"] for item in native_errors[:2])
             provider = "fallback" if allow_fallback else "disabled"
         else:
-            analysis["native_error"] = (
-                "METIS could not prepare any native Tribev2-compatible input for this upload set."
-            )
+            if not native_text_enabled and _has_text_backed_native_candidates(normalized_sources):
+                analysis["native_error"] = (
+                    "Native Tribev2 analysis for text-backed sources is disabled unless "
+                    "brain_pass_native_text_enabled is true."
+                )
+            else:
+                analysis["native_error"] = (
+                    "METIS could not prepare any native Tribev2-compatible input for this upload set."
+                )
             provider = "fallback" if allow_fallback else "disabled"
-    elif enabled and native_requested and not native_available:
+    elif enabled and native_requested and native_candidate_requested and not native_available:
         analysis["native_error"] = "Tribev2 runtime is not installed in this environment."
+    elif enabled and native_requested and _has_text_backed_native_candidates(normalized_sources):
+        analysis["native_error"] = (
+            "Native Tribev2 analysis for text-backed sources is disabled unless "
+            "brain_pass_native_text_enabled is true."
+        )
     elif not enabled or not allow_fallback:
         provider = "disabled"
 

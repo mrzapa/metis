@@ -1,6 +1,22 @@
 ---
 name: symphony-setup
 description: Set up Symphony (OpenAI's Codex orchestrator) for a user's repo. Use when the user mentions Symphony setup, configuring Symphony, getting Symphony running, or wants to connect their repo to Linear for autonomous Codex agents. Also use when the user says "set up symphony", "configure symphony for my repo", or references WORKFLOW.md configuration.
+metadata:
+  id: symphony-setup
+  enabled_by_default: false
+  priority: 40
+  triggers:
+    keywords:
+      - symphony
+      - symphony setup
+      - set up symphony
+      - configure symphony
+      - workflow.md
+      - linear
+    modes: []
+    file_types: []
+    output_styles: []
+  runtime_overrides: {}
 ---
 
 # Symphony Setup

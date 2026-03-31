@@ -25,6 +25,10 @@ import metis_app.settings_store as _settings_store
 from metis_app.engine import list_indexes
 from metis_app.engine.querying import _normalize_run_id
 from metis_app.services.nyx_catalog import NyxCatalogComponentNotFoundError
+from metis_app.services.learning_route_service import (
+    LearningRouteIndexSummary,
+    LearningRouteStarSnapshot,
+)
 from metis_app.services.nyx_install_executor import (
     NyxInstallActionExecutionError,
     execute_nyx_install_action,
@@ -51,6 +55,8 @@ from .models import (
     IndexBuildResultModel,
     KnowledgeSearchRequestModel,
     KnowledgeSearchResultModel,
+    LearningRoutePreviewModel,
+    LearningRoutePreviewRequestModel,
     NyxCatalogComponentDetailModel,
     NyxCatalogSearchResponseModel,
     OpenAIChatCompletionChoiceModel,
@@ -347,6 +353,55 @@ def create_app() -> FastAPI:
                 for edge in graph.edges
             ],
         }
+
+    @app.post(
+        "/v1/learning-routes/preview",
+        response_model=LearningRoutePreviewModel,
+        dependencies=_auth,
+    )
+    def api_learning_route_preview(
+        payload: LearningRoutePreviewRequestModel,
+    ) -> LearningRoutePreviewModel:
+        orchestrator = WorkspaceOrchestrator()
+        try:
+            preview = orchestrator.preview_learning_route(
+                origin_star=LearningRouteStarSnapshot(
+                    id=payload.origin_star.id,
+                    label=payload.origin_star.label,
+                    intent=payload.origin_star.intent,
+                    notes=payload.origin_star.notes,
+                    active_manifest_path=payload.origin_star.active_manifest_path,
+                    linked_manifest_paths=list(payload.origin_star.linked_manifest_paths),
+                    connected_user_star_ids=list(payload.origin_star.connected_user_star_ids),
+                ),
+                connected_stars=[
+                    LearningRouteStarSnapshot(
+                        id=star.id,
+                        label=star.label,
+                        intent=star.intent,
+                        notes=star.notes,
+                        active_manifest_path=star.active_manifest_path,
+                        linked_manifest_paths=list(star.linked_manifest_paths),
+                        connected_user_star_ids=list(star.connected_user_star_ids),
+                    )
+                    for star in payload.connected_stars
+                ],
+                indexes=[
+                    LearningRouteIndexSummary(
+                        index_id=index.index_id,
+                        manifest_path=index.manifest_path,
+                        document_count=index.document_count,
+                        chunk_count=index.chunk_count,
+                        created_at=index.created_at,
+                        embedding_signature=index.embedding_signature,
+                        brain_pass=dict(index.brain_pass or {}),
+                    )
+                    for index in payload.indexes
+                ],
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return LearningRoutePreviewModel.model_validate(preview)
 
     @app.get("/v1/brain/scaffold", dependencies=_auth)
     def api_brain_scaffold() -> dict[str, Any]:

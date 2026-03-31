@@ -163,7 +163,6 @@ export function ChatPanel({
       vp.removeEventListener("scroll", onScroll);
       sentinelObserver?.disconnect();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Restore scroll position after older messages are injected (prevents jump).
@@ -176,7 +175,7 @@ export function ChatPanel({
     const vp = viewportRef.current;
     if (vp) vp.scrollTo({ top: vp.scrollTop + (vp.scrollHeight - saved), behavior: "instant" });
     setIsLoadingOlder(false);
-  });
+  }, [displayFromIndex]);
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     // Don't intercept keys while IME composition is active (CJK input, etc.)

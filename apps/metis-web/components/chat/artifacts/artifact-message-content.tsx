@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent } from "react";
 import { NyxArtifactContent } from "@/components/chat/artifacts/nyx-artifact-content";
 import type { NormalizedArrowArtifact } from "@/lib/artifacts/extract-arrow-artifacts";
 import { useArrowState } from "@/hooks/use-arrow-state";
@@ -321,6 +321,11 @@ function ArrowRuntimeArtifact({
   const [runtimeReady, setRuntimeReady] = useArrowState(false);
 
   useEffect(() => {
+    const mountPoint = mountRef.current;
+    if (!mountPoint) {
+      return;
+    }
+
     let cancelled = false;
     let resolved = false;
 
@@ -369,11 +374,6 @@ function ArrowRuntimeArtifact({
           return;
         }
 
-        const mountPoint = mountRef.current;
-        if (!mountPoint) {
-          throw new Error("Artifact mount target unavailable");
-        }
-
         mountPoint.replaceChildren();
         const view = sandbox({
           source,
@@ -395,11 +395,9 @@ function ArrowRuntimeArtifact({
     return () => {
       cancelled = true;
       setRuntimeReady(false);
-      if (mountRef.current) {
-        mountRef.current.replaceChildren();
-      }
+      mountPoint.replaceChildren();
     };
-  }, [artifact, artifactIndex, onRuntimeLifecycleEvent]);
+  }, [artifact, artifactIndex, onRuntimeLifecycleEvent, setRuntimeReady]);
 
   return (
     <>
@@ -460,7 +458,7 @@ export function ArtifactMessageContent({
       }
       return Math.min(current, runtimeResults.length - 1);
     });
-  }, [runtimeResults.length]);
+  }, [runtimeResults.length, setSelectedIndex]);
 
   useEffect(() => {
     setRuntimeStateByKey((current) => {
@@ -490,7 +488,7 @@ export function ArtifactMessageContent({
 
       return next;
     });
-  }, [runtimeResults]);
+  }, [runtimeResults, setRuntimeStateByKey]);
 
   function handleRuntimeLifecycleEvent(event: ArtifactRuntimeLifecycleEvent) {
     const artifactResult = runtimeResults[event.artifactIndex];
@@ -539,7 +537,7 @@ export function ArtifactMessageContent({
         onRuntimeLifecycleEvent?.(event);
       });
     });
-  }, [onRuntimeLifecycleEvent, runtimeResults]);
+  }, [onRuntimeLifecycleEvent, runtimeResults, setLiveRegionMessage]);
 
   if (!selectedResult) {
     return null;

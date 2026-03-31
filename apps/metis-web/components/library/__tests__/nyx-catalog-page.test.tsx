@@ -57,22 +57,22 @@ function makeCatalogResponse(query = "") {
     items: query
       ? [
           {
-            component_name: "music-player",
-            title: "Music Player",
-            description: "A music player.",
-            curated_description: "Compact music player interface.",
+            component_name: "scanner",
+            title: "Scanner",
+            description: "A scanner component.",
+            curated_description: "Compact scanning interface for capture-heavy flows.",
             component_type: "registry:ui",
-            install_target: "@nyx/music-player",
-            registry_url: "https://nyxui.com/r/music-player.json",
+            install_target: "@nyx/scanner",
+            registry_url: "https://nyxui.com/r/scanner.json",
             schema_url: "https://ui.shadcn.com/schema/registry-item.json",
             source: "nyx_registry",
             source_repo: "https://github.com/MihirJaiswal/nyxui",
-            required_dependencies: ["lucide-react"],
-            dependencies: ["lucide-react"],
+            required_dependencies: ["react-aria-components"],
+            dependencies: ["react-aria-components"],
             dev_dependencies: [],
             registry_dependencies: [],
             file_count: 1,
-            targets: ["components/ui/music-player.tsx"],
+            targets: ["components/ui/scanner.tsx"],
           },
         ]
       : [
@@ -95,22 +95,22 @@ function makeCatalogResponse(query = "") {
             targets: ["components/ui/glow-card.tsx"],
           },
           {
-            component_name: "music-player",
-            title: "Music Player",
-            description: "A music player.",
-            curated_description: "Compact music player interface.",
+            component_name: "scanner",
+            title: "Scanner",
+            description: "A scanner component.",
+            curated_description: "Compact scanning interface for capture-heavy flows.",
             component_type: "registry:ui",
-            install_target: "@nyx/music-player",
-            registry_url: "https://nyxui.com/r/music-player.json",
+            install_target: "@nyx/scanner",
+            registry_url: "https://nyxui.com/r/scanner.json",
             schema_url: "https://ui.shadcn.com/schema/registry-item.json",
             source: "nyx_registry",
             source_repo: "https://github.com/MihirJaiswal/nyxui",
-            required_dependencies: ["lucide-react"],
-            dependencies: ["lucide-react"],
+            required_dependencies: ["react-aria-components"],
+            dependencies: ["react-aria-components"],
             dev_dependencies: [],
             registry_dependencies: [],
             file_count: 1,
-            targets: ["components/ui/music-player.tsx"],
+            targets: ["components/ui/scanner.tsx"],
           },
         ],
   };
@@ -125,38 +125,47 @@ describe("NyxCatalogPage", () => {
     );
   });
 
-  it("loads the local Nyx catalog and links cards to stable preview routes", async () => {
+  it("loads the local Nyx catalog and only links featured cards to stable preview routes", async () => {
     render(<NyxCatalogPage />);
 
     expect(await screen.findByText("Glow Card")).toBeInTheDocument();
+    expect(screen.getByText("Scanner")).toBeInTheDocument();
     expect(fetchNyxCatalog).toHaveBeenCalledWith("", { limit: 24 });
 
     const previewLinks = screen.getAllByRole("link", {
       name: /Preview component/i,
     });
 
-    expect(previewLinks.map((link) => link.getAttribute("href"))).toContain(
+    expect(previewLinks).toHaveLength(1);
+    expect(previewLinks[0]).toHaveAttribute(
+      "href",
       "/library/glow-card",
     );
+    expect(
+      screen.getByText("Preview routes are generated for featured components only."),
+    ).toBeInTheDocument();
   });
 
-  it("filters the catalog and can seed chat from a result", async () => {
+  it("filters the catalog, omits broken preview links, and can seed chat from a result", async () => {
     render(<NyxCatalogPage />);
 
     await screen.findByText("Glow Card");
     fireEvent.change(screen.getByLabelText(/Find a component/i), {
-      target: { value: "music" },
+      target: { value: "scan" },
     });
 
     await waitFor(() => {
-      expect(fetchNyxCatalog).toHaveBeenLastCalledWith("music", { limit: 24 });
+      expect(fetchNyxCatalog).toHaveBeenLastCalledWith("scan", { limit: 24 });
     });
-    expect((await screen.findAllByText("Music Player")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Scanner")).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.queryByRole("link", { name: /Preview component/i })).not.toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /Use in chat/i }));
 
     expect(window.localStorage.getItem("metis_chat_seed_prompt")).toContain(
-      "@nyx/music-player",
+      "@nyx/scanner",
     );
     expect(pushMock).toHaveBeenCalledWith("/chat");
   });

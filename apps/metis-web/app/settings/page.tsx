@@ -305,7 +305,7 @@ export default function SettingsPage() {
     if (current === "refined" || current === "motion" || current === "bold") {
       setUiVariant(current);
     }
-  }, []);
+  }, [setUiVariant]);
 
   function applyUiVariant(nextVariant: UiVariant) {
     setUiVariant(nextVariant);
@@ -393,7 +393,7 @@ export default function SettingsPage() {
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : "Failed to load settings"))
       .finally(() => setLoading(false));
-  }, [reset]);
+  }, [reset, setLoadError, setLoading]);
 
   useEffect(() => {
     fetchAssistantSettings()
@@ -402,7 +402,7 @@ export default function SettingsPage() {
       })
       .catch((err) => setAssistantLoadError(err instanceof Error ? err.message : "Failed to load assistant settings"))
       .finally(() => setAssistantLoading(false));
-  }, [resetAssistant]);
+  }, [resetAssistant, setAssistantLoadError, setAssistantLoading]);
 
   async function onSubmit(values: FormValues) {
     setSaving(true);

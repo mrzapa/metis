@@ -15,6 +15,11 @@ export function useEvidenceHighlight(elementId: string) {
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
+    const target = ref.current ?? (elementId ? document.getElementById(elementId) : null);
+    if (!target) {
+      return;
+    }
+
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -25,12 +30,10 @@ export function useEvidenceHighlight(elementId: string) {
       { threshold: 0.5 },
     );
 
-    if (ref.current) {
-      observer.observe(ref.current);
-    }
+    observer.observe(target);
 
     return () => observer.disconnect();
-  }, []);
+  }, [elementId]);
 
   return { ref, isVisible };
 }
@@ -64,12 +67,26 @@ export function useSubQueryAnimation(
   const timeoutRefs = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
   useEffect(() => {
+    const timeoutMap = timeoutRefs.current;
     return () => {
       // Clean up all pending timeouts on unmount
-      timeoutRefs.current.forEach((timeout) => clearTimeout(timeout));
-      timeoutRefs.current.clear();
+      timeoutMap.forEach((timeout) => clearTimeout(timeout));
+      timeoutMap.clear();
     };
   }, []);
+
+  useEffect(() => {
+    const activeIds = new Set(subQueries.map(({ id }) => id));
+
+    timeoutRefs.current.forEach((timeout, id) => {
+      if (activeIds.has(id)) {
+        return;
+      }
+
+      clearTimeout(timeout);
+      timeoutRefs.current.delete(id);
+    });
+  }, [subQueries]);
 
   const scheduleAnimation = (id: string, delay: number, callback: () => void) => {
     // Clear existing timeout for this ID
@@ -96,13 +113,14 @@ export function useNumericAnimation(
   duration: number = 1000,
 ): number {
   const [displayValue, setDisplayValue] = useState(targetValue);
-  const startRef = useRef(Date.now());
+  const startRef = useRef(0);
   const startValueRef = useRef(displayValue);
+  const currentValueRef = useRef(targetValue);
   const frameRef = useRef<number | null>(null);
 
   useEffect(() => {
     startRef.current = Date.now();
-    startValueRef.current = displayValue;
+    startValueRef.current = currentValueRef.current;
 
     const animate = () => {
       const elapsed = Date.now() - startRef.current;
@@ -117,6 +135,7 @@ export function useNumericAnimation(
       const newValue =
         startValueRef.current +
         (targetValue - startValueRef.current) * easeProgress;
+      currentValueRef.current = newValue;
       setDisplayValue(newValue);
 
       if (progress < 1) {
@@ -141,14 +160,46 @@ export function useNumericAnimation(
  */
 export function useResearchExpansion(isExpanding: boolean) {
   const [hasExpanded, setHasExpanded] = useState(false);
+  const activateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousExpandingRef = useRef(false);
 
   useEffect(() => {
-    if (isExpanding && !hasExpanded) {
-      setHasExpanded(true);
-      const timer = setTimeout(() => setHasExpanded(false), 3000);
-      return () => clearTimeout(timer);
+    const isRisingEdge = isExpanding && !previousExpandingRef.current;
+    previousExpandingRef.current = isExpanding;
+
+    if (!isRisingEdge) {
+      return;
     }
-  }, [isExpanding, hasExpanded]);
+
+    if (activateTimerRef.current !== null) {
+      clearTimeout(activateTimerRef.current);
+    }
+    if (resetTimerRef.current !== null) {
+      clearTimeout(resetTimerRef.current);
+    }
+
+    activateTimerRef.current = setTimeout(() => {
+      setHasExpanded(true);
+      activateTimerRef.current = null;
+    }, 0);
+
+    resetTimerRef.current = setTimeout(() => {
+      setHasExpanded(false);
+      resetTimerRef.current = null;
+    }, 3000);
+  }, [isExpanding]);
+
+  useEffect(() => {
+    return () => {
+      if (activateTimerRef.current !== null) {
+        clearTimeout(activateTimerRef.current);
+      }
+      if (resetTimerRef.current !== null) {
+        clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
 
   return hasExpanded || isExpanding;
 }

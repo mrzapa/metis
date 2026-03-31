@@ -13,8 +13,7 @@
  */
 
 import { motion, AnimatePresence } from "motion/react";
-import { stagger } from "motion";
-import { ReactNode } from "react";
+import type { ReactNode } from "react";
 import BrainGraph3D, { type BrainGraph3DProps } from "./brain-graph-3d";
 
 export interface BrainGraphAnimatedWrapperProps extends BrainGraph3DProps {

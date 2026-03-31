@@ -93,7 +93,7 @@ export function SpaceAtmosphere({ className }: SpaceAtmosphereProps) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [setParticlesReady]);
 
   const particleOptions = useMemo<ISourceOptions>(() => {
     const particleCount = reduceMotion ? 48 : 72;

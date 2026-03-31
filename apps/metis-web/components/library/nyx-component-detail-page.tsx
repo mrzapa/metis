@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import {
   buildNyxChatSeed,
   buildNyxComponentHref,
+  getNyxComponentPreviewHref,
   seedNyxChatPrompt,
 } from "@/components/library/nyx-shared";
 import { PageChrome } from "@/components/shell/page-chrome";
@@ -69,6 +70,8 @@ function DetailHeroAside({ detail }: { detail: NyxCatalogComponentDetail | null 
     );
   }
 
+  const previewHref = getNyxComponentPreviewHref(detail.component_name);
+
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
@@ -93,17 +96,19 @@ function DetailHeroAside({ detail }: { detail: NyxCatalogComponentDetail | null 
         </div>
       </div>
 
-      <div className="rounded-2xl border border-white/10 bg-black/10 px-4 py-4">
-        <p className="text-xs font-medium uppercase tracking-[0.2em] text-primary/80">
-          Preview route
-        </p>
-        <p className="mt-2 break-all font-mono text-xs text-foreground">
-          {buildNyxComponentHref(detail.component_name)}
-        </p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Stable path you can revisit from chat, the library, or direct navigation.
-        </p>
-      </div>
+      {previewHref ? (
+        <div className="rounded-2xl border border-white/10 bg-black/10 px-4 py-4">
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-primary/80">
+            Preview route
+          </p>
+          <p className="mt-2 break-all font-mono text-xs text-foreground">
+            {buildNyxComponentHref(detail.component_name)}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Featured preview route generated at build time for the static export.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }

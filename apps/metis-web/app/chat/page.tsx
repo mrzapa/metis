@@ -220,6 +220,7 @@ export default function ChatPage() {
   const [artifactsEnabled, setArtifactsEnabled] = useArrowState<boolean | undefined>(undefined);
   const [artifactRuntimeEnabled, setArtifactRuntimeEnabled] = useArrowState<boolean | undefined>(undefined);
   const sessionIdRef = useRef<string | null>(null);
+  const seededModeRef = useRef<string | null>(null);
   const {
     createMessage,
     restoreStreamingRun,
@@ -262,7 +263,7 @@ export default function ChatPage() {
       return;
     }
     clearResumableRagRun();
-  }, []);
+  }, [setResumableRun]);
 
   const stopRagStream = useCallback(
     (reason: StopStreamReason = "user") => {
@@ -284,14 +285,20 @@ export default function ChatPage() {
 
       markMessageAborted(activeStream.assistantMessageId);
     },
-    [markMessageAborted, markRunAborted, publishResumableRun],
+    [
+      markMessageAborted,
+      markRunAborted,
+      publishResumableRun,
+      setIsStreamingRag,
+      setLatestFallback,
+    ],
   );
 
   const applyShellPosture = useCallback((isAgentic: boolean) => {
     setTraceFirstLayout(isAgentic);
     setPreferredEvidenceTab(isAgentic ? "trace" : "sources");
     setShellPostureToken((t) => t + 1);
-  }, []);
+  }, [setPreferredEvidenceTab, setShellPostureToken, setTraceFirstLayout]);
 
   const handleAgenticModeChange = useCallback(
     async (enabled: boolean) => {
@@ -310,7 +317,7 @@ export default function ChatPage() {
         setAgenticModeSaving(false);
       }
     },
-    [applyShellPosture],
+    [applyShellPosture, setAgenticMode, setAgenticModeError, setAgenticModeSaving],
   );
 
   useEffect(() => {
@@ -333,13 +340,21 @@ export default function ChatPage() {
         setAgenticMode(isAgentic);
         applyShellPosture(isAgentic);
 
-        const mode = String(settings.selected_mode ?? "Q&A");
+        const mode = seededModeRef.current ?? String(settings.selected_mode ?? "Q&A");
         setSelectedRagMode(mode);
       })
       .catch(() => {
         // Keep the badge empty on fetch error.
       });
-  }, [applyShellPosture]);
+  }, [
+    applyShellPosture,
+    setAgenticMode,
+    setArtifactRuntimeEnabled,
+    setArtifactsEnabled,
+    setModelName,
+    setModelProvider,
+    setSelectedRagMode,
+  ]);
 
   const handleRagModeChange = useCallback(async (mode: string) => {
     setSelectedRagMode(mode);
@@ -349,13 +364,13 @@ export default function ChatPage() {
     } catch {
       // Best-effort — the mode is still applied for the current session.
     }
-  }, []);
+  }, [setSelectedRagMode]);
 
   const handleModelChange = useCallback((provider: string, model: string) => {
     setModelProvider(provider);
     setModelName(model);
     settingsRef.current = null;
-  }, []);
+  }, [setModelName, setModelProvider]);
 
   useEffect(() => {
     let raw = localStorage.getItem("metis_active_index");
@@ -383,7 +398,7 @@ export default function ChatPage() {
 
     localStorage.removeItem("metis_active_index");
     localStorage.removeItem("metis_active_index");
-  }, []);
+  }, [setActiveIndexLabel, setActiveIndexPath, setQueryModeOverride]);
 
   useEffect(() => {
     sessionIdRef.current = companionSessionId;
@@ -405,7 +420,18 @@ export default function ChatPage() {
     setInitialDraft(seedPrompt);
     localStorage.removeItem("metis_chat_seed_prompt");
     localStorage.removeItem("metis_chat_seed_prompt");
-  }, []);
+  }, [setInitialDraft]);
+
+  useEffect(() => {
+    const seedMode = localStorage.getItem("metis_chat_seed_mode");
+    if (!seedMode) {
+      return;
+    }
+    seededModeRef.current = seedMode;
+    setSelectedRagMode(seedMode);
+    setQueryModeOverride("rag");
+    localStorage.removeItem("metis_chat_seed_mode");
+  }, [setQueryModeOverride, setSelectedRagMode]);
 
   useEffect(() => {
     const snapshot = loadResumableRagRun();
@@ -451,7 +477,15 @@ export default function ChatPage() {
       assistantMessageId: assistantMessage.id,
       hasBoundRun: true,
     });
-  }, [createMessage, restoreStreamingRun]);
+  }, [
+    createMessage,
+    restoreStreamingRun,
+    setActiveIndexLabel,
+    setActiveIndexPath,
+    setLiveTraceEvents,
+    setQueryModeOverride,
+    setResumableRun,
+  ]);
 
   useEffect(() => {
     function persistInterruptedRun() {
@@ -498,7 +532,15 @@ export default function ChatPage() {
         setLoadingSession(false);
       }
     },
-    [reset, setSessionMessages],
+    [
+      reset,
+      setLatestFallback,
+      setLiveTraceEvents,
+      setLoadingSession,
+      setSessionError,
+      setSessionMessages,
+      setSessionMeta,
+    ],
   );
 
   const handleSelect = useCallback(
@@ -509,7 +551,14 @@ export default function ChatPage() {
       loadSession(id);
       applyShellPosture(agenticMode);
     },
-    [agenticMode, applyShellPosture, loadSession, publishResumableRun, stopRagStream],
+    [
+      agenticMode,
+      applyShellPosture,
+      loadSession,
+      publishResumableRun,
+      setSelectedId,
+      stopRagStream,
+    ],
   );
 
   const autoCreateSession = useCallback(
@@ -531,7 +580,7 @@ export default function ChatPage() {
         return sessionIdRef.current;
       }
     },
-    [messages.length],
+    [messages.length, setSelectedId, setSessionMeta, setSessionRefreshToken],
   );
 
   const handleDirectSend = useCallback(
@@ -593,7 +642,16 @@ export default function ChatPage() {
         setIsSending(false);
       }
     },
-    [appendCompletedRunMessage, appendMessages, autoCreateSession, createMessage],
+    [
+      appendCompletedRunMessage,
+      appendMessages,
+      autoCreateSession,
+      createMessage,
+      setArtifactRuntimeEnabled,
+      setArtifactsEnabled,
+      setIsSending,
+      setLatestFallback,
+    ],
   );
 
   const startRagStream = useCallback(
@@ -974,6 +1032,11 @@ export default function ChatPage() {
       markRunError,
       publishResumableRun,
       selectedRagMode,
+      setArtifactRuntimeEnabled,
+      setArtifactsEnabled,
+      setIsStreamingRag,
+      setLatestFallback,
+      setLiveTraceEvents,
       setMessageStatus,
       setRunPendingSources,
       setRunSubqueries,
@@ -1101,8 +1164,13 @@ export default function ChatPage() {
       createMessage,
       isStreamingRag,
       selectedRagMode,
-      publishResumableRun,
       appendCompletedRunMessage,
+      publishResumableRun,
+      setArtifactRuntimeEnabled,
+      setArtifactsEnabled,
+      setIsSending,
+      setLatestFallback,
+      setLiveTraceEvents,
       startRagStream,
       stopRagStream,
     ],
@@ -1132,7 +1200,13 @@ export default function ChatPage() {
       sessionId: sessionIdRef.current,
       userMessageTs: resumableRun.userMessageTs,
     });
-  }, [isStreamingRag, resumableRun, setMessageStatus, startRagStream]);
+  }, [
+    isStreamingRag,
+    resumableRun,
+    setLiveTraceEvents,
+    setMessageStatus,
+    startRagStream,
+  ]);
 
   const handleDiscardResumableRun = useCallback(() => {
     if (!resumableRun) {
@@ -1158,7 +1232,19 @@ export default function ChatPage() {
     setLiveTraceEvents([]);
     setLatestFallback(null);
     applyShellPosture(agenticMode);
-  }, [agenticMode, applyShellPosture, publishResumableRun, reset, stopRagStream]);
+  }, [
+    agenticMode,
+    applyShellPosture,
+    publishResumableRun,
+    reset,
+    setLatestFallback,
+    setLiveTraceEvents,
+    setLoadingSession,
+    setSelectedId,
+    setSessionError,
+    setSessionMeta,
+    stopRagStream,
+  ]);
 
   const handleActionApprove = useCallback(
     async (messageId: string) => {

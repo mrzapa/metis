@@ -45,7 +45,6 @@ jobs:
       - name: CLI smoke (headless)
         run: |
           python - <<'PY'
-          import os
           import pathlib
           import subprocess
           import sys
@@ -57,14 +56,11 @@ jobs:
               doc = td_path / 'smoke.txt'
               doc.write_text('METIS smoke test content for CLI mode.\n', encoding='utf-8')
 
-              env = dict(os.environ)
-              env['METIS_NEW_APP'] = '1'
-
               cmd_index = [sys.executable, 'main.py', '--cli', 'index', '--file', str(doc)]
               cmd_query = [sys.executable, 'main.py', '--cli', 'query', '--file', str(doc), '--question', 'smoke']
 
-              subprocess.run(cmd_index, cwd=root, env=env, check=True)
-              subprocess.run(cmd_query, cwd=root, env=env, check=True)
+              subprocess.run(cmd_index, cwd=root, check=True)
+              subprocess.run(cmd_query, cwd=root, check=True)
 
           print('CLI smoke test passed')
           PY
@@ -148,6 +144,11 @@ jobs:
         run: |
           & .\.venv-ci\Scripts\python.exe -m pip install -e ".[dev]"
 
+      - name: Install legacy PySide6 test extra
+        shell: pwsh
+        run: |
+          & .\.venv-ci\Scripts\python.exe -m pip install -e ".[legacy-pyside6]"
+
       - name: Verify dependency graph
         shell: pwsh
         run: |
@@ -157,7 +158,6 @@ jobs:
         shell: pwsh
         run: |
           @'
-          import os
           import pathlib
           import subprocess
           import sys
@@ -169,19 +169,16 @@ jobs:
               doc = td_path / "smoke.txt"
               doc.write_text("METIS smoke test content for CLI mode.\n", encoding="utf-8")
 
-              env = dict(os.environ)
-              env["METIS_NEW_APP"] = "1"
-
               cmd_index = [sys.executable, "main.py", "--cli", "index", "--file", str(doc)]
               cmd_query = [sys.executable, "main.py", "--cli", "query", "--file", str(doc), "--question", "smoke"]
 
-              subprocess.run(cmd_index, cwd=root, env=env, check=True)
-              subprocess.run(cmd_query, cwd=root, env=env, check=True)
+              subprocess.run(cmd_index, cwd=root, check=True)
+              subprocess.run(cmd_query, cwd=root, check=True)
 
           print("CLI smoke test passed")
           '@ | & .\.venv-ci\Scripts\python.exe -
 
-      - name: Qt smoke tests
+      - name: Legacy Qt smoke tests
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen

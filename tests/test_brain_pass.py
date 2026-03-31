@@ -97,6 +97,7 @@ def test_run_brain_pass_uses_native_provider_when_native_inference_succeeds(
         {
             "enable_brain_pass": True,
             "brain_pass_native_enabled": True,
+            "brain_pass_native_text_enabled": True,
             "brain_pass_allow_fallback": True,
             "document_loader": "plain",
         },
@@ -133,6 +134,7 @@ def test_run_brain_pass_tribev2_with_empty_top_rois_keeps_tribev2_provenance(
         {
             "enable_brain_pass": True,
             "brain_pass_native_enabled": True,
+            "brain_pass_native_text_enabled": True,
             "brain_pass_allow_fallback": True,
             "document_loader": "plain",
         },
@@ -164,6 +166,7 @@ def test_run_brain_pass_records_native_error_when_native_inference_fails(
         {
             "enable_brain_pass": True,
             "brain_pass_native_enabled": True,
+            "brain_pass_native_text_enabled": True,
             "brain_pass_allow_fallback": True,
             "document_loader": "plain",
         },
@@ -171,6 +174,74 @@ def test_run_brain_pass_records_native_error_when_native_inference_fails(
 
     assert result.provider == "fallback"
     assert result.analysis["native_error"] == "native download failed"
+
+
+def test_run_brain_pass_skips_native_text_when_disabled(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    src = tmp_path / "notes.txt"
+    src.write_text(
+        "Research evidence and reasoning should stay grounded to the right faculty.\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(brain_pass, "_native_tribev2_available", lambda: True)
+
+    def fail_if_called(**_kwargs):
+        raise AssertionError("native Tribev2 should not run for text sources when explicitly disabled")
+
+    monkeypatch.setattr(brain_pass, "_run_native_tribev2", fail_if_called)
+
+    result = brain_pass.run_brain_pass(
+        [str(src)],
+        {
+            "enable_brain_pass": True,
+            "brain_pass_native_enabled": True,
+            "brain_pass_native_text_enabled": False,
+            "brain_pass_allow_fallback": True,
+            "document_loader": "plain",
+        },
+    )
+
+    assert result.provider == "fallback"
+    assert result.analysis["native_sources_attempted"] == 0
+    assert result.analysis["native_error"] == (
+        "Native Tribev2 analysis for text-backed sources is disabled unless "
+        "brain_pass_native_text_enabled is true."
+    )
+
+
+def test_run_brain_pass_uses_native_text_by_default_when_not_disabled(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    src = tmp_path / "notes.txt"
+    src.write_text("Research evidence and reasoning should stay grounded.\n", encoding="utf-8")
+
+    monkeypatch.setattr(brain_pass, "_native_tribev2_available", lambda: True)
+    monkeypatch.setattr(
+        brain_pass,
+        "_run_native_tribev2",
+        lambda **_kwargs: {
+            "native_input_mode": "text",
+            "top_rois": ["ifs-lh"],
+            "model_id": "facebook/tribev2",
+        },
+    )
+
+    result = brain_pass.run_brain_pass(
+        [str(src)],
+        {
+            "enable_brain_pass": True,
+            "brain_pass_native_enabled": True,
+            "brain_pass_allow_fallback": True,
+            "document_loader": "plain",
+        },
+    )
+
+    assert result.provider == "tribev2"
+    assert result.analysis["native_input_mode"] == "text"
 
 
 def test_run_brain_pass_disabled_by_setting_uses_disabled_provider_and_provenance(
@@ -215,6 +286,7 @@ def test_run_brain_pass_native_failure_without_fallback_uses_disabled_provider_a
         {
             "enable_brain_pass": True,
             "brain_pass_native_enabled": True,
+            "brain_pass_native_text_enabled": True,
             "brain_pass_allow_fallback": False,
             "document_loader": "plain",
         },
@@ -314,6 +386,7 @@ def test_run_native_tribev2_text_uses_audio_proxy_path(monkeypatch, tmp_path) ->
             return np.zeros((1, 10)), []
 
     monkeypatch.setattr(brain_pass, "_load_tribev2_model", lambda *_a, **_kw: _FakeModel())
+    monkeypatch.setattr(brain_pass, "_synthesize_text_to_audio_windows", lambda *_a, **_kw: False)
 
     import sys
     import types
@@ -361,6 +434,32 @@ def test_run_native_tribev2_text_uses_audio_proxy_path(monkeypatch, tmp_path) ->
     assert len(gTTS_calls) == 1
 
 
+def test_text_to_audio_proxy_prefers_local_backend_without_gtts(monkeypatch, tmp_path) -> None:
+    local_audio = tmp_path / "local.wav"
+    local_audio.write_bytes(b"FAKE")
+
+    monkeypatch.setattr(
+        brain_pass,
+        "_synthesize_text_to_audio_local",
+        lambda *_args, **_kwargs: str(local_audio),
+    )
+
+    import sys
+    import types
+
+    fake_langdetect = types.ModuleType("langdetect")
+    fake_langdetect.detect = lambda _text: "en"  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "langdetect", fake_langdetect)
+
+    # If gTTS gets imported in this path, the test should fail.
+    if "gtts" in sys.modules:
+        monkeypatch.delitem(sys.modules, "gtts", raising=False)
+
+    result = brain_pass._text_to_audio_proxy("hello world", str(tmp_path / "cache"))
+
+    assert result == str(local_audio)
+
+
 def test_run_brain_pass_mixed_sources_attempts_native_per_source(monkeypatch, tmp_path) -> None:
     txt = tmp_path / "notes.txt"
     txt.write_text("Reasoning and evidence for decision making.", encoding="utf-8")
@@ -388,6 +487,7 @@ def test_run_brain_pass_mixed_sources_attempts_native_per_source(monkeypatch, tm
         {
             "enable_brain_pass": True,
             "brain_pass_native_enabled": True,
+            "brain_pass_native_text_enabled": True,
             "brain_pass_allow_fallback": True,
             "document_loader": "plain",
         },
@@ -429,6 +529,7 @@ def test_run_brain_pass_partial_native_failure_keeps_successful_sources(monkeypa
         {
             "enable_brain_pass": True,
             "brain_pass_native_enabled": True,
+            "brain_pass_native_text_enabled": True,
             "brain_pass_allow_fallback": True,
             "document_loader": "plain",
         },
@@ -465,6 +566,7 @@ def test_run_brain_pass_exposes_provenance_blend_fields(monkeypatch, tmp_path) -
         {
             "enable_brain_pass": True,
             "brain_pass_native_enabled": True,
+            "brain_pass_native_text_enabled": True,
             "brain_pass_allow_fallback": True,
             "document_loader": "plain",
         },

@@ -156,23 +156,6 @@ export const DEFAULT_NODE_TYPE_TO_NEURON_KIND: NodeTypeNeuronMapping = {
   playbook: "pyramidal",
 };
 
-function hashToUnit(seed: string): number {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) {
-    hash = (hash << 5) - hash + seed.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash % 10_000) / 10_000;
-}
-
-function maxDimensionOfObject(object: THREE.Object3D): number {
-  const bbox = new THREE.Box3().setFromObject(object);
-  if (bbox.isEmpty()) return 1;
-  const size = new THREE.Vector3();
-  bbox.getSize(size);
-  return Math.max(size.x, size.y, size.z, 1e-3);
-}
-
 // -- Vignette colours ---------------------------------------------------------
 
 /** Inner purple tint of the cinematic vignette (inspired by Digital-Brain VignettePass). */
@@ -277,46 +260,6 @@ function makeTextSprite(text: string, color: string, nodeRadius: number): THREE.
   const labelScale = Math.max(0.42, nodeRadius * 0.075);
   sprite.scale.set(canvas.width * labelScale / fontSize, canvas.height * labelScale / fontSize, 1);
   return sprite;
-}
-
-/**
- * Create small tendril lines radiating from a node to mimic neuron dendrites.
- * Returns a THREE.Group containing the tendril line segments.
- */
-function createDendrites(radius: number, color: THREE.Color, count: number): THREE.Group {
-  const group = new THREE.Group();
-  const mat = new THREE.LineBasicMaterial({
-    color,
-    transparent: true,
-    opacity: 0.35,
-    linewidth: 1,
-  });
-
-  for (let i = 0; i < count; i++) {
-    // Random direction on a sphere
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
-    const dx = Math.sin(phi) * Math.cos(theta);
-    const dy = Math.sin(phi) * Math.sin(theta);
-    const dz = Math.cos(phi);
-
-    // Tendril: short line from node surface outward with a slight curve
-    const len = radius * (1.2 + Math.random() * 1.8);
-    const midLen = len * 0.5;
-    // Add a small perpendicular offset for organic curve
-    const perpX = (Math.random() - 0.5) * radius * 0.4;
-    const perpY = (Math.random() - 0.5) * radius * 0.4;
-
-    const points = [
-      new THREE.Vector3(dx * radius, dy * radius, dz * radius),
-      new THREE.Vector3(dx * midLen + perpX, dy * midLen + perpY, dz * midLen),
-      new THREE.Vector3(dx * len, dy * len, dz * len),
-    ];
-    const geo = new THREE.BufferGeometry().setFromPoints(points);
-    const line = new THREE.Line(geo, mat);
-    group.add(line);
-  }
-  return group;
 }
 
 /**
@@ -523,7 +466,7 @@ export default function BrainGraph3D({
     directionalWidth: 2.0,
   });
   const [highlightState, setHighlightState] = useArrowState<BrainGraphHighlightState | null>(null);
-  const [highlightNowMs, setHighlightNowMs] = useArrowState(Date.now());
+  const [highlightNowMs, setHighlightNowMs] = useArrowState(0);
   const lastSignalTsRef = useRef(0);
 
   // Bloom post-processing pass ref (added to the library's internal composer)
@@ -568,12 +511,6 @@ export default function BrainGraph3D({
     needsInitialZoomRef.current = true;
 
     fg.zoomToFit(ZOOM_TO_FIT_MS, ZOOM_TO_FIT_PADDING);
-    const liveGraph = (
-      fg as ForceGraphMethods<BrainSceneNode, BrainSceneLink> & {
-        graphData?: () => { nodes?: Array<{ x?: number; y?: number; z?: number }> };
-      }
-    ).graphData?.();
-
     window.requestAnimationFrame(() => {
       if (!fgRef.current) return;
       fgRef.current.zoomToFit(ZOOM_TO_FIT_MS, ZOOM_TO_FIT_PADDING);
@@ -600,7 +537,7 @@ export default function BrainGraph3D({
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [recoverGraphViewport]);
+  }, [recoverGraphViewport, setDims]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -714,6 +651,8 @@ export default function BrainGraph3D({
   // Dispose all created Three.js objects on unmount
   useEffect(() => {
     const objects = createdObjectsRef.current;
+    const spawnBursts = spawnBurstsRef.current;
+    const connectionFlashes = connectionFlashesRef.current;
     return () => {
       for (const obj of objects) disposeObject3D(obj);
       objects.length = 0;
@@ -733,17 +672,17 @@ export default function BrainGraph3D({
         dustRef.current = null;
       }
       // Dispose spawn bursts
-      for (const burst of spawnBurstsRef.current) {
+      for (const burst of spawnBursts) {
         burst.points.geometry.dispose();
         (burst.points.material as THREE.PointsMaterial).dispose();
       }
-      spawnBurstsRef.current.length = 0;
+      spawnBursts.length = 0;
       // Dispose connection flashes
-      for (const flash of connectionFlashesRef.current) {
+      for (const flash of connectionFlashes) {
         flash.line.geometry.dispose();
         (flash.line.material as THREE.LineBasicMaterial).dispose();
       }
-      connectionFlashesRef.current.length = 0;
+      connectionFlashes.length = 0;
     };
   }, []);
 
@@ -1109,7 +1048,7 @@ export default function BrainGraph3D({
     const scene = fgRef.current?.scene();
     modelSceneRef.current = scene ?? null;
     setSceneReady(Boolean(scene));
-  }, [dims.h, dims.w, graphData.nodes.length]);
+  }, [dims.h, dims.w, graphData.nodes.length, setSceneReady]);
 
   // -- Auto-rotate control -------------------------------------------------
 
@@ -1149,7 +1088,7 @@ export default function BrainGraph3D({
       directionalSpeed: profile.directionalSpeed,
       directionalWidth: profile.directionalWidth,
     });
-  }, [graphData.nodes, selectedNodeId]);
+  }, [graphData.nodes, selectedNodeId, setActivityLabel, setActivityProfile]);
 
   useEffect(() => {
     if (!companionSignal) return;
@@ -1187,7 +1126,7 @@ export default function BrainGraph3D({
       directionalWidth: profile.directionalWidth,
     });
     bloomBoostRef.current = Math.max(bloomBoostRef.current, BLOOM_PULSE_BOOST + profile.bloom * 0.8);
-  }, [companionSignal]);
+  }, [companionSignal, setActivityLabel, setActivityProfile]);
 
   useEffect(() => {
     if (!selectedNodeId || autoRotate) return;

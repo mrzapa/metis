@@ -41,7 +41,7 @@ export function ModelStatusDialog({
       setDraftModel(model);
       setError(null);
     }
-  }, [open, provider, model]);
+  }, [model, open, provider, setDraftModel, setDraftProvider, setError]);
 
   async function handleSave() {
     setSaving(true);

@@ -98,12 +98,12 @@ export function GlowCard({
   }, [])
 
   // Optimized animation loop
-  const animate = useCallback(() => {
+  const animate = useCallback(function animateFrame() {
     if (!isHovered) return
 
     const now = Date.now()
     if (now - lastMouseMoveRef.current < 16) {
-      animationRef.current = requestAnimationFrame(animate)
+      animationRef.current = requestAnimationFrame(animateFrame)
       return
     }
 
@@ -137,7 +137,7 @@ export function GlowCard({
       )
     }
 
-    animationRef.current = requestAnimationFrame(animate)
+    animationRef.current = requestAnimationFrame(animateFrame)
   }, [isHovered, mousePos, variant, generateCosmicParticles])
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -433,7 +433,7 @@ export function GlowCard({
       perspective: "1000px",
       filter: variant === "glitch" && isHovered ? `hue-rotate(${waveTimeRef.current * 2}deg) saturate(1.5)` : undefined,
     }),
-    [backgroundGradient, isHovered, mousePos.x, mousePos.y, variant],
+    [backgroundGradient, isHovered, variant],
   )
 
   useEffect(() => {
