@@ -1,5 +1,5 @@
-import { NyxCatalogPage } from "@/components/library/nyx-catalog-page";
+import { notFound } from "next/navigation";
 
 export default function LibraryPage() {
-  return <NyxCatalogPage />;
+  notFound();
 }

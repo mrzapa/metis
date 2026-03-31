@@ -30,20 +30,11 @@ interface LandingStarfieldWebglProps {
 }
 
 const vertexShader = `
-attribute float aAddable;
-attribute float aBloom;
-attribute float aBrightness;
-attribute float aCoreRadius;
-attribute float aDiffraction;
-attribute float aHaloRadius;
-attribute float aHardness;
-attribute float aTier;
-attribute float aTwinklePhase;
-attribute float aTwinkleSpeed;
-attribute vec3 aAccentColor;
-attribute vec3 aCoreColor;
-attribute vec3 aHaloColor;
-attribute vec3 aSurfaceColor;
+attribute vec4 aColorA;
+attribute vec4 aColorB;
+attribute vec4 aColorC;
+attribute vec4 aShape;
+attribute vec2 aTwinkle;
 
 uniform float uDpr;
 uniform float uTime;
@@ -53,37 +44,31 @@ varying float vBloom;
 varying float vBrightness;
 varying float vCoreRadius;
 varying float vDiffraction;
-varying float vHaloRadius;
-varying float vHardness;
 varying float vTier;
 varying float vTwinkle;
 varying vec3 vAccentColor;
 varying vec3 vCoreColor;
 varying vec3 vHaloColor;
-varying vec3 vSurfaceColor;
 
 void main() {
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mvPosition;
 
-  float twinkle = 0.92 + sin(uTime * aTwinkleSpeed + aTwinklePhase) * 0.08;
-  float tierBoost = aTier > 1.5 ? 1.45 : (aTier > 0.5 ? 1.18 : 1.0);
-  float heroGlow = aTier > 1.5 ? 1.0 + aBloom * 0.32 : 1.0;
-  gl_PointSize = max(1.0, aHaloRadius * uDpr * tierBoost * heroGlow * twinkle);
+  float twinkle = 0.92 + sin(uTime * aTwinkle.y + aTwinkle.x) * 0.08;
+  float tierBoost = aShape.w > 1.5 ? 1.45 : (aShape.w > 0.5 ? 1.18 : 1.0);
+  float heroGlow = aShape.w > 1.5 ? 1.0 + aColorC.w * 0.32 : 1.0;
+  gl_PointSize = max(1.0, aShape.z * uDpr * tierBoost * heroGlow * twinkle);
 
-  vAddable = aAddable;
-  vBloom = aBloom;
-  vBrightness = aBrightness;
-  vCoreRadius = aCoreRadius;
-  vDiffraction = aDiffraction;
-  vHaloRadius = aHaloRadius;
-  vHardness = aHardness;
-  vTier = aTier;
+  vAddable = aColorA.w;
+  vBloom = aColorC.w;
+  vBrightness = aColorB.w;
+  vCoreRadius = aShape.x;
+  vDiffraction = aShape.y;
+  vTier = aShape.w;
   vTwinkle = twinkle;
-  vAccentColor = aAccentColor;
-  vCoreColor = aCoreColor;
-  vHaloColor = aHaloColor;
-  vSurfaceColor = aSurfaceColor;
+  vAccentColor = aColorA.rgb;
+  vCoreColor = aColorB.rgb;
+  vHaloColor = aColorC.rgb;
 }
 `;
 
@@ -93,14 +78,11 @@ varying float vBloom;
 varying float vBrightness;
 varying float vCoreRadius;
 varying float vDiffraction;
-varying float vHaloRadius;
-varying float vHardness;
 varying float vTier;
 varying float vTwinkle;
 varying vec3 vAccentColor;
 varying vec3 vCoreColor;
 varying vec3 vHaloColor;
-varying vec3 vSurfaceColor;
 
 float safeSmoothstep(float edge0, float edge1, float x) {
   if (edge0 == edge1) {
@@ -122,7 +104,8 @@ void main() {
   float coreMask = safeSmoothstep(max(0.72, vCoreRadius * 1.12), max(0.0, vCoreRadius * 0.18), dist);
   float rimMask = safeSmoothstep(0.98, 0.58, dist) * (1.0 - coreMask);
 
-  vec3 color = mix(vHaloColor, vSurfaceColor, surfaceMask);
+  vec3 surfaceColor = mix(vHaloColor, vCoreColor, 0.42);
+  vec3 color = mix(vHaloColor, surfaceColor, surfaceMask);
   color = mix(color, vCoreColor, coreMask);
   color += vAccentColor * rimMask * (0.08 + tierBlend * 0.12);
 
@@ -199,20 +182,11 @@ function fillStarAttributes(frame: LandingStarfieldFrame) {
   const stars = frame.stars;
   const starCount = stars.length;
   const positions = new Float32Array(starCount * 3);
-  const addable = new Float32Array(starCount);
-  const bloom = new Float32Array(starCount);
-  const brightness = new Float32Array(starCount);
-  const coreRadius = new Float32Array(starCount);
-  const diffraction = new Float32Array(starCount);
-  const haloRadius = new Float32Array(starCount);
-  const hardness = new Float32Array(starCount);
-  const tier = new Float32Array(starCount);
-  const twinklePhase = new Float32Array(starCount);
-  const twinkleSpeed = new Float32Array(starCount);
-  const accentColor = new Float32Array(starCount * 3);
-  const coreColor = new Float32Array(starCount * 3);
-  const haloColor = new Float32Array(starCount * 3);
-  const surfaceColor = new Float32Array(starCount * 3);
+  const colorA = new Float32Array(starCount * 4);
+  const colorB = new Float32Array(starCount * 4);
+  const colorC = new Float32Array(starCount * 4);
+  const shape = new Float32Array(starCount * 4);
+  const twinkle = new Float32Array(starCount * 2);
 
   for (let index = 0; index < starCount; index += 1) {
     const star = stars[index];
@@ -221,53 +195,41 @@ function fillStarAttributes(frame: LandingStarfieldFrame) {
     const normalizedAccent = normalizeRgb(palette.accent);
     const normalizedCore = normalizeRgb(palette.core);
     const normalizedHalo = normalizeRgb(palette.halo);
-    const normalizedSurface = normalizeRgb(palette.surface);
     const attributeIndex = index * 3;
+    const packedIndex = index * 4;
+    const twinkleIndex = index * 2;
     const isDarkObject = stellarType === "BLACK_HOLE";
 
     positions[attributeIndex] = star.x;
     positions[attributeIndex + 1] = star.y;
     positions[attributeIndex + 2] = 0;
-    addable[index] = star.addable ? 1 : 0;
-    bloom[index] = visual.bloomFactor;
-    brightness[index] = star.brightness;
-    coreRadius[index] = visual.coreRadiusFactor;
-    diffraction[index] = visual.diffractionStrength;
-    haloRadius[index] = pointSize;
-    hardness[index] = visual.spriteHardness;
-    tier[index] = getTierValue(star.renderTier);
-    twinklePhase[index] = visual.twinklePhase;
-    twinkleSpeed[index] = visual.twinkleSpeed * 500;
-    accentColor[attributeIndex] = normalizedAccent[0];
-    accentColor[attributeIndex + 1] = normalizedAccent[1];
-    accentColor[attributeIndex + 2] = normalizedAccent[2];
-    coreColor[attributeIndex] = normalizedCore[0];
-    coreColor[attributeIndex + 1] = normalizedCore[1];
-    coreColor[attributeIndex + 2] = normalizedCore[2];
-    haloColor[attributeIndex] = isDarkObject ? 0.12 : normalizedHalo[0];
-    haloColor[attributeIndex + 1] = isDarkObject ? 0.16 : normalizedHalo[1];
-    haloColor[attributeIndex + 2] = isDarkObject ? 0.22 : normalizedHalo[2];
-    surfaceColor[attributeIndex] = isDarkObject ? 0.03 : normalizedSurface[0];
-    surfaceColor[attributeIndex + 1] = isDarkObject ? 0.04 : normalizedSurface[1];
-    surfaceColor[attributeIndex + 2] = isDarkObject ? 0.06 : normalizedSurface[2];
+    colorA[packedIndex] = normalizedAccent[0];
+    colorA[packedIndex + 1] = normalizedAccent[1];
+    colorA[packedIndex + 2] = normalizedAccent[2];
+    colorA[packedIndex + 3] = star.addable ? 1 : 0;
+    colorB[packedIndex] = normalizedCore[0];
+    colorB[packedIndex + 1] = normalizedCore[1];
+    colorB[packedIndex + 2] = normalizedCore[2];
+    colorB[packedIndex + 3] = star.brightness;
+    colorC[packedIndex] = isDarkObject ? 0.12 : normalizedHalo[0];
+    colorC[packedIndex + 1] = isDarkObject ? 0.16 : normalizedHalo[1];
+    colorC[packedIndex + 2] = isDarkObject ? 0.22 : normalizedHalo[2];
+    colorC[packedIndex + 3] = visual.bloomFactor;
+    shape[packedIndex] = visual.coreRadiusFactor;
+    shape[packedIndex + 1] = visual.diffractionStrength;
+    shape[packedIndex + 2] = pointSize;
+    shape[packedIndex + 3] = getTierValue(star.renderTier);
+    twinkle[twinkleIndex] = visual.twinklePhase;
+    twinkle[twinkleIndex + 1] = visual.twinkleSpeed * 500;
   }
 
   return {
-    accentColor,
-    addable,
-    bloom,
-    brightness,
-    coreColor,
-    coreRadius,
-    diffraction,
-    haloColor,
-    haloRadius,
-    hardness,
+    colorA,
+    colorB,
+    colorC,
     positions,
-    surfaceColor,
-    tier,
-    twinklePhase,
-    twinkleSpeed,
+    shape,
+    twinkle,
   };
 }
 
@@ -344,20 +306,11 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
       const attributes = fillStarAttributes(frame);
 
       geometry.setAttribute("position", new THREE.BufferAttribute(attributes.positions, 3));
-      geometry.setAttribute("aAccentColor", new THREE.BufferAttribute(attributes.accentColor, 3));
-      geometry.setAttribute("aAddable", new THREE.BufferAttribute(attributes.addable, 1));
-      geometry.setAttribute("aBloom", new THREE.BufferAttribute(attributes.bloom, 1));
-      geometry.setAttribute("aBrightness", new THREE.BufferAttribute(attributes.brightness, 1));
-      geometry.setAttribute("aCoreColor", new THREE.BufferAttribute(attributes.coreColor, 3));
-      geometry.setAttribute("aCoreRadius", new THREE.BufferAttribute(attributes.coreRadius, 1));
-      geometry.setAttribute("aDiffraction", new THREE.BufferAttribute(attributes.diffraction, 1));
-      geometry.setAttribute("aHaloColor", new THREE.BufferAttribute(attributes.haloColor, 3));
-      geometry.setAttribute("aHaloRadius", new THREE.BufferAttribute(attributes.haloRadius, 1));
-      geometry.setAttribute("aHardness", new THREE.BufferAttribute(attributes.hardness, 1));
-      geometry.setAttribute("aSurfaceColor", new THREE.BufferAttribute(attributes.surfaceColor, 3));
-      geometry.setAttribute("aTier", new THREE.BufferAttribute(attributes.tier, 1));
-      geometry.setAttribute("aTwinklePhase", new THREE.BufferAttribute(attributes.twinklePhase, 1));
-      geometry.setAttribute("aTwinkleSpeed", new THREE.BufferAttribute(attributes.twinkleSpeed, 1));
+      geometry.setAttribute("aColorA", new THREE.BufferAttribute(attributes.colorA, 4));
+      geometry.setAttribute("aColorB", new THREE.BufferAttribute(attributes.colorB, 4));
+      geometry.setAttribute("aColorC", new THREE.BufferAttribute(attributes.colorC, 4));
+      geometry.setAttribute("aShape", new THREE.BufferAttribute(attributes.shape, 4));
+      geometry.setAttribute("aTwinkle", new THREE.BufferAttribute(attributes.twinkle, 2));
       geometry.computeBoundingSphere();
     };
 

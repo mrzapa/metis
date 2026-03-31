@@ -864,6 +864,7 @@ export default function Home() {
   const projectedUserStarTargetsRef = useRef<ProjectedUserStarHitTarget[]>([]);
   const visibleStarsRef = useRef<StarData[]>([]);
   const landingStarProfileCacheRef = useRef<Map<string, StellarProfile>>(new Map());
+  const hasSessionIndexedContentRef = useRef(false);
   const landingStarfieldFrameRef = useRef<LandingStarfieldFrame>({
     height: 0,
     revision: 0,
@@ -1552,6 +1553,7 @@ export default function Home() {
       message: `Index ready: ${result.index_id}. METIS filed it near ${facultyLabel} and it is now available to map into orbit.`,
       tone: "default",
     });
+      hasSessionIndexedContentRef.current = true;
     void refreshAvailableIndexes({ silent: true });
   }, [refreshAvailableIndexes, showToast]);
 
@@ -2379,7 +2381,10 @@ export default function Home() {
         star.twinklePhase = worldStar.twinklePhase;
         star.parallaxFactor = worldStar.parallaxFactor;
         star.hasDiffraction = worldStar.hasDiffraction;
-        const hasUserContent = userStarsRef.current.length > 0 || availableIndexesRef.current.length > 0;
+        const hasLinkedSourceContent = userStarsRef.current.some(
+          (userStar) => getStarManifestPaths(userStar).length > 0,
+        );
+        const hasUserContent = hasLinkedSourceContent || hasSessionIndexedContentRef.current;
         star.isAddable = isAddableBackgroundStar(star, nodes, projectedUserStars, W, H, hasUserContent);
         nextVisibleStars[visibleStarCount] = star;
         visibleStarCount += 1;

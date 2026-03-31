@@ -33,7 +33,6 @@ interface PageChromeProps {
 const NAV_ITEMS = [
   { href: "/", label: "Home", icon: Home },
   { href: "/chat", label: "Chat", icon: MessageSquare },
-  { href: "/library", label: "Library", icon: MessageSquare },
   { href: "/settings", label: "Settings", icon: Settings2 },
   { href: "/diagnostics", label: "Diagnostics", icon: Activity },
 ];
