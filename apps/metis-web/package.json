@@ -3,11 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "prepare:brain-model": "node ./scripts/prepare-brain-model.mjs",
     "postinstall": "node ./scripts/ensure-arrow-tsconfig-base.mjs",
-    "predev": "npm run prepare:brain-model",
     "dev": "next dev",
-    "prebuild": "npm run prepare:brain-model",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
