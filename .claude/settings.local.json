@@ -6,7 +6,17 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
       "Bash(node -e \"const p=require\\(''./package.json''\\); console.log\\(''next:'', p.dependencies.next, ''react:'', p.dependencies.react\\)\")",
       "Bash(pnpm --filter metis-web tsc --noEmit)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(find /mnt/c/Users/samwe/Documents/metis/apps/metis-web/components -name *constellation* -o -name *star* -o -name *brain*)",
+      "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" log --oneline -30 -- \"apps/metis-web/app/page.tsx\")",
+      "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" log --oneline -30 -- \"apps/metis-web/components/constellation/\")",
+      "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" show 427b815 --stat)",
+      "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" log -1 --format=\"%H %s\" HEAD)",
+      "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" diff HEAD~5 HEAD -- \"apps/metis-web/app/page.tsx\")",
+      "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" show 427b815 -- \"apps/metis-web/app/page.tsx\")",
+      "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" show 427b815 -- \"apps/metis-web/lib/constellation-home.ts\")",
+      "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" log --oneline --all -1 -- \"apps/metis-web/app/page.tsx\" \"apps/metis-web/lib/constellation-home.ts\" \"apps/metis-web/components/constellation/\")",
+      "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" diff 427b815~1 427b815 -- \"apps/metis-web/app/page.tsx\" \"apps/metis-web/lib/constellation-home.ts\")"
     ]
   }
 }

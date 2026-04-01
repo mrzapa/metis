@@ -17,6 +17,7 @@ from metis_app.engine.querying import (
 from metis_app.services.retrieval_pipeline import execute_retrieval_plan, generate_sub_queries
 from metis_app.services.stream_events import normalize_stream_event
 from metis_app.services.vector_store import resolve_vector_store
+from metis_app.services.index_service import cosine_similarity as _cosine_similarity
 from metis_app.utils.embedding_providers import create_embeddings
 from metis_app.utils.llm_providers import create_llm
 from metis_app.utils.mock_embeddings import MockEmbeddings
@@ -27,14 +28,6 @@ log = logging.getLogger(__name__)
 _MAX_CONTEXT_CHARS = 12_000
 
 
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    """Cosine similarity between two equal-length vectors. Returns 0.0 on zero vectors."""
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = sum(x * x for x in a) ** 0.5
-    norm_b = sum(y * y for y in b) ** 0.5
-    if norm_a == 0.0 or norm_b == 0.0:
-        return 0.0
-    return dot / (norm_a * norm_b)
 
 
 def _embed_text(text: str, settings: dict) -> list[float]:
