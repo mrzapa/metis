@@ -1,5 +1,7 @@
 # Interface Confusion Inventory
 
+> **Note:** This document tracks cleanup work in progress based on [ADR 0004](../adr/0004-one-interface-tauri-next-fastapi.md) migration. Items listed here are being addressed to clarify the one-interface product direction (Tauri + Next.js).
+
 **Summary:**
 - Files affected: 15
 - Items to rewrite: 8

@@ -1,5 +1,8 @@
 # 0001: Local API and Web UI
 
+> ⚠️ **SUPERSEDED BY ADR 0004**  
+> This ADR describes an earlier architecture that included Qt. See [ADR 0004](./0004-one-interface-tauri-next-fastapi.md) for the current architecture (Tauri + Next.js + FastAPI).
+
 - `Status`: Superseded by ADR 0004
 - `Date`: 2026-03-13
 

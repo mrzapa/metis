@@ -35,6 +35,7 @@ api = [
     "python-multipart==0.0.22",
     "uvicorn[standard]==0.42.0",
 ]
+# Legacy Qt dependency for deprecated tests only (per ADR 0004); keep for CI historical test coverage
 legacy-pyside6 = [
     "PySide6>=6.6",
 ]

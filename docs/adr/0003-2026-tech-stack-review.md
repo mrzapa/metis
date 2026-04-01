@@ -1,10 +1,11 @@
 # 0003 — 2026 Tech Stack Review
 
+> ⚠️ **SUPERSEDED BY ADR 0004**  
+> This historical tech review is from 2026. [ADR 0004](./0004-one-interface-tauri-next-fastapi.md) contains the current technology decision.
+
 - **Status**: Superseded
 - **Date**: 2026-03-15
 - **Superseded by**: 0004-one-interface-tauri-next-fastapi.md
-
-> **Note:** This ADR is historical. The architecture has evolved. See ADR 0004 for the current product architecture.
 
 ## Context
 
