@@ -172,7 +172,7 @@ def test_gguf_validate_success_contract(tmp_path):
             "/v1/gguf/validate",
             json={"model_path": str(model_file)},
         )
-        assert response.status_code == 201
+        assert response.status_code == 200
         data = response.json()
         assert data["valid"] is True
         assert data["filename"] == "Qwen2.5-7B-Q4_K_M.gguf"
@@ -236,5 +236,5 @@ def test_gguf_validate_parity_with_fastapi(tmp_path):
         litestar_response = litestar_client.post("/v1/gguf/validate", json=payload)
 
         assert fastapi_response.status_code == 200
-        assert litestar_response.status_code == 201
+        assert litestar_response.status_code == 200
         assert fastapi_response.json() == litestar_response.json()

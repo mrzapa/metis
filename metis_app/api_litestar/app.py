@@ -7,67 +7,42 @@ The FastAPI implementation remains the production default.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from litestar import Litestar
+from litestar import Litestar, Router
 from litestar.config.cors import CORSConfig
-from litestar.openapi.config import OpenAPIConfig
 from litestar.exceptions import HTTPException as LitestarHTTPException
+from litestar.openapi.config import OpenAPIConfig
 
-from .routes import healthz, version, index, gguf
+from .common import (
+    cors_origins_from_env,
+    handle_http_exception,
+    handle_runtime_error,
+    handle_value_error,
+    require_token_guard,
+)
+from .routes import (
+    assistant,
+    autonomous,
+    core,
+    features,
+    gguf,
+    healthz,
+    heretic,
+    index,
+    logs,
+    query,
+    sessions,
+    settings,
+    version,
+)
 
 log = logging.getLogger(__name__)
-
-_DEFAULT_LOCAL_ORIGINS = [
-    "http://localhost",
-    "http://127.0.0.1",
-    "https://localhost",
-    "https://127.0.0.1",
-]
-
-
-def _cors_origins_from_env() -> list[str]:
-    import os
-
-    raw = os.getenv("METIS_API_CORS_ORIGINS", "")
-    if not raw.strip():
-        return _DEFAULT_LOCAL_ORIGINS
-    return [origin.strip() for origin in raw.split(",") if origin.strip()]
-
-
-def _handle_value_error(request: Any, exc: ValueError) -> Any:
-    from litestar import Response
-    import json
-
-    return Response(
-        json.dumps({"detail": str(exc)}), media_type="application/json", status_code=400
-    )
-
-
-def _handle_runtime_error(request: Any, exc: RuntimeError) -> Any:
-    from litestar import Response
-    import json
-
-    return Response(
-        json.dumps({"detail": str(exc)}), media_type="application/json", status_code=503
-    )
-
-
-def _handle_http_exception(request: Any, exc: LitestarHTTPException) -> Any:
-    from litestar import Response
-    import json
-
-    return Response(
-        json.dumps({"detail": exc.detail}),
-        media_type="application/json",
-        status_code=exc.status_code,
-    )
 
 
 def create_app() -> Litestar:
     """Create the experimental Litestar app."""
     cors_config = CORSConfig(
-        allow_origins=_cors_origins_from_env(),
+        allow_origins=cors_origins_from_env(),
         allow_credentials=True,
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
@@ -78,26 +53,37 @@ def create_app() -> Litestar:
         version="1.0-experimental",
     )
 
+    protected_routes = Router(
+        path="",
+        guards=[require_token_guard],
+        route_handlers=[
+            assistant.router,
+            autonomous.router,
+            core.router,
+            features.router,
+            gguf.router,
+            heretic.router,
+            index.router,
+            logs.router,
+            query.router,
+            sessions.router,
+            settings.router,
+        ],
+    )
+
     app = Litestar(
         debug=False,
         cors_config=cors_config,
         openapi_config=openapi_config,
         exception_handlers={
-            ValueError: _handle_value_error,
-            RuntimeError: _handle_runtime_error,
-            LitestarHTTPException: _handle_http_exception,
+            ValueError: handle_value_error,
+            RuntimeError: handle_runtime_error,
+            LitestarHTTPException: handle_http_exception,
         },
         route_handlers=[
             healthz.healthz,
             version.api_version,
-            index.api_build_index,
-            index.api_delete_index,
-            index.api_list_indexes,
-            gguf.list_catalog,
-            gguf.get_hardware,
-            gguf.list_installed,
-            gguf.validate_model,
-            gguf.refresh_catalog,
+            protected_routes,
         ],
     )
 
