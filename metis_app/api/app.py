@@ -42,6 +42,7 @@ from metis_app.utils.feature_flags import FeatureFlag, get_feature_statuses
 
 from . import gguf as _gguf
 from . import features as _features
+from . import heretic as _heretic
 from . import logs as _logs
 from . import sessions as _sessions
 from . import settings as _settings
@@ -249,6 +250,7 @@ def create_app() -> FastAPI:
     app.include_router(_settings.router, dependencies=_auth)
     app.include_router(_logs.router, dependencies=_auth)
     app.include_router(_gguf.router, dependencies=_auth)
+    app.include_router(_heretic.router, dependencies=_auth)
     app.include_router(_assistant.router, dependencies=_auth)
     app.include_router(_autonomous.router, dependencies=_auth)
     app.include_router(_features.router, dependencies=_auth)

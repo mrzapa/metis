@@ -114,6 +114,8 @@ Key endpoints:
 | `/v1/sessions/{id}` | GET | Session detail |
 | `/v1/settings` | GET/POST | Read / update settings |
 | `/v1/gguf/*` | GET/POST | Local GGUF model management |
+| `/v1/heretic/preflight` | GET | Check heretic tool availability |
+| `/v1/heretic/abliterate/stream` | POST | Run abliteration pipeline (SSE stream) |
 
 ---
 
