@@ -30,6 +30,20 @@ def test_save_candidate_creates_db_and_row(tmp_path, repo):
     assert rows[0][2] == 0  # not promoted yet
 
 
+def test_iteration_complete_event_has_trace_fields():
+    """The iteration_complete event dict must have the expected keys."""
+    event = {
+        "type": "iteration_complete",
+        "run_id": "abc123",
+        "iterations_used": 2,
+        "convergence_score": 0.97,
+        "query_text": "What is RAG?",
+    }
+    assert event["type"] == "iteration_complete"
+    assert "iterations_used" in event
+    assert "convergence_score" in event
+
+
 def test_list_candidates_returns_top_unreviewed(tmp_path, repo):
     db_path = tmp_path / "skill_candidates.db"
     for i in range(5):

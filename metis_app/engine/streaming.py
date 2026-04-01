@@ -404,6 +404,15 @@ def stream_rag_answer(
                     _prev_draft_embedding = _current_emb
                 _iterations_used = iteration
 
+            # Emit trace event for skill candidate capture
+            yield _emit({
+                "type": "iteration_complete",
+                "run_id": run_id,
+                "iterations_used": _iterations_used,
+                "convergence_score": round(_last_convergence_score, 4),
+                "query_text": question,
+            })
+
             # After all iterations, expose accumulated sources for the final answer.
             sources = accumulated_sources
 
