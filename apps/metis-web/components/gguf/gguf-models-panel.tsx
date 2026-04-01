@@ -4,13 +4,16 @@ import { useCallback, useEffect } from "react";
 import {
   fetchGgufCatalog,
   fetchGgufHardware,
+  fetchHereticPreflight,
   fetchGgufInstalled,
-  validateGgufModel,
   refreshGgufCatalog,
   registerGgufModel,
+  runHereticAbliterateStream,
   unregisterGgufModel,
+  validateGgufModel,
   type GgufCatalogEntry,
   type GgufHardwareProfile,
+  type HereticPreflightResponse,
   type GgufInstalledEntry,
   type GgufValidateResult,
 } from "@/lib/api";
@@ -27,11 +30,25 @@ import {
   HardDrive,
   Loader2,
   RefreshCw,
+  Scissors,
   Trash2,
+  Square,
   FileCheck,
   Upload,
+  Copy,
 } from "lucide-react";
 import { useArrowState } from "@/hooks/use-arrow-state";
+
+type ModelsTabValue = "catalog" | "installed" | "validate" | "heretic";
+
+interface GgufModelsPanelProps {
+  initialModelsTab?: string | null;
+  initialHereticModelId?: string | null;
+}
+
+function resolveModelsTab(value: string | null | undefined): ModelsTabValue {
+  return value === "installed" || value === "validate" || value === "heretic" ? value : "catalog";
+}
 
 const USE_CASES = [
   { value: "general", label: "General" },
@@ -381,10 +398,11 @@ function InstalledList({
   );
 }
 
-export function GgufModelsPanel() {
+export function GgufModelsPanel({ initialModelsTab, initialHereticModelId }: GgufModelsPanelProps) {
   const [hardware, setHardware] = useArrowState<GgufHardwareProfile | null>(null);
   const [catalog, setCatalog] = useArrowState<GgufCatalogEntry[]>([]);
   const [installed, setInstalled] = useArrowState<GgufInstalledEntry[]>([]);
+  const [modelsTab, setModelsTab] = useArrowState<ModelsTabValue>(resolveModelsTab(initialModelsTab));
   const [selectedModelName, setSelectedModelName] = useArrowState<string | null>(null);
   const [useCase, setUseCase] = useArrowState("general");
   const [loading, setLoading] = useArrowState(true);
@@ -399,6 +417,19 @@ export function GgufModelsPanel() {
   const [registering, setRegistering] = useArrowState(false);
   const [registerSuccess, setRegisterSuccess] = useArrowState(false);
   const [unregistering, setUnregistering] = useArrowState<string | null>(null);
+
+  const [hereticModelId, setHereticModelId] = useArrowState(initialHereticModelId ?? "");
+  const [hereticBnb4Bit, setHereticBnb4Bit] = useArrowState(false);
+  const [hereticOuttype, setHereticOuttype] = useArrowState("f16");
+  const [hereticPreflight, setHereticPreflight] = useArrowState<HereticPreflightResponse | null>(null);
+  const [hereticPreflightLoading, setHereticPreflightLoading] = useArrowState(false);
+  const [hereticPreflightError, setHereticPreflightError] = useArrowState<string | null>(null);
+  const [hereticRunning, setHereticRunning] = useArrowState(false);
+  const [hereticLogs, setHereticLogs] = useArrowState<string[]>([]);
+  const [hereticRunError, setHereticRunError] = useArrowState<string | null>(null);
+  const [hereticGgufPath, setHereticGgufPath] = useArrowState<string | null>(null);
+  const [hereticCopiedPath, setHereticCopiedPath] = useArrowState(false);
+  const [hereticAbortController, setHereticAbortController] = useArrowState<AbortController | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -422,6 +453,12 @@ export function GgufModelsPanel() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    return () => {
+      hereticAbortController?.abort();
+    };
+  }, [hereticAbortController]);
 
   useEffect(() => {
     if (catalog.length === 0) {
@@ -449,6 +486,96 @@ export function GgufModelsPanel() {
       setError(err instanceof Error ? err.message : "Failed to refresh");
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function loadHereticPreflight() {
+    setHereticPreflightLoading(true);
+    setHereticPreflightError(null);
+    try {
+      const result = await fetchHereticPreflight();
+      setHereticPreflight(result);
+    } catch (err) {
+      setHereticPreflightError(err instanceof Error ? err.message : "Failed to load Heretic preflight");
+    } finally {
+      setHereticPreflightLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (modelsTab !== "heretic") {
+      return;
+    }
+    if (!hereticPreflight && !hereticPreflightLoading) {
+      loadHereticPreflight();
+    }
+  }, [hereticPreflight, hereticPreflightLoading, modelsTab]);
+
+  async function handleRunHeretic() {
+    if (!hereticModelId.trim() || hereticRunning || !hereticPreflight?.ready) {
+      return;
+    }
+
+    const controller = new AbortController();
+    setHereticAbortController(controller);
+    setHereticRunning(true);
+    setHereticRunError(null);
+    setHereticGgufPath(null);
+    setHereticCopiedPath(false);
+    setHereticLogs([]);
+
+    try {
+      await runHereticAbliterateStream(
+        {
+          model_id: hereticModelId.trim(),
+          bnb_4bit: hereticBnb4Bit,
+          outtype: hereticOuttype.trim() || "f16",
+        },
+        {
+          signal: controller.signal,
+          onEvent: (event) => {
+            if (event.type === "complete") {
+              if (event.gguf_path) {
+                setHereticGgufPath(event.gguf_path);
+              }
+              setHereticLogs((prev) => [...prev, event.message || "Abliteration pipeline complete"].slice(-400));
+              return;
+            }
+
+            if (event.type === "error") {
+              setHereticRunError(event.message || "Heretic pipeline failed");
+            }
+
+            setHereticLogs((prev) => [...prev, event.message || event.type].slice(-400));
+          },
+        },
+      );
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setHereticLogs((prev) => [...prev, "Pipeline stopped by user"].slice(-400));
+      } else {
+        setHereticRunError(err instanceof Error ? err.message : "Heretic pipeline failed");
+      }
+    } finally {
+      setHereticRunning(false);
+      setHereticAbortController(null);
+    }
+  }
+
+  function handleStopHeretic() {
+    hereticAbortController?.abort();
+  }
+
+  async function handleCopyGgufPath() {
+    if (!hereticGgufPath || typeof navigator === "undefined" || !navigator.clipboard) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(hereticGgufPath);
+      setHereticCopiedPath(true);
+      window.setTimeout(() => setHereticCopiedPath(false), 1500);
+    } catch {
+      setHereticCopiedPath(false);
     }
   }
 
@@ -573,11 +700,12 @@ export function GgufModelsPanel() {
                 <CardTitle>Model catalogue and installed files</CardTitle>
               </CardHeader>
               <CardContent>
-                <Tabs defaultValue="catalog" className="space-y-5">
-                  <TabsList className="glass-tab-rail grid w-full grid-cols-3">
+                <Tabs value={modelsTab} onValueChange={(value) => setModelsTab(resolveModelsTab(value))} className="space-y-5">
+                  <TabsList className="glass-tab-rail grid w-full grid-cols-4">
                     <TabsTrigger value="catalog">Catalogue ({catalog.length})</TabsTrigger>
                     <TabsTrigger value="installed">Installed ({installed.length})</TabsTrigger>
                     <TabsTrigger value="validate">Validate</TabsTrigger>
+                    <TabsTrigger value="heretic">Heretic</TabsTrigger>
                   </TabsList>
 
                   <TabsContent value="catalog" className="mt-0">
@@ -664,6 +792,157 @@ export function GgufModelsPanel() {
                             Model registered successfully
                           </div>
                         )}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+
+                  <TabsContent value="heretic" className="mt-0 space-y-4">
+                    <Card className="glass-panel">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="flex items-center gap-2 text-base">
+                          <AnimatedLucideIcon icon={Scissors} mode="hoverLift" className="size-4" />
+                          Heretic Abliteration
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="rounded-[1rem] border border-white/10 bg-white/5 px-3 py-3 text-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted-foreground">Preflight</span>
+                              <Badge variant={hereticPreflight?.ready ? "default" : "secondary"}>
+                                {hereticPreflight?.ready ? "Ready" : "Not ready"}
+                              </Badge>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={loadHereticPreflight}
+                              disabled={hereticPreflightLoading}
+                              className="gap-1.5"
+                            >
+                              {hereticPreflightLoading ? (
+                                <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />
+                              ) : (
+                                <AnimatedLucideIcon icon={RefreshCw} mode="hoverLift" className="size-4" />
+                              )}
+                              Refresh
+                            </Button>
+                          </div>
+                          {hereticPreflight?.convert_script && (
+                            <p className="mt-2 break-all text-xs text-muted-foreground">
+                              convert_hf_to_gguf.py: {hereticPreflight.convert_script}
+                            </p>
+                          )}
+                          {hereticPreflightError && (
+                            <p className="mt-2 text-xs text-destructive">{hereticPreflightError}</p>
+                          )}
+                          {hereticPreflight && hereticPreflight.errors.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              {hereticPreflight.errors.map((entry) => (
+                                <p key={entry} className="text-xs text-amber-300">
+                                  {entry}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-2 md:col-span-2">
+                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Model ID</p>
+                            <Input
+                              placeholder="meta-llama/Llama-3.1-8B-Instruct"
+                              value={hereticModelId}
+                              onChange={(event) => setHereticModelId(event.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Outtype</p>
+                            <Input
+                              placeholder="f16"
+                              value={hereticOuttype}
+                              onChange={(event) => setHereticOuttype(event.target.value)}
+                            />
+                          </div>
+                          <label className="flex items-center gap-2 pt-7 text-sm text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              checked={hereticBnb4Bit}
+                              onChange={(event) => setHereticBnb4Bit(event.target.checked)}
+                              className="accent-primary"
+                            />
+                            Enable bnb_4bit
+                          </label>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            onClick={handleRunHeretic}
+                            disabled={
+                              hereticRunning ||
+                              !hereticModelId.trim() ||
+                              !hereticPreflight?.ready
+                            }
+                            className="gap-1.5"
+                          >
+                            {hereticRunning && <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />}
+                            Start pipeline
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleStopHeretic}
+                            disabled={!hereticRunning}
+                            className="gap-1.5"
+                          >
+                            <AnimatedLucideIcon icon={Square} mode="hoverLift" className="size-4" />
+                            Stop
+                          </Button>
+                        </div>
+
+                        {hereticRunError && (
+                          <div className="flex items-center gap-2 rounded-[1rem] border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                            <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-4" />
+                            {hereticRunError}
+                          </div>
+                        )}
+
+                        {hereticGgufPath && (
+                          <div className="rounded-[1rem] border border-green-500/30 bg-green-500/10 px-3 py-3 text-sm">
+                            <div className="mb-2 flex items-center gap-2 text-green-600">
+                              <AnimatedLucideIcon icon={CheckCircle2} mode="idlePulse" className="size-4" />
+                              GGUF ready
+                            </div>
+                            <div className="flex flex-col gap-2 md:flex-row">
+                              <Input value={hereticGgufPath} readOnly className="font-mono text-xs" />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={handleCopyGgufPath}
+                                className="gap-1.5"
+                              >
+                                <AnimatedLucideIcon icon={Copy} mode="hoverLift" className="size-4" />
+                                {hereticCopiedPath ? "Copied" : "Copy"}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="rounded-[1rem] border border-white/10 bg-black/35 p-3">
+                          <p className="mb-2 text-xs uppercase tracking-[0.14em] text-muted-foreground">Live log</p>
+                          <div className="max-h-56 overflow-auto font-mono text-xs leading-5 text-slate-200">
+                            {hereticLogs.length === 0 ? (
+                              <p className="text-muted-foreground">No events yet</p>
+                            ) : (
+                              hereticLogs.map((entry, index) => (
+                                <p key={`${entry}-${index}`}>{entry}</p>
+                              ))
+                            )}
+                          </div>
+                        </div>
                       </CardContent>
                     </Card>
                   </TabsContent>

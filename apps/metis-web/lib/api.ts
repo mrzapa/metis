@@ -1661,6 +1661,134 @@ export interface GgufValidateResult {
   is_instruct: boolean;
 }
 
+export interface HereticPreflightResponse {
+  ready: boolean;
+  heretic_available: boolean;
+  convert_script: string | null;
+  errors: string[];
+}
+
+export interface HereticStreamStartedEvent {
+  type: "started";
+  message: string;
+}
+
+export interface HereticStreamProgressEvent {
+  type: "progress";
+  message: string;
+}
+
+export interface HereticStreamCompleteEvent {
+  type: "complete";
+  message: string;
+  gguf_path?: string;
+}
+
+export interface HereticStreamErrorEvent {
+  type: "error";
+  message: string;
+}
+
+export type HereticStreamEvent =
+  | HereticStreamStartedEvent
+  | HereticStreamProgressEvent
+  | HereticStreamCompleteEvent
+  | HereticStreamErrorEvent;
+
+function normalizeHereticStreamEvent(
+  data: unknown,
+  fallbackEventType: string | null,
+): HereticStreamEvent {
+  const payload = getRecord(data);
+  const message = getText(payload.message, "");
+  const payloadType = getText(payload.type).trim().toLowerCase();
+  const eventType = (payloadType || String(fallbackEventType || "").trim().toLowerCase()) as
+    | "started"
+    | "progress"
+    | "complete"
+    | "error"
+    | "";
+
+  if (eventType === "complete") {
+    return {
+      type: "complete",
+      message,
+      gguf_path: getText(payload.gguf_path) || undefined,
+    };
+  }
+
+  if (eventType === "error") {
+    return {
+      type: "error",
+      message: message || "Heretic pipeline failed",
+    };
+  }
+
+  if (eventType === "started") {
+    return {
+      type: "started",
+      message,
+    };
+  }
+
+  return {
+    type: "progress",
+    message,
+  };
+}
+
+export async function fetchHereticPreflight(): Promise<HereticPreflightResponse> {
+  const res = await apiFetch(`${await getApiBase()}/v1/heretic/preflight`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch Heretic preflight (${res.status}): ${detail}`);
+  }
+  const payload = (await res.json()) as unknown;
+  const record = getRecord(payload);
+  return {
+    ready: getBoolean(record.ready),
+    heretic_available: getBoolean(record.heretic_available),
+    convert_script: getText(record.convert_script) || null,
+    errors: getStringArray(record.errors),
+  };
+}
+
+export async function runHereticAbliterateStream(
+  payload: {
+    model_id: string;
+    bnb_4bit?: boolean;
+    outtype?: string;
+  },
+  options: {
+    signal?: AbortSignal;
+    onEvent: (event: HereticStreamEvent) => void;
+  },
+): Promise<void> {
+  const res = await apiFetch(`${await getApiBase()}/v1/heretic/abliterate/stream`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify({
+      model_id: payload.model_id,
+      bnb_4bit: payload.bnb_4bit ?? false,
+      outtype: payload.outtype ?? "f16",
+    }),
+    signal: options.signal,
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Heretic stream failed (${res.status}): ${detail}`);
+  }
+
+  await readSseEvents<unknown>(res, (message) => {
+    const event = normalizeHereticStreamEvent(message.data, message.event);
+    options.onEvent(event);
+  });
+}
+
 export async function fetchGgufCatalog(useCase = "general"): Promise<GgufCatalogEntry[]> {
   const res = await apiFetch(`${await getApiBase()}/v1/gguf/catalog?use_case=${encodeURIComponent(useCase)}`);
   if (!res.ok) {

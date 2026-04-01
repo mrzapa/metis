@@ -296,6 +296,7 @@ vi.mock("lucide-react", () => {
     RefreshCw: Icon,
     RotateCcw: Icon,
     Search: Icon,
+    Scissors: Icon,
     SendHorizontal: Icon,
     Settings: Icon,
     Settings2: Icon,

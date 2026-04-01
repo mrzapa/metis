@@ -352,6 +352,8 @@ function ToggleRow({
 export default function SettingsPage() {
   const searchParams = useSearchParams();
   const initialTab = searchParams.get("tab") === "models" ? "models" : "core";
+  const initialModelsTab = searchParams.get("modelsTab");
+  const initialHereticModelId = searchParams.get("model_id");
   const [loading, setLoading] = useArrowState(true);
   const [loadError, setLoadError] = useArrowState<string | null>(null);
   const [saving, setSaving] = useArrowState(false);
@@ -1737,7 +1739,10 @@ export default function SettingsPage() {
 
             {/* ── Models (GGUF) ──────────────────────────────────────── */}
             <TabsContent value="models" className="glass-settings-pane mt-6">
-              <GgufModelsPanel />
+              <GgufModelsPanel
+                initialModelsTab={initialModelsTab}
+                initialHereticModelId={initialHereticModelId}
+              />
             </TabsContent>
           </Tabs>
         )}

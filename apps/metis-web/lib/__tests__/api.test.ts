@@ -13,8 +13,10 @@ const {
   fetchUiTelemetrySummary,
   fetchApiVersion,
   fetchGgufCatalog,
+  fetchHereticPreflight,
   queryKnowledgeSearch,
   normalizeRagStreamEvent,
+  runHereticAbliterateStream,
   submitRunAction,
 } = await import(
   "../api"
@@ -606,5 +608,119 @@ describe("submitRunAction", () => {
         }),
       }),
     );
+  });
+});
+
+describe("fetchHereticPreflight", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns parsed Heretic preflight data", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            ready: true,
+            heretic_available: true,
+            convert_script: "/opt/llama.cpp/convert_hf_to_gguf.py",
+            errors: [],
+          }),
+      }),
+    );
+
+    const result = await fetchHereticPreflight();
+    expect(result).toEqual({
+      ready: true,
+      heretic_available: true,
+      convert_script: "/opt/llama.cpp/convert_hf_to_gguf.py",
+      errors: [],
+    });
+  });
+});
+
+describe("runHereticAbliterateStream", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("streams started/progress/complete events", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(
+          encoder.encode(
+            [
+              'event: message\ndata: {"type":"started","message":"Starting"}\n\n',
+              'event: message\ndata: {"type":"progress","message":"Converting"}\n\n',
+              'event: message\ndata: {"type":"complete","message":"Done","gguf_path":"/tmp/model.gguf"}\n\n',
+            ].join(""),
+          ),
+        );
+        controller.close();
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: stream,
+      }),
+    );
+
+    const events: Array<{ type: string; message: string; gguf_path?: string }> = [];
+    await runHereticAbliterateStream(
+      {
+        model_id: "meta-llama/Llama-3.1-8B-Instruct",
+      },
+      {
+        onEvent: (event) => {
+          events.push(event);
+        },
+      },
+    );
+
+    expect(events).toEqual([
+      { type: "started", message: "Starting" },
+      { type: "progress", message: "Converting" },
+      { type: "complete", message: "Done", gguf_path: "/tmp/model.gguf" },
+    ]);
+  });
+
+  it("normalizes unknown events to progress", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(
+          encoder.encode('event: message\ndata: {"message":"line output"}\n\n'),
+        );
+        controller.close();
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: stream,
+      }),
+    );
+
+    const messages: string[] = [];
+    await runHereticAbliterateStream(
+      {
+        model_id: "meta-llama/Llama-3.1-8B-Instruct",
+      },
+      {
+        onEvent: (event) => {
+          messages.push(`${event.type}:${event.message}`);
+        },
+      },
+    );
+
+    expect(messages).toEqual(["progress:line output"]);
   });
 });

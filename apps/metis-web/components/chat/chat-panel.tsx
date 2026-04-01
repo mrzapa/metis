@@ -259,6 +259,12 @@ export function ChatPanel({
           >
             Settings
           </Link>
+          <Link
+            href="/settings?tab=models&modelsTab=heretic"
+            className="chat-control-pill rounded-full px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+          >
+            Heretic
+          </Link>
           {/* Model status badge */}
           {(modelProvider || modelName) && (
             <>
