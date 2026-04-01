@@ -134,11 +134,11 @@ function RolloutSummaryCard({
   const runtimeEnabled = settings?.enable_arrow_artifact_runtime;
 
   return (
-    <Card data-testid={`arrow-rollout-${windowHours}h`} className="glass-panel border-white/12">
+    <Card data-testid={`artifact-rollout-${windowHours}h`} className="glass-panel border-white/12">
       <CardHeader className="space-y-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <CardTitle>{windowHours === 24 ? "Arrow rollout alert window" : "Arrow rollout decision window"}</CardTitle>
+            <CardTitle>{windowHours === 24 ? "Artifact rollout alert window" : "Artifact rollout decision window"}</CardTitle>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
               {windowHours === 24
                 ? "Use the 24h window for rollback decisions and incident response."
@@ -254,7 +254,7 @@ function RolloutSummaryCard({
                       onClick={() => onAction("rollback_runtime")}
                     >
                       {actionLoading ? <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" /> : <AnimatedLucideIcon icon={RotateCcw} mode="hoverLift" className="size-4" />}
-                      Disable Arrow runtime
+                      Disable artifact runtime
                     </Button>
                   )
                 ) : summary.thresholds.overall_recommendation === "rollback_artifacts" ? (
@@ -269,7 +269,7 @@ function RolloutSummaryCard({
                       onClick={() => onAction("rollback_artifacts")}
                     >
                       {actionLoading ? <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" /> : <AnimatedLucideIcon icon={ShieldAlert} mode="hoverLift" className="size-4" />}
-                      Disable Arrow artifacts
+                      Disable artifacts
                     </Button>
                   )
                 ) : (
@@ -407,8 +407,8 @@ export default function DiagnosticsPage() {
       versions,
       settings,
       log_tail: logTail,
-      arrow_rollout_summary_24h: summary24h.data,
-      arrow_rollout_summary_168h: summary168h.data,
+      rollout_summary_24h: summary24h.data,
+      rollout_summary_168h: summary168h.data,
     };
     await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2));
     setCopied(true);
@@ -418,8 +418,8 @@ export default function DiagnosticsPage() {
   async function handleRollback(action: RolloutAction) {
     const message =
       action === "rollback_runtime"
-        ? "Disable Arrow runtime rendering? Artifact cards and fallback rendering will remain enabled."
-        : "Disable Arrow artifacts globally? Chat will return to markdown-only rendering.";
+        ? "Disable artifact runtime rendering? Artifact cards and fallback rendering will remain enabled."
+        : "Disable artifacts globally? Chat will return to markdown-only rendering.";
 
     if (typeof window !== "undefined" && !window.confirm(message)) {
       return;
@@ -608,11 +608,11 @@ export default function DiagnosticsPage() {
 
               <Card className="glass-panel-strong border-white/12">
                 <CardHeader>
-                  <CardTitle>Arrow rollout console</CardTitle>
+                  <CardTitle>Artifact rollout console</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <p className="text-sm leading-6 text-muted-foreground">
-                    This operator console combines the Phase 3 telemetry summary endpoint with the active Arrow rollout flags so rollback decisions can be made in-product.
+                    This operator console combines the Phase 3 telemetry summary endpoint with the active artifact rollout flags so rollback decisions can be made in-product.
                   </p>
                   {actionError && (
                     <div className="rounded-[1rem] border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
