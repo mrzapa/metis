@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Metis API",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py"],
+      "port": 8000
+    },
+    {
+      "name": "Metis Web UI",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "apps/metis-web", "run", "dev"],
+      "port": 3000
+    }
+  ]
+}

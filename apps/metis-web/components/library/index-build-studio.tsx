@@ -11,6 +11,7 @@ import { StatusPill } from "@/components/shell/status-pill";
 import { useArrowState } from "@/hooks/use-arrow-state";
 import {
   buildIndexStream,
+  buildWebGraphIndexStream,
   fetchIndexes,
   fetchSettings,
   uploadFiles,
@@ -24,6 +25,7 @@ import {
   Circle,
   Database,
   FolderOpen,
+  Globe,
   Loader2,
   UploadCloud,
   X,
@@ -61,7 +63,7 @@ export function IndexBuildStudio({
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDesktop, setIsDesktop] = useArrowState(false);
-  const [tab, setTab] = useArrowState<"upload" | "paths" | "desktop">("upload");
+  const [tab, setTab] = useArrowState<"upload" | "paths" | "desktop" | "web-graph">("upload");
   const [pathsConsent, setPathsConsent] = useArrowState(false);
 
   const [selectedFiles, setSelectedFiles] = useArrowState<File[]>([]);
@@ -77,6 +79,8 @@ export function IndexBuildStudio({
   const [buildError, setBuildError] = useArrowState<string | null>(null);
   const [progress, setProgress] = useArrowState<ProgressState>(INITIAL_PROGRESS);
   const [buildResult, setBuildResult] = useArrowState<IndexBuildResult | null>(null);
+
+  const [webGraphTopic, setWebGraphTopic] = useArrowState("");
 
   const [indexes, setIndexes] = useArrowState<IndexSummary[]>([]);
   const [loadingIndexes, setLoadingIndexes] = useArrowState(false);
@@ -208,6 +212,37 @@ export function IndexBuildStudio({
     }
   }
 
+  async function handleWebGraphBuild() {
+    if (!webGraphTopic.trim()) return;
+    setBuilding(true);
+    setBuildError(null);
+    setBuildResult(null);
+    setProgress({ reading: "active", embedding: "idle", saved: "idle" });
+
+    try {
+      const settings =
+        settingsOverrides && Object.keys(settingsOverrides).length > 0
+          ? settingsOverrides
+          : await fetchSettings();
+
+      const result = await buildWebGraphIndexStream(webGraphTopic.trim(), settings, (event) => {
+        const type = String(event.type ?? "");
+        if (type === "build_started") {
+          setProgress({ reading: "done", embedding: "active", saved: "idle" });
+        }
+      });
+
+      setProgress({ reading: "done", embedding: "done", saved: "done" });
+      setBuildResult(result);
+      onIndexBuilt?.(result);
+      loadIndexes();
+    } catch (err) {
+      setBuildError(err instanceof Error ? err.message : "Web graph build failed");
+    } finally {
+      setBuilding(false);
+    }
+  }
+
   return (
     <div className={cn("space-y-6", className)}>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(320px,0.92fr)]">
@@ -265,6 +300,18 @@ export function IndexBuildStudio({
               )}
             >
               Local paths
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("web-graph")}
+              className={cn(
+                "cursor-pointer rounded-full px-4 py-2 text-sm font-medium transition-all",
+                tab === "web-graph"
+                  ? "bg-primary/16 text-primary"
+                  : "bg-white/6 text-muted-foreground hover:bg-white/10 hover:text-foreground",
+              )}
+            >
+              Web Graph
             </button>
           </div>
 
@@ -406,6 +453,33 @@ export function IndexBuildStudio({
                 ) : null}
               </div>
             ) : null}
+
+            {tab === "web-graph" ? (
+              <div className="space-y-4">
+                <div className="rounded-[1.35rem] border border-primary/20 bg-primary/6 px-4 py-3 text-sm leading-7 text-primary">
+                  Enter a topic and METIS will search the web, scrape pages, and build a wikilinked knowledge-graph index automatically.
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="web-graph-topic" className="text-sm font-medium text-foreground">
+                    Topic
+                  </label>
+                  <input
+                    id="web-graph-topic"
+                    type="text"
+                    value={webGraphTopic}
+                    onChange={(event) => setWebGraphTopic(event.target.value)}
+                    placeholder="e.g. Transformer attention mechanisms"
+                    className="h-10 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void handleWebGraphBuild();
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    METIS searches several pages, extracts concepts, and indexes them as a knowledge graph you can query in chat.
+                  </p>
+                </div>
+              </div>
+            ) : null}
           </div>
         </section>
 
@@ -414,43 +488,87 @@ export function IndexBuildStudio({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="font-display text-2xl font-semibold tracking-[-0.04em] text-foreground">
-                  Build your first index
+                  {tab === "web-graph" ? "Build web graph index" : "Build your first index"}
                 </h2>
                 <p className="mt-2 text-sm leading-7 text-muted-foreground">
-                  Turn the selected documents into a searchable knowledge base for chat and research mode.
+                  {tab === "web-graph"
+                    ? "METIS will search the web, scrape pages, and produce a wikilinked knowledge-graph index."
+                    : "Turn the selected documents into a searchable knowledge base for chat and research mode."}
                 </p>
               </div>
               <StatusPill
-                label={building ? "Building" : readyPaths.length > 0 ? "Ready to build" : "Waiting on docs"}
-                tone={building ? "checking" : readyPaths.length > 0 ? "connected" : "neutral"}
+                label={
+                  building
+                    ? "Building"
+                    : tab === "web-graph"
+                      ? webGraphTopic.trim()
+                        ? "Topic ready"
+                        : "Enter a topic"
+                      : readyPaths.length > 0
+                        ? "Ready to build"
+                        : "Waiting on docs"
+                }
+                tone={
+                  building
+                    ? "checking"
+                    : tab === "web-graph"
+                      ? webGraphTopic.trim()
+                        ? "connected"
+                        : "neutral"
+                      : readyPaths.length > 0
+                        ? "connected"
+                        : "neutral"
+                }
                 animate={building}
               />
             </div>
 
             <div className="mt-5 rounded-[1.4rem] border border-white/8 bg-black/10 p-4">
               <p className="text-sm text-muted-foreground">
-                {readyPaths.length > 0
-                  ? `${readyPaths.length} document${readyPaths.length === 1 ? "" : "s"} prepared`
-                  : "Choose at least one file or path to continue."}
+                {tab === "web-graph"
+                  ? webGraphTopic.trim()
+                    ? `Topic: "${webGraphTopic.trim()}"`
+                    : "Enter a topic in the panel on the left."
+                  : readyPaths.length > 0
+                    ? `${readyPaths.length} document${readyPaths.length === 1 ? "" : "s"} prepared`
+                    : "Choose at least one file or path to continue."}
               </p>
 
               <Button
-                onClick={handleBuild}
-                disabled={building || readyPaths.length === 0}
+                onClick={tab === "web-graph" ? handleWebGraphBuild : handleBuild}
+                disabled={building || (tab === "web-graph" ? !webGraphTopic.trim() : readyPaths.length === 0)}
                 className="mt-4 gap-2"
               >
-                {building ? <Loader2 className="size-4 animate-spin" /> : <Database className="size-4" />}
-                {building ? "Building..." : "Build index"}
+                {building ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : tab === "web-graph" ? (
+                  <Globe className="size-4" />
+                ) : (
+                  <Database className="size-4" />
+                )}
+                {building
+                  ? tab === "web-graph"
+                    ? "Researching..."
+                    : "Building..."
+                  : tab === "web-graph"
+                    ? "Build web graph"
+                    : "Build index"}
               </Button>
 
               {building || progress.reading !== "idle" ? (
                 <div className="mt-5 space-y-3">
                   {(
-                    [
-                      ["reading", "Reading documents"],
-                      ["embedding", "Computing embeddings"],
-                      ["saved", "Saved and ready"],
-                    ] as const
+                    tab === "web-graph"
+                      ? ([
+                          ["reading", "Searching and scraping web"],
+                          ["embedding", "Generating knowledge graph"],
+                          ["saved", "Indexed and ready"],
+                        ] as const)
+                      : ([
+                          ["reading", "Reading documents"],
+                          ["embedding", "Computing embeddings"],
+                          ["saved", "Saved and ready"],
+                        ] as const)
                   ).map(([key, label]) => (
                     <div key={key} className="flex items-center gap-3 text-sm">
                       <AnimatePresence mode="wait" initial={false}>

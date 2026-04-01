@@ -1483,6 +1483,73 @@ export async function buildIndexStream(
   throw new Error("Build stream ended without completion");
 }
 
+export async function buildWebGraphIndexStream(
+  topic: string,
+  settings: Record<string, unknown>,
+  onEvent: (event: Record<string, unknown>) => void,
+  indexId?: string,
+): Promise<IndexBuildResult> {
+  emitCompanionActivity({
+    source: "index_build",
+    state: "running",
+    trigger: "index_build_started",
+    summary: `Web graph: ${topic}`,
+    timestamp: Date.now(),
+  });
+
+  const res = await apiFetch(`${await getApiBase()}/v1/index/build/web-graph/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topic, settings, index_id: indexId }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    emitCompanionActivity({
+      source: "index_build",
+      state: "error",
+      trigger: "index_build_error",
+      summary: detail,
+      timestamp: Date.now(),
+    });
+    throw new Error(`Web graph build failed (${res.status}): ${detail}`);
+  }
+  let buildResult: IndexBuildResult | null = null;
+  await readSseEvents<Record<string, unknown>>(res, ({ data: event }) => {
+    onEvent(event);
+    if (event.type === "build_started") {
+      emitCompanionActivity({
+        source: "index_build",
+        state: "running",
+        trigger: "index_build_status",
+        summary: `Searching and scraping: ${String(event.topic ?? topic)}`,
+        timestamp: Date.now(),
+      });
+    }
+    if (event.type === "error") {
+      emitCompanionActivity({
+        source: "index_build",
+        state: "error",
+        trigger: "index_build_error",
+        summary: String(event.message ?? "Build error"),
+        timestamp: Date.now(),
+      });
+      throw new Error(String(event.message ?? "Build error"));
+    }
+    if (event.type === "build_complete") {
+      emitCompanionActivity({
+        source: "index_build",
+        state: "completed",
+        trigger: "index_build_completed",
+        summary: String(event.manifest_path ?? "Web graph index complete"),
+        timestamp: Date.now(),
+      });
+      buildResult = event as unknown as IndexBuildResult;
+    }
+  });
+  if (buildResult) return buildResult;
+  throw new Error("Web graph build stream ended without completion");
+}
+
 export async function submitRunAction(
   runId: string,
   body: {

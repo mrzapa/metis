@@ -81,6 +81,7 @@ const schema = z.object({
   embedding_model: z.string().min(1),
   local_llm_url: z.string(),
   agent_lightning_enabled: z.boolean(),
+  web_scrape_full_content: z.boolean(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -215,6 +216,7 @@ const FORM_DEFAULT_VALUES: FormValues = {
   embedding_model: "voyage-4-large",
   local_llm_url: "http://localhost:1234/v1",
   agent_lightning_enabled: false,
+  web_scrape_full_content: false,
 };
 
 /** Search index metadata for all settings fields. Used by the search bar. */
@@ -425,6 +427,7 @@ export default function SettingsPage() {
       embedding_model: "voyage-4-large",
       local_llm_url: "http://localhost:1234/v1",
       agent_lightning_enabled: false,
+      web_scrape_full_content: false,
     },
   });
 
@@ -520,6 +523,7 @@ export default function SettingsPage() {
           embedding_model: (raw.embedding_model as string) ?? "voyage-4-large",
           local_llm_url: (raw.local_llm_url as string) ?? "http://localhost:1234/v1",
           agent_lightning_enabled: (raw.agent_lightning_enabled as boolean) ?? false,
+          web_scrape_full_content: (raw.web_scrape_full_content as boolean) ?? false,
         });
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : "Failed to load settings"))
@@ -1204,6 +1208,13 @@ export default function SettingsPage() {
                       description="Recursively follow graph edges to retrieve additional related context."
                       checked={watch("enable_recursive_retrieval")}
                       onChange={(v) => setValue("enable_recursive_retrieval", v)}
+                    />
+                    <ToggleRow
+                      id="web_scrape_full_content"
+                      label="Web graph: full-page scrape"
+                      description="Scrape the full page content (up to 2000 chars) when building web graph indexes. When off, uses a 1000-char preview."
+                      checked={watch("web_scrape_full_content")}
+                      onChange={(v) => setValue("web_scrape_full_content", v)}
                     />
                   </div>
                 </section>

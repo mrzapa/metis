@@ -17,6 +17,8 @@ import { AlertCircle, Bot, Loader2, SendHorizontal, Square } from "lucide-react"
 import { AgenticStepIndicator } from "@/components/chat/agentic-step-indicator";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
 import { ModelStatusDialog } from "@/components/chat/model-status-dialog";
+import { IndexBuildStudio } from "@/components/library/index-build-studio";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -332,24 +334,42 @@ export function ChatPanel({
                   {activeIndexLabel}
                 </span>
               </span>
-              <button
-                type="button"
-                onClick={() => setPickerOpen(true)}
-                className="text-primary hover:underline"
-              >
-                Change
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setBuildStudioOpen(true)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  + New
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className="text-primary hover:underline"
+                >
+                  Change
+                </button>
+              </div>
             </>
           ) : (
             <>
               <span className="text-muted-foreground">No index selected</span>
-              <button
-                type="button"
-                onClick={() => setPickerOpen(true)}
-                className="font-medium text-primary hover:underline"
-              >
-                Select an index →
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setBuildStudioOpen(true)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  + New
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className="font-medium text-primary hover:underline"
+                >
+                  Select an index →
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -637,6 +657,21 @@ export function ChatPanel({
           onIndexChange?.(path, label);
         }}
       />
+
+      <Dialog open={buildStudioOpen} onOpenChange={setBuildStudioOpen}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Build a new index</DialogTitle>
+          </DialogHeader>
+          <IndexBuildStudio
+            showExistingIndexes={false}
+            onIndexBuilt={(result) => {
+              onIndexChange?.(result.manifest_path, result.index_id);
+              setBuildStudioOpen(false);
+            }}
+          />
+        </DialogContent>
+      </Dialog>
 
       <ModelStatusDialog
         open={modelDialogOpen}
