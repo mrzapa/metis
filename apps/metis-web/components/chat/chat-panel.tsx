@@ -100,6 +100,7 @@ export function ChatPanel({
   const [draft, setDraft] = useArrowState(initialDraft ?? "");
   const [queryMode, setQueryMode] = useArrowState<"direct" | "rag">(initialQueryMode ?? "direct");
   const [pickerOpen, setPickerOpen] = useArrowState(false);
+  const [buildStudioOpen, setBuildStudioOpen] = useArrowState(false);
   const [modelDialogOpen, setModelDialogOpen] = useArrowState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isKnowledgeSearchMode = queryMode === "rag" && selectedMode === "Knowledge Search";

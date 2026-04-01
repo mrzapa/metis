@@ -307,6 +307,10 @@ def stream_rag_answer(
                     "run_id": run_id,
                     "iteration": iteration,
                     "total_iterations": agentic_iteration_budget,
+                    "detail": {
+                        "tool_name": "agentic_loop",
+                        "task_summary": f"Refinement iteration {iteration}/{agentic_iteration_budget}",
+                    },
                 })
 
                 gap_queries = _identify_gaps(question, current_draft, accumulated_context, llm)
@@ -318,6 +322,11 @@ def stream_rag_answer(
                     "run_id": run_id,
                     "gaps": gap_queries,
                     "iteration": iteration,
+                    "detail": {
+                        "tool_name": "gap_analyzer",
+                        "task_summary": f"Identified {len(gap_queries)} gap(s)",
+                    },
+                    "ancestry": [run_id],
                 })
 
                 # Retrieve additional context for each identified gap.
@@ -368,6 +377,11 @@ def stream_rag_answer(
                     "sources": iteration_new_sources,
                     "context_block": new_context_block,
                     "top_score": top_iter_score,
+                    "detail": {
+                        "tool_name": "gap_retrieval",
+                        "task_summary": f"Retrieved context for {len(gap_queries)} gap(s)",
+                    },
+                    "ancestry": [run_id],
                 })
 
                 # Re-synthesise a draft for the next gap-analysis cycle

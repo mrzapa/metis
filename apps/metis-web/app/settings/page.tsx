@@ -55,6 +55,8 @@ const schema = z.object({
   enable_summarizer: z.boolean(),
   agentic_mode: z.boolean(),
   agentic_max_iterations: z.number().int().min(1, "Min 1").max(10, "Max 10"),
+  agentic_iteration_budget: z.number().int().min(1, "Min 1").max(10, "Max 10"),
+  agentic_convergence_threshold: z.number().min(0).max(1),
   subquery_max_docs: z.number().int().min(1, "Min 1").max(500, "Max 500"),
   document_loader: z.string().min(1),
   structure_aware_ingestion: z.boolean(),
@@ -193,6 +195,8 @@ const FORM_DEFAULT_VALUES: FormValues = {
   enable_summarizer: true,
   agentic_mode: false,
   agentic_max_iterations: 2,
+  agentic_iteration_budget: 4,
+  agentic_convergence_threshold: 0.95,
   subquery_max_docs: 200,
   document_loader: "auto",
   structure_aware_ingestion: false,
@@ -1069,6 +1073,29 @@ export default function SettingsPage() {
                         {...register("agentic_max_iterations", { valueAsNumber: true })}
                       />
                       <FieldError message={errors.agentic_max_iterations?.message} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <FieldLabel htmlFor="agentic_iteration_budget" tooltip="Total iteration budget for the convergence loop. The loop exits early if the answer converges before reaching this limit.">Iteration budget</FieldLabel>
+                      <Input
+                        id="agentic_iteration_budget"
+                        type="number"
+                        min={1}
+                        max={10}
+                        {...register("agentic_iteration_budget", { valueAsNumber: true })}
+                      />
+                      <FieldError message={errors.agentic_iteration_budget?.message} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <FieldLabel htmlFor="agentic_convergence_threshold" tooltip="Cosine similarity threshold (0–1) between successive drafts. When similarity exceeds this value the loop exits early.">Convergence threshold</FieldLabel>
+                      <Input
+                        id="agentic_convergence_threshold"
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        {...register("agentic_convergence_threshold", { valueAsNumber: true })}
+                      />
+                      <FieldError message={errors.agentic_convergence_threshold?.message} />
                     </div>
                   </div>
 

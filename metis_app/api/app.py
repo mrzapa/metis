@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -356,6 +357,66 @@ def create_app() -> FastAPI:
             ],
         }
 
+    @app.get("/v1/brain/graph/events", dependencies=_auth)
+    async def api_brain_graph_events(poll_seconds: float = 5.0) -> StreamingResponse:
+        """SSE stream of brain graph snapshots.
+
+        Emits a ``brain_snapshot`` event whenever the graph hash changes,
+        polling every *poll_seconds* seconds (default 5).  Clients can use
+        an ``AbortController`` to cancel the connection.
+        """
+        poll_seconds = max(0.5, min(poll_seconds, 60.0))  # clamp: 0.5–60 s
+
+        def _build_payload(graph: Any) -> dict[str, Any]:
+            return {
+                "nodes": [
+                    {
+                        "node_id": node.node_id,
+                        "node_type": node.node_type,
+                        "label": node.label,
+                        "x": node.x,
+                        "y": node.y,
+                        "metadata": node.metadata,
+                    }
+                    for node in graph.nodes.values()
+                ],
+                "edges": [
+                    {
+                        "source_id": edge.source_id,
+                        "target_id": edge.target_id,
+                        "edge_type": edge.edge_type,
+                        "metadata": edge.metadata,
+                        "weight": edge.weight,
+                    }
+                    for edge in graph.edges
+                ],
+            }
+
+        async def _generate() -> AsyncGenerator[str, None]:
+            last_hash: str | None = None
+            while True:
+                try:
+                    graph = WorkspaceOrchestrator().get_workspace_graph()
+                    payload = _build_payload(graph)
+                    data_str = json.dumps(payload, sort_keys=True, default=str)
+                    graph_hash = hashlib.sha256(data_str.encode()).hexdigest()[:16]
+                    if graph_hash != last_hash:
+                        last_hash = graph_hash
+                        event_data = json.dumps(
+                            {"type": "brain_snapshot", "subject": "brain.graph", "hash": graph_hash, **payload},
+                            default=str,
+                        )
+                        yield f"data: {event_data}\n\n"
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("brain/graph/events poll error: %s", exc)
+                await asyncio.sleep(poll_seconds)
+
+        return StreamingResponse(
+            _generate(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     @app.post(
         "/v1/learning-routes/preview",
         response_model=LearningRoutePreviewModel,
@@ -520,6 +581,35 @@ def create_app() -> FastAPI:
     @app.get("/v1/traces/{run_id}", dependencies=_auth)
     def api_get_trace(run_id: str) -> list[dict[str, Any]]:
         return TraceStore().read_run_events(run_id)
+
+    @app.get("/v1/traces/{run_id}/playback", dependencies=_auth)
+    def api_trace_playback(run_id: str) -> dict[str, Any]:
+        """Return a Scion-style PlaybackManifest for a completed run.
+
+        The manifest lists all recorded trace events in chronological order
+        together with the overall time range, making it straightforward for
+        a frontend player to scrub through an agent's reasoning history.
+        """
+        events = TraceStore().read_run_events(run_id)
+        playback_events = [
+            {
+                "type": e.get("event_type") or e.get("stage") or "unknown",
+                "timestamp": e.get("timestamp", ""),
+                "data": e.get("payload") or {},
+            }
+            for e in events
+        ]
+        timestamps = [e["timestamp"] for e in playback_events if e["timestamp"]]
+        return {
+            "type": "manifest",
+            "run_id": run_id,
+            "time_range": {
+                "start": min(timestamps, default=""),
+                "end": max(timestamps, default=""),
+            },
+            "event_count": len(playback_events),
+            "events": playback_events,
+        }
 
     @app.post("/v1/telemetry/ui", dependencies=_auth)
     async def api_ingest_ui_telemetry(request: Request) -> dict[str, int]:

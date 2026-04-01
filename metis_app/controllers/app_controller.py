@@ -38,6 +38,7 @@ from metis_app.models.parity_types import SkillSessionState
 from metis_app.models.session_types import EvidenceSource
 from metis_app.services.index_service import (
     IndexBundle,
+    cosine_similarity,
     list_index_manifests,
     load_index_bundle,
     refresh_index_bundle,
@@ -111,12 +112,7 @@ def _chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     return chunks
 
 
-def _cosine(v1: list[float], v2: list[float]) -> float:
-    """Return cosine similarity in [-1, 1]; returns 0.0 for zero vectors."""
-    dot = sum(a * b for a, b in zip(v1, v2))
-    n1 = math.sqrt(sum(a * a for a in v1))
-    n2 = math.sqrt(sum(b * b for b in v2))
-    return dot / (n1 * n2) if n1 > 0 and n2 > 0 else 0.0
+_cosine = cosine_similarity  # alias; canonical definition lives in index_service
 
 
 # ---------------------------------------------------------------------------

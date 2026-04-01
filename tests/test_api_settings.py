@@ -196,3 +196,38 @@ def test_post_settings_503_on_write_error(monkeypatch) -> None:
     )
 
     assert response.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# resolve_secret_refs tests (settings_store)
+# ---------------------------------------------------------------------------
+
+def test_resolve_secret_refs_replaces_env_prefix(monkeypatch) -> None:
+    """Values starting with 'env:' are replaced with the env variable value."""
+    from metis_app.settings_store import resolve_secret_refs
+
+    monkeypatch.setenv("TEST_METIS_KEY", "secret123")
+    result = resolve_secret_refs({"api_key_openai": "env:TEST_METIS_KEY", "llm_provider": "openai"})
+
+    assert result["api_key_openai"] == "secret123"
+    assert result["llm_provider"] == "openai"
+
+
+def test_resolve_secret_refs_retains_value_when_env_var_missing(monkeypatch) -> None:
+    """When the env var is not set the original 'env:...' string is retained."""
+    from metis_app.settings_store import resolve_secret_refs
+
+    monkeypatch.delenv("TEST_METIS_MISSING", raising=False)
+    result = resolve_secret_refs({"api_key_openai": "env:TEST_METIS_MISSING"})
+
+    assert result["api_key_openai"] == "env:TEST_METIS_MISSING"
+
+
+def test_resolve_secret_refs_leaves_non_env_values_untouched() -> None:
+    """Non-'env:' values are passed through unchanged."""
+    from metis_app.settings_store import resolve_secret_refs
+
+    data = {"llm_provider": "openai", "max_results": 5, "flag": True}
+    result = resolve_secret_refs(data)
+
+    assert result == data

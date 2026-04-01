@@ -78,6 +78,26 @@ def _run_migrations(settings: dict[str, Any]) -> dict[str, Any]:
     return settings
 
 
+def resolve_secret_refs(settings: dict[str, Any]) -> dict[str, Any]:
+    """Replace ``'env:VAR_NAME'`` string values with the corresponding
+    environment variable, leaving all other values untouched.
+
+    This lets users store sensitive keys (API tokens, etc.) as
+    ``"env:OPENAI_API_KEY"`` in *settings.json* rather than as plain text.
+    If the referenced variable is not set the original ``'env:...'`` string
+    is retained so that the caller can detect an unresolved reference.
+    """
+    resolved: dict[str, Any] = {}
+    for key, value in settings.items():
+        if isinstance(value, str) and value.startswith("env:"):
+            var_name = value[4:].strip()
+            env_value = os.environ.get(var_name)
+            resolved[key] = env_value if env_value is not None else value
+        else:
+            resolved[key] = value
+    return resolved
+
+
 def load_settings() -> dict[str, Any]:
     """Return fully-merged settings (defaults → user overrides).
 
@@ -103,6 +123,7 @@ def load_settings() -> dict[str, Any]:
     merged = dict(defaults)
     merged.update(user)
     merged = _run_migrations(merged)
+    merged = resolve_secret_refs(merged)
     return merged
 
 

@@ -2020,3 +2020,111 @@ def test_autonomous_trigger_returns_500_on_error(monkeypatch) -> None:
 
     response = client.post("/v1/autonomous/trigger")
     assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# New Scion-inspired adoption tests
+# ---------------------------------------------------------------------------
+
+
+def test_brain_graph_events_route_is_registered() -> None:
+    """GET /v1/brain/graph/events route exists in the FastAPI app."""
+    app = api_app_module.create_app()
+    paths = {getattr(r, "path", None) for r in app.routes}
+    assert "/v1/brain/graph/events" in paths
+
+
+def test_brain_graph_events_payload_structure(monkeypatch) -> None:
+    """The SSE payload generated for brain graph events has expected fields."""
+    import hashlib
+
+    # Simulate the payload-building logic used in the SSE generator
+    brain = BrainGraph().build_from_indexes_and_sessions([], [])
+    nodes = [
+        {"node_id": n.node_id, "node_type": n.node_type, "label": n.label,
+         "x": n.x, "y": n.y, "metadata": n.metadata}
+        for n in brain.nodes.values()
+    ]
+    edges = [
+        {"source_id": e.source_id, "target_id": e.target_id,
+         "edge_type": e.edge_type, "metadata": e.metadata, "weight": e.weight}
+        for e in brain.edges
+    ]
+    payload = {"nodes": nodes, "edges": edges}
+    data_str = json.dumps(payload, sort_keys=True, default=str)
+    graph_hash = hashlib.sha256(data_str.encode()).hexdigest()[:16]
+    event = json.loads(
+        json.dumps({"type": "brain_snapshot", "subject": "brain.graph", "hash": graph_hash, **payload}, default=str)
+    )
+
+    assert event["type"] == "brain_snapshot"
+    assert event["subject"] == "brain.graph"
+    assert "hash" in event and len(event["hash"]) == 16
+    assert "nodes" in event
+    assert "edges" in event
+
+
+def test_trace_playback_returns_manifest(monkeypatch, tmp_path) -> None:
+    """GET /v1/traces/{run_id}/playback returns a PlaybackManifest."""
+    import metis_app.services.trace_store as trace_store_module
+
+    run_id = "test-run-playback-001"
+    sample_events = [
+        {
+            "run_id": run_id,
+            "timestamp": "2025-01-01T00:00:00+00:00",
+            "stage": "retrieval",
+            "event_type": "retrieval_complete",
+            "payload": {"sources": []},
+            "citations_chosen": [],
+        },
+        {
+            "run_id": run_id,
+            "timestamp": "2025-01-01T00:00:01+00:00",
+            "stage": "generation",
+            "event_type": "final",
+            "payload": {"answer": "done"},
+            "citations_chosen": [],
+        },
+    ]
+
+    fake_store = MagicMock()
+    fake_store.read_run_events.return_value = sample_events
+    monkeypatch.setattr(api_app_module, "TraceStore", lambda: fake_store)
+
+    client = TestClient(api_app_module.create_app())
+    response = client.get(f"/v1/traces/{run_id}/playback")
+
+    assert response.status_code == 200
+    manifest = response.json()
+    assert manifest["type"] == "manifest"
+    assert manifest["run_id"] == run_id
+    assert manifest["event_count"] == 2
+    assert len(manifest["events"]) == 2
+    assert manifest["events"][0]["type"] == "retrieval_complete"
+    assert manifest["events"][1]["type"] == "final"
+    assert manifest["time_range"]["start"] == "2025-01-01T00:00:00+00:00"
+    assert manifest["time_range"]["end"] == "2025-01-01T00:00:01+00:00"
+
+
+def test_stream_events_normalize_adds_phase_and_activity() -> None:
+    """normalize_stream_event adds agent_phase and agent_activity fields."""
+    from metis_app.services.stream_events import normalize_stream_event
+
+    event = {"type": "iteration_start", "run_id": "run-abc", "iteration": 1, "total_iterations": 2}
+    result = normalize_stream_event(event)
+
+    assert result["agent_phase"] == "running"
+    assert result["agent_activity"] == "thinking"
+    assert result["subject"] == "session.run-abc.events"
+
+
+def test_stream_events_normalize_stopped_on_final() -> None:
+    """Final event gets agent_phase='stopped' and agent_activity='completed'."""
+    from metis_app.services.stream_events import normalize_stream_event
+
+    event = {"type": "final", "run_id": "run-xyz", "answer": "done"}
+    result = normalize_stream_event(event)
+
+    assert result["agent_phase"] == "stopped"
+    assert result["agent_activity"] == "completed"

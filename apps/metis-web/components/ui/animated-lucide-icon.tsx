@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { LucideIcon, LucideProps } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 
@@ -17,9 +18,11 @@ export function AnimatedLucideIcon({
   active = true,
   ...iconProps
 }: AnimatedLucideIconProps) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const reduceMotion = useReducedMotion();
 
-  if (reduceMotion || !active) {
+  if (!mounted || reduceMotion || !active) {
     return <Icon {...iconProps} />;
   }
 

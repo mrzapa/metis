@@ -265,6 +265,12 @@ export interface RagStreamEnvelopeFields {
   timestamp?: string;
   payload?: Record<string, unknown>;
   context?: Record<string, unknown>;
+  // Scion-inspired three-axis agent state model
+  agent_phase?: "initializing" | "running" | "stopped" | "error";
+  agent_activity?: "idle" | "thinking" | "executing" | "waiting_for_input" | "completed";
+  detail?: { tool_name?: string; task_summary?: string; message?: string };
+  ancestry?: string[];
+  subject?: string;
 }
 
 export interface RagStreamRetrievalCompleteEvent extends RagStreamEnvelopeFields {
@@ -346,6 +352,21 @@ export interface RagStreamRefinementRetrievalEvent extends RagStreamEnvelopeFiel
   top_score: number;
 }
 
+export interface RagStreamIterationConvergedEvent extends RagStreamEnvelopeFields {
+  type: "iteration_converged";
+  run_id: string;
+  iteration: number;
+  convergence_score: number;
+}
+
+export interface RagStreamIterationCompleteEvent extends RagStreamEnvelopeFields {
+  type: "iteration_complete";
+  run_id: string;
+  iterations_used: number;
+  convergence_score: number;
+  query_text: string;
+}
+
 export interface RagStreamRunStartedEvent extends RagStreamEnvelopeFields {
   type: "run_started";
   run_id: string;
@@ -363,7 +384,9 @@ export type RagStreamEvent =
   | RagStreamFallbackDecisionEvent
   | RagStreamIterationStartEvent
   | RagStreamGapsIdentifiedEvent
-  | RagStreamRefinementRetrievalEvent;
+  | RagStreamRefinementRetrievalEvent
+  | RagStreamIterationConvergedEvent
+  | RagStreamIterationCompleteEvent;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -1987,6 +2010,107 @@ export async function fetchBrainGraph(): Promise<BrainGraphResponse> {
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Failed to fetch brain graph (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export interface BrainGraphSnapshot extends BrainGraphResponse {
+  hash: string;
+}
+
+/**
+ * SSE stream of brain graph snapshots (Scion hydrate-then-stream pattern).
+ *
+ * Performs an initial REST fetch to hydrate the graph immediately, then opens
+ * an SSE connection to `/v1/brain/graph/events` and calls `onSnapshot`
+ * whenever the server emits a change.
+ *
+ * @example
+ * const stop = await streamBrainGraphEvents({ onSnapshot: (s) => setGraph(s) });
+ * // later:
+ * stop();
+ */
+export async function streamBrainGraphEvents(options: {
+  signal?: AbortSignal;
+  pollSeconds?: number;
+  onSnapshot: (snapshot: BrainGraphSnapshot) => void;
+}): Promise<() => void> {
+  const { signal, pollSeconds = 5, onSnapshot } = options;
+  const base = await getApiBase();
+
+  // 1. Hydrate immediately
+  const initial = await fetchBrainGraph();
+  onSnapshot({ ...initial, hash: "initial" });
+
+  // 2. Open SSE for live deltas
+  const params = new URLSearchParams({ poll_seconds: String(pollSeconds) });
+  const url = `${base}/v1/brain/graph/events?${params}`;
+  const controller = new AbortController();
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
+  }
+
+  const res = await apiFetch(url, { signal: controller.signal });
+  if (!res.ok || !res.body) {
+    return () => controller.abort();
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  (async () => {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          const dataLine = part.split("\n").find((l) => l.startsWith("data: "));
+          if (!dataLine) continue;
+          try {
+            const snapshot = JSON.parse(dataLine.slice(6)) as BrainGraphSnapshot;
+            onSnapshot(snapshot);
+          } catch {
+            // skip malformed events
+          }
+        }
+      }
+    } catch {
+      // connection closed or aborted — silently exit
+    }
+  })();
+
+  return () => controller.abort();
+}
+
+// ── Trace playback ─────────────────────────────────────────────────────────
+
+export interface TracePlaybackEvent {
+  type: string;
+  timestamp: string;
+  data: Record<string, unknown>;
+}
+
+export interface TracePlaybackManifest {
+  type: "manifest";
+  run_id: string;
+  time_range: { start: string; end: string };
+  event_count: number;
+  events: TracePlaybackEvent[];
+}
+
+export async function fetchTracePlayback(runId: string): Promise<TracePlaybackManifest> {
+  const res = await apiFetch(`${await getApiBase()}/v1/traces/${encodeURIComponent(runId)}/playback`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch trace playback for ${runId} (${res.status}): ${detail}`);
   }
   return res.json();
 }

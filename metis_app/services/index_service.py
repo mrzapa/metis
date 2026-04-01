@@ -816,6 +816,10 @@ def refresh_index_bundle(bundle: IndexBundle) -> pathlib.Path:
         if manifest.vector_store_path
         else None
     )
+    if vector_store_path is not None and not _is_within_directory(vector_store_path, root):
+        raise ValueError(
+            f"vector_store_path resolves outside the index root: {vector_store_path}"
+        )
     rewritten = persist_index_bundle(
         bundle,
         backend=manifest.backend,
@@ -883,6 +887,10 @@ def load_index_bundle(path: str | pathlib.Path) -> IndexBundle:
 
         root = pathlib.Path(manifest.manifest_path).parent
         bundle_path = _resolve_from_manifest_root(root, manifest.bundle_path)
+        if not _is_within_directory(bundle_path, root):
+            raise ValueError(
+                f"bundle_path resolves outside the index root: {bundle_path}"
+            )
         payload = _load_json(bundle_path)
         if not isinstance(payload, dict):
             raise ValueError(f"Invalid bundle payload: {bundle_path}")
@@ -893,6 +901,10 @@ def load_index_bundle(path: str | pathlib.Path) -> IndexBundle:
             bundle.embedding_signature = str(manifest.embedding_signature or "")
         if not bundle.document_outline and manifest.outline_path:
             outline_path = _resolve_from_manifest_root(root, manifest.outline_path)
+            if not _is_within_directory(outline_path, root):
+                raise ValueError(
+                    f"outline_path resolves outside the index root: {outline_path}"
+                )
             if outline_path.exists():
                 outline_payload = _load_json(outline_path)
                 if isinstance(outline_payload, list):
@@ -903,6 +915,10 @@ def load_index_bundle(path: str | pathlib.Path) -> IndexBundle:
             regions_path = _resolve_from_manifest_root(
                 root, manifest.semantic_regions_path
             )
+            if not _is_within_directory(regions_path, root):
+                raise ValueError(
+                    f"semantic_regions_path resolves outside the index root: {regions_path}"
+                )
             if regions_path.exists():
                 regions_payload = _load_json(regions_path)
                 if isinstance(regions_payload, list):
@@ -911,6 +927,10 @@ def load_index_bundle(path: str | pathlib.Path) -> IndexBundle:
                     ]
         if not bundle.events and manifest.events_path:
             events_path = _resolve_from_manifest_root(root, manifest.events_path)
+            if not _is_within_directory(events_path, root):
+                raise ValueError(
+                    f"events_path resolves outside the index root: {events_path}"
+                )
             if events_path.exists():
                 events_payload = _load_json(events_path)
                 if isinstance(events_payload, list):
@@ -921,6 +941,10 @@ def load_index_bundle(path: str | pathlib.Path) -> IndexBundle:
             grounding_path = _resolve_from_manifest_root(
                 root, manifest.grounding_artifact_path
             )
+            if not _is_within_directory(grounding_path, root):
+                raise ValueError(
+                    f"grounding_artifact_path resolves outside the index root: {grounding_path}"
+                )
             bundle.grounding_html_path = (
                 str(grounding_path)
                 if grounding_path.exists()

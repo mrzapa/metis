@@ -17,6 +17,8 @@ from metis_app.utils.model_caps import get_capped_output_tokens
 
 _log = logging.getLogger(__name__)
 
+_llm_cache: dict[tuple, Any] = {}
+
 
 # ---------------------------------------------------------------------------
 # Lightweight mock chat model (no external deps)
@@ -185,28 +187,43 @@ def create_llm(settings: dict[str, Any]) -> Any:
         provider, model_name, temperature, output_max,
     )
 
+    _UNCACHED = frozenset({"local_gguf", "mock"})
+    if provider not in _UNCACHED:
+        _key = (
+            provider,
+            model_name,
+            temperature,
+            output_max,
+            settings.get("api_key_openai") or "",
+            settings.get("api_key_anthropic") or "",
+            settings.get("api_key_google") or "",
+            settings.get("api_key_xai") or "",
+            settings.get("local_llm_url") or "",
+        )
+        if _key in _llm_cache:
+            _log.debug("create_llm: cache hit for %s/%s", provider, model_name)
+            return _llm_cache[_key]
+
     if provider == "openai":
-        return _create_openai(settings, model_name, temperature, output_max)
+        llm = _create_openai(settings, model_name, temperature, output_max)
+    elif provider == "anthropic":
+        llm = _create_anthropic(settings, model_name, temperature, output_max)
+    elif provider == "google":
+        llm = _create_google(settings, model_name, temperature, output_max)
+    elif provider == "xai":
+        llm = _create_xai(settings, model_name, temperature, output_max)
+    elif provider == "local_lm_studio":
+        llm = _create_lm_studio(settings, model_name, temperature, output_max)
+    elif provider == "local_gguf":
+        llm = _create_local_gguf(settings, temperature, output_max)
+    elif provider == "mock":
+        llm = MockChatModel()
+    else:
+        raise ValueError(f"Unknown LLM provider: {provider}")
 
-    if provider == "anthropic":
-        return _create_anthropic(settings, model_name, temperature, output_max)
-
-    if provider == "google":
-        return _create_google(settings, model_name, temperature, output_max)
-
-    if provider == "xai":
-        return _create_xai(settings, model_name, temperature, output_max)
-
-    if provider == "local_lm_studio":
-        return _create_lm_studio(settings, model_name, temperature, output_max)
-
-    if provider == "local_gguf":
-        return _create_local_gguf(settings, temperature, output_max)
-
-    if provider == "mock":
-        return MockChatModel()
-
-    raise ValueError(f"Unknown LLM provider: {provider}")
+    if provider not in _UNCACHED:
+        _llm_cache[_key] = llm
+    return llm
 
 
 # ---------------------------------------------------------------------------
@@ -341,3 +358,13 @@ def _msg_content(msg: Any) -> str:
     if isinstance(msg, dict):
         return str(msg.get("content", ""))
     return str(getattr(msg, "content", "") or "")
+
+
+def clear_llm_cache() -> None:
+    """Invalidate the module-level LLM client cache.
+
+    Call this after settings changes to force fresh client construction on
+    the next ``create_llm`` call.  The ``local_gguf`` and ``mock`` providers
+    are never cached, so this has no effect on them.
+    """
+    _llm_cache.clear()

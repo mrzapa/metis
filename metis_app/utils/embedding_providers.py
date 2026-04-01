@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from metis_app.utils.llm_providers import _require_key
+
 _log = logging.getLogger(__name__)
 
 
@@ -212,8 +214,4 @@ def _resolve_embedding_model(settings: dict[str, Any], provider: str) -> str:
     return base or "voyage-4-large"
 
 
-def _require_key(settings: dict[str, Any], key_name: str, label: str) -> str:
-    val = str(settings.get(key_name, "") or "").strip()
-    if not val:
-        raise ValueError(f"{label} API key is missing (settings key: {key_name})")
-    return val
+

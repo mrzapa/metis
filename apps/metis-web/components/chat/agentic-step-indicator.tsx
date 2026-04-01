@@ -12,7 +12,13 @@ const STEPS = [
   { label: "Validation" },
 ] as const;
 
-function deriveSteps(events: TraceEvent[], isStreaming: boolean): [StepState, StepState, StepState] {
+type DerivedState = {
+  steps: [StepState, StepState, StepState];
+  iterationLabel: string | null;
+  converged: boolean;
+};
+
+function deriveSteps(events: TraceEvent[], isStreaming: boolean): DerivedState {
   const hasRetrieval = events.some((e) =>
     ["retrieval_complete", "retrieval_augmented", "refinement_retrieval"].includes(e.event_type),
   );
@@ -25,7 +31,14 @@ function deriveSteps(events: TraceEvent[], isStreaming: boolean): [StepState, St
   const synthesis: StepState = hasFinal ? "complete" : hasRetrieval ? "active" : "upcoming";
   const validation: StepState = hasFinal ? "complete" : hasValidationSignal ? "active" : "upcoming";
 
-  return [retrieval, synthesis, validation];
+  const iterStartEvents = events.filter((e) => e.event_type === "iteration_start");
+  const last = iterStartEvents.at(-1);
+  const iterationLabel = last
+    ? `${Number(last.payload.iteration)} / ${Number(last.payload.total_iterations)}`
+    : null;
+  const converged = events.some((e) => e.event_type === "iteration_converged");
+
+  return { steps: [retrieval, synthesis, validation], iterationLabel, converged };
 }
 
 export function AgenticStepIndicator({
@@ -37,7 +50,7 @@ export function AgenticStepIndicator({
   isStreaming: boolean;
     className?: string;
 }) {
-  const states = deriveSteps(liveTraceEvents, isStreaming);
+  const { steps: states, iterationLabel, converged } = deriveSteps(liveTraceEvents, isStreaming);
 
   return (
      <div className={cn("mt-2 flex items-center gap-1 text-[10px]", className)}>
@@ -76,6 +89,18 @@ export function AgenticStepIndicator({
           </span>
         );
       })}
+      {iterationLabel && (
+        <span
+          className={cn(
+            "ml-2 rounded-full px-1.5 py-0 font-mono text-[9px] tabular-nums",
+            converged
+              ? "bg-emerald-500/12 text-emerald-600"
+              : "bg-sky-500/12 text-sky-600",
+          )}
+        >
+          {converged ? `✓ ${iterationLabel}` : `iter ${iterationLabel}`}
+        </span>
+      )}
     </div>
   );
 }

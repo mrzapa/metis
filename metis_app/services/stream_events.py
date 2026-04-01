@@ -42,6 +42,43 @@ _LIFECYCLE_BY_EVENT_TYPE = {
     "error": "error",
 }
 
+# Scion-inspired three-axis agent state model
+# agent_phase: coarse lifecycle phase visible to orchestrators
+_PHASE_BY_EVENT_TYPE = {
+    "run_started": "initializing",
+    "retrieval_complete": "running",
+    "retrieval_augmented": "running",
+    "subqueries": "running",
+    "iteration_start": "running",
+    "gaps_identified": "running",
+    "refinement_retrieval": "running",
+    "fallback_decision": "running",
+    "token": "running",
+    "iteration_converged": "running",
+    "iteration_complete": "running",
+    "final": "stopped",
+    "action_required": "stopped",
+    "error": "error",
+}
+
+# agent_activity: fine-grained current activity within the phase
+_ACTIVITY_BY_EVENT_TYPE = {
+    "run_started": "idle",
+    "retrieval_complete": "executing",
+    "retrieval_augmented": "executing",
+    "subqueries": "executing",
+    "iteration_start": "thinking",
+    "gaps_identified": "thinking",
+    "refinement_retrieval": "executing",
+    "fallback_decision": "thinking",
+    "token": "executing",
+    "iteration_converged": "thinking",
+    "iteration_complete": "thinking",
+    "final": "completed",
+    "action_required": "waiting_for_input",
+    "error": "idle",
+}
+
 _META_KEYS = {
     "type",
     "event_type",
@@ -50,6 +87,11 @@ _META_KEYS = {
     "timestamp",
     "status",
     "lifecycle",
+    "agent_phase",
+    "agent_activity",
+    "detail",
+    "ancestry",
+    "subject",
     "payload",
     "context",
 }
@@ -127,6 +169,18 @@ def normalize_stream_event(
     context_wrapper.setdefault("run_id", run_id)
     context_wrapper.setdefault("source", source)
     normalized["context"] = context_wrapper
+
+    # Three-axis agent state (additive — not overriding if already set)
+    normalized["agent_phase"] = str(
+        normalized.get("agent_phase")
+        or _PHASE_BY_EVENT_TYPE.get(event_type, "running")
+    )
+    normalized["agent_activity"] = str(
+        normalized.get("agent_activity")
+        or _ACTIVITY_BY_EVENT_TYPE.get(event_type, "executing")
+    )
+    if run_id and "subject" not in normalized:
+        normalized["subject"] = f"session.{run_id}.events"
 
     return normalized
 
