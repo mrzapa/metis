@@ -120,7 +120,11 @@ class AutonomousResearchService:
             "sources": sources,
         }
 
-    def scan_faculty_gaps(self, indexes: list[dict[str, Any]]) -> str | None:
+    def scan_faculty_gaps(
+        self,
+        indexes: list[dict[str, Any]],
+        demand_scores: dict[str, int] | None = None,
+    ) -> str | None:
         """Return the faculty_id with the fewest auto-generated stars, or None if all covered.
 
         Priority:
@@ -128,6 +132,8 @@ class AutonomousResearchService:
         2. If no faculty has any auto-stars at all, return the first unrepresented faculty
            in FACULTY_ORDER.
         3. If all faculties meet the threshold, return None.
+
+        When demand_scores is provided, higher-demand faculties are prioritised (reverse-curriculum).
         """
         faculty_counts: dict[str, int] = {fac: 0 for fac in FACULTY_ORDER}
         for idx in indexes:
@@ -147,13 +153,26 @@ class AutonomousResearchService:
             if 0 < count < _MIN_STARS_PER_FACULTY
         ]
         if sparse_represented:
-            # Return the sparsest (first in FACULTY_ORDER on tie)
+            if demand_scores:
+                # hardness = demand_score / count; higher hardness → research first
+                return min(
+                    sparse_represented,
+                    key=lambda x: (
+                        -(demand_scores.get(x[0], 0) / max(x[1], 1)),
+                        FACULTY_ORDER.index(x[0]),
+                    ),
+                )[0]
             return min(sparse_represented, key=lambda x: (x[1], FACULTY_ORDER.index(x[0])))[0]
 
-        # No partially-covered faculties — fall back to first completely unrepresented faculty
-        for fac in FACULTY_ORDER:
-            if faculty_counts[fac] == 0:
-                return fac
+        # No partially-covered faculties — fall back to first unrepresented faculty
+        # sorted by hardness (demand / max(count, 1)) descending when demand_scores provided.
+        unrepresented = [fac for fac in FACULTY_ORDER if faculty_counts[fac] == 0]
+        if unrepresented and demand_scores:
+            unrepresented.sort(
+                key=lambda f: (-(demand_scores.get(f, 0)), FACULTY_ORDER.index(f))
+            )
+        if unrepresented:
+            return unrepresented[0]
 
         # All faculties are at or above the threshold
         return None
