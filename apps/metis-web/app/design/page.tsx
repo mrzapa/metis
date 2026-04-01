@@ -259,19 +259,19 @@ export default function DesignPage() {
           Hover each card to activate its effect. Four variants: liquid, laser, cosmic, glitch.
         </p>
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          <GlowCard variant="liquid" liquidColor="#6366f1" intensity={0.8} className="min-h-[120px]">
+          <GlowCard variant="liquid" liquidColor="#6366f1" intensity={0.8} className="min-h-30">
             <p className="text-sm font-semibold">Liquid</p>
             <p className="mt-1 text-xs text-muted-foreground">Smooth radial shimmer follows the cursor.</p>
           </GlowCard>
-          <GlowCard variant="laser" laserColor="#f97316" intensity={0.8} className="min-h-[120px]">
+          <GlowCard variant="laser" laserColor="#f97316" intensity={0.8} className="min-h-30">
             <p className="text-sm font-semibold">Laser</p>
             <p className="mt-1 text-xs text-muted-foreground">Crosshair beams snap to mouse position.</p>
           </GlowCard>
-          <GlowCard variant="cosmic" intensity={0.8} className="min-h-[120px]">
+          <GlowCard variant="cosmic" intensity={0.8} className="min-h-30">
             <p className="text-sm font-semibold">Cosmic</p>
             <p className="mt-1 text-xs text-muted-foreground">Particle nebula trails the cursor.</p>
           </GlowCard>
-          <GlowCard variant="glitch" glitchColor1="#ec4899" glitchColor2="#22d3ee" intensity={0.8} className="min-h-[120px]">
+          <GlowCard variant="glitch" glitchColor1="#ec4899" glitchColor2="#22d3ee" intensity={0.8} className="min-h-30">
             <p className="text-sm font-semibold">Glitch</p>
             <p className="mt-1 text-xs text-muted-foreground">Chromatic scanlines distort on hover.</p>
           </GlowCard>
