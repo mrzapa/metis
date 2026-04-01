@@ -224,6 +224,43 @@ class AutonomousResearchService:
         path.write_text(content, encoding="utf-8")
         return path
 
+    async def run_batch(
+        self,
+        *,
+        faculty_ids: list[str],
+        settings: dict[str, Any],
+        orchestrator: Any,
+        concurrency: int = 1,
+        request_delay_ms: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Run research for multiple faculty gaps concurrently.
+
+        Uses an asyncio.Semaphore to cap concurrent tasks. Each task calls
+        self.run() in a thread executor to avoid blocking the event loop.
+        """
+        import asyncio
+
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+        delay_s = max(0, request_delay_ms) / 1000.0
+        loop = asyncio.get_event_loop()
+
+        async def _run_one(faculty_id: str) -> dict[str, Any] | None:
+            async with semaphore:
+                if delay_s > 0:
+                    await asyncio.sleep(delay_s)
+                return await loop.run_in_executor(
+                    None,
+                    lambda: self.run(
+                        settings=settings,
+                        indexes=[],  # orchestrator provides current index list inside
+                        orchestrator=orchestrator,
+                    ),
+                )
+
+        tasks = [_run_one(fid) for fid in faculty_ids]
+        raw = await asyncio.gather(*tasks, return_exceptions=True)
+        return [r for r in raw if isinstance(r, dict)]
+
     def _extract_title(self, markdown: str) -> str:
         for line in markdown.splitlines():
             stripped = line.strip().lstrip("#").strip()

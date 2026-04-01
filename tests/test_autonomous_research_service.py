@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock
 
 from metis_app.services.autonomous_research_service import AutonomousResearchService
@@ -154,3 +155,21 @@ def test_scan_faculty_gaps_counts_indexes_not_documents():
     # This proves document_count is ignored — if it were counted, perception would be 100
     # and well above the threshold, causing a different faculty to be returned.
     assert faculty == "perception"
+
+
+def test_run_batch_returns_list_of_results():
+    """run_batch calls run() once per faculty gap up to concurrency limit."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+    svc.run = MagicMock(return_value={"faculty_id": "perception", "index_id": "x"})
+
+    # Simulate 2 gaps with concurrency=2
+    results = asyncio.get_event_loop().run_until_complete(
+        svc.run_batch(
+            faculty_ids=["perception", "memory"],
+            settings={},
+            orchestrator=MagicMock(),
+            concurrency=2,
+            request_delay_ms=0,
+        )
+    )
+    assert len(results) == 2
