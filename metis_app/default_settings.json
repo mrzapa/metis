@@ -136,6 +136,8 @@
   "chat_path": "RAG",
   "agentic_mode": false,
   "agentic_max_iterations": 2,
+  "agentic_iteration_budget": 4,
+  "agentic_convergence_threshold": 0.95,
   "show_retrieved_context": false,
   "deepread_mode": false,
   "secure_mode": false,
