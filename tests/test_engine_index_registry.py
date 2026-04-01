@@ -13,6 +13,7 @@ def test_registry_lists_built_indexes_and_reads_metadata(tmp_path, monkeypatch) 
     )
     index_dir = tmp_path / "indexes"
     monkeypatch.setattr(engine_indexing, "_DEFAULT_INDEX_STORAGE_DIR", index_dir)
+    monkeypatch.setattr("metis_app.services.brain_pass._native_tribev2_available", lambda: False)
 
     result = engine_indexing.build_index(
         engine_indexing.IndexBuildRequest(

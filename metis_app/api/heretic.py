@@ -19,33 +19,14 @@ from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import ConfigDict
 
+from metis_app.api.models import AbliterateStreamRequest
 from metis_app.services.heretic_service import HereticService
 
 router = APIRouter(prefix="/v1/heretic", tags=["heretic"])
 
 log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Request models
-# ---------------------------------------------------------------------------
-
-
-class AbliterateStreamRequest(BaseModel):
-    """Body for ``POST /v1/heretic/abliterate/stream``."""
-
-    model_id: str
-    """HuggingFace model identifier (e.g. ``meta-llama/Llama-3.1-8B-Instruct``)."""
-
-    bnb_4bit: bool = False
-    """Enable bitsandbytes 4-bit quantization to reduce VRAM usage."""
-
-    outtype: str = "f16"
-    """Output quantization type for the GGUF file (e.g. ``"f16"``, ``"q4_k_m"``)."""
-
-    model_config = ConfigDict(extra="forbid")
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import pathlib
-import secrets
 import tempfile
 import time
 import uuid
@@ -175,7 +174,7 @@ def _brain_graph_cache_key(graph: Any) -> str:
 
 
 @get("/v1/nyx/catalog")
-async def api_search_nyx_catalog(
+def api_search_nyx_catalog(
     q: str = "",
     limit: int | None = None,
 ) -> dict[str, Any]:
@@ -187,7 +186,7 @@ async def api_search_nyx_catalog(
 
 
 @get("/v1/nyx/catalog/{component_name:path}")
-async def api_get_nyx_component_detail(component_name: str) -> dict[str, Any]:
+def api_get_nyx_component_detail(component_name: str) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
     try:
         detail = orchestrator.get_nyx_component_detail(component_name)
@@ -201,7 +200,7 @@ async def api_get_nyx_component_detail(component_name: str) -> dict[str, Any]:
 
 
 @get("/v1/brain/graph")
-async def api_brain_graph() -> dict[str, Any]:
+def api_brain_graph() -> dict[str, Any]:
     graph = WorkspaceOrchestrator().get_workspace_graph()
     return {
         "nodes": [
@@ -229,7 +228,7 @@ async def api_brain_graph() -> dict[str, Any]:
 
 
 @post("/v1/learning-routes/preview")
-async def api_learning_route_preview(
+def api_learning_route_preview(
     payload: LearningRoutePreviewRequestModel,
 ) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
@@ -275,7 +274,7 @@ async def api_learning_route_preview(
 
 
 @get("/v1/brain/scaffold")
-async def api_brain_scaffold() -> dict[str, Any]:
+def api_brain_scaffold() -> dict[str, Any]:
     graph = WorkspaceOrchestrator().get_workspace_graph()
     cache_key = _brain_graph_cache_key(graph)
     now = time.time()
@@ -318,7 +317,7 @@ async def api_upload_files(request: Request[Any, Any, Any]) -> dict[str, list[st
 
 
 @get("/v1/traces/{run_id:str}")
-async def api_get_trace(run_id: str) -> list[dict[str, Any]]:
+def api_get_trace(run_id: str) -> list[dict[str, Any]]:
     return TraceStore().read_run_events(run_id)
 
 
@@ -355,7 +354,7 @@ async def api_ingest_ui_telemetry(request: Request[Any, Any, Any]) -> dict[str, 
 
 
 @get("/v1/telemetry/ui/summary")
-async def api_ui_telemetry_summary(
+def api_ui_telemetry_summary(
     window_hours: int = 24,
     limit: int = 50_000,
 ) -> dict[str, Any]:
@@ -372,7 +371,7 @@ async def api_ui_telemetry_summary(
 
 
 @post("/v1/runs/{run_id:str}/actions")
-async def api_run_action(run_id: str, payload: RunActionRequestModel) -> dict[str, Any]:
+def api_run_action(run_id: str, payload: RunActionRequestModel) -> dict[str, Any]:
     action_payload = dict(payload.payload or {})
     action_type = str(payload.action_type or action_payload.get("action_type") or "").strip()
     action_id = str(payload.action_id or action_payload.get("action_id") or "").strip()

@@ -35,7 +35,7 @@ _RAG_STREAM_MANAGER = ReplayableRunStreamManager()
 
 
 @post("/v1/query/rag")
-async def api_query_rag(payload: RagQueryRequestModel) -> dict[str, Any]:
+def api_query_rag(payload: RagQueryRequestModel) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
     result = run_engine(
         orchestrator.run_rag_query,
@@ -46,7 +46,7 @@ async def api_query_rag(payload: RagQueryRequestModel) -> dict[str, Any]:
 
 
 @post("/v1/search/knowledge")
-async def api_search_knowledge(payload: KnowledgeSearchRequestModel) -> dict[str, Any]:
+def api_search_knowledge(payload: KnowledgeSearchRequestModel) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
     result = run_engine(
         orchestrator.run_knowledge_search,
@@ -57,7 +57,7 @@ async def api_search_knowledge(payload: KnowledgeSearchRequestModel) -> dict[str
 
 
 @post("/v1/query/direct")
-async def api_query_direct(payload: DirectQueryRequestModel) -> dict[str, Any]:
+def api_query_direct(payload: DirectQueryRequestModel) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
     result = run_engine(
         orchestrator.run_direct_query,
@@ -68,7 +68,7 @@ async def api_query_direct(payload: DirectQueryRequestModel) -> dict[str, Any]:
 
 
 @post("/v1/openai/chat/completions")
-async def api_openai_chat_completions(
+def api_openai_chat_completions(
     payload: OpenAIChatCompletionRequestModel,
 ) -> dict[str, Any]:
     settings = _settings_store.load_settings()
@@ -134,7 +134,7 @@ async def api_openai_chat_completions(
 
 
 @post("/v1/query/rag/stream")
-async def api_stream_rag(
+def api_stream_rag(
     payload: RagQueryRequestModel,
     request: Request[Any, Any, Any],
 ) -> ServerSentEvent:

@@ -4,6 +4,6 @@ from litestar import get
 
 
 @get("/healthz")
-async def healthz() -> dict[str, bool]:
+def healthz() -> dict[str, bool]:
     """Health check endpoint."""
     return {"ok": True}

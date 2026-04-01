@@ -17,7 +17,7 @@ from metis_app.api_litestar.common import get_session_repo
 
 
 @get("/v1/sessions")
-async def list_sessions(search: str = "", skill: str = "") -> list[dict[str, object]]:
+def list_sessions(search: str = "", skill: str = "") -> list[dict[str, object]]:
     """List session summaries with optional search and skill filtering."""
     repo = get_session_repo()
     summaries = repo.list_sessions(search=search, skill=skill)
@@ -25,7 +25,7 @@ async def list_sessions(search: str = "", skill: str = "") -> list[dict[str, obj
 
 
 @post("/v1/sessions", status_code=201)
-async def create_session(payload: CreateSessionRequestModel) -> dict[str, object]:
+def create_session(payload: CreateSessionRequestModel) -> dict[str, object]:
     """Create a new session."""
     repo = get_session_repo()
     summary = repo.create_session(title=payload.title or "New Chat")
@@ -33,7 +33,7 @@ async def create_session(payload: CreateSessionRequestModel) -> dict[str, object
 
 
 @get("/v1/sessions/{session_id:str}")
-async def get_session(session_id: str) -> dict[str, object]:
+def get_session(session_id: str) -> dict[str, object]:
     """Return session detail, including hydrated action results."""
     repo = get_session_repo()
     detail = repo.get_session(session_id)
@@ -44,7 +44,7 @@ async def get_session(session_id: str) -> dict[str, object]:
 
 
 @post("/v1/sessions/{session_id:str}/feedback")
-async def submit_feedback(session_id: str, payload: FeedbackRequestModel) -> dict[str, bool]:
+def submit_feedback(session_id: str, payload: FeedbackRequestModel) -> dict[str, bool]:
     """Persist feedback for a run in a session."""
     repo = get_session_repo()
     repo.save_feedback(
@@ -57,7 +57,7 @@ async def submit_feedback(session_id: str, payload: FeedbackRequestModel) -> dic
 
 
 @delete("/v1/sessions/{session_id:str}", status_code=200)
-async def delete_session(session_id: str) -> dict[str, object]:
+def delete_session(session_id: str) -> dict[str, object]:
     """Delete a session and all associated messages and feedback."""
     repo = get_session_repo()
     detail = repo.get_session(session_id)

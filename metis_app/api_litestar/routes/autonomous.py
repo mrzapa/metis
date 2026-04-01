@@ -15,7 +15,7 @@ _log = logging.getLogger(__name__)
 
 
 @get("/v1/autonomous/status")
-async def get_autonomous_status() -> dict[str, Any]:
+def get_autonomous_status() -> dict[str, Any]:
     settings = _settings_store.load_settings()
     policy = settings.get("assistant_policy") or {}
     return {
@@ -28,7 +28,7 @@ async def get_autonomous_status() -> dict[str, Any]:
 
 
 @post("/v1/autonomous/trigger")
-async def trigger_autonomous_research() -> dict[str, Any]:
+def trigger_autonomous_research() -> dict[str, Any]:
     settings = _settings_store.load_settings()
     policy = dict(settings.get("assistant_policy") or {})
     policy["autonomous_research_enabled"] = True

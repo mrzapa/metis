@@ -297,6 +297,11 @@ def execute_retrieval_plan(
         )
     )
 
+    if selected_mode == "Research" and final_result.sources:
+        final_result.sources.sort(
+            key=lambda s: (s.chunk_idx if s.chunk_idx is not None else 0)
+        )
+
     return RetrievalPlan(
         question=question,
         selected_mode=selected_mode,

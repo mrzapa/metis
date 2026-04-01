@@ -13,12 +13,12 @@ from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
 
 
 @get("/v1/assistant")
-async def get_assistant() -> dict:
+def get_assistant() -> dict:
     return WorkspaceOrchestrator().get_assistant_snapshot()
 
 
 @post("/v1/assistant")
-async def update_assistant(payload: AssistantUpdateRequestModel) -> dict:
+def update_assistant(payload: AssistantUpdateRequestModel) -> dict:
     return WorkspaceOrchestrator().update_assistant(
         identity=payload.identity,
         runtime=payload.runtime,
@@ -28,13 +28,13 @@ async def update_assistant(payload: AssistantUpdateRequestModel) -> dict:
 
 
 @get("/v1/assistant/status")
-async def get_assistant_status() -> dict:
+def get_assistant_status() -> dict:
     snapshot = WorkspaceOrchestrator().get_assistant_snapshot()
     return dict(snapshot.get("status") or {})
 
 
 @post("/v1/assistant/reflect")
-async def reflect_assistant(payload: AssistantReflectRequestModel) -> dict:
+def reflect_assistant(payload: AssistantReflectRequestModel) -> dict:
     kwargs = {
         "trigger": payload.trigger,
         "session_id": payload.session_id,
@@ -47,19 +47,19 @@ async def reflect_assistant(payload: AssistantReflectRequestModel) -> dict:
 
 
 @post("/v1/assistant/bootstrap")
-async def bootstrap_assistant(payload: AssistantBootstrapRequestModel) -> dict:
+def bootstrap_assistant(payload: AssistantBootstrapRequestModel) -> dict:
     return WorkspaceOrchestrator().bootstrap_assistant(
         install_local_model=payload.install_local_model,
     )
 
 
 @get("/v1/assistant/memory")
-async def list_assistant_memory(limit: int = 20) -> list[dict]:
+def list_assistant_memory(limit: int = 20) -> list[dict]:
     return WorkspaceOrchestrator().list_assistant_memory(limit=limit)
 
 
 @delete("/v1/assistant/memory", status_code=200)
-async def clear_assistant_memory(limit: int = 10) -> dict:
+def clear_assistant_memory(limit: int = 10) -> dict:
     return WorkspaceOrchestrator().clear_assistant_memory(limit=limit)
 
 

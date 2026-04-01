@@ -42,7 +42,7 @@ def _save_registry(registry: dict[str, Any]) -> None:
 
 
 @get("/v1/gguf/catalog")
-async def list_catalog(use_case: str = "general") -> list[dict[str, Any]]:
+def list_catalog(use_case: str = "general") -> list[dict[str, Any]]:
     """List known GGUF models from the embedded catalog."""
     result = _RECOMMENDER.recommend_models(use_case=use_case, limit=50)
     rows = result.get("rows", [])
@@ -50,13 +50,13 @@ async def list_catalog(use_case: str = "general") -> list[dict[str, Any]]:
 
 
 @get("/v1/gguf/hardware")
-async def get_hardware() -> dict[str, Any]:
+def get_hardware() -> dict[str, Any]:
     """Get detected hardware profile for GGUF recommendations."""
     return hardware_payload_from_recommender(_RECOMMENDER)
 
 
 @get("/v1/gguf/installed")
-async def list_installed() -> list[dict[str, Any]]:
+def list_installed() -> list[dict[str, Any]]:
     """List locally installed GGUF models from the model registry."""
     registry = _load_registry()
     entries = _REGISTRY.list_entries(registry)
@@ -73,7 +73,7 @@ async def list_installed() -> list[dict[str, Any]]:
 
 
 @post("/v1/gguf/validate", status_code=200)
-async def validate_model(data: GgufValidateRequestModel) -> dict[str, Any]:
+def validate_model(data: GgufValidateRequestModel) -> dict[str, Any]:
     """Validate a GGUF model path and return metadata."""
     try:
         result = validate_model_path(data.model_path)
@@ -87,7 +87,7 @@ async def validate_model(data: GgufValidateRequestModel) -> dict[str, Any]:
 
 
 @post("/v1/gguf/refresh")
-async def refresh_catalog(use_case: str = "general") -> dict[str, Any]:
+def refresh_catalog(use_case: str = "general") -> dict[str, Any]:
     """Refresh catalog metadata and return updated recommendations."""
     _RECOMMENDER.invalidate_hardware_cache()
     _RECOMMENDER.invalidate_repo_cache()
@@ -101,7 +101,7 @@ async def refresh_catalog(use_case: str = "general") -> dict[str, Any]:
 
 
 @post("/v1/gguf/register")
-async def register_model(payload: GgufRegisterRequestModel) -> dict[str, Any]:
+def register_model(payload: GgufRegisterRequestModel) -> dict[str, Any]:
     """Register a locally installed GGUF model into the registry."""
     if not payload.name or not payload.path:
         raise LitestarHTTPException(status_code=400, detail="name and path are required")
@@ -139,7 +139,7 @@ async def register_model(payload: GgufRegisterRequestModel) -> dict[str, Any]:
 
 
 @delete("/v1/gguf/installed/{model_id:str}", status_code=200)
-async def unregister_model(model_id: str) -> dict[str, Any]:
+def unregister_model(model_id: str) -> dict[str, Any]:
     """Unregister a GGUF model from the registry."""
     registry = _load_registry()
     entry = _REGISTRY.get_entry(registry, model_id)

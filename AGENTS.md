@@ -2,7 +2,10 @@
 
 METIS is a local-first AI workspace that runs entirely on your machine.  The
 primary interface is the **Tauri + Next.js web application** (`apps/metis-web/`)
-backed by a **FastAPI** service (`metis_app/api/`).
+backed by a **Litestar** ASGI service (default) or **FastAPI** (`metis_app/api/`).
+
+Set `METIS_API_BACKEND=fastapi` to use FastAPI instead of the Litestar default.
+Both backends are importable; Litestar is used when the env var is unset.
 
 ---
 
@@ -22,7 +25,7 @@ python main.py --cli query --file my_docs/ --question "What are the key findings
 ## Architecture overview
 
 ```
-main.py                  Entry point — starts FastAPI + opens browser
+main.py                  Entry point — starts Litestar (default) or FastAPI + opens browser
 metis_app/
   api/                   FastAPI routes (v1/*)
   engine/                Indexing + retrieval core (provider-agnostic)

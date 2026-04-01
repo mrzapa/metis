@@ -15,13 +15,13 @@ _API_KEY_PREFIX = "api_key_"
 
 
 @get("/v1/settings")
-async def get_settings() -> dict[str, Any]:
+def get_settings() -> dict[str, Any]:
     """Return active settings with api_key_* fields redacted."""
     return _store.safe_settings(_store.load_settings())
 
 
 @post("/v1/settings")
-async def post_settings(payload: dict[str, Any]) -> dict[str, Any]:
+def post_settings(payload: dict[str, Any]) -> dict[str, Any]:
     """Accept partial settings updates and persist them."""
     updates = dict(payload.get("updates") or payload)
     validated = SettingsUpdateRequest.model_validate({"updates": updates})

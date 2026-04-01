@@ -19,7 +19,7 @@ from metis_app.utils.feature_flags import (
 
 
 @get("/v1/features")
-async def list_features() -> dict[str, list[dict[str, Any]]]:
+def list_features() -> dict[str, list[dict[str, Any]]]:
     statuses = get_feature_statuses(_store.load_settings())
     return {
         "features": [
@@ -36,7 +36,7 @@ async def list_features() -> dict[str, list[dict[str, Any]]]:
 
 
 @post("/v1/features/{feature_name:str}/disable")
-async def disable_feature(
+def disable_feature(
     feature_name: str,
     payload: FeatureKillSwitchRequest,
 ) -> dict[str, Any]:
@@ -68,7 +68,7 @@ async def disable_feature(
 
 
 @post("/v1/features/{feature_name:str}/enable")
-async def enable_feature(
+def enable_feature(
     feature_name: str,
     payload: FeatureEnableRequest,
 ) -> dict[str, Any]:

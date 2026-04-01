@@ -63,7 +63,8 @@ def test_index_service_persists_manifest_and_lists_indexes(tmp_path) -> None:
     assert listed and listed[0].index_id == bundle.index_id
 
 
-def test_index_service_embeds_brain_pass_metadata(tmp_path) -> None:
+def test_index_service_embeds_brain_pass_metadata(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("metis_app.services.brain_pass._native_tribev2_available", lambda: False)
     src = tmp_path / "guide.pdf"
     src.write_text(
         "Implementation guide with evidence and analysis.\n"

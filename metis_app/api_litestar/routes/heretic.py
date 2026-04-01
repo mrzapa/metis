@@ -10,14 +10,14 @@ from typing import Any
 from litestar import Router, get, post
 from litestar.response import ServerSentEvent
 
-from metis_app.api.heretic import AbliterateStreamRequest
+from metis_app.api.models import AbliterateStreamRequest
 from metis_app.services.heretic_service import HereticService
 
 log = logging.getLogger(__name__)
 
 
 @get("/v1/heretic/preflight")
-async def preflight() -> dict[str, Any]:
+def preflight() -> dict[str, Any]:
     svc = HereticService()
     result = svc.preflight()
     return {

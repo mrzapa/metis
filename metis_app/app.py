@@ -16,6 +16,7 @@ Or directly::
 
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 import traceback
@@ -61,7 +62,14 @@ def run_app(
     *,
     open_browser: bool = True,
 ) -> None:
-    """Initialise logging and start the METIS API + web server."""
+    """Initialise logging and start the METIS API + web server.
+
+    The ASGI backend is selected via the ``METIS_API_BACKEND`` environment
+    variable (default: ``litestar``):
+
+    * ``METIS_API_BACKEND=litestar`` — use Litestar (production default)
+    * ``METIS_API_BACKEND=fastapi``  — use FastAPI (backward compat)
+    """
 
     # ── 1. Logging — must be first ────────────────────────────────────
     _default_log_dir = _REPO_ROOT / "logs"
@@ -73,9 +81,17 @@ def run_app(
     try:
         import uvicorn  # type: ignore[import-untyped]
 
-        from metis_app.api.app import app as fastapi_app
+        _backend = os.getenv("METIS_API_BACKEND", "litestar").lower()
+        if _backend == "fastapi":
+            from metis_app.api.app import app as _asgi_app
+            _app_label = "FastAPI"
+        else:
+            from metis_app.api_litestar.app import create_app
+            _asgi_app = create_app()
+            _app_label = "Litestar"
 
         url = f"http://{host}:{port}"
+        logger.info("Starting METIS API (%s) on %s:%s", _app_label, host, port)
         logger.info("Starting API server at %s", url)
 
         if open_browser:
@@ -88,7 +104,7 @@ def run_app(
 
             threading.Thread(target=_open, daemon=True).start()
 
-        uvicorn.run(fastapi_app, host=host, port=port, log_level="info")
+        uvicorn.run(_asgi_app, host=host, port=port, log_level="info")
 
     except Exception as exc:
         detail = traceback.format_exc()

@@ -498,6 +498,40 @@ TelemetryId = Annotated[str, StringConstraints(strip_whitespace=True, min_length
 TelemetryLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
 
 
+# ---------------------------------------------------------------------------
+# Web Graph build models
+# ---------------------------------------------------------------------------
+
+class WebGraphNodeModel(BaseModel):
+    """A single node in the built knowledge graph."""
+
+    filename: str
+    node_type: str  # "moc" | "concept" | "pattern" | "gotcha"
+    title: str
+
+
+class WebGraphBuildRequestModel(BaseModel):
+    """Request body for POST /v1/index/build/web-graph."""
+
+    topic: str
+    settings: dict[str, Any]
+    index_id: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class WebGraphBuildResultModel(BaseModel):
+    """Response for a successfully built web-graph index."""
+
+    index_id: str
+    manifest_path: str
+    topic: str
+    nodes: list[WebGraphNodeModel]
+    sources: list[str]
+    document_count: int
+    chunk_count: int
+
+
 class ArtifactTelemetryBasePayloadModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -926,6 +960,21 @@ class AssistantRuntimeModel(BaseModel):
     local_gguf_gpu_layers: int
     local_gguf_threads: int
     fallback_to_primary: bool
+
+
+class AbliterateStreamRequest(BaseModel):
+    """Body for ``POST /v1/heretic/abliterate/stream``."""
+
+    model_id: str
+    """HuggingFace model identifier (e.g. ``meta-llama/Llama-3.1-8B-Instruct``)."""
+
+    bnb_4bit: bool = False
+    """Enable bitsandbytes 4-bit quantization to reduce VRAM usage."""
+
+    outtype: str = "f16"
+    """Output quantization type for the GGUF file (e.g. ``"f16"``, ``"q4_k_m"``)."""
+
+    model_config = ConfigDict(extra="forbid")
     auto_bootstrap: bool
     auto_install: bool
     bootstrap_state: str

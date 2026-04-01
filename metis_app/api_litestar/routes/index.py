@@ -17,7 +17,7 @@ from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
 from metis_app.api_litestar.common import run_engine
 
 @post("/v1/index/build")
-async def api_build_index(data: IndexBuildRequestModel) -> dict[str, Any]:
+def api_build_index(data: IndexBuildRequestModel) -> dict[str, Any]:
     """Build a new index from documents."""
     orchestrator = WorkspaceOrchestrator()
     result = run_engine(
@@ -30,13 +30,13 @@ async def api_build_index(data: IndexBuildRequestModel) -> dict[str, Any]:
 
 
 @get("/v1/index/list")
-async def api_list_indexes() -> list[dict[str, Any]]:
+def api_list_indexes() -> list[dict[str, Any]]:
     """List all available indexes."""
     return run_engine(list_indexes)
 
 
 @delete("/v1/index", status_code=200)
-async def api_delete_index(manifest_path: str) -> dict[str, Any]:
+def api_delete_index(manifest_path: str) -> dict[str, Any]:
     """Delete a persisted index by manifest path."""
     orchestrator = WorkspaceOrchestrator()
     try:

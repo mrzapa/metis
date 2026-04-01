@@ -332,6 +332,7 @@ def _build_hierarchical_sources(
     score_lookup: dict[int, float] | list[float],
     *,
     top_k: int,
+    token_budget: int = 0,
 ) -> tuple[list[EvidenceSource], list[str], list[int], float]:
     lookup = _chunk_index_lookup(bundle)
     grouped_hits: dict[str, dict[str, Any]] = {}
@@ -370,6 +371,7 @@ def _build_hierarchical_sources(
     context_parts: list[str] = []
     selected_hit_indices: list[int] = []
     top_score = 0.0
+    _accumulated_tokens = 0
 
     for rank, group_id in enumerate(ranked_group_ids, start=1):
         group = grouped_hits[group_id]
@@ -418,6 +420,11 @@ def _build_hierarchical_sources(
                 **dict(parent_chunk.get("metadata") or {}),
             },
         )
+        if token_budget > 0:
+            _chunk_tokens = len(str(parent_chunk.get("text") or "")) // 4
+            if sources and _accumulated_tokens + _chunk_tokens > token_budget:
+                break
+            _accumulated_tokens += _chunk_tokens
         sources.append(source)
         focus_hint = ""
         if matched_previews:
@@ -1028,7 +1035,14 @@ def build_index_bundle(
         outline_nodes = _extract_outline_nodes(text, str(path))
         all_outline_nodes.extend(outline_nodes)
         all_events.extend(_extract_events(text, source))
-        raw_chunks = chunk_text_semantic(text, chunk_size, overlap, strategy=chunk_strategy)
+        if chunk_strategy == "meta_marker":
+            from metis_app.services.semantic_chunker import chunk_text_meta_marker
+            _meta_dicts = chunk_text_meta_marker(text, settings)
+            raw_chunks = [d["text"] for d in _meta_dicts]
+            _meta_marker_keys: list[str] | None = [d.get("marker_key") or d["text"] for d in _meta_dicts]
+        else:
+            raw_chunks = chunk_text_semantic(text, chunk_size, overlap, strategy=chunk_strategy)
+            _meta_marker_keys = None
         per_doc_chunks.append((source, str(path), list(raw_chunks)))
         doc_child_chunks: list[dict[str, Any]] = []
         brain_source = source_brain_metadata.get(str(path), {})
@@ -1052,6 +1066,7 @@ def build_index_bundle(
                 {
                     "id": f"{source}::chunk{idx}",
                     "text": chunk,
+                    **({"marker_key": _meta_marker_keys[idx]} if _meta_marker_keys is not None and idx < len(_meta_marker_keys) else {}),
                     "source": source,
                     "chunk_idx": idx,
                     "file_path": str(path),
@@ -1184,7 +1199,10 @@ def build_index_bundle(
                     {"type": "log", "text": "  (summary generation skipped — LLM unavailable)"}
                 )
 
-    embeddings = emb.embed_documents([chunk["text"] for chunk in all_chunks])
+    embeddings = emb.embed_documents([
+        str(chunk.get("marker_key") or chunk.get("text") or "")
+        for chunk in all_chunks
+    ])
     graph, entity_to_chunks = build_knowledge_graph(
         [chunk["text"] for chunk in all_chunks]
     )
@@ -1278,12 +1296,14 @@ def build_query_result(
     resolved_settings = dict(settings or {})
     top_k = int(resolved_settings.get("top_k", 5) or 5)
     retrieval_mode = str(resolved_settings.get("retrieval_mode", "flat") or "flat").strip().lower()
+    token_budget = int((resolved_settings or {}).get("retrieval_token_budget", 0) or 0)
     if retrieval_mode == "hierarchical":
         sources, context_parts, selected_hits, top_score = _build_hierarchical_sources(
             bundle,
             hit_indices,
             score_lookup,
             top_k=top_k,
+            token_budget=token_budget,
         )
         return QueryResult(
             prompt=question,
@@ -1297,10 +1317,16 @@ def build_query_result(
 
     sources: list[EvidenceSource] = []
     context_parts: list[str] = []
+    _accumulated_tokens = 0
     for rank, idx in enumerate(hit_indices, start=1):
         if idx < 0 or idx >= len(bundle.chunks):
             continue
         chunk = bundle.chunks[idx]
+        if token_budget > 0:
+            _chunk_tokens = len(str(chunk.get("text") or "")) // 4
+            if sources and _accumulated_tokens + _chunk_tokens > token_budget:
+                break
+            _accumulated_tokens += _chunk_tokens
         sid = f"S{rank}"
         score = _score_for_index(score_lookup, idx)
         source = EvidenceSource(

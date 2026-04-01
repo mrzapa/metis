@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from typing import Any, Callable
 
@@ -30,6 +31,10 @@ _ERROR_TAIL_LINES = 5
 
 # Rich markup stripper — removes tags like [bold], [/], [blue underline], etc.
 _RICH_TAG_RE = re.compile(r"\[/?[^\]]*\]")
+
+_VALID_OUTTYPES: frozenset[str] = frozenset(
+    {"f16", "bf16", "f32", "q4_0", "q4_k_m", "q6_k", "q8_0", "auto"}
+)
 
 
 def _strip_rich(text: str) -> str:
@@ -113,10 +118,12 @@ def _run_streaming(
     tail: collections.deque[str] = collections.deque(maxlen=_ERROR_TAIL_LINES)
 
     # Optional wall-clock watchdog.
+    timed_out = [False]
     if timeout_seconds is not None:
         def _kill() -> None:
             if proc.poll() is None:
                 _log.warning("%s: timeout after %ds — killing", label, timeout_seconds)
+                timed_out[0] = True
                 proc.kill()
         _watchdog: threading.Timer | None = threading.Timer(timeout_seconds, _kill)
         _watchdog.start()
@@ -148,8 +155,13 @@ def _run_streaming(
 
     if proc.returncode != 0:
         detail = "\n".join(tail)
+        prefix = (
+            f"heretic timed out after {timeout_seconds}s — "
+            if timed_out[0]
+            else ""
+        )
         raise RuntimeError(
-            f"{label} exited with code {proc.returncode}\n{detail}"
+            f"{prefix}{label} exited with code {proc.returncode}\n{detail}"
         )
 
 
@@ -394,9 +406,18 @@ class HereticService:
             f'quantization = "{"bnb_4bit" if bnb_4bit else "none"}"',
             'study_checkpoint_dir = "checkpoints"',
         ]
-        (output_dir / "config.toml").write_text(
-            "\n".join(config_lines) + "\n", encoding="utf-8"
-        )
+        _toml_content = "\n".join(config_lines) + "\n"
+        _toml_path = output_dir / "config.toml"
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=_toml_path.parent,
+            suffix=".tmp",
+            delete=False,
+            encoding="utf-8",
+        ) as _tmp:
+            _tmp.write(_toml_content)
+            _tmp_path = _tmp.name
+        os.replace(_tmp_path, _toml_path)
 
         # Remove any previous checkpoint so heretic starts fresh and no extra
         # "continue previous run?" prompt appears before the trial-selection menu.
@@ -450,6 +471,11 @@ class HereticService:
             _log.info("gguf-convert: %s", text)
             if post_message:
                 post_message({"type": "status", "text": text})
+
+        if outtype not in _VALID_OUTTYPES:
+            raise ValueError(
+                f"Invalid outtype {outtype!r}; must be one of {sorted(_VALID_OUTTYPES)}"
+            )
 
         convert_script = find_convert_script()
         if not convert_script:

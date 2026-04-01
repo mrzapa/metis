@@ -100,3 +100,36 @@ def _ddg_search(query: str, *, n_results: int = 5) -> list[WebSearchResult]:
                 )
             )
     return results
+
+
+def fetch_page_content(url: str, max_chars: int = 2000) -> str:
+    """Fetch main content from a URL via Jina Reader (r.jina.ai).
+
+    Falls back to an empty string on any error so callers degrade gracefully.
+    No external dependencies — uses stdlib urllib only.
+    """
+    jina_url = f"https://r.jina.ai/{url}"
+    try:
+        req = urllib.request.Request(
+            jina_url,
+            headers={"User-Agent": "MetisAI/1.0", "Accept": "text/plain"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
+            return resp.read().decode("utf-8", errors="replace")[:max_chars]
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("Jina Reader fetch failed for %s: %s", url, exc)
+        return ""
+
+
+def create_page_fetcher(settings: dict) -> callable:  # type: ignore[type-arg]
+    """Return a page-content fetcher.
+
+    Respects ``web_scrape_full_content`` setting (future: max_chars).
+    Returns a zero-arg-per-call wrapper around :func:`fetch_page_content`.
+    """
+    max_chars = 2000 if settings.get("web_scrape_full_content") else 1000
+
+    def _fetch(url: str) -> str:
+        return fetch_page_content(url, max_chars=max_chars)
+
+    return _fetch
