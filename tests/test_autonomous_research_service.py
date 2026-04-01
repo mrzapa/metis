@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import pathlib
-import uuid
 from unittest.mock import MagicMock
-
-import pytest
 
 from metis_app.services.autonomous_research_service import AutonomousResearchService
 from metis_app.utils.web_search import WebSearchResult
@@ -54,7 +50,16 @@ def test_save_temp_document_writes_file(tmp_path):
     assert path.read_text(encoding="utf-8") == content
 
 
-def test_formulate_query_calls_llm():
+def test_formulate_query_calls_llm(monkeypatch):
+    import sys
+    import types
+
+    fake_langchain_core = types.ModuleType("langchain_core")
+    fake_langchain_core_messages = types.ModuleType("langchain_core.messages")
+    fake_langchain_core_messages.HumanMessage = lambda content: {"role": "user", "content": content}  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "langchain_core", fake_langchain_core)
+    monkeypatch.setitem(sys.modules, "langchain_core.messages", fake_langchain_core_messages)
+
     mock_llm = MagicMock()
     mock_llm.invoke.return_value = MagicMock(content="What is emergence in complex systems?")
     svc = AutonomousResearchService(web_search=MagicMock())
@@ -63,7 +68,16 @@ def test_formulate_query_calls_llm():
     mock_llm.invoke.assert_called_once()
 
 
-def test_synthesize_document_returns_markdown():
+def test_synthesize_document_returns_markdown(monkeypatch):
+    import sys
+    import types
+
+    fake_langchain_core = types.ModuleType("langchain_core")
+    fake_langchain_core_messages = types.ModuleType("langchain_core.messages")
+    fake_langchain_core_messages.HumanMessage = lambda content: {"role": "user", "content": content}  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "langchain_core", fake_langchain_core)
+    monkeypatch.setitem(sys.modules, "langchain_core.messages", fake_langchain_core_messages)
+
     mock_llm = MagicMock()
     mock_llm.invoke.return_value = MagicMock(
         content="# Emergence\n\nEmergence is the arising of novel properties."

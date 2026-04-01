@@ -7,8 +7,7 @@ from datetime import datetime, timezone
 import uuid
 from typing import Any
 
-# Import trace event schema for documentation and type hints
-from metis_app.models.trace_event_schema import EventType, EventStatus
+
 
 
 def utc_now_iso() -> str:

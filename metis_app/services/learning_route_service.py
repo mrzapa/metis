@@ -386,7 +386,7 @@ def _build_fallback_step_title(kind: LearningRouteStepKind, topic: str) -> str:
     if kind == "foundations":
         return f"Lay the Foundations for {topic}"
     if kind == "synthesis":
-        return f"Synthesize the Constellation"
+        return "Synthesize the Constellation"
     return f"Apply {topic}"
 
 

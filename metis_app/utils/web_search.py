@@ -78,7 +78,6 @@ def _ddg_search(query: str, *, n_results: int = 5) -> list[WebSearchResult]:
     results: list[WebSearchResult] = []
     abstract = data.get("AbstractText", "")
     abstract_url = data.get("AbstractURL", "")
-    abstract_added = False
     if abstract and abstract_url:
         results.append(
             WebSearchResult(
@@ -88,7 +87,6 @@ def _ddg_search(query: str, *, n_results: int = 5) -> list[WebSearchResult]:
                 content=abstract,
             )
         )
-        abstract_added = True
     for item in data.get("RelatedTopics", []):
         if len(results) >= n_results:
             break

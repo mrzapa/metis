@@ -16,6 +16,8 @@ qt_gui = pytest.importorskip("PySide6.QtGui", reason="Qt runtime unavailable")
 QApplication = qt_widgets.QApplication
 QTabWidget = qt_widgets.QTabWidget
 
+pytest.importorskip("metis_app.views.app_view", reason="AppView shell not available")
+
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "win32",

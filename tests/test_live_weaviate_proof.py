@@ -238,7 +238,6 @@ def test_live_weaviate_cli_round_trip_uses_shared_backend(tmp_path, monkeypatch,
     user_settings.write_text(json.dumps(settings), encoding="utf-8")
     monkeypatch.setattr(app_model_module, "_DEFAULT_SETTINGS_PATH", defaults)
     monkeypatch.setattr(app_model_module, "_USER_SETTINGS_PATH", user_settings)
-    monkeypatch.setattr(app_model_module, "_LEGACY_CONFIG_PATH", tmp_path / "legacy.json")
 
     src = tmp_path / "cli.txt"
     out = tmp_path / "cli.metis-index"
