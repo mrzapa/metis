@@ -287,3 +287,65 @@ class SkillRepository:
                 }
             )
         return rows
+
+    # ------------------------------------------------------------------
+    # Skill candidate capture (Phase 3: Skill Evolution)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _init_candidates_db(db_path: pathlib.Path) -> sqlite3.Connection:
+        import sqlite3
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS skill_candidates (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                query_text TEXT NOT NULL,
+                trace_json TEXT NOT NULL,
+                convergence_score REAL NOT NULL DEFAULT 0.0,
+                created_at REAL NOT NULL,
+                promoted  INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        conn.commit()
+        return conn
+
+    def save_candidate(
+        self,
+        *,
+        db_path: pathlib.Path,
+        query_text: str,
+        trace_json: str,
+        convergence_score: float,
+    ) -> None:
+        import sqlite3
+        import time
+        conn = self._init_candidates_db(db_path)
+        with conn:
+            conn.execute(
+                "INSERT INTO skill_candidates (query_text, trace_json, convergence_score, created_at) VALUES (?, ?, ?, ?)",
+                (str(query_text), str(trace_json), float(convergence_score), time.time()),
+            )
+
+    def list_candidates(
+        self,
+        *,
+        db_path: pathlib.Path,
+        limit: int = 5,
+    ) -> list[dict]:
+        import sqlite3
+        conn = self._init_candidates_db(db_path)
+        rows = conn.execute(
+            "SELECT id, query_text, trace_json, convergence_score, created_at FROM skill_candidates "
+            "WHERE promoted = 0 ORDER BY convergence_score DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            {"id": r[0], "query_text": r[1], "trace_json": r[2], "convergence_score": r[3], "created_at": r[4]}
+            for r in rows
+        ]
+
+    def mark_candidate_promoted(self, *, db_path: pathlib.Path, candidate_id: int) -> None:
+        import sqlite3
+        conn = self._init_candidates_db(db_path)
+        with conn:
+            conn.execute("UPDATE skill_candidates SET promoted = 1 WHERE id = ?", (candidate_id,))
