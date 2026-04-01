@@ -121,6 +121,26 @@ def test_run_returns_none_when_web_search_empty(monkeypatch):
     assert result is None
 
 
+def test_scan_faculty_gaps_uses_demand_scores_for_ordering():
+    """High-demand faculty with zero indexes should be prioritised over low-demand."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+    # reasoning (index 3 in FACULTY_ORDER) has no auto-indexes
+    # perception (index 0) has no auto-indexes
+    # If reasoning has higher demand, it should come first
+    indexes = []  # all faculties have zero coverage
+    demand_scores = {"perception": 1, "reasoning": 5}  # reasoning is in higher demand
+    faculty = svc.scan_faculty_gaps(indexes, demand_scores=demand_scores)
+    assert faculty == "reasoning"
+
+
+def test_scan_faculty_gaps_falls_back_to_faculty_order_without_demand_scores():
+    """Without demand_scores, original tie-break by FACULTY_ORDER still applies."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+    indexes = []
+    faculty = svc.scan_faculty_gaps(indexes)
+    assert faculty == "perception"  # first in FACULTY_ORDER
+
+
 def test_scan_faculty_gaps_counts_indexes_not_documents():
     """Each auto_ index should count as 1 star regardless of document_count."""
     svc = AutonomousResearchService(web_search=MagicMock())
