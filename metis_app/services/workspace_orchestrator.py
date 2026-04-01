@@ -688,8 +688,40 @@ class WorkspaceOrchestrator:
             {"index_id": idx.get("index_id", ""), "document_count": idx.get("document_count", 0)}
             for idx in index_dicts
         ]
+        concurrency = max(1, int(raw_policy.get("autonomous_research_concurrency", 1) or 1))
+        delay_ms = max(0, int(raw_policy.get("autonomous_research_request_delay_ms", 500) or 500))
+
         svc = AutonomousResearchService(web_search=create_web_search(resolved))
-        return svc.run(settings=resolved, indexes=index_list, orchestrator=self)
+
+        if concurrency <= 1:
+            # Original single-gap behaviour — backwards compatible
+            return svc.run(settings=resolved, indexes=index_list, orchestrator=self)
+
+        # Collect all sparse faculty gaps
+        import asyncio
+        faculty_ids: list[str] = []
+        temp_indexes = list(index_list)
+        for _ in range(concurrency * 2):  # cap scan to avoid infinite loop
+            fid = svc.scan_faculty_gaps(temp_indexes)
+            if fid is None or fid in faculty_ids:
+                break
+            faculty_ids.append(fid)
+            # Temporarily mark as covered so scan finds the next gap
+            temp_indexes = temp_indexes + [{"index_id": f"auto_{fid}_placeholder"}]
+
+        if not faculty_ids:
+            return None
+
+        results = asyncio.run(
+            svc.run_batch(
+                faculty_ids=faculty_ids,
+                settings=resolved,
+                orchestrator=self,
+                concurrency=concurrency,
+                request_delay_ms=delay_ms,
+            )
+        )
+        return results[0] if results else None
 
     def preview_learning_route(
         self,
