@@ -2571,13 +2571,13 @@ export default function Home() {
             && (ragPulseState?.starIds.has(star.id) || ragPulseState?.starIds.has(linkedStarId));
           const selectedEdge = selectedStarId !== null
             && (star.id === selectedStarId || linkedStarId === selectedStarId);
-          if (!selectedEdge && !ragHighlighted) {
-            return;
-          }
           const ragBoost = ragHighlighted ? ragPulseStrength : 0;
+          // Always render edges so the constellation structure stays visible;
+          // boost alpha on selection to signal which branches belong to the picked star.
+          const edgeAlpha = selectedEdge ? 0.32 : ragHighlighted ? 0.21 : 0.13;
           const gradient = ctx!.createLinearGradient(from.target.x, from.target.y, to.target.x, to.target.y);
-          gradient.addColorStop(0, `rgba(${from.mixed[0]},${from.mixed[1]},${from.mixed[2]},${(0.15 + ragBoost * 0.34) * alphaMultiplier})`);
-          gradient.addColorStop(1, `rgba(${to.mixed[0]},${to.mixed[1]},${to.mixed[2]},${(0.15 + ragBoost * 0.34) * alphaMultiplier})`);
+          gradient.addColorStop(0, `rgba(${from.mixed[0]},${from.mixed[1]},${from.mixed[2]},${(edgeAlpha + ragBoost * 0.34) * alphaMultiplier})`);
+          gradient.addColorStop(1, `rgba(${to.mixed[0]},${to.mixed[1]},${to.mixed[2]},${(edgeAlpha + ragBoost * 0.34) * alphaMultiplier})`);
           ctx!.strokeStyle = gradient;
           ctx!.lineWidth = 0.95 + ragBoost * 1.35;
           ctx!.beginPath();
@@ -2755,8 +2755,10 @@ export default function Home() {
         H,
         polarisCam,
       );
-      const ppx = projected.x;
-      const ppy = projected.y;
+      // Match the parallax applied to constellation nodes so Polaris drifts
+      // in sync with the surrounding star field on mouse movement.
+      const ppx = projected.x + (mouse.x - W / 2) * 0.015;
+      const ppy = projected.y + (mouse.y - H / 2) * 0.015;
       const pulse = reducedMotion ? 1 : 0.88 + Math.sin(ts * 0.00209) * 0.12;
       const nodeGalaxyScale = getZoomResponsiveNodeScale(backgroundZoomRef.current);
       const coreR = 5 * nodeGalaxyScale;
