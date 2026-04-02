@@ -22,6 +22,7 @@ interface PageChromeProps {
   children: ReactNode;
   contentClassName?: string;
   fullBleed?: boolean;
+  hideHeader?: boolean;
   backdropVariant?: "ambient" | "starscape";
   tone?: "default" | "starscape";
   companionContext?: {
@@ -51,6 +52,7 @@ export function PageChrome({
   children,
   contentClassName,
   fullBleed = false,
+  hideHeader = false,
   tone = "default",
   companionContext,
 }: PageChromeProps) {
@@ -119,7 +121,7 @@ export function PageChrome({
               className="mx-auto w-full max-w-384"
             >
               {/* Page header */}
-              <section className="mb-4 grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.95fr)] xl:items-stretch">
+              {!hideHeader && <section className="mb-4 grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.95fr)] xl:items-stretch">
                 <div
                   className={cn(
                     "home-liquid-glass flex h-full flex-col rounded-2xl px-5 py-5 sm:px-6 sm:py-6",
@@ -172,7 +174,7 @@ export function PageChrome({
                     </div>
                   </div>
                 ) : null}
-              </section>
+              </section>}
 
               {/* Main content area */}
               <section

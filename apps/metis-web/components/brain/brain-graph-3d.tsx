@@ -24,6 +24,7 @@ import ForceGraph3D, { type ForceGraphMethods } from "react-force-graph-3d";
 import * as THREE from "three";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import gsap from "gsap";
 
 import {
   type BrainGraphData,
@@ -478,7 +479,6 @@ export default function BrainGraph3D({
   const pointerCurrentRef = useRef(new THREE.Vector2(0, 0));
   const presenceTargetRef = useRef(0);
   const presenceCurrentRef = useRef(0);
-  const bloomBoostRef = useRef(0);
   // Active shockwave effects
   const shockwavesRef = useRef<ShockwaveHandle[]>([]);
   // Active spawn burst effects (inspired by Vestige)
@@ -515,6 +515,23 @@ export default function BrainGraph3D({
       if (!fgRef.current) return;
       fgRef.current.zoomToFit(ZOOM_TO_FIT_MS, ZOOM_TO_FIT_PADDING);
     });
+  }, []);
+
+  /**
+   * Pulse the UnrealBloom strength to `targetStrength` and ease it back to the
+   * baseline. Only fires if the requested peak is stronger than the current
+   * value (i.e. a weaker pulse never interrupts a stronger one).
+   */
+  const pulseBloom = useCallback((targetStrength: number) => {
+    const bloomPass = bloomPassRef.current;
+    if (!bloomPass) return;
+    if (targetStrength <= bloomPass.strength) return;
+    gsap.killTweensOf(bloomPass, "strength");
+    gsap.fromTo(
+      bloomPass,
+      { strength: targetStrength },
+      { strength: BLOOM_STRENGTH, duration: 2.0, ease: "power3.out" },
+    );
   }, []);
 
   useEffect(() => {
@@ -566,7 +583,7 @@ export default function BrainGraph3D({
       }
       setHighlightState(next);
       setHighlightNowMs(Date.now());
-      bloomBoostRef.current = Math.max(bloomBoostRef.current, BLOOM_PULSE_BOOST + 0.08);
+      pulseBloom(BLOOM_STRENGTH + BLOOM_PULSE_BOOST + 0.08);
     };
 
     const unsubscribe = subscribeBrainGraphRagActivity(applyActivity, {
@@ -576,7 +593,7 @@ export default function BrainGraph3D({
     return () => {
       unsubscribe();
     };
-  }, [data, setHighlightNowMs, setHighlightState]);
+  }, [data, pulseBloom, setHighlightNowMs, setHighlightState]);
 
   useEffect(() => {
     if (!ragActivity) {
@@ -659,6 +676,7 @@ export default function BrainGraph3D({
       // Bloom/output passes are managed by the library's internal composer;
       // we only need to dispose our pass materials.
       if (bloomPassRef.current) {
+        gsap.killTweensOf(bloomPassRef.current);
         bloomPassRef.current.dispose();
         bloomPassRef.current = null;
       }
@@ -761,11 +779,6 @@ export default function BrainGraph3D({
           rimLight.position.y = rimLight.userData.baseHeight + pointerCurrent.y * 20;
           rimLight.intensity = rimLight.userData.baseIntensity + presenceCurrentRef.current * 0.12;
         }
-      }
-
-      if (bloomPassRef.current) {
-        bloomBoostRef.current = Math.max(0, bloomBoostRef.current - dt * 0.11);
-        bloomPassRef.current.strength = BLOOM_STRENGTH + bloomBoostRef.current;
       }
 
       // Animate spawn bursts (particles fly outward + fade)
@@ -1103,7 +1116,7 @@ export default function BrainGraph3D({
         directionalSpeed: 0.003,
         directionalWidth: 1.8,
       });
-      bloomBoostRef.current = Math.max(bloomBoostRef.current, 0.04);
+      pulseBloom(BLOOM_STRENGTH + 0.04);
       return;
     }
 
@@ -1125,8 +1138,8 @@ export default function BrainGraph3D({
       directionalSpeed: profile.directionalSpeed,
       directionalWidth: profile.directionalWidth,
     });
-    bloomBoostRef.current = Math.max(bloomBoostRef.current, BLOOM_PULSE_BOOST + profile.bloom * 0.8);
-  }, [companionSignal, setActivityLabel, setActivityProfile]);
+    pulseBloom(BLOOM_STRENGTH + BLOOM_PULSE_BOOST + profile.bloom * 0.8);
+  }, [companionSignal, pulseBloom, setActivityLabel, setActivityProfile]);
 
   useEffect(() => {
     if (!selectedNodeId || autoRotate) return;
@@ -1300,10 +1313,7 @@ export default function BrainGraph3D({
         const profile = ACTIVITY_PROFILES[node.brain.node_type];
         const nodeDegree = graphTopology.degreeById.get(node.id) ?? 0;
         const degreeBoost = Math.min(0.28, nodeDegree * 0.02);
-        bloomBoostRef.current = Math.max(
-          bloomBoostRef.current,
-          BLOOM_PULSE_BOOST + profile.bloom + degreeBoost * 0.2,
-        );
+        pulseBloom(BLOOM_STRENGTH + BLOOM_PULSE_BOOST + profile.bloom + degreeBoost * 0.2);
         const wave = createShockwave(pos, color);
         scene.add(wave.mesh);
         shockwavesRef.current.push(wave);
@@ -1335,7 +1345,7 @@ export default function BrainGraph3D({
         }
       }
     },
-    [graphData.links, graphData.nodes, graphTopology.degreeById, onNodeSelect, onSelectedNodeIdChange, selectedNodeId],
+    [graphData.links, graphData.nodes, graphTopology.degreeById, onNodeSelect, onSelectedNodeIdChange, pulseBloom, selectedNodeId],
   );
 
   // Clear selection when the selected node is no longer visible

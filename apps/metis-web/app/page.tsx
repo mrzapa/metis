@@ -2396,7 +2396,12 @@ export default function Home() {
         const hasLinkedSourceContent = userStarsRef.current.some(
           (userStar) => getStarManifestPaths(userStar).length > 0,
         );
-        const hasUserContent = hasLinkedSourceContent || hasSessionIndexedContentRef.current;
+        // Allow star adding if the user has any available index (even from prior sessions),
+        // not just one built in the current session — restores the ability to add the first
+        // star when indexes exist but no user stars have been mapped yet.
+        const hasUserContent = hasLinkedSourceContent
+          || hasSessionIndexedContentRef.current
+          || availableIndexesRef.current.length > 0;
         star.isAddable = isAddableBackgroundStar(star, allConstellationStarPx, projectedUserStars, W, H, hasUserContent);
         nextVisibleStars[visibleStarCount] = star;
         visibleStarCount += 1;

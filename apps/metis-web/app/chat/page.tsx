@@ -1320,6 +1320,7 @@ export default function ChatPage() {
       eyebrow="Chat"
       title="Ask questions, get grounded answers"
       description="Switch between direct reasoning and retrieval-augmented mode. Inspect evidence, trace data, and manage sessions."
+      hideHeader
       backdropVariant="starscape"
       tone="starscape"
       actions={

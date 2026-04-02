@@ -16,7 +16,9 @@
       "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" show 427b815 -- \"apps/metis-web/app/page.tsx\")",
       "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" show 427b815 -- \"apps/metis-web/lib/constellation-home.ts\")",
       "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" log --oneline --all -1 -- \"apps/metis-web/app/page.tsx\" \"apps/metis-web/lib/constellation-home.ts\" \"apps/metis-web/components/constellation/\")",
-      "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" diff 427b815~1 427b815 -- \"apps/metis-web/app/page.tsx\" \"apps/metis-web/lib/constellation-home.ts\")"
+      "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" diff 427b815~1 427b815 -- \"apps/metis-web/app/page.tsx\" \"apps/metis-web/lib/constellation-home.ts\")",
+      "Bash(python -m pytest tests/test_iterrag_convergence.py tests/test_skill_evolution.py -v --tb=short)",
+      "Bash(python -m pytest tests/test_autonomous_research_service.py tests/test_workspace_orchestrator.py -v --tb=short)"
     ]
   }
 }
