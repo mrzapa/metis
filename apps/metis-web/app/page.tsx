@@ -13,7 +13,7 @@ const LandingStarfieldWebgl = dynamic(
     ),
   { ssr: false, loading: () => null },
 );
-import { FacultyConceptPanel, StarDetailsPanel } from "@/components/constellation/star-observatory-dialog";
+import { StarDetailsPanel } from "@/components/constellation/star-observatory-dialog";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
 import { deleteIndex, fetchIndexes, previewLearningRoute } from "@/lib/api";
 import {
@@ -822,7 +822,6 @@ export default function Home() {
   const [learningRoutePreviewStarId, setLearningRoutePreviewStarId] = useState<string | null>(null);
   const [learningRouteLoading, setLearningRouteLoading] = useState(false);
   const [learningRouteError, setLearningRouteError] = useState<string | null>(null);
-  const [selectedConceptFaculty, setSelectedConceptFaculty] = useState<FacultyConcept | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const starTooltipCardRef = useRef<HTMLDivElement>(null);
   const starTooltipDomainRef = useRef<HTMLDivElement>(null);
@@ -1194,7 +1193,6 @@ export default function Home() {
 
   const closeConcept = useCallback(() => {
     activeNodeRef.current = -1;
-    setSelectedConceptFaculty(null);
   }, []);
 
   const closeStarTooltip = useCallback(() => {
@@ -2053,7 +2051,18 @@ export default function Home() {
 
     function showConceptAtNode(idx: number) {
       activeNodeRef.current = idx;
-      setSelectedConceptFaculty(nodes[idx].concept);
+      const c = nodes[idx].concept;
+      void addUserStar({
+        x: c.faculty.x,
+        y: c.faculty.y,
+        size: 0.82 + Math.random() * 0.55,
+        primaryDomainId: c.faculty.id,
+        stage: "seed",
+      }).then((createdStar) => {
+        if (!createdStar) return;
+        openStarDetails(createdStar, "new");
+        clearHoveredCandidate();
+      });
     }
 
     /* nodes */
@@ -4059,11 +4068,6 @@ export default function Home() {
         onSetLearningRouteStepStatus={handleSetLearningRouteStepStatus}
       />
 
-      <FacultyConceptPanel
-        open={selectedConceptFaculty !== null}
-        onClose={closeConcept}
-        concept={selectedConceptFaculty}
-      />
 
       {/* Star tooltip card */}
       <div ref={starTooltipCardRef} className="metis-star-tooltip" id="starTooltipCard">

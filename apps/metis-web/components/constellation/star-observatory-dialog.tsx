@@ -204,7 +204,7 @@ function StarMiniPreview({
     if (!ctx) return;
 
     const DPR = Math.min(typeof window !== "undefined" ? (window.devicePixelRatio ?? 1) : 1, 2);
-    const PX = 96;
+    const PX = 180;
     canvas.width = PX * DPR;
     canvas.height = PX * DPR;
     canvas.style.width = `${PX}px`;
@@ -215,7 +215,7 @@ function StarMiniPreview({
     const cy = PX / 2;
     const [r, g, b] = getFacultyColor(primaryDomainId);
     const relatedColors = (relatedDomainIds ?? []).slice(0, 2).map((id) => getFacultyColor(id));
-    const sz = Math.max(3.5, Math.min(7.5, (size ?? 1.2) * 3.2));
+    const sz = Math.max(38, Math.min(52, (size ?? 1.2) * 36));
     const hasDiffraction = stage === "integrated" || stage === "growing";
     let startTime: number | null = null;
 
@@ -224,13 +224,10 @@ function StarMiniPreview({
       const elapsed = ts - startTime;
       ctx!.clearRect(0, 0, PX, PX);
 
-      ctx!.save();
-      ctx!.beginPath();
-      ctx!.arc(cx, cy, PX / 2, 0, Math.PI * 2);
-      ctx!.clip();
-
       ctx!.fillStyle = "rgb(8,11,20)";
       ctx!.fillRect(0, 0, PX, PX);
+
+      ctx!.save();
 
       const twinkle = 0.85 + Math.sin(elapsed * 0.002) * 0.1 + Math.cos(elapsed * 0.0014) * 0.05;
 
