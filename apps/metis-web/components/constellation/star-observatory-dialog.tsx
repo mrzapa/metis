@@ -183,6 +183,326 @@ function resolveDefaultStage(
   return "seed";
 }
 
+/* ── WebGL2 procedural star shader ──────────────────────────────────── */
+
+const STAR_VERT = `#version 300 es
+precision highp float;
+in vec2 a_pos;
+out vec2 v_uv;
+void main(){
+  v_uv = a_pos * 0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0.0, 1.0);
+}` as const;
+
+const STAR_FRAG = `#version 300 es
+precision highp float;
+
+in vec2 v_uv;
+out vec4 fragColor;
+
+uniform float u_time;
+uniform float u_seed;
+uniform vec3  u_color;
+uniform vec3  u_color2;
+uniform vec3  u_color3;
+uniform float u_hasColor2;
+uniform float u_hasColor3;
+uniform float u_hasDiffraction;
+uniform float u_stage;        // 0 seed, 1 growing, 2 integrated
+uniform vec2  u_res;          // physical pixel resolution
+
+/* ── hash ───────────────────────────────────────────────────────────── */
+float hash(vec2 p){
+  vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+vec2 hash2(vec2 p){
+  return vec2(hash(p), hash(p + 127.1));
+}
+
+/* ── value noise (quintic interp for smoothness) ────────────────────── */
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*f*(f*(f*6.0-15.0)+10.0);   // quintic Hermite
+  float a = hash(i);
+  float b = hash(i + vec2(1,0));
+  float c = hash(i + vec2(0,1));
+  float d = hash(i + vec2(1,1));
+  return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
+}
+
+/* ── fbm — 7 octaves for fine detail ────────────────────────────────── */
+float fbm(vec2 p, int oct){
+  float v = 0.0, a = 0.5, tot = 0.0;
+  mat2 rot = mat2(0.8,-0.6,0.6,0.8);
+  for(int i=0; i<7; i++){
+    if(i >= oct) break;
+    v += a * vnoise(p);
+    tot += a;
+    p = rot * p * 2.03;
+    a *= 0.49;
+  }
+  return v / tot;
+}
+
+/* ── Worley (F1) with animated jitter ───────────────────────────────── */
+float worley(vec2 p, float jitter){
+  vec2 i = floor(p), f = fract(p);
+  float md = 1.0;
+  for(int y=-1; y<=1; y++){
+    for(int x=-1; x<=1; x++){
+      vec2 nb = vec2(float(x), float(y));
+      vec2 pt = hash2(i + nb + u_seed * 13.7) * jitter;
+      float d = length(nb + pt - f);
+      md = min(md, d);
+    }
+  }
+  return md;
+}
+
+/* ── multi-scale Worley for granulation ─────────────────────────────── */
+float granulation(vec2 p, float t){
+  float w1 = worley(p * 18.0 + t * 0.08, 0.92);
+  float w2 = worley(p * 36.0 + t * 0.05, 0.88);
+  float w3 = worley(p * 72.0 - t * 0.03, 0.85);
+  // combine: large cells with fine sub-structure
+  float g = w1 * 0.5 + w2 * 0.3 + w3 * 0.2;
+  // keep full dynamic range — don't binarise
+  return g;
+}
+
+/* ── dither to kill banding ─────────────────────────────────────────── */
+float dither(vec2 fragCoord){
+  return (hash(fragCoord + fract(u_time)) - 0.5) / 255.0;
+}
+
+void main(){
+  vec2 uv = v_uv * 2.0 - 1.0;
+  float dist = length(uv);
+  float angle = atan(uv.y, uv.x);
+
+  vec2 starOff = vec2(u_seed * 11.3, u_seed * 7.7);
+  float t = u_time * 0.35;
+
+  vec3 fc   = u_color / 255.0;
+  vec3 hot  = vec3(1.0, 0.97, 0.92);
+
+  /* ===================================================================
+     PHOTOSPHERE  (dist < ~0.44)
+     ================================================================ */
+
+  // Limb darkening — realistic power-law: I(mu) = mu^0.8
+  // mu = cos(theta) from sphere projection
+  float sphereR = 0.44;                          // photosphere radius in UV
+  float rNorm   = dist / sphereR;                // 0 at centre, 1 at edge
+  float mu      = sqrt(max(0.0, 1.0 - rNorm * rNorm));
+  float limb    = pow(mu, 0.8);
+
+  // Granulation — three Worley octaves, subtle
+  float gran = granulation(uv + starOff, t);
+  // modulate: bright granule centres, dark intergranular lanes
+  float granMod = 0.88 + gran * 0.24;            // range ~0.88–1.12
+
+  // Colour gradient: white core → saturated faculty colour at limb
+  float coreT   = smoothstep(0.0, 0.85, rNorm);  // 0 at centre, 1 at limb
+  vec3 coreCol  = mix(hot, fc * 1.1, coreT * coreT);
+  // warm mid-tones: add a hint of gold/orange at mid-radius
+  vec3 midWarm  = mix(vec3(1.0, 0.85, 0.6), fc, 0.5);
+  float midBand = exp(-pow((rNorm - 0.55) * 4.0, 2.0));
+  coreCol       = mix(coreCol, midWarm, midBand * 0.25);
+
+  vec3 photosphere = coreCol * limb * granMod;
+
+  // Sunspots (growing + integrated)
+  if(u_stage >= 1.0){
+    float spot = fbm(uv * 6.0 + starOff * 2.0 + t * 0.02, 5);
+    float spotMask = smoothstep(0.60, 0.65, spot) * smoothstep(0.8, 0.15, rNorm);
+    // penumbra ring
+    float penumbra = smoothstep(0.57, 0.60, spot) * smoothstep(0.65, 0.62, spot);
+    photosphere *= 1.0 - spotMask * 0.55;
+    photosphere = mix(photosphere, fc * 0.4, penumbra * 0.3 * smoothstep(0.8, 0.15, rNorm));
+  }
+
+  // faculae — bright patches near limb (integrated only)
+  if(u_stage >= 2.0){
+    float fac = fbm(uv * 10.0 + starOff * 3.0 + t * 0.01, 4);
+    float facMask = smoothstep(0.55, 0.62, fac) * smoothstep(0.3, 0.9, rNorm) * smoothstep(1.0, 0.85, rNorm);
+    photosphere += hot * facMask * 0.15;
+  }
+
+  // Sharp photosphere edge
+  float bodyMask = smoothstep(sphereR + 0.008, sphereR - 0.008, dist);
+
+  /* ===================================================================
+     CHROMOSPHERE  (thin bright ring just outside photosphere)
+     ================================================================ */
+  float chromoDist = abs(dist - sphereR);
+  float chromo = exp(-chromoDist * chromoDist * 3000.0) * 0.6;
+  // chromosphere has spicule texture
+  float spiculeNoise = fbm(vec2(angle * 8.0 + u_seed * 3.0, dist * 30.0 - t * 0.5), 5);
+  chromo *= 0.6 + spiculeNoise * 0.8;
+  vec3 chromoCol = mix(fc, hot, 0.5) * chromo;
+
+  /* ===================================================================
+     CORONA  (structured filaments, not a blurry ring)
+     ================================================================ */
+  float coronaDist = max(0.0, dist - sphereR);
+  float coronaFade = exp(-coronaDist * 3.5);
+
+  // Streamer rays — 6-8 asymmetric rays from noise
+  float nRays = 6.0 + u_seed * 4.0;              // 6–10 rays depending on seed
+  float rayAngle = angle + fbm(vec2(angle * 0.5 + u_seed * 9.0, 1.0), 3) * 0.8;
+  float rays = pow(abs(cos(rayAngle * nRays * 0.5)), 8.0);
+
+  // Fine filament structure within streamers
+  float filament = fbm(vec2(angle * 6.0 + u_seed, coronaDist * 20.0 - t * 0.3), 6);
+  float filament2 = fbm(vec2(angle * 12.0 - u_seed * 2.0, coronaDist * 40.0 + t * 0.2), 5);
+  float detail = filament * 0.65 + filament2 * 0.35;
+
+  float corona = coronaFade * (rays * 0.6 + 0.15) * (0.4 + detail * 0.9);
+  corona *= smoothstep(0.0, 0.04, coronaDist);   // gap between body and corona
+
+  // Corona colour: faculty colour blending with secondary domains
+  vec3 coronaColor = mix(fc, hot, 0.35);
+  if(u_hasColor2 > 0.5){
+    vec3 c2 = u_color2 / 255.0;
+    float side1 = smoothstep(-0.3, 0.5, sin(angle + u_seed * 2.0));
+    coronaColor = mix(coronaColor, c2, side1 * 0.4);
+  }
+  if(u_hasColor3 > 0.5){
+    vec3 c3 = u_color3 / 255.0;
+    float side2 = smoothstep(-0.3, 0.5, sin(angle + u_seed * 4.0 + 2.1));
+    coronaColor = mix(coronaColor, c3, side2 * 0.35);
+  }
+
+  /* ===================================================================
+     PROMINENCES  (bright arcs at the limb, integrated stars)
+     ================================================================ */
+  float prom = 0.0;
+  if(u_stage >= 2.0){
+    // 2-3 prominences at seed-determined angles
+    for(int k=0; k<3; k++){
+      float pa = u_seed * 6.28 * float(k+1) * 0.618;
+      float angDiff = abs(mod(angle - pa + 3.14159, 6.28318) - 3.14159);
+      float arcWidth = 0.15 + hash(vec2(u_seed, float(k))) * 0.1;
+      float arcH = 0.06 + hash(vec2(float(k), u_seed * 3.0)) * 0.08;
+      float radialPeak = sphereR + arcH;
+      float arcShape = exp(-angDiff * angDiff / (arcWidth * arcWidth))
+                      * exp(-pow(dist - radialPeak, 2.0) * 200.0);
+      prom += arcShape * 0.5;
+    }
+  }
+
+  /* ===================================================================
+     DIFFRACTION SPIKES  (6-point, tapered, with secondary set)
+     ================================================================ */
+  float spikes = 0.0;
+  if(u_hasDiffraction > 0.5){
+    float sa = t * 0.04;
+    // primary 4-spike cross
+    for(int k=0; k<4; k++){
+      float target = sa + float(k) * 1.5708;     // pi/2 apart
+      float diff = abs(mod(angle - target + 3.14159, 6.28318) - 3.14159);
+      float spike = exp(-diff * diff * 800.0);    // very narrow
+      // taper: strong near star, fading outward
+      spike *= exp(-coronaDist * 4.0) * 0.5 + exp(-coronaDist * 1.5) * 0.3;
+      spikes += spike;
+    }
+    // secondary set — 45° offset, dimmer
+    for(int k=0; k<4; k++){
+      float target = sa + 0.7854 + float(k) * 1.5708;
+      float diff = abs(mod(angle - target + 3.14159, 6.28318) - 3.14159);
+      float spike = exp(-diff * diff * 2000.0);
+      spike *= exp(-coronaDist * 5.0) * 0.2;
+      spikes += spike;
+    }
+    spikes *= smoothstep(0.0, 0.02, coronaDist);  // no spikes inside body
+  }
+
+  /* ===================================================================
+     COMPOSE
+     ================================================================ */
+  float twinkle = 0.92 + sin(t * 0.7 + u_seed * 6.0) * 0.06
+                       + cos(t * 0.5) * 0.02;
+
+  // Photosphere body
+  vec3 col = photosphere * bodyMask;
+
+  // Chromosphere ring
+  col += chromoCol;
+
+  // Corona
+  col += coronaColor * corona * 0.8;
+
+  // Prominences
+  col += mix(fc, hot, 0.6) * prom;
+
+  // Diffraction spikes
+  col += coronaColor * spikes * 0.7;
+
+  // Core bloom — tight, intense
+  float bloom = exp(-dist * dist / (0.012));
+  col += hot * bloom * 0.45;
+
+  // Second bloom layer — softer
+  float bloom2 = exp(-dist * dist / (0.06));
+  col += mix(hot, fc, 0.3) * bloom2 * 0.15;
+
+  col *= twinkle;
+
+  // Alpha: body is solid, corona/halo fall off
+  float alpha = bodyMask;
+  float glowAlpha = corona * 0.8 + chromo + spikes * 0.5 + prom + bloom2 * 0.3;
+  alpha = max(alpha, clamp(glowAlpha * twinkle, 0.0, 1.0));
+  alpha *= smoothstep(1.02, 0.92, dist);          // gentle clip at canvas edge
+
+  // Dither
+  vec2 fc2 = gl_FragCoord.xy;
+  col += dither(fc2);
+
+  fragColor = vec4(clamp(col, 0.0, 1.0), clamp(alpha, 0.0, 1.0));
+}` as const;
+
+function compileShader(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader | null {
+  const s = gl.createShader(type);
+  if (!s) return null;
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error("Shader compile error:", gl.getShaderInfoLog(s));
+    gl.deleteShader(s);
+    return null;
+  }
+  return s;
+}
+
+function createStarProgram(gl: WebGL2RenderingContext): WebGLProgram | null {
+  const vs = compileShader(gl, gl.VERTEX_SHADER, STAR_VERT);
+  const fs = compileShader(gl, gl.FRAGMENT_SHADER, STAR_FRAG);
+  if (!vs || !fs) return null;
+  const prog = gl.createProgram()!;
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    console.error("Program link error:", gl.getProgramInfoLog(prog));
+    return null;
+  }
+  gl.deleteShader(vs);
+  gl.deleteShader(fs);
+  return prog;
+}
+
+function domainSeed(id?: string): number {
+  if (!id) return 0.42;
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  }
+  return (((h >>> 0) % 10000) / 10000);
+}
+
 function StarMiniPreview({
   primaryDomainId,
   relatedDomainIds,
@@ -196,125 +516,90 @@ function StarMiniPreview({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
+  const glRef = useRef<{ gl: WebGL2RenderingContext; prog: WebGLProgram } | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
 
-    const DPR = Math.min(typeof window !== "undefined" ? (window.devicePixelRatio ?? 1) : 1, 2);
-    const PX = 180;
+    const DPR = Math.min(typeof window !== "undefined" ? (window.devicePixelRatio ?? 1) : 1, 3);
+    const PX = 220;
     canvas.width = PX * DPR;
     canvas.height = PX * DPR;
     canvas.style.width = `${PX}px`;
     canvas.style.height = `${PX}px`;
-    ctx.scale(DPR, DPR);
 
-    const cx = PX / 2;
-    const cy = PX / 2;
+    /* ── init WebGL2 ────────────────────────────────────────────────── */
+    let cached = glRef.current;
+    if (!cached) {
+      const gl = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: false, antialias: true });
+      if (!gl) return;                // fallback: just show dark circle
+      const prog = createStarProgram(gl);
+      if (!prog) return;
+
+      /* fullscreen quad */
+      const buf = gl.createBuffer()!;
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+      const loc = gl.getAttribLocation(prog, "a_pos");
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+      cached = { gl, prog };
+      glRef.current = cached;
+    }
+
+    const { gl, prog } = cached;
+    gl.useProgram(prog);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.clearColor(8 / 255, 11 / 255, 20 / 255, 1);
+
+    /* ── uniforms ───────────────────────────────────────────────────── */
+    const uTime  = gl.getUniformLocation(prog, "u_time");
+    const uSeed  = gl.getUniformLocation(prog, "u_seed");
+    const uColor = gl.getUniformLocation(prog, "u_color");
+    const uColor2 = gl.getUniformLocation(prog, "u_color2");
+    const uColor3 = gl.getUniformLocation(prog, "u_color3");
+    const uHasC2 = gl.getUniformLocation(prog, "u_hasColor2");
+    const uHasC3 = gl.getUniformLocation(prog, "u_hasColor3");
+    const uDiffraction = gl.getUniformLocation(prog, "u_hasDiffraction");
+    const uStage = gl.getUniformLocation(prog, "u_stage");
+    const uRes = gl.getUniformLocation(prog, "u_res");
+
     const [r, g, b] = getFacultyColor(primaryDomainId);
-    const relatedColors = (relatedDomainIds ?? []).slice(0, 2).map((id) => getFacultyColor(id));
-    const sz = Math.max(38, Math.min(52, (size ?? 1.2) * 36));
+    const related = (relatedDomainIds ?? []).slice(0, 2).map((id) => getFacultyColor(id));
     const hasDiffraction = stage === "integrated" || stage === "growing";
+    const stageVal = stage === "integrated" ? 2 : stage === "growing" ? 1 : 0;
+    const seed = domainSeed(primaryDomainId);
+
+    gl.uniform3f(uColor, r, g, b);
+    gl.uniform3f(uColor2, ...(related[0] ?? [208, 216, 232]) as [number, number, number]);
+    gl.uniform3f(uColor3, ...(related[1] ?? [208, 216, 232]) as [number, number, number]);
+    gl.uniform1f(uHasC2, related.length >= 1 ? 1 : 0);
+    gl.uniform1f(uHasC3, related.length >= 2 ? 1 : 0);
+    gl.uniform1f(uDiffraction, hasDiffraction ? 1 : 0);
+    gl.uniform1f(uStage, stageVal);
+    gl.uniform1f(uSeed, seed);
+    gl.uniform2f(uRes, canvas.width, canvas.height);
+
     let startTime: number | null = null;
 
     function draw(ts: number) {
       if (!startTime) startTime = ts;
-      const elapsed = ts - startTime;
-      ctx!.clearRect(0, 0, PX, PX);
-
-      ctx!.fillStyle = "rgb(8,11,20)";
-      ctx!.fillRect(0, 0, PX, PX);
-
-      ctx!.save();
-
-      const twinkle = 0.85 + Math.sin(elapsed * 0.002) * 0.1 + Math.cos(elapsed * 0.0014) * 0.05;
-
-      // Outer halo
-      const haloR = sz * 5.8;
-      const halo = ctx!.createRadialGradient(cx, cy, sz * 0.3, cx, cy, haloR);
-      halo.addColorStop(0, `rgba(${r},${g},${b},${0.22 * twinkle})`);
-      halo.addColorStop(0.55, `rgba(${r},${g},${b},${0.07 * twinkle})`);
-      halo.addColorStop(1, "rgba(0,0,0,0)");
-      ctx!.fillStyle = halo;
-      ctx!.beginPath();
-      ctx!.arc(cx, cy, haloR, 0, Math.PI * 2);
-      ctx!.fill();
-
-      // Secondary colour halos
-      relatedColors.forEach(([sr, sg, sb], i) => {
-        const drift = i % 2 === 0 ? 1 : -1;
-        const accentR = haloR * 0.72;
-        const ox = cx + drift * sz * 0.9;
-        const oy = cy - sz * 0.5;
-        const ag = ctx!.createRadialGradient(ox, oy, sz * 0.1, cx, cy, accentR);
-        ag.addColorStop(0, `rgba(${sr},${sg},${sb},${0.10 * twinkle})`);
-        ag.addColorStop(1, "rgba(0,0,0,0)");
-        ctx!.fillStyle = ag;
-        ctx!.beginPath();
-        ctx!.arc(cx, cy, accentR, 0, Math.PI * 2);
-        ctx!.fill();
-      });
-
-      // Aura
-      const auraR = sz * 3.4;
-      const aura = ctx!.createRadialGradient(cx, cy, sz * 0.2, cx, cy, auraR);
-      aura.addColorStop(0, `rgba(${r},${g},${b},${0.24 * twinkle})`);
-      aura.addColorStop(1, "rgba(0,0,0,0)");
-      ctx!.fillStyle = aura;
-      ctx!.beginPath();
-      ctx!.arc(cx, cy, auraR, 0, Math.PI * 2);
-      ctx!.fill();
-
-      // Diffraction spikes
-      if (hasDiffraction) {
-        const spikeLen = sz * 5.5;
-        const spikeAngle = elapsed * 0.00004;
-        ctx!.save();
-        ctx!.translate(cx, cy);
-        ctx!.rotate(spikeAngle);
-        ctx!.strokeStyle = `rgba(${r},${g},${b},${0.28 * twinkle})`;
-        ctx!.lineWidth = 0.85;
-        ctx!.beginPath();
-        ctx!.moveTo(-spikeLen, 0);
-        ctx!.lineTo(spikeLen, 0);
-        ctx!.moveTo(0, -spikeLen * 0.76);
-        ctx!.lineTo(0, spikeLen * 0.76);
-        ctx!.stroke();
-        ctx!.restore();
-      }
-
-      // Star body
-      const coreR2 = Math.round(r * 0.7 + 255 * 0.3);
-      const coreG2 = Math.round(g * 0.82 + 210 * 0.18);
-      const coreB2 = Math.round(b * 0.7 + 230 * 0.3);
-      const bodyGrad = ctx!.createRadialGradient(cx - sz * 0.35, cy - sz * 0.38, sz * 0.12, cx, cy, sz * 1.45);
-      bodyGrad.addColorStop(0, `rgba(255,255,255,${0.97 * twinkle})`);
-      bodyGrad.addColorStop(0.16, `rgba(${coreR2},${coreG2},${coreB2},${0.98 * twinkle})`);
-      bodyGrad.addColorStop(0.52, `rgba(${r},${g},${b},${0.82 * twinkle})`);
-      bodyGrad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-      ctx!.fillStyle = bodyGrad;
-      ctx!.beginPath();
-      ctx!.arc(cx, cy, sz * 1.45, 0, Math.PI * 2);
-      ctx!.fill();
-
-      // Bright white core
-      const coreGrad = ctx!.createRadialGradient(cx, cy, 0, cx, cy, sz * 0.82);
-      coreGrad.addColorStop(0, `rgba(255,255,255,${twinkle})`);
-      coreGrad.addColorStop(0.6, `rgba(255,255,255,${0.6 * twinkle})`);
-      coreGrad.addColorStop(1, "rgba(255,255,255,0)");
-      ctx!.fillStyle = coreGrad;
-      ctx!.beginPath();
-      ctx!.arc(cx, cy, sz * 0.82, 0, Math.PI * 2);
-      ctx!.fill();
-
-      ctx!.restore();
+      const elapsed = (ts - startTime) / 1000;    // seconds
+      gl.uniform1f(uTime, elapsed);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       rafRef.current = requestAnimationFrame(draw);
     }
 
     rafRef.current = requestAnimationFrame(draw);
-    return () => { cancelAnimationFrame(rafRef.current); };
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      glRef.current = null;
+    };
   }, [primaryDomainId, relatedDomainIds, stage, size]);
 
   return <canvas ref={canvasRef} style={{ display: "block", borderRadius: "50%" }} />;

@@ -1,0 +1,538 @@
+plan_id: agent-native-integration
+objective: Research how BuilderIO/agent-native framework could be incorporated into METIS
+focus_area: agent-native framework vs METIS architecture — integration surface mapping
+created_at: "2026-04-02"
+created_by: gem-researcher
+status: completed
+
+tldr: |
+  - agent-native (MIT, TypeScript) is a framework for apps where an AI agent and a UI are bidirectionally connected; METIS is a Python RAG engine with a Next.js frontend — the architectures overlap at chat-bridge, skills, and streaming patterns.
+  - The most direct integration surfaces are: (1) adopting agent-native's UI→agent structured chat-bridge pattern in metis-web, (2) adding a backend-writable application-state store so the Python agentic loop can push ephemeral state the frontend polls, (3) modelling METIS as an agent-native backend so agent-native templates can consume METIS RAG as the AI layer.
+  - METIS already has SSE, skills, sessions, and a brain graph — agent-native's polling sync, `sendToAgentChat()`, and scripting patterns are the clearest additive contributions rather than replacements.
+  - agent-native's `@agent-native/core` npm package targets a Nitro/H3 TypeScript server; using it directly in metis-web requires a Node.js sidecar or shim — not a zero-cost import.
+  - The skills/SKILL.md system in METIS and the `.agents/skills/` system in agent-native are structurally analogous but serve different layers (retrieval-time prompt assembly vs agent CLI guidance; both are YAML + Markdown).
+
+
+research_metadata:
+  methodology: hybrid retrieval — semantic_search (METIS codebase) + fetch_webpage (GitHub README, AGENTS.md, docs/auth.md, packages/core/README.md for agent-native); relationship discovery via architecture memory files
+  scope: agent-native public repo (README, AGENTS.md, docs/auth.md, packages listing); METIS backend (api/, engine/, services/, models/), frontend (apps/metis-web/), and skill system
+  confidence: high
+  coverage: 85  # agent-native internals (core package source) not read; METIS retrieval pipeline internals partially covered via memory
+
+
+files_analyzed:
+  - file: README.md (agent-native)
+    path: https://github.com/BuilderIO/agent-native
+    purpose: Top-level description of the agent-native framework, templates, architecture, and quick-start
+    key_elements:
+      - element: six-rule architecture
+        type: pattern
+        location: README.md
+        description: SQL state, AI-through-agent-chat, scripts, polling sync, agent-modifies-code, app-state-in-SQL
+      - element: sendToAgentChat()
+        type: function
+        location: AGENTS.md#rule-2
+        description: UI-to-agent bridge; UI never calls LLM directly — routes through agent chat
+      - element: useFileWatcher() polling
+        type: function
+        location: AGENTS.md#rule-4
+        description: Client polls /api/poll every 2 s; version counter increments on DB write; invalidates React Query cache
+      - element: application_state SQL table
+        type: variable
+        location: AGENTS.md#rule-6
+        description: Ephemeral key-value store both agent and UI share; keyed by session ID; agent writes → UI reacts
+      - element: pnpm script <name>
+        type: pattern
+        location: AGENTS.md#rule-3
+        description: Agent invokes scripts/ for data operations; everything UI can do, agent does via scripts + shared DB
+    language: TypeScript (98%), CSS
+    lines: ~150
+
+  - file: AGENTS.md (agent-native)
+    path: https://raw.githubusercontent.com/BuilderIO/agent-native/main/AGENTS.md
+    purpose: Authoritative rules for agent+UI interactions; integration contract for agents
+    key_elements:
+      - element: The Six Rules
+        type: pattern
+        location: AGENTS.md
+        description: Architectural invariants — SQL state, agent chat bridge, scripts, polling, self-modifying code, ephemeral state
+      - element: application-state helpers
+        type: function
+        location: AGENTS.md#rule-6
+        description: readAppState(key), writeAppState(key, value), deleteAppState(key), listAppState(prefix) — both client and script-side
+      - element: autoMountAuth / getSession()
+        type: function
+        location: AGENTS.md#authentication
+        description: Zero-config auth; dev bypassed, production activated by ACCESS_TOKEN env var
+      - element: ClientOnly wrapper
+        type: pattern
+        location: AGENTS.md#client-side-first-rendering
+        description: All app content client-side only; server renders HTML shell + spinner to avoid hydration mismatch
+      - element: db-schema / db-query / db-exec core scripts
+        type: pattern
+        location: AGENTS.md#database-scripts
+        description: Built-in agent scripts for SQL introspection and mutation; multi-tenant scoped to AGENT_USER_EMAIL in production
+    language: Markdown
+    lines: ~300
+
+  - file: apps/metis-web/lib/api.ts
+    path: c:\Users\samwe\Documents\metis\apps\metis-web\lib\api.ts
+    purpose: Typed fetch wrappers for all METIS API calls from the Next.js frontend
+    key_elements:
+      - element: queryRagStream()
+        type: function
+        location: lib/api.ts:1356
+        description: POST /v1/query/rag/stream; reads SSE events; exposes onEvent callback
+      - element: readSseEvents()
+        type: function
+        location: lib/api.ts:1002
+        description: Internal SSE frame parser; handles chunked ReadableStream
+      - element: apiFetch()
+        type: function
+        location: lib/api.ts:934
+        description: Thin fetch wrapper that attaches Bearer token from localStorage or config
+      - element: fetchBrainScaffold() / fetchAssistant()
+        type: function
+        location: lib/api.ts:2118
+        description: Brain graph + assistant snapshot fetch — high-level one-shot reads
+    language: TypeScript
+    lines: 2200+
+
+  - file: apps/metis-web/app/chat/page.tsx
+    path: c:\Users\samwe\Documents\metis\apps\metis-web\app\chat\page.tsx
+    purpose: Main chat page — orchestrates sessions, RAG streaming, trace events, resumable runs
+    key_elements:
+      - element: handleRagSend()
+        type: function
+        location: page.tsx:1028
+        description: User submit → creates session → starts RAG SSE stream
+      - element: startRagStream()
+        type: function
+        location: page.tsx:707
+        description: Manages AbortController, deduplication, event application from queryRagStream()
+      - element: ActiveRagStream interface
+        type: type
+        location: page.tsx:62
+        description: In-flight stream state; includes liveTraceEvents, seenEventSignatures, dedupeFloorEventId
+      - element: handleDirectSend()
+        type: function
+        location: page.tsx:567
+        description: Direct LLM query path (no RAG) — separate from RAG flow, no index required
+    language: TypeScript/TSX
+    lines: 1400+
+
+  - file: metis_app/services/skill_repository.py
+    path: c:\Users\samwe\Documents\metis\metis_app\services\skill_repository.py
+    purpose: Load and validate SKILL.md files from skills/ directory
+    key_elements:
+      - element: parse_skill_file()
+        type: function
+        location: skill_repository.py:70
+        description: Reads YAML frontmatter + Markdown body; validates against schema; returns SkillDefinition
+      - element: SkillRepository.load_all()
+        type: function
+        location: skill_repository.py:202
+        description: Glob skills/*/SKILL.md; returns (valid, invalid) lists
+      - element: FRONTMATTER_REQUIRED_KEYS
+        type: variable
+        location: skill_repository.py:1
+        description: id, name, description, enabled_by_default, priority, triggers, runtime_overrides
+      - element: RUNTIME_OVERRIDE_KEYS
+        type: variable
+        location: skill_repository.py:1
+        description: selected_mode, retrieval_k, top_k, mmr_lambda, retrieval_mode, agentic_mode, agentic_max_iterations, output_style, system_instructions_append, citation_policy_append
+    language: Python
+    lines: 260
+
+  - file: metis_app/services/runtime_resolution.py
+    path: c:\Users\samwe\Documents\metis\metis_app\services\runtime_resolution.py
+    purpose: Skill selection, runtime settings merge, system prompt assembly
+    key_elements:
+      - element: select_skills()
+        type: function
+        location: runtime_resolution.py:146
+        description: Scores skills by keyword/mode/file_type/output_style triggers; returns sorted SkillMatch list
+      - element: resolve_runtime_settings()
+        type: function
+        location: runtime_resolution.py:310
+        description: Full resolution pipeline — skill selection → override merge → prompt build → ResolvedRuntimeSettings
+      - element: build_system_prompt()
+        type: function
+        location: runtime_resolution.py:270
+        description: Assembles multi-segment system prompt including skill instruction blocks
+    language: Python
+    lines: 460
+
+  - file: skills/summary-blinkist/SKILL.md
+    path: c:\Users\samwe\Documents\metis\skills\summary-blinkist\SKILL.md
+    purpose: Representative METIS skill — shows canonical SKILL.md format
+    key_elements:
+      - element: YAML frontmatter
+        type: pattern
+        location: SKILL.md:1
+        description: id, name, description, enabled_by_default, priority, triggers (keywords/modes/file_types/output_styles), runtime_overrides
+    language: Markdown
+    lines: 30
+
+  - file: metis_app/api/app.py
+    path: c:\Users\samwe\Documents\metis\metis_app\api\app.py
+    purpose: FastAPI application; defines all /v1/* routes
+    key_elements:
+      - element: /v1/brain/graph/events SSE endpoint
+        type: function
+        location: app.py:362
+        description: Polls brain graph hash every 5s; emits brain_snapshot SSE events to connected clients
+      - element: /v1/query/rag/stream
+        type: pattern
+        location: app.py (referenced)
+        description: POST-based SSE; client reads token/final/error events; resumable via lastEventId
+
+
+patterns_found:
+  - category: architecture
+    pattern: UI-to-API-to-agent (METIS) vs UI-to-agent-chat-bridge (agent-native)
+    description: In METIS, the Next.js frontend calls the Python API which runs the agentic RAG loop. In agent-native, the UI calls sendToAgentChat() which routes to the CLI-based agent, and all results flow through the shared SQL database. METIS has a tighter API coupling; agent-native's bridge is more loosely coupled through the database.
+    examples:
+      - file: apps/metis-web/app/chat/page.tsx
+        location: page.tsx:1028
+        snippet: "await startRagStream({ ... }); // POST /v1/query/rag/stream → SSE"
+      - file: AGENTS.md (agent-native)
+        location: AGENTS.md#rule-2
+        snippet: "sendToAgentChat() // UI delegates to agent; agent writes to DB; UI polls"
+    prevalence: common
+
+  - category: streaming
+    pattern: SSE-based result delivery
+    description: Both systems use Server-Sent Events. METIS uses POST-based SSE (EventSource is GET-only; METIS uses fetch+ReadableStream). agent-native uses both polling (/api/poll) and SSE for real-time sync.
+    examples:
+      - file: apps/metis-web/lib/api.ts
+        location: lib/api.ts:1002
+        snippet: "readSseEvents<T>(res, onEvent) // ReadableStream parser"
+      - file: metis_app/api/app.py
+        location: app.py:362
+        snippet: "media_type='text/event-stream' // brain_graph_events SSE"
+    prevalence: common
+
+  - category: skills
+    pattern: YAML-frontmatter + Markdown body skill files
+    description: METIS stores skills in skills/*/SKILL.md with YAML frontmatter for triggers/overrides, Markdown body for LLM instructions. agent-native stores agent guidance in .agents/skills/*/SKILL.md. Both use frontmatter + prose body, but serve different layers — retrieval-time vs agent-CLI invocation.
+    examples:
+      - file: skills/summary-blinkist/SKILL.md
+        location: SKILL.md:1
+        snippet: "---\nid: summary-blinkist\ntriggers:\n  keywords: [summarize]\nruntime_overrides:\n  selected_mode: Summary\n---"
+      - file: .agents/skills/ (agent-native)
+        location: AGENTS.md#skills-table
+        snippet: "storing-data | real-time-sync | delegate-to-agent | scripts | self-modifying-code"
+    prevalence: common
+
+  - category: state management
+    pattern: Session-scoped state vs SQL-backed application state
+    description: METIS tracks per-session chat history + trace events in Python service layer (session repository) and surfaces them via /v1/sessions/{id}. agent-native stores all ephemeral state in application_state SQL table, keyed by session ID + key; both agent and UI can read/write.
+    examples:
+      - file: apps/metis-web/app/chat/page.tsx
+        location: page.tsx:190
+        snippet: "const [sessionMeta, setSessionMeta] = useArrowState<SessionSummary | null>(null);"
+    prevalence: common
+
+  - category: auth
+    pattern: Token-based, dev-bypassed auth
+    description: Both systems share the same auth philosophy — zero friction in development, single env var activates token-based auth in production. METIS uses METIS_API_TOKEN; agent-native uses ACCESS_TOKEN.
+    examples:
+      - file: AGENTS.md (agent-native — auth section)
+        location: AGENTS.md#authentication
+        snippet: "ACCESS_TOKEN=your-secret pnpm start"
+      - file: metis_app/api/app.py
+        location: app.py (referenced)
+        snippet: "METIS_API_TOKEN environment variable guard"
+    prevalence: common
+
+  - category: architecture
+    pattern: Agent-modifiable code / self-evolving skills
+    description: agent-native's Rule 5 allows the agent to edit app source. METIS's skill system is the closest analogue — skills are read at query time and can be created/modified by the agent. However METIS has no runtime code-modify pathway for the Python backend; the agent-native approach is more ambitious.
+    examples:
+      - file: AGENTS.md (agent-native)
+        location: AGENTS.md#rule-5
+        snippet: "The agent can edit the app's own source code — components, routes, styles, scripts."
+      - file: metis_app/services/skill_repository.py
+        location: skill_repository.py:202
+        snippet: "SkillRepository.load_all() # each query resolves skills at runtime from disk"
+    prevalence: occasional
+
+
+related_architecture:
+  components_relevant_to_domain:
+    - component: metis_app/api/app.py (FastAPI) / api_litestar/ (Litestar)
+      responsibility: HTTP + SSE entry point for all agent interactions
+      location: metis_app/api/ and metis_app/api_litestar/
+      relationship_to_domain: domain depends on this — integration point where agent-native patterns would connect
+    - component: apps/metis-web/lib/api.ts
+      responsibility: Typed client-side fetch wrappers for all METIS API routes
+      location: apps/metis-web/lib/api.ts
+      relationship_to_domain: domain depends on this — sendToAgentChat()-equivalent would live here
+    - component: metis_app/services/skill_repository.py + runtime_resolution.py
+      responsibility: Skill loading, trigger scoring, runtime settings assembly, system prompt construction
+      location: metis_app/services/
+      relationship_to_domain: direct analogue to agent-native .agents/skills/ — extension point for agent-native skill patterns
+    - component: apps/metis-web/app/chat/page.tsx
+      responsibility: Chat UI orchestration — sessions, streaming, trace events
+      location: apps/metis-web/app/chat/page.tsx
+      relationship_to_domain: UI layer where sendToAgentChat() / useFileWatcher() patterns would integrate
+    - component: metis_app/engine/streaming.py (agentic loop)
+      responsibility: Iterative retrieval → synthesis → gap-critique loop
+      location: metis_app/engine/streaming.py
+      relationship_to_domain: Python equivalent of agent-native's "agent does the work"; writes output via SSE
+    - component: metis_app/models/parity_types.py (SkillDefinition, SkillMatch)
+      responsibility: Data contracts for skill selection and runtime resolution
+      location: metis_app/models/parity_types.py
+      relationship_to_domain: direct structural parallel to agent-native's skill frontmatter schema
+
+  interfaces_used_by_domain:
+    - interface: POST /v1/query/rag/stream (SSE)
+      location: metis_app/api/app.py
+      usage_pattern: Frontend POSTs question + settings; reads token/final/error SSE events
+    - interface: GET /v1/brain/graph/events (SSE)
+      location: metis_app/api/app.py:362
+      usage_pattern: Long-poll SSE; emits brain_snapshot on graph change — closest existing METIS equivalent to agent-native polling
+    - interface: /api/poll (agent-native)
+      location: agent-native server/routes/api/
+      usage_pattern: GET, returns version hash; client polls every 2s; stale-while-revalidate pattern via React Query
+
+  data_flow_involving_domain: |
+    METIS current flow:
+      User types → chatPage.handleRagSend() → queryRagStream() POST /v1/query/rag/stream
+        → Python agentic loop (retrieve → synthesize → gap-critique) → SSE token/final events
+        → frontend appends tokens to assistant message → done.
+    agent-native flow:
+      User types → sendToAgentChat() → agent CLI (Claude Code / Codex) picks up message
+        → agent runs scripts, writes to application_state SQL → /api/poll returns new version
+        → useFileWatcher() invalidates React Query → UI re-renders with new state.
+    Gap: METIS has no agent→UI ephemeral state write path outside of the active SSE stream.
+    Gap: METIS has no structured UI-action→agent routing (every action is free-text in chat).
+
+  key_relationships_to_domain:
+    - from: agent-native sendToAgentChat()
+      to: METIS queryRagStream()
+      relationship: functional equivalent — both route user intent to the AI engine
+    - from: agent-native application_state SQL table + /api/poll
+      to: METIS brain graph SSE (/v1/brain/graph/events)
+      relationship: agent-native polling is more general; METIS brain SSE is domain-specific
+    - from: agent-native .agents/skills/ (CLI guidance)
+      to: METIS skills/ (RAG runtime overrides)
+      relationship: same SKILL.md file format; different execution context (CLI vs retrieval pipeline)
+    - from: agent-native pnpm script <name>
+      to: METIS python main.py --cli
+      relationship: same pattern — agent-callable scripts for structured data operations
+    - from: agent-native ACCESS_TOKEN
+      to: METIS METIS_API_TOKEN
+      relationship: identical security philosophy; same bearer-token bearer pattern
+
+
+related_technology_stack:
+  languages_used_in_domain:
+    - TypeScript (agent-native, 97.9%)
+    - Python (METIS backend)
+    - TSX/React (METIS frontend + agent-native frontend)
+
+  frameworks_used_in_domain:
+    - name: Nitro (H3) — agent-native server
+      usage_in_domain: File-based API routes; SSR catch-all; plugin system for auth + DB
+    - name: React Router v7 — agent-native frontend
+      usage_in_domain: File-based page routes; flat routes config
+    - name: Next.js (App Router) — METIS frontend
+      usage_in_domain: Client-side only rendering; chat page and brain visualization
+    - name: FastAPI / Litestar — METIS backend
+      usage_in_domain: REST + SSE API for RAG queries, sessions, settings, brain graph
+    - name: Drizzle ORM — agent-native database layer
+      usage_in_domain: Dialect-agnostic SQL; SQLite local fallback, Postgres/Neon/Turso in production
+    - name: React Query — agent-native client
+      usage_in_domain: Cache invalidation on poll version bump; drives UI sync
+
+  libraries_used_in_domain:
+    - name: "@agent-native/core"
+      purpose_in_domain: npm package — sendToAgentChat(), useSession(), useFileWatcher(), autoMountAuth(), application-state helpers, db scripts
+    - name: shadcn/ui (agent-native)
+      purpose_in_domain: Required component library; templates include app/components/ui/
+    - name: Tailwind CSS (both)
+      purpose_in_domain: Styling in both agent-native templates and metis-web
+
+  external_apis_used_in_domain:
+    - name: Any CLI-based AI agent (Claude Code, Codex, Cursor)
+      integration_point: agent-native agent panel (.agents/ directory); agent reads AGENTS.md, runs scripts
+
+
+related_conventions:
+  naming_patterns_in_domain: |
+    agent-native: camelCase TypeScript; file-based routes in server/routes/api/*.get.ts / *.post.ts
+    METIS backend: snake_case Python; routers in metis_app/api/ and metis_app/api_litestar/
+    METIS frontend: camelCase TypeScript; Next.js app router pages in apps/metis-web/app/
+  structure_of_domain: |
+    agent-native: app/ (React pages+components) | server/ (Nitro API+plugins) | shared/ | scripts/ | data/
+    METIS: metis_app/ (Python backend) | apps/metis-web/ (Next.js frontend) | skills/ | tests/
+  error_handling_in_domain: |
+    agent-native: Scripts return structured errors; agent retries or escalates
+    METIS frontend: AbortController + SSE error events; handleInterruption() path in page.tsx
+  testing_in_domain: |
+    agent-native: Vitest (from packages/README)
+    METIS: pytest (tests/ directory); conftest.py; 50+ test files
+  documentation_in_domain: |
+    agent-native: AGENTS.md (authoritative rules) + docs/ directory + agent-native.com
+    METIS: AGENTS.md (overview) + docs/ directory + skill SKILL.md files
+
+
+related_dependencies:
+  internal:
+    - component: metis_app/services/skill_repository.py → metis_app/models/parity_types.py
+      relationship_to_domain: SkillDefinition and SkillMatch dataclasses are the shared data contract
+      direction: outbound
+    - component: apps/metis-web/app/chat/page.tsx → apps/metis-web/lib/api.ts
+      relationship_to_domain: All API calls go through lib/api.ts typed wrappers
+      direction: outbound
+    - component: agent-native templates → @agent-native/core
+      relationship_to_domain: Core package provides sendToAgentChat, useFileWatcher, application-state, auth
+      direction: outbound
+  external:
+    - name: "@agent-native/core" npm package
+      purpose_for_domain: Would need to be added to apps/metis-web to use agent-native client primitives; requires Nitro server compatibility or custom adapter
+    - name: Drizzle ORM (agent-native dep)
+      purpose_for_domain: Not currently used in METIS; METIS uses Python SQLAlchemy-style ORM or direct SQLite via aiosqlite in session store
+
+
+domain_security_considerations:
+  sensitive_areas:
+    - area: sendToAgentChat() — structured context injection
+      location: agent-native AGENTS.md#rule-2
+      concern: UI pushes structured content to agent's input; if not sanitized, a malicious page element could inject instructions into the agent's context (prompt injection surface)
+    - area: writeAppState() — agent writes to shared SQL application_state
+      location: agent-native AGENTS.md#rule-6
+      concern: Agent can write arbitrary values to application_state that the UI renders; XSS risk if values are rendered as HTML without sanitization
+    - area: "pnpm script / python main.py --cli — agent-callable scripts"
+      location: AGENTS.md (both)
+      concern: Scripts execute with full server permissions; agent-native's db-exec allows arbitrary SQL mutations — no RLS by default in dev mode
+    - area: Agent modifies app code (agent-native Rule 5)
+      location: AGENTS.md (agent-native)
+      concern: If agent processes external content (emails, web pages) and then modifies source files, a crafted document could trigger code injection
+  authentication_patterns_in_domain: |
+    agent-native: ACCESS_TOKEN env var → httpOnly cookie sessions stored in data/.sessions.json; dev mode bypassed entirely
+    METIS: METIS_API_TOKEN Bearer auth on protected endpoints; no login page (API-key model)
+  authorization_patterns_in_domain: |
+    agent-native: Multi-tenant scoping via AGENT_USER_EMAIL on all SQL queries; temp views shadow real tables with WHERE filter
+    METIS: Single-tenant local-first model; token guards API surface but no per-user data isolation
+  data_validation_in_domain: |
+    agent-native: parseArgs() in scripts; getDbExec() abstraction for dialect-agnostic parameterized queries
+    METIS: Pydantic models at API boundary (FastAPI/Litestar); SSE event normalization in normalizeRagStreamEvent()
+
+
+testing_patterns:
+  framework: pytest (METIS), Vitest (agent-native)
+  coverage_areas:
+    - METIS — RAG streaming, skill resolution, session CRUD, brain graph, API routes, embedding providers, GGUF serialization
+    - agent-native — component rendering (inferred from Vitest config in packages/)
+  test_organization: |
+    METIS: flat tests/ directory with test_*.py files; conftest.py with shared fixtures
+    agent-native: test files co-located with packages (inferred from Vitest config)
+  mock_patterns:
+    - METIS — monkeypatching LLM providers in conftest.py; mock vector stores for retrieval tests
+
+
+open_questions:
+  - question: Does @agent-native/core require the Nitro/H3 server to be present, or can sendToAgentChat() and useFileWatcher() be used with any REST backend?
+    context: If core is server-agnostic on the client side, then apps/metis-web could import just the client hooks and point them at METIS API endpoints (/v1/app-state/poll instead of /api/poll).
+  - question: What exactly does the agent-native "agent panel" look like — is it a separate iframe/webview or part of the react app?
+    context: agent-native README mentions "embedded agent panel with chat and optional CLI terminal"; understanding whether this is embeddable in metis-web determines UI layer integration complexity.
+  - question: Can METIS's Python agentic loop (streaming.py) write to a lightweight application_state store (SQLite/Redis) that the frontend polls, without a full agent-native refactor?
+    context: The gap between METIS's SSE-only agent output and agent-native's bidirectional state model requires a new Python endpoint; feasibility depends on METIS's session store backend.
+  - question: agent-native's "agent modifies code" rule (Rule 5) — how does this work when the agent is Claude Code or Codex? Does it directly edit files in the repo, or is there an intermediary?
+    context: If METIS were to adopt this pattern, the Python skill system would need a "create skill" pathway the agent can invoke during a chat session.
+
+
+gaps:
+  - area: agent-native packages/core source code
+    description: The internal implementation of sendToAgentChat(), useFileWatcher(), autoMountAuth(), and application-state helpers was not read — only docs/AGENTS.md were accessed.
+    impact: Cannot confirm whether @agent-native/core client APIs are decoupled from the Nitro server runtime, which is the central question for direct npm import into apps/metis-web.
+  - area: agent-native /api/poll endpoint implementation
+    description: Exact polling contract (response shape, version fields, cache headers) not confirmed from source; only described in AGENTS.md.
+    impact: Designing a compatible METIS /v1/app-state/poll endpoint requires knowing the exact protocol.
+  - area: METIS session store backend
+    description: The session repository implementation (metis_app/services/session_repository.py) was not fully read; unknown whether it backs onto SQLite, in-memory, or file-based store that could double as application_state.
+    impact: Determines implementation cost of adding a generic application_state table the Python agentic loop can write to.
+  - area: agent-native mobile-app and desktop-app packages
+    description: packages/mobile-app and packages/desktop-app not inspected; METIS also has apps/metis-desktop/.
+    impact: Potential cross-platform integration angles (Tauri desktop app) not mapped.
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Integration surface summary (factual, no recommendations)
+# ──────────────────────────────────────────────────────────────────────────────
+integration_surfaces:
+
+  - id: structured-chat-bridge
+    description: |
+      agent-native's sendToAgentChat() routes UI actions as structured context messages to the agent.
+      METIS equivalent: UI constructs a formatted prompt from a UI action (e.g. "Summarize document X") and calls queryRagStream().
+      Existing hook in METIS: handleDirectSend() and handleRagSend() in page.tsx; lib/api.ts wrappers.
+      Gap: no structured schema for action type + payload; free-text only.
+    files_involved:
+      - apps/metis-web/app/chat/page.tsx:567 (handleDirectSend)
+      - apps/metis-web/lib/api.ts:1356 (queryRagStream)
+
+  - id: application-state-store
+    description: |
+      agent-native's application_state SQL table + writeAppState() allow the agent to push ephemeral state that the UI polls.
+      METIS has no equivalent — the Python agentic loop writes only to the SSE stream of the active request.
+      Adding: a new /v1/app-state/* endpoint family + Python helper + frontend useAppStatePoller() hook.
+      The brain graph SSE (/v1/brain/graph/events) is the closest existing primitive but is domain-specific.
+    files_involved:
+      - metis_app/api/app.py (new route family needed)
+      - apps/metis-web/lib/api.ts (new poll hook needed)
+      - metis_app/engine/streaming.py (write calls needed)
+
+  - id: polling-sync
+    description: |
+      agent-native useFileWatcher() polls /api/poll every 2 s; version increment triggers React Query invalidation.
+      METIS frontend uses SSE for active streams and one-shot fetches for sessions/settings.
+      The brain graph SSE is a push-based equivalent but not a general-purpose poll target.
+      A lightweight GET /v1/poll?since=<version> endpoint in METIS would enable the same pattern.
+    files_involved:
+      - apps/metis-web/app/chat/page.tsx (polling hook would integrate here)
+      - metis_app/api/app.py (new /v1/poll endpoint)
+
+  - id: agent-native-as-metis-consumer
+    description: |
+      METIS REST API (/v1/query/rag/stream, /v1/index/list, /v1/sessions) could be the AI backend for an agent-native template app.
+      The agent-native template's sendToAgentChat() would forward user messages to METIS /v1/query/rag/stream.
+      agent-native handles UI, sessions, auth, and code evolution; METIS handles RAG retrieval and synthesis.
+      No code changes to METIS required; requires a custom agent-native template or adapter script.
+    files_involved:
+      - metis_app/api/app.py (METIS API surface — consumed as-is)
+      - agent-native templates (new template would import METIS API base URL)
+
+  - id: skill-system-cross-pollination
+    description: |
+      Both codebases use SKILL.md (YAML frontmatter + Markdown body) for different purposes.
+      METIS skills/ → retrieval-time prompt assembly and parameter overrides.
+      agent-native .agents/skills/ → agent CLI guidance (no runtime trigger scoring).
+      A METIS skill could document agent-native patterns for the METIS agentic loop to follow when in Research mode.
+      Conversely, a METIS agent-native skill could expose the `pnpm script` / `python main.py --cli` interface to the agent.
+    files_involved:
+      - skills/ (METIS skill directory)
+      - metis_app/services/skill_repository.py
+      - metis_app/services/runtime_resolution.py
+
+  - id: python-scripts-pattern
+    description: |
+      agent-native Rule 3: agent invokes pnpm script <name> for data operations.
+      METIS equivalent: python main.py --cli (existing) or python -m metis_app.scripts.<name> (new).
+      METIS already has a CLI module (metis_app/cli.py) with subcommands (index, query, skills).
+      Gap: no structured "agent-callable script" discovery mechanism; agent must know CLI command signatures.
+    files_involved:
+      - metis_app/cli.py
+      - main.py
+
+  - id: npm-package-import
+    description: |
+      "@agent-native/core" could be installed in apps/metis-web.
+      Client-side exports (sendToAgentChat, useSession, useFileWatcher, application-state helpers) may work against any REST backend.
+      Server-side exports (autoMountAuth, defineNitroPlugin) require Nitro/H3; incompatible with Python backend.
+      Risk: package source not fully read; actual tree-shaking / server/client boundary not confirmed.
+    files_involved:
+      - apps/metis-web/package.json (would add @agent-native/core dependency)
