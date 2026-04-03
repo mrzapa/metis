@@ -72,3 +72,4 @@ langextract_grounding_*.html
 *.pth
 *.bin
 *.safetensors
+.venv311-forecast/
