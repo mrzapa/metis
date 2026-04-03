@@ -220,6 +220,9 @@ float hash(vec2 p){
 vec2 hash2(vec2 p){
   return vec2(hash(p), hash(p + 127.1));
 }
+vec3 hash3(vec2 p){
+  return vec3(hash(p), hash(p + 127.1), hash(p + 269.5));
+}
 
 /* ── value noise (quintic interp for smoothness) ────────────────────── */
 float vnoise(vec2 p){
@@ -232,11 +235,11 @@ float vnoise(vec2 p){
   return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
 }
 
-/* ── fbm — 7 octaves for fine detail ────────────────────────────────── */
+/* ── fbm — up to 8 octaves for HD detail ─────────────────────────── */
 float fbm(vec2 p, int oct){
   float v = 0.0, a = 0.5, tot = 0.0;
   mat2 rot = mat2(0.8,-0.6,0.6,0.8);
-  for(int i=0; i<7; i++){
+  for(int i=0; i<8; i++){
     if(i >= oct) break;
     v += a * vnoise(p);
     tot += a;
@@ -244,6 +247,16 @@ float fbm(vec2 p, int oct){
     a *= 0.49;
   }
   return v / tot;
+}
+
+/* ── domain-warped FBM for turbulent plasma ─────────────────────────── */
+float warpedFbm(vec2 p, float t, int oct){
+  // Two-pass domain warping for organic turbulent flow
+  vec2 q = vec2(fbm(p + vec2(0.0, 0.0) + t * 0.03, oct),
+                fbm(p + vec2(5.2, 1.3) - t * 0.02, oct));
+  vec2 r = vec2(fbm(p + 4.0 * q + vec2(1.7, 9.2) + t * 0.015, oct),
+                fbm(p + 4.0 * q + vec2(8.3, 2.8) - t * 0.01, oct));
+  return fbm(p + 3.5 * r, oct);
 }
 
 /* ── Worley (F1) with animated jitter ───────────────────────────────── */
@@ -261,15 +274,53 @@ float worley(vec2 p, float jitter){
   return md;
 }
 
-/* ── multi-scale Worley for granulation ─────────────────────────────── */
+/* ── Worley F1-F2 for cell walls ────────────────────────────────────── */
+vec2 worley2(vec2 p, float jitter){
+  vec2 i = floor(p), f = fract(p);
+  float f1 = 1.0, f2 = 1.0;
+  for(int y=-1; y<=1; y++){
+    for(int x=-1; x<=1; x++){
+      vec2 nb = vec2(float(x), float(y));
+      vec2 pt = hash2(i + nb + u_seed * 13.7) * jitter;
+      float d = length(nb + pt - f);
+      if(d < f1){ f2 = f1; f1 = d; }
+      else if(d < f2){ f2 = d; }
+    }
+  }
+  return vec2(f1, f2);
+}
+
+/* ── HD granulation with cell walls ─────────────────────────────────── */
 float granulation(vec2 p, float t){
-  float w1 = worley(p * 18.0 + t * 0.08, 0.92);
-  float w2 = worley(p * 36.0 + t * 0.05, 0.88);
-  float w3 = worley(p * 72.0 - t * 0.03, 0.85);
-  // combine: large cells with fine sub-structure
-  float g = w1 * 0.5 + w2 * 0.3 + w3 * 0.2;
-  // keep full dynamic range — don't binarise
-  return g;
+  // Large convection cells (supergranulation)
+  vec2 w0 = worley2(p * 8.0 + t * 0.02, 0.94);
+  float superGran = smoothstep(0.0, 0.12, w0.y - w0.x);  // cell wall darkening
+
+  // Main granulation cells
+  vec2 w1 = worley2(p * 22.0 + t * 0.06, 0.92);
+  float gran1 = w1.x;                                      // bright cell centres
+  float walls1 = smoothstep(0.0, 0.08, w1.y - w1.x);     // intergranular lanes
+
+  // Fine sub-granulation
+  vec2 w2 = worley2(p * 48.0 + t * 0.04, 0.88);
+  float gran2 = w2.x;
+  float walls2 = smoothstep(0.0, 0.06, w2.y - w2.x);
+
+  // Ultra-fine texture
+  float w3 = worley(p * 96.0 - t * 0.02, 0.85);
+
+  // Combine: bright granule centres with clearly dark lanes
+  float cellBrightness = gran1 * 0.45 + gran2 * 0.35 + w3 * 0.2;
+  float lanesDark = walls1 * 0.6 + walls2 * 0.25 + (1.0 - superGran) * 0.15;
+
+  return cellBrightness * (0.55 + lanesDark * 0.45);
+}
+
+/* ── plasma turbulence overlay ──────────────────────────────────────── */
+float plasmaTurbulence(vec2 p, float t){
+  float turb = warpedFbm(p * 5.0 + vec2(u_seed * 7.3, u_seed * 3.1), t, 7);
+  float flow = warpedFbm(p * 3.0 + vec2(u_seed * 11.0, u_seed * 5.7) + t * 0.05, t, 6);
+  return turb * 0.6 + flow * 0.4;
 }
 
 /* ── dither to kill banding ─────────────────────────────────────────── */
@@ -287,84 +338,162 @@ void main(){
 
   vec3 fc   = u_color / 255.0;
   vec3 hot  = vec3(1.0, 0.97, 0.92);
+  vec3 warm = vec3(1.0, 0.82, 0.48);  // yellow-orange mid tone
 
   /* ===================================================================
      PHOTOSPHERE  (dist < ~0.44)
+     High-detail realistic star surface with visible convection
      ================================================================ */
 
-  // Limb darkening — realistic power-law: I(mu) = mu^0.8
-  // mu = cos(theta) from sphere projection
-  float sphereR = 0.44;                          // photosphere radius in UV
-  float rNorm   = dist / sphereR;                // 0 at centre, 1 at edge
+  float sphereR = 0.44;
+  float rNorm   = dist / sphereR;
   float mu      = sqrt(max(0.0, 1.0 - rNorm * rNorm));
-  float limb    = pow(mu, 0.8);
 
-  // Granulation — three Worley octaves, subtle
-  float gran = granulation(uv + starOff, t);
-  // modulate: bright granule centres, dark intergranular lanes
-  float granMod = 0.88 + gran * 0.24;            // range ~0.88–1.12
+  // Steeper limb darkening for stronger 3D sphere appearance
+  // Blended power law: combines slow core falloff with sharp edge
+  float limb = pow(mu, 0.55) * 0.7 + pow(mu, 2.5) * 0.3;
 
-  // Colour gradient: white core → saturated faculty colour at limb
-  float coreT   = smoothstep(0.0, 0.85, rNorm);  // 0 at centre, 1 at limb
-  vec3 coreCol  = mix(hot, fc * 1.1, coreT * coreT);
-  // warm mid-tones: add a hint of gold/orange at mid-radius
-  vec3 midWarm  = mix(vec3(1.0, 0.85, 0.6), fc, 0.5);
-  float midBand = exp(-pow((rNorm - 0.55) * 4.0, 2.0));
-  coreCol       = mix(coreCol, midWarm, midBand * 0.25);
+  // ── TRUE 3D SPHERE UV WITH Y-AXIS ROTATION ──────────────────────────
+  // Reconstruct normalised 3D position on the front hemisphere.
+  // nz > 0 for the entire visible disc (back hemisphere is culled by bodyMask).
+  float nx = uv.x / sphereR;
+  float ny = uv.y / sphereR;
+  float nz = sqrt(max(0.0, 1.0 - nx*nx - ny*ny));
 
-  vec3 photosphere = coreCol * limb * granMod;
+  // Rotate around Y axis over time — slow, clearly visible spin.
+  float rotAngle = u_time * 0.08 + u_seed * 6.28318;
+  float cosR = cos(rotAngle);
+  float sinR = sin(rotAngle);
+  float rx = cosR * nx + sinR * nz;
+  float rz = -sinR * nx + cosR * nz;
 
-  // Sunspots (growing + integrated)
+  // Seamless surface UV from the 3D rotated position.
+  // XZ-plane projection — no atan() seam, rotation is fully smooth.
+  // Pole pinch is invisible because limb darkening blacks out the poles.
+  vec2 sphereUV = vec2(rx, rz) * 2.0 + starOff;
+
+  // === GRANULATION — highly detailed convective cells ===
+  float gran = granulation(sphereUV, t);
+
+  // Modulate: bright granule centres vs dark intergranular lanes
+  // Much higher contrast than before
+  float granMod = 0.72 + gran * 0.56;            // range ~0.72–1.28
+
+  // === PLASMA TURBULENCE — organic flow patterns overlaid ===
+  float plasma = plasmaTurbulence(sphereUV * 0.7, t);
+  // Subtle large-scale brightness variation across the surface
+  float plasmaMod = 0.85 + plasma * 0.3;
+
+  // === COLOUR GRADIENT — multi-band temperature mapping ===
+  // Hot white core → warm yellow → faculty colour → dark limb
+  float coreT = smoothstep(0.0, 0.7, rNorm);
+  vec3 innerCol = mix(hot, warm, coreT * 0.5);
+  vec3 outerCol = mix(warm, fc * 1.15, smoothstep(0.3, 0.95, rNorm));
+  vec3 surfCol  = mix(innerCol, outerCol, coreT * coreT);
+
+  // Mid-tone warm band — wider and stronger
+  float midBand = exp(-pow((rNorm - 0.5) * 3.0, 2.0));
+  vec3 midWarm  = mix(warm, fc, 0.35);
+  surfCol = mix(surfCol, midWarm, midBand * 0.35);
+
+  // Chromatic granulation: hot granule centres, cooler lanes
+  vec3 granHot  = mix(surfCol * 1.15, hot, 0.15);
+  vec3 granCool = mix(surfCol * 0.7, fc * 0.6, 0.3);
+  float granBlend = smoothstep(0.3, 0.7, gran);
+  vec3 granColored = mix(granCool, granHot, granBlend);
+
+  vec3 photosphere = granColored * granMod * limb * plasmaMod;
+
+  // === SUNSPOTS (growing + integrated) — more dramatic ===
   if(u_stage >= 1.0){
-    float spot = fbm(uv * 6.0 + starOff * 2.0 + t * 0.02, 5);
-    float spotMask = smoothstep(0.60, 0.65, spot) * smoothstep(0.8, 0.15, rNorm);
-    // penumbra ring
-    float penumbra = smoothstep(0.57, 0.60, spot) * smoothstep(0.65, 0.62, spot);
-    photosphere *= 1.0 - spotMask * 0.55;
-    photosphere = mix(photosphere, fc * 0.4, penumbra * 0.3 * smoothstep(0.8, 0.15, rNorm));
+    float spotBase = warpedFbm(sphereUV * 1.5 + t * 0.01, t * 0.5, 6);
+    float spotMask = smoothstep(0.58, 0.66, spotBase) * smoothstep(0.85, 0.15, rNorm);
+    // Dark umbra
+    photosphere *= 1.0 - spotMask * 0.65;
+    // Penumbra ring — fibrous structure
+    float penumbra = smoothstep(0.54, 0.58, spotBase) * smoothstep(0.66, 0.60, spotBase);
+    float penFiber = fbm(vec2(angle * 12.0 + u_seed, rNorm * 20.0), 5);
+    photosphere = mix(photosphere, fc * 0.35 * (0.7 + penFiber * 0.6),
+                      penumbra * 0.45 * smoothstep(0.85, 0.15, rNorm));
   }
 
-  // faculae — bright patches near limb (integrated only)
+  // === FACULAE — bright patches near limb (integrated) ===
   if(u_stage >= 2.0){
-    float fac = fbm(uv * 10.0 + starOff * 3.0 + t * 0.01, 4);
-    float facMask = smoothstep(0.55, 0.62, fac) * smoothstep(0.3, 0.9, rNorm) * smoothstep(1.0, 0.85, rNorm);
-    photosphere += hot * facMask * 0.15;
+    float fac = warpedFbm(sphereUV * 2.0 + t * 0.008, t * 0.3, 5);
+    float facMask = smoothstep(0.52, 0.62, fac)
+                  * smoothstep(0.25, 0.85, rNorm)
+                  * smoothstep(1.0, 0.8, rNorm);
+    photosphere += hot * facMask * 0.22;
+    // Plage (bright active regions)
+    float plage = fbm(sphereUV * 3.5 + t * 0.015, 6);
+    float plageMask = smoothstep(0.56, 0.64, plage) * smoothstep(0.9, 0.4, rNorm);
+    photosphere += mix(hot, warm, 0.3) * plageMask * 0.12;
   }
 
-  // Sharp photosphere edge
-  float bodyMask = smoothstep(sphereR + 0.008, sphereR - 0.008, dist);
+  // Sharp photosphere edge with sub-pixel anti-aliasing
+  float edgeSoft = 1.0 / u_res.x * 2.0;
+  float bodyMask = smoothstep(sphereR + edgeSoft, sphereR - edgeSoft, dist);
 
   /* ===================================================================
-     CHROMOSPHERE  (thin bright ring just outside photosphere)
+     CHROMOSPHERE  (thin bright ring with spicule forests)
      ================================================================ */
   float chromoDist = abs(dist - sphereR);
-  float chromo = exp(-chromoDist * chromoDist * 3000.0) * 0.6;
-  // chromosphere has spicule texture
-  float spiculeNoise = fbm(vec2(angle * 8.0 + u_seed * 3.0, dist * 30.0 - t * 0.5), 5);
-  chromo *= 0.6 + spiculeNoise * 0.8;
-  vec3 chromoCol = mix(fc, hot, 0.5) * chromo;
+  float chromo = exp(-chromoDist * chromoDist * 4000.0) * 0.75;
+
+  // Spicule forest texture — finer and more varied
+  float spiculeCoarse = fbm(vec2(angle * 12.0 + u_seed * 3.0, dist * 40.0 - t * 0.6), 6);
+  float spiculeFine = fbm(vec2(angle * 24.0 + u_seed * 5.0, dist * 60.0 - t * 0.4), 5);
+  float spiculeNoise = spiculeCoarse * 0.6 + spiculeFine * 0.4;
+  chromo *= 0.5 + spiculeNoise * 1.0;
+
+  // Bright macrospicules at random angles
+  float macroSpicule = 0.0;
+  for(int i = 0; i < 8; i++){
+    float spAngle = hash(vec2(u_seed, float(i) * 1.7)) * 6.283;
+    float angDist = abs(mod(angle - spAngle + 3.14159, 6.28318) - 3.14159);
+    float spHeight = 0.02 + hash(vec2(float(i), u_seed * 2.3)) * 0.03;
+    float sp = exp(-angDist * angDist * 400.0)
+             * smoothstep(sphereR + spHeight, sphereR, dist)
+             * smoothstep(sphereR - 0.01, sphereR, dist);
+    macroSpicule += sp * 0.3;
+  }
+  chromo += macroSpicule;
+
+  vec3 chromoCol = mix(fc * 1.2, hot, 0.45) * chromo;
 
   /* ===================================================================
-     CORONA  (structured filaments, not a blurry ring)
+     CORONA  (HD filamentary streamers with fine structure)
      ================================================================ */
   float coronaDist = max(0.0, dist - sphereR);
-  float coronaFade = exp(-coronaDist * 3.5);
+  float coronaFade = exp(-coronaDist * 3.0);
 
-  // Streamer rays — 6-8 asymmetric rays from noise
-  float nRays = 6.0 + u_seed * 4.0;              // 6–10 rays depending on seed
-  float rayAngle = angle + fbm(vec2(angle * 0.5 + u_seed * 9.0, 1.0), 3) * 0.8;
-  float rays = pow(abs(cos(rayAngle * nRays * 0.5)), 8.0);
+  // Asymmetric streamer rays with domain-warped turbulence
+  float nRays = 6.0 + u_seed * 6.0;              // 6–12 rays
+  float warpedAngle = angle + warpedFbm(vec2(angle * 0.3 + u_seed * 9.0, coronaDist * 3.0), t * 0.5, 4) * 1.2;
+  float rays = pow(abs(cos(warpedAngle * nRays * 0.5)), 6.0);
 
-  // Fine filament structure within streamers
-  float filament = fbm(vec2(angle * 6.0 + u_seed, coronaDist * 20.0 - t * 0.3), 6);
-  float filament2 = fbm(vec2(angle * 12.0 - u_seed * 2.0, coronaDist * 40.0 + t * 0.2), 5);
-  float detail = filament * 0.65 + filament2 * 0.35;
+  // Multi-scale filament structure
+  float fil1 = fbm(vec2(angle * 8.0 + u_seed, coronaDist * 25.0 - t * 0.3), 7);
+  float fil2 = fbm(vec2(angle * 16.0 - u_seed * 2.0, coronaDist * 50.0 + t * 0.2), 6);
+  float fil3 = fbm(vec2(angle * 32.0 + u_seed * 4.0, coronaDist * 80.0 - t * 0.15), 5);
+  float detail = fil1 * 0.5 + fil2 * 0.3 + fil3 * 0.2;
 
-  float corona = coronaFade * (rays * 0.6 + 0.15) * (0.4 + detail * 0.9);
-  corona *= smoothstep(0.0, 0.04, coronaDist);   // gap between body and corona
+  // Coronal loops and arcs
+  float loops = 0.0;
+  for(int k = 0; k < 4; k++){
+    float loopAngle = u_seed * 6.28 * (float(k) + 1.0) * 0.414;
+    float la = abs(mod(angle - loopAngle + 3.14159, 6.28318) - 3.14159);
+    float loopR = 0.05 + hash(vec2(u_seed * 2.0, float(k))) * 0.06;
+    float loopArc = exp(-la * la * 120.0)
+                  * exp(-pow(coronaDist - loopR, 2.0) * 800.0);
+    loops += loopArc * 0.25;
+  }
 
-  // Corona colour: faculty colour blending with secondary domains
-  vec3 coronaColor = mix(fc, hot, 0.35);
+  float corona = coronaFade * (rays * 0.55 + 0.2) * (0.35 + detail * 0.95) + loops;
+  corona *= smoothstep(0.0, 0.035, coronaDist);
+
+  // Corona colour with secondary domain blending
+  vec3 coronaColor = mix(fc, hot, 0.4);
   if(u_hasColor2 > 0.5){
     vec3 c2 = u_color2 / 255.0;
     float side1 = smoothstep(-0.3, 0.5, sin(angle + u_seed * 2.0));
@@ -377,20 +506,23 @@ void main(){
   }
 
   /* ===================================================================
-     PROMINENCES  (bright arcs at the limb, integrated stars)
+     PROMINENCES  (dramatic plasma arcs at the limb)
      ================================================================ */
   float prom = 0.0;
-  if(u_stage >= 2.0){
-    // 2-3 prominences at seed-determined angles
-    for(int k=0; k<3; k++){
+  if(u_stage >= 1.0){
+    int nProm = u_stage >= 2.0 ? 4 : 2;
+    for(int k=0; k<4; k++){
+      if(k >= nProm) break;
       float pa = u_seed * 6.28 * float(k+1) * 0.618;
       float angDiff = abs(mod(angle - pa + 3.14159, 6.28318) - 3.14159);
-      float arcWidth = 0.15 + hash(vec2(u_seed, float(k))) * 0.1;
-      float arcH = 0.06 + hash(vec2(float(k), u_seed * 3.0)) * 0.08;
+      float arcWidth = 0.12 + hash(vec2(u_seed, float(k))) * 0.12;
+      float arcH = 0.05 + hash(vec2(float(k), u_seed * 3.0)) * 0.10;
       float radialPeak = sphereR + arcH;
+      // Turbulent arc shape
+      float turbArc = fbm(vec2(angDiff * 10.0 + u_seed * float(k+1), dist * 15.0 + t * 0.1), 4);
       float arcShape = exp(-angDiff * angDiff / (arcWidth * arcWidth))
-                      * exp(-pow(dist - radialPeak, 2.0) * 200.0);
-      prom += arcShape * 0.5;
+                      * exp(-pow(dist - radialPeak - turbArc * 0.015, 2.0) * 180.0);
+      prom += arcShape * 0.55;
     }
   }
 
@@ -400,30 +532,27 @@ void main(){
   float spikes = 0.0;
   if(u_hasDiffraction > 0.5){
     float sa = t * 0.04;
-    // primary 4-spike cross
     for(int k=0; k<4; k++){
-      float target = sa + float(k) * 1.5708;     // pi/2 apart
+      float target = sa + float(k) * 1.5708;
       float diff = abs(mod(angle - target + 3.14159, 6.28318) - 3.14159);
-      float spike = exp(-diff * diff * 800.0);    // very narrow
-      // taper: strong near star, fading outward
-      spike *= exp(-coronaDist * 4.0) * 0.5 + exp(-coronaDist * 1.5) * 0.3;
+      float spike = exp(-diff * diff * 900.0);
+      spike *= exp(-coronaDist * 3.5) * 0.5 + exp(-coronaDist * 1.2) * 0.3;
       spikes += spike;
     }
-    // secondary set — 45° offset, dimmer
     for(int k=0; k<4; k++){
       float target = sa + 0.7854 + float(k) * 1.5708;
       float diff = abs(mod(angle - target + 3.14159, 6.28318) - 3.14159);
-      float spike = exp(-diff * diff * 2000.0);
+      float spike = exp(-diff * diff * 2200.0);
       spike *= exp(-coronaDist * 5.0) * 0.2;
       spikes += spike;
     }
-    spikes *= smoothstep(0.0, 0.02, coronaDist);  // no spikes inside body
+    spikes *= smoothstep(0.0, 0.02, coronaDist);
   }
 
   /* ===================================================================
-     COMPOSE
+     COMPOSE — HDR-style tonemapping for realistic star appearance
      ================================================================ */
-  float twinkle = 0.92 + sin(t * 0.7 + u_seed * 6.0) * 0.06
+  float twinkle = 0.93 + sin(t * 0.7 + u_seed * 6.0) * 0.05
                        + cos(t * 0.5) * 0.02;
 
   // Photosphere body
@@ -433,29 +562,37 @@ void main(){
   col += chromoCol;
 
   // Corona
-  col += coronaColor * corona * 0.8;
+  col += coronaColor * corona * 0.85;
 
   // Prominences
-  col += mix(fc, hot, 0.6) * prom;
+  col += mix(fc * 1.1, hot, 0.55) * prom;
 
   // Diffraction spikes
-  col += coronaColor * spikes * 0.7;
+  col += coronaColor * spikes * 0.65;
 
-  // Core bloom — tight, intense
-  float bloom = exp(-dist * dist / (0.012));
-  col += hot * bloom * 0.45;
+  // Core bloom — tight, intense, HDR-hot
+  float bloom = exp(-dist * dist / 0.009);
+  col += hot * bloom * 0.55;
 
-  // Second bloom layer — softer
-  float bloom2 = exp(-dist * dist / (0.06));
-  col += mix(hot, fc, 0.3) * bloom2 * 0.15;
+  // Second bloom — medium halo
+  float bloom2 = exp(-dist * dist / 0.04);
+  col += mix(hot, fc, 0.25) * bloom2 * 0.18;
+
+  // Third bloom — wider atmospheric glow
+  float bloom3 = exp(-dist * dist / 0.12);
+  col += mix(hot, fc, 0.5) * bloom3 * 0.06;
 
   col *= twinkle;
 
+  // Soft HDR tonemapping — preserve highlights while keeping darks rich
+  col = col / (1.0 + col * 0.15);
+  col = pow(col, vec3(0.97));  // very slight gamma lift for richness
+
   // Alpha: body is solid, corona/halo fall off
   float alpha = bodyMask;
-  float glowAlpha = corona * 0.8 + chromo + spikes * 0.5 + prom + bloom2 * 0.3;
+  float glowAlpha = corona * 0.85 + chromo + spikes * 0.5 + prom + bloom2 * 0.35 + bloom3 * 0.15;
   alpha = max(alpha, clamp(glowAlpha * twinkle, 0.0, 1.0));
-  alpha *= smoothstep(1.02, 0.92, dist);          // gentle clip at canvas edge
+  alpha *= smoothstep(1.02, 0.92, dist);
 
   // Dither
   vec2 fc2 = gl_FragCoord.xy;
@@ -523,7 +660,7 @@ function StarMiniPreview({
     if (!canvas) return;
 
     const DPR = Math.min(typeof window !== "undefined" ? (window.devicePixelRatio ?? 1) : 1, 3);
-    const PX = 220;
+    const PX = 320;
     canvas.width = PX * DPR;
     canvas.height = PX * DPR;
     canvas.style.width = `${PX}px`;
@@ -1098,7 +1235,7 @@ export function StarDetailsPanel({
       <DialogContent
         className="left-1/2 top-auto bottom-3 flex h-[calc(100vh-1.5rem)] max-h-[calc(100vh-1.5rem)] w-[calc(100%-1.5rem)] max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-0 flex-col gap-0 overflow-hidden rounded-[1.75rem] border-white/12 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(8,11,20,0.96))] p-0 sm:left-auto sm:right-4 sm:top-4 sm:bottom-4 sm:h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-2rem)] sm:w-[min(460px,calc(100vw-2rem))] sm:max-w-[460px] sm:translate-x-0 sm:translate-y-0"
         data-testid="star-details-panel"
-        showCloseButton={!building && !uploading && !removing}
+        showCloseButton={true}
         showOverlay={false}
       >
         <div className="border-b border-white/10 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(10,13,23,0.92))] px-5 py-5 sm:px-6">

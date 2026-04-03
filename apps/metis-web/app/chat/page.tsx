@@ -19,6 +19,7 @@ import {
 } from "@/lib/chat-types";
 import { useChatTranscript } from "@/app/chat/use-chat-transcript";
 import { useArrowState } from "@/hooks/use-arrow-state";
+import { useAppStatePoller } from "@/hooks/use-app-state-poller";
 import { emitBrainGraphRagActivity } from "@/lib/brain-graph-rag-activity";
 import {
   clearResumableRagRun,
@@ -247,6 +248,8 @@ export default function ChatPage() {
     runIdsNewestFirst,
   } = useChatTranscript();
   const companionSessionId = selectedId ?? sessionMeta?.session_id ?? null;
+  const { appState: agentAppState } = useAppStatePoller(agenticMode ? companionSessionId : null);
+  const agentStateKeyCount = Object.keys(agentAppState).length;
 
   const getRunSubqueries = useCallback(
     (runId: string) => getRun(runId)?.sub_queries,
@@ -1337,6 +1340,14 @@ export default function ChatPage() {
               className="border-[rgba(196,149,58,0.16)] bg-[rgba(10,14,28,0.58)] text-[rgba(222,229,241,0.84)]"
             >
               Index: {activeIndexLabel}
+            </Badge>
+          ) : null}
+          {agenticMode && agentStateKeyCount > 0 ? (
+            <Badge
+              variant="outline"
+              className="border-[rgba(100,210,180,0.22)] bg-[rgba(10,14,28,0.58)] text-[rgba(100,210,180,0.9)]"
+            >
+              Agent state: {agentStateKeyCount} {agentStateKeyCount === 1 ? "key" : "keys"}
             </Badge>
           ) : null}
         </>

@@ -14,6 +14,10 @@ import tempfile
 import uuid
 from typing import Any, Callable
 
+# Typed shape emitted by the progress_cb at each pipeline phase.
+# {"phase": str, "faculty_id": str | None, "detail": str}
+ProgressEvent = dict[str, Any]
+
 _log = logging.getLogger(__name__)
 
 # The 11 constellation faculties in preferred gap-fill order
@@ -59,17 +63,32 @@ class AutonomousResearchService:
         settings: dict[str, Any],
         indexes: list[dict[str, Any]],
         orchestrator: Any,
+        progress_cb: Callable[[ProgressEvent], None] | None = None,
     ) -> dict[str, Any] | None:
-        """Full pipeline. Returns result dict or None if nothing to research."""
+        """Full pipeline. Returns result dict or None if nothing to research.
+
+        progress_cb receives a dict at each phase:
+        {"phase": str, "faculty_id": str | None, "detail": str}
+        """
         from metis_app.utils.llm_providers import create_llm
 
+        def _emit(phase: str, faculty: str | None, detail: str) -> None:
+            if progress_cb is not None:
+                try:
+                    progress_cb({"phase": phase, "faculty_id": faculty, "detail": detail})
+                except Exception:  # noqa: BLE001
+                    pass
+
+        _emit("scanning", None, "Scanning constellation for faculty gaps…")
         faculty_id = self.scan_faculty_gaps(indexes)
         if faculty_id is None:
             _log.debug("autonomous_research: no faculty gaps found, skipping")
+            _emit("skipped", None, "Constellation fully covered, skipping")
             return None
 
         faculty_desc = FACULTY_DESCRIPTIONS.get(faculty_id, faculty_id)
 
+        _emit("formulating", faculty_id, f"Formulating research query for '{faculty_id}'…")
         try:
             llm = create_llm(settings)
             query = self.formulate_query(faculty_id, faculty_desc, llm)
@@ -82,11 +101,13 @@ class AutonomousResearchService:
             return None
 
         _log.info("autonomous_research: researching %s with query: %s", faculty_id, query)
+        _emit("searching", faculty_id, f"Searching: {query}")
         search_results = self._web_search(query, n_results=5)
         if not search_results:
             _log.warning("autonomous_research: no search results for %s", faculty_id)
             return None
 
+        _emit("synthesizing", faculty_id, f"Synthesising {len(search_results)} sources…")
         try:
             document_content = self.synthesize_document(faculty_id, query, search_results, llm)
         except Exception as exc:
@@ -100,6 +121,7 @@ class AutonomousResearchService:
             return None
 
         index_id = f"auto_{faculty_id}_{uuid.uuid4().hex[:8]}"
+        _emit("indexing", faculty_id, f"Building star index: {index_id}")
         try:
             orchestrator.build_index([str(doc_path)], settings, index_id=index_id)
         except Exception as exc:
@@ -113,10 +135,12 @@ class AutonomousResearchService:
                 pass
 
         sources = [r.url for r in search_results if r.url]
+        title = self._extract_title(document_content)
+        _emit("complete", faculty_id, f"New star added: {title}")
         return {
             "faculty_id": faculty_id,
             "index_id": index_id,
-            "title": self._extract_title(document_content),
+            "title": title,
             "sources": sources,
         }
 
@@ -232,6 +256,7 @@ class AutonomousResearchService:
         orchestrator: Any,
         concurrency: int = 1,
         request_delay_ms: int = 500,
+        progress_cb: Callable[[ProgressEvent], None] | None = None,
     ) -> list[dict[str, Any]]:
         """Run research for multiple faculty gaps concurrently.
 
@@ -254,6 +279,7 @@ class AutonomousResearchService:
                         settings=settings,
                         indexes=[],  # orchestrator provides current index list inside
                         orchestrator=orchestrator,
+                        progress_cb=progress_cb,
                     ),
                 )
 

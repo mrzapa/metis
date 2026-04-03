@@ -15,7 +15,7 @@ const LandingStarfieldWebgl = dynamic(
 );
 import { StarDetailsPanel } from "@/components/constellation/star-observatory-dialog";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
-import { deleteIndex, fetchIndexes, previewLearningRoute } from "@/lib/api";
+import { deleteIndex, fetchIndexes, previewLearningRoute, subscribeCompanionActivity } from "@/lib/api";
 import {
   buildBrainPlacementIntent,
   buildFacultyAnchoredPlacement,
@@ -905,6 +905,18 @@ export default function Home() {
     availableIndexesRef.current = availableIndexes;
     starfieldRevisionRef.current += 1;
   }, [availableIndexes]);
+
+  // Auto-refresh constellation when autonomous research completes a new star
+  useEffect(() => {
+    return subscribeCompanionActivity((event) => {
+      if (
+        event.source === "autonomous_research" &&
+        event.state === "completed"
+      ) {
+        void refreshAvailableIndexes({ silent: true });
+      }
+    });
+  }, [refreshAvailableIndexes]);
 
   useEffect(() => {
     selectedUserStarIdRef.current = selectedUserStarId;
