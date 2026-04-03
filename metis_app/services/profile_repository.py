@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
+import logging
 import pathlib
 import re
+
+log = logging.getLogger(__name__)
 
 from metis_app.models.parity_types import AgentProfile
 
@@ -86,8 +89,8 @@ class ProfileRepository:
         if path and path.exists():
             try:
                 return self.load_file(path)
-            except (OSError, json.JSONDecodeError):
-                pass
+            except (OSError, json.JSONDecodeError) as exc:
+                log.warning("Could not load profile from %s: %s", path, exc)
         return replace(self.BUILTIN_PROFILES["Built-in: Default"])
 
     def load_file(self, path: str | pathlib.Path) -> AgentProfile:

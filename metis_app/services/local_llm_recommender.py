@@ -594,7 +594,7 @@ class LocalLlmRecommenderService:
                     f"Incomplete GGUF download for {plan.filename}: expected {total_bytes} bytes, got {downloaded}."
                 )
             os.replace(part_path, destination)
-        except Exception:
+        except Exception:  # noqa: BLE001 — cleanup on any download error before re-raising
             if part_path.exists():
                 part_path.unlink()
             raise
@@ -751,14 +751,14 @@ def detect_memory_gb() -> tuple[float, float]:
             status.length = ctypes.sizeof(_MemoryStatus)
             ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
             return status.total_phys / _GIB, status.avail_phys / _GIB
-        except Exception:
+        except (OSError, AttributeError, OverflowError):
             return 0.0, 0.0
     try:
         pages = os.sysconf("SC_PHYS_PAGES")
         page_size = os.sysconf("SC_PAGE_SIZE")
         available = os.sysconf("SC_AVPHYS_PAGES")
         return (pages * page_size) / _GIB, (available * page_size) / _GIB
-    except Exception:
+    except (OSError, ValueError):
         return 0.0, 0.0
 
 
@@ -1307,7 +1307,7 @@ def _run_command(command: list[str]) -> str:
             errors="ignore",
             timeout=10,
         )
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return ""
     return str(completed.stdout or "").strip() if completed.returncode == 0 else ""
 

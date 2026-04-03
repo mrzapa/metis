@@ -34,6 +34,7 @@ import {
   CORE_CENTER_X,
   CORE_CENTER_Y,
   CORE_EXCLUSION_RADIUS,
+  findStarDiveFocusTarget,
   getBackgroundCameraScale,
   getBackgroundViewportWorldBounds,
   getConstellationCameraScale,
@@ -41,6 +42,7 @@ import {
   getAutoStarFaculty,
   getInfluenceColors,
   getPreviewConnectionNodes,
+  getStarDiveFocusStrength,
   isAutonomousStar,
   inferConstellationFaculty,
   isAddableBackgroundStar,
@@ -51,6 +53,7 @@ import {
   projectConstellationPoint,
   screenToConstellationPoint,
   screenToWorldPoint,
+  STAR_DIVE_ZOOM_THRESHOLD,
   type ConstellationFacultyMetadata,
   type ConstellationFieldStar,
   type ConstellationNodePoint,
@@ -113,7 +116,7 @@ const BACKGROUND_TILE_PADDING_PX = 220;
 const BACKGROUND_TILE_SIZE = 960;
 const MAX_CACHED_WORLD_TILES = 4096;
 const WORLD_STAR_COUNT_BY_LAYER = [4, 7, 10] as const;
-const WORLD_STAR_REVEAL_STEPS = [1, 1.35, 1.8, 2.4, 3.2, 4.3, 5.8, 7.8, 10.5, 14.2, 19.2, 26, 35, 47, 64, 86, 116, 156, 200] as const;
+const WORLD_STAR_REVEAL_STEPS = [1, 1.35, 1.8, 2.4, 3.2, 4.3, 5.8, 7.8, 10.5, 14.2, 19.2, 26, 35, 47, 64, 86, 116, 156, 200, 270, 365, 493, 667, 900, 1215, 1640, 2000] as const;
 const HOVER_EXPAND_DELAY_MS = 600;
 const DRAG_DISTANCE_PX = 6;
 const ZOOM_UI_RESTORE_DELAY_MS = 240;
@@ -813,6 +816,7 @@ export default function Home() {
   const [pendingDetailStar, setPendingDetailStar] = useState<UserStar | null>(null);
   const [starDetailCloseLockedUntil, setStarDetailCloseLockedUntil] = useState(0);
   const [starFocusPhase, setStarFocusPhase] = useState<StarFocusPhase>("idle");
+  const [starDiveFocusStrength, setStarDiveFocusStrength] = useState(0);
   const [availableIndexes, setAvailableIndexes] = useState<IndexSummary[]>([]);
   const [indexesLoading, setIndexesLoading] = useState(true);
   const [indexLoadError, setIndexLoadError] = useState<string | null>(null);
@@ -879,6 +883,11 @@ export default function Home() {
     width: 0,
   });
   const optimisticIndexKeysRef = useRef<Set<string>>(new Set());
+  const starDiveFocusedStarIdRef = useRef<string | null>(null);
+  const starDiveFocusStrengthRef = useRef(0);
+  const starDiveFocusWorldPosRef = useRef<Point | null>(null);
+  const starDiveFocusProfileRef = useRef<StellarProfile | null>(null);
+  const starDivePanSuppressedRef = useRef(false);
   const starTooltipHideTimeoutRef = useRef<number | null>(null);
   const toastDismissTimeoutRef = useRef<number | null>(null);
   const zoomInteractionTimeoutRef = useRef<number | null>(null);
@@ -3097,6 +3106,52 @@ export default function Home() {
         zoomFactor: backgroundZoomRef.current,
       };
 
+      // --- Star Dive: focus detection + auto-drift ---
+      const diveFocusStrength = getStarDiveFocusStrength(backgroundCamera.zoomFactor);
+      starDiveFocusStrengthRef.current = diveFocusStrength;
+
+      if (diveFocusStrength > 0 && !starDivePanSuppressedRef.current) {
+        // Acquire or maintain focus target
+        if (!starDiveFocusedStarIdRef.current) {
+          const target = findStarDiveFocusTarget(visibleStarsRef.current, W, H);
+          if (target) {
+            const scale = getBackgroundCameraScale(backgroundCamera.zoomFactor);
+            starDiveFocusedStarIdRef.current = target.id;
+            starDiveFocusWorldPosRef.current = {
+              x: backgroundCamera.x + (target.screenX - W / 2) / scale,
+              y: backgroundCamera.y + (target.screenY - H / 2) / scale,
+            };
+            starDiveFocusProfileRef.current = getCachedStellarProfile(target.id);
+          }
+        }
+
+        // Auto-drift camera toward focused star
+        if (starDiveFocusWorldPosRef.current) {
+          const wp = starDiveFocusWorldPosRef.current;
+          const driftEasing = reducedMotion ? 1 : 0.04 + diveFocusStrength * 0.08;
+          const driftDx = wp.x - backgroundCameraTargetOriginRef.current.x;
+          const driftDy = wp.y - backgroundCameraTargetOriginRef.current.y;
+          if (Math.abs(driftDx) > 0.01 || Math.abs(driftDy) > 0.01) {
+            backgroundCameraTargetOriginRef.current = {
+              x: backgroundCameraTargetOriginRef.current.x + driftDx * driftEasing,
+              y: backgroundCameraTargetOriginRef.current.y + driftDy * driftEasing,
+            };
+          }
+        }
+      } else if (diveFocusStrength <= 0 && starDiveFocusedStarIdRef.current) {
+        // Clear focus when zoomed back out
+        starDiveFocusedStarIdRef.current = null;
+        starDiveFocusWorldPosRef.current = null;
+        starDiveFocusProfileRef.current = null;
+        starDivePanSuppressedRef.current = false;
+      }
+
+      // Update reactive state (throttled — only when integer percentage changes)
+      const roundedStrength = Math.round(diveFocusStrength * 100) / 100;
+      if (Math.abs(roundedStrength - starDiveFocusStrength) > 0.009) {
+        setStarDiveFocusStrength(roundedStrength);
+      }
+
       const starFocusSession = starFocusSessionRef.current;
       if (
         starFocusPhaseRef.current === "focusing"
@@ -3536,6 +3591,10 @@ export default function Home() {
           zoomFactor: currentCamera.zoomFactor,
           moved: false,
         };
+        // Suppress Star Dive auto-drift during manual pan
+        if (starDiveFocusStrengthRef.current > 0) {
+          starDivePanSuppressedRef.current = true;
+        }
         setAddMessage(null);
         setDragMessage(null);
         clearHoveredCandidate();

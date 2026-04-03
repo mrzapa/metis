@@ -8,7 +8,9 @@ export const CORE_EXCLUSION_RADIUS = 0.21;
 export const ADD_CANDIDATE_HIT_RADIUS_PX = 26;
 export const MOBILE_ADD_CANDIDATE_HIT_RADIUS_PX = 38;
 export const MIN_BACKGROUND_ZOOM_FACTOR = 0.75;
-export const MAX_BACKGROUND_ZOOM_FACTOR = 200;
+export const MAX_BACKGROUND_ZOOM_FACTOR = 2000;
+export const STAR_DIVE_ZOOM_THRESHOLD = 200;
+export const STAR_DIVE_FULL_ZOOM = 800;
 export const CONSTELLATION_FACULTY_CENTER_X = CORE_CENTER_X;
 export const CONSTELLATION_FACULTY_CENTER_Y = CORE_CENTER_Y;
 export const CONSTELLATION_FACULTY_RING_RADIUS = 0.34;
@@ -525,4 +527,52 @@ export function getPreviewConnectionNodes<T extends Pick<ConstellationNodePoint,
         - Math.hypot(right.x / width - candidate.nx, right.y / height - candidate.ny),
     )
     .slice(0, 2);
+}
+
+/**
+ * Compute the Star Dive focus strength (0→1) from the current zoom factor.
+ * Returns 0 below STAR_DIVE_ZOOM_THRESHOLD and 1 at STAR_DIVE_FULL_ZOOM.
+ */
+export function getStarDiveFocusStrength(zoomFactor: number): number {
+  if (zoomFactor <= STAR_DIVE_ZOOM_THRESHOLD) return 0;
+  if (zoomFactor >= STAR_DIVE_FULL_ZOOM) return 1;
+  return clamp(
+    (zoomFactor - STAR_DIVE_ZOOM_THRESHOLD) / (STAR_DIVE_FULL_ZOOM - STAR_DIVE_ZOOM_THRESHOLD),
+    0,
+    1,
+  );
+}
+
+/**
+ * Find the best star to focus on during a Star Dive.
+ * Picks the brightest star nearest the viewport center, weighted by distance.
+ */
+export function findStarDiveFocusTarget<
+  T extends { id: string; screenX: number; screenY: number; brightness: number },
+>(
+  stars: readonly T[],
+  viewportWidth: number,
+  viewportHeight: number,
+): T | null {
+  const cx = viewportWidth / 2;
+  const cy = viewportHeight / 2;
+  const maxSearchRadius = Math.min(viewportWidth, viewportHeight) * 0.4;
+
+  let best: T | null = null;
+  let bestScore = -Infinity;
+
+  for (const star of stars) {
+    const dx = star.screenX - cx;
+    const dy = star.screenY - cy;
+    const dist = Math.hypot(dx, dy);
+    if (dist > maxSearchRadius) continue;
+    const proximityScore = 1 - dist / maxSearchRadius;
+    const score = star.brightness * 1.6 + proximityScore * 0.8;
+    if (score > bestScore) {
+      bestScore = score;
+      best = star;
+    }
+  }
+
+  return best;
 }

@@ -548,6 +548,14 @@ body {
   to { background-position: 1000px 1000px; }
 }
 
+/* Respect users who prefer reduced motion: pause the starfield drift */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes starfield-drift {
+    from { background-position: 0 0; }
+    to { background-position: 0 0; }
+  }
+}
+
 @keyframes thinking-pulse {
   0%,
   100% {
