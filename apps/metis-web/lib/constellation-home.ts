@@ -421,11 +421,13 @@ export function projectBackgroundStar(
   star: Pick<ConstellationFieldStar, "nx" | "ny" | "parallaxFactor">,
   width: number,
   height: number,
-  mouse: Point,
+  _mouse: Point,
 ): Point {
   return {
-    x: star.nx * width + (mouse.x - width / 2) * star.parallaxFactor,
-    y: star.ny * height + (mouse.y - height / 2) * star.parallaxFactor,
+    // Keep hover and selection targets anchored to the same screen-space
+    // coordinates used by the WebGL starfield renderer.
+    x: star.nx * width,
+    y: star.ny * height,
   };
 }
 

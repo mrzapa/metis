@@ -440,9 +440,9 @@ describe("findHoveredAddCandidate", () => {
     expect(candidate?.id).toBe("nearest");
   });
 
-  it("uses projected star coordinates when parallax shifts the hover target", () => {
+  it("keeps hover targets anchored to the rendered star position", () => {
     const mouse: Point = { x: 640, y: 420 };
-    const pointer: Point = { x: 902.8, y: 148.4 };
+    const pointer: Point = { x: 900, y: 150 };
     const stars = [makeStar({ id: "projected", nx: 0.9, ny: 0.15, parallaxFactor: 0.02 })];
 
     const candidate = findHoveredAddCandidate(
