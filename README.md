@@ -188,6 +188,35 @@ This starts:
 - API at `http://127.0.0.1:8000`
 - Next.js dev UI at `http://127.0.0.1:3000`
 
+### Forecast on Windows
+
+TimesFM 2.5 currently works best in a dedicated Python 3.11 environment on
+Windows. METIS includes a helper script that reproduces the validated setup and
+starts the FastAPI backend with forecast support enabled:
+
+```powershell
+.\scripts\run_forecast_api_dev.ps1
+```
+
+That script:
+
+- creates `.venv311-forecast`
+- installs `.[dev,api]`
+- installs TimesFM from a pinned upstream Git revision with torch extras
+- installs `jax` and `scikit-learn` for covariate-backed XReg runs
+- starts the API on `http://127.0.0.1:8000` using the FastAPI backend
+
+Then run the web UI separately:
+
+```powershell
+cd apps/metis-web
+pnpm dev
+```
+
+Forecast mode now defaults to a full 16k context window and a 1k horizon cap
+instead of the older 1k / 256 defaults, so long-history series are no longer
+artificially clipped by small local settings.
+
 ---
 
 ## 🔧 Configuration

@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Any
 
 _DEFAULT_MODEL_ID = "google/timesfm-2.5-200m-pytorch"
-_DEFAULT_MAX_CONTEXT = 1024
-_DEFAULT_MAX_HORIZON = 256
+_DEFAULT_MAX_CONTEXT = 16000
+_DEFAULT_MAX_HORIZON = 1000
 _DEFAULT_XREG_MODE = "xreg + timesfm"
 _FORECAST_SELECTED_MODE = "Forecast"
 _DEFAULT_QUANTILE_LABELS = [

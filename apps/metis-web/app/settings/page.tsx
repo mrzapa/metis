@@ -37,8 +37,16 @@ const schema = z.object({
   show_retrieved_context: z.boolean(),
   verbose_mode: z.boolean(),
   forecast_model_id: z.string().min(1),
-  forecast_max_context: z.number().int().min(1, "Min 1").max(8192, "Max 8192"),
-  forecast_max_horizon: z.number().int().min(1, "Min 1").max(2048, "Max 2048"),
+  forecast_max_context: z
+    .number()
+    .int()
+    .min(1, "Min 1")
+    .max(FORECAST_MAX_CONTEXT_LIMIT, `Max ${FORECAST_MAX_CONTEXT_LIMIT}`),
+  forecast_max_horizon: z
+    .number()
+    .int()
+    .min(1, "Min 1")
+    .max(FORECAST_MAX_HORIZON_LIMIT, `Max ${FORECAST_MAX_HORIZON_LIMIT}`),
   forecast_use_quantiles: z.boolean(),
   forecast_xreg_mode: z.string().min(1),
   forecast_force_xreg_cpu: z.boolean(),
@@ -105,6 +113,8 @@ const FORECAST_XREG_MODES = ["xreg + timesfm", "timesfm"];
 const FALLBACK_STRATEGIES = ["synthesize_anyway", "no_answer"];
 const KG_QUERY_MODES = ["hybrid", "vector", "keyword"];
 const COMPREHENSION_DEPTHS = ["Standard", "Deep", "Exhaustive"];
+const FORECAST_MAX_CONTEXT_LIMIT = 16000;
+const FORECAST_MAX_HORIZON_LIMIT = 1000;
 const UI_VARIANTS = [
   {
     value: "motion",
@@ -185,8 +195,8 @@ const FORM_DEFAULT_VALUES: FormValues = {
   show_retrieved_context: false,
   verbose_mode: false,
   forecast_model_id: "google/timesfm-2.5-200m-pytorch",
-  forecast_max_context: 1024,
-  forecast_max_horizon: 256,
+  forecast_max_context: FORECAST_MAX_CONTEXT_LIMIT,
+  forecast_max_horizon: FORECAST_MAX_HORIZON_LIMIT,
   forecast_use_quantiles: true,
   forecast_xreg_mode: "xreg + timesfm",
   forecast_force_xreg_cpu: true,
@@ -406,8 +416,8 @@ export default function SettingsPage() {
       show_retrieved_context: false,
       verbose_mode: false,
       forecast_model_id: "google/timesfm-2.5-200m-pytorch",
-      forecast_max_context: 1024,
-      forecast_max_horizon: 256,
+      forecast_max_context: FORECAST_MAX_CONTEXT_LIMIT,
+      forecast_max_horizon: FORECAST_MAX_HORIZON_LIMIT,
       forecast_use_quantiles: true,
       forecast_xreg_mode: "xreg + timesfm",
       forecast_force_xreg_cpu: true,
@@ -513,8 +523,8 @@ export default function SettingsPage() {
           show_retrieved_context: (raw.show_retrieved_context as boolean) ?? false,
           verbose_mode: (raw.verbose_mode as boolean) ?? false,
           forecast_model_id: (raw.forecast_model_id as string) ?? "google/timesfm-2.5-200m-pytorch",
-          forecast_max_context: (raw.forecast_max_context as number) ?? 1024,
-          forecast_max_horizon: (raw.forecast_max_horizon as number) ?? 256,
+          forecast_max_context: (raw.forecast_max_context as number) ?? FORECAST_MAX_CONTEXT_LIMIT,
+          forecast_max_horizon: (raw.forecast_max_horizon as number) ?? FORECAST_MAX_HORIZON_LIMIT,
           forecast_use_quantiles: (raw.forecast_use_quantiles as boolean) ?? true,
           forecast_xreg_mode: (raw.forecast_xreg_mode as string) ?? "xreg + timesfm",
           forecast_force_xreg_cpu: (raw.forecast_force_xreg_cpu as boolean) ?? true,
@@ -909,23 +919,23 @@ export default function SettingsPage() {
 
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1.5">
-                        <FieldLabel htmlFor="forecast_max_context" tooltip="Maximum number of historical points to pass into the TimesFM context window.">Forecast max context</FieldLabel>
+                        <FieldLabel htmlFor="forecast_max_context" tooltip="Maximum number of historical points to pass into the TimesFM context window. TimesFM 2.5 supports substantially larger windows than the old 1k default, so METIS now defaults to the full 16k context budget.">Forecast max context</FieldLabel>
                         <Input
                           id="forecast_max_context"
                           type="number"
                           min={1}
-                          max={8192}
+                          max={FORECAST_MAX_CONTEXT_LIMIT}
                           {...register("forecast_max_context", { valueAsNumber: true })}
                         />
                         <FieldError message={errors.forecast_max_context?.message} />
                       </div>
                       <div className="space-y-1.5">
-                        <FieldLabel htmlFor="forecast_max_horizon" tooltip="Upper limit for horizon steps in Forecast mode.">Forecast max horizon</FieldLabel>
+                        <FieldLabel htmlFor="forecast_max_horizon" tooltip="Upper limit for horizon steps in Forecast mode. METIS now defaults to a 1k-step ceiling instead of the smaller 256-step cap.">Forecast max horizon</FieldLabel>
                         <Input
                           id="forecast_max_horizon"
                           type="number"
                           min={1}
-                          max={2048}
+                          max={FORECAST_MAX_HORIZON_LIMIT}
                           {...register("forecast_max_horizon", { valueAsNumber: true })}
                         />
                         <FieldError message={errors.forecast_max_horizon?.message} />
