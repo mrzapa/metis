@@ -11,6 +11,14 @@ vi.mock("@/lib/api", () => ({
   reflectAssistant: vi.fn(),
   bootstrapAssistant: vi.fn(),
   clearAssistantMemory: vi.fn(),
+  fetchAutonomousStatus: vi.fn().mockResolvedValue({ enabled: false }),
+  updateSettings: vi.fn().mockResolvedValue({}),
+  triggerAutonomousResearchStream: vi.fn().mockResolvedValue(undefined),
+  subscribeCompanionActivity: vi.fn().mockReturnValue(() => {}),
+}));
+
+vi.mock("@/lib/webgpu-companion/webgpu-companion-context", () => ({
+  useWebGPUCompanionContext: () => ({ status: "idle", load: vi.fn(), send: vi.fn(), stop: vi.fn(), reset: vi.fn(), output: null, progress: null, error: null }),
 }));
 
 const { fetchAssistant } = await import("@/lib/api");

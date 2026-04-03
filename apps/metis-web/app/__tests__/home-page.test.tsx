@@ -722,7 +722,7 @@ describe("Home page", () => {
     });
   });
 
-  it("opens a concept card when the pointer lands on the visible label outside the node circle", async () => {
+  it("opens star details panel when the pointer lands on the visible label outside the node circle", async () => {
     let hasRenderedFrame = false;
     vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
       if (!hasRenderedFrame) {
@@ -775,9 +775,8 @@ describe("Home page", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Faculty 01")).toBeInTheDocument();
-      expect(screen.getByText("Perception")).toBeInTheDocument();
-      expect(screen.getByText("Sensory intake, pattern detection, and direct observation.")).toBeInTheDocument();
+      expect(screen.getByTestId("star-details-panel")).toBeInTheDocument();
+      expect(screen.getByText("new")).toBeInTheDocument();
     });
   });
 });

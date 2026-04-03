@@ -104,6 +104,10 @@ vi.mock("@/components/chat/model-status-dialog", () => ({
   ModelStatusDialog: () => null,
 }));
 
+vi.mock("@/lib/webgpu-companion/webgpu-companion-context", () => ({
+  useWebGPUCompanionContext: () => ({ status: "idle", load: vi.fn(), send: vi.fn(), stop: vi.fn(), reset: vi.fn(), output: null, progress: null, error: null }),
+}));
+
 vi.mock("@/components/ui/animated-lucide-icon", () => ({
   AnimatedLucideIcon: () => <span data-testid="mock-icon" />,
 }));

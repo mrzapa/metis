@@ -76,6 +76,11 @@ export function MetisCompanionDock({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [researchPhase, setResearchPhase] = useState("");
   const [unseenCount, setUnseenCount] = useState(0);
+  const [dockHistory, setDockHistory] = useState<Array<{ role: string; content: string }>>([]);
+  const minimized = Boolean(snapshot?.identity.minimized);
+
+  const load = useCallback(async (autoBootstrap: boolean) => {
+    const requestId = ++requestIdRef.current;
     try {
       let next = await fetchAssistant();
       if (requestId !== requestIdRef.current) {
@@ -161,7 +166,6 @@ export function MetisCompanionDock({
     () => snapshot?.memory?.[0] ?? null,
     [snapshot],
   );
-  const minimized = Boolean(snapshot?.identity.minimized);
 
   // True when no dedicated runtime is wired up on the server side.
   // WebGPU fills this gap with a fully in-browser model.

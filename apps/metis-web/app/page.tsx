@@ -912,18 +912,6 @@ export default function Home() {
     starfieldRevisionRef.current += 1;
   }, [availableIndexes]);
 
-  // Auto-refresh constellation when autonomous research completes a new star
-  useEffect(() => {
-    return subscribeCompanionActivity((event) => {
-      if (
-        event.source === "autonomous_research" &&
-        event.state === "completed"
-      ) {
-        void refreshAvailableIndexes({ silent: true });
-      }
-    });
-  }, [refreshAvailableIndexes]);
-
   useEffect(() => {
     selectedUserStarIdRef.current = selectedUserStarId;
   }, [selectedUserStarId]);
@@ -1538,6 +1526,18 @@ export default function Home() {
       }
     }
   }, []);
+
+  // Auto-refresh constellation when autonomous research completes a new star
+  useEffect(() => {
+    return subscribeCompanionActivity((event) => {
+      if (
+        event.source === "autonomous_research" &&
+        event.state === "completed"
+      ) {
+        void refreshAvailableIndexes({ silent: true });
+      }
+    });
+  }, [refreshAvailableIndexes]);
 
   const handleIndexBuilt = useCallback((result: IndexBuildResult) => {
     const optimisticIndex = buildOptimisticIndexSummary(result);
