@@ -11,6 +11,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { MetisCompanionDock } from "@/components/shell/metis-companion-dock";
+import { WebGPUCompanionProvider } from "@/lib/webgpu-companion/webgpu-companion-context";
 import { cn } from "@/lib/utils";
 
 interface PageChromeProps {
@@ -60,6 +61,7 @@ export function PageChrome({
   const isStarscape = tone === "starscape";
 
   return (
+    <WebGPUCompanionProvider>
     <div
       className={cn(
         "page-chrome relative min-h-screen overflow-hidden bg-transparent",
@@ -196,5 +198,6 @@ export function PageChrome({
         runId={companionContext?.runId}
       />
     </div>
+    </WebGPUCompanionProvider>
   );
 }

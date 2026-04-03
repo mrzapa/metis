@@ -160,4 +160,25 @@ describe("constellation focus helpers", () => {
       )?.id,
     ).toBe("candidate-a");
   });
+
+  it("keeps background candidate hit targets anchored to the rendered screen position", () => {
+    const star = { id: "candidate-a", nx: 0.5, ny: 0.5, parallaxFactor: 0.02 };
+    const centeredTarget = buildProjectedCandidateHitTarget(
+      star,
+      1000,
+      800,
+      { x: 500, y: 400 },
+      24,
+    );
+    const offsetTarget = buildProjectedCandidateHitTarget(
+      star,
+      1000,
+      800,
+      { x: 740, y: 180 },
+      24,
+    );
+
+    expect(offsetTarget.x).toBeCloseTo(centeredTarget.x, 6);
+    expect(offsetTarget.y).toBeCloseTo(centeredTarget.y, 6);
+  });
 });

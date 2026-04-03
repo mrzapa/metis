@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { updateSettings } from "@/lib/api";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Cpu, Loader2 } from "lucide-react";
 import { useArrowState } from "@/hooks/use-arrow-state";
 
 interface ModelStatusDialogProps {
@@ -72,6 +72,30 @@ export function ModelStatusDialog({
         </DialogHeader>
 
         <div className="space-y-3">
+          {/* WebGPU quick-select */}
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-lg border border-primary/20 bg-primary/6 px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-primary/10 disabled:opacity-50"
+            disabled={saving}
+            onClick={() => {
+              setDraftProvider("webgpu");
+              setDraftModel("LFM2 8B");
+            }}
+          >
+            <Cpu className="size-3.5 shrink-0 text-primary" />
+            <div className="min-w-0">
+              <div className="font-medium leading-4 text-foreground">Use Browser (WebGPU)</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">Runs LFM2&nbsp;8B entirely in your browser — no API key needed</div>
+            </div>
+          </button>
+
+          {draftProvider === "webgpu" && (
+            <div className="flex items-start gap-2 rounded-md bg-primary/8 px-3 py-2 text-xs text-muted-foreground">
+              <Cpu className="mt-0.5 size-3.5 shrink-0 text-primary" />
+              <span>Browser AI uses WebGPU. The model (~2&nbsp;GB) is downloaded once and cached locally. Requires Chrome&nbsp;113+ or Edge&nbsp;113+.</span>
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">
               Provider

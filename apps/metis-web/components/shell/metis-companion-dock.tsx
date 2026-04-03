@@ -37,7 +37,7 @@ import {
 } from "lucide-react";
 import { BrainIcon } from "@/components/icons";
 import { useArrowState } from "@/hooks/use-arrow-state";
-import { useWebGPUCompanion } from "@/lib/webgpu-companion/use-webgpu-companion";
+import { useWebGPUCompanionContext } from "@/lib/webgpu-companion/webgpu-companion-context";
 
 interface MetisCompanionDockProps {
   sessionId?: string | null;
@@ -59,8 +59,9 @@ export function MetisCompanionDock({
   const previousContextRef = useRef<{ sessionId?: string | null; runId?: string | null } | null>(null);
   const researchAbortRef = useRef<AbortController | null>(null);
 
-  // WebGPU companion – only activated when no server-side runtime is configured
-  const webgpu = useWebGPUCompanion();
+  // WebGPU companion – shared instance from context, so the chat pane and dock
+  // can drive the same model without loading a second 2 GB worker.
+  const webgpu = useWebGPUCompanionContext();
   const [quickAsk, setQuickAsk] = useState("");
   const [thoughts, setThoughts] = useState<CompanionActivityEvent[]>(() => {
     if (typeof window === "undefined") return [];
@@ -643,20 +644,36 @@ export function MetisCompanionDock({
                     {/* Ready or generating – show quick-ask interface */}
                     {(webgpu.status === "ready" || webgpu.status === "generating") && (
                       <div className="mt-3 space-y-2">
-                        {/* Streamed output */}
-                        {webgpu.output && (
-                          <div className="max-h-36 overflow-y-auto rounded-[0.9rem] border border-white/8 bg-black/20 px-3 py-2 text-sm leading-6 text-foreground">
-                            {webgpu.output}
-                            {webgpu.status === "generating" && (
-                              <span className="ml-0.5 inline-block w-1.5 animate-pulse rounded-sm bg-primary align-middle">
-                                &nbsp;
-                              </span>
+                        {/* Conversation thread */}
+                        {(dockHistory.length > 0 || (webgpu.status === "generating" && webgpu.output)) && (
+                          <div className="max-h-52 space-y-2 overflow-y-auto">
+                            {dockHistory.map((msg, i) => (
+                              <div
+                                key={i}
+                                className={cn(
+                                  "rounded-[0.9rem] px-3 py-2 text-xs leading-5",
+                                  msg.role === "user"
+                                    ? "ml-4 bg-primary/10 text-foreground"
+                                    : "mr-4 border border-white/8 bg-black/20 text-foreground/90",
+                                )}
+                              >
+                                {msg.content}
+                              </div>
+                            ))}
+                            {/* Live streaming token */}
+                            {webgpu.status === "generating" && webgpu.output && (
+                              <div className="mr-4 rounded-[0.9rem] border border-white/8 bg-black/20 px-3 py-2 text-xs leading-5 text-foreground/90">
+                                {webgpu.output}
+                                <span className="ml-0.5 inline-block w-1.5 animate-pulse rounded-sm bg-primary align-middle">
+                                  &nbsp;
+                                </span>
+                              </div>
                             )}
                           </div>
                         )}
 
                         {/* Quick-reflect button */}
-                        {webgpu.status === "ready" && !webgpu.output && (
+                        {webgpu.status === "ready" && dockHistory.length === 0 && (
                           <Button
                             type="button"
                             variant="outline"
@@ -677,10 +694,11 @@ export function MetisCompanionDock({
                             onKeyDown={(e) => {
                               if (e.key === "Enter" && !e.shiftKey && quickAsk.trim()) {
                                 e.preventDefault();
-                                webgpu.send([
-                                  { role: "system", content: "You are METIS, a concise research companion. Be direct. Keep replies under 3 sentences." },
-                                  { role: "user", content: quickAsk.trim() },
-                                ]);
+                                const userContent = quickAsk.trim();
+                                const systemMsg = { role: "system", content: "You are METIS, a concise research companion. Be direct. Keep replies under 3 sentences." };
+                                const nextHistory = [...dockHistory, { role: "user", content: userContent }];
+                                setDockHistory(nextHistory);
+                                webgpu.send([systemMsg, ...nextHistory]);
                                 setQuickAsk("");
                               }
                             }}
@@ -708,10 +726,11 @@ export function MetisCompanionDock({
                               disabled={!quickAsk.trim()}
                               onClick={() => {
                                 if (!quickAsk.trim()) return;
-                                webgpu.send([
-                                  { role: "system", content: "You are METIS, a concise research companion. Be direct. Keep replies under 3 sentences." },
-                                  { role: "user", content: quickAsk.trim() },
-                                ]);
+                                const userContent = quickAsk.trim();
+                                const systemMsg = { role: "system", content: "You are METIS, a concise research companion. Be direct. Keep replies under 3 sentences." };
+                                const nextHistory = [...dockHistory, { role: "user", content: userContent }];
+                                setDockHistory(nextHistory);
+                                webgpu.send([systemMsg, ...nextHistory]);
                                 setQuickAsk("");
                               }}
                               aria-label="Send"

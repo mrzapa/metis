@@ -48,7 +48,6 @@ import {
   MIN_BACKGROUND_ZOOM_FACTOR,
   MOBILE_ADD_CANDIDATE_HIT_RADIUS_PX,
   mixConstellationColors,
-  projectBackgroundStar,
   projectConstellationPoint,
   screenToConstellationPoint,
   screenToWorldPoint,
@@ -72,6 +71,10 @@ import {
 } from "@/lib/constellation-focus";
 import { generateStellarProfile, type StellarProfile } from "@/lib/landing-stars";
 import { buildLandingStarRenderPlan } from "@/lib/landing-stars/landing-star-lod";
+import {
+  getLandingStarInteractionHitRadius,
+  getLandingStarSelectableApparentSize,
+} from "@/lib/landing-stars/landing-star-interaction";
 import {
   buildLandingStarSpatialHash,
   findClosestLandingStarHitTarget,
@@ -142,6 +145,9 @@ interface CanvasBounds {
 
 interface VisibleStarData extends ConstellationFieldStar {
   isAddable: boolean;
+  hitRadius: number;
+  screenX: number;
+  screenY: number;
 }
 
 type StarData = VisibleStarData;
@@ -2215,12 +2221,18 @@ export default function Home() {
     }
 
     function getCandidateConstellationPoint(
-      candidate: Pick<StarData, "nx" | "ny" | "parallaxFactor">,
+      candidate: Pick<StarData, "screenX" | "screenY">,
       backgroundCamera: BackgroundCameraState,
     ): Point {
-      const projected = projectBackgroundStar(candidate, W, H, mouse);
-
-      return screenToConstellationPoint(projected, W, H, backgroundCamera);
+      return screenToConstellationPoint(
+        {
+          x: candidate.screenX,
+          y: candidate.screenY,
+        },
+        W,
+        H,
+        backgroundCamera,
+      );
     }
 
     function getSelectedLinkAnchor(candidatePoint: Point): UserStar | null {
@@ -2351,6 +2363,21 @@ export default function Home() {
           0.94,
           worldStar.brightness + Math.min(0.16, Math.log2(backgroundCamera.zoomFactor + 1) * 0.03),
         );
+        const interactionStar = {
+          apparentSize: projectedSize,
+          brightness,
+          id: worldStar.id,
+          x: screenX,
+          y: screenY,
+        };
+        const hitRadius = getLandingStarInteractionHitRadius(
+          interactionStar,
+          backgroundCamera.zoomFactor,
+        );
+        const selectableApparentSize = getLandingStarSelectableApparentSize(
+          interactionStar,
+          backgroundCamera.zoomFactor,
+        );
         const star = nextVisibleStars[visibleStarCount] ?? {
           id: worldStar.id,
           nx: normalizedX,
@@ -2364,6 +2391,9 @@ export default function Home() {
           parallaxFactor: worldStar.parallaxFactor,
           hasDiffraction: worldStar.hasDiffraction,
           isAddable: false,
+          hitRadius,
+          screenX,
+          screenY,
         };
 
         star.id = worldStar.id;
@@ -2377,6 +2407,9 @@ export default function Home() {
         star.twinklePhase = worldStar.twinklePhase;
         star.parallaxFactor = worldStar.parallaxFactor;
         star.hasDiffraction = worldStar.hasDiffraction;
+        star.hitRadius = hitRadius;
+        star.screenX = screenX;
+        star.screenY = screenY;
         const hasLinkedSourceContent = userStarsRef.current.some(
           (userStar) => getStarManifestPaths(userStar).length > 0,
         );
@@ -2386,7 +2419,17 @@ export default function Home() {
         const hasUserContent = hasLinkedSourceContent
           || hasSessionIndexedContentRef.current
           || availableIndexesRef.current.length > 0;
-        star.isAddable = isAddableBackgroundStar(star, allConstellationStarPx, projectedUserStars, W, H, hasUserContent);
+        star.isAddable = isAddableBackgroundStar(
+          {
+            ...star,
+            baseSize: selectableApparentSize,
+          },
+          allConstellationStarPx,
+          projectedUserStars,
+          W,
+          H,
+          hasUserContent,
+        );
         nextVisibleStars[visibleStarCount] = star;
         visibleStarCount += 1;
       });
@@ -2400,11 +2443,11 @@ export default function Home() {
           addable: star.isAddable,
           apparentSize: star.baseSize,
           brightness: star.brightness,
-          hitRadius: Math.max(8, star.baseSize * 5.5),
+          hitRadius: star.hitRadius,
           id: star.id,
           profile,
-          x: star.nx * W,
-          y: star.ny * H,
+          x: star.screenX,
+          y: star.screenY,
         };
 
         if (star.isAddable) {
@@ -2931,9 +2974,8 @@ export default function Home() {
       );
       const [primaryPreviewR, primaryPreviewG, primaryPreviewB] = previewColors[0];
       const [mixedPreviewR, mixedPreviewG, mixedPreviewB] = mixConstellationColors(previewColors);
-      const projected = projectBackgroundStar(candidate, W, H, mouse);
-      const px = projected.x;
-      const py = projected.y;
+      const px = candidate.screenX;
+      const py = candidate.screenY;
       const pulse = reducedMotion ? 0.72 : 0.7 + Math.sin(ts * 0.008) * 0.18;
 
       ctx!.save();
@@ -3262,11 +3304,11 @@ export default function Home() {
             addable: true,
             apparentSize: star.baseSize,
             brightness: star.brightness,
-            hitRadius: Math.max(8, star.baseSize * 5.5),
+            hitRadius: star.hitRadius,
             id: star.id,
             profile: getCachedStellarProfile(star.id),
-            x: star.nx * W,
-            y: star.ny * H,
+            x: star.screenX,
+            y: star.screenY,
           }));
 
         return addableTargets.length > 0 ? buildLandingStarSpatialHash(addableTargets) : null;

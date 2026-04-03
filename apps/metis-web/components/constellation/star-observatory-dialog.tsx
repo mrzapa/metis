@@ -334,7 +334,7 @@ void main(){
   float angle = atan(uv.y, uv.x);
 
   vec2 starOff = vec2(u_seed * 11.3, u_seed * 7.7);
-  float t = u_time * 0.35;
+  float t = u_time * 0.9;  // fast enough to see granulation drift
 
   vec3 fc   = u_color / 255.0;
   vec3 hot  = vec3(1.0, 0.97, 0.92);
@@ -631,11 +631,12 @@ function createStarProgram(gl: WebGL2RenderingContext): WebGLProgram | null {
   return prog;
 }
 
-function domainSeed(id?: string): number {
-  if (!id) return 0.42;
+function domainSeed(id?: string, id2?: string): number {
+  const combined = (id ?? "") + "\x00" + (id2 ?? "");
+  if (!combined.replace(/\x00/g, "")) return 0.42;
   let h = 0;
-  for (let i = 0; i < id.length; i++) {
-    h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  for (let i = 0; i < combined.length; i++) {
+    h = ((h << 5) - h + combined.charCodeAt(i)) | 0;
   }
   return (((h >>> 0) % 10000) / 10000);
 }
@@ -645,11 +646,13 @@ function StarMiniPreview({
   relatedDomainIds,
   stage,
   size,
+  starId,
 }: {
   primaryDomainId?: string;
   relatedDomainIds?: string[];
   stage?: UserStarStage;
   size?: number;
+  starId?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -709,7 +712,7 @@ function StarMiniPreview({
     const related = (relatedDomainIds ?? []).slice(0, 2).map((id) => getFacultyColor(id));
     const hasDiffraction = stage === "integrated" || stage === "growing";
     const stageVal = stage === "integrated" ? 2 : stage === "growing" ? 1 : 0;
-    const seed = domainSeed(primaryDomainId);
+    const seed = domainSeed(primaryDomainId, starId);
 
     gl.uniform3f(uColor, r, g, b);
     gl.uniform3f(uColor2, ...(related[0] ?? [208, 216, 232]) as [number, number, number]);
@@ -737,7 +740,7 @@ function StarMiniPreview({
       cancelAnimationFrame(rafRef.current);
       glRef.current = null;
     };
-  }, [primaryDomainId, relatedDomainIds, stage, size]);
+  }, [primaryDomainId, relatedDomainIds, stage, size, starId]);
 
   return <canvas ref={canvasRef} style={{ display: "block", borderRadius: "50%" }} />;
 }
@@ -940,6 +943,19 @@ export function StarDetailsPanel({
     }
     onOpenChange(nextOpen);
   }, [building, closeLockedUntil, onOpenChange, removing, uploading]);
+
+  // Close on Space key when panel is open and not busy
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === " " && !building && !uploading && !removing) {
+        e.preventDefault();
+        handleOpenChange(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, building, uploading, removing, handleOpenChange]);
 
   if (!star) {
     return null;
@@ -1275,6 +1291,7 @@ export function StarDetailsPanel({
                   }
                   stage={effectiveStage}
                   size={activeStar.size}
+                  starId={activeStar.id}
                 />
               </div>
             </div>

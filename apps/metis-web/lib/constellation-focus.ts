@@ -4,7 +4,6 @@ import {
   clampBackgroundZoomFactor,
   constellationPointToWorldPoint,
   getConstellationCameraScale,
-  projectBackgroundStar,
   projectConstellationPoint,
   type BackgroundCameraState,
   type ConstellationFieldStar,
@@ -240,15 +239,13 @@ export function buildProjectedCandidateHitTarget(
   star: Pick<ConstellationFieldStar, "id" | "nx" | "ny" | "parallaxFactor">,
   viewportWidth: number,
   viewportHeight: number,
-  mouse: Point,
+  _mouse: Point,
   hitRadius: number,
 ): ProjectedHitTarget {
-  const projected = projectBackgroundStar(star, viewportWidth, viewportHeight, mouse);
-
   return {
     id: star.id,
-    x: projected.x,
-    y: projected.y,
+    x: star.nx * viewportWidth,
+    y: star.ny * viewportHeight,
     hitRadius,
   };
 }

@@ -21,6 +21,7 @@ import { useChatTranscript } from "@/app/chat/use-chat-transcript";
 import { useArrowState } from "@/hooks/use-arrow-state";
 import { useAppStatePoller } from "@/hooks/use-app-state-poller";
 import { emitBrainGraphRagActivity } from "@/lib/brain-graph-rag-activity";
+import { useWebGPUCompanionContext } from "@/lib/webgpu-companion/webgpu-companion-context";
 import {
   clearResumableRagRun,
   loadResumableRagRun,
@@ -219,6 +220,10 @@ export default function ChatPage() {
   const [artifactRuntimeEnabled, setArtifactRuntimeEnabled] = useArrowState<boolean | undefined>(undefined);
   const sessionIdRef = useRef<string | null>(null);
   const seededModeRef = useRef<string | null>(null);
+  const webgpu = useWebGPUCompanionContext();
+  const webgpuRunIdRef = useRef<string | null>(null);
+  const webgpuOutputLenRef = useRef(0);
+  const webgpuHistoryRef = useRef<Array<{ role: string; content: string }>>([]);
   const {
     createMessage,
     restoreStreamingRun,
@@ -657,8 +662,129 @@ export default function ChatPage() {
     ],
   );
 
-  const startRagStream = useCallback(
-    async ({
+  // ── WebGPU streaming effects ────────────────────────────────────────────────
+
+  // Forward newly generated tokens into the chat transcript.
+  useEffect(() => {
+    if (webgpuRunIdRef.current === null) return;
+    const newText = webgpu.output.slice(webgpuOutputLenRef.current);
+    if (!newText) return;
+    webgpuOutputLenRef.current = webgpu.output.length;
+    appendRunToken(webgpuRunIdRef.current, newText);
+  }, [webgpu.output, appendRunToken]);
+
+  // Finalize the run when generation completes.
+  useEffect(() => {
+    if (webgpuRunIdRef.current === null) return;
+    if (webgpu.status !== "ready") return;
+    const runId = webgpuRunIdRef.current;
+    const fullText = webgpu.output;
+    webgpuRunIdRef.current = null;
+    webgpuOutputLenRef.current = 0;
+    finalizeRun(runId, fullText, []);
+    setIsSending(false);
+    // Append assistant turn to conversation history for the model.
+    if (fullText) {
+      webgpuHistoryRef.current = [
+        ...webgpuHistoryRef.current,
+        { role: "assistant", content: fullText },
+      ];
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [webgpu.status]);
+
+  const handleWebGPUSend = useCallback(
+    async (prompt: string) => {
+      if (webgpu.status === "unsupported") return;
+
+      setIsSending(true);
+
+      // Optimistically load the model if it hasn't been loaded yet.
+      if (webgpu.status === "idle") {
+        webgpu.load();
+      }
+
+      // Add user message to transcript.
+      const userMsg = createMessage({
+        role: "user",
+        content: prompt,
+        ts: new Date().toISOString(),
+        run_id: "",
+        sources: [],
+        query_mode: "direct",
+      });
+
+      // Add streaming assistant placeholder.
+      const runId = createClientRunId();
+      const assistantMsg = createMessage(
+        {
+          role: "assistant",
+          content: "",
+          ts: new Date().toISOString(),
+          run_id: runId,
+          sources: [],
+          query_mode: "direct",
+          llm_provider: "webgpu",
+          llm_model: "LFM2 8B",
+        },
+        { status: "streaming" },
+      );
+      appendMessages([userMsg, assistantMsg]);
+      bindRunToAssistantMessage(runId, assistantMsg.id);
+      setLatestFallback(null);
+
+      await autoCreateSession(prompt);
+
+      // Update conversation history.
+      webgpuHistoryRef.current = [
+        ...webgpuHistoryRef.current,
+        { role: "user", content: prompt },
+      ];
+
+      // Track for the streaming effects above.
+      webgpuRunIdRef.current = runId;
+      webgpuOutputLenRef.current = 0;
+
+      const systemMsg = {
+        role: "system",
+        content:
+          "You are METIS, a concise and helpful AI research assistant. Give clear, well-structured answers.",
+      };
+
+      if (webgpu.status === "ready") {
+        webgpu.send([systemMsg, ...webgpuHistoryRef.current]);
+      }
+      // If still loading, the model will be ready soon; the user turn is now
+      // committed and the send() will be called once status reaches "ready".
+    },
+    [
+      webgpu,
+      appendMessages,
+      autoCreateSession,
+      bindRunToAssistantMessage,
+      createMessage,
+      setIsSending,
+      setLatestFallback,
+    ],
+  );
+
+  // When the WebGPU model finishes loading (idle → ready), fire any pending
+  // send that was queued while the model was still downloading.
+  useEffect(() => {
+    if (webgpu.status !== "ready") return;
+    if (webgpuRunIdRef.current === null) return;
+    // A run is in-flight but we haven't sent to the worker yet (model was
+    // loading when handleWebGPUSend was called). Send now.
+    const systemMsg = {
+      role: "system",
+      content:
+        "You are METIS, a concise and helpful AI research assistant. Give clear, well-structured answers.",
+    };
+    webgpu.send([systemMsg, ...webgpuHistoryRef.current]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [webgpu.status]);
+
+  const startRagStream = useCallback(    async ({
       assistantMessageId,
       assistantMessageTs,
       assistantSeedContent,
@@ -1387,7 +1513,7 @@ export default function ChatPage() {
                   sessionMeta={sessionMeta}
                   loading={loadingSession}
                   error={sessionError}
-                  onDirectSend={handleDirectSend}
+                  onDirectSend={modelProvider === "webgpu" ? handleWebGPUSend : handleDirectSend}
                   onRagSend={handleRagSend}
                   isSending={isSending}
                   isStreamingRag={isStreamingRag}
