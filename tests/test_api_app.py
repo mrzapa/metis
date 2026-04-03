@@ -2022,6 +2022,67 @@ def test_autonomous_trigger_returns_500_on_error(monkeypatch) -> None:
     assert response.status_code == 500
 
 
+def test_autonomous_research_stream_returns_sse_events(monkeypatch) -> None:
+    """POST /v1/autonomous/research/stream streams SSE events, starts with research_started."""
+    from metis_app.api import autonomous as _autonomous_module
+
+    monkeypatch.setattr(
+        _autonomous_module._settings_store,
+        "load_settings",
+        lambda: {},
+    )
+
+    class _FakeOrchestrator:
+        def run_autonomous_research(self, settings, progress_cb=None) -> dict:
+            if progress_cb is not None:
+                progress_cb({"phase": "scanning", "faculty_id": None, "detail": "Scanning..."})
+                progress_cb({"phase": "skipped", "faculty_id": None, "detail": "No gaps found."})
+            return {"cycles": 0}
+
+    monkeypatch.setattr(
+        _autonomous_module,
+        "WorkspaceOrchestrator",
+        lambda: _FakeOrchestrator(),
+    )
+    client = TestClient(api_app_module.create_app())
+
+    response = client.post("/v1/autonomous/research/stream")
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+    text = response.text
+    assert "research_started" in text
+    assert "scanning" in text
+    assert "research_complete" in text
+
+
+def test_autonomous_research_stream_emits_error_event_on_failure(monkeypatch) -> None:
+    """POST /v1/autonomous/research/stream emits research_error when orchestrator raises."""
+    from metis_app.api import autonomous as _autonomous_module
+
+    monkeypatch.setattr(
+        _autonomous_module._settings_store,
+        "load_settings",
+        lambda: {},
+    )
+
+    class _BrokenOrchestrator:
+        def run_autonomous_research(self, settings, progress_cb=None) -> None:
+            raise RuntimeError("search service down")
+
+    monkeypatch.setattr(
+        _autonomous_module,
+        "WorkspaceOrchestrator",
+        lambda: _BrokenOrchestrator(),
+    )
+    client = TestClient(api_app_module.create_app())
+
+    response = client.post("/v1/autonomous/research/stream")
+
+    assert response.status_code == 200
+    assert "research_error" in response.text
+
+
 # ---------------------------------------------------------------------------
 # New Scion-inspired adoption tests
 # ---------------------------------------------------------------------------

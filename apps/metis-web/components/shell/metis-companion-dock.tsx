@@ -5,16 +5,24 @@ import {
   bootstrapAssistant,
   clearAssistantMemory,
   fetchAssistant,
+  fetchAutonomousStatus,
   reflectAssistant,
+  subscribeCompanionActivity,
+  triggerAutonomousResearchStream,
   updateAssistant,
+  updateSettings,
   type AssistantSnapshot,
+  type CompanionActivityEvent,
 } from "@/lib/api";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ProgressIndicator } from "@/components/ui/progress-indicator";
 import { cn } from "@/lib/utils";
 import {
   Bot,
+  Search,
+  Zap,
   ChevronDown,
   ChevronUp,
   Loader2,
@@ -44,20 +52,29 @@ export function MetisCompanionDock({
 }: MetisCompanionDockProps) {
   const [snapshot, setSnapshot] = useArrowState<AssistantSnapshot | null>(null);
   const [loading, setLoading] = useArrowState(true);
-  const [busyAction, setBusyAction] = useArrowState<"" | "toggle" | "reflect" | "clear" | "bootstrap">("");
+  const [busyAction, setBusyAction] = useArrowState<"" | "toggle" | "reflect" | "clear" | "bootstrap" | "research">("");
   const [showWhy, setShowWhy] = useArrowState(false);
   const [error, setError] = useArrowState<string | null>(null);
   const requestIdRef = useRef(0);
   const previousContextRef = useRef<{ sessionId?: string | null; runId?: string | null } | null>(null);
+  const researchAbortRef = useRef<AbortController | null>(null);
 
   // WebGPU companion – only activated when no server-side runtime is configured
   const webgpu = useWebGPUCompanion();
   const [quickAsk, setQuickAsk] = useState("");
-
-  const load = useCallback(async (autoBootstrap = true) => {
-    const requestId = ++requestIdRef.current;
-    setLoading(true);
-    setError(null);
+  const [thoughts, setThoughts] = useState<CompanionActivityEvent[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = sessionStorage.getItem("metis:thought-log");
+      return raw ? (JSON.parse(raw) as CompanionActivityEvent[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [autonomousEnabled, setAutonomousEnabled] = useState<boolean | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [researchPhase, setResearchPhase] = useState("");
+  const [unseenCount, setUnseenCount] = useState(0);
     try {
       let next = await fetchAssistant();
       if (requestId !== requestIdRef.current) {
@@ -92,6 +109,52 @@ export function MetisCompanionDock({
     previousContextRef.current = { sessionId, runId };
     void load(!hasPreviousContext);
   }, [load, sessionId, runId]);
+
+  // Persist thought log to sessionStorage on every update
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      sessionStorage.setItem("metis:thought-log", JSON.stringify(thoughts));
+    } catch {
+      // storage may be unavailable in private browsing
+    }
+  }, [thoughts]);
+
+  // Reset unseen badge when dock expands
+  useEffect(() => {
+    if (!minimized) setUnseenCount(0);
+  }, [minimized]);
+
+  useEffect(() => {
+    return subscribeCompanionActivity((event) => {
+      setThoughts((prev) => [event, ...prev].slice(0, 8));
+      if (minimized) setUnseenCount((n) => n + 1);
+      if (event.source === "autonomous_research" && event.state === "completed") {
+        setToastMessage("New star added to constellation");
+      }
+    });
+  }, [minimized]);
+
+  // Dismiss toast after 3 seconds
+  useEffect(() => {
+    if (!toastMessage) return;
+    const id = window.setTimeout(() => setToastMessage(null), 3000);
+    return () => window.clearTimeout(id);
+  }, [toastMessage]);
+
+  // Load autonomous status once on mount
+  useEffect(() => {
+    fetchAutonomousStatus()
+      .then((s) => setAutonomousEnabled(s.enabled))
+      .catch(() => {});
+  }, []);
+
+  // Abort any in-flight research stream on unmount
+  useEffect(() => {
+    return () => {
+      researchAbortRef.current?.abort();
+    };
+  }, []);
 
   const latestMemory = useMemo(
     () => snapshot?.memory?.[0] ?? null,
@@ -191,6 +254,52 @@ export function MetisCompanionDock({
     }
   }
 
+  async function handleResearchNow() {
+    // Cancel any previous in-flight request
+    researchAbortRef.current?.abort();
+    const abortController = new AbortController();
+    researchAbortRef.current = abortController;
+    setBusyAction("research");
+    setResearchPhase("starting…");
+    setError(null);
+    try {
+      await triggerAutonomousResearchStream({
+        signal: abortController.signal,
+        onEvent: (ev) => {
+          const label: Record<string, string> = {
+            scanning: "scanning…",
+            formulating: "formulating…",
+            searching: "searching…",
+            synthesizing: "synthesising…",
+            indexing: "indexing…",
+            complete: "done",
+            skipped: "up to date",
+          };
+          if (ev.type in label) setResearchPhase(label[ev.type]);
+        },
+      });
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        setError(err instanceof Error ? err.message : "Autonomous research failed");
+      }
+    } finally {
+      setBusyAction("");
+      setResearchPhase("");
+    }
+  }
+
+  async function handleToggleAutonomous() {
+    if (autonomousEnabled === null) return;
+    const next = !autonomousEnabled;
+    setAutonomousEnabled(next);
+    try {
+      await updateSettings({ assistant_policy: { autonomous_research_enabled: next } });
+    } catch {
+      // Revert optimistic update on failure
+      setAutonomousEnabled(!next);
+    }
+  }
+
   async function handleMinimizeToggle() {
     if (!snapshot) return;
     try {
@@ -239,8 +348,13 @@ export function MetisCompanionDock({
             </div>
           )}
           {minimized && (
-            <span className="text-sm font-medium text-foreground">
+            <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
               {snapshot?.identity.name ?? "METIS"}
+              {unseenCount > 0 && (
+                <span className="flex size-4 items-center justify-center rounded-full bg-violet-500 text-[9px] font-bold text-white">
+                  {unseenCount > 9 ? "9+" : unseenCount}
+                </span>
+              )}
             </span>
           )}
           <button
@@ -291,6 +405,42 @@ export function MetisCompanionDock({
                     ) : null}
                   </div>
                 ) : null}
+
+                {/* ── Thought log ───────────────────────────────────────────
+                    Shows the 8 most recent CompanionActivityEvents emitted by
+                    RAG queries, index builds, autonomous research, and
+                    reflections. Subscribers are added via subscribeCompanionActivity(). ── */}
+                {thoughts.length > 0 && (
+                  <div className="rounded-[1.15rem] border border-white/8 bg-white/4 px-3 py-2.5 backdrop-blur-sm">
+                    <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                      Recent activity
+                    </p>
+                    <ul className="max-h-40 space-y-1.5 overflow-y-auto">
+                      {thoughts.map((t, i) => {
+                        const sourceColors: Record<string, string> = {
+                          rag_stream: "text-blue-400",
+                          index_build: "text-green-400",
+                          autonomous_research: "text-violet-400",
+                          reflection: "text-amber-400",
+                        };
+                        const stateIcon =
+                          t.state === "running"
+                            ? "▸"
+                            : t.state === "completed"
+                              ? "✓"
+                              : "⚠";
+                        return (
+                          <li key={i} className="flex items-start gap-2 text-xs leading-5">
+                            <span className={cn("mt-0.5 shrink-0 text-[10px]", sourceColors[t.source] ?? "text-muted-foreground")}>
+                              {stateIcon}
+                            </span>
+                            <span className="min-w-0 text-foreground/80">{t.summary}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-2">
                   <Button
@@ -351,7 +501,78 @@ export function MetisCompanionDock({
                     <BrainIcon size={16} className="shrink-0" />
                     Refresh
                   </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="col-span-2 justify-start gap-2"
+                    onClick={() => void handleResearchNow()}
+                    disabled={busyAction !== ""}
+                  >
+                    {busyAction === "research" ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Search className="size-4" />
+                    )}
+                    Research Now
+                    {busyAction === "research" && researchPhase && (
+                      <span className="ml-auto text-[10px] font-normal text-muted-foreground">
+                        {researchPhase}
+                      </span>
+                    )}
+                  </Button>
                 </div>
+
+                {/* Autonomous research enabled toggle */}
+                {autonomousEnabled !== null && (
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleAutonomous()}
+                    className="flex w-full items-center justify-between gap-2 rounded-[1rem] border border-white/8 bg-white/4 px-3 py-2 text-left backdrop-blur-sm transition-colors hover:bg-white/8"
+                  >
+                    <div className="flex min-w-0 flex-col">
+                      <div className="flex items-center gap-2">
+                        <Zap className={cn("size-3.5 shrink-0", autonomousEnabled ? "text-violet-400" : "text-muted-foreground")} />
+                        <span className="text-xs font-medium text-foreground">
+                          Auto-research
+                        </span>
+                      </div>
+                      {(() => {
+                        const last = thoughts.find(
+                          (t) => t.source === "autonomous_research" && t.state === "completed",
+                        );
+                        if (!last) return null;
+                        const mins = Math.round((Date.now() - last.timestamp) / 60_000);
+                        const label = mins < 1 ? "just now" : mins === 1 ? "1 min ago" : `${mins} mins ago`;
+                        return (
+                          <span className="ml-5.5 text-[10px] text-muted-foreground">
+                            Last run: {label}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                    <span className={cn(
+                      "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em]",
+                      autonomousEnabled
+                        ? "bg-violet-400/15 text-violet-400"
+                        : "bg-white/8 text-muted-foreground",
+                    )}>
+                      {autonomousEnabled ? "On" : "Off"}
+                    </span>
+                  </button>
+                )}
+
+{/* Toast notification for new star – taps through to /brain */}
+                {toastMessage && (
+                  <Link
+                    href="/brain"
+                    className="flex items-center gap-2 rounded-[1rem] border border-violet-400/20 bg-violet-400/10 px-3 py-2 transition-colors hover:bg-violet-400/15"
+                  >
+                    <Zap className="size-3.5 shrink-0 text-violet-400" />
+                    <p className="text-xs text-violet-300">{toastMessage}</p>
+                    <span className="ml-auto text-[10px] text-violet-400/60">View →</span>
+                  </Link>
+                )}
 
                 {/* ── WebGPU browser-local companion ─────────────────────────
                     Shown only when no server runtime is configured.

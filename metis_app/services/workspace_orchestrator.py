@@ -22,7 +22,7 @@ import json
 import os
 import pathlib
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import Any, Callable
 
 import metis_app.settings_store as _settings_store
 from metis_app.engine import (
@@ -663,11 +663,17 @@ class WorkspaceOrchestrator:
             _orchestrator=self,
         )
 
-    def run_autonomous_research(self, settings: dict[str, Any]) -> dict[str, Any] | None:
+    def run_autonomous_research(
+        self,
+        settings: dict[str, Any],
+        progress_cb: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any] | None:
         """Run one autonomous research cycle: find sparse faculty → web search → synthesize → index.
 
         Returns result dict with {faculty_id, index_id, title, sources} or None if skipped.
         Called from the companion reflection loop when autonomous_research_enabled is True.
+
+        progress_cb is optional; receives phase dicts: {"phase", "faculty_id", "detail"}.
         """
         from metis_app.models.assistant_types import AssistantPolicy
         from metis_app.services.autonomous_research_service import AutonomousResearchService
@@ -695,7 +701,7 @@ class WorkspaceOrchestrator:
 
         if concurrency <= 1:
             # Original single-gap behaviour — backwards compatible
-            return svc.run(settings=resolved, indexes=index_list, orchestrator=self)
+            return svc.run(settings=resolved, indexes=index_list, orchestrator=self, progress_cb=progress_cb)
 
         # Collect all sparse faculty gaps
         import asyncio
@@ -719,6 +725,7 @@ class WorkspaceOrchestrator:
                 orchestrator=self,
                 concurrency=concurrency,
                 request_delay_ms=delay_ms,
+                progress_cb=progress_cb,
             )
         )
         return results[0] if results else None

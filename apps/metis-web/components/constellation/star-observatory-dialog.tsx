@@ -353,10 +353,26 @@ void main(){
   // Blended power law: combines slow core falloff with sharp edge
   float limb = pow(mu, 0.55) * 0.7 + pow(mu, 2.5) * 0.3;
 
+  // ── TRUE 3D SPHERE UV WITH Y-AXIS ROTATION ──────────────────────────
+  // Reconstruct normalised 3D position on the front hemisphere.
+  // nz > 0 for the entire visible disc (back hemisphere is culled by bodyMask).
+  float nx = uv.x / sphereR;
+  float ny = uv.y / sphereR;
+  float nz = sqrt(max(0.0, 1.0 - nx*nx - ny*ny));
+
+  // Rotate around Y axis over time — slow, clearly visible spin.
+  float rotAngle = u_time * 0.08 + u_seed * 6.28318;
+  float cosR = cos(rotAngle);
+  float sinR = sin(rotAngle);
+  float rx = cosR * nx + sinR * nz;
+  float rz = -sinR * nx + cosR * nz;
+
+  // Seamless surface UV from the 3D rotated position.
+  // XZ-plane projection — no atan() seam, rotation is fully smooth.
+  // Pole pinch is invisible because limb darkening blacks out the poles.
+  vec2 sphereUV = vec2(rx, rz) * 2.0 + starOff;
+
   // === GRANULATION — highly detailed convective cells ===
-  vec2 surfaceUV = uv + starOff;
-  // Sphere-project UV for more realistic pole/equator distortion
-  vec2 sphereUV = surfaceUV / max(mu, 0.08);
   float gran = granulation(sphereUV, t);
 
   // Modulate: bright granule centres vs dark intergranular lanes
@@ -386,11 +402,11 @@ void main(){
   float granBlend = smoothstep(0.3, 0.7, gran);
   vec3 granColored = mix(granCool, granHot, granBlend);
 
-  vec3 photosphere = granColored * limb * plasmaMod;
+  vec3 photosphere = granColored * granMod * limb * plasmaMod;
 
   // === SUNSPOTS (growing + integrated) — more dramatic ===
   if(u_stage >= 1.0){
-    float spotBase = warpedFbm(uv * 5.0 + starOff * 2.0 + t * 0.01, t * 0.5, 6);
+    float spotBase = warpedFbm(sphereUV * 1.5 + t * 0.01, t * 0.5, 6);
     float spotMask = smoothstep(0.58, 0.66, spotBase) * smoothstep(0.85, 0.15, rNorm);
     // Dark umbra
     photosphere *= 1.0 - spotMask * 0.65;
@@ -403,13 +419,13 @@ void main(){
 
   // === FACULAE — bright patches near limb (integrated) ===
   if(u_stage >= 2.0){
-    float fac = warpedFbm(uv * 8.0 + starOff * 3.0 + t * 0.008, t * 0.3, 5);
+    float fac = warpedFbm(sphereUV * 2.0 + t * 0.008, t * 0.3, 5);
     float facMask = smoothstep(0.52, 0.62, fac)
                   * smoothstep(0.25, 0.85, rNorm)
                   * smoothstep(1.0, 0.8, rNorm);
     photosphere += hot * facMask * 0.22;
     // Plage (bright active regions)
-    float plage = fbm(uv * 14.0 + starOff + t * 0.015, 6);
+    float plage = fbm(sphereUV * 3.5 + t * 0.015, 6);
     float plageMask = smoothstep(0.56, 0.64, plage) * smoothstep(0.9, 0.4, rNorm);
     photosphere += mix(hot, warm, 0.3) * plageMask * 0.12;
   }
@@ -1219,7 +1235,7 @@ export function StarDetailsPanel({
       <DialogContent
         className="left-1/2 top-auto bottom-3 flex h-[calc(100vh-1.5rem)] max-h-[calc(100vh-1.5rem)] w-[calc(100%-1.5rem)] max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-0 flex-col gap-0 overflow-hidden rounded-[1.75rem] border-white/12 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(8,11,20,0.96))] p-0 sm:left-auto sm:right-4 sm:top-4 sm:bottom-4 sm:h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-2rem)] sm:w-[min(460px,calc(100vw-2rem))] sm:max-w-[460px] sm:translate-x-0 sm:translate-y-0"
         data-testid="star-details-panel"
-        showCloseButton={!building && !uploading && !removing}
+        showCloseButton={true}
         showOverlay={false}
       >
         <div className="border-b border-white/10 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(10,13,23,0.92))] px-5 py-5 sm:px-6">

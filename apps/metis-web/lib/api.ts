@@ -740,12 +740,32 @@ export interface TraceEvent {
 }
 
 export interface CompanionActivityEvent {
-  source: "rag_stream" | "index_build";
+  source: "rag_stream" | "index_build" | "autonomous_research" | "reflection";
   state: "running" | "completed" | "error";
   trigger: string;
   summary: string;
   timestamp: number;
   payload?: Record<string, unknown>;
+}
+
+export interface AutoResearchStreamEvent {
+  type:
+    | "research_started"
+    | "research_phase"
+    | "research_complete"
+    | "research_error"
+    | "scanning"
+    | "formulating"
+    | "searching"
+    | "synthesizing"
+    | "indexing"
+    | "complete"
+    | "skipped";
+  phase?: string;
+  faculty_id?: string;
+  detail?: string;
+  result?: unknown;
+  message?: string;
 }
 
 type CompanionActivityListener = (event: CompanionActivityEvent) => void;
@@ -2203,6 +2223,13 @@ export async function reflectAssistant(payload: {
   run_id?: string;
   force?: boolean;
 }): Promise<Record<string, unknown>> {
+  emitCompanionActivity({
+    source: "reflection",
+    state: "running",
+    trigger: payload.trigger ?? "manual",
+    summary: "METIS is reflecting…",
+    timestamp: Date.now(),
+  });
   const res = await apiFetch(`${await getApiBase()}/v1/assistant/reflect`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2216,9 +2243,109 @@ export async function reflectAssistant(payload: {
   });
   if (!res.ok) {
     const detail = await res.text();
+    emitCompanionActivity({
+      source: "reflection",
+      state: "error",
+      trigger: payload.trigger ?? "manual",
+      summary: "Reflection failed",
+      timestamp: Date.now(),
+    });
     throw new Error(`Failed to reflect assistant (${res.status}): ${detail}`);
   }
-  return res.json();
+  const result = await res.json();
+  emitCompanionActivity({
+    source: "reflection",
+    state: "completed",
+    trigger: payload.trigger ?? "manual",
+    summary: "Reflection complete",
+    timestamp: Date.now(),
+  });
+  return result;
+}
+
+export async function triggerAutonomousResearchStream({
+  signal,
+  onEvent,
+}: {
+  signal?: AbortSignal;
+  onEvent?: (event: AutoResearchStreamEvent) => void;
+}): Promise<void> {
+  const base = await getApiBase();
+  const res = await apiFetch(`${base}/v1/autonomous/research/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`Autonomous research stream failed (${res.status})`);
+  }
+  emitCompanionActivity({
+    source: "autonomous_research",
+    state: "running",
+    trigger: "manual",
+    summary: "Autonomous research started…",
+    timestamp: Date.now(),
+  });
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        try {
+          const event: AutoResearchStreamEvent = JSON.parse(line.slice(5).trim());
+          onEvent?.(event);
+          // Map backend phase events to companion activity events
+          const phaseLabels: Record<string, string> = {
+            scanning: "Scanning constellation for gaps…",
+            formulating: event.detail ?? "Formulating research query…",
+            searching: event.detail ?? "Searching the web…",
+            synthesizing: event.detail ?? "Synthesising sources…",
+            indexing: event.detail ?? "Building new star index…",
+            complete: event.detail ?? "New star added to constellation",
+            skipped: "Constellation fully covered — nothing to research",
+          };
+          if (event.type in phaseLabels) {
+            emitCompanionActivity({
+              source: "autonomous_research",
+              state: "running",
+              trigger: "manual",
+              summary: phaseLabels[event.type],
+              timestamp: Date.now(),
+              payload: { phase: event.type, faculty_id: event.faculty_id },
+            });
+          } else if (event.type === "research_complete") {
+            emitCompanionActivity({
+              source: "autonomous_research",
+              state: "completed",
+              trigger: "manual",
+              summary: "Autonomous research complete",
+              timestamp: Date.now(),
+              payload: { result: event.result },
+            });
+          } else if (event.type === "research_error") {
+            emitCompanionActivity({
+              source: "autonomous_research",
+              state: "error",
+              trigger: "manual",
+              summary: event.message ?? "Research failed",
+              timestamp: Date.now(),
+            });
+          }
+        } catch {
+          // Ignore malformed SSE frames
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export async function bootstrapAssistant(

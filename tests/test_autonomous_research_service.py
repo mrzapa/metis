@@ -173,3 +173,73 @@ def test_run_batch_returns_list_of_results():
         )
     )
     assert len(results) == 2
+
+
+def test_run_emits_scanning_phase_via_progress_cb():
+    """run() calls progress_cb with phase='scanning' before any other phase."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+    # No faculty gaps → only the scanning event fires, then skipped.
+    indexes = [
+        {"index_id": f"auto_{fac}_{i}", "document_count": 1}
+        for fac in ["perception", "knowledge", "memory", "reasoning", "skills",
+                    "strategy", "personality", "values", "synthesis", "autonomy", "emergence"]
+        for i in range(3)
+    ]
+    events: list[dict] = []
+    svc.run(settings={}, indexes=indexes, orchestrator=MagicMock(), progress_cb=events.append)
+    phases = [e["phase"] for e in events]
+    assert "scanning" in phases
+    assert phases[0] == "scanning"
+
+
+def test_run_emits_skipped_phase_when_no_gaps():
+    """run() emits phase='skipped' when scan_faculty_gaps returns None."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+    indexes = [
+        {"index_id": f"auto_{fac}_{i}", "document_count": 1}
+        for fac in ["perception", "knowledge", "memory", "reasoning", "skills",
+                    "strategy", "personality", "values", "synthesis", "autonomy", "emergence"]
+        for i in range(3)
+    ]
+    events: list[dict] = []
+    svc.run(settings={}, indexes=indexes, orchestrator=MagicMock(), progress_cb=events.append)
+    phases = [e["phase"] for e in events]
+    assert "skipped" in phases
+
+
+def test_run_progress_cb_receives_all_required_keys():
+    """Every progress_cb event must contain phase, faculty_id, and detail."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+    events: list[dict] = []
+    svc.run(settings={}, indexes=[], orchestrator=MagicMock(), progress_cb=events.append)
+    for event in events:
+        assert "phase" in event, f"Missing 'phase' in {event}"
+        assert "detail" in event, f"Missing 'detail' in {event}"
+        assert "faculty_id" in event, f"Missing 'faculty_id' in {event}"
+
+
+def test_run_batch_threads_progress_cb_to_run():
+    """run_batch passes progress_cb to each run() invocation."""
+    collected: list[dict] = []
+
+    svc = AutonomousResearchService(web_search=MagicMock())
+
+    def fake_run(**kwargs):  # noqa: ANN202
+        cb = kwargs.get("progress_cb")
+        if cb:
+            cb({"phase": "scanning", "faculty_id": None, "detail": "test"})
+        return None
+
+    svc.run = fake_run  # type: ignore[method-assign]
+
+    asyncio.get_event_loop().run_until_complete(
+        svc.run_batch(
+            faculty_ids=["perception"],
+            settings={},
+            orchestrator=MagicMock(),
+            concurrency=1,
+            request_delay_ms=0,
+            progress_cb=collected.append,
+        )
+    )
+    assert any(e["phase"] == "scanning" for e in collected)
