@@ -14,6 +14,7 @@ _HERE = pathlib.Path(__file__).resolve().parent
 _PACKAGE_ROOT = _HERE.parent
 _REPO_ROOT = _PACKAGE_ROOT.parent
 _DEFAULT_SKILLS_DIR = _REPO_ROOT / "skills"
+_DEFAULT_CANDIDATES_DB_PATH = _REPO_ROOT / "skill_candidates.db"
 
 FRONTMATTER_REQUIRED_KEYS = {
     "id",

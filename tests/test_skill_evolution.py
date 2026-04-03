@@ -9,6 +9,12 @@ import pytest
 from metis_app.services.skill_repository import SkillRepository
 
 
+def test_default_candidates_db_path_is_repo_root():
+    from metis_app.services.skill_repository import _DEFAULT_CANDIDATES_DB_PATH
+    assert _DEFAULT_CANDIDATES_DB_PATH.name == "skill_candidates.db"
+    assert (_DEFAULT_CANDIDATES_DB_PATH.parent / "metis_app").is_dir()
+
+
 @pytest.fixture
 def repo(tmp_path):
     return SkillRepository(skills_dir=tmp_path / "skills")
