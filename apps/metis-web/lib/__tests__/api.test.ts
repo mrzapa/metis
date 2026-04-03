@@ -10,11 +10,15 @@ const {
   previewLearningRoute,
   fetchSessions,
   fetchSettings,
+  fetchForecastPreflight,
+  fetchForecastSchema,
   fetchUiTelemetrySummary,
   fetchApiVersion,
   fetchGgufCatalog,
   fetchHereticPreflight,
+  queryForecast,
   queryKnowledgeSearch,
+  normalizeForecastStreamEvent,
   normalizeRagStreamEvent,
   runHereticAbliterateStream,
   submitRunAction,
@@ -75,6 +79,126 @@ describe("fetchSettings", () => {
 
     const result = await fetchSettings();
     expect(result).toEqual(mockSettings);
+  });
+});
+
+describe("forecast api helpers", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("fetches forecast preflight", async () => {
+    const mockPreflight = {
+      ready: true,
+      timesfm_available: true,
+      covariates_available: true,
+      model_id: "google/timesfm-2.5-200m-pytorch",
+      max_context: 1024,
+      max_horizon: 256,
+      xreg_mode: "xreg + timesfm",
+      force_xreg_cpu: true,
+      warnings: [],
+      install_guidance: [],
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockPreflight),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchForecastPreflight();
+
+    expect(result).toEqual(mockPreflight);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/v1/forecast/preflight");
+  });
+
+  it("posts forecast schema requests", async () => {
+    const mockSchema = {
+      file_path: "/tmp/revenue.csv",
+      file_name: "revenue.csv",
+      delimiter: ",",
+      row_count: 12,
+      column_count: 3,
+      columns: [],
+      timestamp_candidates: ["ds"],
+      numeric_target_candidates: ["y"],
+      suggested_mapping: {
+        timestamp_column: "ds",
+        target_column: "y",
+        dynamic_covariates: ["promo"],
+        static_covariates: [],
+      },
+      validation: {
+        valid: true,
+        errors: [],
+        warnings: [],
+        history_row_count: 10,
+        future_row_count: 2,
+        inferred_horizon: 2,
+        resolved_horizon: 2,
+        inferred_frequency: "daily",
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSchema),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchForecastSchema("/tmp/revenue.csv", {
+      mapping: {
+        timestamp_column: "ds",
+        target_column: "y",
+        dynamic_covariates: ["promo"],
+        static_covariates: [],
+      },
+      horizon: 2,
+    });
+
+    expect(result).toEqual(mockSchema);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/v1/forecast/schema");
+    expect(String(fetchMock.mock.calls[0]?.[1]?.body)).toContain("\"file_path\":\"/tmp/revenue.csv\"");
+    expect(String(fetchMock.mock.calls[0]?.[1]?.body)).toContain("\"horizon\":2");
+  });
+
+  it("posts forecast queries", async () => {
+    const mockResult = {
+      run_id: "forecast-run-1",
+      answer_text: "The next value is likely to rise.",
+      selected_mode: "Forecast",
+      model_backend: "timesfm-2.5-torch",
+      model_id: "google/timesfm-2.5-200m-pytorch",
+      horizon: 3,
+      context_used: 24,
+      warnings: [],
+      artifacts: [],
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResult),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await queryForecast(
+      "/tmp/revenue.csv",
+      "Forecast the next three periods.",
+      {
+        timestamp_column: "ds",
+        target_column: "y",
+        dynamic_covariates: ["promo"],
+        static_covariates: [],
+      },
+      { selected_mode: "Forecast" },
+      { horizon: 3, sessionId: "session-1" },
+    );
+
+    expect(result).toEqual(mockResult);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/v1/query/forecast");
+    expect(String(fetchMock.mock.calls[0]?.[1]?.body)).toContain("\"session_id\":\"session-1\"");
   });
 });
 
@@ -460,6 +584,54 @@ describe("fetchGgufCatalog", () => {
     const result = await fetchGgufCatalog("chat");
 
     expect(result).toEqual(mockCatalog);
+  });
+});
+
+describe("normalizeForecastStreamEvent", () => {
+  it("normalizes final forecast stream payloads", () => {
+    const normalized = normalizeForecastStreamEvent({
+      event_type: "final",
+      payload: {
+        run_id: "forecast-run-1",
+        answer_text: "The series trends upward.",
+        selected_mode: "Forecast",
+        model_backend: "timesfm-2.5-torch",
+        model_id: "google/timesfm-2.5-200m-pytorch",
+        horizon: 6,
+        context_used: 32,
+        warnings: ["One covariate was clipped."],
+        artifacts: [],
+      },
+    });
+
+    expect(normalized).toMatchObject({
+      type: "final",
+      run_id: "forecast-run-1",
+      answer_text: "The series trends upward.",
+      selected_mode: "Forecast",
+      model_backend: "timesfm-2.5-torch",
+      model_id: "google/timesfm-2.5-200m-pytorch",
+      horizon: 6,
+      context_used: 32,
+      warnings: ["One covariate was clipped."],
+      artifacts: [],
+      event_id: undefined,
+      event_type: "final",
+      status: undefined,
+      lifecycle: undefined,
+      timestamp: undefined,
+      payload: {
+        run_id: "forecast-run-1",
+        answer_text: "The series trends upward.",
+        selected_mode: "Forecast",
+        model_backend: "timesfm-2.5-torch",
+        model_id: "google/timesfm-2.5-200m-pytorch",
+        horizon: 6,
+        context_used: 32,
+        warnings: ["One covariate was clipped."],
+        artifacts: [],
+      },
+    });
   });
 });
 

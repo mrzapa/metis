@@ -46,6 +46,7 @@ from . import gguf as _gguf
 from . import features as _features
 from . import heretic as _heretic
 from . import logs as _logs
+from . import observe as _observe
 from . import sessions as _sessions
 from . import settings as _settings
 from . import assistant as _assistant
@@ -53,6 +54,11 @@ from . import autonomous as _autonomous
 from .models import (
     DirectQueryRequestModel,
     DirectQueryResultModel,
+    ForecastPreflightResultModel,
+    ForecastQueryRequestModel,
+    ForecastQueryResultModel,
+    ForecastSchemaRequestModel,
+    ForecastSchemaResultModel,
     IndexBuildRequestModel,
     IndexDeleteResultModel,
     IndexBuildResultModel,
@@ -257,6 +263,7 @@ def create_app() -> FastAPI:
     app.include_router(_assistant.router, dependencies=_auth)
     app.include_router(_autonomous.router, dependencies=_auth)
     app.include_router(_features.router, dependencies=_auth)
+    app.include_router(_observe.router, dependencies=_auth)
 
     @app.get("/v1/version")
     def api_version() -> dict[str, str]:
@@ -500,6 +507,68 @@ def create_app() -> FastAPI:
             dest.write_bytes(content)
             saved.append(str(dest))
         return {"paths": saved}
+
+    @app.get("/v1/forecast/preflight", response_model=ForecastPreflightResultModel, dependencies=_auth)
+    def api_forecast_preflight() -> ForecastPreflightResultModel:
+        orchestrator = WorkspaceOrchestrator()
+        return ForecastPreflightResultModel.model_validate(orchestrator.get_forecast_preflight())
+
+    @app.post("/v1/forecast/schema", response_model=ForecastSchemaResultModel, dependencies=_auth)
+    def api_forecast_schema(payload: ForecastSchemaRequestModel) -> ForecastSchemaResultModel:
+        orchestrator = WorkspaceOrchestrator()
+        return ForecastSchemaResultModel.model_validate(
+            orchestrator.inspect_forecast_schema(payload.to_engine())
+        )
+
+    @app.post("/v1/query/forecast", response_model=ForecastQueryResultModel, dependencies=_auth)
+    def api_query_forecast(payload: ForecastQueryRequestModel) -> ForecastQueryResultModel:
+        orchestrator = WorkspaceOrchestrator()
+        return ForecastQueryResultModel.from_engine(
+            _run_engine(
+                orchestrator.run_forecast_query,
+                payload.to_engine(),
+                session_id=payload.session_id,
+            )
+        )
+
+    @app.post("/v1/query/forecast/stream", dependencies=_auth)
+    async def api_stream_forecast(
+        payload: ForecastQueryRequestModel,
+    ) -> StreamingResponse:
+        orchestrator = WorkspaceOrchestrator()
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        def _worker() -> None:
+            try:
+                for event in orchestrator.stream_forecast_query(
+                    payload.to_engine(),
+                    session_id=payload.session_id,
+                ):
+                    loop.call_soon_threadsafe(queue.put_nowait, event)
+            except Exception as exc:  # noqa: BLE001
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    {"type": "error", "run_id": str(payload.run_id or ""), "message": str(exc)},
+                )
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        future = loop.run_in_executor(None, _worker)
+
+        async def _event_gen() -> AsyncGenerator[str, None]:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield f"event: message\ndata: {json.dumps(event)}\n\n"
+            await future
+
+        return StreamingResponse(
+            _event_gen(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.post("/v1/index/build/stream", dependencies=_auth)
     async def api_build_index_stream(

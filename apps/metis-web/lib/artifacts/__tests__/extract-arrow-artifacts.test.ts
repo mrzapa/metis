@@ -88,6 +88,45 @@ describe("extractArrowArtifacts", () => {
     expect(result.artifacts[0]?.runtime_skip_reason).toBeUndefined();
   });
 
+  it("recognizes forecast reports as structured renderers", () => {
+    const result = extractArrowArtifacts([
+      {
+        id: "forecast_report",
+        type: "forecast_report",
+        summary: "Revenue forecast",
+        payload: {
+          mapping: {
+            file_path: "/tmp/revenue.csv",
+            file_name: "revenue.csv",
+            timestamp_column: "ds",
+            target_column: "y",
+            dynamic_covariates: ["promo"],
+            static_covariates: [],
+          },
+          metadata: {
+            horizon: 3,
+            context_used: 12,
+            model_backend: "timesfm-2.5-torch",
+            model_id: "google/timesfm-2.5-200m-pytorch",
+            xreg_mode: "xreg + timesfm",
+          },
+          history_points: [{ timestamp: "2026-01-01T00:00:00", value: 10 }],
+          forecast_points: [{ timestamp: "2026-01-02T00:00:00", value: 11 }],
+          quantiles: {
+            p10: [{ timestamp: "2026-01-02T00:00:00", value: 9 }],
+            p90: [{ timestamp: "2026-01-02T00:00:00", value: 13 }],
+          },
+          warnings: [],
+        },
+      },
+    ]);
+
+    expect(result.isValid).toBe(true);
+    expect(result.artifacts[0]?.render_kind).toBe("structured");
+    expect(result.artifacts[0]?.runtime_eligible).toBe(false);
+    expect(result.artifacts[0]?.runtime_skip_reason).toBeUndefined();
+  });
+
   it("marks unsupported types as runtime skipped", () => {
     const result = extractArrowArtifacts([
       {

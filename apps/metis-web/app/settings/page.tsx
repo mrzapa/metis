@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -30,12 +30,18 @@ const schema = z.object({
   // ── Core ──────────────────────────────────────────────────────────────────
   llm_provider: z.string().min(1),
   llm_model: z.string().min(1),
-  chat_path: z.enum(["RAG", "Direct"]),
+  chat_path: z.enum(["RAG", "Direct", "Forecast"]),
   selected_mode: z.string().min(1),
   output_style: z.string().min(1),
   chat_history_max_turns: z.number().int().min(1, "Min 1").max(50, "Max 50"),
   show_retrieved_context: z.boolean(),
   verbose_mode: z.boolean(),
+  forecast_model_id: z.string().min(1),
+  forecast_max_context: z.number().int().min(1, "Min 1").max(8192, "Max 8192"),
+  forecast_max_horizon: z.number().int().min(1, "Min 1").max(2048, "Max 2048"),
+  forecast_use_quantiles: z.boolean(),
+  forecast_xreg_mode: z.string().min(1),
+  forecast_force_xreg_cpu: z.boolean(),
   // ── Advanced Retrieval ────────────────────────────────────────────────────
   chunk_size: z.number().int().min(100, "Min 100").max(10000, "Max 10000"),
   chunk_overlap: z.number().int().min(0, "Min 0").max(500, "Max 500"),
@@ -94,6 +100,8 @@ const RETRIEVAL_MODES = ["flat", "mmr", "hybrid", "hierarchical"];
 const SEARCH_TYPES = ["similarity", "mmr"];
 const OUTPUT_STYLES = ["Default answer", "Concise", "Detailed", "Bullet points"];
 const SKILL_MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack", "Knowledge Search"];
+const FORECAST_SELECTED_MODE = "Forecast";
+const FORECAST_XREG_MODES = ["xreg + timesfm", "timesfm"];
 const FALLBACK_STRATEGIES = ["synthesize_anyway", "no_answer"];
 const KG_QUERY_MODES = ["hybrid", "vector", "keyword"];
 const COMPREHENSION_DEPTHS = ["Standard", "Deep", "Exhaustive"];
@@ -176,6 +184,12 @@ const FORM_DEFAULT_VALUES: FormValues = {
   chat_history_max_turns: 6,
   show_retrieved_context: false,
   verbose_mode: false,
+  forecast_model_id: "google/timesfm-2.5-200m-pytorch",
+  forecast_max_context: 1024,
+  forecast_max_horizon: 256,
+  forecast_use_quantiles: true,
+  forecast_xreg_mode: "xreg + timesfm",
+  forecast_force_xreg_cpu: true,
   chunk_size: 1000,
   chunk_overlap: 100,
   parent_chunk_size: 2800,
@@ -234,6 +248,12 @@ const SEARCH_INDEX = [
   { tab: "core", label: "History turns", description: "Number of past conversation turns included in each new request." },
   { tab: "core", label: "Show retrieved context", description: "Display the retrieved document chunks alongside answers in chat." },
   { tab: "core", label: "Verbose mode", description: "Log additional diagnostic information to the server console." },
+  { tab: "core", label: "Forecast model ID", description: "TimesFM checkpoint to use for Forecast chat mode." },
+  { tab: "core", label: "Forecast max context", description: "Maximum historical points passed into each TimesFM forecast run." },
+  { tab: "core", label: "Forecast max horizon", description: "Upper bound for forecast steps in Forecast mode." },
+  { tab: "core", label: "Forecast quantiles", description: "Include uncertainty bands like p10 and p90 in forecast artifacts." },
+  { tab: "core", label: "Forecast XReg mode", description: "Covariate execution mode used when dynamic or static regressors are mapped." },
+  { tab: "core", label: "Forecast force CPU", description: "Force XReg covariate runs onto CPU for stability, especially on Windows." },
   // ── Retrieval ──
   { tab: "retrieval", label: "Chunk size", description: "Token size of each ingested document chunk." },
   { tab: "retrieval", label: "Chunk overlap", description: "Overlap between consecutive chunks to avoid cutting context mid-sentence." },
@@ -385,6 +405,12 @@ export default function SettingsPage() {
       chat_history_max_turns: 6,
       show_retrieved_context: false,
       verbose_mode: false,
+      forecast_model_id: "google/timesfm-2.5-200m-pytorch",
+      forecast_max_context: 1024,
+      forecast_max_horizon: 256,
+      forecast_use_quantiles: true,
+      forecast_xreg_mode: "xreg + timesfm",
+      forecast_force_xreg_cpu: true,
       // Advanced Retrieval
       chunk_size: 1000,
       chunk_overlap: 100,
@@ -435,6 +461,16 @@ export default function SettingsPage() {
     },
   });
 
+  const applyUiVariant = useCallback((nextVariant: UiVariant) => {
+    setUiVariant(nextVariant);
+    document.documentElement.dataset.uiVariant = nextVariant;
+    try {
+      window.localStorage.setItem("metis-ui-variant", nextVariant);
+    } catch {
+      // Ignore storage failures and keep the in-memory selection.
+    }
+  }, [setUiVariant]);
+
   useEffect(() => {
     if (typeof document === "undefined") return;
     const current = document.documentElement.dataset.uiVariant;
@@ -443,17 +479,7 @@ export default function SettingsPage() {
       return;
     }
     applyUiVariant("motion");
-  }, [setUiVariant]);
-
-  function applyUiVariant(nextVariant: UiVariant) {
-    setUiVariant(nextVariant);
-    document.documentElement.dataset.uiVariant = nextVariant;
-    try {
-      window.localStorage.setItem("metis-ui-variant", nextVariant);
-    } catch {
-      // Ignore storage failures and keep the in-memory selection.
-    }
-  }
+  }, [applyUiVariant, setUiVariant]);
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = form;
   const assistantForm = useForm<AssistantFormValues>({
@@ -470,16 +496,28 @@ export default function SettingsPage() {
   useEffect(() => {
     fetchSettings()
       .then((raw) => {
+        const rawChatPath = String(raw.chat_path ?? "");
         reset({
           // Core
           llm_provider: (raw.llm_provider as string) ?? "anthropic",
           llm_model: (raw.llm_model as string) ?? "claude-opus-4-6",
-          chat_path: ((raw.chat_path as string) === "Direct" ? "Direct" : "RAG"),
+          chat_path:
+            rawChatPath === "Direct"
+              ? "Direct"
+              : rawChatPath === "Forecast"
+                ? "Forecast"
+                : "RAG",
           selected_mode: (raw.selected_mode as string) ?? "Q&A",
           output_style: (raw.output_style as string) ?? "Default answer",
           chat_history_max_turns: (raw.chat_history_max_turns as number) ?? 6,
           show_retrieved_context: (raw.show_retrieved_context as boolean) ?? false,
           verbose_mode: (raw.verbose_mode as boolean) ?? false,
+          forecast_model_id: (raw.forecast_model_id as string) ?? "google/timesfm-2.5-200m-pytorch",
+          forecast_max_context: (raw.forecast_max_context as number) ?? 1024,
+          forecast_max_horizon: (raw.forecast_max_horizon as number) ?? 256,
+          forecast_use_quantiles: (raw.forecast_use_quantiles as boolean) ?? true,
+          forecast_xreg_mode: (raw.forecast_xreg_mode as string) ?? "xreg + timesfm",
+          forecast_force_xreg_cpu: (raw.forecast_force_xreg_cpu as boolean) ?? true,
           // Advanced Retrieval
           chunk_size: (raw.chunk_size as number) ?? 1000,
           chunk_overlap: (raw.chunk_overlap as number) ?? 100,
@@ -575,6 +613,18 @@ export default function SettingsPage() {
 
   const mmrLambda = watch("mmr_lambda");
   const llmTemp = watch("llm_temperature");
+  const chatPath = watch("chat_path");
+  const selectedMode = watch("selected_mode");
+
+  useEffect(() => {
+    if (chatPath === "Forecast" && selectedMode !== FORECAST_SELECTED_MODE) {
+      setValue("selected_mode", FORECAST_SELECTED_MODE);
+      return;
+    }
+    if (chatPath !== "Forecast" && selectedMode === FORECAST_SELECTED_MODE) {
+      setValue("selected_mode", "Q&A");
+    }
+  }, [chatPath, selectedMode, setValue]);
 
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -778,9 +828,9 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <FieldLabel htmlFor="chat_path_rag" tooltip="RAG grounds answers in your documents via retrieval. Direct sends prompts straight to the LLM without any context.">Query path</FieldLabel>
+                    <FieldLabel htmlFor="chat_path_rag" tooltip="RAG grounds answers in your documents via retrieval. Direct sends prompts straight to the LLM without any context. Forecast turns the same chat workspace into a structured TimesFM forecasting surface for uploaded CSV or TSV time series.">Query path</FieldLabel>
                     <div className="flex gap-4">
-                      {(["RAG", "Direct"] as const).map((path) => (
+                      {(["RAG", "Direct", "Forecast"] as const).map((path) => (
                         <label key={path} htmlFor={`chat_path_${path}`} className="flex cursor-pointer items-center gap-2 text-sm">
                           <input
                             id={`chat_path_${path}`}
@@ -789,31 +839,115 @@ export default function SettingsPage() {
                             {...register("chat_path")}
                             className="accent-primary"
                           />
-                          {path === "RAG" ? "RAG (document-grounded)" : "Direct (LLM only)"}
+                          {path === "RAG"
+                            ? "RAG (document-grounded)"
+                            : path === "Forecast"
+                              ? "Forecast (time series)"
+                              : "Direct (LLM only)"}
                         </label>
                       ))}
                     </div>
                   </div>
 
                   <div className="space-y-1.5">
-                    <FieldLabel htmlFor="selected_mode" tooltip="Q&A gives direct cited answers. Research adds sub-query expansion and graph traversal. Tutor uses Socratic back-and-forth. Evidence Pack grounds each claim.">Skill mode</FieldLabel>
-                    <div className="flex flex-wrap gap-3">
-                      {SKILL_MODES.map((mode) => (
-                        <label key={mode} htmlFor={`mode_${mode}`} className="flex cursor-pointer items-center gap-2 text-sm">
-                          <input
-                            id={`mode_${mode}`}
-                            type="radio"
-                            value={mode}
-                            {...register("selected_mode")}
-                            className="accent-primary"
-                          />
-                          {mode}
-                        </label>
-                      ))}
+                    <FieldLabel htmlFor="selected_mode" tooltip="Q&A gives direct cited answers. Research adds sub-query expansion and graph traversal. Tutor uses Socratic back-and-forth. Evidence Pack grounds each claim. Forecast mode uses a dedicated structured path instead of these RAG-only skills.">Skill mode</FieldLabel>
+                    {chatPath === "Forecast" ? (
+                      <div className="rounded-xl border border-sky-500/20 bg-sky-500/8 px-4 py-3 text-sm text-sky-200/90">
+                        Forecast mode uses the dedicated <code className="rounded bg-sky-500/15 px-1">selected_mode</code> value <strong>{FORECAST_SELECTED_MODE}</strong> and bypasses the RAG skill selector.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex flex-wrap gap-3">
+                          {SKILL_MODES.map((mode) => (
+                            <label key={mode} htmlFor={`mode_${mode}`} className="flex cursor-pointer items-center gap-2 text-sm">
+                              <input
+                                id={`mode_${mode}`}
+                                type="radio"
+                                value={mode}
+                                {...register("selected_mode")}
+                                className="accent-primary"
+                              />
+                              {mode}
+                            </label>
+                          ))}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Controls how the assistant approaches your questions.
+                        </p>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="space-y-4 rounded-[1.2rem] border border-white/10 bg-white/[0.03] px-4 py-4">
+                    <div>
+                      <h3 className="text-sm font-semibold">Forecast defaults</h3>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        TimesFM settings used when the chat path is set to Forecast.
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Controls how the assistant approaches your questions.
-                    </p>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <FieldLabel htmlFor="forecast_model_id" tooltip="TimesFM checkpoint identifier used for Forecast mode runs.">Forecast model ID</FieldLabel>
+                        <Input id="forecast_model_id" type="text" {...register("forecast_model_id")} />
+                        <FieldError message={errors.forecast_model_id?.message} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <FieldLabel htmlFor="forecast_xreg_mode" tooltip="Covariate execution mode to send into TimesFM when regressors are mapped.">Forecast XReg mode</FieldLabel>
+                        <select
+                          id="forecast_xreg_mode"
+                          {...register("forecast_xreg_mode")}
+                          className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
+                        >
+                          {FORECAST_XREG_MODES.map((mode) => (
+                            <option key={mode} value={mode}>{mode}</option>
+                          ))}
+                        </select>
+                        <FieldError message={errors.forecast_xreg_mode?.message} />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <FieldLabel htmlFor="forecast_max_context" tooltip="Maximum number of historical points to pass into the TimesFM context window.">Forecast max context</FieldLabel>
+                        <Input
+                          id="forecast_max_context"
+                          type="number"
+                          min={1}
+                          max={8192}
+                          {...register("forecast_max_context", { valueAsNumber: true })}
+                        />
+                        <FieldError message={errors.forecast_max_context?.message} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <FieldLabel htmlFor="forecast_max_horizon" tooltip="Upper limit for horizon steps in Forecast mode.">Forecast max horizon</FieldLabel>
+                        <Input
+                          id="forecast_max_horizon"
+                          type="number"
+                          min={1}
+                          max={2048}
+                          {...register("forecast_max_horizon", { valueAsNumber: true })}
+                        />
+                        <FieldError message={errors.forecast_max_horizon?.message} />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <ToggleRow
+                        id="forecast_use_quantiles"
+                        label="Forecast quantiles"
+                        description="Include uncertainty bands like p10 and p90 in forecast artifacts."
+                        checked={watch("forecast_use_quantiles")}
+                        onChange={(value) => setValue("forecast_use_quantiles", value)}
+                      />
+                      <ToggleRow
+                        id="forecast_force_xreg_cpu"
+                        label="Force XReg on CPU"
+                        description="Keep covariate-backed forecast runs on CPU for stability, especially on Windows."
+                        checked={watch("forecast_force_xreg_cpu")}
+                        onChange={(value) => setValue("forecast_force_xreg_cpu", value)}
+                      />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">

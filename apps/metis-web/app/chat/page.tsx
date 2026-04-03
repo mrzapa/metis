@@ -7,8 +7,29 @@ import { ChatPanel } from "@/components/chat/chat-panel";
 import { EvidencePanel } from "@/components/chat/evidence-panel";
 import { Badge } from "@/components/ui/badge";
 import { PageChrome } from "@/components/shell/page-chrome";
-import { createSession, fetchSession, fetchSettings, queryDirect, queryKnowledgeSearch, queryRagStream, submitRunAction, updateSettings } from "@/lib/api";
-import type { ActionPayload, RetrievalFallback, SessionSummary, TraceEvent } from "@/lib/api";
+import {
+  createSession,
+  fetchForecastPreflight,
+  fetchForecastSchema,
+  fetchSession,
+  fetchSettings,
+  queryDirect,
+  queryForecast,
+  queryKnowledgeSearch,
+  queryRagStream,
+  submitRunAction,
+  updateSettings,
+  uploadFiles,
+} from "@/lib/api";
+import type {
+  ActionPayload,
+  ForecastMapping,
+  ForecastPreflightResult,
+  ForecastSchemaResult,
+  RetrievalFallback,
+  SessionSummary,
+  TraceEvent,
+} from "@/lib/api";
 import type { RagStreamEvent } from "@/lib/api";
 import {
   getChatActionStatusFromResult,
@@ -21,7 +42,10 @@ import { useChatTranscript } from "@/app/chat/use-chat-transcript";
 import { useArrowState } from "@/hooks/use-arrow-state";
 import { useAppStatePoller } from "@/hooks/use-app-state-poller";
 import { emitBrainGraphRagActivity } from "@/lib/brain-graph-rag-activity";
-import { useWebGPUCompanionContext } from "@/lib/webgpu-companion/webgpu-companion-context";
+import {
+  useWebGPUCompanionContext,
+  WebGPUCompanionProvider,
+} from "@/lib/webgpu-companion/webgpu-companion-context";
 import {
   clearResumableRagRun,
   loadResumableRagRun,
@@ -102,6 +126,57 @@ interface StartRagStreamOptions {
   runId: string;
   sessionId?: string | null;
   userMessageTs: string;
+}
+
+interface RestoredForecastState {
+  filePath: string;
+  fileName: string;
+  mapping: ForecastMapping;
+  horizon: number | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
+function extractForecastSessionState(messages: Array<{ artifacts?: Array<{ type?: string; payload?: unknown }> }>): RestoredForecastState | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const artifacts = messages[index]?.artifacts ?? [];
+    const forecastArtifact = artifacts.find((artifact) => artifact.type === "forecast_report");
+    if (!forecastArtifact || !isRecord(forecastArtifact.payload)) {
+      continue;
+    }
+    const sessionState = isRecord(forecastArtifact.payload.session_state)
+      ? forecastArtifact.payload.session_state
+      : {};
+    const mappingPayload = isRecord(sessionState.mapping) ? sessionState.mapping : {};
+    const filePath = typeof sessionState.file_path === "string" ? sessionState.file_path : "";
+    const fileName = typeof sessionState.file_name === "string" ? sessionState.file_name : "";
+    const timestampColumn = typeof mappingPayload.timestamp_column === "string" ? mappingPayload.timestamp_column : "";
+    const targetColumn = typeof mappingPayload.target_column === "string" ? mappingPayload.target_column : "";
+    if (!filePath || !timestampColumn || !targetColumn) {
+      continue;
+    }
+    return {
+      filePath,
+      fileName,
+      mapping: {
+        timestamp_column: timestampColumn,
+        target_column: targetColumn,
+        dynamic_covariates: Array.isArray(mappingPayload.dynamic_covariates)
+          ? mappingPayload.dynamic_covariates.map((item) => String(item))
+          : [],
+        static_covariates: Array.isArray(mappingPayload.static_covariates)
+          ? mappingPayload.static_covariates.map((item) => String(item))
+          : [],
+      },
+      horizon:
+        typeof sessionState.horizon === "number" && Number.isFinite(sessionState.horizon)
+          ? sessionState.horizon
+          : null,
+    };
+  }
+  return null;
 }
 
 function buildEventSignature(
@@ -188,7 +263,7 @@ function toStoredResumableRagRun(
   };
 }
 
-export default function ChatPage() {
+function ChatPageContent() {
   const [selectedId, setSelectedId] = useArrowState<string | null>(null);
   const [sessionMeta, setSessionMeta] = useArrowState<SessionSummary | null>(null);
   const [loadingSession, setLoadingSession] = useArrowState(false);
@@ -197,10 +272,14 @@ export default function ChatPage() {
   const [isStreamingRag, setIsStreamingRag] = useArrowState(false);
   const [activeIndexPath, setActiveIndexPath] = useArrowState<string | null>(null);
   const [activeIndexLabel, setActiveIndexLabel] = useArrowState<string | null>(null);
-  const [queryModeOverride, setQueryModeOverride] = useArrowState<"rag" | null>(null);
+  const [queryModeOverride, setQueryModeOverride] = useArrowState<"direct" | "rag" | "forecast" | null>(null);
   const [liveTraceEvents, setLiveTraceEvents] = useArrowState<TraceEvent[]>([]);
   const [resumableRun, setResumableRun] = useArrowState<ResumableRagRunState | null>(null);
   const settingsRef = useRef<Record<string, unknown> | null>(null);
+  const forecastPreflightRef = useRef<ForecastPreflightResult | null>(null);
+  const forecastFilePathRef = useRef<string | null>(null);
+  const forecastMappingRef = useRef<ForecastMapping | null>(null);
+  const forecastHorizonRef = useRef<number | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const ragRequestIdRef = useRef(0);
   const activeRagStreamRef = useRef<ActiveRagStream | null>(null);
@@ -218,12 +297,24 @@ export default function ChatPage() {
   const [latestFallback, setLatestFallback] = useArrowState<RetrievalFallback | null>(null);
   const [artifactsEnabled, setArtifactsEnabled] = useArrowState<boolean | undefined>(undefined);
   const [artifactRuntimeEnabled, setArtifactRuntimeEnabled] = useArrowState<boolean | undefined>(undefined);
+  const [forecastPreflight, setForecastPreflight] = useArrowState<ForecastPreflightResult | null>(null);
+  const [forecastSchema, setForecastSchema] = useArrowState<ForecastSchemaResult | null>(null);
+  const [forecastMapping, setForecastMapping] = useArrowState<ForecastMapping | null>(null);
+  const [forecastHorizon, setForecastHorizon] = useArrowState<number | null>(null);
+  const [forecastLoadingSchema, setForecastLoadingSchema] = useArrowState(false);
+  const [forecastFilePath, setForecastFilePath] = useArrowState<string | null>(null);
+  const [forecastFileName, setForecastFileName] = useArrowState<string | null>(null);
+  const [forecastError, setForecastError] = useArrowState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const seededModeRef = useRef<string | null>(null);
   const webgpu = useWebGPUCompanionContext();
   const webgpuRunIdRef = useRef<string | null>(null);
   const webgpuOutputLenRef = useRef(0);
   const webgpuHistoryRef = useRef<Array<{ role: string; content: string }>>([]);
+  forecastPreflightRef.current = forecastPreflight;
+  forecastFilePathRef.current = forecastFilePath;
+  forecastMappingRef.current = forecastMapping;
+  forecastHorizonRef.current = forecastHorizon;
   const {
     createMessage,
     restoreStreamingRun,
@@ -347,6 +438,10 @@ export default function ChatPage() {
 
         const mode = seededModeRef.current ?? String(settings.selected_mode ?? "Q&A");
         setSelectedRagMode(mode);
+        const chatPath = String(settings.chat_path ?? "");
+        if (chatPath === "Forecast") {
+          setQueryModeOverride("forecast");
+        }
       })
       .catch(() => {
         // Keep the badge empty on fetch error.
@@ -358,6 +453,7 @@ export default function ChatPage() {
     setArtifactsEnabled,
     setModelName,
     setModelProvider,
+    setQueryModeOverride,
     setSelectedRagMode,
   ]);
 
@@ -376,6 +472,158 @@ export default function ChatPage() {
     setModelName(model);
     settingsRef.current = null;
   }, [setModelName, setModelProvider]);
+
+  const resetForecastState = useCallback(() => {
+    setForecastSchema(null);
+    setForecastMapping(null);
+    setForecastHorizon(null);
+    setForecastFilePath(null);
+    setForecastFileName(null);
+    setForecastError(null);
+    setForecastLoadingSchema(false);
+  }, [
+    setForecastError,
+    setForecastFileName,
+    setForecastFilePath,
+    setForecastHorizon,
+    setForecastLoadingSchema,
+    setForecastMapping,
+    setForecastSchema,
+  ]);
+
+  const ensureForecastPreflight = useCallback(async () => {
+    if (forecastPreflightRef.current) {
+      return forecastPreflightRef.current;
+    }
+    const result = await fetchForecastPreflight();
+    setForecastPreflight(result);
+    return result;
+  }, [setForecastPreflight]);
+
+  const refreshForecastSchema = useCallback(
+    async (
+      nextFilePath: string,
+      nextMapping: ForecastMapping | null,
+      nextHorizon: number | null,
+      nextFileName?: string | null,
+    ) => {
+      setForecastError(null);
+      setForecastLoadingSchema(true);
+      try {
+        const result = await fetchForecastSchema(nextFilePath, {
+          mapping: nextMapping,
+          horizon: nextHorizon,
+        });
+        setForecastSchema(result);
+        setForecastFilePath(nextFilePath);
+        setForecastFileName(nextFileName ?? result.file_name);
+        const resolvedMapping = nextMapping ?? result.suggested_mapping ?? null;
+        setForecastMapping(resolvedMapping);
+        const resolvedHorizon =
+          nextHorizon ?? result.validation.resolved_horizon ?? result.validation.inferred_horizon ?? null;
+        setForecastHorizon(resolvedHorizon && resolvedHorizon > 0 ? resolvedHorizon : null);
+      } catch (error) {
+        setForecastSchema(null);
+        setForecastError(
+          error instanceof Error ? error.message : "Failed to inspect forecast schema.",
+        );
+      } finally {
+        setForecastLoadingSchema(false);
+      }
+    },
+    [
+      setForecastError,
+      setForecastFileName,
+      setForecastFilePath,
+      setForecastHorizon,
+      setForecastLoadingSchema,
+      setForecastMapping,
+      setForecastSchema,
+    ],
+  );
+
+  const handleForecastModeEnter = useCallback(() => {
+    void ensureForecastPreflight().catch((error) => {
+      setForecastError(error instanceof Error ? error.message : "Forecast preflight failed.");
+    });
+  }, [ensureForecastPreflight, setForecastError]);
+
+  const handleForecastFileSelect = useCallback(
+    async (file: File | null) => {
+      if (!file) {
+        return;
+      }
+      setForecastError(null);
+      try {
+        const preflight = await ensureForecastPreflight();
+        if (!preflight.ready) {
+          setQueryModeOverride("forecast");
+          return;
+        }
+        const uploadResult = await uploadFiles([file]);
+        const uploadedPath = uploadResult.paths[0];
+        if (!uploadedPath) {
+          throw new Error("Upload did not return a forecast file path.");
+        }
+        setForecastFilePath(uploadedPath);
+        setForecastFileName(file.name);
+        setForecastSchema(null);
+        setForecastMapping(null);
+        setForecastHorizon(null);
+        setQueryModeOverride("forecast");
+        await refreshForecastSchema(uploadedPath, null, null, file.name);
+      } catch (error) {
+        setForecastError(
+          error instanceof Error ? error.message : "Failed to load forecast dataset.",
+        );
+      }
+    },
+    [
+      ensureForecastPreflight,
+      refreshForecastSchema,
+      setForecastError,
+      setForecastFileName,
+      setForecastFilePath,
+      setForecastHorizon,
+      setForecastMapping,
+      setForecastSchema,
+      setQueryModeOverride,
+    ],
+  );
+
+  const handleForecastMappingChange = useCallback(
+    (nextMapping: ForecastMapping) => {
+      setForecastMapping(nextMapping);
+      const filePath = forecastFilePathRef.current;
+      if (!filePath) {
+        return;
+      }
+      void refreshForecastSchema(
+        filePath,
+        nextMapping,
+        forecastHorizonRef.current,
+        forecastFileName,
+      );
+    },
+    [forecastFileName, refreshForecastSchema, setForecastMapping],
+  );
+
+  const handleForecastHorizonChange = useCallback(
+    (nextHorizon: number | null) => {
+      setForecastHorizon(nextHorizon);
+      const filePath = forecastFilePathRef.current;
+      if (!filePath) {
+        return;
+      }
+      void refreshForecastSchema(
+        filePath,
+        forecastMappingRef.current,
+        nextHorizon,
+        forecastFileName,
+      );
+    },
+    [forecastFileName, refreshForecastSchema, setForecastHorizon],
+  );
 
   useEffect(() => {
     let raw = localStorage.getItem("metis_active_index");
@@ -523,25 +771,53 @@ export default function ChatPage() {
 
       try {
         const detail = await fetchSession(id);
-      setSessionMessages(detail.messages);
-      setSessionMeta(detail.summary);
-      setLatestFallback(null);
-    } catch (error) {
+        setSessionMessages(detail.messages);
+        setSessionMeta(detail.summary);
+        setLatestFallback(null);
+
+        const restoredForecast = extractForecastSessionState(detail.messages);
+        if (restoredForecast || detail.summary.mode === "Forecast") {
+          setQueryModeOverride("forecast");
+          if (restoredForecast) {
+            setForecastFilePath(restoredForecast.filePath);
+            setForecastFileName(restoredForecast.fileName);
+            setForecastMapping(restoredForecast.mapping);
+            setForecastHorizon(restoredForecast.horizon);
+            void refreshForecastSchema(
+              restoredForecast.filePath,
+              restoredForecast.mapping,
+              restoredForecast.horizon,
+              restoredForecast.fileName,
+            );
+          } else {
+            resetForecastState();
+          }
+        } else {
+          resetForecastState();
+        }
+      } catch (error) {
         setSessionError(
           error instanceof Error ? error.message : "Failed to load session",
         );
-      reset();
-      setSessionMeta(null);
-      setLatestFallback(null);
+        reset();
+        setSessionMeta(null);
+        setLatestFallback(null);
       } finally {
         setLoadingSession(false);
       }
     },
     [
+      refreshForecastSchema,
       reset,
+      resetForecastState,
+      setForecastFileName,
+      setForecastFilePath,
+      setForecastHorizon,
+      setForecastMapping,
       setLatestFallback,
       setLiveTraceEvents,
       setLoadingSession,
+      setQueryModeOverride,
       setSessionError,
       setSessionMessages,
       setSessionMeta,
@@ -655,6 +931,99 @@ export default function ChatPage() {
       appendMessages,
       autoCreateSession,
       createMessage,
+      setArtifactRuntimeEnabled,
+      setArtifactsEnabled,
+      setIsSending,
+      setLatestFallback,
+    ],
+  );
+
+  const handleForecastSend = useCallback(
+    async (prompt: string) => {
+      const filePath = forecastFilePathRef.current;
+      const mapping = forecastMappingRef.current;
+      if (!filePath || !mapping) {
+        return;
+      }
+
+      setIsSending(true);
+      appendMessages([
+        createMessage({
+          role: "user",
+          content: prompt,
+          ts: new Date().toISOString(),
+          run_id: "",
+          sources: [],
+          query_mode: "forecast",
+        }),
+      ]);
+      setLatestFallback(null);
+
+      const sessionId = await autoCreateSession(prompt);
+
+      try {
+        if (!settingsRef.current) {
+          const settings = await fetchSettings();
+          settingsRef.current = settings;
+          setArtifactsEnabled(resolveArtifactsEnabled(settings));
+          setArtifactRuntimeEnabled(resolveArtifactRuntimeEnabled(settings));
+        }
+
+        const preflight = await ensureForecastPreflight();
+        if (!preflight.ready) {
+          throw new Error(preflight.install_guidance[0] ?? "Forecast dependencies are not installed.");
+        }
+
+        const forecastSettings = {
+          ...settingsRef.current,
+          selected_mode: "Forecast",
+        };
+        const result = await queryForecast(
+          filePath,
+          prompt,
+          mapping,
+          forecastSettings,
+          {
+            horizon: forecastHorizonRef.current,
+            sessionId,
+          },
+        );
+        appendCompletedRunMessage(
+          createMessage({
+            role: "assistant",
+            content: result.answer_text,
+            ts: new Date().toISOString(),
+            run_id: result.run_id,
+            sources: [],
+            artifacts: result.artifacts,
+            query_mode: "forecast",
+          }),
+        );
+      } catch (error) {
+        appendMessages([
+          createMessage(
+            {
+              role: "assistant",
+              content:
+                error instanceof Error ? error.message : "An error occurred.",
+              ts: new Date().toISOString(),
+              run_id: "",
+              sources: [],
+              query_mode: "forecast",
+            },
+            { status: "error" },
+          ),
+        ]);
+      } finally {
+        setIsSending(false);
+      }
+    },
+    [
+      appendCompletedRunMessage,
+      appendMessages,
+      autoCreateSession,
+      createMessage,
+      ensureForecastPreflight,
       setArtifactRuntimeEnabled,
       setArtifactsEnabled,
       setIsSending,
@@ -1363,11 +1732,13 @@ export default function ChatPage() {
     setSessionError(null);
     setLiveTraceEvents([]);
     setLatestFallback(null);
+    resetForecastState();
     applyShellPosture(agenticMode);
   }, [
     agenticMode,
     applyShellPosture,
     publishResumableRun,
+    resetForecastState,
     reset,
     setLatestFallback,
     setLiveTraceEvents,
@@ -1484,6 +1855,7 @@ export default function ChatPage() {
         sessionId: companionSessionId,
         runId: latestRunId,
       }}
+      withWebGPUProvider={false}
     >
       <div className="chat-starscape-theme chat-shell-frame h-[calc(100dvh-13.75rem)] min-h-176 overflow-hidden rounded-[2rem] p-2.5 sm:p-3">
         <ResizablePanels
@@ -1515,6 +1887,7 @@ export default function ChatPage() {
                   error={sessionError}
                   onDirectSend={modelProvider === "webgpu" ? handleWebGPUSend : handleDirectSend}
                   onRagSend={handleRagSend}
+                  onForecastSend={handleForecastSend}
                   isSending={isSending}
                   isStreamingRag={isStreamingRag}
                   onStopStreaming={() => stopRagStream("user")}
@@ -1552,6 +1925,26 @@ export default function ChatPage() {
                   liveTraceEvents={liveTraceEvents}
                   artifactsEnabled={artifactsEnabled}
                   artifactRuntimeEnabled={artifactRuntimeEnabled}
+                  forecastPreflight={forecastPreflight}
+                  forecastSchema={forecastSchema}
+                  forecastMapping={forecastMapping}
+                  forecastHorizon={forecastHorizon}
+                  forecastLoadingSchema={forecastLoadingSchema}
+                  forecastDisabledReason={
+                    forecastError
+                      ? forecastError
+                      : !forecastPreflight?.ready
+                      ? forecastPreflight?.install_guidance?.[0] ?? "Forecast dependencies are not installed."
+                      : forecastSchema && !forecastSchema.validation.valid
+                        ? forecastSchema.validation.errors[0] ?? null
+                        : !forecastFilePath
+                          ? "Upload a CSV or TSV dataset to start forecasting."
+                          : null
+                  }
+                  onForecastModeEnter={handleForecastModeEnter}
+                  onForecastFileSelect={handleForecastFileSelect}
+                  onForecastMappingChange={handleForecastMappingChange}
+                  onForecastHorizonChange={handleForecastHorizonChange}
                 />
               ),
             },
@@ -1577,5 +1970,13 @@ export default function ChatPage() {
         />
       </div>
     </PageChrome>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <WebGPUCompanionProvider>
+      <ChatPageContent />
+    </WebGPUCompanionProvider>
   );
 }

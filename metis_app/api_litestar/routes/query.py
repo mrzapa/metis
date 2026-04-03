@@ -14,6 +14,11 @@ import metis_app.settings_store as _settings_store
 from metis_app.api.models import (
     DirectQueryRequestModel,
     DirectQueryResultModel,
+    ForecastPreflightResultModel,
+    ForecastQueryRequestModel,
+    ForecastQueryResultModel,
+    ForecastSchemaRequestModel,
+    ForecastSchemaResultModel,
     KnowledgeSearchRequestModel,
     KnowledgeSearchResultModel,
     OpenAIChatCompletionChoiceModel,
@@ -65,6 +70,50 @@ def api_query_direct(payload: DirectQueryRequestModel) -> dict[str, Any]:
         session_id=payload.session_id,
     )
     return DirectQueryResultModel.from_engine(result).model_dump(mode="json")
+
+
+@get("/v1/forecast/preflight")
+def api_forecast_preflight() -> dict[str, Any]:
+    orchestrator = WorkspaceOrchestrator()
+    return ForecastPreflightResultModel.model_validate(
+        orchestrator.get_forecast_preflight()
+    ).model_dump(mode="json")
+
+
+@post("/v1/forecast/schema")
+def api_forecast_schema(payload: ForecastSchemaRequestModel) -> dict[str, Any]:
+    orchestrator = WorkspaceOrchestrator()
+    return ForecastSchemaResultModel.model_validate(
+        orchestrator.inspect_forecast_schema(payload.to_engine())
+    ).model_dump(mode="json")
+
+
+@post("/v1/query/forecast")
+def api_query_forecast(payload: ForecastQueryRequestModel) -> dict[str, Any]:
+    orchestrator = WorkspaceOrchestrator()
+    result = run_engine(
+        orchestrator.run_forecast_query,
+        payload.to_engine(),
+        session_id=payload.session_id,
+    )
+    return ForecastQueryResultModel.from_engine(result).model_dump(mode="json")
+
+
+@post("/v1/query/forecast/stream")
+def api_stream_forecast(payload: ForecastQueryRequestModel) -> ServerSentEvent:
+    orchestrator = WorkspaceOrchestrator()
+
+    def _event_generator() -> Any:
+        for event in orchestrator.stream_forecast_query(
+            payload.to_engine(),
+            session_id=payload.session_id,
+        ):
+            yield {
+                "event": "message",
+                "data": json.dumps(event, ensure_ascii=False),
+            }
+
+    return ServerSentEvent(_event_generator())
 
 
 @post("/v1/openai/chat/completions")
@@ -168,7 +217,11 @@ router = Router(
         api_query_rag,
         api_search_knowledge,
         api_query_direct,
+        api_forecast_preflight,
+        api_forecast_schema,
+        api_query_forecast,
         api_openai_chat_completions,
+        api_stream_forecast,
         api_stream_rag,
     ],
     tags=["query"],

@@ -224,7 +224,7 @@ describe("ArtifactMessageContent runtime integration", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("nyx-component-selection-artifact")).toBeInTheDocument();
-      expect(screen.getByTestId("arrow-artifact-runtime-badge-0")).toHaveTextContent("Nyx render");
+      expect(screen.getByTestId("arrow-artifact-runtime-badge-0")).toHaveTextContent("Structured render");
       expect(screen.getByText("Glow Card")).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Open detail" })).toHaveAttribute("href", "/library/glow-card");
       expect(screen.getByRole("link", { name: "Registry JSON" })).toHaveAttribute(
@@ -233,6 +233,73 @@ describe("ArtifactMessageContent runtime integration", () => {
       );
     });
 
+    expect(sandbox).not.toHaveBeenCalled();
+  });
+
+  it("renders structured forecast artifacts without the runtime sandbox", async () => {
+    sandbox.mockClear();
+
+    const artifact: NormalizedArrowArtifact = {
+      id: "forecast_report",
+      type: "forecast_report",
+      summary: "Revenue forecast",
+      path: "forecast/revenue.json",
+      mime_type: "application/vnd.metis.forecast+json",
+      payload: {
+        mapping: {
+          file_path: "/tmp/revenue.csv",
+          file_name: "revenue.csv",
+          timestamp_column: "ds",
+          target_column: "y",
+          dynamic_covariates: ["promo"],
+          static_covariates: ["region"],
+        },
+        metadata: {
+          horizon: 4,
+          context_used: 24,
+          model_backend: "timesfm-2.5-torch",
+          model_id: "google/timesfm-2.5-200m-pytorch",
+          xreg_mode: "xreg + timesfm",
+          frequency: "daily",
+        },
+        history_points: [
+          { timestamp: "2026-03-01T00:00:00", value: 100 },
+          { timestamp: "2026-03-02T00:00:00", value: 101 },
+        ],
+        forecast_points: [
+          { timestamp: "2026-03-03T00:00:00", value: 102 },
+          { timestamp: "2026-03-04T00:00:00", value: 103 },
+        ],
+        quantiles: {
+          p10: [
+            { timestamp: "2026-03-03T00:00:00", value: 98 },
+            { timestamp: "2026-03-04T00:00:00", value: 99 },
+          ],
+          p90: [
+            { timestamp: "2026-03-03T00:00:00", value: 106 },
+            { timestamp: "2026-03-04T00:00:00", value: 107 },
+          ],
+        },
+        warnings: ["Promo covariate values were forward-filled for one step."],
+      },
+      payload_bytes: 0,
+      payload_truncated: false,
+      render_kind: "structured",
+      runtime_eligible: false,
+      runtime_skip_reason: undefined,
+    };
+
+    render(<ArtifactMessageContent artifacts={[artifact]} runtimeEnabled={true} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("forecast-report-artifact")).toBeInTheDocument();
+      expect(screen.getByTestId("arrow-artifact-runtime-badge-0")).toHaveTextContent("Structured render");
+      expect(screen.getByText("revenue.csv · ds → y")).toBeInTheDocument();
+      expect(screen.getByText("Promo covariate values were forward-filled for one step.")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("promo")).toBeInTheDocument();
+    expect(screen.getByText("region")).toBeInTheDocument();
     expect(sandbox).not.toHaveBeenCalled();
   });
 

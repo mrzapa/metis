@@ -179,7 +179,7 @@ class TestCategoryCompleteness:
         for member in EventType:
             category = get_event_category(member.value)
             assert category != "UNKNOWN", f"{member.value} missing from category map"
-            assert category in {"STAGE", "TOOL", "CHECKPOINT", "CONTENT", "ITERATION"}
+            assert category in {"STAGE", "TOOL", "CHECKPOINT", "CONTENT", "ITERATION", "SEMANTIC"}
 
     def test_all_event_types_have_lifecycle(self) -> None:
         """Verify every EventType enum member has a lifecycle."""

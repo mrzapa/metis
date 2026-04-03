@@ -2,6 +2,7 @@ const MAX_ARROW_ARTIFACTS = 5;
 
 const RUNTIME_SUPPORTED_TYPES = new Set(["timeline", "metric_cards"]);
 const STRUCTURED_SUPPORTED_TYPES = new Set([
+  "forecast_report",
   "nyx_component_selection",
   "nyx_install_plan",
   "nyx_dependency_report",
@@ -214,6 +215,41 @@ function isNyxDependencyReportPayload(payload: unknown): boolean {
   );
 }
 
+function isForecastPoint(value: unknown): boolean {
+  return (
+    isRecord(value)
+    && toStringValue(value.timestamp).length > 0
+    && typeof value.value === "number"
+    && Number.isFinite(value.value)
+  );
+}
+
+function isForecastReportPayload(payload: unknown): boolean {
+  if (!isRecord(payload) || !isRecord(payload.mapping) || !isRecord(payload.metadata)) {
+    return false;
+  }
+
+  const historyPoints = payload.history_points;
+  const forecastPoints = payload.forecast_points;
+  if (
+    !Array.isArray(historyPoints)
+    || !Array.isArray(forecastPoints)
+    || historyPoints.length === 0
+    || forecastPoints.length === 0
+  ) {
+    return false;
+  }
+
+  if (!historyPoints.every((point) => isForecastPoint(point)) || !forecastPoints.every((point) => isForecastPoint(point))) {
+    return false;
+  }
+
+  const quantiles = isRecord(payload.quantiles) ? payload.quantiles : {};
+  return Object.values(quantiles).every(
+    (series) => Array.isArray(series) && series.every((point) => isForecastPoint(point)),
+  );
+}
+
 function resolveArtifactRendering(
   type: string,
   payload: unknown,
@@ -252,7 +288,9 @@ function resolveArtifactRendering(
 
   if (STRUCTURED_SUPPORTED_TYPES.has(type)) {
     const isValidPayload =
-      type === "nyx_component_selection"
+      type === "forecast_report"
+        ? isForecastReportPayload(payload)
+        : type === "nyx_component_selection"
         ? isNyxComponentSelectionPayload(payload)
         : type === "nyx_install_plan"
           ? isNyxInstallPlanPayload(payload)

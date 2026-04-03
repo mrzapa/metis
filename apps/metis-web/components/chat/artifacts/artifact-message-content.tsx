@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import type { KeyboardEvent } from "react";
-import { NyxArtifactContent } from "@/components/chat/artifacts/nyx-artifact-content";
+import { StructuredArtifactContent } from "@/components/chat/artifacts/structured-artifact-content";
 import type { NormalizedArrowArtifact } from "@/lib/artifacts/extract-arrow-artifacts";
 import { useArrowState } from "@/hooks/use-arrow-state";
 
@@ -252,7 +252,7 @@ function getSkipReasonLabel(reason?: ArtifactRuntimeSkipReason): string {
 
 function getRuntimeBadgeLabel(state: ArtifactRuntimeState): string {
   if (state.lifecycle === "structured") {
-    return "Nyx render";
+    return "Structured render";
   }
   if (state.lifecycle === "attempt") {
     return "Runtime loading";
@@ -597,7 +597,7 @@ export function ArtifactMessageContent({
             onRuntimeLifecycleEvent={handleRuntimeLifecycleEvent}
           />
         ) : selectedResult.shouldUseStructured ? (
-          <NyxArtifactContent artifact={selectedResult.artifact} />
+          <StructuredArtifactContent artifact={selectedResult.artifact} />
         ) : (
           <RuntimeArtifactFallback artifact={selectedResult.artifact} />
         )}

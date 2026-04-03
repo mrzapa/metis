@@ -21,6 +21,7 @@ _DEFAULT_SYSTEM_INSTRUCTIONS = (
 _ARTIFACT_SETTINGS_KEYS = ("arrow_artifacts", "artifacts")
 _MAX_ARROW_ARTIFACTS = 5
 _MAX_ARROW_ARTIFACT_PAYLOAD_BYTES = 16_384
+_MAX_FORECAST_ARTIFACT_PAYLOAD_BYTES = 65_536
 _MAX_ARROW_ARTIFACT_SUMMARY_CHARS = 280
 _MAX_ARROW_ARTIFACT_ID_CHARS = 96
 _MAX_ARROW_ARTIFACT_TYPE_CHARS = 64
@@ -170,7 +171,12 @@ def _normalize_arrow_artifact(raw: Any, *, metadata_only: bool = False) -> dict[
     if metadata_only:
         return normalized
 
-    if payload is not None and payload_bytes <= _MAX_ARROW_ARTIFACT_PAYLOAD_BYTES:
+    payload_limit = (
+        _MAX_FORECAST_ARTIFACT_PAYLOAD_BYTES
+        if artifact_type == "forecast_report"
+        else _MAX_ARROW_ARTIFACT_PAYLOAD_BYTES
+    )
+    if payload is not None and payload_bytes <= payload_limit:
         normalized["payload"] = payload
         return normalized
 

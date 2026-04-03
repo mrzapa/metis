@@ -28,11 +28,15 @@ import metis_app.settings_store as _settings_store
 from metis_app.engine import (
     build_index,
     delete_index,
+    forecast_preflight,
     get_index,
+    inspect_forecast_schema,
     knowledge_search,
     list_indexes,
+    query_forecast,
     query_direct,
     query_rag,
+    stream_forecast,
     stream_rag_answer,
 )
 from metis_app.engine.indexing import IndexBuildRequest, IndexBuildResult
@@ -45,6 +49,7 @@ from metis_app.engine.querying import (
     RagQueryResult,
     extract_arrow_artifacts,
 )
+from metis_app.engine.forecasting import ForecastQueryRequest, ForecastSchemaRequest
 from metis_app.models.brain_graph import BrainGraph
 from metis_app.models.session_types import (
     EvidenceSource,
@@ -456,6 +461,124 @@ class WorkspaceOrchestrator:
                         sources=final_sources,
                         artifacts=final_artifacts,
                         actions=final_actions,
+                    )
+                    self._assistant_service.reflect(
+                        trigger="completed_run",
+                        settings=resolved_settings,
+                        session_id=session_id,
+                        run_id=final_run_id,
+                        _orchestrator=self,
+                    )
+                yield event
+
+        return _wrapped()
+
+    def get_forecast_preflight(self, settings: dict[str, Any] | None = None) -> dict[str, Any]:
+        resolved_settings = self._resolve_query_settings(settings or {})
+        resolved_settings["selected_mode"] = "Forecast"
+        return forecast_preflight(resolved_settings).to_dict()
+
+    def inspect_forecast_schema(self, req: ForecastSchemaRequest) -> dict[str, Any]:
+        return inspect_forecast_schema(req).to_dict()
+
+    def run_forecast_query(
+        self,
+        req: ForecastQueryRequest,
+        *,
+        session_id: str = "",
+    ) -> Any:
+        resolved_settings = self._resolve_query_settings(req.settings, query=req.prompt)
+        resolved_settings["selected_mode"] = "Forecast"
+        normalized = ForecastQueryRequest(
+            file_path=req.file_path,
+            prompt=req.prompt,
+            mapping=req.mapping,
+            settings=resolved_settings,
+            horizon=req.horizon,
+            run_id=req.run_id,
+        )
+        user_prompt = str(req.prompt or "").strip() or f"Forecast {pathlib.Path(req.file_path).name}"
+        if session_id:
+            self._prepare_session_for_query(session_id, user_prompt, resolved_settings)
+            self.append_message(session_id, role="user", content=user_prompt, run_id="")
+
+        result = query_forecast(normalized)
+        result_artifacts = list(getattr(result, "artifacts", None) or [])
+        self._record_trace_event(
+            result.run_id,
+            {
+                "type": "final",
+                "run_id": result.run_id,
+                "answer_text": result.answer_text,
+                "sources": [],
+                "artifacts": result_artifacts,
+                "selected_mode": result.selected_mode,
+                "model_backend": result.model_backend,
+                "model_id": result.model_id,
+                "horizon": result.horizon,
+                "context_used": result.context_used,
+                "warnings": list(getattr(result, "warnings", []) or []),
+            },
+        )
+        if session_id:
+            self.append_message(
+                session_id,
+                role="assistant",
+                content=result.answer_text,
+                run_id=result.run_id,
+                sources=[],
+                artifacts=result_artifacts,
+                actions=[],
+            )
+            self._assistant_service.reflect(
+                trigger="completed_run",
+                settings=resolved_settings,
+                session_id=session_id,
+                run_id=result.run_id,
+                _orchestrator=self,
+            )
+        return result
+
+    def stream_forecast_query(
+        self,
+        req: ForecastQueryRequest,
+        *,
+        session_id: str = "",
+    ) -> Iterator[dict[str, Any]]:
+        resolved_settings = self._resolve_query_settings(req.settings, query=req.prompt)
+        resolved_settings["selected_mode"] = "Forecast"
+        normalized = ForecastQueryRequest(
+            file_path=req.file_path,
+            prompt=req.prompt,
+            mapping=req.mapping,
+            settings=resolved_settings,
+            horizon=req.horizon,
+            run_id=req.run_id,
+        )
+        user_prompt = str(req.prompt or "").strip() or f"Forecast {pathlib.Path(req.file_path).name}"
+        if session_id:
+            self._prepare_session_for_query(session_id, user_prompt, resolved_settings)
+            self.append_message(session_id, role="user", content=user_prompt, run_id="")
+
+        def _wrapped() -> Iterator[dict[str, Any]]:
+            final_run_id = str(normalized.run_id or "")
+            for event in stream_forecast(normalized):
+                final_run_id = str(event.get("run_id") or final_run_id or "").strip()
+                self._record_trace_event(final_run_id, event)
+                if event.get("type") == "final" and session_id:
+                    final_artifacts = [
+                        dict(item)
+                        for item in list(event.get("artifacts") or [])
+                        if isinstance(item, dict)
+                    ]
+                    self.append_message(
+                        session_id,
+                        role="assistant",
+                        content=str(event.get("answer_text") or ""),
+                        run_id=final_run_id,
+                        sources=[],
+                        artifacts=final_artifacts,
+                        actions=[],
                     )
                     self._assistant_service.reflect(
                         trigger="completed_run",

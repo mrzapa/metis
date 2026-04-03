@@ -11,6 +11,7 @@ from . import heretic
 from . import version
 from . import index
 from . import logs
+from . import observe
 from . import query
 from . import sessions
 from . import settings
@@ -26,6 +27,7 @@ __all__ = [
 	"heretic",
 	"index",
 	"logs",
+	"observe",
 	"query",
 	"sessions",
 	"settings",

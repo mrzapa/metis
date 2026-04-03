@@ -13,6 +13,13 @@ const LandingStarfieldWebgl = dynamic(
     ),
   { ssr: false, loading: () => null },
 );
+const StarCloseupWebgl = dynamic(
+  () =>
+    import("@/components/home/star-closeup-webgl").then(
+      (m) => ({ default: m.StarCloseupWebgl }),
+    ),
+  { ssr: false, loading: () => null },
+);
 import { StarDetailsPanel } from "@/components/constellation/star-observatory-dialog";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
 import { deleteIndex, fetchIndexes, previewLearningRoute, subscribeCompanionActivity } from "@/lib/api";
@@ -2473,11 +2480,17 @@ export default function Home() {
 
         return projectedStar;
       });
-      const renderPlan = buildLandingStarRenderPlan(landingRenderableStars, backgroundCamera.zoomFactor);
+      const renderPlan = buildLandingStarRenderPlan(
+        landingRenderableStars,
+        backgroundCamera.zoomFactor,
+        undefined,
+        starDiveFocusedStarIdRef.current,
+      );
       const flattenedRenderPlan = [
         ...renderPlan.batches.point,
         ...renderPlan.batches.sprite,
         ...renderPlan.batches.hero,
+        ...renderPlan.batches.closeup,
       ];
       const nextWebglStars: LandingWebglStar[] = flattenedRenderPlan.map((star) => ({
         addable: star.addable,
@@ -2809,50 +2822,203 @@ export default function Home() {
       const ppx = projected.x + (mouse.x - W / 2) * 0.015;
       const ppy = projected.y + (mouse.y - H / 2) * 0.015;
       const pulse = reducedMotion ? 1 : 0.88 + Math.sin(ts * 0.00209) * 0.12;
-      const nodeGalaxyScale = getZoomResponsiveNodeScale(backgroundZoomRef.current);
-      const coreR = 5 * nodeGalaxyScale;
+      const sc = getZoomResponsiveNodeScale(backgroundZoomRef.current);
+      const coreR = 5 * sc;
 
-      // Outer gold glow
-      const outerGrad = ctx!.createRadialGradient(ppx, ppy, 0, ppx, ppy, 44 * nodeGalaxyScale);
-      outerGrad.addColorStop(0, `rgba(255,240,180,${0.14 * pulse})`);
-      outerGrad.addColorStop(0.5, `rgba(220,190,80,${0.06 * pulse})`);
-      outerGrad.addColorStop(1, "rgba(0,0,0,0)");
+      // ── Satellite micro-node positions (dx, dy from centre, pre-scaled) ───────
+      // Modelled on the Sketchfab "Mini Constellation Lines Stylized Effect":
+      // a small organic constellation of 6 peripheral nodes surrounding the core,
+      // connected by animated lines that trace, hold, then fade in a looping cycle.
+      const MICRO: [number, number][] = [
+        [  0,          0       ], // 0 — METIS core (drawn separately below)
+        [-22 * sc,  -20 * sc  ], // 1 — upper-left
+        [  2 * sc,  -35 * sc  ], // 2 — apex (topmost)
+        [ 25 * sc,  -17 * sc  ], // 3 — upper-right
+        [ 34 * sc,    9 * sc  ], // 4 — right
+        [ -5 * sc,   28 * sc  ], // 5 — lower
+        [-28 * sc,   12 * sc  ], // 6 — left
+      ];
+
+      // Edge pairs (indices into MICRO) — outer ring + inner cross-spokes
+      const EDGES: [number, number][] = [
+        [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 1], // outer constellation ring
+        [0, 2], [0, 4], [2, 5], [1, 4],                  // hub spokes + diagonals
+      ];
+
+      // Spawn-loop timing (mirrors the looping/spawning feel in the Sketchfab VFX)
+      const CYCLE_MS = 7200; // full respawn period
+      const TRACE_MS = 640;  // line traces from source to target
+      const HOLD_MS  = 680;  // line holds fully drawn
+      const FADE_MS  = 960;  // line fades out
+      const TOTAL_MS = TRACE_MS + HOLD_MS + FADE_MS;
+      const STEP_MS  = 580;  // stagger between successive edge starts
+
+      // ── 1. Animated constellation lines ──────────────────────────────────────
+      ctx!.save();
+      ctx!.lineCap = "round";
+
+      EDGES.forEach(([ai, bi], eIdx) => {
+        const [ax, ay] = MICRO[ai];
+        const [bx, by] = MICRO[bi];
+
+        if (reducedMotion) {
+          // Reduced motion: static dim lines, no trace animation
+          ctx!.beginPath();
+          ctx!.moveTo(ppx + ax, ppy + ay);
+          ctx!.lineTo(ppx + bx, ppy + by);
+          ctx!.strokeStyle = "rgba(180,210,255,0.18)";
+          ctx!.lineWidth = 0.7;
+          ctx!.stroke();
+          return;
+        }
+
+        const startOffset = eIdx * STEP_MS;
+        const t = ts % CYCLE_MS;
+        const edgeT = (t - startOffset + CYCLE_MS) % CYCLE_MS;
+        if (edgeT > TOTAL_MS) return;
+
+        // Ease-in squared trace progress
+        const traceP = Math.min(1, edgeT / TRACE_MS);
+        let alpha: number;
+        if (edgeT <= TRACE_MS + HOLD_MS) {
+          alpha = edgeT < TRACE_MS ? traceP * traceP : 1;
+        } else {
+          const fP = (edgeT - TRACE_MS - HOLD_MS) / FADE_MS;
+          alpha = 1 - fP * fP; // ease-out squared
+        }
+        alpha = Math.max(0, alpha) * pulse;
+        if (alpha < 0.01) return;
+
+        const sx = ppx + ax,                    sy = ppy + ay;
+        const ex = ppx + ax + (bx - ax) * traceP, ey = ppy + ay + (by - ay) * traceP;
+
+        // Soft outer glow (wide, low-opacity)
+        ctx!.beginPath();
+        ctx!.moveTo(sx, sy);
+        ctx!.lineTo(ex, ey);
+        ctx!.strokeStyle = `rgba(110,165,255,${alpha * 0.14})`;
+        ctx!.lineWidth = 5 * sc;
+        ctx!.stroke();
+
+        // Inner bright core line
+        ctx!.beginPath();
+        ctx!.moveTo(sx, sy);
+        ctx!.lineTo(ex, ey);
+        ctx!.strokeStyle = `rgba(215,232,255,${alpha * 0.82})`;
+        ctx!.lineWidth = 0.85 * sc;
+        ctx!.stroke();
+
+        // Travelling particle at the line tip (only while tracing)
+        if (traceP < 0.999 && alpha > 0.05) {
+          const tg = ctx!.createRadialGradient(ex, ey, 0, ex, ey, 5.5 * sc);
+          tg.addColorStop(0,   `rgba(240,250,255,${alpha})`);
+          tg.addColorStop(0.4, `rgba(150,205,255,${alpha * 0.5})`);
+          tg.addColorStop(1,   "rgba(0,0,0,0)");
+          ctx!.fillStyle = tg;
+          ctx!.beginPath();
+          ctx!.arc(ex, ey, 5.5 * sc, 0, Math.PI * 2);
+          ctx!.fill();
+        }
+      });
+
+      ctx!.restore();
+
+      // ── 2. Peripheral micro-star nodes (nodes 1–6) ───────────────────────────
+      MICRO.slice(1).forEach(([dx, dy], i) => {
+        const nx = ppx + dx;
+        const ny = ppy + dy;
+        const nodePulse = reducedMotion
+          ? 0.80
+          : 0.62 + Math.sin(ts * 0.0025 + i * 1.31) * 0.38;
+        const mr = (1.55 + (i % 3) * 0.28) * sc;
+
+        // Soft halo
+        const hg = ctx!.createRadialGradient(nx, ny, 0, nx, ny, mr * 5.5);
+        hg.addColorStop(0, `rgba(145,195,255,${0.18 * nodePulse})`);
+        hg.addColorStop(1, "rgba(0,0,0,0)");
+        ctx!.fillStyle = hg;
+        ctx!.beginPath();
+        ctx!.arc(nx, ny, mr * 5.5, 0, Math.PI * 2);
+        ctx!.fill();
+
+        // Outer dot
+        ctx!.beginPath();
+        ctx!.arc(nx, ny, mr, 0, Math.PI * 2);
+        ctx!.fillStyle = `rgba(200,222,255,${0.88 * nodePulse})`;
+        ctx!.fill();
+
+        // Bright inner core
+        ctx!.beginPath();
+        ctx!.arc(nx, ny, mr * 0.36, 0, Math.PI * 2);
+        ctx!.fillStyle = "rgba(248,252,255,1)";
+        ctx!.fill();
+      });
+
+      // ── 3. Main Polaris / METIS core ─────────────────────────────────────────
+      // Outer gold-blue ambient glow
+      const outerGrad = ctx!.createRadialGradient(ppx, ppy, 0, ppx, ppy, 52 * sc);
+      outerGrad.addColorStop(0,   `rgba(210,228,255,${0.10 * pulse})`);
+      outerGrad.addColorStop(0.4, `rgba(255,240,180,${0.08 * pulse})`);
+      outerGrad.addColorStop(1,   "rgba(0,0,0,0)");
       ctx!.fillStyle = outerGrad;
-      ctx!.beginPath(); ctx!.arc(ppx, ppy, 44 * nodeGalaxyScale, 0, Math.PI * 2); ctx!.fill();
+      ctx!.beginPath();
+      ctx!.arc(ppx, ppy, 52 * sc, 0, Math.PI * 2);
+      ctx!.fill();
 
-      // Mid corona
-      const midGrad = ctx!.createRadialGradient(ppx, ppy, 0, ppx, ppy, 20 * nodeGalaxyScale);
-      midGrad.addColorStop(0, `rgba(255,252,220,${0.32 * pulse})`);
+      // Inner corona
+      const midGrad = ctx!.createRadialGradient(ppx, ppy, 0, ppx, ppy, 20 * sc);
+      midGrad.addColorStop(0, `rgba(255,252,220,${0.38 * pulse})`);
       midGrad.addColorStop(1, "rgba(0,0,0,0)");
       ctx!.fillStyle = midGrad;
-      ctx!.beginPath(); ctx!.arc(ppx, ppy, 20 * nodeGalaxyScale, 0, Math.PI * 2); ctx!.fill();
+      ctx!.beginPath();
+      ctx!.arc(ppx, ppy, 20 * sc, 0, Math.PI * 2);
+      ctx!.fill();
 
-      // 6-point diffraction spikes (very slowly rotating)
-      const spikeAngle = ts * 0.00008;
+      // 8-point diffraction spikes: 4 long warm + 4 short cool (slowly rotating)
+      const spikeAngle = ts * 0.00007;
       ctx!.save();
-      ctx!.strokeStyle = `rgba(255,240,160,${0.48 * pulse})`;
-      ctx!.lineWidth = 0.85;
-      for (let ii = 0; ii < 6; ii++) {
-        const a = spikeAngle + (Math.PI / 3) * ii;
+      ctx!.lineCap = "round";
+      for (let ii = 0; ii < 4; ii++) {
+        const a  = spikeAngle + (Math.PI / 4) * ii;
+        const a2 = a + Math.PI / 8;
+
+        // Long primary spike (warm gold)
         ctx!.beginPath();
         ctx!.moveTo(ppx + Math.cos(a) * coreR * 1.2, ppy + Math.sin(a) * coreR * 1.2);
-        ctx!.lineTo(ppx + Math.cos(a) * 28 * nodeGalaxyScale, ppy + Math.sin(a) * 28 * nodeGalaxyScale);
+        ctx!.lineTo(ppx + Math.cos(a) * 30 * sc,     ppy + Math.sin(a) * 30 * sc);
+        ctx!.strokeStyle = `rgba(255,238,150,${0.50 * pulse})`;
+        ctx!.lineWidth = 0.85;
+        ctx!.stroke();
+
+        // Short secondary spike (cool blue-white)
+        ctx!.beginPath();
+        ctx!.moveTo(ppx + Math.cos(a2) * coreR * 1.2, ppy + Math.sin(a2) * coreR * 1.2);
+        ctx!.lineTo(ppx + Math.cos(a2) * 16 * sc,     ppy + Math.sin(a2) * 16 * sc);
+        ctx!.strokeStyle = `rgba(180,212,255,${0.32 * pulse})`;
+        ctx!.lineWidth = 0.55;
         ctx!.stroke();
       }
       ctx!.restore();
 
-      // Core disk
-      ctx!.beginPath(); ctx!.arc(ppx, ppy, coreR, 0, Math.PI * 2);
-      ctx!.fillStyle = `rgba(255,252,230,${0.96 * pulse})`; ctx!.fill();
-      ctx!.beginPath(); ctx!.arc(ppx, ppy, coreR * 0.4, 0, Math.PI * 2);
-      ctx!.fillStyle = "rgba(255,255,255,1)"; ctx!.fill();
+      // Core disk (warm white)
+      ctx!.beginPath();
+      ctx!.arc(ppx, ppy, coreR, 0, Math.PI * 2);
+      ctx!.fillStyle = `rgba(255,252,230,${0.96 * pulse})`;
+      ctx!.fill();
 
-      // METIS label
-      const fontSize = Math.round(10 + nodeGalaxyScale * 4);
-      ctx!.font = buildCanvasFont(fontSize, NODE_LABEL_FONT_FAMILY, "600");
-      ctx!.textAlign = "center";
-      ctx!.fillStyle = `rgba(255,235,140,${0.72 * pulse})`;
-      ctx!.fillText("METIS", ppx, ppy - coreR - 10 * nodeGalaxyScale);
+      // Bright inner core
+      ctx!.beginPath();
+      ctx!.arc(ppx, ppy, coreR * 0.4, 0, Math.PI * 2);
+      ctx!.fillStyle = "rgba(255,255,255,1)";
+      ctx!.fill();
+
+      // ── 4. METIS label (above the topmost micro-node) ────────────────────────
+      const topNodeY  = ppy + MICRO[2][1]; // apex node absolute Y
+      const fontSize  = Math.round(10 + sc * 4);
+      ctx!.font       = buildCanvasFont(fontSize, NODE_LABEL_FONT_FAMILY, "600");
+      ctx!.textAlign  = "center";
+      ctx!.fillStyle  = `rgba(255,235,140,${0.72 * pulse})`;
+      ctx!.fillText("METIS", ppx, topNodeY - 8 * sc);
     }
 
     function drawNodes(t: number) {
@@ -3218,6 +3384,14 @@ export default function Home() {
       if (!awakened && ts > 2000) {
         awakened = true; awakenStart = ts;
       }
+
+      // Fade canvas overlay elements during Star Dive
+      const canvasOverlayAlpha = 1 - starDiveFocusStrengthRef.current * 0.92;
+      if (canvasOverlayAlpha < 0.99) {
+        ctx!.save();
+        ctx!.globalAlpha = Math.max(0, canvasOverlayAlpha);
+      }
+
       drawNebulae();
       drawDust();
       drawNodes(ts);
@@ -3225,6 +3399,11 @@ export default function Home() {
       drawAddCandidatePreview(ts);
       drawUserStars(ts);
       drawPolarisMetis(ts);
+
+      if (canvasOverlayAlpha < 0.99) {
+        ctx!.restore();
+      }
+
       projectedUserStarTargetsRef.current = projectedUserStarTargets;
       animFrame = requestAnimationFrame(render);
     }
@@ -3883,6 +4062,17 @@ export default function Home() {
       setBackgroundZoomTarget(nextZoomFactor);
     }
 
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && starDiveFocusStrengthRef.current > 0) {
+        // Exit Star Dive: zoom back to 1×
+        setBackgroundZoomTarget(1);
+        starDivePanSuppressedRef.current = false;
+        starDiveFocusedStarIdRef.current = null;
+        starDiveFocusWorldPosRef.current = null;
+        starDiveFocusProfileRef.current = null;
+      }
+    }
+
     window.addEventListener("resize", onResize);
     canvas.addEventListener("pointerdown", onCanvasPointerDown);
     canvas.addEventListener("lostpointercapture", onCanvasLostPointerCapture);
@@ -3891,6 +4081,7 @@ export default function Home() {
     window.addEventListener("pointerup", onCanvasPress);
     canvas.addEventListener("pointerleave", onPointerLeave);
     window.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("keydown", onKeyDown);
     window.addEventListener("blur", onBlur);
 
     return () => {
@@ -3903,6 +4094,7 @@ export default function Home() {
       window.removeEventListener("pointerup", onCanvasPress);
       canvas.removeEventListener("pointerleave", onPointerLeave);
       window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("blur", onBlur);
     };
   }, [
@@ -3957,6 +4149,13 @@ export default function Home() {
         frameRef={landingStarfieldFrameRef}
       />
 
+      <StarCloseupWebgl
+        className="metis-star-closeup-webgl"
+        focusStrength={starDiveFocusStrength}
+        profile={starDiveFocusProfileRef.current}
+        reducedMotion={prefersReducedMotion()}
+      />
+
       <canvas
         ref={canvasRef}
         id="universe"
@@ -3972,6 +4171,47 @@ export default function Home() {
           <h1 className="metis-hero-headline">Discover everything</h1>
         </div>
       </div>
+
+      {starDiveFocusStrength > 0.5 && starDiveFocusProfileRef.current && (
+        <div
+          className="metis-star-dive-hud"
+          style={{
+            position: "fixed",
+            bottom: 80,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 20,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 4,
+            color: "rgba(255,255,255,0.9)",
+            fontFamily: '"Space Grotesk", sans-serif',
+            fontSize: 13,
+            fontWeight: 400,
+            letterSpacing: "0.02em",
+            textShadow: "0 1px 8px rgba(0,0,0,0.7)",
+            opacity: Math.min(1, (starDiveFocusStrength - 0.5) * 4),
+            transition: "opacity 0.3s",
+            pointerEvents: "none",
+          }}
+          aria-live="polite"
+        >
+          <div style={{ fontSize: 15, fontWeight: 500 }}>
+            {starDiveFocusProfileRef.current.spectralClass} — {starDiveFocusProfileRef.current.stellarType.replace(/_/g, " ")}
+          </div>
+          <div style={{ opacity: 0.7, fontSize: 11 }}>
+            {Math.round(starDiveFocusProfileRef.current.temperatureK).toLocaleString()} K
+            {" · "}
+            {starDiveFocusProfileRef.current.luminositySolar.toFixed(1)} L☉
+            {" · "}
+            {starDiveFocusProfileRef.current.radiusSolar.toFixed(2)} R☉
+          </div>
+          <div style={{ opacity: 0.45, fontSize: 10, marginTop: 2 }}>
+            Press Esc to exit
+          </div>
+        </div>
+      )}
 
       <div className={`metis-zoom-pill ${canvasInteractionsLocked ? "is-muted" : ""}`} aria-live="polite">
         <div className="metis-zoom-pill-value">{backgroundZoomLabel}</div>

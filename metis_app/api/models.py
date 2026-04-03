@@ -11,12 +11,22 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from metis_app.engine import (
     DirectQueryRequest,
     DirectQueryResult,
+    ForecastQueryRequest,
+    ForecastSchemaRequest,
     IndexBuildRequest,
     IndexBuildResult,
     KnowledgeSearchRequest,
     KnowledgeSearchResult,
     RagQueryRequest,
     RagQueryResult,
+)
+from metis_app.services.forecast_service import (
+    ForecastMapping,
+    ForecastPreflightResult,
+    ForecastQueryResult,
+    ForecastSchemaColumn,
+    ForecastSchemaResult,
+    ForecastValidationResult,
 )
 from metis_app.models.session_types import (
     EvidenceSource,
@@ -137,6 +147,161 @@ class QueryArtifactModel(BaseModel):
     payload: Any | None = None
     payload_bytes: int = 0
     payload_truncated: bool = False
+
+
+class ForecastMappingModel(BaseModel):
+    timestamp_column: str
+    target_column: str
+    dynamic_covariates: list[str] = Field(default_factory=list)
+    static_covariates: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+    def to_service(self) -> ForecastMapping:
+        return ForecastMapping(
+            timestamp_column=self.timestamp_column,
+            target_column=self.target_column,
+            dynamic_covariates=list(self.dynamic_covariates),
+            static_covariates=list(self.static_covariates),
+        )
+
+
+class ForecastSchemaColumnModel(BaseModel):
+    name: str
+    detected_type: str
+    non_null_count: int
+    unique_count: int
+    numeric_ratio: float
+    timestamp_ratio: float
+    sample_values: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_service(cls, value: ForecastSchemaColumn) -> "ForecastSchemaColumnModel":
+        return cls(**value.to_dict())
+
+
+class ForecastValidationResultModel(BaseModel):
+    valid: bool
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    history_row_count: int = 0
+    future_row_count: int = 0
+    inferred_horizon: int = 0
+    resolved_horizon: int = 0
+    inferred_frequency: str = ""
+
+    @classmethod
+    def from_service(cls, value: ForecastValidationResult) -> "ForecastValidationResultModel":
+        return cls(**value.to_dict())
+
+
+class ForecastPreflightResultModel(BaseModel):
+    ready: bool
+    timesfm_available: bool
+    covariates_available: bool
+    model_id: str
+    max_context: int
+    max_horizon: int
+    xreg_mode: str
+    force_xreg_cpu: bool
+    warnings: list[str] = Field(default_factory=list)
+    install_guidance: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_service(cls, value: ForecastPreflightResult) -> "ForecastPreflightResultModel":
+        return cls(**value.to_dict())
+
+
+class ForecastSchemaRequestModel(BaseModel):
+    file_path: str
+    mapping: ForecastMappingModel | None = None
+    horizon: int | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    def to_engine(self) -> ForecastSchemaRequest:
+        return ForecastSchemaRequest(
+            file_path=self.file_path,
+            mapping=self.mapping.to_service() if self.mapping else None,
+            horizon=self.horizon,
+        )
+
+
+class ForecastSchemaResultModel(BaseModel):
+    file_path: str
+    file_name: str
+    delimiter: str
+    row_count: int
+    column_count: int
+    columns: list[ForecastSchemaColumnModel]
+    timestamp_candidates: list[str] = Field(default_factory=list)
+    numeric_target_candidates: list[str] = Field(default_factory=list)
+    suggested_mapping: ForecastMappingModel | None = None
+    validation: ForecastValidationResultModel
+
+    @classmethod
+    def from_service(cls, value: ForecastSchemaResult) -> "ForecastSchemaResultModel":
+        suggested_mapping = value.suggested_mapping.to_dict() if value.suggested_mapping else None
+        return cls(
+            file_path=value.file_path,
+            file_name=value.file_name,
+            delimiter=value.delimiter,
+            row_count=value.row_count,
+            column_count=value.column_count,
+            columns=[ForecastSchemaColumnModel.from_service(item) for item in value.columns],
+            timestamp_candidates=list(value.timestamp_candidates),
+            numeric_target_candidates=list(value.numeric_target_candidates),
+            suggested_mapping=ForecastMappingModel(**suggested_mapping) if suggested_mapping else None,
+            validation=ForecastValidationResultModel.from_service(value.validation),
+        )
+
+
+class ForecastQueryRequestModel(BaseModel):
+    file_path: str
+    prompt: str = ""
+    mapping: ForecastMappingModel
+    settings: dict[str, Any]
+    run_id: str | None = None
+    session_id: str = ""
+    horizon: int | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    def to_engine(self) -> ForecastQueryRequest:
+        return ForecastQueryRequest(
+            file_path=self.file_path,
+            prompt=self.prompt,
+            mapping=self.mapping.to_service(),
+            settings=dict(self.settings),
+            horizon=self.horizon,
+            run_id=self.run_id,
+        )
+
+
+class ForecastQueryResultModel(BaseModel):
+    run_id: str
+    answer_text: str
+    selected_mode: str
+    model_backend: str
+    model_id: str
+    horizon: int
+    context_used: int
+    warnings: list[str] = Field(default_factory=list)
+    artifacts: list["QueryArtifactModel"] | None = None
+
+    @classmethod
+    def from_engine(cls, result: ForecastQueryResult) -> "ForecastQueryResultModel":
+        return cls(
+            run_id=result.run_id,
+            answer_text=result.answer_text,
+            selected_mode=result.selected_mode,
+            model_backend=result.model_backend,
+            model_id=result.model_id,
+            horizon=result.horizon,
+            context_used=result.context_used,
+            warnings=list(result.warnings),
+            artifacts=[QueryArtifactModel(**item) for item in list(result.artifacts or [])] or None,
+        )
 
 
 class NyxInstallProposalComponentModel(BaseModel):

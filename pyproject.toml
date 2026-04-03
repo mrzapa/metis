@@ -50,6 +50,16 @@ dev = [
     "uvicorn[standard]==0.42.0",
     "litestar>=2.4",
 ]
+forecast = [
+    "timesfm>=2,<3",
+    "torch>=2.0.0",
+]
+forecast-xreg = [
+    "timesfm>=2,<3",
+    "torch>=2.0.0",
+    "jax>=0.4.0",
+    "scikit-learn>=1.5.0",
+]
 runtime-all = [
     "langchain==0.3.28",
     "langchain-core==0.3.83",

@@ -30,6 +30,7 @@ interface PageChromeProps {
     sessionId?: string | null;
     runId?: string | null;
   };
+  withWebGPUProvider?: boolean;
 }
 
 const NAV_ITEMS = [
@@ -56,12 +57,12 @@ export function PageChrome({
   hideHeader = false,
   tone = "default",
   companionContext,
+  withWebGPUProvider = true,
 }: PageChromeProps) {
   const pathname = usePathname();
   const isStarscape = tone === "starscape";
 
-  return (
-    <WebGPUCompanionProvider>
+  const content = (
     <div
       className={cn(
         "page-chrome relative min-h-screen overflow-hidden bg-transparent",
@@ -198,6 +199,11 @@ export function PageChrome({
         runId={companionContext?.runId}
       />
     </div>
-    </WebGPUCompanionProvider>
   );
+
+  if (!withWebGPUProvider) {
+    return content;
+  }
+
+  return <WebGPUCompanionProvider>{content}</WebGPUCompanionProvider>;
 }

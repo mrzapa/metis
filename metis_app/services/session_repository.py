@@ -153,6 +153,21 @@ class SessionRepository:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_feedback_session ON message_feedback(session_id, ts)"
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS trace_feedback(
+                    feedback_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    segment TEXT,
+                    label TEXT,
+                    note TEXT,
+                    created_at TEXT
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_trace_feedback_run ON trace_feedback(run_id)"
+            )
 
     @staticmethod
     def _ensure_message_columns(conn: sqlite3.Connection) -> None:
