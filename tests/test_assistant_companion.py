@@ -416,8 +416,10 @@ def test_reflect_triggers_autonomous_research_when_enabled(tmp_path):
 
 
 def test_reflect_promotes_high_scoring_skill_candidates(tmp_path) -> None:
-    """reflect() writes an auto-generated skill file for high-scoring candidates."""
+    """reflect() spawns a thread that writes an auto-generated skill file via the LLM quality gate."""
     import json as _json
+    import time
+    from unittest.mock import MagicMock, patch
     from metis_app.services.assistant_companion import AssistantCompanionService
     from metis_app.services.assistant_repository import AssistantRepository
     from metis_app.services.skill_repository import SkillRepository
@@ -440,16 +442,27 @@ def test_reflect_promotes_high_scoring_skill_candidates(tmp_path) -> None:
         candidates_db_path=db_path,
     )
 
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MagicMock(content=_json.dumps({
+        "is_generalizable": True,
+        "skill_name": "Entropy Explainer",
+        "skill_description": "Explains entropy in information theory.",
+        "confidence": 0.92,
+    }))
+
     settings = {
         "assistant_identity": {"companion_enabled": True},
         "assistant_policy": {
             "reflection_enabled": True,
             "allow_automatic_writes": True,
             "reflection_backend": "heuristic",
+            "trigger_on_completed_run": True,
         },
-        "llm_provider": "mock",
     }
-    svc.reflect(trigger="manual", settings=settings, force=True)
+    with patch("metis_app.services.assistant_companion.create_llm", return_value=mock_llm), \
+         patch.object(svc, "_resolve_runtime_llm_settings", return_value={"llm_provider": "openai"}):
+        svc.reflect(trigger="completed_run", settings=settings, force=True)
+        time.sleep(0.2)  # wait for daemon promotion thread
 
     auto_dir = skills_dir / "auto-generated"
     written = list(auto_dir.glob("*.md")) if auto_dir.exists() else []

@@ -315,9 +315,6 @@ class AssistantCompanionService:
             )
         self.repository.add_brain_links(links, max_items=policy.max_brain_links)
 
-        if policy.allow_automatic_writes:
-            self._promote_skill_candidates()
-
         status.state = "reflected"
         status.last_reflection_at = memory_entry.created_at
         status.last_reflection_trigger = trigger
@@ -325,10 +322,10 @@ class AssistantCompanionService:
         status.latest_why = memory_entry.why
         self.repository.update_status(status)
 
+        import threading
+
         # Spawn autonomous research in background daemon thread if enabled
         if policy.autonomous_research_enabled and _orchestrator is not None:
-            import threading
-
             def _research_task() -> None:
                 try:
                     result = _orchestrator.run_autonomous_research(active_settings)
@@ -353,6 +350,17 @@ class AssistantCompanionService:
                     log.warning("autonomous_research background task failed: %s", _exc)
 
             threading.Thread(target=_research_task, daemon=True).start()
+
+        # Spawn skill candidate promotion in background daemon thread
+        if trigger == "completed_run" and policy.allow_automatic_writes:
+            def _promote_task() -> None:
+                try:
+                    count = self._promote_skill_candidates(active_settings)
+                    if count:
+                        log.debug("Promoted %d skill candidate(s).", count)
+                except Exception as _exc:
+                    log.warning("_promote_skill_candidates background task failed: %s", _exc)
+            threading.Thread(target=_promote_task, daemon=True).start()
 
         return {
             "ok": True,
@@ -744,52 +752,87 @@ class AssistantCompanionService:
         )
         return True
 
-    def _promote_skill_candidates(self) -> None:
-        """Write auto-generated skill files for high-scoring unpromoted candidates."""
-        import re
-        import time
+    def _promote_skill_candidates(
+        self,
+        settings: dict[str, Any],
+        *,
+        _db_path: "pathlib.Path | None" = None,
+        _auto_gen_dir: "pathlib.Path | None" = None,
+    ) -> int:
+        """LLM-judge unreviewed skill candidates and promote generalizable ones to .md files.
 
+        Returns count of newly promoted candidates. Silently skips if LLM is unavailable.
+        """
+        from metis_app.services.skill_repository import (
+            SkillRepository,
+            _DEFAULT_CANDIDATES_DB_PATH,
+            _DEFAULT_SKILLS_DIR,
+        )
+        llm_settings = self._resolve_runtime_llm_settings(settings)
+        if llm_settings is None:
+            return 0
         try:
-            candidates = self._skill_repo.list_candidates(
-                db_path=self._candidates_db_path, limit=5
-            )
+            llm = create_llm(llm_settings)
         except Exception as exc:  # noqa: BLE001
-            log.debug("Skill candidate promotion skipped: %s", exc)
-            return
+            log.debug("_promote_skill_candidates: LLM unavailable: %s", exc)
+            return 0
 
-        auto_dir = self._skill_repo.skills_dir / "auto-generated"
-        auto_dir.mkdir(parents=True, exist_ok=True)
+        db_path = _db_path or getattr(self, "_candidates_db_path", None) or _DEFAULT_CANDIDATES_DB_PATH
+        instance_repo: SkillRepository | None = getattr(self, "_skill_repo", None)
+        auto_gen_dir = _auto_gen_dir or (
+            (instance_repo.skills_dir / "auto-generated") if instance_repo is not None
+            else (_DEFAULT_SKILLS_DIR / "auto-generated")
+        )
+        repo = instance_repo or SkillRepository(skills_dir=auto_gen_dir.parent)
+        candidates = repo.list_candidates(db_path=db_path, limit=3)
+        promoted_count = 0
 
+        judge_prompt = (
+            "You are a skill extraction assistant. Given a user query answered by "
+            "multi-iteration agentic RAG, decide if it represents a generalizable, "
+            "reusable skill pattern worth capturing. "
+            "Return ONLY compact JSON: "
+            '{"is_generalizable": bool, "skill_name": str, '
+            '"skill_description": str, "confidence": float}'
+        )
         for candidate in candidates:
-            cid = candidate["id"]
+            candidate_id = int(candidate["id"])
             query_text = str(candidate.get("query_text") or "")
-            score = float(candidate.get("convergence_score") or 0.0)
-            if score < 0.90:
+            try:
+                raw = llm.invoke([
+                    {"type": "system", "content": judge_prompt},
+                    {"type": "human", "content": f"Query: {query_text}"},
+                ])
+                text = str(getattr(raw, "content", raw) or "")
+                start, end = text.find("{"), text.rfind("}") + 1
+                if start == -1 or end <= start:
+                    continue
+                payload = json.loads(text[start:end])
+                if not isinstance(payload, dict):
+                    continue
+                if not bool(payload.get("is_generalizable")) or float(payload.get("confidence") or 0) < 0.7:
+                    continue
+                skill_name = str(payload.get("skill_name") or "auto_skill").strip()
+                skill_description = str(payload.get("skill_description") or "").strip()
+            except Exception as exc:  # noqa: BLE001
+                log.debug("_promote_skill_candidates: judge failed for id=%s: %s", candidate_id, exc)
                 continue
 
-            slug = re.sub(r"[^a-z0-9]+", "-", query_text.lower())[:40].strip("-")
-            if not slug:
-                slug = f"skill-{cid}"
-            ts = int(time.time())
-            skill_id = f"auto-{slug}-{ts}"
-            skill_path = auto_dir / f"{skill_id}.md"
-
-            content = (
-                f"---\n"
-                f"id: {skill_id}\n"
-                f"name: Auto: {query_text[:80]}\n"
-                f"description: Auto-generated from a high-convergence agentic run (score={score:.2f}).\n"
-                f"auto_generated: true\n"
-                f"convergence_score: {score}\n"
-                f"---\n\n"
-                f"Pattern discovered from successful agentic query:\n\n"
-                f"> {query_text}\n"
-            )
             try:
-                skill_path.write_text(content, encoding="utf-8")
-                self._skill_repo.mark_candidate_promoted(
-                    db_path=self._candidates_db_path, candidate_id=cid
+                auto_gen_dir.mkdir(parents=True, exist_ok=True)
+                slug = skill_name.lower().replace(" ", "-")
+                md_content = (
+                    f"---\nid: {slug}\nname: {skill_name}\n"
+                    f"description: {skill_description}\nenabled_by_default: false\n"
+                    f"priority: 0\ntriggers:\n  keywords: []\n  modes: []\n"
+                    f"  file_types: []\n  output_styles: []\nruntime_overrides: {{}}\n---\n\n"
+                    f"# {skill_name}\n\n{skill_description}\n\n"
+                    f"*Auto-generated from query:* {query_text}\n"
                 )
-                log.info("Promoted skill candidate %d → %s", cid, skill_path.name)
+                (auto_gen_dir / f"{candidate_id}.md").write_text(md_content, encoding="utf-8")
+                repo.mark_candidate_promoted(db_path=db_path, candidate_id=candidate_id)
+                promoted_count += 1
             except Exception as exc:  # noqa: BLE001
-                log.debug("Failed to write skill file %s: %s", skill_path, exc)
+                log.warning("_promote_skill_candidates: write failed for id=%s: %s", candidate_id, exc)
+
+        return promoted_count

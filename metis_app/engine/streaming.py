@@ -140,6 +140,9 @@ def stream_rag_answer(
       {"type": "refinement_retrieval", "run_id": str, "iteration": int,
                                         "sources": [...], "context_block": str,
                                         "top_score": float}                    # agentic_mode only
+      {"type": "iteration_complete",   "run_id": str, "iterations_used": int,
+                                        "convergence_score": float,
+                                        "query_text": str}                    # agentic_mode only
       {"type": "token",                "run_id": str, "text": str}  # 1..N
       {"type": "final",                "run_id": str, "answer_text": str, "sources": [...]}
       {"type": "error",                "run_id": str, "message": str}

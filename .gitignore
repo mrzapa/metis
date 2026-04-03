@@ -33,6 +33,7 @@ settings.json
 assistant_state.json
 rag_sessions.db
 app_state.db
+skill_candidates.db
 agentic_rag_runs.jsonl
 trace_store/
 indexes/

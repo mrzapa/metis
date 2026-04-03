@@ -422,15 +422,16 @@ class WorkspaceOrchestrator:
                         item if isinstance(item, EvidenceSource) else EvidenceSource.from_dict(item)
                         for item in list(event.get("sources") or [])
                     ]
-                elif event.get("type") == "iteration_complete":
-                    iterations_used = int(event.get("iterations_used") or 0)
-                    convergence_score = float(event.get("convergence_score") or 0.0)
+                elif (
+                    event.get("type") == "iteration_complete"
+                    and int(event.get("iterations_used", 0)) >= 2
+                ):
                     self._assistant_service.capture_skill_candidate(
                         db_path=_DEFAULT_CANDIDATES_DB_PATH,
                         query_text=str(event.get("query_text") or normalized.question),
-                        trace_json=json.dumps({"run_id": event_run_id, "iterations_used": iterations_used}),
-                        convergence_score=convergence_score,
-                        trace_iterations=iterations_used,
+                        trace_json=json.dumps(event),
+                        convergence_score=float(event.get("convergence_score") or 0.0),
+                        trace_iterations=int(event.get("iterations_used") or 0),
                     )
                 elif event.get("type") == "final" and session_id:
                     final_sources = [
