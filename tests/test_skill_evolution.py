@@ -89,6 +89,11 @@ def test_list_candidates_returns_top_unreviewed(tmp_path, repo):
     assert scores == sorted(scores, reverse=True)
 
 
+def test_stream_rag_answer_docstring_documents_iteration_complete():
+    from metis_app.engine.streaming import stream_rag_answer
+    assert "iteration_complete" in (stream_rag_answer.__doc__ or "")
+
+
 def test_reflect_spawns_promote_thread_on_completed_run(monkeypatch):
     """reflect() must spawn _promote_skill_candidates in a daemon thread for completed_run
     when allow_automatic_writes is True."""
