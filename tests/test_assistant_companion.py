@@ -413,3 +413,48 @@ def test_reflect_triggers_autonomous_research_when_enabled(tmp_path):
     # Wait for the daemon thread to call the orchestrator (up to 5s timeout)
     fired = research_called.wait(timeout=5.0)
     assert fired, "autonomous research daemon thread did not fire within 5 seconds"
+
+
+def test_reflect_promotes_high_scoring_skill_candidates(tmp_path) -> None:
+    """reflect() writes an auto-generated skill file for high-scoring candidates."""
+    import json as _json
+    from metis_app.services.assistant_companion import AssistantCompanionService
+    from metis_app.services.assistant_repository import AssistantRepository
+    from metis_app.services.skill_repository import SkillRepository
+
+    db_path = tmp_path / "skill_candidates.db"
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+
+    skill_repo = SkillRepository(skills_dir=skills_dir)
+    skill_repo.save_candidate(
+        db_path=db_path,
+        query_text="What is entropy?",
+        trace_json=_json.dumps({"run_id": "run-1", "iterations_used": 3}),
+        convergence_score=0.95,
+    )
+
+    svc = AssistantCompanionService(
+        repository=AssistantRepository(tmp_path / "state.json"),
+        skill_repo=skill_repo,
+        candidates_db_path=db_path,
+    )
+
+    settings = {
+        "assistant_identity": {"companion_enabled": True},
+        "assistant_policy": {
+            "reflection_enabled": True,
+            "allow_automatic_writes": True,
+            "reflection_backend": "heuristic",
+        },
+        "llm_provider": "mock",
+    }
+    svc.reflect(trigger="manual", settings=settings, force=True)
+
+    auto_dir = skills_dir / "auto-generated"
+    written = list(auto_dir.glob("*.md")) if auto_dir.exists() else []
+    assert len(written) == 1, f"Expected 1 auto-generated skill file, got: {written}"
+
+    # Candidate should be marked promoted so it isn't re-promoted next cycle
+    candidates = skill_repo.list_candidates(db_path=db_path, limit=10)
+    assert candidates == [], "Candidate should be marked promoted and no longer listed"

@@ -1472,6 +1472,47 @@ class TestStreamRagQuery:
         ]
 
 
+    def test_iteration_complete_calls_capture_skill_candidate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """stream_rag_query calls capture_skill_candidate when iterations_used >= 2."""
+        assistant_service = MagicMock()
+        assistant_service.get_snapshot.return_value = {"identity": {"name": "Companion"}}
+        assistant_service.capture_skill_candidate.return_value = True
+        orch = _make_orchestrator(assistant_service=assistant_service)
+
+        monkeypatch.setattr(
+            "metis_app.services.workspace_orchestrator._settings_store.load_settings",
+            lambda: {"selected_mode": "Q&A", "llm_provider": "mock"},
+        )
+        monkeypatch.setattr(
+            "metis_app.services.workspace_orchestrator.stream_rag_answer",
+            lambda req, cancel_token=None: iter(
+                [
+                    {"type": "run_started", "run_id": "run-c"},
+                    {
+                        "type": "iteration_complete",
+                        "run_id": "run-c",
+                        "iterations_used": 3,
+                        "convergence_score": 0.96,
+                        "query_text": "What is entropy?",
+                    },
+                    {"type": "final", "run_id": "run-c", "answer_text": "Entropy is..."},
+                ]
+            ),
+        )
+
+        list(orch.stream_rag_query(
+            RagQueryRequest(manifest_path="/tmp/m.json", question="What is entropy?", settings={})
+        ))
+
+        assert assistant_service.capture_skill_candidate.call_count == 1
+        kwargs = assistant_service.capture_skill_candidate.call_args.kwargs
+        assert kwargs["convergence_score"] == 0.96
+        assert kwargs["trace_iterations"] == 3
+        assert "entropy" in kwargs["query_text"].lower()
+
+
 class TestTraceHooks:
     def test_records_non_token_events_and_maps_stages(self) -> None:
         orch = _make_orchestrator()

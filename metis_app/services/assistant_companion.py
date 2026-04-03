@@ -19,6 +19,7 @@ from metis_app.models.assistant_types import (
     AssistantStatus,
 )
 from metis_app.services.assistant_repository import AssistantRepository
+from metis_app.services.skill_repository import SkillRepository, _DEFAULT_CANDIDATES_DB_PATH
 from metis_app.services.local_llm_recommender import LocalLlmRecommenderService
 from metis_app.services.local_model_registry import LocalModelRegistryService
 from metis_app.services.session_repository import SessionRepository
@@ -56,12 +57,16 @@ class AssistantCompanionService:
         model_registry: LocalModelRegistryService | None = None,
         session_repo: SessionRepository | None = None,
         trace_store: TraceStore | None = None,
+        skill_repo: SkillRepository | None = None,
+        candidates_db_path: pathlib.Path | None = None,
     ) -> None:
         self.repository = repository or AssistantRepository()
         self.recommender = recommender or LocalLlmRecommenderService()
         self.model_registry = model_registry or LocalModelRegistryService()
         self.session_repo = session_repo
         self.trace_store = trace_store or TraceStore()
+        self._skill_repo = skill_repo or SkillRepository()
+        self._candidates_db_path = candidates_db_path or _DEFAULT_CANDIDATES_DB_PATH
 
     def get_snapshot(self, settings: dict[str, Any] | None = None) -> dict[str, Any]:
         active_settings = dict(settings or settings_store.load_settings())
@@ -309,6 +314,9 @@ class AssistantCompanionService:
                 )
             )
         self.repository.add_brain_links(links, max_items=policy.max_brain_links)
+
+        if policy.allow_automatic_writes:
+            self._promote_skill_candidates()
 
         status.state = "reflected"
         status.last_reflection_at = memory_entry.created_at
@@ -735,3 +743,53 @@ class AssistantCompanionService:
             convergence_score=convergence_score,
         )
         return True
+
+    def _promote_skill_candidates(self) -> None:
+        """Write auto-generated skill files for high-scoring unpromoted candidates."""
+        import re
+        import time
+
+        try:
+            candidates = self._skill_repo.list_candidates(
+                db_path=self._candidates_db_path, limit=5
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Skill candidate promotion skipped: %s", exc)
+            return
+
+        auto_dir = self._skill_repo.skills_dir / "auto-generated"
+        auto_dir.mkdir(parents=True, exist_ok=True)
+
+        for candidate in candidates:
+            cid = candidate["id"]
+            query_text = str(candidate.get("query_text") or "")
+            score = float(candidate.get("convergence_score") or 0.0)
+            if score < 0.90:
+                continue
+
+            slug = re.sub(r"[^a-z0-9]+", "-", query_text.lower())[:40].strip("-")
+            if not slug:
+                slug = f"skill-{cid}"
+            ts = int(time.time())
+            skill_id = f"auto-{slug}-{ts}"
+            skill_path = auto_dir / f"{skill_id}.md"
+
+            content = (
+                f"---\n"
+                f"id: {skill_id}\n"
+                f"name: Auto: {query_text[:80]}\n"
+                f"description: Auto-generated from a high-convergence agentic run (score={score:.2f}).\n"
+                f"auto_generated: true\n"
+                f"convergence_score: {score}\n"
+                f"---\n\n"
+                f"Pattern discovered from successful agentic query:\n\n"
+                f"> {query_text}\n"
+            )
+            try:
+                skill_path.write_text(content, encoding="utf-8")
+                self._skill_repo.mark_candidate_promoted(
+                    db_path=self._candidates_db_path, candidate_id=cid
+                )
+                log.info("Promoted skill candidate %d → %s", cid, skill_path.name)
+            except Exception as exc:  # noqa: BLE001
+                log.debug("Failed to write skill file %s: %s", skill_path, exc)
