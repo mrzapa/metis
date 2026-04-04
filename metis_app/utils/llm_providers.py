@@ -14,10 +14,70 @@ from dataclasses import dataclass
 from typing import Any
 
 from metis_app.utils.model_caps import get_capped_output_tokens
+from metis_app.utils.credential_pool import CredentialPool as _CredentialPool
 
 _log = logging.getLogger(__name__)
 
 _llm_cache: dict[tuple, Any] = {}
+
+
+# ---------------------------------------------------------------------------
+# PooledLLM — retries with the next pool key on 401/429 errors
+# ---------------------------------------------------------------------------
+
+class PooledLLM:
+    """LLM wrapper that retries with the next pool key on 401/429 errors.
+
+    Matches the invoke() / stream() interface of LangChain BaseChatModel.
+    Ported from Hermes Agent v0.7.0 credential_pool pattern.
+    """
+
+    _AUTH_KEYWORDS = ("401", "unauthorized", "authentication", "invalid api key", "ratelimit", "429")
+
+    def __init__(
+        self,
+        pool: _CredentialPool,
+        factory: Any,  # Callable[[str], LLM]
+        initial_key: str,
+    ) -> None:
+        self._pool = pool
+        self._factory = factory
+        self._current_key = initial_key
+        self._llm = factory(initial_key)
+
+    def _is_auth_error(self, exc: Exception) -> bool:
+        msg = str(exc).lower()
+        return any(kw in msg for kw in self._AUTH_KEYWORDS)
+
+    def _rotate(self) -> None:
+        self._pool.report_failure(self._current_key)
+        self._current_key = self._pool.get_key()  # raises RuntimeError if pool empty
+        self._llm = self._factory(self._current_key)
+
+    def invoke(self, messages: list[Any]) -> Any:
+        try:
+            result = self._llm.invoke(messages)
+            self._pool.report_success(self._current_key)
+            return result
+        except Exception as exc:
+            if self._is_auth_error(exc):
+                self._rotate()
+                result = self._llm.invoke(messages)
+                self._pool.report_success(self._current_key)
+                return result
+            raise
+
+    def stream(self, messages: list[Any]) -> Any:
+        try:
+            yield from self._llm.stream(messages)
+            self._pool.report_success(self._current_key)
+        except Exception as exc:
+            if self._is_auth_error(exc):
+                self._rotate()
+                yield from self._llm.stream(messages)
+                self._pool.report_success(self._current_key)
+            else:
+                raise
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +246,44 @@ def create_llm(settings: dict[str, Any]) -> Any:
         "create_llm: provider=%s model=%s temp=%.2f max_tokens=%d",
         provider, model_name, temperature, output_max,
     )
+
+    # --- Credential pool rotation ---
+    _pool_keys = list(
+        (settings.get("credential_pool") or {}).get(provider) or []
+    )
+    _POOL_KEY_MAP: dict[str, str] = {
+        "openai": "api_key_openai",
+        "anthropic": "api_key_anthropic",
+        "google": "api_key_google",
+        "xai": "api_key_xai",
+    }
+    if _pool_keys and provider in _POOL_KEY_MAP:
+        _pool = _CredentialPool(_pool_keys)
+        _initial_key = _pool.get_key()
+
+        def _llm_factory(
+            key: str,
+            _p: str = provider,
+            _m: str = model_name,
+            _t: float = temperature,
+            _o: int = output_max,
+            _s: dict = settings,
+            _km: dict = _POOL_KEY_MAP,
+        ) -> Any:
+            _settings_copy = dict(_s)
+            _settings_copy[_km[_p]] = key
+            if _p == "openai":
+                return _create_openai(_settings_copy, _m, _t, _o)
+            if _p == "anthropic":
+                return _create_anthropic(_settings_copy, _m, _t, _o)
+            if _p == "google":
+                return _create_google(_settings_copy, _m, _t, _o)
+            if _p == "xai":
+                return _create_xai(_settings_copy, _m, _t, _o)
+            raise ValueError(f"Credential pool not supported for provider: {_p}")
+
+        _pool.report_success(_initial_key)
+        return PooledLLM(pool=_pool, factory=_llm_factory, initial_key=_initial_key)
 
     _UNCACHED = frozenset({"local_gguf", "mock"})
     if provider not in _UNCACHED:

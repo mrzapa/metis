@@ -277,6 +277,7 @@ def build_system_prompt(
     agentic_mode: bool,
     agentic_max_iterations: int,
     citation_policy_append: list[str],
+    enabled_skills: list[SkillDefinition] | None = None,
 ) -> str:
     base_instructions = str(
         settings.get("system_instructions")
@@ -291,6 +292,22 @@ def build_system_prompt(
             f"mode={retrieval_mode}, retrieve_k={retrieve_k}, final_k={final_k}, mmr_lambda={mmr_lambda}."
         ),
     ]
+    # --- Skill discovery index (progressive disclosure) ---
+    # Inject compact one-liner per enabled skill so the LLM knows what's
+    # available. Full skill bodies are only injected for *selected* skills below.
+    if enabled_skills:
+        from metis_app.services.skill_repository import SkillSummary as _SS  # noqa: PLC0415
+        _index_lines = [
+            _SS(
+                skill_id=sk.skill_id,
+                name=sk.name,
+                description=sk.description,
+                keywords=list((sk.triggers or {}).get("keywords") or []),
+            ).format_index_line()
+            for sk in enabled_skills
+        ]
+        segments.append("Available skills:\n" + "\n".join(_index_lines))
+
     if selected_skills:
         segments.append("\n".join(_selected_skill_lines(selected_skills)))
         skill_blocks = ["Selected skill instructions:"]
@@ -439,6 +456,7 @@ def resolve_runtime_settings(
         agentic_mode=agentic_mode,
         agentic_max_iterations=agentic_max_iterations,
         citation_policy_append=citation_policy_append,
+        enabled_skills=enabled_skills,
     )
     conflicts = _scalar_conflicts(selected_skills)
     next_session_state = (session_skill_state or SkillSessionState()).normalized()

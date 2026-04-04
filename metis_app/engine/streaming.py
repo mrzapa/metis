@@ -199,6 +199,44 @@ def _format_swarm_report(report: dict[str, Any]) -> str:
     return "\n".join(lines).strip()
 
 
+def _compress_context(
+    context: str,
+    question: str,
+    llm: Any,
+    iteration: int,
+) -> str:
+    """Compress *context* using a structured summary template.
+
+    Ported from Hermes Agent v0.7.0 context_compressor.py.
+    Template: Goal / Key Findings / Remaining Gaps / Next Steps.
+    Falls back to hard truncation on LLM failure.
+    """
+    system = (
+        "You are a concise research summariser. Compress the following retrieved "
+        "context into a structured summary. Return ONLY:\n\n"
+        f"## Compression Summary (pass {iteration})\n"
+        "**Goal:** {one sentence restating the original question}\n"
+        "**Key Findings:**\n- (bullet points of the most important facts)\n"
+        "**Remaining Gaps:** (what is still unknown or unresolved)\n"
+        "**Next Steps:** (what additional retrieval would help)\n\n"
+        "Preserve all entity names, dates, numbers, and key claims. "
+        "Be dense — every sentence should carry information."
+    )
+    try:
+        from metis_app.engine.querying import _response_text as _rt  # noqa: PLC0415
+        return _rt(
+            llm.invoke([
+                {"type": "system", "content": system},
+                {
+                    "type": "human",
+                    "content": f"ORIGINAL QUESTION:\n{question}\n\nCONTEXT TO COMPRESS:\n{context[:6000]}",
+                },
+            ])
+        )
+    except Exception:  # noqa: BLE001
+        return context[:_MAX_CONTEXT_CHARS]
+
+
 def _dedup_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return *sources* with duplicates removed, preserving insertion order.
 
@@ -566,33 +604,29 @@ def stream_rag_answer(
                     break  # No new evidence found — stop the loop.
 
                 new_context_block = "\n\n".join(new_context_parts)
-                # Sliding-window compaction: on iteration 3+, LLM-compress the
-                # oldest half of accumulated context instead of hard-truncating.
                 candidate = accumulated_context + "\n\n" + new_context_block
-                if iteration >= 3 and len(candidate) > _MAX_CONTEXT_CHARS:
-                    _split = len(accumulated_context) // 2
-                    _old_half = accumulated_context[:_split]
-                    _new_half = accumulated_context[_split:]
+                _compress_enabled = bool(settings.get("agentic_context_compress_enabled", True))
+                _compress_threshold = int(
+                    settings.get("agentic_context_compress_threshold_chars", _MAX_CONTEXT_CHARS)
+                    or _MAX_CONTEXT_CHARS
+                )
+                if _compress_enabled and iteration >= 3 and len(candidate) > _compress_threshold:
                     try:
-                        _compact = _response_text(
-                            llm.invoke([
-                                {
-                                    "type": "system",
-                                    "content": (
-                                        "You are a concise summariser. Compress the following "
-                                        "retrieved context into a dense 200-word factual summary. "
-                                        "Preserve all entity names, dates, and key claims. "
-                                        "Return only the summary, no preamble."
-                                    ),
-                                },
-                                {"type": "human", "content": _old_half[:4000]},
-                            ])
+                        _compact = _compress_context(
+                            accumulated_context, question, llm, iteration
                         )
-                        accumulated_context = _compact + "\n\n" + _new_half + "\n\n" + new_context_block
+                        accumulated_context = _compact + "\n\n" + new_context_block
+                        yield _emit({
+                            "type": "context_compressed",
+                            "run_id": run_id,
+                            "iteration": iteration,
+                            "chars_before": len(candidate),
+                            "chars_after": len(accumulated_context),
+                        })
                     except Exception:  # noqa: BLE001
-                        accumulated_context = candidate[:_MAX_CONTEXT_CHARS]
+                        accumulated_context = candidate[:_compress_threshold]
                 else:
-                    accumulated_context = candidate[:_MAX_CONTEXT_CHARS]
+                    accumulated_context = candidate[:_compress_threshold]
                 accumulated_sources = _dedup_sources(
                     accumulated_sources + iteration_new_sources
                 )
@@ -753,4 +787,4 @@ def stream_rag_answer(
         yield _emit({"type": "error", "run_id": run_id, "message": str(exc)})
 
 
-__all__ = ["stream_rag_answer", "_identify_gaps", "_dedup_sources"]
+__all__ = ["stream_rag_answer", "_identify_gaps", "_dedup_sources", "_compress_context"]

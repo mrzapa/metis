@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass as _dataclass
 from dataclasses import replace
 import pathlib
 from typing import Any
@@ -9,6 +10,19 @@ from typing import Any
 import yaml
 
 from metis_app.models.parity_types import SkillDefinition
+
+
+@_dataclass
+class SkillSummary:
+    """Lightweight skill descriptor for system-prompt index injection."""
+    skill_id: str
+    name: str
+    description: str
+    keywords: list[str]  # from triggers.keywords
+
+    def format_index_line(self) -> str:
+        kw = ", ".join(self.keywords[:4]) if self.keywords else "—"
+        return f"- {self.skill_id} ({self.name}): {self.description}  [triggers: {kw}]"
 
 _HERE = pathlib.Path(__file__).resolve().parent
 _PACKAGE_ROOT = _HERE.parent
@@ -260,6 +274,22 @@ class SkillRepository:
 
     def enabled_skills(self, settings: dict[str, Any]) -> list[SkillDefinition]:
         return [replace(skill) for skill in self.list_valid_skills() if self.is_globally_enabled(skill, settings)]
+
+    def load_skill_index(self) -> list[SkillSummary]:
+        """Return compact summaries of all *valid* skills — no body content.
+
+        Used to build a discovery index in the system prompt without bloating
+        it with full SKILL.md bodies (progressive disclosure pattern).
+        """
+        return [
+            SkillSummary(
+                skill_id=skill.skill_id,
+                name=skill.name,
+                description=skill.description,
+                keywords=list((skill.triggers or {}).get("keywords") or []),
+            )
+            for skill in self.list_valid_skills()
+        ]
 
     def set_global_enabled(self, settings: dict[str, Any], skill_id: str, enabled: bool) -> dict[str, Any]:
         normalized = str(skill_id or "").strip()

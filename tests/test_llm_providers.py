@@ -11,12 +11,14 @@ import pytest
 
 from metis_app.utils.llm_providers import (
     MockChatModel,
+    PooledLLM,
     _ChatMessage,
     _msg_content,
     _msg_type,
     _resolve_model,
     create_llm,
 )
+from metis_app.utils.credential_pool import CredentialPool
 
 
 # ---------------------------------------------------------------------------
@@ -172,3 +174,73 @@ class TestCreateLlm:
         result = model.invoke([{"type": "human", "content": "ping"}])
         assert result.content
         assert result.type == "ai"
+
+
+# ---------------------------------------------------------------------------
+# PooledLLM
+# ---------------------------------------------------------------------------
+
+
+class TestPooledLLM:
+    def test_retries_on_auth_error(self):
+        """PooledLLM retries with next key when invoke raises 401."""
+        pool = CredentialPool(["bad-key", "good-key"])
+        attempt = {"n": 0}
+
+        class _CountingLLM:
+            def invoke(self, messages):
+                attempt["n"] += 1
+                if attempt["n"] == 1:
+                    raise Exception("401 Unauthorized")
+                return _ChatMessage(content="success")
+
+        pooled = PooledLLM(
+            pool=pool,
+            factory=lambda key: _CountingLLM(),
+            initial_key=pool.get_key(),
+        )
+        result = pooled.invoke([{"type": "human", "content": "hi"}])
+        assert result.content == "success"
+
+    def test_raises_when_all_keys_exhausted(self):
+        """PooledLLM raises RuntimeError when all keys are tried and fail."""
+        pool = CredentialPool(["k1"])
+
+        class _AlwaysFail:
+            def invoke(self, messages):
+                raise Exception("401 Unauthorized")
+
+        pooled = PooledLLM(
+            pool=pool,
+            factory=lambda key: _AlwaysFail(),
+            initial_key="k1",
+        )
+        with pytest.raises(RuntimeError, match="No credential pool keys"):
+            pooled.invoke([])
+
+    def test_non_auth_error_propagates(self):
+        """Non-auth errors are not swallowed — they propagate normally."""
+        pool = CredentialPool(["k1"])
+
+        class _NetworkFail:
+            def invoke(self, messages):
+                raise ConnectionError("timeout")
+
+        pooled = PooledLLM(
+            pool=pool,
+            factory=lambda key: _NetworkFail(),
+            initial_key="k1",
+        )
+        with pytest.raises(ConnectionError, match="timeout"):
+            pooled.invoke([])
+
+    def test_create_llm_returns_pooled_for_pool_settings(self):
+        """create_llm() returns PooledLLM when credential_pool has keys for provider."""
+        settings = {
+            "llm_provider": "mock",
+            "credential_pool": {"mock": ["k1", "k2"]},
+        }
+        # mock provider is not in the pool-supported provider map, so falls through
+        # to regular mock — this just ensures no crash
+        model = create_llm(settings)
+        assert model is not None

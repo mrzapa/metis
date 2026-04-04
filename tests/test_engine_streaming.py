@@ -679,3 +679,60 @@ def test_stream_final_auto_emits_only_nyx_artifacts_when_nyx_runtime_present(
     assert [artifact["type"] for artifact in final.get("artifacts") or []] == [
         "nyx_component_selection"
     ]
+
+
+# ---------------------------------------------------------------------------
+# Task 5: context compression
+# ---------------------------------------------------------------------------
+
+
+def test_compress_context_returns_structured_summary() -> None:
+    """_compress_context calls LLM with structured template and returns its output."""
+    from metis_app.engine.streaming import _compress_context
+    from metis_app.utils.llm_providers import _ChatMessage
+
+    class _MockLLM:
+        def invoke(self, messages):
+            system = messages[0]["content"]
+            assert "Key Findings" in system or "Goal" in system
+            return _ChatMessage(content="STRUCTURED SUMMARY")
+
+    result = _compress_context(
+        context="Some long context text.",
+        question="What is the answer?",
+        llm=_MockLLM(),
+        iteration=3,
+    )
+    assert result == "STRUCTURED SUMMARY"
+
+
+def test_context_compression_respects_enabled_flag(tmp_path, monkeypatch) -> None:
+    """When agentic_context_compress_enabled=False, no compression fires."""
+    compressed_calls = []
+
+    def _mock_compress(context, question, llm, iteration):
+        compressed_calls.append(iteration)
+        return "COMPRESSED"
+
+    monkeypatch.setattr(engine_streaming, "_compress_context", _mock_compress)
+
+    build_result = _build_test_index(tmp_path, monkeypatch)
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who wrote the first algorithm?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "selected_mode": "Q&A",
+            "top_k": 2,
+            "retrieval_k": 2,
+            "agentic_mode": True,
+            "agentic_iteration_budget": 3,
+            "agentic_context_compress_enabled": False,
+            "agentic_context_compress_threshold_chars": 1,
+        },
+    )
+    events = list(stream_rag_answer(req))
+    assert "error" not in [e.get("type") for e in events]
+    assert compressed_calls == []  # disabled — must not fire
