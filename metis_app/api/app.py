@@ -51,6 +51,7 @@ from . import sessions as _sessions
 from . import settings as _settings
 from . import assistant as _assistant
 from . import autonomous as _autonomous
+from . import comets as _comets
 from .models import (
     DirectQueryRequestModel,
     DirectQueryResultModel,
@@ -266,6 +267,7 @@ def create_app() -> FastAPI:
     app.include_router(_autonomous.router, dependencies=_auth)
     app.include_router(_features.router, dependencies=_auth)
     app.include_router(_observe.router, dependencies=_auth)
+    app.include_router(_comets.router, dependencies=_auth)
 
     @app.get("/v1/version")
     def api_version() -> dict[str, str]:

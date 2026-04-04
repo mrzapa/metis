@@ -2804,3 +2804,104 @@ export async function pollSync(since: number): Promise<{ version: number; change
   }
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Comet News API
+// ---------------------------------------------------------------------------
+
+import type { CometEvent } from "@/lib/comet-types";
+
+export async function fetchActiveComets(): Promise<CometEvent[]> {
+  const res = await apiFetch(`${await getApiBase()}/v1/comets/active`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function pollComets(): Promise<{ comets: CometEvent[]; total_active: number }> {
+  const res = await apiFetch(`${await getApiBase()}/v1/comets/poll`, { method: "POST" });
+  if (!res.ok) return { comets: [], total_active: 0 };
+  return res.json();
+}
+
+export async function absorbComet(cometId: string): Promise<{ ok: boolean }> {
+  const res = await apiFetch(`${await getApiBase()}/v1/comets/${encodeURIComponent(cometId)}/absorb`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(`Failed to absorb comet ${cometId}`);
+  return res.json();
+}
+
+export async function dismissComet(cometId: string): Promise<{ ok: boolean }> {
+  const res = await apiFetch(`${await getApiBase()}/v1/comets/${encodeURIComponent(cometId)}/dismiss`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(`Failed to dismiss comet ${cometId}`);
+  return res.json();
+}
+
+/**
+ * SSE stream of comet lifecycle events (hydrate-then-stream pattern).
+ */
+export async function streamCometEvents(options: {
+  signal?: AbortSignal;
+  pollSeconds?: number;
+  onUpdate: (comets: CometEvent[]) => void;
+}): Promise<() => void> {
+  const { signal, pollSeconds = 10, onUpdate } = options;
+  const base = await getApiBase();
+
+  // 1. Hydrate immediately
+  const initial = await fetchActiveComets();
+  onUpdate(initial);
+
+  // 2. Open SSE for live updates
+  const params = new URLSearchParams({ poll_seconds: String(pollSeconds) });
+  const url = `${base}/v1/comets/events?${params}`;
+  const controller = new AbortController();
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
+  }
+
+  const res = await apiFetch(url, { signal: controller.signal });
+  if (!res.ok || !res.body) {
+    return () => controller.abort();
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  (async () => {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          const dataLine = part.split("\n").find((l) => l.startsWith("data: "));
+          if (!dataLine) continue;
+          try {
+            const payload = JSON.parse(dataLine.slice(6)) as { comets: CometEvent[] };
+            onUpdate(payload.comets ?? []);
+          } catch {
+            // skip malformed events
+          }
+        }
+      }
+    } catch {
+      // connection closed or aborted
+    }
+  })();
+
+  return () => controller.abort();
+}

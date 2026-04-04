@@ -23,7 +23,16 @@ const StarDiveOverlay = dynamic(
 );
 import { StarDetailsPanel } from "@/components/constellation/star-observatory-dialog";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
+import { useCometNews } from "@/hooks/use-news-comets";
 import { deleteIndex, fetchIndexes, previewLearningRoute, subscribeCompanionActivity } from "@/lib/api";
+import type { CometData, CometEvent } from "@/lib/comet-types";
+import {
+  makeCometData,
+  tickComet,
+  drawComets as drawCometSprites,
+  drawPolarisTendril,
+  drawAbsorptionBurst,
+} from "@/lib/constellation-comets";
 import {
   buildBrainPlacementIntent,
   buildFacultyAnchoredPlacement,
@@ -817,6 +826,13 @@ export default function Home() {
     updateUserStarById,
     starLimit,
   } = useConstellationStars();
+
+  // Comet-news: subscribe to live news events rendered as comets.
+  // TODO: wire news_comets_enabled from user settings when settings context is available.
+  const { comets: serverComets } = useCometNews(true);
+  const serverCometsRef = useRef(serverComets);
+  serverCometsRef.current = serverComets;
+
   const [addMessage, setAddMessage] = useState<string | null>(null);
   const [selectedUserStarId, setSelectedUserStarId] = useState<string | null>(null);
   const [starDetailsOpen, setStarDetailsOpen] = useState(false);
@@ -2176,6 +2192,33 @@ export default function Home() {
     const dust: DustData[] = [];
     for (let i = 0; i < 40; i++) dust.push(makeDust(W, H));
 
+    /* comets — news items rendered as comets across the constellation */
+    const cometSprites: CometData[] = [];
+    const absorbBursts: { x: number; y: number; color: [number, number, number]; startedAt: number }[] = [];
+    let lastCometSyncSerial = -1;
+
+    /** Reconcile server-side comet events into the closure-scoped cometSprites array. */
+    function syncComets(serverComets: CometEvent[]) {
+      const existing = new Set(cometSprites.map((c) => c.comet_id));
+      for (const evt of serverComets) {
+        if (existing.has(evt.comet_id)) continue;
+        // Find the target faculty node position
+        const targetNode = nodes.find((n) => n.concept.faculty.id === evt.faculty_id);
+        const tx = targetNode ? targetNode.x : W / 2;
+        const ty = targetNode ? targetNode.y : H / 2;
+        const color = getFacultyColor(evt.faculty_id);
+        cometSprites.push(makeCometData(evt, W, H, color, tx, ty));
+      }
+      // Remove comets no longer on server (dismissed/absorbed externally)
+      const serverIds = new Set(serverComets.map((c) => c.comet_id));
+      for (let i = cometSprites.length - 1; i >= 0; i--) {
+        if (!serverIds.has(cometSprites[i].comet_id) && cometSprites[i].phase !== "fading" && cometSprites[i].phase !== "absorbed") {
+          cometSprites[i].phase = "fading";
+          cometSprites[i].phaseStartedAt = performance.now();
+        }
+      }
+    }
+
     const mouse = mouseRef.current;
     let awakened = false;
     let awakenStart = 0;
@@ -3444,11 +3487,45 @@ export default function Home() {
 
       drawNebulae();
       drawDust();
+
+      // ── Comet lifecycle: tick, draw, burst effects ──
+      syncComets(serverCometsRef.current);
+      for (let i = cometSprites.length - 1; i >= 0; i--) {
+        const shouldRemove = tickComet(cometSprites[i], ts);
+        if (shouldRemove) {
+          if (cometSprites[i].phase === "absorbed") {
+            absorbBursts.push({ x: cometSprites[i].targetX, y: cometSprites[i].targetY, color: cometSprites[i].color, startedAt: ts });
+          }
+          cometSprites.splice(i, 1);
+        }
+      }
+      if (cometSprites.length > 0 && ctx) {
+        drawCometSprites(ctx, cometSprites, ts);
+      }
+      // Absorption burst effects (persists briefly after comet absorbed)
+      for (let i = absorbBursts.length - 1; i >= 0; i--) {
+        const b = absorbBursts[i];
+        const progress = (ts - b.startedAt) / 600;
+        if (progress >= 1) { absorbBursts.splice(i, 1); continue; }
+        if (ctx) drawAbsorptionBurst(ctx, b.x, b.y, b.color, progress);
+      }
+
       drawNodes(ts);
       drawUserStarEdges(ts);
       drawAddCandidatePreview(ts);
       drawUserStars(ts);
       drawPolarisMetis(ts);
+
+      // ── Polaris tendrils reaching toward approaching/absorbing comets ──
+      if (cometSprites.length > 0 && ctx) {
+        const polCam = readBackgroundCamera();
+        const polProj = projectConstellationPoint({ x: CORE_CENTER_X, y: CORE_CENTER_Y }, W, H, polCam);
+        const polPx = polProj.x + (mouse.x - W / 2) * 0.015;
+        const polPy = polProj.y + (mouse.y - H / 2) * 0.015;
+        for (const comet of cometSprites) {
+          drawPolarisTendril(ctx, polPx, polPy, comet, ts);
+        }
+      }
 
       if (canvasOverlayAlpha < 0.99) {
         ctx!.restore();
@@ -4136,6 +4213,8 @@ export default function Home() {
 
     return () => {
       cancelAnimationFrame(animFrame);
+      cometSprites.length = 0;
+      absorbBursts.length = 0;
       window.removeEventListener("resize", onResize);
       canvas.removeEventListener("pointerdown", onCanvasPointerDown);
       canvas.removeEventListener("lostpointercapture", onCanvasLostPointerCapture);

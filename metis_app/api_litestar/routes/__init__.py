@@ -3,6 +3,7 @@
 from . import app_state
 from . import assistant
 from . import autonomous
+from . import comets
 from . import core
 from . import features
 from . import gguf
@@ -20,6 +21,7 @@ __all__ = [
 	"app_state",
 	"assistant",
 	"autonomous",
+	"comets",
 	"core",
 	"features",
 	"gguf",

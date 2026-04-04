@@ -187,5 +187,11 @@
   "enable_mces": false,
   "mces_roi_window": 1800,
   "enable_knowledge_cache": false,
-  "knowledge_cache_ttl_hours": 24
+  "knowledge_cache_ttl_hours": 24,
+  "news_comets_enabled": false,
+  "news_comet_sources": ["rss"],
+  "news_comet_poll_interval_seconds": 300,
+  "news_comet_max_active": 5,
+  "news_comet_auto_absorb_threshold": 0.75,
+  "news_comet_rss_feeds": []
 }

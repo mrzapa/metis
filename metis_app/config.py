@@ -106,5 +106,13 @@ class Config:
     output_style: str = "Default answer"
     selected_mode: str = "Q&A"
 
+    # News comets
+    news_comets_enabled: bool = False
+    news_comet_sources: list[str] = field(default_factory=lambda: ["rss"])
+    news_comet_poll_interval_seconds: int = 300
+    news_comet_max_active: int = 5
+    news_comet_auto_absorb_threshold: float = 0.75
+    news_comet_rss_feeds: list[str] = field(default_factory=list)
+
     # API keys (populated from config file or env; never hard-coded)
     api_keys: dict[str, str] = field(default_factory=dict)
