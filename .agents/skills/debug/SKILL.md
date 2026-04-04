@@ -116,3 +116,20 @@ concurrent runs.
 - Check rotated logs (`log/symphony.log*`) before concluding data is missing.
 - If required context fields are missing in new log statements, align with
   `elixir/docs/logging.md` conventions.
+
+<!-- Evolution: 2026-04-04 | source: ep-2026-04-04-001 | skill: debug -->
+
+## Stray Git Conflict Markers
+
+After resolving merge conflicts, always grep the full repo before running tests:
+
+```bash
+rg -n "^[<=>]{7}" .
+```
+
+Stray `<<<<<<< HEAD`, `=======`, or `>>>>>>>` markers cause a Python
+`SyntaxError` (or JS parse error) that many editors silently miss. The symptom
+is a confusing runtime failure at a line number that makes no logical sense.
+
+When a conflict has two non-overlapping code blocks on each side, keep **both**
+rather than discarding one arbitrarily.
