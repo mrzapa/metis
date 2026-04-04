@@ -19,10 +19,20 @@
       "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" diff 427b815~1 427b815 -- \"apps/metis-web/app/page.tsx\" \"apps/metis-web/lib/constellation-home.ts\")",
       "Bash(python -m pytest tests/test_iterrag_convergence.py tests/test_skill_evolution.py -v --tb=short)",
       "Bash(python -m pytest tests/test_autonomous_research_service.py tests/test_workspace_orchestrator.py -v --tb=short)",
-      "Bash(python -c \"import ast; [ast.parse\\(open\\(f\\).read\\(\\)\\) or print\\(f''OK: {f}''\\) for f in [''metis_app/services/hybrid_scorer.py'',''metis_app/services/retrieval_pipeline.py'',''metis_app/services/vector_store.py'']]\")",
-      "Bash(python -m pytest tests/ -q --tb=short -x)",
-      "Bash(.venv/Scripts/pip install:*)",
-      "Bash(python -c \"import rank_bm25; print\\(''rank_bm25 installed:'', rank_bm25.__version__\\)\")"
+      "Bash(npm run:*)",
+      "Skill(commit-commands:commit-push-pr)",
+      "Skill(commit-commands:commit-push-pr:*)",
+      "Bash(powershell -Command \"netstat -ano | findstr :3000\")",
+      "Bash(powershell -Command \"Stop-Process -Id 24556 -Force; Write-Host done\")",
+      "Bash(node -e \":*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(find /c/Users/samwe/Documents/metis/.claude/worktrees/admiring-goodall -name *.md -path */plans/*)",
+      "Bash(git -C \"C:/Users/samwe/Documents/metis/.claude/worktrees/admiring-goodall\" show e6eb0f3:apps/metis-web/components/home/star-dive-overlay.tsx)",
+      "Bash(git -C \"C:/Users/samwe/Documents/metis/.claude/worktrees/admiring-goodall\" ls-files --error-unmatch \"apps/metis-web/components/home/star-dive-overlay.tsx\")",
+      "Bash(node_modules/.bin/tsc --noEmit -p apps/metis-web/tsconfig.json)",
+      "Bash(\"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\\\\apps\\\\metis-web\\\\node_modules/.bin/tsc\" --noEmit -p \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\\\\.claude\\\\worktrees\\\\admiring-goodall\\\\apps\\\\metis-web\\\\tsconfig.json\")",
+      "Bash(xargs grep:*)"
     ]
   }
 }

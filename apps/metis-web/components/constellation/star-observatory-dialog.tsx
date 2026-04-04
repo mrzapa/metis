@@ -222,7 +222,7 @@ function StarMiniPreview({
     if (!canvas) return;
 
     const DPR = Math.min(typeof window !== "undefined" ? (window.devicePixelRatio ?? 1) : 1, 3);
-    const PX = 320;
+    const PX = 160;
     canvas.width = PX * DPR;
     canvas.height = PX * DPR;
     canvas.style.width = `${PX}px`;
@@ -813,9 +813,15 @@ export function StarDetailsPanel({
         showCloseButton={true}
         showOverlay={false}
       >
-        <div className="border-b border-white/10 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(10,13,23,0.92))] px-5 py-5 sm:px-6">
+        <div className="relative border-b border-white/10 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(10,13,23,0.92))] px-5 py-5 sm:px-6">
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className="absolute right-3 top-3 flex size-3.5 items-center justify-center rounded-full bg-[#ff5f57] transition-opacity hover:opacity-80"
+            aria-label="Close"
+          />
           <DialogHeader className="gap-3">
-            <div className="flex items-start justify-between gap-4 pr-10">
+            <div className="flex items-start justify-between gap-4 pr-6">
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.32em] text-[#d6b361]">
                   <Sparkles className="size-3.5" />
