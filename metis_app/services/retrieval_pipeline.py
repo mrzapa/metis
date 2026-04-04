@@ -283,21 +283,6 @@ def execute_retrieval_plan(
 
     effective_queries = [question]
 
-    # ── Hybrid rerank primary result ─────────────────────────────────────────
-    if alpha < 1.0 and primary_result.hit_indices:
-        chunk_texts = [str(c.get("text") or "") for c in bundle.chunks]
-        top_k = int(settings.get("top_k", 5) or 5)
-        reranked_indices = hybrid_rerank(
-            list(primary_result.hit_indices),
-            {idx: float(s) for idx, s in zip(primary_result.hit_indices, [primary_result.top_score] * len(primary_result.hit_indices))},
-            chunk_texts,
-            question,
-            alpha=alpha,
-            top_k=top_k,
-        )
-        dense_scores = _score_bundle_against_question(bundle, question, settings)
-        primary_result = build_query_result(bundle, question, reranked_indices, dense_scores, settings=settings)
-
     stages: list[RetrievalStage] = [
         RetrievalStage(
             stage_type="retrieval_complete",
