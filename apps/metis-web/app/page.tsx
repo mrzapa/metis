@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { LandingStarfieldFrame, LandingWebglStar } from "@/components/home/landing-starfield-webgl.types";
+import type { StarDiveOverlayView } from "@/components/home/star-dive-overlay";
 
 const LandingStarfieldWebgl = dynamic(
   () =>
@@ -13,7 +14,6 @@ const LandingStarfieldWebgl = dynamic(
     ),
   { ssr: false, loading: () => null },
 );
-import type { StarDiveOverlayView } from "@/components/home/star-dive-overlay";
 const StarDiveOverlay = dynamic(
   () =>
     import("@/components/home/star-dive-overlay").then(
