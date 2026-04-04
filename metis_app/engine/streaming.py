@@ -293,7 +293,7 @@ def stream_rag_answer(
                 # For Evidence Pack mode, classify each source into belief tiers.
                 _ret_sources = list(payload.get("sources") or [])
                 _ep_mode = str(settings.get("selected_mode", "") or "")
-                if _ep_mode == "Evidence Pack" and _ret_sources:
+                if _ep_mode in {"Evidence Pack", "Research"} and _ret_sources:
                     try:
                         _tiers = _classify_source_tiers(question, _ret_sources, llm)
                         for _i, _src in enumerate(_ret_sources):
@@ -386,6 +386,7 @@ def stream_rag_answer(
         # ------------------------------------------------------------------
         # Simulation mode – run swarm persona simulation instead of the
         # standard agentic RAG loop.
+        # Emits swarm_* events that the frontend simulation stage handles.
         # ------------------------------------------------------------------
         _mode = str(settings.get("selected_mode", "Q&A") or "Q&A")
         if _mode == "Simulation":
@@ -393,6 +394,7 @@ def stream_rag_answer(
 
             n_personas = max(1, int(settings.get("swarm_n_personas", 8) or 8))
             n_rounds = max(1, int(settings.get("swarm_n_rounds", 4) or 4))
+            _round_deltas: list[float] = []
 
             for swarm_event in stream_swarm_simulation(
                 context_text=accumulated_context,
@@ -401,45 +403,74 @@ def stream_rag_answer(
                 n_rounds=n_rounds,
             ):
                 etype = swarm_event.get("event", "")
-                if etype == "persona_created":
+                if etype == "topics_extracted":
                     yield _emit({
-                        "type": "persona_created",
+                        "type": "swarm_start",
                         "run_id": run_id,
-                        "agent": swarm_event.get("agent", {}),
+                        "n_personas": n_personas,
+                        "n_rounds": n_rounds,
+                        "topics": list(swarm_event.get("topics") or []),
+                    })
+                elif etype == "persona_created":
+                    _agent = dict(swarm_event.get("agent") or {})
+                    yield _emit({
+                        "type": "swarm_persona_vote",
+                        "run_id": run_id,
+                        "persona": str(_agent.get("name", "")),
+                        "stance": str(_agent.get("stance_summary", "")),
+                        "summary": str(_agent.get("background", "")),
                     })
                 elif etype == "simulation_round_start":
+                    _round_deltas = []
                     yield _emit({
-                        "type": "simulation_round_start",
+                        "type": "swarm_round_start",
                         "run_id": run_id,
-                        "round": swarm_event.get("round", 0),
-                        "total": swarm_event.get("total", n_rounds),
+                        "round": int(swarm_event.get("round", 0)),
+                        "n_rounds": int(swarm_event.get("total", n_rounds)),
                     })
                 elif etype == "belief_shift":
+                    _delta = float(swarm_event.get("delta", 0.0) or 0.0)
+                    _round_deltas.append(abs(_delta))
                     yield _emit({
-                        "type": "belief_shift",
+                        "type": "swarm_persona_vote",
                         "run_id": run_id,
-                        "agent_id": swarm_event.get("agent_id", ""),
-                        "agent_name": swarm_event.get("agent_name", ""),
-                        "topic": swarm_event.get("topic", ""),
-                        "delta": swarm_event.get("delta", 0.0),
-                        "prev_stance": swarm_event.get("prev_stance", 0.0),
-                        "new_stance": swarm_event.get("new_stance", 0.0),
+                        "persona": str(swarm_event.get("agent_name", "")),
+                        "stance": (
+                            f"{float(swarm_event.get('prev_stance', 0.0)):+.2f}"
+                            f" → {float(swarm_event.get('new_stance', 0.0)):+.2f}"
+                        ),
+                        "summary": (
+                            f"Shifted on '{swarm_event.get('topic', '')}'"
+                            f" by {_delta:+.2f}"
+                        ),
                     })
                 elif etype == "simulation_round":
+                    _round_dict = dict(swarm_event.get("round") or {})
+                    _consensus_delta = (
+                        sum(_round_deltas) / len(_round_deltas) if _round_deltas else 0.0
+                    )
                     yield _emit({
-                        "type": "simulation_round",
+                        "type": "swarm_round_end",
                         "run_id": run_id,
-                        "round": swarm_event.get("round", {}),
+                        "round": int(_round_dict.get("round_num", 0)),
+                        "consensus_delta": round(_consensus_delta, 4),
                     })
                 elif etype == "simulation_complete":
                     report_dict = dict(swarm_event.get("report") or {})
                     answer_text = _format_swarm_report(report_dict)
                     yield _emit({
-                        "type": "simulation_complete",
+                        "type": "swarm_synthesis",
                         "run_id": run_id,
-                        "report": report_dict,
+                        "method": "swarm_consensus",
+                    })
+                    yield _emit({
+                        "type": "swarm_complete",
+                        "run_id": run_id,
+                        "answer_text": answer_text,
+                        "sources": sources,
                     })
                     final_artifacts = extract_arrow_artifacts(settings)
+                    # Also emit `final` so orchestrator session-save triggers.
                     yield _emit({
                         "type": "final",
                         "run_id": run_id,

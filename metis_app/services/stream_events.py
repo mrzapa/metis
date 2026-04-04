@@ -31,6 +31,12 @@ _STATUS_BY_EVENT_TYPE = {
     "simulation_round": "in_progress",
     "simulation_complete": "completed",
     "topics_extracted": "in_progress",
+    "swarm_start": "in_progress",
+    "swarm_round_start": "in_progress",
+    "swarm_persona_vote": "in_progress",
+    "swarm_round_end": "in_progress",
+    "swarm_synthesis": "in_progress",
+    "swarm_complete": "completed",
 }
 
 _LIFECYCLE_BY_EVENT_TYPE = {
@@ -52,6 +58,12 @@ _LIFECYCLE_BY_EVENT_TYPE = {
     "simulation_round": "simulation",
     "simulation_complete": "simulation",
     "topics_extracted": "simulation",
+    "swarm_start": "simulation",
+    "swarm_round_start": "simulation",
+    "swarm_persona_vote": "simulation",
+    "swarm_round_end": "simulation",
+    "swarm_synthesis": "simulation",
+    "swarm_complete": "simulation",
 }
 
 # Scion-inspired three-axis agent state model
@@ -77,6 +89,12 @@ _PHASE_BY_EVENT_TYPE = {
     "simulation_round": "running",
     "simulation_complete": "stopped",
     "topics_extracted": "running",
+    "swarm_start": "running",
+    "swarm_round_start": "running",
+    "swarm_persona_vote": "running",
+    "swarm_round_end": "running",
+    "swarm_synthesis": "running",
+    "swarm_complete": "stopped",
 }
 
 # agent_activity: fine-grained current activity within the phase
@@ -101,6 +119,12 @@ _ACTIVITY_BY_EVENT_TYPE = {
     "simulation_round": "executing",
     "simulation_complete": "completed",
     "topics_extracted": "thinking",
+    "swarm_start": "executing",
+    "swarm_round_start": "executing",
+    "swarm_persona_vote": "thinking",
+    "swarm_round_end": "thinking",
+    "swarm_synthesis": "thinking",
+    "swarm_complete": "completed",
 }
 
 _META_KEYS = {
