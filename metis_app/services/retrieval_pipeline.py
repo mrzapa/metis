@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import json
 from typing import Any
 
+from metis_app.services.hybrid_scorer import hybrid_rerank
 from metis_app.services.index_service import IndexBundle, QueryResult, build_query_result
 from metis_app.services.reranker import reciprocal_rank_fusion
 from metis_app.utils.embedding_providers import create_embeddings
@@ -261,6 +262,25 @@ def execute_retrieval_plan(
             _cache = None  # degrade gracefully; proceed with live retrieval
 
     primary_result = adapter.query(bundle, question, settings)
+
+    # Hybrid rerank: blend BM25 keyword scores with vector scores (Onyx-style alpha blending).
+    # alpha=1.0 (default) is a no-op — pure vector, identical to previous behaviour.
+    _hybrid_alpha = float(settings.get("hybrid_alpha", 1.0) or 1.0)
+    if _hybrid_alpha < 1.0 and bundle.chunks:
+        _vec_scores = {
+            s.chunk_idx: float(s.score)
+            for s in primary_result.sources
+            if s.chunk_idx is not None
+        }
+        _reranked = hybrid_rerank(
+            bundle.chunks, list(primary_result.hit_indices),
+            _vec_scores, question, _hybrid_alpha,
+        )
+        if _reranked != list(primary_result.hit_indices):
+            primary_result = build_query_result(
+                bundle, question, _reranked, _vec_scores, settings=settings,
+            )
+
     effective_queries = [question]
     stages: list[RetrievalStage] = [
         RetrievalStage(
@@ -302,6 +322,13 @@ def execute_retrieval_plan(
                 fused_indices = reciprocal_rank_fusion(*ranked_lists)
                 top_k = int(settings.get("top_k", 5) or 5)
                 dense_scores = _score_bundle_against_question(bundle, question, settings)
+                if _hybrid_alpha < 1.0 and bundle.chunks:
+                    _dense_dict = {i: float(s) for i, s in enumerate(dense_scores)}
+                    # Rerank a wider candidate window before slicing to top_k
+                    _candidate_pool = fused_indices[: max(top_k * 3, top_k)]
+                    fused_indices = hybrid_rerank(
+                        bundle.chunks, _candidate_pool, _dense_dict, question, _hybrid_alpha,
+                    )
                 final_result = build_query_result(
                     bundle,
                     question,

@@ -550,36 +550,65 @@ class WeaviateVectorStoreAdapter(VectorStoreAdapter):
         ok, reason = self._preflight(connection_settings)
         if not ok:
             raise RuntimeError(reason)
+
+        hybrid_alpha = float(settings.get("hybrid_alpha", 1.0) or 1.0)
         client = self._connect(connection_settings)
         try:
             collection = client.collections.get(
                 manifest.collection_name or _collection_name(bundle.index_id, uppercase_first=True)
             )
-            embeddings = _load_query_embeddings(settings)
-            query_vector = embeddings.embed_query(question)
             limit = _native_query_limit(bundle, settings)
-            response = collection.query.near_vector(
-                near_vector=query_vector,
-                limit=limit,
-                return_metadata=MetadataQuery(distance=True),
-            )
-            ranked: list[int] = []
-            scores: dict[int, float] = {}
-            lookup = _chunk_id_lookup(bundle)
-            for item in getattr(response, "objects", []) or []:
-                props = dict(getattr(item, "properties", {}) or {})
-                idx = lookup.get(str(props.get("chunk_id") or ""))
-                if idx is None:
-                    try:
-                        idx = int(props.get("chunk_idx"))
-                    except (TypeError, ValueError):
-                        idx = None
-                if idx is None or idx in scores:
-                    continue
-                ranked.append(idx)
-                scores[idx] = _normalized_distance_score(
-                    getattr(getattr(item, "metadata", None), "distance", None)
+            if hybrid_alpha < 1.0:
+                # Weaviate native hybrid search (BM25 + vector). Weaviate's alpha
+                # convention matches ours: 1.0 = pure vector, 0.0 = pure BM25.
+                response = collection.query.hybrid(
+                    query=question,
+                    alpha=hybrid_alpha,
+                    limit=limit,
+                    return_metadata=MetadataQuery(score=True),
                 )
+                ranked: list[int] = []
+                scores: dict[int, float] = {}
+                lookup = _chunk_id_lookup(bundle)
+                for item in getattr(response, "objects", []) or []:
+                    props = dict(getattr(item, "properties", {}) or {})
+                    idx = lookup.get(str(props.get("chunk_id") or ""))
+                    if idx is None:
+                        try:
+                            idx = int(props.get("chunk_idx"))
+                        except (TypeError, ValueError):
+                            idx = None
+                    if idx is None or idx in scores:
+                        continue
+                    ranked.append(idx)
+                    raw_score = getattr(getattr(item, "metadata", None), "score", None)
+                    scores[idx] = float(raw_score) if raw_score is not None else 0.0
+            else:
+                # Pure vector path (original behaviour).
+                embeddings = _load_query_embeddings(settings)
+                query_vector = embeddings.embed_query(question)
+                response = collection.query.near_vector(
+                    near_vector=query_vector,
+                    limit=limit,
+                    return_metadata=MetadataQuery(distance=True),
+                )
+                ranked = []
+                scores = {}
+                lookup = _chunk_id_lookup(bundle)
+                for item in getattr(response, "objects", []) or []:
+                    props = dict(getattr(item, "properties", {}) or {})
+                    idx = lookup.get(str(props.get("chunk_id") or ""))
+                    if idx is None:
+                        try:
+                            idx = int(props.get("chunk_idx"))
+                        except (TypeError, ValueError):
+                            idx = None
+                    if idx is None or idx in scores:
+                        continue
+                    ranked.append(idx)
+                    scores[idx] = _normalized_distance_score(
+                        getattr(getattr(item, "metadata", None), "distance", None)
+                    )
         finally:
             client.close()
 
