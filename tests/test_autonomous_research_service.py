@@ -243,3 +243,153 @@ def test_run_batch_threads_progress_cb_to_run():
         )
     )
     assert any(e["phase"] == "scanning" for e in collected)
+
+
+def test_compute_demand_scores_counts_user_indexes_per_faculty():
+    """Non-auto indexes with brain_pass.placement.faculty_id increment demand."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+    indexes = [
+        {
+            "index_id": "user_doc_1",
+            "brain_pass": {"placement": {"faculty_id": "reasoning"}},
+        },
+        {
+            "index_id": "user_doc_2",
+            "brain_pass": {"placement": {"faculty_id": "reasoning"}},
+        },
+        {
+            "index_id": "user_doc_3",
+            "brain_pass": {"placement": {"faculty_id": "knowledge"}},
+        },
+        # auto_ indexes should not count toward demand
+        {
+            "index_id": "auto_reasoning_abc",
+            "brain_pass": {"placement": {"faculty_id": "reasoning"}},
+        },
+    ]
+    scores = svc.compute_demand_scores(indexes)
+    assert scores["reasoning"] == 2
+    assert scores["knowledge"] == 1
+    assert scores.get("perception", 0) == 0
+
+
+def test_compute_demand_scores_ignores_missing_placement():
+    """Indexes without brain_pass.placement.faculty_id are skipped."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+    indexes = [
+        {"index_id": "user_doc_no_faculty", "brain_pass": {}},
+        {"index_id": "user_doc_no_brain_pass"},
+        {"index_id": "user_doc_valid", "brain_pass": {"placement": {"faculty_id": "memory"}}},
+    ]
+    scores = svc.compute_demand_scores(indexes)
+    assert scores.get("memory", 0) == 1
+    assert len([v for v in scores.values() if v > 0]) == 1
+
+
+def test_compute_demand_scores_returns_empty_for_no_user_indexes():
+    """Returns empty dict when no user-placed indexes exist."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+    scores = svc.compute_demand_scores([])
+    assert scores == {}
+
+
+def test_run_passes_demand_scores_to_scan_faculty_gaps():
+    """run() computes demand scores and passes them to scan_faculty_gaps."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+
+    captured: dict = {}
+
+    original_scan = svc.scan_faculty_gaps
+
+    def capturing_scan(indexes, demand_scores=None):
+        captured["demand_scores"] = demand_scores
+        return original_scan(indexes, demand_scores=demand_scores)
+
+    svc.scan_faculty_gaps = capturing_scan  # type: ignore[method-assign]
+
+    # One user index assigned to "reasoning" → demand_scores={"reasoning": 1}
+    indexes = [
+        {"index_id": "user_doc_1", "brain_pass": {"placement": {"faculty_id": "reasoning"}}},
+    ]
+    # run() will try to create an LLM — patch llm_providers to avoid real calls
+    import sys, types
+    fake_lp = types.ModuleType("metis_app.utils.llm_providers")
+    fake_lp.create_llm = lambda s: MagicMock(invoke=MagicMock(return_value=MagicMock(content="query")))
+    original = sys.modules.get("metis_app.utils.llm_providers")
+    sys.modules["metis_app.utils.llm_providers"] = fake_lp
+    try:
+        svc.run(settings={}, indexes=indexes, orchestrator=MagicMock())
+    finally:
+        if original is None:
+            sys.modules.pop("metis_app.utils.llm_providers", None)
+        else:
+            sys.modules["metis_app.utils.llm_providers"] = original
+
+    assert captured.get("demand_scores") == {"reasoning": 1}
+
+
+def test_reverse_curriculum_prefers_high_demand_unrepresented_faculty():
+    """End-to-end: compute_demand_scores + scan_faculty_gaps together."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+
+    # User has uploaded 5 indexes tagged to "emergence", none to "perception".
+    # Without demand scores: perception is first (FACULTY_ORDER index 0).
+    # With demand scores: emergence has demand=5, perception has demand=0
+    #   → emergence should be returned first.
+    indexes = [
+        {"index_id": f"user_doc_{i}", "brain_pass": {"placement": {"faculty_id": "emergence"}}}
+        for i in range(5)
+    ]
+    # No auto_ indexes at all → all faculties are unrepresented
+
+    # Baseline: without demand, perception (index 0) wins
+    baseline = svc.scan_faculty_gaps(indexes)
+    assert baseline == "perception"
+
+    # With demand scores computed from same indexes:
+    demand = svc.compute_demand_scores(indexes)
+    assert demand == {"emergence": 5}
+    result = svc.scan_faculty_gaps(indexes, demand_scores=demand)
+    assert result == "emergence"
+
+
+def test_sparse_represented_beats_unrepresented_regardless_of_demand():
+    """Partially-covered faculty (sparse_represented) always wins over zero-coverage faculty.
+
+    scan_faculty_gaps has two passes: first it returns the sparsest partially-covered
+    faculty (0 < stars < threshold); only if none exist does it fall back to the
+    first unrepresented faculty (stars == 0). The demand/hardness sort applies
+    within each pass, but a faculty in pass-1 always beats one in pass-2.
+    """
+    svc = AutonomousResearchService(web_search=MagicMock())
+
+    # reasoning: 1 auto-star → enters sparse_represented (pass 1)
+    # emergence: 0 auto-stars → enters unrepresented (pass 2)
+    # Both have equal demand=5, but reasoning wins because pass 1 has priority.
+    indexes = [{"index_id": "auto_reasoning_abc", "document_count": 1}]
+    demand = {"reasoning": 5, "emergence": 5}
+    result = svc.scan_faculty_gaps(indexes, demand_scores=demand)
+    assert result == "reasoning"
+
+
+def test_run_scanning_event_fires_with_nonempty_detail():
+    """run() emits a 'scanning' progress event with a non-empty detail string."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+    # All faculties fully covered → only 'scanning' and 'skipped' events fire
+    indexes = [
+        {"index_id": f"auto_{fac}_{i}", "document_count": 1}
+        for fac in ["perception", "knowledge", "memory", "reasoning", "skills",
+                    "strategy", "personality", "values", "synthesis", "autonomy", "emergence"]
+        for i in range(3)
+    ] + [
+        # Add 2 user indexes with faculty placement to generate non-zero demand
+        {"index_id": "user_1", "brain_pass": {"placement": {"faculty_id": "reasoning"}}},
+        {"index_id": "user_2", "brain_pass": {"placement": {"faculty_id": "reasoning"}}},
+    ]
+    events: list[dict] = []
+    svc.run(settings={}, indexes=indexes, orchestrator=MagicMock(), progress_cb=events.append)
+    scanning_events = [e for e in events if e["phase"] == "scanning"]
+    assert scanning_events, "No scanning event emitted"
+    # The detail should mention demand signals when present
+    detail = scanning_events[0]["detail"]
+    assert isinstance(detail, str) and len(detail) > 0
