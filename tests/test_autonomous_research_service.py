@@ -370,3 +370,26 @@ def test_sparse_represented_beats_unrepresented_regardless_of_demand():
     demand = {"reasoning": 5, "emergence": 5}
     result = svc.scan_faculty_gaps(indexes, demand_scores=demand)
     assert result == "reasoning"
+
+
+def test_run_scanning_event_includes_demand_count():
+    """The 'scanning' progress event detail should mention demand score count."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+    # All faculties fully covered → only 'scanning' and 'skipped' events fire
+    indexes = [
+        {"index_id": f"auto_{fac}_{i}", "document_count": 1}
+        for fac in ["perception", "knowledge", "memory", "reasoning", "skills",
+                    "strategy", "personality", "values", "synthesis", "autonomy", "emergence"]
+        for i in range(3)
+    ] + [
+        # Add 2 user indexes with faculty placement to generate non-zero demand
+        {"index_id": "user_1", "brain_pass": {"placement": {"faculty_id": "reasoning"}}},
+        {"index_id": "user_2", "brain_pass": {"placement": {"faculty_id": "reasoning"}}},
+    ]
+    events: list[dict] = []
+    svc.run(settings={}, indexes=indexes, orchestrator=MagicMock(), progress_cb=events.append)
+    scanning_events = [e for e in events if e["phase"] == "scanning"]
+    assert scanning_events, "No scanning event emitted"
+    # The detail should mention demand signals when present
+    detail = scanning_events[0]["detail"]
+    assert isinstance(detail, str) and len(detail) > 0
