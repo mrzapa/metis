@@ -520,6 +520,8 @@ class WeaviateVectorStoreAdapter(VectorStoreAdapter):
     def query(self, bundle: IndexBundle, question: str, settings: dict[str, Any]) -> QueryResult:
         from weaviate.classes.query import MetadataQuery
 
+        from metis_app.services.hybrid_scorer import hybrid_alpha as _hybrid_alpha
+
         manifest = load_index_manifest(bundle.index_path)
         connection_settings = normalize_weaviate_settings({
             **dict(manifest.metadata.get("weaviate_settings") or {}),
@@ -528,6 +530,7 @@ class WeaviateVectorStoreAdapter(VectorStoreAdapter):
         ok, reason = self._preflight(connection_settings)
         if not ok:
             raise RuntimeError(reason)
+        alpha = _hybrid_alpha(settings)
         client = self._connect(connection_settings)
         try:
             collection = client.collections.get(
@@ -536,11 +539,21 @@ class WeaviateVectorStoreAdapter(VectorStoreAdapter):
             embeddings = _load_query_embeddings(settings)
             query_vector = embeddings.embed_query(question)
             limit = _native_query_limit(bundle, settings)
-            response = collection.query.near_vector(
-                near_vector=query_vector,
-                limit=limit,
-                return_metadata=MetadataQuery(distance=True),
-            )
+            if alpha < 1.0:
+                # Use Weaviate's native hybrid search (BM25 + vector fusion).
+                response = collection.query.hybrid(
+                    query=question,
+                    vector=query_vector,
+                    alpha=alpha,
+                    limit=limit,
+                    return_metadata=MetadataQuery(score=True),
+                )
+            else:
+                response = collection.query.near_vector(
+                    near_vector=query_vector,
+                    limit=limit,
+                    return_metadata=MetadataQuery(distance=True),
+                )
             ranked: list[int] = []
             scores: dict[int, float] = {}
             lookup = _chunk_id_lookup(bundle)
@@ -555,9 +568,13 @@ class WeaviateVectorStoreAdapter(VectorStoreAdapter):
                 if idx is None or idx in scores:
                     continue
                 ranked.append(idx)
-                scores[idx] = _normalized_distance_score(
-                    getattr(getattr(item, "metadata", None), "distance", None)
-                )
+                meta = getattr(item, "metadata", None)
+                if alpha < 1.0:
+                    # hybrid search returns a score (higher = better)
+                    raw_score = getattr(meta, "score", None)
+                    scores[idx] = float(raw_score) if raw_score is not None else 0.0
+                else:
+                    scores[idx] = _normalized_distance_score(getattr(meta, "distance", None))
         finally:
             client.close()
 

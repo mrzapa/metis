@@ -51,6 +51,7 @@ dev = [
     "litestar>=2.4",
 ]
 runtime-all = [
+    "rank-bm25>=0.2.2",
     "langchain==0.3.28",
     "langchain-core==0.3.83",
     "langchain-text-splitters==0.3.11",

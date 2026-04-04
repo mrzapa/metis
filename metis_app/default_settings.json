@@ -126,6 +126,7 @@
   "retrieval_mode": "flat",
   "retrieval_min_score": 0.15,
   "search_type": "similarity",
+  "hybrid_alpha": 1.0,
   "mmr_lambda": 0.5,
   "use_reranker": true,
   "use_sub_queries": true,

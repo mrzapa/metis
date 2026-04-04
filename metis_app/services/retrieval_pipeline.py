@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import json
 from typing import Any
 
+from metis_app.services.hybrid_scorer import hybrid_alpha, hybrid_rerank
 from metis_app.services.index_service import IndexBundle, QueryResult, build_query_result
 from metis_app.services.reranker import reciprocal_rank_fusion
 from metis_app.utils.embedding_providers import create_embeddings
@@ -229,8 +230,25 @@ def execute_retrieval_plan(
     """Run the retrieval pipeline and return a serialisable plan."""
 
     selected_mode = _selected_mode(settings)
+    alpha = hybrid_alpha(settings)
     primary_result = adapter.query(bundle, question, settings)
     effective_queries = [question]
+
+    # ── Hybrid rerank primary result ─────────────────────────────────────────
+    if alpha < 1.0 and primary_result.hit_indices:
+        chunk_texts = [str(c.get("text") or "") for c in bundle.chunks]
+        top_k = int(settings.get("top_k", 5) or 5)
+        reranked_indices = hybrid_rerank(
+            list(primary_result.hit_indices),
+            {idx: float(s) for idx, s in zip(primary_result.hit_indices, [primary_result.top_score] * len(primary_result.hit_indices))},
+            chunk_texts,
+            question,
+            alpha=alpha,
+            top_k=top_k,
+        )
+        dense_scores = _score_bundle_against_question(bundle, question, settings)
+        primary_result = build_query_result(bundle, question, reranked_indices, dense_scores, settings=settings)
+
     stages: list[RetrievalStage] = [
         RetrievalStage(
             stage_type="retrieval_complete",
@@ -271,6 +289,15 @@ def execute_retrieval_plan(
                 fused_indices = reciprocal_rank_fusion(*ranked_lists)
                 top_k = int(settings.get("top_k", 5) or 5)
                 dense_scores = _score_bundle_against_question(bundle, question, settings)
+                if alpha < 1.0:
+                    chunk_texts = [str(c.get("text") or "") for c in bundle.chunks]
+                    fused_indices = hybrid_rerank(
+                        fused_indices,
+                        {idx: dense_scores[idx] if idx < len(dense_scores) else 0.0 for idx in fused_indices},
+                        chunk_texts,
+                        question,
+                        alpha=alpha,
+                    )
                 final_result = build_query_result(
                     bundle,
                     question,
