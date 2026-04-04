@@ -1911,7 +1911,6 @@ def test_run_autonomous_research_returns_result_when_enabled():
 
 def test_run_autonomous_research_concurrent_dispatches_multiple_faculties():
     """With concurrency=2, run_autonomous_research scans multiple gaps and calls run_batch."""
-    import asyncio as _asyncio
     import unittest.mock as um
     from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
 
