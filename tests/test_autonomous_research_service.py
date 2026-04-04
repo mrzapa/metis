@@ -163,7 +163,7 @@ def test_run_batch_returns_list_of_results():
     svc.run = MagicMock(return_value={"faculty_id": "perception", "index_id": "x"})
 
     # Simulate 2 gaps with concurrency=2
-    results = asyncio.get_event_loop().run_until_complete(
+    results = asyncio.run(
         svc.run_batch(
             faculty_ids=["perception", "memory"],
             settings={},
@@ -232,7 +232,7 @@ def test_run_batch_threads_progress_cb_to_run():
 
     svc.run = fake_run  # type: ignore[method-assign]
 
-    asyncio.get_event_loop().run_until_complete(
+    asyncio.run(
         svc.run_batch(
             faculty_ids=["perception"],
             settings={},
@@ -243,6 +243,55 @@ def test_run_batch_threads_progress_cb_to_run():
         )
     )
     assert any(e["phase"] == "scanning" for e in collected)
+
+
+def test_run_with_target_faculty_id_skips_scan():
+    """run() with target_faculty_id bypasses scan_faculty_gaps and uses the supplied faculty."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+
+    scan_called = []
+    original_scan = svc.scan_faculty_gaps
+    def capturing_scan(*args, **kwargs):
+        scan_called.append(True)
+        return original_scan(*args, **kwargs)
+    svc.scan_faculty_gaps = capturing_scan  # type: ignore[method-assign]
+
+    # All faculties fully covered → normally scan returns None and run() exits early.
+    # With target_faculty_id, run() should skip the scan entirely and proceed to query.
+    fully_covered = [
+        {"index_id": f"auto_{fac}_{i}", "document_count": 1}
+        for fac in ["perception", "knowledge", "memory", "reasoning", "skills",
+                    "strategy", "personality", "values", "synthesis", "autonomy", "emergence"]
+        for i in range(3)
+    ]
+
+    events: list[dict] = []
+    # run() will try to create LLM — patch it to bail at formulation
+    import sys, types
+    fake_lp = types.ModuleType("metis_app.utils.llm_providers")
+    fake_lp.create_llm = lambda s: MagicMock(invoke=MagicMock(return_value=MagicMock(content="")))
+    original = sys.modules.get("metis_app.utils.llm_providers")
+    sys.modules["metis_app.utils.llm_providers"] = fake_lp
+    try:
+        svc.run(
+            settings={},
+            indexes=fully_covered,
+            orchestrator=MagicMock(),
+            target_faculty_id="reasoning",
+            progress_cb=events.append,
+        )
+    finally:
+        if original is None:
+            sys.modules.pop("metis_app.utils.llm_providers", None)
+        else:
+            sys.modules["metis_app.utils.llm_providers"] = original
+
+    # Scan was NOT called
+    assert not scan_called, "scan_faculty_gaps should be skipped when target_faculty_id is set"
+    # The formulating event should mention "reasoning"
+    formulating = [e for e in events if e["phase"] == "formulating"]
+    assert formulating, "Expected a formulating event"
+    assert formulating[0]["faculty_id"] == "reasoning"
 
 
 def test_compute_demand_scores_counts_user_indexes_per_faculty():
@@ -393,3 +442,66 @@ def test_run_scanning_event_fires_with_nonempty_detail():
     # The detail should mention demand signals when present
     detail = scanning_events[0]["detail"]
     assert isinstance(detail, str) and len(detail) > 0
+
+
+def test_run_batch_passes_target_faculty_id_to_each_run():
+    """run_batch must pass the correct target_faculty_id to each run() call."""
+    import asyncio as _asyncio
+    svc = AutonomousResearchService(web_search=MagicMock())
+
+    received_faculty_ids: list[str] = []
+
+    def capturing_run(**kwargs):
+        fid = kwargs.get("target_faculty_id")
+        if fid:
+            received_faculty_ids.append(fid)
+        return {"faculty_id": fid, "index_id": f"auto_{fid}_x"}
+
+    svc.run = capturing_run  # type: ignore[method-assign]
+
+    _asyncio.run(
+        svc.run_batch(
+            faculty_ids=["reasoning", "memory", "emergence"],
+            settings={},
+            orchestrator=MagicMock(),
+            concurrency=3,
+            request_delay_ms=0,
+        )
+    )
+
+    assert sorted(received_faculty_ids) == ["emergence", "memory", "reasoning"]
+
+
+def test_run_batch_respects_semaphore_concurrency():
+    """run_batch serialises tasks correctly under concurrency=1."""
+    import asyncio as _asyncio
+    import threading
+
+    svc = AutonomousResearchService(web_search=MagicMock())
+    concurrent_count = [0]
+    max_concurrent = [0]
+    lock = threading.Lock()
+
+    def slow_run(**kwargs):
+        import time
+        with lock:
+            concurrent_count[0] += 1
+            max_concurrent[0] = max(max_concurrent[0], concurrent_count[0])
+        time.sleep(0.02)
+        with lock:
+            concurrent_count[0] -= 1
+        return {"faculty_id": kwargs.get("target_faculty_id"), "index_id": "x"}
+
+    svc.run = slow_run  # type: ignore[method-assign]
+
+    _asyncio.run(
+        svc.run_batch(
+            faculty_ids=["perception", "knowledge", "memory"],
+            settings={},
+            orchestrator=MagicMock(),
+            concurrency=1,
+            request_delay_ms=0,
+        )
+    )
+
+    assert max_concurrent[0] == 1, f"Expected max 1 concurrent, got {max_concurrent[0]}"

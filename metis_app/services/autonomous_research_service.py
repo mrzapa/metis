@@ -64,6 +64,7 @@ class AutonomousResearchService:
         indexes: list[dict[str, Any]],
         orchestrator: Any,
         progress_cb: Callable[[ProgressEvent], None] | None = None,
+        target_faculty_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Full pipeline. Returns result dict or None if nothing to research.
 
@@ -79,13 +80,17 @@ class AutonomousResearchService:
                 except Exception:  # noqa: BLE001
                     pass
 
-        _emit("scanning", None, "Scanning constellation for faculty gaps…")
-        demand_scores = self.compute_demand_scores(indexes) or None  # {} → None so scan uses FACULTY_ORDER fallback
-        faculty_id = self.scan_faculty_gaps(indexes, demand_scores=demand_scores)
-        if faculty_id is None:
-            _log.debug("autonomous_research: no faculty gaps found, skipping")
-            _emit("skipped", None, "Constellation fully covered, skipping")
-            return None
+        if target_faculty_id is not None:
+            faculty_id = target_faculty_id
+            _emit("targeted", faculty_id, f"Targeting faculty '{faculty_id}' directly…")
+        else:
+            _emit("scanning", None, "Scanning constellation for faculty gaps…")
+            demand_scores = self.compute_demand_scores(indexes) or None  # {} → None so scan uses FACULTY_ORDER fallback
+            faculty_id = self.scan_faculty_gaps(indexes, demand_scores=demand_scores)
+            if faculty_id is None:
+                _log.debug("autonomous_research: no faculty gaps found, skipping")
+                _emit("skipped", None, "Constellation fully covered, skipping")
+                return None
 
         faculty_desc = FACULTY_DESCRIPTIONS.get(faculty_id, faculty_id)
 
@@ -287,12 +292,14 @@ class AutonomousResearchService:
 
         Uses an asyncio.Semaphore to cap concurrent tasks. Each task calls
         self.run() in a thread executor to avoid blocking the event loop.
+        The target_faculty_id is passed to each run() call so the scan phase
+        is bypassed and each task researches its assigned faculty directly.
         """
         import asyncio
 
         semaphore = asyncio.Semaphore(max(1, concurrency))
         delay_s = max(0, request_delay_ms) / 1000.0
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         async def _run_one(faculty_id: str) -> dict[str, Any] | None:
             async with semaphore:
@@ -302,8 +309,9 @@ class AutonomousResearchService:
                     None,
                     lambda: self.run(
                         settings=settings,
-                        indexes=[],  # orchestrator provides current index list inside
+                        indexes=[],
                         orchestrator=orchestrator,
+                        target_faculty_id=faculty_id,
                         progress_cb=progress_cb,
                     ),
                 )

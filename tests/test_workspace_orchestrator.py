@@ -1909,6 +1909,56 @@ def test_run_autonomous_research_returns_result_when_enabled():
     assert result == expected
 
 
+def test_run_autonomous_research_concurrent_dispatches_multiple_faculties():
+    """With concurrency=2, run_autonomous_research scans multiple gaps and calls run_batch."""
+    import unittest.mock as um
+    from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
+
+    settings = {
+        "assistant_policy": {
+            "autonomous_research_enabled": True,
+            "autonomous_research_concurrency": 2,
+            "autonomous_research_request_delay_ms": 0,
+        },
+        "llm_provider": "mock",
+    }
+
+    orc = WorkspaceOrchestrator()
+
+    # No indexes → all 11 faculties are gaps; orchestrator should collect 2*2=4 at most
+    # and call run_batch with multiple faculty IDs.
+    run_batch_calls: list[dict] = []
+
+    async def fake_run_batch(**kwargs):
+        run_batch_calls.append(kwargs)
+        return [{"faculty_id": fid, "index_id": f"auto_{fid}_x"}
+                for fid in kwargs.get("faculty_ids", [])]
+
+    mock_svc = um.MagicMock()
+    mock_svc.scan_faculty_gaps.side_effect = lambda indexes, **kw: (
+        "perception" if not any(i["index_id"] == "auto_perception_placeholder" for i in indexes)
+        else "knowledge" if not any(i["index_id"] == "auto_knowledge_placeholder" for i in indexes)
+        else None
+    )
+    mock_svc.run_batch = fake_run_batch
+
+    MockSvcClass = um.MagicMock(return_value=mock_svc)
+
+    with um.patch(
+        "metis_app.services.autonomous_research_service.AutonomousResearchService",
+        MockSvcClass,
+    ), um.patch(
+        "metis_app.utils.web_search.create_web_search",
+        return_value=um.MagicMock(),
+    ), um.patch.object(orc, "list_indexes", return_value=[]):
+        result = orc.run_autonomous_research(settings)
+
+    assert run_batch_calls, "run_batch was not called"
+    assert len(run_batch_calls[0]["faculty_ids"]) >= 2, (
+        f"Expected >=2 faculty IDs dispatched, got {run_batch_calls[0]['faculty_ids']}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # API integration — brain graph uses orchestrator
 # ---------------------------------------------------------------------------
