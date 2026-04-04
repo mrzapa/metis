@@ -372,8 +372,8 @@ def test_sparse_represented_beats_unrepresented_regardless_of_demand():
     assert result == "reasoning"
 
 
-def test_run_scanning_event_includes_demand_count():
-    """The 'scanning' progress event detail should mention demand score count."""
+def test_run_scanning_event_fires_with_nonempty_detail():
+    """run() emits a 'scanning' progress event with a non-empty detail string."""
     svc = AutonomousResearchService(web_search=MagicMock())
     # All faculties fully covered → only 'scanning' and 'skipped' events fire
     indexes = [
