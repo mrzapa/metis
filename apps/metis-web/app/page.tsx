@@ -4037,7 +4037,7 @@ export default function Home() {
         zoomFactor: backgroundZoomTargetRef.current,
       };
       const worldBeforeZoom = screenToWorldPoint(pointer, bounds.width, bounds.height, currentCamera);
-      const zoomMultiplier = Math.exp(e.deltaY * 0.0014);
+      const zoomMultiplier = Math.exp(-e.deltaY * 0.0014);
       const nextZoomFactor = clampBackgroundZoomFactor(currentCamera.zoomFactor * zoomMultiplier);
 
       if (Math.abs(nextZoomFactor - currentCamera.zoomFactor) < 0.0005) {
