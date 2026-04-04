@@ -222,7 +222,7 @@ function StarMiniPreview({
     if (!canvas) return;
 
     const DPR = Math.min(typeof window !== "undefined" ? (window.devicePixelRatio ?? 1) : 1, 3);
-    const PX = 320;
+    const PX = 160;
     canvas.width = PX * DPR;
     canvas.height = PX * DPR;
     canvas.style.width = `${PX}px`;
