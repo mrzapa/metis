@@ -326,3 +326,45 @@ def test_run_passes_demand_scores_to_scan_faculty_gaps():
             sys.modules["metis_app.utils.llm_providers"] = original
 
     assert captured.get("demand_scores") == {"reasoning": 1}
+
+
+def test_reverse_curriculum_prefers_high_demand_unrepresented_faculty():
+    """End-to-end: compute_demand_scores + scan_faculty_gaps together."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+
+    # User has uploaded 5 indexes tagged to "emergence", none to "perception".
+    # Without demand scores: perception is first (FACULTY_ORDER index 0).
+    # With demand scores: emergence has demand=5, perception has demand=0
+    #   → emergence should be returned first.
+    indexes = [
+        {"index_id": f"user_doc_{i}", "brain_pass": {"placement": {"faculty_id": "emergence"}}}
+        for i in range(5)
+    ]
+    # No auto_ indexes at all → all faculties are unrepresented
+
+    # Baseline: without demand, perception (index 0) wins
+    baseline = svc.scan_faculty_gaps(indexes)
+    assert baseline == "perception"
+
+    # With demand scores computed from same indexes:
+    demand = svc.compute_demand_scores(indexes)
+    assert demand == {"emergence": 5}
+    result = svc.scan_faculty_gaps(indexes, demand_scores=demand)
+    assert result == "emergence"
+
+
+def test_reverse_curriculum_hardness_ratio_beats_raw_demand():
+    """Faculty with 0 auto-stars and high demand beats one with 1 star and same demand."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+
+    # reasoning: 1 auto-star, demand=5 → hardness = 5/1 = 5.0
+    # emergence: 0 auto-stars, demand=5 → hardness = 5/max(0,1) = 5.0
+    # Tie on hardness; emergence (index 10) comes after reasoning (index 3)
+    # → reasoning should win
+    indexes = [{"index_id": "auto_reasoning_abc", "document_count": 1}]
+    demand = {"reasoning": 5, "emergence": 5}
+    result = svc.scan_faculty_gaps(indexes, demand_scores=demand)
+    # reasoning is in sparse_represented (1 star, demand=5, hardness=5)
+    # emergence is unrepresented — handled in second pass
+    # sparse_represented wins over unrepresented, so reasoning is returned
+    assert result == "reasoning"
