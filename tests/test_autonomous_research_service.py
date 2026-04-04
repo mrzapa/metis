@@ -353,18 +353,20 @@ def test_reverse_curriculum_prefers_high_demand_unrepresented_faculty():
     assert result == "emergence"
 
 
-def test_reverse_curriculum_hardness_ratio_beats_raw_demand():
-    """Faculty with 0 auto-stars and high demand beats one with 1 star and same demand."""
+def test_sparse_represented_beats_unrepresented_regardless_of_demand():
+    """Partially-covered faculty (sparse_represented) always wins over zero-coverage faculty.
+
+    scan_faculty_gaps has two passes: first it returns the sparsest partially-covered
+    faculty (0 < stars < threshold); only if none exist does it fall back to the
+    first unrepresented faculty (stars == 0). The demand/hardness sort applies
+    within each pass, but a faculty in pass-1 always beats one in pass-2.
+    """
     svc = AutonomousResearchService(web_search=MagicMock())
 
-    # reasoning: 1 auto-star, demand=5 → hardness = 5/1 = 5.0
-    # emergence: 0 auto-stars, demand=5 → hardness = 5/max(0,1) = 5.0
-    # Tie on hardness; emergence (index 10) comes after reasoning (index 3)
-    # → reasoning should win
+    # reasoning: 1 auto-star → enters sparse_represented (pass 1)
+    # emergence: 0 auto-stars → enters unrepresented (pass 2)
+    # Both have equal demand=5, but reasoning wins because pass 1 has priority.
     indexes = [{"index_id": "auto_reasoning_abc", "document_count": 1}]
     demand = {"reasoning": 5, "emergence": 5}
     result = svc.scan_faculty_gaps(indexes, demand_scores=demand)
-    # reasoning is in sparse_represented (1 star, demand=5, hardness=5)
-    # emergence is unrepresented — handled in second pass
-    # sparse_represented wins over unrepresented, so reasoning is returned
     assert result == "reasoning"
