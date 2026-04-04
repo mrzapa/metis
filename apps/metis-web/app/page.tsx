@@ -3295,10 +3295,13 @@ export default function Home() {
       if (diveFocusStrength > 0 && !starDivePanSuppressedRef.current) {
         // Acquire or maintain focus target
         if (!starDiveFocusedStarIdRef.current) {
+          // Use projectedUserStarRenderState for screen positions — avoids re-projecting world coords
+          // and stays consistent with the render pass. Positions are from the previous frame,
+          // which is acceptable since target acquisition is a one-time event per zoom-in.
           const userStarTargets = userStarsRef.current.flatMap((star) => {
             const proj = projectedUserStarRenderState.get(star.id);
             if (!proj) return [];
-            return [{ id: star.id, screenX: proj.target.x, screenY: proj.target.y, brightness: star.size ?? 1 }];
+            return [{ id: star.id, screenX: proj.target.x, screenY: proj.target.y, brightness: star.size }];
           });
           const target = findStarDiveFocusTarget(userStarTargets, W, H);
           if (target) {
