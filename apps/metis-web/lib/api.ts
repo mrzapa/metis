@@ -1333,11 +1333,12 @@ function parseSseMessage<T>(frame: string): SseMessage<T> | null {
 
 export async function fetchSessions(
   search = "",
+  signal?: AbortSignal,
 ): Promise<SessionSummary[]> {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   const url = `${await getApiBase()}/v1/sessions${params.toString() ? `?${params}` : ""}`;
-  const res = await apiFetch(url);
+  const res = await apiFetch(url, { signal });
   if (!res.ok) throw new Error(`Failed to fetch sessions: ${res.status}`);
   return res.json();
 }
