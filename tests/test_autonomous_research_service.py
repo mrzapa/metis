@@ -163,7 +163,7 @@ def test_run_batch_returns_list_of_results():
     svc.run = MagicMock(return_value={"faculty_id": "perception", "index_id": "x"})
 
     # Simulate 2 gaps with concurrency=2
-    results = asyncio.get_event_loop().run_until_complete(
+    results = asyncio.run(
         svc.run_batch(
             faculty_ids=["perception", "memory"],
             settings={},
@@ -232,7 +232,7 @@ def test_run_batch_threads_progress_cb_to_run():
 
     svc.run = fake_run  # type: ignore[method-assign]
 
-    asyncio.get_event_loop().run_until_complete(
+    asyncio.run(
         svc.run_batch(
             faculty_ids=["perception"],
             settings={},
