@@ -18,7 +18,11 @@
       "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" log --oneline --all -1 -- \"apps/metis-web/app/page.tsx\" \"apps/metis-web/lib/constellation-home.ts\" \"apps/metis-web/components/constellation/\")",
       "Bash(git -C \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\" diff 427b815~1 427b815 -- \"apps/metis-web/app/page.tsx\" \"apps/metis-web/lib/constellation-home.ts\")",
       "Bash(python -m pytest tests/test_iterrag_convergence.py tests/test_skill_evolution.py -v --tb=short)",
-      "Bash(python -m pytest tests/test_autonomous_research_service.py tests/test_workspace_orchestrator.py -v --tb=short)"
+      "Bash(python -m pytest tests/test_autonomous_research_service.py tests/test_workspace_orchestrator.py -v --tb=short)",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(f\\).read\\(\\)\\) or print\\(f''OK: {f}''\\) for f in [''metis_app/services/hybrid_scorer.py'',''metis_app/services/retrieval_pipeline.py'',''metis_app/services/vector_store.py'']]\")",
+      "Bash(python -m pytest tests/ -q --tb=short -x)",
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(python -c \"import rank_bm25; print\\(''rank_bm25 installed:'', rank_bm25.__version__\\)\")"
     ]
   }
 }

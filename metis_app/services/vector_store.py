@@ -542,6 +542,8 @@ class WeaviateVectorStoreAdapter(VectorStoreAdapter):
     def query(self, bundle: IndexBundle, question: str, settings: dict[str, Any]) -> QueryResult:
         from weaviate.classes.query import MetadataQuery
 
+        from metis_app.services.hybrid_scorer import hybrid_alpha as _hybrid_alpha
+
         manifest = load_index_manifest(bundle.index_path)
         connection_settings = normalize_weaviate_settings({
             **dict(manifest.metadata.get("weaviate_settings") or {}),

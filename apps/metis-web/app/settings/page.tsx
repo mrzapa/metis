@@ -61,6 +61,7 @@ const schema = z.object({
   retrieval_mode: z.string().min(1),
   search_type: z.string().min(1),
   mmr_lambda: z.number().min(0).max(1),
+  hybrid_alpha: z.number().min(0).max(1),
   retrieval_min_score: z.number().min(0).max(1),
   fallback_strategy: z.string().min(1),
   fallback_message: z.string(),
@@ -213,6 +214,7 @@ const FORM_DEFAULT_VALUES: FormValues = {
   retrieval_mode: "flat",
   search_type: "similarity",
   mmr_lambda: 0.5,
+  hybrid_alpha: 1.0,
   retrieval_min_score: 0.15,
   fallback_strategy: "synthesize_anyway",
   fallback_message:
@@ -281,6 +283,7 @@ const SEARCH_INDEX = [
   { tab: "retrieval", label: "Retrieval mode", description: "flat, mmr, hybrid, or hierarchical retrieval strategy." },
   { tab: "retrieval", label: "Search type", description: "Vector similarity or MMR-based search." },
   { tab: "retrieval", label: "MMR lambda", description: "Diversity vs relevance trade-off for MMR retrieval (0 = max diversity, 1 = max relevance)." },
+  { tab: "retrieval", label: "Hybrid search alpha", description: "Blend between keyword (BM25) and vector search. 1.0 = pure vector, 0.0 = pure keyword, 0.5 = equal weight." },
   { tab: "retrieval", label: "Retrieval min score", description: "Minimum similarity score required to include a chunk." },
   { tab: "retrieval", label: "Fallback strategy", description: "What to do when no high-quality chunks are found." },
   { tab: "retrieval", label: "Fallback message", description: "Message shown when retrieval quality is below the minimum score threshold." },
@@ -441,6 +444,7 @@ export default function SettingsPage() {
       retrieval_mode: "flat",
       search_type: "similarity",
       mmr_lambda: 0.5,
+      hybrid_alpha: 1.0,
       retrieval_min_score: 0.15,
       fallback_strategy: "synthesize_anyway",
       fallback_message:
@@ -551,6 +555,7 @@ export default function SettingsPage() {
           retrieval_mode: (raw.retrieval_mode as string) ?? "flat",
           search_type: (raw.search_type as string) ?? "similarity",
           mmr_lambda: (raw.mmr_lambda as number) ?? 0.5,
+          hybrid_alpha: (raw.hybrid_alpha as number) ?? 1.0,
           retrieval_min_score: (raw.retrieval_min_score as number) ?? 0.15,
           fallback_strategy: (raw.fallback_strategy as string) ?? "synthesize_anyway",
           fallback_message:
@@ -637,6 +642,7 @@ export default function SettingsPage() {
   }
 
   const mmrLambda = watch("mmr_lambda");
+  const hybridAlpha = watch("hybrid_alpha");
   const llmTemp = watch("llm_temperature");
   const chatPath = watch("chat_path");
   const selectedMode = watch("selected_mode");
@@ -1190,6 +1196,29 @@ export default function SettingsPage() {
                     <div className="flex justify-between text-xs text-muted-foreground">
                       <span>0 — max diversity</span>
                       <span>1 — max relevance</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <FieldLabel htmlFor="hybrid_alpha" tooltip="Controls the blend between keyword (BM25) and vector search. 1.0 = pure vector (default). 0.5 = equal weight — recommended for exact-phrase or technical queries. 0.0 = pure keyword.">
+                      Hybrid search alpha{" "}
+                      <span className="font-normal text-muted-foreground">
+                        (keyword ↔ vector) — {Number(hybridAlpha).toFixed(2)}
+                      </span>
+                    </FieldLabel>
+                    <input
+                      id="hybrid_alpha"
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      {...register("hybrid_alpha", { valueAsNumber: true })}
+                      className="glass-slider"
+                      style={{ "--slider-progress": `${Math.round(Number(hybridAlpha) * 100)}%` } as CSSProperties}
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>0 — pure keyword (BM25)</span>
+                      <span>1 — pure vector</span>
                     </div>
                   </div>
 
