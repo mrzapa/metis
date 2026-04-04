@@ -80,7 +80,8 @@ class AutonomousResearchService:
                     pass
 
         _emit("scanning", None, "Scanning constellation for faculty gaps…")
-        faculty_id = self.scan_faculty_gaps(indexes)
+        demand_scores = self.compute_demand_scores(indexes) or None
+        faculty_id = self.scan_faculty_gaps(indexes, demand_scores=demand_scores)
         if faculty_id is None:
             _log.debug("autonomous_research: no faculty gaps found, skipping")
             _emit("skipped", None, "Constellation fully covered, skipping")

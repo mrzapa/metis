@@ -291,3 +291,38 @@ def test_compute_demand_scores_returns_empty_for_no_user_indexes():
     svc = AutonomousResearchService(web_search=MagicMock())
     scores = svc.compute_demand_scores([])
     assert scores == {}
+
+
+def test_run_passes_demand_scores_to_scan_faculty_gaps():
+    """run() computes demand scores and passes them to scan_faculty_gaps."""
+    svc = AutonomousResearchService(web_search=MagicMock())
+
+    captured: dict = {}
+
+    original_scan = svc.scan_faculty_gaps
+
+    def capturing_scan(indexes, demand_scores=None):
+        captured["demand_scores"] = demand_scores
+        return original_scan(indexes, demand_scores=demand_scores)
+
+    svc.scan_faculty_gaps = capturing_scan  # type: ignore[method-assign]
+
+    # One user index assigned to "reasoning" → demand_scores={"reasoning": 1}
+    indexes = [
+        {"index_id": "user_doc_1", "brain_pass": {"placement": {"faculty_id": "reasoning"}}},
+    ]
+    # run() will try to create an LLM — patch llm_providers to avoid real calls
+    import sys, types
+    fake_lp = types.ModuleType("metis_app.utils.llm_providers")
+    fake_lp.create_llm = lambda s: MagicMock(invoke=MagicMock(return_value=MagicMock(content="query")))
+    original = sys.modules.get("metis_app.utils.llm_providers")
+    sys.modules["metis_app.utils.llm_providers"] = fake_lp
+    try:
+        svc.run(settings={}, indexes=indexes, orchestrator=MagicMock())
+    finally:
+        if original is None:
+            sys.modules.pop("metis_app.utils.llm_providers", None)
+        else:
+            sys.modules["metis_app.utils.llm_providers"] = original
+
+    assert captured.get("demand_scores") == {"reasoning": 1}
