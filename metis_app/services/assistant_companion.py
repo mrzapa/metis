@@ -522,6 +522,37 @@ class AssistantCompanionService:
             session_detail=session_detail,
             trace_events=trace_events,
         )
+
+        # -- Topology scaffold awareness (Step 5) --------------------------
+        from metis_app.utils.feature_flags import FeatureFlag, get_feature_statuses
+        topo_enabled = any(
+            s.enabled and s.name == FeatureFlag.TOPO_SCAFFOLD_ENABLED
+            for s in get_feature_statuses(settings)
+        )
+        if topo_enabled:
+            try:
+                from metis_app.models.brain_graph import BrainGraph
+                from metis_app.services.topo_scaffold import compute_scaffold
+                from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
+                graph = WorkspaceOrchestrator().get_workspace_graph()
+                scaffold = compute_scaffold(graph)
+                topo_lines = [
+                    f"Topology: {scaffold.betti_0} connected region(s), {scaffold.betti_1} integration loop(s).",
+                ]
+                if scaffold.scaffold_edges:
+                    top_edge = scaffold.scaffold_edges[0]
+                    topo_lines.append(
+                        f"Strongest scaffold edge: {top_edge[0]} — {top_edge[1]} "
+                        f"(persistence {top_edge[2]:.2f}, frequency {top_edge[3]})."
+                    )
+                if scaffold.summary:
+                    topo_lines.append(f"Scaffold summary: {scaffold.summary}")
+                context_lines = list(reflection.get("context_lines") or [])
+                context_lines.extend(topo_lines)
+                reflection["context_lines"] = context_lines
+            except Exception:  # noqa: BLE001
+                log.debug("Topology scaffold unavailable for reflection", exc_info=True)
+
         policy = resolve_assistant_policy(settings)
         if policy.reflection_backend == "heuristic":
             return reflection

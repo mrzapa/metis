@@ -40,6 +40,8 @@ export interface UserStar {
   intent?: string;
   notes?: string;
   connectedUserStarIds?: string[];
+  /** Scaffold weight per connected star (keyed by connected star ID). */
+  scaffoldWeights?: Record<string, number>;
   linkedManifestPaths?: string[];
   activeManifestPath?: string;
   linkedManifestPath?: string;

@@ -9,6 +9,7 @@ import {
   type BrainNode,
   type BrainScope,
 } from "./brain-graph";
+import type { BrainScaffoldEdge } from "@/lib/api";
 import { CONSTELLATION_FACULTIES, getFacultyColor } from "@/lib/constellation-home";
 import {
   DEFAULT_BRAIN_GRAPH_HIGHLIGHT_TTL_MS,
@@ -39,6 +40,8 @@ export interface BrainSceneLink {
   width: number;
   weight: number;
   activeStrength: number;
+  isScaffoldEdge: boolean;
+  persistenceWeight: number;
 }
 
 export interface BrainSceneGraph {
@@ -61,6 +64,7 @@ interface BuildBrainSceneGraphOptions {
   activeScopes?: BrainScope[];
   highlight?: BrainGraphHighlightState | null;
   nowMs?: number;
+  scaffoldEdges?: BrainScaffoldEdge[];
 }
 
 export function createActiveScopeSet(activeScopes: BrainScope[] = ALL_BRAIN_SCOPES): Set<BrainScope> {
@@ -298,6 +302,7 @@ export function buildBrainSceneGraph(
     activeScopes = ALL_BRAIN_SCOPES,
     highlight = null,
     nowMs = Date.now(),
+    scaffoldEdges = [],
   }: BuildBrainSceneGraphOptions = {},
 ): BrainSceneGraph {
   const filterLower = filter.trim().toLowerCase();
@@ -340,6 +345,15 @@ export function buildBrainSceneGraph(
     });
   }
 
+  // Build scaffold edge lookup for O(1) hit testing.
+  const scaffoldLookup = new Map<string, BrainScaffoldEdge>();
+  for (const se of scaffoldEdges) {
+    const fwd = `${se.source_id}::${se.target_id}`;
+    const rev = `${se.target_id}::${se.source_id}`;
+    scaffoldLookup.set(fwd, se);
+    scaffoldLookup.set(rev, se);
+  }
+
   const links: BrainSceneLink[] = [];
   for (const edge of data.edges) {
     const scope = scopeFromMetadata(edge.metadata);
@@ -352,22 +366,34 @@ export function buildBrainSceneGraph(
         ? highlightStrength
         : 0;
 
+    // Scaffold edge detection — match on node pair ignoring edge_type.
+    const pairKey = `${edge.source_id}::${edge.target_id}`;
+    const scaffoldHit = scaffoldLookup.get(pairKey);
+    const isScaffoldEdge = !!scaffoldHit;
+    const persistenceWeight = scaffoldHit?.persistence_weight ?? 0;
+
+    const scaffoldBoost = isScaffoldEdge ? 1.0 + Math.sqrt(persistenceWeight) * 0.6 : 1.0;
     const baseWidth =
       (scope === "assistant_learned" ? 1.4 : scope === "assistant_self" ? 1.0 : 0.6) *
-      Math.sqrt(Math.max(0.05, edge.weight || 1.0));
+      Math.sqrt(Math.max(0.05, edge.weight || 1.0)) * scaffoldBoost;
 
     const baseColor = SCOPE_LINK_COLOR[scope] ?? "rgba(255,255,255,0.15)";
     const activeColor = `rgba(255, 229, 138, ${0.35 + edgeActiveStrength * 0.55})`;
+    const scaffoldColor = isScaffoldEdge
+      ? `rgba(120, 220, 255, ${0.35 + Math.min(persistenceWeight * 0.1, 0.45)})`
+      : baseColor;
 
     links.push({
       source: edge.source_id,
       target: edge.target_id,
       edge,
       edgeKey,
-      color: edgeActiveStrength > 0 ? activeColor : baseColor,
+      color: edgeActiveStrength > 0 ? activeColor : scaffoldColor,
       weight: edge.weight,
       width: baseWidth * (edgeActiveStrength > 0 ? 1.7 + edgeActiveStrength : 1),
       activeStrength: edgeActiveStrength,
+      isScaffoldEdge,
+      persistenceWeight,
     });
   }
 

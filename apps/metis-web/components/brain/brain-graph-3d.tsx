@@ -42,6 +42,11 @@ import {
   type BrainSceneLink,
   type BrainSceneNode,
 } from "./brain-graph-view-model";
+import {
+  fetchBrainScaffold,
+  type BrainScaffoldResponse,
+  type BrainScaffoldEdge,
+} from "@/lib/api";
 
 // -- Constants ----------------------------------------------------------------
 
@@ -492,6 +497,10 @@ export default function BrainGraph3D({
   // Cinematic rim lights
   const rimLightsRef = useRef<THREE.PointLight[]>([]);
 
+  // Scaffold topology state
+  const [scaffoldData, setScaffoldData] = useArrowState<BrainScaffoldResponse | null>(null);
+  const h1TorusGroupRef = useRef<THREE.Group | null>(null);
+
   // Track container dimensions for the ForceGraph width/height props
   const [dims, setDims] = useArrowState({ w: 800, h: 600 });
   const wasZeroSizedRef = useRef(false);
@@ -533,6 +542,19 @@ export default function BrainGraph3D({
       { strength: BLOOM_STRENGTH, duration: 2.0, ease: "power3.out" },
     );
   }, []);
+
+  // Fetch scaffold topology data once on mount
+  useEffect(() => {
+    let cancelled = false;
+    fetchBrainScaffold()
+      .then((data) => {
+        if (!cancelled) setScaffoldData(data);
+      })
+      .catch(() => {
+        // Scaffold is optional — silently degrade
+      });
+    return () => { cancelled = true; };
+  }, [setScaffoldData]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -850,8 +872,9 @@ export default function BrainGraph3D({
       activeScopes,
       highlight: highlightState,
       nowMs: highlightNowMs,
+      scaffoldEdges: scaffoldData?.scaffold_edges,
     }),
-    [activeScopes, data, filter, highlightNowMs, highlightState],
+    [activeScopes, data, filter, highlightNowMs, highlightState, scaffoldData],
   );
 
   const facultyLegend = useMemo(
@@ -1080,6 +1103,104 @@ export default function BrainGraph3D({
       fgRef.current?.zoomToFit(ZOOM_TO_FIT_MS, ZOOM_TO_FIT_PADDING);
     }
   }, []);
+
+  // -- H₁ persistence torus rings ------------------------------------------
+  // After layout converges and scaffold data is available, visualise each H₁
+  // persistence pair as a semi-transparent torus centred at the centroid of
+  // its member nodes.  Ring radius ∝ spatial spread; emissive glow ∝ lifespan.
+  useEffect(() => {
+    const scene = modelSceneRef.current;
+    if (!scene || !sceneReady || !scaffoldData?.h1_pairs?.length) return;
+
+    // Clean up previous rings
+    if (h1TorusGroupRef.current) {
+      scene.remove(h1TorusGroupRef.current);
+      h1TorusGroupRef.current.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry.dispose();
+          (obj.material as THREE.Material).dispose();
+        }
+      });
+    }
+
+    const group = new THREE.Group();
+    group.name = "h1-torus-rings";
+
+    // Build lookup: nodeId → BrainSceneNode (with settled x/y/z)
+    const nodeById = new Map<string, BrainSceneNode>();
+    for (const n of graphData.nodes) nodeById.set(n.id, n);
+
+    for (const pair of scaffoldData.h1_pairs) {
+      const members = pair.node_ids
+        .map((id) => nodeById.get(id))
+        .filter((n): n is BrainSceneNode => !!n && n.x != null && n.y != null);
+
+      if (members.length < 2) continue;
+
+      // Centroid of member nodes
+      let cx = 0, cy = 0, cz = 0;
+      for (const m of members) {
+        cx += m.x ?? 0;
+        cy += m.y ?? 0;
+        cz += m.z ?? 0;
+      }
+      cx /= members.length;
+      cy /= members.length;
+      cz /= members.length;
+
+      // Spatial spread → ring radius
+      let maxDist = 0;
+      for (const m of members) {
+        const dx = (m.x ?? 0) - cx;
+        const dy = (m.y ?? 0) - cy;
+        const dz = (m.z ?? 0) - cz;
+        maxDist = Math.max(maxDist, Math.sqrt(dx * dx + dy * dy + dz * dz));
+      }
+      const ringRadius = Math.max(maxDist * 0.8, 15);
+      const tubeRadius = 1.2 + (pair.death - pair.birth) * 0.4;
+
+      // Lifespan → glow intensity
+      const lifespan = pair.death - pair.birth;
+      const intensity = Math.min(lifespan * 0.5, 1.0);
+
+      const geometry = new THREE.TorusGeometry(ringRadius, tubeRadius, 16, 48);
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x78dcff,
+        emissive: 0x78dcff,
+        emissiveIntensity: 0.3 + intensity * 0.5,
+        transparent: true,
+        opacity: 0.15 + intensity * 0.2,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+
+      const torus = new THREE.Mesh(geometry, material);
+      torus.position.set(cx, cy, cz);
+      // Random orientation for visual variety
+      torus.rotation.set(
+        Math.random() * Math.PI,
+        Math.random() * Math.PI,
+        0,
+      );
+      group.add(torus);
+    }
+
+    scene.add(group);
+    h1TorusGroupRef.current = group;
+
+    return () => {
+      if (h1TorusGroupRef.current && scene) {
+        scene.remove(h1TorusGroupRef.current);
+        h1TorusGroupRef.current.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            obj.geometry.dispose();
+            (obj.material as THREE.Material).dispose();
+          }
+        });
+        h1TorusGroupRef.current = null;
+      }
+    };
+  }, [scaffoldData, sceneReady, graphData.nodes]);
 
   useEffect(() => {
     if (!selectedNodeId) {
@@ -1406,9 +1527,21 @@ export default function BrainGraph3D({
         linkCurvature={0.15}
         linkCurveRotation={0}
         /* Directional link particles for synaptic-fire effect */
-        linkDirectionalParticles={activityProfile.directionalParticles}
-        linkDirectionalParticleWidth={activityProfile.directionalWidth}
-        linkDirectionalParticleSpeed={activityProfile.directionalSpeed}
+        linkDirectionalParticles={(link: BrainSceneLink) =>
+          link.isScaffoldEdge
+            ? activityProfile.directionalParticles + 4
+            : activityProfile.directionalParticles
+        }
+        linkDirectionalParticleWidth={(link: BrainSceneLink) =>
+          link.isScaffoldEdge
+            ? activityProfile.directionalWidth * 1.4
+            : activityProfile.directionalWidth
+        }
+        linkDirectionalParticleSpeed={(link: BrainSceneLink) =>
+          link.isScaffoldEdge
+            ? activityProfile.directionalSpeed * 1.3
+            : activityProfile.directionalSpeed
+        }
         linkDirectionalParticleColor={(link: BrainSceneLink) => link.color}
         /* Interactions */
         onNodeClick={handleNodeClick}

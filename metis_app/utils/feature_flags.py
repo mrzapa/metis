@@ -28,6 +28,7 @@ class FeatureFlag(StrEnum):
     EVENT_ENVELOPE_V2 = "event_envelope_v2"
     PROVIDER_FALLBACK_ROUTING = "provider_fallback_routing"
     TENANT_RBAC_MODE = "tenant_rbac_mode"
+    TOPO_SCAFFOLD_ENABLED = "topo_scaffold_enabled"
 
 
 _DEFAULT_STATES: dict[FeatureFlag, bool] = {
@@ -39,6 +40,7 @@ _DEFAULT_STATES: dict[FeatureFlag, bool] = {
     FeatureFlag.EVENT_ENVELOPE_V2: False,
     FeatureFlag.PROVIDER_FALLBACK_ROUTING: False,
     FeatureFlag.TENANT_RBAC_MODE: False,
+    FeatureFlag.TOPO_SCAFFOLD_ENABLED: True,
 }
 
 

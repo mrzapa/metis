@@ -25,7 +25,7 @@ import { StarDetailsPanel } from "@/components/constellation/star-observatory-di
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
 import { useCometNews } from "@/hooks/use-news-comets";
 import { deleteIndex, fetchBrainScaffold, fetchIndexes, previewLearningRoute, subscribeCompanionActivity } from "@/lib/api";
-import type { BrainScaffoldEdge } from "@/lib/api";
+import type { BrainScaffoldEdge, BrainScaffoldResponse } from "@/lib/api";
 import type { CometData, CometEvent } from "@/lib/comet-types";
 import {
   makeCometData,
@@ -874,6 +874,7 @@ export default function Home() {
   const armedAddCandidateIdRef = useRef<string | null>(null);
   const availableIndexesRef = useRef<IndexSummary[]>(availableIndexes);
   const scaffoldEdgesRef = useRef<BrainScaffoldEdge[]>([]);
+  const scaffoldResponseRef = useRef<BrainScaffoldResponse | null>(null);
   const canvasBoundsRef = useRef<CanvasBounds>({
     left: 0,
     top: 0,
@@ -1721,7 +1722,10 @@ export default function Home() {
     let cancelled = false;
     fetchBrainScaffold()
       .then((data) => {
-        if (!cancelled) scaffoldEdgesRef.current = data.scaffold_edges;
+        if (!cancelled) {
+          scaffoldEdgesRef.current = data.scaffold_edges;
+          scaffoldResponseRef.current = data;
+        }
       })
       .catch(() => {
         // Scaffold is optional — silently degrade
@@ -3126,9 +3130,31 @@ export default function Home() {
       // in sync with the surrounding star field on mouse movement.
       const ppx = projected.x + (mouse.x - W / 2) * 0.015;
       const ppy = projected.y + (mouse.y - H / 2) * 0.015;
-      const pulse = reducedMotion ? 1 : 0.88 + Math.sin(ts * 0.00209) * 0.12;
       const sc = getZoomResponsiveNodeScale(backgroundZoomRef.current);
       const coreR = 5 * sc;
+
+      // ── Topology activity strength (0–1) derived from scaffold data ───────────
+      const scaffResp = scaffoldResponseRef.current;
+      const topoEdgeCount = scaffoldEdgesRef.current.length;
+      const topoBetti0 = scaffResp?.betti_0 ?? 0; // connected components
+      const topoBetti1 = scaffResp?.betti_1 ?? 0; // loops / cross-references
+      // Normalise: betti_0 ≥ 1 means at least one index, each additional component adds;
+      // betti_1 > 0 means deep cross-references found. Edge count contributes volume.
+      const topoComponentStrength = Math.min(1, Math.max(0, (topoBetti0 - 1) / 5));
+      const topoLoopStrength = Math.min(1, topoBetti1 / 3);
+      const topoEdgeStrength = Math.min(1, topoEdgeCount / 12);
+      const topoDataStrength = Math.min(1, topoComponentStrength * 0.4 + topoLoopStrength * 0.35 + topoEdgeStrength * 0.25);
+
+      // Polaris always feels alive — idle breath baseline + topology amplification
+      // idleBreath: slow ambient oscillation so the star is never static (0.15–0.35)
+      const idleBreath = reducedMotion ? 0.25 : 0.25 + Math.sin(ts * 0.0003) * 0.10;
+      // topoStrength: blends idle baseline with actual data, clamped 0–1
+      const topoStrength = Math.min(1, idleBreath + topoDataStrength * 0.75);
+
+      // Pulse rate accelerates with knowledge — idle 3010ms → active ~2000ms
+      const pulseFreq = 0.00209 + topoStrength * 0.00105;
+      const pulseAmp = 0.12 + topoStrength * 0.06; // 12% → 18% amplitude
+      const pulse = reducedMotion ? 1 : (0.88 - topoStrength * 0.06) + Math.sin(ts * pulseFreq) * pulseAmp;
 
       // ── Satellite micro-node positions (dx, dy from centre, pre-scaled) ───────
       // Modelled on the Sketchfab "Mini Constellation Lines Stylized Effect":
@@ -3197,11 +3223,21 @@ export default function Home() {
         const sx = ppx + ax,                    sy = ppy + ay;
         const ex = ppx + ax + (bx - ax) * traceP, ey = ppy + ay + (by - ay) * traceP;
 
+        // Micro-constellation color warmth shifts with topology activity
+        // Idle: cool blue (110,165,255) → Active: warm gold (210,195,120)
+        const tw = topoStrength; // 0 = cool, 1 = warm
+        const glowR = Math.round(110 + tw * 100);
+        const glowG = Math.round(165 + tw * 30);
+        const glowB = Math.round(255 - tw * 135);
+        const coreLineR = Math.round(215 + tw * 40);
+        const coreLineG = Math.round(232 + tw * 8);
+        const coreLineB = Math.round(255 - tw * 105);
+
         // Soft outer glow (wide, low-opacity)
         ctx!.beginPath();
         ctx!.moveTo(sx, sy);
         ctx!.lineTo(ex, ey);
-        ctx!.strokeStyle = `rgba(110,165,255,${alpha * 0.14})`;
+        ctx!.strokeStyle = `rgba(${glowR},${glowG},${glowB},${alpha * 0.14})`;
         ctx!.lineWidth = 5 * sc;
         ctx!.stroke();
 
@@ -3209,15 +3245,15 @@ export default function Home() {
         ctx!.beginPath();
         ctx!.moveTo(sx, sy);
         ctx!.lineTo(ex, ey);
-        ctx!.strokeStyle = `rgba(215,232,255,${alpha * 0.82})`;
+        ctx!.strokeStyle = `rgba(${coreLineR},${coreLineG},${coreLineB},${alpha * 0.82})`;
         ctx!.lineWidth = 0.85 * sc;
         ctx!.stroke();
 
         // Travelling particle at the line tip (only while tracing)
         if (traceP < 0.999 && alpha > 0.05) {
           const tg = ctx!.createRadialGradient(ex, ey, 0, ex, ey, 5.5 * sc);
-          tg.addColorStop(0,   `rgba(240,250,255,${alpha})`);
-          tg.addColorStop(0.4, `rgba(150,205,255,${alpha * 0.5})`);
+          tg.addColorStop(0,   `rgba(${Math.round(240 + tw * 15)},${Math.round(250 - tw * 20)},${Math.round(255 - tw * 80)},${alpha})`);
+          tg.addColorStop(0.4, `rgba(${Math.round(150 + tw * 60)},${Math.round(205 - tw * 10)},${Math.round(255 - tw * 100)},${alpha * 0.5})`);
           tg.addColorStop(1,   "rgba(0,0,0,0)");
           ctx!.fillStyle = tg;
           ctx!.beginPath();
@@ -3237,9 +3273,12 @@ export default function Home() {
           : 0.62 + Math.sin(ts * 0.0025 + i * 1.31) * 0.38;
         const mr = (1.55 + (i % 3) * 0.28) * sc;
 
-        // Soft halo
+        // Soft halo — warms toward gold with topology
+        const haloR = Math.round(145 + topoStrength * 80);
+        const haloG = Math.round(195 + topoStrength * 20);
+        const haloB = Math.round(255 - topoStrength * 100);
         const hg = ctx!.createRadialGradient(nx, ny, 0, nx, ny, mr * 5.5);
-        hg.addColorStop(0, `rgba(145,195,255,${0.18 * nodePulse})`);
+        hg.addColorStop(0, `rgba(${haloR},${haloG},${haloB},${0.18 * nodePulse})`);
         hg.addColorStop(1, "rgba(0,0,0,0)");
         ctx!.fillStyle = hg;
         ctx!.beginPath();
@@ -3247,9 +3286,12 @@ export default function Home() {
         ctx!.fill();
 
         // Outer dot
+        const dotR = Math.round(200 + topoStrength * 40);
+        const dotG = Math.round(222 + topoStrength * 12);
+        const dotB = Math.round(255 - topoStrength * 80);
         ctx!.beginPath();
         ctx!.arc(nx, ny, mr, 0, Math.PI * 2);
-        ctx!.fillStyle = `rgba(200,222,255,${0.88 * nodePulse})`;
+        ctx!.fillStyle = `rgba(${dotR},${dotG},${dotB},${0.88 * nodePulse})`;
         ctx!.fill();
 
         // Bright inner core
@@ -3260,48 +3302,146 @@ export default function Home() {
       });
 
       // ── 3. Main Polaris / METIS core ─────────────────────────────────────────
-      // Outer gold-blue ambient glow
-      const outerGrad = ctx!.createRadialGradient(ppx, ppy, 0, ppx, ppy, 52 * sc);
-      outerGrad.addColorStop(0,   `rgba(210,228,255,${0.10 * pulse})`);
-      outerGrad.addColorStop(0.4, `rgba(255,240,180,${0.08 * pulse})`);
+      // Outer gold-blue ambient glow — expands with topology knowledge
+      const outerR = (52 + topoStrength * 18) * sc; // 52 → 70 with full topology
+      const outerGrad = ctx!.createRadialGradient(ppx, ppy, 0, ppx, ppy, outerR);
+      const outerWarmth = topoStrength * 40; // shift toward warmer gold with activity
+      outerGrad.addColorStop(0,   `rgba(${210 + outerWarmth},${228},${255 - outerWarmth},${(0.10 + topoStrength * 0.06) * pulse})`);
+      outerGrad.addColorStop(0.4, `rgba(255,${240 - outerWarmth * 0.3},${180 - outerWarmth},${(0.08 + topoStrength * 0.05) * pulse})`);
       outerGrad.addColorStop(1,   "rgba(0,0,0,0)");
       ctx!.fillStyle = outerGrad;
       ctx!.beginPath();
-      ctx!.arc(ppx, ppy, 52 * sc, 0, Math.PI * 2);
+      ctx!.arc(ppx, ppy, outerR, 0, Math.PI * 2);
       ctx!.fill();
 
-      // Inner corona
-      const midGrad = ctx!.createRadialGradient(ppx, ppy, 0, ppx, ppy, 20 * sc);
-      midGrad.addColorStop(0, `rgba(255,252,220,${0.38 * pulse})`);
+      // Inner corona — grows with connected components
+      const coronaR = (20 + topoStrength * 10) * sc; // 20 → 30 with full topology
+      const midGrad = ctx!.createRadialGradient(ppx, ppy, 0, ppx, ppy, coronaR);
+      midGrad.addColorStop(0, `rgba(255,252,${220 - topoStrength * 30},${(0.38 + topoStrength * 0.12) * pulse})`);
       midGrad.addColorStop(1, "rgba(0,0,0,0)");
       ctx!.fillStyle = midGrad;
       ctx!.beginPath();
-      ctx!.arc(ppx, ppy, 20 * sc, 0, Math.PI * 2);
+      ctx!.arc(ppx, ppy, coronaR, 0, Math.PI * 2);
       ctx!.fill();
 
+      // ── 3a. Orbit ring — always present as idle breath, intensifies with H₁ ─
+      if (!reducedMotion) {
+        const ringR = 40 * sc;
+        const ringAngle = -ts * 0.00005; // counter-rotate vs spikes
+        // Idle baseline alpha + H₁ loop amplification
+        const ringAlpha = 0.04 + idleBreath * 0.06 + topoLoopStrength * 0.20;
+        ctx!.save();
+        ctx!.translate(ppx, ppy);
+        ctx!.rotate(ringAngle);
+        ctx!.beginPath();
+        ctx!.arc(0, 0, ringR, 0, Math.PI * 2);
+        ctx!.strokeStyle = `rgba(140,180,255,${ringAlpha * pulse})`;
+        ctx!.lineWidth = 0.6 + idleBreath * 0.3 + topoLoopStrength * 0.5;
+        ctx!.setLineDash([3 * sc, 5 * sc]);
+        ctx!.stroke();
+        ctx!.setLineDash([]);
+        // Second ring — appears with deeper loop data or strong idle breath
+        if (topoLoopStrength > 0.3 || idleBreath > 0.3) {
+          const ring2Alpha = topoLoopStrength > 0.3
+            ? ringAlpha * 0.5
+            : 0.03 + idleBreath * 0.04;
+          ctx!.beginPath();
+          ctx!.arc(0, 0, ringR + 5 * sc, 0, Math.PI * 2);
+          ctx!.strokeStyle = `rgba(180,140,255,${ring2Alpha * pulse})`;
+          ctx!.lineWidth = 0.4 + idleBreath * 0.15;
+          ctx!.setLineDash([2 * sc, 7 * sc]);
+          ctx!.stroke();
+          ctx!.setLineDash([]);
+        }
+        ctx!.restore();
+      }
+
+      // ── 3b. Orbiting particles — always-on idle motes + extra per component ──
+      if (!reducedMotion) {
+        // Always show 2 idle motes; topology data adds up to 4 more (max 6)
+        const idleMotes = 2;
+        const dataParticles = Math.min(4, topoBetti0);
+        const particleCount = idleMotes + dataParticles;
+        const orbitR = 36 * sc;
+        for (let pi = 0; pi < particleCount; pi++) {
+          const isIdleMote = pi < idleMotes;
+          const orbitSpeed = isIdleMote
+            ? 0.00025 + pi * 0.00012  // idle: slower, dreamier
+            : 0.0004 + (pi - idleMotes) * 0.00008;
+          const orbitPhase = (pi / particleCount) * Math.PI * 2;
+          const angle = ts * orbitSpeed + orbitPhase;
+          // Slight eccentricity per particle for organic feel
+          const eccX = 1.0 + Math.sin(pi * 2.17) * 0.15;
+          const eccY = 1.0 + Math.cos(pi * 1.73) * 0.12;
+          const px = ppx + Math.cos(angle) * orbitR * eccX;
+          const py = ppy + Math.sin(angle) * orbitR * eccY;
+          // Idle motes are subtle but always visible; data particles are bolder
+          const pAlpha = isIdleMote
+            ? (0.15 + idleBreath * 0.20) * pulse
+            : (0.3 + topoStrength * 0.5) * pulse;
+          const pR = isIdleMote
+            ? (0.9 + (pi % 2) * 0.2) * sc
+            : (1.2 + ((pi - idleMotes) % 3) * 0.3) * sc;
+
+          // Particle glow
+          const pg = ctx!.createRadialGradient(px, py, 0, px, py, pR * 4);
+          pg.addColorStop(0, `rgba(160,200,255,${pAlpha * 0.5})`);
+          pg.addColorStop(1, "rgba(0,0,0,0)");
+          ctx!.fillStyle = pg;
+          ctx!.beginPath();
+          ctx!.arc(px, py, pR * 4, 0, Math.PI * 2);
+          ctx!.fill();
+
+          // Particle core
+          ctx!.beginPath();
+          ctx!.arc(px, py, pR, 0, Math.PI * 2);
+          ctx!.fillStyle = `rgba(220,235,255,${pAlpha})`;
+          ctx!.fill();
+        }
+      }
+
       // 8-point diffraction spikes: 4 long warm + 4 short cool (slowly rotating)
+      // Spike brightness boosted by topology activity
       const spikeAngle = ts * 0.00007;
+      const spikeBoost = topoStrength * 0.25; // up to +25% alpha
       ctx!.save();
       ctx!.lineCap = "round";
       for (let ii = 0; ii < 4; ii++) {
         const a  = spikeAngle + (Math.PI / 4) * ii;
         const a2 = a + Math.PI / 8;
 
-        // Long primary spike (warm gold)
+        // Long primary spike (warm gold — extends further with topology)
+        const primaryLen = (30 + topoStrength * 8) * sc;
         ctx!.beginPath();
         ctx!.moveTo(ppx + Math.cos(a) * coreR * 1.2, ppy + Math.sin(a) * coreR * 1.2);
-        ctx!.lineTo(ppx + Math.cos(a) * 30 * sc,     ppy + Math.sin(a) * 30 * sc);
-        ctx!.strokeStyle = `rgba(255,238,150,${0.50 * pulse})`;
-        ctx!.lineWidth = 0.85;
+        ctx!.lineTo(ppx + Math.cos(a) * primaryLen,   ppy + Math.sin(a) * primaryLen);
+        ctx!.strokeStyle = `rgba(255,238,150,${(0.50 + spikeBoost) * pulse})`;
+        ctx!.lineWidth = 0.85 + topoStrength * 0.4;
         ctx!.stroke();
 
         // Short secondary spike (cool blue-white)
+        const secondaryLen = (16 + topoStrength * 4) * sc;
         ctx!.beginPath();
         ctx!.moveTo(ppx + Math.cos(a2) * coreR * 1.2, ppy + Math.sin(a2) * coreR * 1.2);
-        ctx!.lineTo(ppx + Math.cos(a2) * 16 * sc,     ppy + Math.sin(a2) * 16 * sc);
-        ctx!.strokeStyle = `rgba(180,212,255,${0.32 * pulse})`;
-        ctx!.lineWidth = 0.55;
+        ctx!.lineTo(ppx + Math.cos(a2) * secondaryLen, ppy + Math.sin(a2) * secondaryLen);
+        ctx!.strokeStyle = `rgba(180,212,255,${(0.32 + spikeBoost * 0.6) * pulse})`;
+        ctx!.lineWidth = 0.55 + topoStrength * 0.25;
         ctx!.stroke();
+      }
+
+      // ── Tertiary spikes — always shimmer faintly, amplify with H₁ loops ──
+      {
+        for (let ii = 0; ii < 4; ii++) {
+          const a3 = spikeAngle + (Math.PI / 8) + (Math.PI / 4) * ii;
+          const tertiaryLen = (8 + idleBreath * 3 + topoLoopStrength * 8) * sc;
+          const tertiaryAlpha = (0.06 + idleBreath * 0.06 + topoLoopStrength * 0.16) * pulse;
+          ctx!.beginPath();
+          ctx!.moveTo(ppx + Math.cos(a3) * coreR * 1.4, ppy + Math.sin(a3) * coreR * 1.4);
+          ctx!.lineTo(ppx + Math.cos(a3) * tertiaryLen,  ppy + Math.sin(a3) * tertiaryLen);
+          ctx!.strokeStyle = `rgba(160,180,255,${tertiaryAlpha})`;
+          ctx!.lineWidth = 0.35 + idleBreath * 0.1;
+          ctx!.stroke();
+        }
       }
       ctx!.restore();
 
