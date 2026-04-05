@@ -100,7 +100,7 @@ import {
   buildLandingStarSpatialHash,
   findClosestLandingStarHitTarget,
 } from "@/lib/landing-stars/landing-star-spatial-index";
-import { StarCatalogue, DEFAULT_CATALOGUE_CONFIG } from "@/lib/star-catalogue";
+import { StarCatalogue, DEFAULT_CATALOGUE_CONFIG, fnv1a32, SeededRNG, generateStarName } from "@/lib/star-catalogue";
 import type { CatalogueStar } from "@/lib/star-catalogue";
 import {
   buildCanvasFont,
@@ -3812,7 +3812,10 @@ export default function Home() {
       }
 
       const faculty = resolveStarFaculty(star);
-      const title = star.label?.trim() || "Untitled Star";
+      const title = star.label?.trim() || (() => {
+        const rng = new SeededRNG(fnv1a32(star.id));
+        return generateStarName(rng, Math.max(1, 7 - (star.size * 2.5)));
+      })();
       const description = getStarTooltipDescription(star, faculty);
       const domainLabel = faculty.label;
 
