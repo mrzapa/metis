@@ -2100,66 +2100,103 @@ export default function Home() {
       offscreen.width  = pw;
       offscreen.height = ph;
 
+      const cx = pw / 2;
+      const cy = ph / 2;
+
+      // --- Pass 1: Radial core glow ---
+      const coreRadius = Math.min(pw, ph) * 0.55;
+      const coreGrad = gc.createRadialGradient(cx, cy, 0, cx, cy, coreRadius);
+      coreGrad.addColorStop(0,    'rgba(200,180,255,0.65)');
+      coreGrad.addColorStop(0.08, 'rgba(160,120,255,0.5)');
+      coreGrad.addColorStop(0.20, 'rgba(80,40,180,0.28)');
+      coreGrad.addColorStop(0.50, 'rgba(20,10,60,0.12)');
+      coreGrad.addColorStop(1.0,  'rgba(0,0,0,0)');
+      gc.fillStyle = coreGrad;
+      gc.fillRect(0, 0, pw, ph);
+
+      // --- Pass 2: fBm cloud arms (pixel density map) ---
+      const stride = 2;
       const imageData = gc.createImageData(pw, ph);
       const data = imageData.data;
 
-      const cos25 = Math.cos(25 * Math.PI / 180);
-      const sin25 = Math.sin(25 * Math.PI / 180);
-      const stride = 3;
-
       for (let py = 0; py < ph; py += stride) {
         for (let px = 0; px < pw; px += stride) {
-          const nx = (px / pw - 0.5) * 4;
-          const ny = (py / ph - 0.5) * 4;
-          const by = -nx * sin25 + ny * cos25;
-          const band = Math.exp(-(by * by) / 0.18);
-          const noise = fbm4(nx * 3, ny * 3);
-          const density = band * (0.4 + noise * 0.6);
+          const nx = (px / pw - 0.5) * 3;
+          const ny = (py / ph - 0.5) * 3;
+          const r2 = nx * nx + ny * ny;
 
-          const r = Math.round((8  + (18 - 8)  * noise) * density);
-          const g = Math.round((10 + (12 - 10) * noise) * density);
-          const b = Math.round((28 + (42 - 28) * noise) * density);
-          const a = Math.round(density * 200);
+          const coreDensity = Math.exp(-r2 / 0.18);
+
+          const angle = Math.atan2(ny, nx);
+          const lobe1 = Math.exp(-(Math.pow(angle - 0.4, 2) + r2 * 0.35) / 0.45);
+          const lobe2 = Math.exp(-(Math.pow(angle - 0.4 - Math.PI, 2) + r2 * 0.35) / 0.45);
+          const armDensity = (lobe1 + lobe2) * 0.65;
+
+          const noise = fbm4(nx * 2.5, ny * 2.5);
+          const density = Math.min(1, coreDensity + armDensity) * (0.35 + noise * 0.65);
+
+          const rc  = Math.round(Math.min(255, 15  + 75  * noise + 120 * coreDensity));
+          const gc2 = Math.round(Math.min(255, 8   + 52  * noise +  72 * coreDensity));
+          const bc  = Math.round(Math.min(255, 45  + 130 * noise + 100 * coreDensity));
+          const ac  = Math.round(density * 185);
 
           for (let dy = 0; dy < stride && py + dy < ph; dy++) {
             for (let dx = 0; dx < stride && px + dx < pw; dx++) {
               const idx = ((py + dy) * pw + (px + dx)) * 4;
-              data[idx    ] = r;
-              data[idx + 1] = g;
-              data[idx + 2] = b;
-              data[idx + 3] = a;
+              data[idx    ] = rc;
+              data[idx + 1] = gc2;
+              data[idx + 2] = bc;
+              data[idx + 3] = ac;
             }
           }
         }
       }
 
-      gc.putImageData(imageData, 0, 0);
-
-      // Blur using a temporary canvas to avoid self-compositing (undefined in Firefox/Safari)
-      const blurTemp = document.createElement('canvas');
-      blurTemp.width = pw;
-      blurTemp.height = ph;
-      const btx = blurTemp.getContext('2d');
-      if (btx) {
-        btx.filter = 'blur(4px)';
-        btx.drawImage(offscreen, 0, 0);
-        btx.filter = 'none';
-        gc.clearRect(0, 0, pw, ph);
-        gc.drawImage(blurTemp, 0, 0);
+      // Blur cloud arms via temp canvas to avoid self-compositing
+      const armTemp = document.createElement('canvas');
+      armTemp.width = pw;
+      armTemp.height = ph;
+      const atx = armTemp.getContext('2d');
+      if (atx) {
+        atx.putImageData(imageData, 0, 0);
+        const blurTemp = document.createElement('canvas');
+        blurTemp.width = pw;
+        blurTemp.height = ph;
+        const btx = blurTemp.getContext('2d');
+        if (btx) {
+          btx.filter = 'blur(6px)';
+          btx.drawImage(armTemp, 0, 0);
+          btx.filter = 'none';
+          gc.drawImage(blurTemp, 0, 0);
+        }
       }
 
-      const seed = 0.618;
+      // --- Pass 3: Three-tier procedural star field ---
       for (let py = 0; py < ph; py += 2) {
         for (let px = 0; px < pw; px += 2) {
-          const nx = (px / pw - 0.5) * 4;
-          const ny = (py / ph - 0.5) * 4;
-          const by = -nx * sin25 + ny * cos25;
-          const band = Math.exp(-(by * by) / 0.18);
-          const noise = fbm4(nx * 3 + seed, ny * 3 + seed);
-          const density = band * (0.4 + noise * 0.6);
+          const nx = (px / pw - 0.5) * 3;
+          const ny = (py / ph - 0.5) * 3;
+          const r2 = nx * nx + ny * ny;
+          const coreDensity = Math.exp(-r2 / 0.18);
+          const angle = Math.atan2(ny, nx);
+          const lobe1 = Math.exp(-(Math.pow(angle - 0.4, 2) + r2 * 0.35) / 0.45);
+          const lobe2 = Math.exp(-(Math.pow(angle - 0.4 - Math.PI, 2) + r2 * 0.35) / 0.45);
+          const armDensity = (lobe1 + lobe2) * 0.65;
+          const noise = fbm4(nx * 2.5 + 1.3, ny * 2.5 + 0.7);
+          const density = Math.min(1, coreDensity + armDensity) * (0.35 + noise * 0.65);
+
           const h = Math.abs(hash2(px, py));
-          if (h < density * 0.06) {
-            gc.fillStyle = `rgba(200,210,255,${density * 0.85})`;
+
+          if (h < density * 0.003) {
+            gc.fillStyle = `rgba(230,220,255,${(density * 0.95).toFixed(3)})`;
+            gc.beginPath();
+            gc.arc(px, py, 1.5, 0, Math.PI * 2);
+            gc.fill();
+          } else if (h < density * 0.025) {
+            gc.fillStyle = `rgba(190,170,255,${(density * 0.85).toFixed(3)})`;
+            gc.fillRect(px, py, 1, 1);
+          } else if (h < density * 0.10) {
+            gc.fillStyle = `rgba(150,130,225,${(density * 0.55).toFixed(3)})`;
             gc.fillRect(px, py, 1, 1);
           }
         }
