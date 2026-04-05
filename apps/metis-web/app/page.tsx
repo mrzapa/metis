@@ -26,6 +26,8 @@ import { useConstellationStars } from "@/hooks/use-constellation-stars";
 import { useCometNews } from "@/hooks/use-news-comets";
 import { deleteIndex, fetchBrainScaffold, fetchIndexes, previewLearningRoute, subscribeCompanionActivity } from "@/lib/api";
 import type { BrainScaffoldEdge, BrainScaffoldResponse } from "@/lib/api";
+import { noise2D } from "@/lib/simplex-noise";
+import gsap from "gsap";
 import type { CometData, CometEvent } from "@/lib/comet-types";
 import {
   makeCometData,
@@ -779,6 +781,11 @@ export default function Home() {
   const availableIndexesRef = useRef<IndexSummary[]>(availableIndexes);
   const scaffoldEdgesRef = useRef<BrainScaffoldEdge[]>([]);
   const scaffoldResponseRef = useRef<BrainScaffoldResponse | null>(null);
+  // Smooth animated topology strength — GSAP tweens this from old→new value
+  const topoStrengthAnimRef = useRef({ value: 0 });
+  // Offscreen canvas for Polaris bloom composite
+  const bloomCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const bloomCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const canvasBoundsRef = useRef<CanvasBounds>({
     left: 0,
     top: 0,
@@ -819,6 +826,7 @@ export default function Home() {
   const starDiveFocusStrengthRef = useRef(0);
   const starDiveFocusWorldPosRef = useRef<Point | null>(null);
   const starDiveFocusProfileRef = useRef<StellarProfile | null>(null);
+  const starDiveFocusNameRef = useRef<string | null>(null);
   const starDiveOverlayViewRef = useRef<StarDiveOverlayView | null>(null);
   const starDivePanSuppressedRef = useRef(false);
   const starTooltipHideTimeoutRef = useRef<number | null>(null);
@@ -1630,6 +1638,20 @@ export default function Home() {
         if (!cancelled) {
           scaffoldEdgesRef.current = data.scaffold_edges;
           scaffoldResponseRef.current = data;
+          // Compute raw data strength and GSAP-tween to it for smooth visual transition
+          const b0 = data.betti_0 ?? 0;
+          const b1 = data.betti_1 ?? 0;
+          const ec = data.scaffold_edges.length;
+          const rawStrength = Math.min(1,
+            Math.min(1, Math.max(0, (b0 - 1) / 5)) * 0.4 +
+            Math.min(1, b1 / 3) * 0.35 +
+            Math.min(1, ec / 12) * 0.25,
+          );
+          gsap.to(topoStrengthAnimRef.current, {
+            value: rawStrength,
+            duration: 1.8,
+            ease: "power2.inOut",
+          });
         }
       })
       .catch(() => {
@@ -1885,7 +1907,7 @@ export default function Home() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    let ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     let W = window.innerWidth;
@@ -2160,6 +2182,7 @@ export default function Home() {
     let lastVisibleStarfieldY = Number.NaN;
     let lastVisibleWorldZoom = Number.NaN;
     let visibleWorldStars: WorldStarData[] = [];
+    let visibleStarNameMap = new Map<string, string>();
     let lastConstellationProjectionWidth = -1;
     let lastConstellationProjectionHeight = -1;
     let lastConstellationProjectionZoom = Number.NaN;
@@ -2270,9 +2293,12 @@ export default function Home() {
         BACKGROUND_TILE_PADDING_PX,
       );
 
-      /* Magnitude-based reveal: brightest stars visible at galaxy zoom (0.002),
-         faintest stars appear around zoom 5-6.  Formula maps apparentMagnitude
-         [0, 6.5] → revealZoom [~0.003, ~5.6]. */
+      /* Magnitude-based reveal: brightest stars (mag≈0) visible from galaxy zoom (0.002×),
+         faintest stars (mag≈6.5) only appear around zoom 5–6×.
+         Formula: revealZoom = 10^(mag × 0.7 − 3.5)
+           mag 0   → 10^−3.5 ≈ 0.0003  → visible from 0.002× ✓
+           mag 3   → 10^−1.4 ≈ 0.04    → visible from 0.04×
+           mag 6.5 → 10^+1.05 ≈ 11     → visible from ~11× */
       const zoomFactor = backgroundCamera.zoomFactor;
       const shouldRebuildVisibleWorldStars =
         lastVisibleStarfieldRevision !== starfieldRevisionRef.current
@@ -2291,7 +2317,7 @@ export default function Home() {
         for (let i = 0; i < catStars.length; i++) {
           const cat = catStars[i];
           const mag = cat.apparentMagnitude;
-          const revealZoomFactor = Math.max(0.002, Math.pow(10, mag * 0.5 - 2.5));
+          const revealZoomFactor = Math.pow(10, mag * 0.7 - 3.5);
           if (zoomFactor + 1e-6 < revealZoomFactor) continue;
 
           const layer = cat.depthLayer < 0.33 ? 2 : cat.depthLayer < 0.66 ? 1 : 0;
@@ -2355,7 +2381,6 @@ export default function Home() {
       const nextVisibleStars = visibleStarsRef.current;
       let visibleStarCount = 0;
       const visibleStarProfiles = new Map<string, StellarProfile>();
-      const visibleStarNames = new Map<string, string>();
 
       visibleWorldStars.forEach((worldStar) => {
         const screenX = (worldStar.worldX - backgroundCamera.x) * scale + W / 2;
@@ -2452,7 +2477,7 @@ export default function Home() {
         );
         nextVisibleStars[visibleStarCount] = star;
         visibleStarProfiles.set(worldStar.id, worldStar.profile);
-        visibleStarNames.set(worldStar.id, worldStar.catalogueName);
+        visibleStarNameMap.set(worldStar.id, worldStar.catalogueName);
         visibleStarCount += 1;
       });
 
@@ -2473,7 +2498,7 @@ export default function Home() {
           addable: star.isAddable,
           apparentSize: isFocused ? focusedSizeBoost : star.baseSize,
           brightness: star.brightness * dimFactor,
-          catalogueName: visibleStarNames.get(star.id),
+          catalogueName: visibleStarNameMap.get(star.id),
           hitRadius: star.hitRadius,
           id: star.id,
           profile,
@@ -2933,18 +2958,24 @@ export default function Home() {
       const topoComponentStrength = Math.min(1, Math.max(0, (topoBetti0 - 1) / 5));
       const topoLoopStrength = Math.min(1, topoBetti1 / 3);
       const topoEdgeStrength = Math.min(1, topoEdgeCount / 12);
-      const topoDataStrength = Math.min(1, topoComponentStrength * 0.4 + topoLoopStrength * 0.35 + topoEdgeStrength * 0.25);
+      // Use GSAP-tweened data strength for smooth transitions (falls back to raw calc)
+      const topoDataStrength = topoStrengthAnimRef.current.value > 0
+        ? topoStrengthAnimRef.current.value
+        : Math.min(1, topoComponentStrength * 0.4 + topoLoopStrength * 0.35 + topoEdgeStrength * 0.25);
 
-      // Polaris always feels alive — idle breath baseline + topology amplification
-      // idleBreath: slow ambient oscillation so the star is never static (0.15–0.35)
-      const idleBreath = reducedMotion ? 0.25 : 0.25 + Math.sin(ts * 0.0003) * 0.10;
+      // Polaris always feels alive — organic noise baseline + topology amplification
+      // Simplex noise replaces mechanical Math.sin for natural, never-repeating drift
+      const noiseT = ts * 0.00008; // slow-moving noise time coordinate
+      const idleBreath = reducedMotion ? 0.25 : 0.25 + noise2D(noiseT, 0.0) * 0.10;
       // topoStrength: blends idle baseline with actual data, clamped 0–1
       const topoStrength = Math.min(1, idleBreath + topoDataStrength * 0.75);
 
       // Pulse rate accelerates with knowledge — idle 3010ms → active ~2000ms
       const pulseFreq = 0.00209 + topoStrength * 0.00105;
       const pulseAmp = 0.12 + topoStrength * 0.06; // 12% → 18% amplitude
-      const pulse = reducedMotion ? 1 : (0.88 - topoStrength * 0.06) + Math.sin(ts * pulseFreq) * pulseAmp;
+      // Noise-modulated pulse with subtle frequency drift
+      const pulseDrift = noise2D(noiseT * 1.7, 3.0) * 0.0003;
+      const pulse = reducedMotion ? 1 : (0.88 - topoStrength * 0.06) + noise2D(ts * (pulseFreq + pulseDrift), 1.0) * pulseAmp;
 
       // ── Satellite micro-node positions (dx, dy from centre, pre-scaled) ───────
       // Modelled on the Sketchfab "Mini Constellation Lines Stylized Effect":
@@ -3060,7 +3091,7 @@ export default function Home() {
         const ny = ppy + dy;
         const nodePulse = reducedMotion
           ? 0.80
-          : 0.62 + Math.sin(ts * 0.0025 + i * 1.31) * 0.38;
+          : 0.62 + noise2D(ts * 0.0006 + i * 1.31, 5.0 + i) * 0.38;
         const mr = (1.55 + (i % 3) * 0.28) * sc;
 
         // Soft halo — warms toward gold with topology
@@ -3117,9 +3148,10 @@ export default function Home() {
       // ── 3a. Orbit ring — always present as idle breath, intensifies with H₁ ─
       if (!reducedMotion) {
         const ringR = 40 * sc;
-        const ringAngle = -ts * 0.00005; // counter-rotate vs spikes
-        // Idle baseline alpha + H₁ loop amplification
-        const ringAlpha = 0.04 + idleBreath * 0.06 + topoLoopStrength * 0.20;
+        const ringAngle = -ts * 0.00005 + noise2D(noiseT * 0.6, 8.0) * 0.04; // noise wobble
+        // Idle baseline alpha + H₁ loop amplification + noise flicker
+        const ringFlicker = noise2D(noiseT * 2.3, 9.0) * 0.02;
+        const ringAlpha = 0.04 + idleBreath * 0.06 + topoLoopStrength * 0.20 + ringFlicker;
         ctx!.save();
         ctx!.translate(ppx, ppy);
         ctx!.rotate(ringAngle);
@@ -3160,11 +3192,12 @@ export default function Home() {
             : 0.0004 + (pi - idleMotes) * 0.00008;
           const orbitPhase = (pi / particleCount) * Math.PI * 2;
           const angle = ts * orbitSpeed + orbitPhase;
-          // Slight eccentricity per particle for organic feel
+          // Slight eccentricity per particle for organic feel + noise drift
           const eccX = 1.0 + Math.sin(pi * 2.17) * 0.15;
           const eccY = 1.0 + Math.cos(pi * 1.73) * 0.12;
-          const px = ppx + Math.cos(angle) * orbitR * eccX;
-          const py = ppy + Math.sin(angle) * orbitR * eccY;
+          const noiseDrift = noise2D(ts * 0.0001 + pi * 3.7, 12.0 + pi) * 2.5 * sc;
+          const px = ppx + Math.cos(angle) * orbitR * eccX + noiseDrift;
+          const py = ppy + Math.sin(angle) * orbitR * eccY + noiseDrift * 0.7;
           // Idle motes are subtle but always visible; data particles are bolder
           const pAlpha = isIdleMote
             ? (0.15 + idleBreath * 0.20) * pulse
@@ -3574,6 +3607,7 @@ export default function Home() {
               y: backgroundCamera.y + (target.screenY - H / 2) / scale,
             };
             starDiveFocusProfileRef.current = getCachedStellarProfile(target.id);
+            starDiveFocusNameRef.current = visibleStarNameMap.get(target.id) ?? null;
           }
         }
 
@@ -3595,6 +3629,7 @@ export default function Home() {
         starDiveFocusedStarIdRef.current = null;
         starDiveFocusWorldPosRef.current = null;
         starDiveFocusProfileRef.current = null;
+        starDiveFocusNameRef.current = null;
         starDivePanSuppressedRef.current = false;
       }
 
@@ -3611,6 +3646,7 @@ export default function Home() {
           screenY: (wp.y - backgroundCamera.y) * scale + H / 2,
           focusStrength: diveFocusStrength,
           profile: starDiveFocusProfileRef.current,
+          starName: starDiveFocusNameRef.current ?? undefined,
         };
       } else {
         starDiveOverlayViewRef.current = null;
@@ -3719,7 +3755,43 @@ export default function Home() {
       drawUserStarEdges(ts);
       drawAddCandidatePreview(ts);
       drawUserStars(ts);
-      drawPolarisMetis(ts);
+
+      // ── Offscreen bloom composite for Polaris ────────────────────────────────
+      // Draw Polaris to an offscreen canvas, then composite back with a soft
+      // blur layer underneath for a real glow effect.
+      if (!reducedMotion && ctx) {
+        // Lazy-init offscreen canvas at matching size
+        if (!bloomCanvasRef.current || bloomCanvasRef.current.width !== W || bloomCanvasRef.current.height !== H) {
+          bloomCanvasRef.current = document.createElement("canvas");
+          bloomCanvasRef.current.width = W;
+          bloomCanvasRef.current.height = H;
+          bloomCtxRef.current = bloomCanvasRef.current.getContext("2d");
+        }
+        const bCtx = bloomCtxRef.current;
+        if (bCtx) {
+          bCtx.clearRect(0, 0, W, H);
+          // Temporarily redirect drawing context so drawPolarisMetis renders offscreen
+          const mainCtx = ctx;
+          ctx = bCtx;
+          drawPolarisMetis(ts);
+          ctx = mainCtx;
+
+          // Layer 1: blurred glow underneath (additive blend)
+          mainCtx.save();
+          mainCtx.filter = "blur(6px)";
+          mainCtx.globalCompositeOperation = "lighter";
+          mainCtx.globalAlpha = 0.35;
+          mainCtx.drawImage(bloomCanvasRef.current, 0, 0);
+          mainCtx.restore();
+
+          // Layer 2: crisp original on top
+          mainCtx.drawImage(bloomCanvasRef.current, 0, 0);
+        } else {
+          drawPolarisMetis(ts);
+        }
+      } else {
+        drawPolarisMetis(ts);
+      }
 
       // ── Polaris tendrils reaching toward approaching/absorbing comets ──
       if (cometSprites.length > 0 && ctx) {
@@ -4449,6 +4521,7 @@ export default function Home() {
         starDiveFocusedStarIdRef.current = null;
         starDiveFocusWorldPosRef.current = null;
         starDiveFocusProfileRef.current = null;
+        starDiveFocusNameRef.current = null;
       }
     }
 
@@ -4576,6 +4649,11 @@ export default function Home() {
           }}
           aria-live="polite"
         >
+          {starDiveFocusNameRef.current && (
+            <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: "0.03em" }}>
+              {starDiveFocusNameRef.current}
+            </div>
+          )}
           <div style={{ fontSize: 15, fontWeight: 500 }}>
             {starDiveFocusProfileRef.current.spectralClass} — {starDiveFocusProfileRef.current.stellarType.replace(/_/g, " ")}
           </div>
@@ -4649,65 +4727,40 @@ export default function Home() {
         </div>
       </div>
 
-      <section id="build-map" className="metis-build-section">
-        <div className="metis-build-toolbar">
-          <div className="metis-build-stats" aria-live="polite">
-            <div className="metis-build-stat">{starCountLabel}</div>
-            <div className="metis-build-stat">{detectedSourceCountLabel}</div>
-            <div className="metis-build-stat">{readyToMapCountLabel}</div>
-            <div className="metis-build-stat">{attachmentsCountLabel}</div>
-          </div>
-
-          <div className="metis-star-controls-actions">
+      {(detailsStar || addMessage) && (
+        <section id="build-map" className="metis-build-section">
+          <div className="metis-build-studio-shell">
             <button
               type="button"
-              className="metis-star-btn"
-              onClick={() => void mapIndexedSources()}
-              disabled={indexesLoading || unmappedIndexes.length === 0}
+              className="metis-build-dismiss"
+              aria-label="Dismiss"
+              onClick={() => {
+                closeStarDetails({ clearSelection: true, restoreCamera: "none" });
+                setAddMessage(null);
+              }}
             >
-              Seed indexed sources
+              ✕
             </button>
-            <button
-              type="button"
-              className="metis-star-btn danger"
-              onClick={() => void handleRemoveSelectedStar()}
-              disabled={!selectedUserStar}
-            >
-              Remove selected
-            </button>
-            <button
-              type="button"
-              className="metis-star-btn"
-              onClick={() => void handleResetOrbit()}
-              disabled={userStars.length === 0}
-            >
-              Reset orbit
-            </button>
-          </div>
-        </div>
-
-        <div className="metis-build-studio-shell">
-          <div className={`metis-build-note ${buildNoteTone}`}>{buildNoteMessage}</div>
-
-          <div className="metis-star-editor">
-            <div className="metis-star-editor-head">Star details</div>
-            <p className="metis-star-editor-copy">{selectedStarSummary}</p>
-            {isAutonomousStar(selectedStarActiveIndex?.index_id) && (
-              <p className="metis-star-editor-copy" style={{ color: "rgb(196, 181, 253)", fontSize: "0.75rem" }}>
-                ✦ Added autonomously by METIS
-                {getAutoStarFaculty(selectedStarActiveIndex?.index_id)
-                  ? ` · ${getAutoStarFaculty(selectedStarActiveIndex?.index_id)}`
-                  : ""}
-              </p>
+            {addMessage && (
+              <div className={`metis-build-note ${buildNoteTone}`}>{buildNoteMessage}</div>
             )}
-            <p className="metis-star-editor-copy">
-              Follow the faculty ring when you drag or seed stars. Claimed stars keep their own
-              source context, so uploads, attachments, and grounded chat remain aligned to the same
-              manifest path.
-            </p>
+            {detailsStar && (
+              <div className="metis-star-editor">
+                <div className="metis-star-editor-head">{detailsStar.label ?? detailsStar.id}</div>
+                <p className="metis-star-editor-copy">{selectedStarSummary}</p>
+                {isAutonomousStar(selectedStarActiveIndex?.index_id) && (
+                  <p className="metis-star-editor-copy" style={{ color: "rgb(196, 181, 253)", fontSize: "0.75rem" }}>
+                    ✦ Added autonomously by METIS
+                    {getAutoStarFaculty(selectedStarActiveIndex?.index_id)
+                      ? ` · ${getAutoStarFaculty(selectedStarActiveIndex?.index_id)}`
+                      : ""}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
-        </div>
-      </section>
+        </section>
+      )}
       {toastState ? (
         <div
           className={`metis-toast ${toastState.tone === "error" ? "error" : ""}`}
@@ -5263,64 +5316,27 @@ body {
 .metis-inline-accent {
   color: rgba(236, 204, 128, 0.98);
 }
-.metis-build-toolbar {
-  margin-top: 28px;
+.metis-build-dismiss {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px 24px;
-  padding: 20px 0 24px;
-  border-top: 1px solid rgba(200,210,225,0.09);
-  border-bottom: 1px solid rgba(200,210,225,0.09);
-}
-.metis-build-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.metis-build-stat {
-  display: inline-flex;
   align-items: center;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(200,210,225,0.1);
-  background: rgba(10,14,28,0.38);
+  justify-content: center;
+  border: 1px solid rgba(200,210,225,0.12);
+  border-radius: 50%;
+  background: rgba(10,14,28,0.56);
   color: var(--text-mid);
   font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-.metis-star-controls-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.metis-star-btn {
-  border: 1px solid rgba(200, 210, 225, 0.16);
-  background: rgba(17, 24, 46, 0.56);
-  color: var(--text-bright);
-  border-radius: 999px;
-  padding: 8px 13px;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   cursor: pointer;
-  transition: all 0.25s ease;
+  transition: all 0.2s ease;
 }
-.metis-star-btn:hover:not(:disabled) {
-  border-color: rgba(196,149,58,0.34);
-  color: var(--gold-bright);
-}
-.metis-star-btn.danger:hover:not(:disabled) {
-  border-color: rgba(255,120,120,0.45);
-  color: rgba(255,180,180,0.95);
-}
-.metis-star-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+.metis-build-dismiss:hover {
+  border-color: rgba(200,210,225,0.3);
+  color: var(--text-bright);
+  background: rgba(10,14,28,0.78);
 }
 .metis-build-note {
   margin-top: 14px;
@@ -5648,10 +5664,6 @@ body {
   .metis-cards-section {
     padding-left: 20px;
     padding-right: 20px;
-  }
-
-  .metis-build-toolbar {
-    flex-direction: column;
   }
 
   .metis-star-editor-grid {
