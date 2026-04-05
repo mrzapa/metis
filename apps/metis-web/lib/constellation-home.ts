@@ -253,7 +253,7 @@ export function clampBackgroundZoomFactor(value: number): number {
 }
 
 export function getBackgroundCameraScale(zoomFactor: number): number {
-  return 1 / Math.sqrt(clampBackgroundZoomFactor(zoomFactor));
+  return Math.sqrt(clampBackgroundZoomFactor(zoomFactor));
 }
 
 export function getConstellationCameraScale(zoomFactor: number): number {
