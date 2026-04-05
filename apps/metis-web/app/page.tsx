@@ -2045,6 +2045,115 @@ export default function Home() {
       { x: W * 0.55, y: H * 0.2, rx: 220, ry: 150, angle: 0.8, color: [10, 18, 48], opacity: 0.15 },
     ];
 
+    /* galaxy background */
+    function smoothstep(edge0: number, edge1: number, x: number): number {
+      const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+      return t * t * (3 - 2 * t);
+    }
+
+    function hash2(ix: number, iy: number): number {
+      const n = ix * 127 + iy * 311;
+      return (Math.sin(n) * 43758.5453) % 1;
+    }
+
+    function valueNoise(x: number, y: number): number {
+      const ix = Math.floor(x), iy = Math.floor(y);
+      const fx = x - ix, fy = y - iy;
+      const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+      const a = Math.abs(hash2(ix, iy));
+      const b = Math.abs(hash2(ix + 1, iy));
+      const c = Math.abs(hash2(ix, iy + 1));
+      const d = Math.abs(hash2(ix + 1, iy + 1));
+      return a + (b - a) * ux + (c - a) * uy + (d - a + a - b - c + b + c - d) * ux * uy;
+    }
+
+    function fbm4(x: number, y: number): number {
+      return (
+        valueNoise(x,     y    ) * 0.5   +
+        valueNoise(x * 2, y * 2) * 0.25  +
+        valueNoise(x * 4, y * 4) * 0.125 +
+        valueNoise(x * 8, y * 8) * 0.0625
+      );
+    }
+
+    function renderGalaxyToCanvas(offscreen: HTMLCanvasElement, cW: number, cH: number) {
+      const gc = offscreen.getContext('2d')!;
+      const dpr = window.devicePixelRatio || 1;
+      const pw = Math.round(cW * dpr);
+      const ph = Math.round(cH * dpr);
+      offscreen.width  = pw;
+      offscreen.height = ph;
+
+      const imageData = gc.createImageData(pw, ph);
+      const data = imageData.data;
+
+      const cos25 = Math.cos(25 * Math.PI / 180);
+      const sin25 = Math.sin(25 * Math.PI / 180);
+      const stride = 3;
+
+      for (let py = 0; py < ph; py += stride) {
+        for (let px = 0; px < pw; px += stride) {
+          const nx = (px / pw - 0.5) * 4;
+          const ny = (py / ph - 0.5) * 4;
+          const by = -nx * sin25 + ny * cos25;
+          const band = Math.exp(-(by * by) / 0.18);
+          const noise = fbm4(nx * 3, ny * 3);
+          const density = band * (0.4 + noise * 0.6);
+
+          const r = Math.round((8  + (18 - 8)  * noise) * density);
+          const g = Math.round((10 + (12 - 10) * noise) * density);
+          const b = Math.round((28 + (42 - 28) * noise) * density);
+          const a = Math.round(density * 200);
+
+          for (let dy = 0; dy < stride && py + dy < ph; dy++) {
+            for (let dx = 0; dx < stride && px + dx < pw; dx++) {
+              const idx = ((py + dy) * pw + (px + dx)) * 4;
+              data[idx    ] = r;
+              data[idx + 1] = g;
+              data[idx + 2] = b;
+              data[idx + 3] = a;
+            }
+          }
+        }
+      }
+
+      gc.putImageData(imageData, 0, 0);
+
+      gc.filter = 'blur(4px)';
+      gc.drawImage(offscreen, 0, 0);
+      gc.filter = 'none';
+
+      const seed = 0.618;
+      for (let py = 0; py < ph; py += 2) {
+        for (let px = 0; px < pw; px += 2) {
+          const nx = (px / pw - 0.5) * 4;
+          const ny = (py / ph - 0.5) * 4;
+          const by = -nx * sin25 + ny * cos25;
+          const band = Math.exp(-(by * by) / 0.18);
+          const noise = fbm4(nx * 3 + seed, ny * 3 + seed);
+          const density = band * (0.4 + noise * 0.6);
+          const h = Math.abs(hash2(px, py));
+          if (h < density * 0.06) {
+            gc.fillStyle = `rgba(200,210,255,${density * 0.85})`;
+            gc.fillRect(px / dpr, py / dpr, 1 / dpr, 1 / dpr);
+          }
+        }
+      }
+    }
+
+    const galaxyCanvas = document.createElement('canvas');
+    renderGalaxyToCanvas(galaxyCanvas, W, H);
+
+    function drawGalaxy() {
+      const zoomFactor = backgroundZoomRef.current;
+      const galaxyAlpha = 1 - smoothstep(0.75, 1.5, zoomFactor);
+      if (galaxyAlpha <= 0) return;
+      ctx!.save();
+      ctx!.globalAlpha = galaxyAlpha;
+      ctx!.drawImage(galaxyCanvas, 0, 0, W, H);
+      ctx!.restore();
+    }
+
     const motionPreviewEnabled = document.documentElement.dataset.uiVariant === "motion";
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const enhancedHoverMotion = motionPreviewEnabled && !reducedMotion;
@@ -3485,6 +3594,7 @@ export default function Home() {
         ctx!.globalAlpha = Math.max(0, canvasOverlayAlpha);
       }
 
+      drawGalaxy();
       drawNebulae();
       drawDust();
 
@@ -3547,6 +3657,7 @@ export default function Home() {
       nebulae[0].x = W * 0.72; nebulae[0].y = H * 0.35;
       nebulae[1].x = W * 0.25; nebulae[1].y = H * 0.65;
       nebulae[2].x = W * 0.55; nebulae[2].y = H * 0.2;
+      renderGalaxyToCanvas(galaxyCanvas, W, H);
       lastVisibleStarfieldWidth = -1;
       lastConstellationProjectionWidth = -1;
     }
