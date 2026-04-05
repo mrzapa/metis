@@ -10,6 +10,18 @@ import {
   normalizeUserStar,
   parseUserStars,
 } from "@/lib/constellation-types";
+import { fnv1a32, SeededRNG, generateStarName } from "@/lib/star-catalogue";
+
+/**
+ * Procedurally generate a star name from position and timestamp.
+ * Size [0.5, 2.0] maps to magnitude [6, 1] — bigger = brighter = more prestigious name.
+ */
+function makeProceduralStarName(x: number, y: number, now: number, size: number): string {
+  const seed = fnv1a32(`${Math.round(x * 10000)},${Math.round(y * 10000)},${now}`);
+  const rng = new SeededRNG(seed);
+  const magnitude = Math.max(1, 7 - (size * 2.5));
+  return generateStarName(rng, magnitude);
+}
 
 const STORAGE_KEY = "metis_constellation_user_stars";
 const SETTINGS_KEY = "landing_constellation_user_stars";
@@ -99,8 +111,10 @@ export function useConstellationStars() {
         return null;
       }
       const now = Date.now();
+      const label = star.label?.trim() || makeProceduralStarName(star.x, star.y, now, star.size ?? 1);
       const createdStar = normalizeUserStar({
         ...star,
+        label,
         id: `star-${now}-${Math.round(Math.random() * 100000)}`,
         createdAt: now,
       });
@@ -124,13 +138,15 @@ export function useConstellationStars() {
 
       const now = Date.now();
       const starsToAdd = remainingSlots === null ? stars : stars.slice(0, remainingSlots);
-      const nextStars = starsToAdd.map((star, index) =>
-        normalizeUserStar({
+      const nextStars = starsToAdd.map((star, index) => {
+        const label = star.label?.trim() || makeProceduralStarName(star.x, star.y, now + index, star.size ?? 1);
+        return normalizeUserStar({
           ...star,
+          label,
           id: `star-${now}-${index}-${Math.round(Math.random() * 100000)}`,
           createdAt: now + index,
-        }),
-      );
+        });
+      });
       if (nextStars.length === 0) {
         return 0;
       }

@@ -100,6 +100,8 @@ import {
   buildLandingStarSpatialHash,
   findClosestLandingStarHitTarget,
 } from "@/lib/landing-stars/landing-star-spatial-index";
+import { StarCatalogue, DEFAULT_CATALOGUE_CONFIG } from "@/lib/star-catalogue";
+import type { CatalogueStar } from "@/lib/star-catalogue";
 import {
   buildCanvasFont,
   measureSingleLineTextWidth,
@@ -131,10 +133,6 @@ const FACULTY_CONCEPTS = CONSTELLATION_FACULTIES.map((faculty, index) => ({
 }));
 const BACKGROUND_BUTTON_ZOOM_STEP = 1.8;
 const BACKGROUND_TILE_PADDING_PX = 220;
-const BACKGROUND_TILE_SIZE = 960;
-const MAX_CACHED_WORLD_TILES = 4096;
-const WORLD_STAR_COUNT_BY_LAYER = [4, 7, 10] as const;
-const WORLD_STAR_REVEAL_STEPS = [1, 1.35, 1.8, 2.4, 3.2, 4.3, 5.8, 7.8, 10.5, 14.2, 19.2, 26, 35, 47, 64, 86, 116, 156, 200, 270, 365, 493, 667, 900, 1215, 1640, 2000] as const;
 const HOVER_EXPAND_DELAY_MS = 600;
 const DRAG_DISTANCE_PX = 6;
 const ZOOM_UI_RESTORE_DELAY_MS = 240;
@@ -207,6 +205,8 @@ interface WorldStarData {
   parallaxFactor: number;
   hasDiffraction: boolean;
   revealZoomFactor: number;
+  profile: StellarProfile;
+  catalogueName: string;
 }
 
 interface HomeRagPulseState {
@@ -229,6 +229,7 @@ interface HomeToastState {
 
 interface LandingWorldStarRenderState extends LandingStarHitTarget {
   addable: boolean;
+  catalogueName?: string;
   profile: StellarProfile;
 }
 
@@ -263,38 +264,6 @@ interface LearningRouteOverlayStop {
   y: number;
 }
 
-function nextDeterministicSeed(seed: number): number {
-  return (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-}
-
-function getWorldRevealBucket(zoomFactor: number): number {
-  let bucket = 0;
-
-  while (
-    bucket < WORLD_STAR_REVEAL_STEPS.length
-    && zoomFactor + 1e-6 >= WORLD_STAR_REVEAL_STEPS[bucket]
-  ) {
-    bucket += 1;
-  }
-
-  return bucket;
-}
-
-function createTileSeed(tileX: number, tileY: number, layer: number, index: number): number {
-  let seed = 2166136261;
-
-  seed ^= Math.imul(tileX, 374761393);
-  seed = Math.imul(seed, 668265263) >>> 0;
-  seed ^= Math.imul(tileY, 1442695041);
-  seed = Math.imul(seed, 2246822519) >>> 0;
-  seed ^= Math.imul(layer + 1, 3266489917);
-  seed = Math.imul(seed, 668265263) >>> 0;
-  seed ^= Math.imul(index + 1, 1597334677);
-  seed = Math.imul(seed, 2246822519) >>> 0;
-
-  return seed >>> 0;
-}
-
 function clampToRange(value: number, min: number, max: number): number {
   if (value < min) {
     return min;
@@ -303,11 +272,6 @@ function clampToRange(value: number, min: number, max: number): number {
     return max;
   }
   return value;
-}
-
-function sampleDeterministicRatio(seed: number): [number, number] {
-  const nextSeed = nextDeterministicSeed(seed);
-  return [nextSeed, nextSeed / 4294967296];
 }
 
 function formatBackgroundZoom(zoomFactor: number): string {
@@ -325,72 +289,6 @@ function formatBackgroundZoom(zoomFactor: number): string {
 
 function buildStarInfluenceColors(star: Pick<UserStar, "primaryDomainId" | "relatedDomainIds">) {
   return getInfluenceColors(star.primaryDomainId, star.relatedDomainIds);
-}
-
-function getWorldTileStars(
-  tileCache: Map<string, WorldStarData[]>,
-  layer: number,
-  tileX: number,
-  tileY: number,
-): WorldStarData[] {
-  const cacheKey = `${layer}:${tileX}:${tileY}`;
-  const cached = tileCache.get(cacheKey);
-  if (cached) {
-    tileCache.delete(cacheKey);
-    tileCache.set(cacheKey, cached);
-    return cached;
-  }
-
-  const starCount = WORLD_STAR_COUNT_BY_LAYER[layer] ?? WORLD_STAR_COUNT_BY_LAYER[WORLD_STAR_COUNT_BY_LAYER.length - 1];
-  const tileStars: WorldStarData[] = [];
-
-  for (let index = 0; index < starCount; index += 1) {
-    let seed = createTileSeed(tileX, tileY, layer, index);
-    let value: number;
-
-    [seed, value] = sampleDeterministicRatio(seed);
-    const offsetX = value;
-    [seed, value] = sampleDeterministicRatio(seed);
-    const offsetY = value;
-    [seed, value] = sampleDeterministicRatio(seed);
-    const brightness = 0.12 + value * (layer === 0 ? 0.55 : layer === 1 ? 0.42 : 0.28);
-    [seed, value] = sampleDeterministicRatio(seed);
-    const baseSize = layer === 0 ? 1.12 + value * 1.55 : layer === 1 ? 0.72 + value * 0.96 : 0.28 + value * 0.58;
-    [seed, value] = sampleDeterministicRatio(seed);
-    const revealZoomFactor = WORLD_STAR_REVEAL_STEPS[Math.floor(value * WORLD_STAR_REVEAL_STEPS.length)] ?? 1;
-    [seed, value] = sampleDeterministicRatio(seed);
-    const twinkle = value > (layer === 0 ? 0.58 : 0.76);
-    [seed, value] = sampleDeterministicRatio(seed);
-    const twinkleSpeed = 0.0018 + value * 0.0065;
-    [seed, value] = sampleDeterministicRatio(seed);
-    const twinklePhase = value * Math.PI * 2;
-    [seed, value] = sampleDeterministicRatio(seed);
-    const hasDiffraction = layer <= 1 && baseSize > (layer === 0 ? 1.75 : 1.25) && value > 0.34;
-
-    tileStars.push({
-      id: `field-star-${layer}-${tileX}-${tileY}-${index}`,
-      worldX: tileX * BACKGROUND_TILE_SIZE + offsetX * BACKGROUND_TILE_SIZE,
-      worldY: tileY * BACKGROUND_TILE_SIZE + offsetY * BACKGROUND_TILE_SIZE,
-      layer,
-      baseSize,
-      brightness,
-      twinkle,
-      twinkleSpeed,
-      twinklePhase,
-      parallaxFactor: layer === 0 ? 0.026 : layer === 1 ? 0.013 : 0.006,
-      hasDiffraction,
-      revealZoomFactor,
-    });
-  }
-
-  tileCache.set(cacheKey, tileStars);
-  if (tileCache.size > MAX_CACHED_WORLD_TILES) {
-    const oldestCacheKey = tileCache.keys().next().value;
-    if (oldestCacheKey) {
-      tileCache.delete(oldestCacheKey);
-    }
-  }
-  return tileStars;
 }
 
 function getZoomResponsiveNodeScale(zoomFactor: number): number {
@@ -867,6 +765,7 @@ export default function Home() {
   const starTooltipDomainRef = useRef<HTMLDivElement>(null);
   const starTooltipTitleRef = useRef<HTMLDivElement>(null);
   const starTooltipDescRef = useRef<HTMLDivElement>(null);
+  const catalogueTooltipRef = useRef<HTMLDivElement>(null);
   const activeNodeRef = useRef(-1);
   const hoveredNodeRef = useRef(-1);
   const hoverStartRef = useRef(0);
@@ -913,6 +812,7 @@ export default function Home() {
     revision: 0,
     stars: [],
     width: 0,
+    zoomScale: 0,
   });
   const optimisticIndexKeysRef = useRef<Set<string>>(new Set());
   const starDiveFocusedStarIdRef = useRef<string | null>(null);
@@ -2058,7 +1958,6 @@ export default function Home() {
     }
     resize();
 
-    const tileCache = new Map<string, WorldStarData[]>();
     backgroundZoomRef.current = clampBackgroundZoomFactor(backgroundZoomRef.current);
     backgroundZoomTargetRef.current = clampBackgroundZoomFactor(backgroundZoomTargetRef.current);
 
@@ -2069,161 +1968,8 @@ export default function Home() {
       { x: W * 0.55, y: H * 0.2, rx: 220, ry: 150, angle: 0.8, color: [10, 18, 48], opacity: 0.15 },
     ];
 
-    /* galaxy background */
-    function smoothstep(edge0: number, edge1: number, x: number): number {
-      const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-      return t * t * (3 - 2 * t);
-    }
-
-    function hash2(ix: number, iy: number): number {
-      const n = ix * 127 + iy * 311;
-      return (Math.sin(n) * 43758.5453) % 1;
-    }
-
-    function valueNoise(x: number, y: number): number {
-      const ix = Math.floor(x), iy = Math.floor(y);
-      const fx = x - ix, fy = y - iy;
-      const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
-      const a = Math.abs(hash2(ix, iy));
-      const b = Math.abs(hash2(ix + 1, iy));
-      const c = Math.abs(hash2(ix, iy + 1));
-      const d = Math.abs(hash2(ix + 1, iy + 1));
-      return a + (b - a) * ux + (c - a) * uy + (d - a + a - b - c + b + c - d) * ux * uy;
-    }
-
-    function fbm4(x: number, y: number): number {
-      return (
-        valueNoise(x,     y    ) * 0.5   +
-        valueNoise(x * 2, y * 2) * 0.25  +
-        valueNoise(x * 4, y * 4) * 0.125 +
-        valueNoise(x * 8, y * 8) * 0.0625
-      );
-    }
-
-    function renderGalaxyToCanvas(offscreen: HTMLCanvasElement, cW: number, cH: number) {
-      const gc = offscreen.getContext('2d');
-      if (!gc) return;
-      const dpr = window.devicePixelRatio || 1;
-      const pw = Math.round(cW * dpr);
-      const ph = Math.round(cH * dpr);
-      offscreen.width  = pw;
-      offscreen.height = ph;
-
-      const cx = pw / 2;
-      const cy = ph / 2;
-
-      // --- Pass 1: Radial core glow ---
-      const coreRadius = Math.min(pw, ph) * 0.55;
-      const coreGrad = gc.createRadialGradient(cx, cy, 0, cx, cy, coreRadius);
-      coreGrad.addColorStop(0,    'rgba(200,180,255,0.65)');
-      coreGrad.addColorStop(0.08, 'rgba(160,120,255,0.5)');
-      coreGrad.addColorStop(0.20, 'rgba(80,40,180,0.28)');
-      coreGrad.addColorStop(0.50, 'rgba(20,10,60,0.12)');
-      coreGrad.addColorStop(1.0,  'rgba(0,0,0,0)');
-      gc.fillStyle = coreGrad;
-      gc.fillRect(0, 0, pw, ph);
-
-      // --- Pass 2: fBm cloud arms (pixel density map) ---
-      const stride = 2;
-      const imageData = gc.createImageData(pw, ph);
-      const data = imageData.data;
-
-      for (let py = 0; py < ph; py += stride) {
-        for (let px = 0; px < pw; px += stride) {
-          const nx = (px / pw - 0.5) * 3;
-          const ny = (py / ph - 0.5) * 3;
-          const r2 = nx * nx + ny * ny;
-
-          const coreDensity = Math.exp(-r2 / 0.18);
-
-          const angle = Math.atan2(ny, nx);
-          const lobe1 = Math.exp(-(Math.pow(angle - 0.4, 2) + r2 * 0.35) / 0.45);
-          const lobe2 = Math.exp(-(Math.pow(angle - 0.4 - Math.PI, 2) + r2 * 0.35) / 0.45);
-          const armDensity = (lobe1 + lobe2) * 0.65;
-
-          const noise = fbm4(nx * 2.5, ny * 2.5);
-          const density = Math.min(1, coreDensity + armDensity) * (0.35 + noise * 0.65);
-
-          const rc  = Math.round(Math.min(255, 15  + 75  * noise + 120 * coreDensity));
-          const gc2 = Math.round(Math.min(255, 8   + 52  * noise +  72 * coreDensity));
-          const bc  = Math.round(Math.min(255, 45  + 130 * noise + 100 * coreDensity));
-          const ac  = Math.round(density * 185);
-
-          for (let dy = 0; dy < stride && py + dy < ph; dy++) {
-            for (let dx = 0; dx < stride && px + dx < pw; dx++) {
-              const idx = ((py + dy) * pw + (px + dx)) * 4;
-              data[idx    ] = rc;
-              data[idx + 1] = gc2;
-              data[idx + 2] = bc;
-              data[idx + 3] = ac;
-            }
-          }
-        }
-      }
-
-      // Blur cloud arms via temp canvas to avoid self-compositing
-      const armTemp = document.createElement('canvas');
-      armTemp.width = pw;
-      armTemp.height = ph;
-      const atx = armTemp.getContext('2d');
-      if (atx) {
-        atx.putImageData(imageData, 0, 0);
-        const blurTemp = document.createElement('canvas');
-        blurTemp.width = pw;
-        blurTemp.height = ph;
-        const btx = blurTemp.getContext('2d');
-        if (btx) {
-          btx.filter = 'blur(6px)';
-          btx.drawImage(armTemp, 0, 0);
-          btx.filter = 'none';
-          gc.drawImage(blurTemp, 0, 0);
-        }
-      }
-
-      // --- Pass 3: Three-tier procedural star field ---
-      for (let py = 0; py < ph; py += 2) {
-        for (let px = 0; px < pw; px += 2) {
-          const nx = (px / pw - 0.5) * 3;
-          const ny = (py / ph - 0.5) * 3;
-          const r2 = nx * nx + ny * ny;
-          const coreDensity = Math.exp(-r2 / 0.18);
-          const angle = Math.atan2(ny, nx);
-          const lobe1 = Math.exp(-(Math.pow(angle - 0.4, 2) + r2 * 0.35) / 0.45);
-          const lobe2 = Math.exp(-(Math.pow(angle - 0.4 - Math.PI, 2) + r2 * 0.35) / 0.45);
-          const armDensity = (lobe1 + lobe2) * 0.65;
-          const noise = fbm4(nx * 2.5 + 1.3, ny * 2.5 + 0.7);
-          const density = Math.min(1, coreDensity + armDensity) * (0.35 + noise * 0.65);
-
-          const h = Math.abs(hash2(px, py));
-
-          if (h < density * 0.003) {
-            gc.fillStyle = `rgba(230,220,255,${(density * 0.95).toFixed(3)})`;
-            gc.beginPath();
-            gc.arc(px, py, 1.5, 0, Math.PI * 2);
-            gc.fill();
-          } else if (h < density * 0.025) {
-            gc.fillStyle = `rgba(190,170,255,${(density * 0.85).toFixed(3)})`;
-            gc.fillRect(px, py, 1, 1);
-          } else if (h < density * 0.10) {
-            gc.fillStyle = `rgba(150,130,225,${(density * 0.55).toFixed(3)})`;
-            gc.fillRect(px, py, 1, 1);
-          }
-        }
-      }
-    }
-
-    const galaxyCanvas = document.createElement('canvas');
-    renderGalaxyToCanvas(galaxyCanvas, W, H);
-
-    function drawGalaxy() {
-      const zoomFactor = backgroundZoomRef.current;
-      const galaxyAlpha = 1 - smoothstep(0.002, 0.05, zoomFactor);
-      if (galaxyAlpha <= 0) return;
-      ctx!.save();
-      ctx!.globalAlpha = ctx!.globalAlpha * galaxyAlpha;
-      ctx!.drawImage(galaxyCanvas, 0, 0, W, H);
-      ctx!.restore();
-    }
+    /* Star catalogue – lazy initialisation inside this effect closure */
+    const catalogue = new StarCatalogue(DEFAULT_CATALOGUE_CONFIG, generateStellarProfile);
 
     const motionPreviewEnabled = document.documentElement.dataset.uiVariant === "motion";
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -2284,11 +2030,14 @@ export default function Home() {
     function showConceptAtNode(idx: number) {
       activeNodeRef.current = idx;
       const c = nodes[idx].concept;
+      const conceptPoint: Point = { x: c.faculty.x, y: c.faculty.y };
+      const autoAnchor = getNearestUserStar(conceptPoint);
       void addUserStar({
         x: c.faculty.x,
         y: c.faculty.y,
         size: 0.82 + Math.random() * 0.55,
         primaryDomainId: c.faculty.id,
+        connectedUserStarIds: autoAnchor ? [autoAnchor.id] : undefined,
         stage: "seed",
       }).then((createdStar) => {
         if (!createdStar) return;
@@ -2409,11 +2158,7 @@ export default function Home() {
     let lastVisibleStarfieldZoom = Number.NaN;
     let lastVisibleStarfieldX = Number.NaN;
     let lastVisibleStarfieldY = Number.NaN;
-    let lastVisibleWorldMinTileX = Number.NaN;
-    let lastVisibleWorldMaxTileX = Number.NaN;
-    let lastVisibleWorldMinTileY = Number.NaN;
-    let lastVisibleWorldMaxTileY = Number.NaN;
-    let lastVisibleWorldRevealBucket = -1;
+    let lastVisibleWorldZoom = Number.NaN;
     let visibleWorldStars: WorldStarData[] = [];
     let lastConstellationProjectionWidth = -1;
     let lastConstellationProjectionHeight = -1;
@@ -2500,6 +2245,23 @@ export default function Home() {
       return selectedStar;
     }
 
+    /** Find the nearest existing user star to auto-link when no anchor is explicitly selected. */
+    function getNearestUserStar(candidatePoint: Point): UserStar | null {
+      const existing = userStarsRef.current;
+      if (existing.length === 0) return null;
+      let nearest: UserStar | null = null;
+      let nearestDist = Infinity;
+      for (const star of existing) {
+        const p = getResolvedStarPoint(star, dragPreviewPositionsRef.current, star.id);
+        const d = Math.hypot(p.x - candidatePoint.x, p.y - candidatePoint.y);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearest = star;
+        }
+      }
+      return nearest;
+    }
+
     function refreshVisibleStars(backgroundCamera: BackgroundCameraState) {
       const worldBounds = getBackgroundViewportWorldBounds(
         W,
@@ -2507,44 +2269,59 @@ export default function Home() {
         backgroundCamera,
         BACKGROUND_TILE_PADDING_PX,
       );
-      const minTileX = Math.floor(worldBounds.left / BACKGROUND_TILE_SIZE) - 1;
-      const maxTileX = Math.floor(worldBounds.right / BACKGROUND_TILE_SIZE) + 1;
-      const minTileY = Math.floor(worldBounds.top / BACKGROUND_TILE_SIZE) - 1;
-      const maxTileY = Math.floor(worldBounds.bottom / BACKGROUND_TILE_SIZE) + 1;
-      const revealBucket = getWorldRevealBucket(backgroundCamera.zoomFactor);
+
+      /* Magnitude-based reveal: brightest stars visible at galaxy zoom (0.002),
+         faintest stars appear around zoom 5-6.  Formula maps apparentMagnitude
+         [0, 6.5] → revealZoom [~0.003, ~5.6]. */
+      const zoomFactor = backgroundCamera.zoomFactor;
       const shouldRebuildVisibleWorldStars =
         lastVisibleStarfieldRevision !== starfieldRevisionRef.current
-        || minTileX !== lastVisibleWorldMinTileX
-        || maxTileX !== lastVisibleWorldMaxTileX
-        || minTileY !== lastVisibleWorldMinTileY
-        || maxTileY !== lastVisibleWorldMaxTileY
-        || revealBucket !== lastVisibleWorldRevealBucket;
+        || Math.abs(lastVisibleWorldZoom - zoomFactor) > 0.001;
 
       if (shouldRebuildVisibleWorldStars) {
+        const catStars = catalogue.getVisibleStars(
+          worldBounds.left,
+          worldBounds.right,
+          worldBounds.top,
+          worldBounds.bottom,
+          1,
+        );
         const nextVisibleWorldStars: WorldStarData[] = [];
 
-        for (let layer = 2; layer >= 0; layer -= 1) {
-          for (let tileX = minTileX; tileX <= maxTileX; tileX += 1) {
-            for (let tileY = minTileY; tileY <= maxTileY; tileY += 1) {
-              const tileStars = getWorldTileStars(tileCache, layer, tileX, tileY);
+        for (let i = 0; i < catStars.length; i++) {
+          const cat = catStars[i];
+          const mag = cat.apparentMagnitude;
+          const revealZoomFactor = Math.max(0.002, Math.pow(10, mag * 0.5 - 2.5));
+          if (zoomFactor + 1e-6 < revealZoomFactor) continue;
 
-              tileStars.forEach((worldStar) => {
-                if (backgroundCamera.zoomFactor + 1e-6 < worldStar.revealZoomFactor) {
-                  return;
-                }
+          const layer = cat.depthLayer < 0.33 ? 2 : cat.depthLayer < 0.66 ? 1 : 0;
+          const brightness = 0.15 + (1 - mag / 6.5) * 0.72;
+          const baseSize = 0.3 + (1 - mag / 6.5) * 2.2;
+          const twinkle = mag > 2;
+          const twinkleSpeed = 0.002 + (cat.profile.visual?.twinkleSpeed ?? 0.004);
+          const twinklePhase = cat.profile.visual?.twinklePhase ?? 0;
+          const hasDiffraction = layer <= 1 && baseSize > 1.25 && mag < 3;
 
-                nextVisibleWorldStars.push(worldStar);
-              });
-            }
-          }
+          nextVisibleWorldStars.push({
+            id: cat.id,
+            worldX: cat.wx,
+            worldY: cat.wy,
+            layer,
+            baseSize,
+            brightness,
+            twinkle,
+            twinkleSpeed,
+            twinklePhase,
+            parallaxFactor: layer === 0 ? 0.026 : layer === 1 ? 0.013 : 0.006,
+            hasDiffraction,
+            revealZoomFactor,
+            profile: cat.profile,
+            catalogueName: cat.name,
+          });
         }
 
         visibleWorldStars = nextVisibleWorldStars;
-        lastVisibleWorldMinTileX = minTileX;
-        lastVisibleWorldMaxTileX = maxTileX;
-        lastVisibleWorldMinTileY = minTileY;
-        lastVisibleWorldMaxTileY = maxTileY;
-        lastVisibleWorldRevealBucket = revealBucket;
+        lastVisibleWorldZoom = zoomFactor;
       }
 
       const projectedUserStars = userStarsRef.current.map((star) => {
@@ -2577,6 +2354,8 @@ export default function Home() {
       const scale = getBackgroundCameraScale(backgroundCamera.zoomFactor);
       const nextVisibleStars = visibleStarsRef.current;
       let visibleStarCount = 0;
+      const visibleStarProfiles = new Map<string, StellarProfile>();
+      const visibleStarNames = new Map<string, string>();
 
       visibleWorldStars.forEach((worldStar) => {
         const screenX = (worldStar.worldX - backgroundCamera.x) * scale + W / 2;
@@ -2672,6 +2451,8 @@ export default function Home() {
           hasUserContent,
         );
         nextVisibleStars[visibleStarCount] = star;
+        visibleStarProfiles.set(worldStar.id, worldStar.profile);
+        visibleStarNames.set(worldStar.id, worldStar.catalogueName);
         visibleStarCount += 1;
       });
 
@@ -2679,7 +2460,7 @@ export default function Home() {
       projectedCandidateById.clear();
 
       const landingRenderableStars: LandingWorldStarRenderState[] = nextVisibleStars.map((star) => {
-        const profile = getCachedStellarProfile(star.id);
+        const profile = visibleStarProfiles.get(star.id) ?? getCachedStellarProfile(star.id);
         const focusStr = starDiveFocusStrengthRef.current;
         const isFocused = starDiveFocusedStarIdRef.current === star.id;
         // Dim non-focused stars proportionally to focus strength
@@ -2692,6 +2473,7 @@ export default function Home() {
           addable: star.isAddable,
           apparentSize: isFocused ? focusedSizeBoost : star.baseSize,
           brightness: star.brightness * dimFactor,
+          catalogueName: visibleStarNames.get(star.id),
           hitRadius: star.hitRadius,
           id: star.id,
           profile,
@@ -2729,14 +2511,17 @@ export default function Home() {
       }));
       const addableTargets = landingRenderableStars.filter((star) => star.addable);
 
-      landingStarSpatialHash = addableTargets.length > 0
-        ? buildLandingStarSpatialHash(addableTargets)
+      // Hash ALL renderable stars for interaction (hover/click), not just addable ones
+      landingStarSpatialHash = landingRenderableStars.length > 0
+        ? buildLandingStarSpatialHash(landingRenderableStars)
         : null;
+      const zoomNorm = Math.log2(Math.max(0.002, backgroundCamera.zoomFactor) + 1) / Math.log2(2001);
       landingStarfieldFrameRef.current = {
         height: H,
         revision: landingStarfieldFrameRef.current.revision + 1,
         stars: nextWebglStars,
         width: W,
+        zoomScale: zoomNorm,
       };
       lastVisibleStarfieldWidth = W;
       lastVisibleStarfieldHeight = H;
@@ -3768,7 +3553,19 @@ export default function Home() {
             if (!proj) return [];
             return [{ id: star.id, screenX: proj.target.x, screenY: proj.target.y, brightness: star.size }];
           });
-          const target = findStarDiveFocusTarget(userStarTargets, W, H);
+          let target = findStarDiveFocusTarget(userStarTargets, W, H);
+
+          // Fall back to catalogue stars when no user star is near the viewport centre
+          if (!target) {
+            const catalogueTargets = visibleStarsRef.current.map((star) => ({
+              id: star.id,
+              screenX: star.screenX,
+              screenY: star.screenY,
+              brightness: star.brightness,
+            }));
+            target = findStarDiveFocusTarget(catalogueTargets, W, H);
+          }
+
           if (target) {
             const scale = getBackgroundCameraScale(backgroundCamera.zoomFactor);
             starDiveFocusedStarIdRef.current = target.id;
@@ -3870,6 +3667,14 @@ export default function Home() {
         || Math.abs(lastVisibleStarfieldY - backgroundCamera.y) > STARFIELD_CAMERA_REBUILD_EPSILON;
       if (shouldRefreshVisibleStars) {
         refreshVisibleStars(backgroundCamera);
+
+        // Throttled sector eviction (~once per viewport change, not per frame)
+        const scale = getBackgroundCameraScale(backgroundCamera.zoomFactor);
+        const sectorSize = DEFAULT_CATALOGUE_CONFIG.sectorSize;
+        const camSx = Math.floor(backgroundCamera.x / sectorSize);
+        const camSy = Math.floor(backgroundCamera.y / sectorSize);
+        const maxDist = Math.ceil(((W + H) / scale) / sectorSize) + 4;
+        catalogue.evictDistantSectors(camSx, camSy, maxDist);
       }
       rebuildProjectedUserStarRenderState(backgroundCamera, getRenderEpochMs(ts));
 
@@ -3885,7 +3690,6 @@ export default function Home() {
         ctx!.globalAlpha = Math.max(0, canvasOverlayAlpha);
       }
 
-      drawGalaxy();
       drawNebulae();
       drawDust();
 
@@ -3948,7 +3752,6 @@ export default function Home() {
       nebulae[0].x = W * 0.72; nebulae[0].y = H * 0.35;
       nebulae[1].x = W * 0.25; nebulae[1].y = H * 0.65;
       nebulae[2].x = W * 0.55; nebulae[2].y = H * 0.2;
-      renderGalaxyToCanvas(galaxyCanvas, W, H);
       lastVisibleStarfieldWidth = -1;
       lastConstellationProjectionWidth = -1;
     }
@@ -4072,6 +3875,23 @@ export default function Home() {
       }, 180);
     }
 
+    function showCatalogueTooltip(hit: LandingWorldStarRenderState, clientX: number, clientY: number) {
+      const el = catalogueTooltipRef.current;
+      if (!el) return;
+      const nameEl = el.querySelector<HTMLSpanElement>('[data-field="name"]');
+      const classEl = el.querySelector<HTMLSpanElement>('[data-field="class"]');
+      if (nameEl) nameEl.textContent = hit.catalogueName ?? hit.id;
+      if (classEl) classEl.textContent = hit.profile.spectralClass;
+      el.style.display = "flex";
+      el.style.left = `${clientX + 14}px`;
+      el.style.top = `${clientY - 10}px`;
+    }
+
+    function hideCatalogueTooltip() {
+      const el = catalogueTooltipRef.current;
+      if (el) el.style.display = "none";
+    }
+
     function getHoveredCandidate(clientX: number, clientY: number): StarData | null {
       const pointer = getCanvasPointer(clientX, clientY);
       const spatialHash = landingStarSpatialHash ?? (() => {
@@ -4110,6 +3930,17 @@ export default function Home() {
       return projectedCandidateById.get(target.id)
         ?? visibleStarsRef.current.find((star) => star.id === target.id)
         ?? null;
+    }
+
+    function getHoveredCatalogueStar(clientX: number, clientY: number): LandingWorldStarRenderState | null {
+      if (!landingStarSpatialHash) return null;
+      const pointer = getCanvasPointer(clientX, clientY);
+      return findClosestLandingStarHitTarget(
+        landingStarSpatialHash,
+        pointer.x,
+        pointer.y,
+        { queryPaddingPx: 12 },
+      ) ?? null;
     }
 
     function releaseCanvasPointerCapture(pointerId?: number | null) {
@@ -4218,6 +4049,7 @@ export default function Home() {
         hoverExpandedRef.current = false;
         clearHoveredCandidate();
         hideStarTooltip();
+        hideCatalogueTooltip();
         return;
       }
 
@@ -4226,6 +4058,7 @@ export default function Home() {
         hoverExpandedRef.current = false;
         clearHoveredCandidate();
         hideStarTooltip();
+        hideCatalogueTooltip();
         return;
       }
 
@@ -4237,6 +4070,7 @@ export default function Home() {
         hoverExpandedRef.current = false;
         clearHoveredCandidate();
         hideStarTooltip();
+        hideCatalogueTooltip();
         return;
       }
       if (pointerOnStarTooltip) {
@@ -4256,6 +4090,7 @@ export default function Home() {
           hoveredNodeRef.current = -1;
           hoverExpandedRef.current = false;
           hideStarTooltip();
+          hideCatalogueTooltip();
           closeConcept();
           return;
         }
@@ -4268,6 +4103,7 @@ export default function Home() {
         hoveredNodeRef.current = -1;
         hoverExpandedRef.current = false;
         showStarTooltip(hoveredUserStar.star, hoveredUserStar.target);
+        hideCatalogueTooltip();
         closeConcept();
         return;
       }
@@ -4287,6 +4123,17 @@ export default function Home() {
       }
       if (hover >= 0 && !hoverExpandedRef.current && performance.now() - hoverStartRef.current >= HOVER_EXPAND_DELAY_MS) {
         hoverExpandedRef.current = true;
+      }
+
+      if (hover < 0) {
+        const catHit = getHoveredCatalogueStar(e.clientX, e.clientY);
+        if (catHit && !catHit.addable) {
+          showCatalogueTooltip(catHit, e.clientX, e.clientY);
+        } else {
+          hideCatalogueTooltip();
+        }
+      } else {
+        hideCatalogueTooltip();
       }
     }
 
@@ -4437,7 +4284,7 @@ export default function Home() {
       if (candidate) {
         const backgroundCamera = readBackgroundCamera();
         const candidatePoint = getCandidateConstellationPoint(candidate, backgroundCamera);
-        const selectedAnchor = getSelectedLinkAnchor(candidatePoint);
+        const selectedAnchor = getSelectedLinkAnchor(candidatePoint) ?? getNearestUserStar(candidatePoint);
         const selectedStarId = selectedUserStarIdRef.current;
         if (coarsePointerRef.current && armedAddCandidateIdRef.current !== candidate.id) {
           armedAddCandidateIdRef.current = candidate.id;
@@ -4988,6 +4835,12 @@ export default function Home() {
             Remove star
           </button>
         </div>
+      </div>
+
+      {/* Catalogue star tooltip (lightweight, no actions) */}
+      <div ref={catalogueTooltipRef} className="metis-catalogue-tooltip" style={{ display: "none", position: "fixed", pointerEvents: "none", zIndex: 50 }}>
+        <span data-field="name" />
+        <span data-field="class" />
       </div>
 
       {/* Chat bubble */}
@@ -5690,6 +5543,30 @@ body {
   .metis-star-tooltip {
     transition: none;
   }
+}
+
+/* CATALOGUE STAR TOOLTIP */
+.metis-catalogue-tooltip {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(12,18,35,0.88);
+  border: 1px solid rgba(196,149,58,0.15);
+  backdrop-filter: blur(8px);
+  font-size: 11px;
+  color: rgba(200,210,240,0.85);
+  white-space: nowrap;
+}
+.metis-catalogue-tooltip [data-field="name"] {
+  font-weight: 500;
+  color: rgba(220,225,245,0.95);
+}
+.metis-catalogue-tooltip [data-field="class"] {
+  opacity: 0.7;
+  font-family: monospace;
+  font-size: 10px;
 }
 
 /* CHAT BUBBLE */
