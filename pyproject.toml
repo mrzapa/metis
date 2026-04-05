@@ -92,6 +92,9 @@ tribev2 = [
 heretic = [
     "heretic-llm>=1.2",
 ]
+news = [
+    "feedparser>=6.0",
+]
 all = [
     "kreuzberg",
     "weaviate-client>=4,<5",

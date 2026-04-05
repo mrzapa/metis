@@ -113,6 +113,7 @@ class Config:
     news_comet_max_active: int = 5
     news_comet_auto_absorb_threshold: float = 0.75
     news_comet_rss_feeds: list[str] = field(default_factory=list)
+    news_comet_reddit_subs: list[str] = field(default_factory=list)
 
     # API keys (populated from config file or env; never hard-coded)
     api_keys: dict[str, str] = field(default_factory=dict)

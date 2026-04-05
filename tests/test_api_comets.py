@@ -57,6 +57,9 @@ def test_fastapi_get_sources(fastapi_client):
     assert resp.status_code == 200
     data = resp.json()
     assert "sources" in data
+    assert "available_sources" in data
+    assert "hackernews" in data["available_sources"]
+    assert "reddit" in data["available_sources"]
 
 
 def test_fastapi_get_active_empty(fastapi_client):
@@ -147,6 +150,9 @@ def test_litestar_get_sources(litestar_client):
     assert resp.status_code == 200
     data = resp.json()
     assert "sources" in data
+    assert "available_sources" in data
+    assert "hackernews" in data["available_sources"]
+    assert "reddit" in data["available_sources"]
 
 
 def test_litestar_get_active_empty(litestar_client):

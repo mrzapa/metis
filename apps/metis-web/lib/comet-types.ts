@@ -9,13 +9,14 @@ export type CometPhase =
   | "fading"
   | "absorbed"
   | "dismissed";
+export type CometSourceChannel = "rss" | "hackernews" | "reddit";
 
 export interface CometNewsItem {
   item_id: string;
   title: string;
   summary: string;
   url: string;
-  source_channel: string;
+  source_channel: CometSourceChannel | string;
   published_at: number;
 }
 
@@ -70,4 +71,15 @@ export interface CometData {
   decision: CometDecision;
   /** Relevance score 0-1 */
   relevanceScore: number;
+}
+
+/** Response from GET /v1/comets/sources */
+export interface CometSourcesResponse {
+  enabled: boolean;
+  sources: CometSourceChannel[];
+  available_sources: CometSourceChannel[];
+  rss_feeds: string[];
+  reddit_subs: string[];
+  poll_interval_seconds: number;
+  max_active: number;
 }

@@ -135,6 +135,7 @@ export interface ForecastQueryResult {
   run_id: string;
   answer_text: string;
   selected_mode: string;
+  query_mode?: string;
   model_backend: string;
   model_id: string;
   horizon: number;
@@ -387,6 +388,7 @@ export interface ForecastStreamFinalEvent extends RagStreamEnvelopeFields {
   run_id: string;
   answer_text: string;
   selected_mode: string;
+  query_mode?: string;
   model_backend: string;
   model_id: string;
   horizon: number;
@@ -923,6 +925,7 @@ export function normalizeForecastStreamEvent(rawEvent: unknown): ForecastStreamE
         run_id: runId,
         answer_text: getText(event.answer_text ?? payload.answer_text),
         selected_mode: getText(event.selected_mode ?? payload.selected_mode, "Forecast"),
+        query_mode: getText(event.query_mode ?? payload.query_mode, "forecast"),
         model_backend: getText(event.model_backend ?? payload.model_backend),
         model_id: getText(event.model_id ?? payload.model_id),
         horizon: getNumber(event.horizon ?? payload.horizon),
@@ -2809,7 +2812,13 @@ export async function pollSync(since: number): Promise<{ version: number; change
 // Comet News API
 // ---------------------------------------------------------------------------
 
-import type { CometEvent } from "@/lib/comet-types";
+import type { CometEvent, CometSourcesResponse } from "@/lib/comet-types";
+
+export async function fetchCometSources(): Promise<CometSourcesResponse> {
+  const res = await apiFetch(`${await getApiBase()}/v1/comets/sources`);
+  if (!res.ok) return { enabled: false, sources: [], available_sources: [], rss_feeds: [], reddit_subs: [], poll_interval_seconds: 300, max_active: 5 };
+  return res.json();
+}
 
 export async function fetchActiveComets(): Promise<CometEvent[]> {
   const res = await apiFetch(`${await getApiBase()}/v1/comets/active`);

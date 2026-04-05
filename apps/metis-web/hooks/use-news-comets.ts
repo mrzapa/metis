@@ -9,6 +9,8 @@ export interface UseCometNewsResult {
   comets: CometEvent[];
   /** Whether the initial fetch is in progress. */
   isLoading: boolean;
+  /** Error message if the stream or initial fetch failed. */
+  error: string | null;
 }
 
 /**
@@ -23,6 +25,7 @@ export function useCometNews(
 ): UseCometNewsResult {
   const [comets, setComets] = useState<CometEvent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -35,6 +38,7 @@ export function useCometNews(
     let stopStream: (() => void) | null = null;
 
     setIsLoading(true);
+    setError(null);
 
     // Subscribe to SSE stream (does hydrate-then-stream internally)
     streamCometEvents({
@@ -53,8 +57,11 @@ export function useCometNews(
           stopStream = stop;
         }
       })
-      .catch(() => {
-        if (!cancelled) setIsLoading(false);
+      .catch((err) => {
+        if (!cancelled) {
+          setIsLoading(false);
+          setError(err instanceof Error ? err.message : "Stream connection failed");
+        }
       });
 
     // Periodic manual poll to trigger backend news fetching
@@ -77,5 +84,5 @@ export function useCometNews(
     };
   }, [enabled, pollIntervalMs]);
 
-  return { comets, isLoading };
+  return { comets, isLoading, error };
 }

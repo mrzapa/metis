@@ -140,7 +140,7 @@
   "selected_mode": "Q&A",
   "chat_path": "RAG",
   "forecast_model_id": "google/timesfm-2.5-200m-pytorch",
-  "forecast_max_context": 16000,
+  "forecast_max_context": 15360,
   "forecast_max_horizon": 1000,
   "forecast_use_quantiles": true,
   "forecast_xreg_mode": "xreg + timesfm",
@@ -193,5 +193,6 @@
   "news_comet_poll_interval_seconds": 300,
   "news_comet_max_active": 5,
   "news_comet_auto_absorb_threshold": 0.75,
-  "news_comet_rss_feeds": []
+  "news_comet_rss_feeds": [],
+  "news_comet_reddit_subs": []
 }
