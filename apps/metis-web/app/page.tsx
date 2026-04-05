@@ -314,8 +314,13 @@ function formatBackgroundZoom(zoomFactor: number): string {
   if (zoomFactor >= 10) {
     return `${Math.round(zoomFactor)}x`;
   }
-
-  return `${zoomFactor.toFixed(1)}x`;
+  if (zoomFactor >= 1) {
+    return `${zoomFactor.toFixed(1)}x`;
+  }
+  if (zoomFactor >= 0.1) {
+    return `${zoomFactor.toFixed(2)}x`;
+  }
+  return `${zoomFactor.toFixed(3)}x`;
 }
 
 function buildStarInfluenceColors(star: Pick<UserStar, "primaryDomainId" | "relatedDomainIds">) {
@@ -3559,7 +3564,9 @@ export default function Home() {
 
         ctx!.font = labelLayout.font;
         ctx!.textAlign = "center";
-        ctx!.fillStyle = `rgba(${r},${g},${bl},${0.48 + b * 0.24})`;
+        // Fade labels out as we zoom very far out (below 0.3x)
+        const labelZoomAlpha = Math.min(1, Math.max(0, (backgroundZoomRef.current - 0.05) / 0.25));
+        ctx!.fillStyle = `rgba(${r},${g},${bl},${(0.48 + b * 0.24) * labelZoomAlpha})`;
         ctx!.fillText(n.concept.title, labelLayout.x, labelLayout.y);
       });
     }
@@ -3708,6 +3715,21 @@ export default function Home() {
             };
       } else {
         backgroundCameraOriginRef.current = { ...backgroundCameraTargetOriginRef.current };
+      }
+
+      // At very low zoom (galaxy view), smoothly pull camera origin back to world centre
+      // so the constellation nucleus stays centred in the galaxy glow.
+      const zoomNow = backgroundZoomRef.current;
+      if (zoomNow < 0.15) {
+        const pullStrength = Math.min(1, (0.15 - zoomNow) / 0.13) * 0.06;
+        backgroundCameraOriginRef.current = {
+          x: backgroundCameraOriginRef.current.x * (1 - pullStrength),
+          y: backgroundCameraOriginRef.current.y * (1 - pullStrength),
+        };
+        backgroundCameraTargetOriginRef.current = {
+          x: backgroundCameraTargetOriginRef.current.x * (1 - pullStrength),
+          y: backgroundCameraTargetOriginRef.current.y * (1 - pullStrength),
+        };
       }
 
       const zoomDelta = backgroundZoomTargetRef.current - backgroundZoomRef.current;
