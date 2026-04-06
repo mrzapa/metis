@@ -3770,11 +3770,14 @@ export default function Home() {
         const bCtx = bloomCtxRef.current;
         if (bCtx) {
           bCtx.clearRect(0, 0, W, H);
-          // Temporarily redirect drawing context so drawPolarisMetis renders offscreen
-          const mainCtx = ctx;
-          ctx = bCtx;
+          // Temporarily redirect drawing context so drawPolarisMetis renders offscreen.
+          // swapCtx is an arrow indirection that bypasses Turbopack's incorrect
+          // const-detection on closure-captured let variables (Turbopack bug).
+          const swapCtx = (next: CanvasRenderingContext2D) => { ctx = next; };
+          const mainCtx = ctx!;
+          swapCtx(bCtx);
           drawPolarisMetis(ts);
-          ctx = mainCtx;
+          swapCtx(mainCtx);
 
           // Layer 1: blurred glow underneath (additive blend)
           mainCtx.save();
