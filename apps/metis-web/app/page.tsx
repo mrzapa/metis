@@ -4629,52 +4629,6 @@ export default function Home() {
         </div>
       </div>
 
-      {starDiveFocusStrength > 0.5 && starDiveFocusProfileRef.current && (
-        <div
-          className="metis-star-dive-hud"
-          style={{
-            position: "fixed",
-            bottom: 80,
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 20,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 4,
-            color: "rgba(255,255,255,0.9)",
-            fontFamily: '"Space Grotesk", sans-serif',
-            fontSize: 13,
-            fontWeight: 400,
-            letterSpacing: "0.02em",
-            textShadow: "0 1px 8px rgba(0,0,0,0.7)",
-            opacity: Math.min(1, (starDiveFocusStrength - 0.5) * 4),
-            transition: "opacity 0.3s",
-            pointerEvents: "none",
-          }}
-          aria-live="polite"
-        >
-          {starDiveFocusNameRef.current && (
-            <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: "0.03em" }}>
-              {starDiveFocusNameRef.current}
-            </div>
-          )}
-          <div style={{ fontSize: 15, fontWeight: 500 }}>
-            {starDiveFocusProfileRef.current.spectralClass} — {starDiveFocusProfileRef.current.stellarType.replace(/_/g, " ")}
-          </div>
-          <div style={{ opacity: 0.7, fontSize: 11 }}>
-            {Math.round(starDiveFocusProfileRef.current.temperatureK).toLocaleString()} K
-            {" · "}
-            {starDiveFocusProfileRef.current.luminositySolar.toFixed(1)} L☉
-            {" · "}
-            {starDiveFocusProfileRef.current.radiusSolar.toFixed(2)} R☉
-          </div>
-          <div style={{ opacity: 0.45, fontSize: 10, marginTop: 2 }}>
-            Press Esc to exit
-          </div>
-        </div>
-      )}
-
       <div className={`metis-zoom-pill ${canvasInteractionsLocked ? "is-muted" : ""}`} aria-live="polite">
         <div className="metis-zoom-pill-value">{backgroundZoomLabel}</div>
         <div className="metis-zoom-pill-tools" role="toolbar" aria-label="Constellation tools">

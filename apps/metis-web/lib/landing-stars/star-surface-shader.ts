@@ -161,7 +161,7 @@ void main(){
      High-detail realistic star surface with visible convection
      ================================================================ */
 
-  float sphereR = 0.44;
+  float sphereR = 0.46;
   float rNorm   = dist / sphereR;
   float mu      = sqrt(max(0.0, 1.0 - rNorm * rNorm));
 
@@ -347,19 +347,21 @@ void main(){
      ================================================================ */
   float spikes = 0.0;
   if(u_hasDiffraction > 0.5){
-    float sa = t * 0.04;
+    // Fixed aperture angle — determined by seed, not rotating with time.
+    // Real telescope diffraction spikes are stationary relative to the optic.
+    float sa = u_seed * 0.7854;  // 0..π/4 offset per star
     for(int k=0; k<4; k++){
       float target = sa + float(k) * 1.5708;
       float diff = abs(mod(angle - target + 3.14159, 6.28318) - 3.14159);
-      float spike = exp(-diff * diff * 900.0);
-      spike *= exp(-coronaDist * 3.5) * 0.5 + exp(-coronaDist * 1.2) * 0.3;
+      float spike = exp(-diff * diff * 1100.0);
+      spike *= exp(-coronaDist * 3.2) * 0.55 + exp(-coronaDist * 1.1) * 0.28;
       spikes += spike;
     }
     for(int k=0; k<4; k++){
       float target = sa + 0.7854 + float(k) * 1.5708;
       float diff = abs(mod(angle - target + 3.14159, 6.28318) - 3.14159);
-      float spike = exp(-diff * diff * 2200.0);
-      spike *= exp(-coronaDist * 5.0) * 0.2;
+      float spike = exp(-diff * diff * 2800.0);
+      spike *= exp(-coronaDist * 5.5) * 0.18;
       spikes += spike;
     }
     spikes *= smoothstep(0.0, 0.02, coronaDist);
