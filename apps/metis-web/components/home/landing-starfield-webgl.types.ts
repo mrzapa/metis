@@ -27,4 +27,5 @@ export interface LandingStarfieldFrame {
   revision: number;
   stars: LandingWebglStar[];
   width: number;
+  zoomScale: number;
 }

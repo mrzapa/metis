@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createStarProgram,
 } from "@/lib/landing-stars/star-surface-shader";
@@ -11,6 +11,7 @@ export interface StarDiveOverlayView {
   screenY: number;   // star centre in CSS pixels from viewport top
   focusStrength: number; // 0→1
   profile: StellarProfile;
+  starName?: string;
 }
 
 interface StarDiveOverlayProps {
@@ -23,6 +24,7 @@ export function StarDiveOverlay({
   reducedMotion = false,
 }: StarDiveOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const labelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -78,6 +80,7 @@ export function StarDiveOverlay({
 
       if (!view || view.focusStrength < 0.01) {
         canvas!.style.opacity = "0";
+        if (labelRef.current) labelRef.current.style.display = "none";
         startTime = null;
         return;
       }
@@ -103,6 +106,20 @@ export function StarDiveOverlay({
       canvas!.style.left    = `${Math.round(view.screenX - radius)}px`;
       canvas!.style.top     = `${Math.round(view.screenY - radius)}px`;
       canvas!.style.opacity = String(view.focusStrength);
+
+      /* Position name label below the star */
+      const label = labelRef.current;
+      if (label) {
+        if (view.starName && view.focusStrength > 0.3) {
+          label.style.display = "block";
+          label.style.opacity = String(Math.min(1, (view.focusStrength - 0.3) / 0.4));
+          label.style.left = `${Math.round(view.screenX)}px`;
+          label.style.top = `${Math.round(view.screenY + radius + 12)}px`;
+          label.textContent = `${view.starName}  ${view.profile.spectralClass}`;
+        } else {
+          label.style.display = "none";
+        }
+      }
 
       /* Update uniforms when profile changes */
       const pid = view.profile.seedHash + "";
@@ -140,19 +157,38 @@ export function StarDiveOverlay({
   }, [viewRef, reducedMotion]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        position: "fixed",
-        left: 0,
-        top: 0,
-        pointerEvents: "none",
-        borderRadius: "50%",
-        opacity: 0,
-        transition: "opacity 0.1s",
-        zIndex: 2,
-      }}
-      aria-hidden="true"
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: "fixed",
+          left: 0,
+          top: 0,
+          pointerEvents: "none",
+          borderRadius: "50%",
+          opacity: 0,
+          transition: "opacity 0.1s",
+          zIndex: 2,
+        }}
+        aria-hidden="true"
+      />
+      <div
+        ref={labelRef}
+        style={{
+          position: "fixed",
+          display: "none",
+          pointerEvents: "none",
+          transform: "translateX(-50%)",
+          whiteSpace: "nowrap",
+          fontSize: 12,
+          fontWeight: 500,
+          letterSpacing: "0.04em",
+          color: "rgba(200,210,240,0.85)",
+          textShadow: "0 1px 6px rgba(0,0,0,0.6)",
+          zIndex: 3,
+        }}
+        aria-hidden="true"
+      />
+    </>
   );
 }

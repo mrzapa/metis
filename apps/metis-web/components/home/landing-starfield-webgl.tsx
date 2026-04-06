@@ -21,6 +21,7 @@ attribute vec2 aTwinkle;
 
 uniform float uDpr;
 uniform float uTime;
+uniform float uZoomScale;
 
 varying float vAddable;
 varying float vBloom;
@@ -40,7 +41,8 @@ void main() {
   float twinkle = 0.92 + sin(uTime * aTwinkle.y + aTwinkle.x) * 0.08;
   float tierBoost = aShape.w > 1.5 ? 1.45 : (aShape.w > 0.5 ? 1.18 : 1.0);
   float heroGlow = aShape.w > 1.5 ? 1.0 + aColorC.w * 0.32 : 1.0;
-  gl_PointSize = max(1.0, aShape.z * uDpr * tierBoost * heroGlow * twinkle);
+  float zoomSizeScale = mix(0.15, 1.0, smoothstep(0.0, 0.4, uZoomScale));
+  gl_PointSize = max(1.0, aShape.z * uDpr * tierBoost * heroGlow * twinkle * zoomSizeScale);
 
   vAddable = aColorA.w;
   vBloom = aColorC.w;
@@ -243,6 +245,7 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
       uniforms: {
         uDpr: { value: 1 },
         uTime: { value: 0 },
+        uZoomScale: { value: 1 },
       },
       vertexShader,
     });
@@ -321,6 +324,7 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
       }
 
       material.uniforms.uTime.value = timestampMs * 0.001;
+      material.uniforms.uZoomScale.value = frame.zoomScale ?? 1;
       renderer.render(scene, camera);
     };
 

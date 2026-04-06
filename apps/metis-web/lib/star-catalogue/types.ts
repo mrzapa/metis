@@ -42,7 +42,7 @@ export interface StarCatalogueConfig {
 
 export const DEFAULT_CATALOGUE_CONFIG: StarCatalogueConfig = {
   galaxySeed: "metis-prime",
-  sectorSize: 0.1,
+  sectorSize: 960,
   starsPerSector: 350,
   numArms: 4,
   armWindingRate: 3.5,
