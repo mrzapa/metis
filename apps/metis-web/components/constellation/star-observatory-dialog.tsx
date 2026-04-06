@@ -266,6 +266,8 @@ function StarMiniPreview({
     const uDiffraction = gl.getUniformLocation(prog, "u_hasDiffraction");
     const uStage = gl.getUniformLocation(prog, "u_stage");
     const uRes = gl.getUniformLocation(prog, "u_res");
+    const uStarPos       = gl.getUniformLocation(prog, "u_starPos");
+    const uFocusStrength = gl.getUniformLocation(prog, "u_focusStrength");
 
     const [r, g, b] = getFacultyColor(primaryDomainId);
     const related = (relatedDomainIds ?? []).slice(0, 2).map((id) => getFacultyColor(id));
@@ -282,6 +284,9 @@ function StarMiniPreview({
     gl.uniform1f(uStage, stageVal);
     gl.uniform1f(uSeed, seed);
     gl.uniform2f(uRes, canvas.width, canvas.height);
+    // Observatory: star is always centred in its canvas
+    gl.uniform2f(uStarPos, canvas.width / 2, canvas.height / 2);
+    gl.uniform1f(uFocusStrength, 1.0);  // always fully visible in observatory
 
     let startTime: number | null = null;
 

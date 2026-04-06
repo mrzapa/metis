@@ -25,6 +25,7 @@ export function StarDiveOverlay({
 }: StarDiveOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const labelContainerRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLDivElement>(null);
   const subRef = useRef<HTMLDivElement>(null);
   const statsRef = useRef<HTMLDivElement>(null);
@@ -35,12 +36,13 @@ export function StarDiveOverlay({
 
     const DPR = Math.min(window.devicePixelRatio ?? 1, 3);
 
-    const gl = canvas.getContext("webgl2", {
+    const glOrNull = canvas.getContext("webgl2", {
       alpha: true,
       premultipliedAlpha: false,
       antialias: true,
     });
-    if (!gl) return;
+    if (!glOrNull) return;
+    const gl = glOrNull;
 
     const prog = createStarProgram(gl);
     if (!prog) return;
@@ -58,7 +60,7 @@ export function StarDiveOverlay({
 
     gl.useProgram(prog);
     gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.blendFunc(gl.ONE, gl.ONE);
 
     const uTime        = gl.getUniformLocation(prog, "u_time");
     const uSeed        = gl.getUniformLocation(prog, "u_seed");
@@ -70,6 +72,8 @@ export function StarDiveOverlay({
     const uDiffraction = gl.getUniformLocation(prog, "u_hasDiffraction");
     const uStage       = gl.getUniformLocation(prog, "u_stage");
     const uRes         = gl.getUniformLocation(prog, "u_res");
+    const uStarPos       = gl.getUniformLocation(prog, "u_starPos");
+    const uFocusStrength = gl.getUniformLocation(prog, "u_focusStrength");
 
     let startTime: number | null = null;
     let lastProfileId = "";
@@ -83,7 +87,6 @@ export function StarDiveOverlay({
       if (!view || view.focusStrength < 0.01) {
         if (wrapper) {
           wrapper.style.opacity = "0";
-          wrapper.style.transform = "translate(-50%, -50%) scale(0.82)";
         }
         startTime = null;
         return;
@@ -92,30 +95,30 @@ export function StarDiveOverlay({
       if (!startTime) startTime = ts;
       const elapsed = reducedMotion ? 0 : (ts - startTime) / 1000;
 
-      // Size: sphere fills ~52% of the shortest viewport dimension at full focus
-      const vmin = Math.min(window.innerWidth, window.innerHeight);
-      const radius = view.focusStrength * 0.52 * vmin * 0.5;
-      const diameter = Math.round(radius * 2);
-      const physSize = Math.round(diameter * DPR);
-
-      if (physSize < 1) return;
-
-      if (canvas!.width !== physSize || canvas!.height !== physSize) {
-        canvas!.width  = physSize;
-        canvas!.height = physSize;
-        canvas!.style.width  = `${diameter}px`;
-        canvas!.style.height = `${diameter}px`;
-        gl.viewport(0, 0, physSize, physSize);
+      const cssW = window.innerWidth;
+      const cssH = window.innerHeight;
+      const physW = Math.round(cssW * DPR);
+      const physH = Math.round(cssH * DPR);
+      if (canvas!.width !== physW || canvas!.height !== physH) {
+        canvas!.width  = physW;
+        canvas!.height = physH;
+        canvas!.style.width  = `${cssW}px`;
+        canvas!.style.height = `${cssH}px`;
+        gl.viewport(0, 0, physW, physH);
       }
 
-      // Position wrapper centred on the star
-      if (wrapper) {
-        wrapper.style.left = `${Math.round(view.screenX)}px`;
-        wrapper.style.top  = `${Math.round(view.screenY)}px`;
+      gl.uniform2f(uStarPos, view.screenX * DPR, view.screenY * DPR);
+      gl.uniform1f(uFocusStrength, view.focusStrength);
+      gl.uniform2f(uRes, physW, physH);
 
-        const scale = 0.82 + view.focusStrength * 0.18;
-        wrapper.style.opacity   = String(Math.min(1, view.focusStrength * 1.8));
-        wrapper.style.transform = `translate(-50%, -50%) scale(${scale.toFixed(3)})`;
+      if (wrapper) {
+        wrapper.style.opacity = String(Math.min(1, view.focusStrength * 1.8));
+      }
+
+      if (labelContainerRef.current) {
+        const discCssPx = Math.min(window.innerWidth, window.innerHeight) * 0.28;
+        labelContainerRef.current.style.left = `${Math.round(view.screenX)}px`;
+        labelContainerRef.current.style.top  = `${Math.round(view.screenY + discCssPx + 24)}px`;
       }
 
       // HUD labels
@@ -157,7 +160,6 @@ export function StarDiveOverlay({
       }
 
       gl.uniform1f(uTime, elapsed);
-      gl.uniform2f(uRes, canvas!.width, canvas!.height);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -177,19 +179,12 @@ export function StarDiveOverlay({
       ref={wrapperRef}
       style={{
         position: "fixed",
-        left: 0,
-        top: 0,
+        inset: 0,
         pointerEvents: "none",
-        zIndex: 2,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
+        zIndex: 3,
         opacity: 0,
-        transform: "translate(-50%, -50%) scale(0.82)",
-        transition: reducedMotion
-          ? "opacity 0.15s"
-          : "opacity 0.55s ease, transform 0.55s cubic-bezier(0.23, 1, 0.32, 1)",
-        willChange: "transform, opacity",
+        transition: reducedMotion ? "opacity 0.15s" : "opacity 0.55s ease",
+        willChange: "opacity",
       }}
       aria-hidden="true"
     >
@@ -197,23 +192,25 @@ export function StarDiveOverlay({
         ref={canvasRef}
         style={{
           display: "block",
-          borderRadius: "50%",
-          boxShadow: "0 0 80px 20px rgba(0,0,0,0.55)",
         }}
         aria-hidden="true"
       />
 
-      {/* Label block — centred below sphere */}
-      <div style={{
-        marginTop: 18,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 5,
-        fontFamily: '"Space Grotesk", sans-serif',
-        textShadow: "0 1px 10px rgba(0,0,0,0.8)",
-        textAlign: "center",
-      }}>
+      {/* Label block — absolutely positioned below disc */}
+      <div
+        ref={labelContainerRef}
+        style={{
+          position: "absolute",
+          transform: "translate(-50%, 0)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 5,
+          fontFamily: '"Space Grotesk", sans-serif',
+          textShadow: "0 1px 10px rgba(0,0,0,0.8)",
+          textAlign: "center",
+        }}
+      >
         <div
           ref={nameRef}
           style={{
