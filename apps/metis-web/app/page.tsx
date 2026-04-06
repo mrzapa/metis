@@ -3720,7 +3720,7 @@ export default function Home() {
       }
 
       // Fade canvas overlay elements during Star Dive
-      const canvasOverlayAlpha = 1 - starDiveFocusStrengthRef.current * 0.92;
+      const canvasOverlayAlpha = 1 - starDiveFocusStrengthRef.current * 0.12;
       if (canvasOverlayAlpha < 0.99) {
         ctx!.save();
         ctx!.globalAlpha = Math.max(0, canvasOverlayAlpha);
@@ -4611,11 +4611,6 @@ export default function Home() {
         frameRef={landingStarfieldFrameRef}
       />
 
-      <StarDiveOverlay
-        viewRef={starDiveOverlayViewRef}
-        reducedMotion={prefersReducedMotion()}
-      />
-
       <canvas
         ref={canvasRef}
         id="universe"
@@ -4624,6 +4619,11 @@ export default function Home() {
         data-focus-phase={starFocusPhase}
         data-details-open={starDetailsOpen ? "true" : "false"}
         data-pan-active={isCanvasPanning ? "true" : "false"}
+      />
+
+      <StarDiveOverlay
+        viewRef={starDiveOverlayViewRef}
+        reducedMotion={prefersReducedMotion()}
       />
 
       <div className="metis-hero-overlay">
