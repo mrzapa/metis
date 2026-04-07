@@ -10,6 +10,7 @@ from . import features
 from . import gguf
 from . import healthz
 from . import heretic
+from . import improvements
 from . import version
 from . import index
 from . import logs
@@ -29,6 +30,7 @@ __all__ = [
 	"gguf",
 	"healthz",
 	"heretic",
+	"improvements",
 	"index",
 	"logs",
 	"observe",

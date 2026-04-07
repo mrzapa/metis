@@ -1,6 +1,7 @@
 """metis_app.models — shared typed models used across MVC parity work."""
 
 from metis_app.models.comet_event import CometEvent, NewsItem
+from metis_app.models.improvement_types import ImprovementEntry
 from metis_app.models.parity_types import (
     AgentProfile,
     IndexManifest,
@@ -17,6 +18,7 @@ __all__ = [
     "AgentProfile",
     "CometEvent",
     "IndexManifest",
+    "ImprovementEntry",
     "LocalModelEntry",
     "NewsItem",
     "ResolvedRuntimeSettings",

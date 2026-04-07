@@ -23,7 +23,7 @@ import os
 import pathlib
 import re
 from collections.abc import Callable, Iterator
-from typing import Any, Callable
+from typing import Any
 
 import metis_app.settings_store as _settings_store
 from metis_app.engine import (
@@ -56,6 +56,7 @@ from metis_app.engine.querying import (
 from metis_app.engine.forecasting import ForecastQueryRequest, ForecastSchemaRequest
 from metis_app.models.atlas_types import AtlasEntry
 from metis_app.models.brain_graph import BrainGraph
+from metis_app.models.improvement_types import ImprovementEntry
 from metis_app.models.session_types import (
     EvidenceSource,
     SessionDetail,
@@ -63,6 +64,7 @@ from metis_app.models.session_types import (
 )
 from metis_app.services.atlas_repository import AtlasRepository
 from metis_app.services.assistant_companion import AssistantCompanionService
+from metis_app.services.improvement_repository import ImprovementRepository
 from metis_app.services.learning_route_service import (
     LearningRouteIndexSummary,
     LearningRoutePreviewRequest,
@@ -111,12 +113,14 @@ class WorkspaceOrchestrator:
         assistant_service: AssistantCompanionService | None = None,
         nyx_catalog: NyxCatalogBroker | None = None,
         atlas_repo: AtlasRepository | None = None,
+        improvement_repo: ImprovementRepository | None = None,
     ) -> None:
         self._session_repo: SessionRepository = session_repo or _make_session_repo()
         self._skill_repo: SkillRepository = skill_repo or SkillRepository()
         self._index_dir: pathlib.Path | str | None = index_dir
         self._trace_store = TraceStore()
         self._atlas_repo = atlas_repo or AtlasRepository()
+        self._improvement_repo = improvement_repo or ImprovementRepository()
         self._assistant_service = assistant_service or AssistantCompanionService(
             session_repo=self._session_repo,
             trace_store=self._trace_store,
@@ -928,10 +932,12 @@ class WorkspaceOrchestrator:
         }
         if context_id:
             kwargs["context_id"] = context_id
-        return self._assistant_service.reflect(
+        result = self._assistant_service.reflect(
             **kwargs,
             _orchestrator=self,
         )
+        self._capture_improvement_idea_from_reflection(result)
+        return result
 
     def run_autonomous_research(
         self,
@@ -971,7 +977,14 @@ class WorkspaceOrchestrator:
 
         if concurrency <= 1:
             # Original single-gap behaviour — backwards compatible
-            return svc.run(settings=resolved, indexes=index_list, orchestrator=self, progress_cb=progress_cb)
+            result = svc.run(
+                settings=resolved,
+                indexes=index_list,
+                orchestrator=self,
+                progress_cb=progress_cb,
+            )
+            self._capture_improvement_sources_from_autonomous_result(result)
+            return result
 
         # Collect all sparse faculty gaps
         import asyncio
@@ -998,7 +1011,28 @@ class WorkspaceOrchestrator:
                 progress_cb=progress_cb,
             )
         )
+        self._capture_improvement_sources_from_autonomous_result(results)
         return results[0] if results else None
+
+    def list_improvement_entries(
+        self,
+        *,
+        artifact_type: str = "",
+        status: str = "",
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        return [
+            entry.to_payload()
+            for entry in self._improvement_repo.list_entries(
+                artifact_type=artifact_type,
+                status=status,
+                limit=limit,
+            )
+        ]
+
+    def get_improvement_entry(self, entry_id: str) -> dict[str, Any] | None:
+        entry = self._improvement_repo.get_entry(entry_id)
+        return entry.to_payload() if entry is not None else None
 
     def preview_learning_route(
         self,
@@ -1245,6 +1279,81 @@ class WorkspaceOrchestrator:
         if len(summary) <= 160:
             return summary
         return summary[:157].rstrip() + "..."
+
+    def _capture_improvement_sources_from_autonomous_result(
+        self,
+        result: dict[str, Any] | list[dict[str, Any]] | None,
+    ) -> None:
+        rows = result if isinstance(result, list) else ([result] if isinstance(result, dict) else [])
+        for item in rows:
+            faculty_id = str(item.get("faculty_id") or "").strip()
+            index_id = str(item.get("index_id") or "").strip()
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            sources = [
+                str(source).strip()
+                for source in (item.get("sources") or [])
+                if str(source).strip()
+            ]
+            artifact = ImprovementEntry.create(
+                artifact_key=f"source:autonomous_research:{index_id or title.lower()}",
+                artifact_type="source",
+                title=title,
+                summary=(
+                    f"Autonomous research filled the '{faculty_id or 'unknown'}' faculty gap "
+                    f"and created index '{index_id or 'unknown'}'."
+                ),
+                body_md=(
+                    f"METIS autonomous research generated a new research star titled '{title}'.\n\n"
+                    f"Faculty: {faculty_id or 'unknown'}\n"
+                    f"Index: {index_id or 'unknown'}\n"
+                    f"Sources: {', '.join(sources) if sources else 'none'}"
+                ),
+                status="active",
+                tags=["autonomous_research", *([faculty_id] if faculty_id else [])],
+                metadata={
+                    "origin": "autonomous_research",
+                    "faculty_id": faculty_id,
+                    "index_id": index_id,
+                    "sources": sources,
+                },
+            )
+            self._improvement_repo.upsert_entry(artifact)
+
+    def _capture_improvement_idea_from_reflection(self, result: dict[str, Any] | None) -> None:
+        if not isinstance(result, dict) or not result.get("ok"):
+            return
+        memory_entry = result.get("memory_entry")
+        if not isinstance(memory_entry, dict):
+            return
+        trigger = str(memory_entry.get("trigger") or "").strip()
+        session_id = str(memory_entry.get("session_id") or "").strip()
+        run_id = str(memory_entry.get("run_id") or "").strip()
+        title = str(memory_entry.get("title") or "").strip()
+        summary = str(memory_entry.get("summary") or "").strip()
+        details = str(memory_entry.get("details") or "").strip()
+        entry_id = str(memory_entry.get("entry_id") or "").strip()
+        if not title:
+            return
+        artifact = ImprovementEntry.create(
+            artifact_key=f"idea:reflection:{trigger}:{session_id}:{run_id}:{entry_id}",
+            artifact_type="idea",
+            title=title,
+            summary=summary,
+            body_md=details,
+            session_id=session_id,
+            run_id=run_id,
+            status="draft",
+            tags=["assistant_reflection", *([trigger] if trigger else [])],
+            metadata={
+                "origin": "assistant_reflection",
+                "why": str(memory_entry.get("why") or "").strip(),
+                "confidence": memory_entry.get("confidence"),
+                "related_node_ids": list(memory_entry.get("related_node_ids") or []),
+            },
+        )
+        self._improvement_repo.upsert_entry(artifact)
 
     @staticmethod
     def _atlas_candidate_confidence(

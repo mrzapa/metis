@@ -1348,6 +1348,28 @@ class AtlasDecisionRequestModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ImprovementEntryModel(BaseModel):
+    entry_id: str
+    artifact_key: str
+    artifact_type: str
+    created_at: str
+    updated_at: str
+    title: str
+    summary: str
+    body_md: str
+    session_id: str = ""
+    run_id: str = ""
+    status: str = "draft"
+    tags: list[str] = Field(default_factory=list)
+    upstream_ids: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    slug: str = ""
+    saved_at: str = ""
+    markdown_path: str = ""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class GgufCatalogEntryModel(BaseModel):
     model_name: str
     provider: str

@@ -4,17 +4,40 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from litestar import Router, delete, get, post
 from litestar.exceptions import HTTPException as LitestarHTTPException
 from litestar.response import ServerSentEvent
+from pydantic import BaseModel, Field
 
 from metis_app.api.models import IndexBuildRequestModel, IndexBuildResultModel, IndexDeleteResultModel
 from metis_app.engine import list_indexes
 from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
+from metis_app.services.star_archetype import detect_archetypes, RankedArchetype
 
 from metis_app.api_litestar.common import run_engine
+
+
+# ---------------------------------------------------------------------------
+# Archetype suggest models
+# ---------------------------------------------------------------------------
+
+class SuggestArchetypesRequest(BaseModel):
+    file_paths: list[str] = Field(min_length=0)
+
+
+def _ranked_to_dict(r: RankedArchetype) -> dict[str, Any]:
+    return {
+        "id": r.archetype.id,
+        "name": r.archetype.name,
+        "description": r.archetype.description,
+        "icon_hint": r.archetype.icon_hint,
+        "settings_overrides": r.archetype.settings_overrides,
+        "score": r.score,
+        "why": r.why,
+    }
 
 @post("/v1/index/build")
 def api_build_index(data: IndexBuildRequestModel) -> dict[str, Any]:

@@ -11,21 +11,19 @@
 > They deliver richer context — documentation, ownership, history, decisions —
 > in a single call. Raw `read_file` calls are a last resort only.
 
-Last indexed: 2026-04-06. Confidence: 100%.
+Last indexed: 2026-04-07. Confidence: 100%.
 ### Architecture
-repo is a sophisticated, multi-platform monorepo designed to provide a unified interface for complex data orchestration and AI-driven querying. The project leverages a hybrid architecture, combining a robust Python-based backend engine with multiple frontend implementations to serve desktop and web environments. With over 216,000 lines of code, the repository serves as a comprehensive ecosystem for managing session-based workflows, LLM integrations, and graph-based data structures. The project utilizes a diverse set of technologies to balance performance, cross-platform compatibility, and rapid feature iteration:
-
-*   **Backend:** Primarily Python (30.7%), utilizing Litestar and custom API frameworks for high-performance service orchestration.
+repo is a complex, multi-language monorepo designed to support a unified ecosystem of desktop and web-based applications. The project leverages a robust Python-based backend architecture to handle core logic, data modeling, and API services, while providing cross-platform interfaces through Rust (Tauri) and modern JavaScript/TypeScript web frameworks. With over 200,000 lines of code, the project is highly active, characterized by rapid iteration across both frontend and backend domains. It is designed to manage complex data structures—such as brain graphs and star catalogues—and provides sophisticated querying engines and LLM integration capabilities.
 ### Key Modules
 | Module | Purpose | Owner |
 |--------|---------|-------|
-| `metis_app` | The metis_app module serves as the core backend engine and API layer for the Met | — |
+| `metis_app` | The metis_app module serves as the core backend engine for the Metis ecosystem | — |
 | `root` | The root module serves as the primary entry point and orchestration layer for th | — |
 | `apps` | The apps module serves as the primary frontend and desktop interface layer for t | — |
-| `tests` | The tests module serves as the comprehensive validation suite for the metis_app  | — |
+| `tests` | The tests module serves as the comprehensive validation suite for the Metis appl | — |
 | `.agents` | The .agents module serves as the foundational framework for autonomous agent ope | — |
-| `.github` | The .github module serves as the central repository for GitHub-specific automati | — |
-| `docs` | The docs module serves as a centralized repository for technical documentation s | — |
+| `.github` | The .github module serves as a centralized repository for GitHub-specific automa | — |
+| `docs` | The docs module serves as a centralized repository for technical snippets and im | — |
 | `scripts` | The scripts module serves as a collection of administrative and maintenance util | — |
 ### Entry Points
 - `metis_app/api/app.py`
@@ -45,11 +43,11 @@ repo is a sophisticated, multi-platform monorepo designed to provide a unified i
 ### Hotspots (High Churn)
 | File | Churn | 90d Commits | Owner |
 |------|-------|-------------|-------|
-| `apps/metis-web/app/page.tsx` | 99.7th %ile | 56 | mrzapa |
+| `apps/metis-web/app/page.tsx` | 99.8th %ile | 56 | mrzapa |
 | `tests/test_api_app.py` | 99.5th %ile | 21 | Sam |
-| `apps/metis-web/components/constellation/star-observatory-dialog.tsx` | 99.2th %ile | 20 | Sam |
-| `apps/metis-web/lib/api.ts` | 99.0th %ile | 19 | Sam |
-| `apps/metis-web/app/settings/page.tsx` | 98.7th %ile | 19 | mrzapa |
+| `apps/metis-web/lib/api.ts` | 99.3th %ile | 20 | mrzapa |
+| `apps/metis-web/components/constellation/star-observatory-dialog.tsx` | 99.0th %ile | 20 | Sam |
+| `apps/metis-web/app/settings/page.tsx` | 98.8th %ile | 19 | mrzapa |
 
 ### Repowise MCP Tools
 
@@ -85,7 +83,7 @@ This project has a Repowise MCP server configured. **ALWAYS use these tools befo
 
 ### Codebase Conventions
 **Architectural Decisions:**
-- **Conditional application of Halley's method adjustment**: If 1-adj < 0, Halley's method sends x in the opposite direction to Newton's method, which is undesir.- **Conditional branch handling for eager vs lazy execution**: 1. Eager execution performance. 2. Numerical/algorithmic stability in certain frameworks.- **Fixed return signature for JIT-compiled functions**: JIT compilers cannot handle variable numbers of return arguments.- **Handling of mutable post_self_positional arguments in codegen**: The number of ops in this category is small, making manual implementation more efficient than updati.- **Omission of uniqueness check in JIT code**: Cannot branch on the condition because JIT code needs to be non-branching.**Commands:**
+- **Conditional application of Halley's method adjustment**: If 1-adj < 0, Halley's method sends x in the opposite direction to Newton's method, which is undesir.- **Conditional branch handling for eager vs lazy execution**: 1. Eager execution performance. 2. Numerical/algorithmic stability in certain frameworks.- **Conditional branching strategy for eager vs lazy frameworks**: Eager models need to avoid unnecessary computation and errors; lazy backends need to maintain the fu.- **Fixed return signature for JIT-compiled functions**: JIT compilers cannot handle variable numbers of return arguments.- **Handling of mutable post_self_positional arguments in codegen**: Updating the codegen to handle these cases is a significant effort ('much bigger lift'), and the num.- **Omission of uniqueness check in JIT code**: Cannot branch on the condition because JIT code needs to be non-branching.**Commands:**
 - Test: `pytest`
 - Lint: `ruff check .`
 

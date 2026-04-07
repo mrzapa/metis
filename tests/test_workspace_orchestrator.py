@@ -18,6 +18,7 @@ from metis_app.models.brain_graph import BrainGraph
 from metis_app.models.parity_types import SkillDefinition
 from metis_app.models.session_types import SessionDetail, SessionSummary
 from metis_app.services.atlas_repository import AtlasRepository
+from metis_app.services.improvement_repository import ImprovementRepository
 from metis_app.services.nyx_catalog import (
     CuratedNyxComponent,
     NyxCatalogBroker,
@@ -72,6 +73,7 @@ def _make_orchestrator(
     assistant_service: Any | None = None,
     nyx_catalog: Any | None = None,
     atlas_repo: Any | None = None,
+    improvement_repo: Any | None = None,
 ) -> WorkspaceOrchestrator:
     """Return a WorkspaceOrchestrator with stub dependencies injected."""
     if session_repo is None:
@@ -97,6 +99,7 @@ def _make_orchestrator(
         assistant_service=assistant_service,
         nyx_catalog=nyx_catalog,
         atlas_repo=atlas_repo,
+        improvement_repo=improvement_repo,
         index_dir="/tmp/fake_indexes",
     )
 
@@ -1729,6 +1732,54 @@ class TestReflectionHooks:
             _orchestrator=orch,
         )
 
+    def test_reflect_assistant_captures_improvement_idea(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assistant_service = MagicMock()
+        assistant_service.reflect.return_value = {
+            "ok": True,
+            "memory_entry": {
+                "entry_id": "mem-1",
+                "title": "Research follow-up idea",
+                "summary": "Turn the last reflection into a durable idea.",
+                "details": "Inspect the run and propose a better next experiment.",
+                "why": "Completed runs often reveal the next useful move.",
+                "trigger": "completed_run",
+                "session_id": "session-1",
+                "run_id": "run-1",
+                "confidence": 0.81,
+                "related_node_ids": ["session:session-1"],
+            },
+        }
+        improvement_repo = ImprovementRepository(
+            db_path=":memory:",
+            improvements_root=tmp_path,
+        )
+        orch = _make_orchestrator(
+            assistant_service=assistant_service,
+            improvement_repo=improvement_repo,
+        )
+
+        monkeypatch.setattr(
+            "metis_app.services.workspace_orchestrator._settings_store.load_settings",
+            lambda: {"selected_mode": "Tutor", "llm_provider": "mock"},
+        )
+
+        result = orch.reflect_assistant(
+            trigger="completed_run",
+            session_id="session-1",
+            run_id="run-1",
+            force=True,
+            settings={"llm_provider": "openai"},
+        )
+
+        assert result["ok"] is True
+        entries = improvement_repo.list_entries(artifact_type="idea", limit=10)
+        assert len(entries) == 1
+        assert entries[0].title == "Research follow-up idea"
+        assert entries[0].run_id == "run-1"
+        assert entries[0].metadata["origin"] == "assistant_reflection"
+
 
 # ---------------------------------------------------------------------------
 # Graph / Brain canvas
@@ -1974,7 +2025,9 @@ class TestSettings:
 def test_run_autonomous_research_returns_none_when_disabled(tmp_path):
     """run_autonomous_research returns None when autonomous_research_enabled is False."""
     from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
-    orc = WorkspaceOrchestrator()
+    orc = WorkspaceOrchestrator(
+        improvement_repo=ImprovementRepository(db_path=":memory:", improvements_root=tmp_path),
+    )
     settings = {
         "assistant_policy": {"autonomous_research_enabled": False},
         "llm_provider": "mock",
@@ -1983,7 +2036,7 @@ def test_run_autonomous_research_returns_none_when_disabled(tmp_path):
     assert result is None
 
 
-def test_run_autonomous_research_returns_result_when_enabled():
+def test_run_autonomous_research_returns_result_when_enabled(tmp_path):
     """run_autonomous_research propagates AutonomousResearchService.run result."""
     import unittest.mock as um
     from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
@@ -2000,7 +2053,11 @@ def test_run_autonomous_research_returns_result_when_enabled():
         "llm_provider": "mock",
     }
 
-    orc = WorkspaceOrchestrator()
+    improvement_repo = ImprovementRepository(
+        db_path=":memory:",
+        improvements_root=tmp_path,
+    )
+    orc = WorkspaceOrchestrator(improvement_repo=improvement_repo)
 
     mock_svc_instance = um.MagicMock()
     mock_svc_instance.run.return_value = expected
@@ -2016,9 +2073,13 @@ def test_run_autonomous_research_returns_result_when_enabled():
         result = orc.run_autonomous_research(settings)
 
     assert result == expected
+    entries = improvement_repo.list_entries(artifact_type="source", limit=10)
+    assert len(entries) == 1
+    assert entries[0].title == "Emergence in Complex Systems"
+    assert entries[0].metadata["origin"] == "autonomous_research"
 
 
-def test_run_autonomous_research_concurrent_dispatches_multiple_faculties():
+def test_run_autonomous_research_concurrent_dispatches_multiple_faculties(tmp_path):
     """With concurrency=2, run_autonomous_research scans multiple gaps and calls run_batch."""
     import unittest.mock as um
     from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
@@ -2032,7 +2093,11 @@ def test_run_autonomous_research_concurrent_dispatches_multiple_faculties():
         "llm_provider": "mock",
     }
 
-    orc = WorkspaceOrchestrator()
+    improvement_repo = ImprovementRepository(
+        db_path=":memory:",
+        improvements_root=tmp_path,
+    )
+    orc = WorkspaceOrchestrator(improvement_repo=improvement_repo)
 
     # No indexes → all 11 faculties are gaps; orchestrator should collect 2*2=4 at most
     # and call run_batch with multiple faculty IDs.
