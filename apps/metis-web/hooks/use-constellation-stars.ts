@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchSettings, updateSettings } from "@/lib/api";
+import { fetchSettings, updateSettings, postNourishmentEvent } from "@/lib/api";
 import {
   capUserStars,
   CONSTELLATION_USER_STAR_LIMIT,
@@ -123,6 +123,13 @@ export function useConstellationStars() {
         createdStar,
       ];
       await saveBoth(next);
+      // Fire-and-forget nourishment event — don't block star interaction
+      postNourishmentEvent({
+        event_type: "star_added",
+        star_id: createdStar.id,
+        faculty_id: createdStar.primaryDomainId ?? "",
+        detail: createdStar.label ?? "",
+      }).catch(() => {/* nourishment event is best-effort */});
       return createdStar;
     },
     [saveBoth],
@@ -185,6 +192,14 @@ export function useConstellationStars() {
         return;
       }
       await saveBoth(next);
+      // Fire-and-forget nourishment event — triggers punishment loop
+      const removedStar = current.find((s) => s.id === starId);
+      postNourishmentEvent({
+        event_type: "star_removed",
+        star_id: starId,
+        faculty_id: removedStar?.primaryDomainId ?? "",
+        detail: removedStar?.label ?? "",
+      }).catch(() => {/* nourishment event is best-effort */});
     },
     [saveBoth],
   );

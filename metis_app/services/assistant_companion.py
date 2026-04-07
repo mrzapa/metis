@@ -21,6 +21,7 @@ from metis_app.models.assistant_types import (
 from metis_app.models.star_nourishment import (
     NourishmentState,
     StarEvent,
+    TopologySignal,
     compute_nourishment,
 )
 from metis_app.services.assistant_repository import AssistantRepository
@@ -514,11 +515,47 @@ class AssistantCompanionService:
             NourishmentState.from_payload(previous_raw)
             if isinstance(previous_raw, dict) else None
         )
+
+        # Build TopologySignal when scaffold is available
+        topo_signal: TopologySignal | None = None
+        try:
+            from metis_app.utils.feature_flags import FeatureFlag, get_feature_statuses
+            topo_enabled = any(
+                s.enabled and s.name == FeatureFlag.TOPO_SCAFFOLD_ENABLED
+                for s in get_feature_statuses(settings)
+            )
+            if topo_enabled:
+                from metis_app.services.topo_scaffold import compute_scaffold
+                from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
+                graph = WorkspaceOrchestrator().get_workspace_graph()
+                scaffold = compute_scaffold(graph)
+                # Derive isolated faculties: faculties with no scaffold edge
+                connected_ids: set[str] = set()
+                for edge in (scaffold.scaffold_edges or []):
+                    connected_ids.add(str(edge[0]))
+                    connected_ids.add(str(edge[1]))
+                faculty_ids = {f.get("id", f.get("name", "")) for f in faculties}
+                isolated = sorted(faculty_ids - connected_ids) if connected_ids else []
+                topo_signal = TopologySignal(
+                    betti_0=scaffold.betti_0,
+                    betti_1=scaffold.betti_1,
+                    scaffold_edge_count=len(scaffold.scaffold_edges or []),
+                    strongest_persistence=(
+                        scaffold.scaffold_edges[0][2]
+                        if scaffold.scaffold_edges else 0.0
+                    ),
+                    isolated_faculties=isolated,
+                    summary=scaffold.summary or "",
+                )
+        except Exception:  # noqa: BLE001
+            log.debug("Topology signal unavailable for nourishment", exc_info=True)
+
         return compute_nourishment(
             stars=stars,
             faculties=faculties,
             previous=previous,
             events=events,
+            topology=topo_signal,
         )
 
     def _install_companion_model(

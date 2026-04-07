@@ -286,3 +286,170 @@ class TestStarEventReaction:
     def test_no_events_empty_reaction(self):
         state = NourishmentState()
         assert generate_star_event_reaction(state) == ""
+
+
+# ---------------------------------------------------------------------------
+# Wave 2: TopologySignal + topology-nourishment fusion
+# ---------------------------------------------------------------------------
+
+from metis_app.models.star_nourishment import TopologySignal  # noqa: E402
+
+
+class TestTopologySignal:
+    def test_defaults(self):
+        sig = TopologySignal()
+        assert sig.betti_0 == 1
+        assert sig.betti_1 == 0
+        assert sig.scaffold_edge_count == 0
+        assert sig.strongest_persistence == 0.0
+        assert sig.isolated_faculties == []
+        assert sig.summary == ""
+
+    def test_roundtrip(self):
+        sig = TopologySignal(
+            betti_0=3,
+            betti_1=2,
+            scaffold_edge_count=7,
+            strongest_persistence=0.85,
+            isolated_faculties=["arts", "history"],
+            summary="3 components, 2 loops",
+        )
+        payload = sig.to_payload()
+        assert payload["betti_0"] == 3
+        assert payload["betti_1"] == 2
+        assert payload["isolated_faculties"] == ["arts", "history"]
+
+        restored = TopologySignal.from_payload(payload)
+        assert restored.betti_0 == 3
+        assert restored.betti_1 == 2
+        assert restored.isolated_faculties == ["arts", "history"]
+
+    def test_from_none_payload(self):
+        sig = TopologySignal.from_payload(None)
+        assert sig.betti_0 == 1
+
+
+class TestNourishmentTopologyIntegration:
+    def test_topology_in_nourishment_state(self):
+        topo = TopologySignal(betti_0=1, betti_1=1, scaffold_edge_count=5)
+        state = NourishmentState(topology=topo)
+        assert state.integration_loops == 1
+        assert not state.is_fragmented
+
+    def test_fragmented_state(self):
+        topo = TopologySignal(betti_0=3, betti_1=0)
+        state = NourishmentState(topology=topo)
+        assert state.is_fragmented
+        assert state.integration_loops == 0
+
+    def test_topology_roundtrip_in_state(self):
+        topo = TopologySignal(betti_0=1, betti_1=3, isolated_faculties=["arts"])
+        state = NourishmentState(hunger_level=0.4, topology=topo)
+        payload = state.to_payload()
+        assert payload["integration_loops"] == 3
+        assert payload["is_fragmented"] is False
+
+        restored = NourishmentState.from_payload(payload)
+        assert restored.topology is not None
+        assert restored.topology.betti_1 == 3
+        assert restored.topology.isolated_faculties == ["arts"]
+
+    def test_compute_nourishment_with_topology_pressure(self):
+        """Topology with no loops and isolated faculties should increase hunger."""
+        stars = _make_stars(10, faculty_id="mathematics")
+        topo_no_loops = TopologySignal(
+            betti_0=2,
+            betti_1=0,
+            scaffold_edge_count=3,
+            isolated_faculties=["physics", "literature"],
+        )
+        state_with_topo = compute_nourishment(
+            stars=stars, faculties=_FACULTIES, topology=topo_no_loops,
+        )
+        state_without_topo = compute_nourishment(
+            stars=stars, faculties=_FACULTIES,
+        )
+        # Topology pressure should make hunger higher
+        assert state_with_topo.hunger_level >= state_without_topo.hunger_level
+
+    def test_compute_nourishment_topology_none_is_safe(self):
+        """Passing topology=None defaults to a neutral TopologySignal."""
+        stars = _make_stars(5)
+        state = compute_nourishment(stars=stars, faculties=_FACULTIES, topology=None)
+        assert state.total_stars == 5
+        # topology=None defaults to a neutral signal, not None
+        assert state.topology.betti_0 == 1
+        assert state.topology.betti_1 == 0
+
+
+class TestTopologyAwareExpressions:
+    def _state_with_topo(self, **topo_kwargs) -> NourishmentState:
+        topo = TopologySignal(**topo_kwargs)
+        return NourishmentState(
+            hunger_level=0.6,
+            total_stars=5,
+            faculty_gaps=["physics"],
+            topology=topo,
+        )
+
+    def test_expression_with_loops(self):
+        state = self._state_with_topo(betti_1=3, scaffold_edge_count=5)
+        expr = generate_hunger_expression(state)
+        assert isinstance(expr, str)
+        assert len(expr) > 10
+
+    def test_expression_with_fragmentation(self):
+        state = self._state_with_topo(betti_0=4, betti_1=0)
+        expr = generate_hunger_expression(state)
+        assert isinstance(expr, str)
+        assert len(expr) > 10
+
+    def test_expression_with_isolation(self):
+        state = self._state_with_topo(isolated_faculties=["arts", "history"])
+        expr = generate_hunger_expression(state)
+        assert isinstance(expr, str)
+        assert len(expr) > 10
+
+    def test_hunger_block_includes_topology(self):
+        topo = TopologySignal(
+            betti_0=2, betti_1=1, scaffold_edge_count=4,
+            isolated_faculties=["arts"],
+        )
+        state = NourishmentState(
+            hunger_level=0.5, total_stars=8, topology=topo,
+        )
+        block = generate_hunger_block(state)
+        assert "Topology:" in block
+        assert "2 region(s)" in block
+        assert "1 integration loop(s)" in block
+        assert "Isolated faculties" in block
+        assert "arts" in block
+
+    def test_hunger_block_no_explicit_topology(self):
+        """Default topology signal still appears in block (neutral values)."""
+        state = NourishmentState(hunger_level=0.5, total_stars=5)
+        block = generate_hunger_block(state)
+        assert "Constellation Nourishment State" in block
+        # Default topology (betti_0=1, betti_1=0) is still rendered
+        assert "Topology:" in block
+        assert "FRAGMENTED" not in block  # betti_0=1 is not fragmented
+
+    def test_fragmented_block_includes_warning(self):
+        topo = TopologySignal(betti_0=3, betti_1=0)
+        state = NourishmentState(
+            hunger_level=0.7, total_stars=5, topology=topo,
+        )
+        block = generate_hunger_block(state)
+        assert "FRAGMENTED" in block
+
+    def test_all_hunger_levels_with_topology(self):
+        """All 6 hunger states generate valid expressions with topology present."""
+        topo = TopologySignal(betti_0=2, betti_1=1, isolated_faculties=["arts"])
+        for level in [0.05, 0.25, 0.45, 0.65, 0.85, 0.98]:
+            state = NourishmentState(
+                hunger_level=level, total_stars=5, topology=topo,
+            )
+            expr = generate_hunger_expression(state)
+            assert isinstance(expr, str), f"Failed at level {level}"
+            block = generate_hunger_block(state)
+            assert "Topology:" in block, f"No topology at level {level}"

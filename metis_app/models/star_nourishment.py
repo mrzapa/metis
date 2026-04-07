@@ -84,6 +84,10 @@ HUNGER_DECAY_RATE_PER_HOUR = 0.04
 # Maximum recent events the companion tracks
 MAX_RECENT_EVENTS = 20
 
+# Topology thresholds
+MIN_INTEGRATION_LOOPS = 2     # Fewer H₁ loops than this → topology hunger
+ISOLATION_PENALTY_PER_FACULTY = 0.04  # Per isolated faculty hunger boost
+
 # Hunger response levels
 HUNGER_LEVELS = {
     "satiated":  (0.0, 0.15),
@@ -104,6 +108,37 @@ def hunger_label(level: float) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Topology signal — scaffold data fed into hunger computation
+# ---------------------------------------------------------------------------
+
+@dataclass(slots=True)
+class TopologySignal:
+    """Lightweight summary of scaffold topology passed to nourishment."""
+    betti_0: int = 1              # Connected regions
+    betti_1: int = 0              # Integration loops (H₁ generators)
+    scaffold_edge_count: int = 0
+    strongest_persistence: float = 0.0
+    isolated_faculties: list[str] = field(default_factory=list)  # Faculty IDs with no scaffold edges
+    summary: str = ""
+
+    def to_payload(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_payload(cls, data: dict[str, Any] | None) -> "TopologySignal":
+        if not data:
+            return cls()
+        return cls(
+            betti_0=max(0, _coerce_int(data.get("betti_0"), 1)),
+            betti_1=max(0, _coerce_int(data.get("betti_1"), 0)),
+            scaffold_edge_count=max(0, _coerce_int(data.get("scaffold_edge_count"), 0)),
+            strongest_persistence=max(0.0, _coerce_float(data.get("strongest_persistence"), 0.0)),
+            isolated_faculties=list(data.get("isolated_faculties") or []),
+            summary=str(data.get("summary") or ""),
+        )
+
+
+# ---------------------------------------------------------------------------
 # NourishmentState — the companion's felt sense of its constellation
 # ---------------------------------------------------------------------------
 
@@ -116,6 +151,7 @@ class NourishmentState:
     faculty_gaps: list[str] = field(default_factory=list)   # faculty_ids with gaps
     recent_events: list[StarEvent] = field(default_factory=list)
     lightning_eligible: bool = False
+    topology: TopologySignal = field(default_factory=TopologySignal)
     last_fed_at: str = ""                   # ISO timestamp of last star_added
     last_starved_at: str = ""               # ISO timestamp when hunger hit > 0.90
     computed_at: str = ""
@@ -136,12 +172,22 @@ class NourishmentState:
     def has_recent_loss(self) -> bool:
         return any(e.event_type == "star_removed" for e in self.recent_events[-5:])
 
+    @property
+    def integration_loops(self) -> int:
+        return self.topology.betti_1
+
+    @property
+    def is_fragmented(self) -> bool:
+        return self.topology.betti_0 > 1
+
     def to_payload(self) -> dict[str, Any]:
         d = asdict(self)
         d["hunger_name"] = self.hunger_name
         d["gap_count"] = self.gap_count
         d["is_starving"] = self.is_starving
         d["has_recent_loss"] = self.has_recent_loss
+        d["integration_loops"] = self.integration_loops
+        d["is_fragmented"] = self.is_fragmented
         return d
 
     @classmethod
@@ -162,6 +208,7 @@ class NourishmentState:
                 for e in (data.get("recent_events") or [])
             ],
             lightning_eligible=bool(data.get("lightning_eligible", False)),
+            topology=TopologySignal.from_payload(data.get("topology")),
             last_fed_at=str(data.get("last_fed_at") or ""),
             last_starved_at=str(data.get("last_starved_at") or ""),
             computed_at=str(data.get("computed_at") or assistant_now_iso()),
@@ -177,6 +224,7 @@ def compute_nourishment(
     faculties: list[dict[str, str]],
     previous: NourishmentState | None = None,
     events: list[StarEvent] | None = None,
+    topology: TopologySignal | None = None,
 ) -> NourishmentState:
     """Derive a NourishmentState from the current constellation.
 
@@ -186,6 +234,7 @@ def compute_nourishment(
     faculties : list of {id, name} dicts (the 11 constellation faculties)
     previous : optional prior state for temporal hunger computation
     events : optional new star events to append
+    topology : optional scaffold topology signal for topology-aware hunger
     """
     now = assistant_now_iso()
     total = len(stars)
@@ -216,7 +265,10 @@ def compute_nourishment(
         if is_gap:
             faculty_gaps.append(fid)
 
-    # Hunger computation — based on star density + temporal decay
+    # Topology signal — use provided or fallback to empty
+    topo = topology or TopologySignal()
+
+    # Hunger computation — based on star density + temporal decay + topology
     if total == 0:
         hunger = 1.0
     else:
@@ -233,7 +285,13 @@ def compute_nourishment(
                 time_hunger = min(0.3, hours_since * HUNGER_DECAY_RATE_PER_HOUR)
             except (ValueError, TypeError):
                 pass
-        hunger = min(1.0, density_hunger + gap_pressure + time_hunger)
+        # Topology pressure: few integration loops + isolated faculties → more hunger
+        topo_pressure = 0.0
+        if total >= 3:  # Only apply topology pressure when enough stars exist
+            if topo.betti_1 < MIN_INTEGRATION_LOOPS:
+                topo_pressure += 0.08 * (MIN_INTEGRATION_LOOPS - topo.betti_1)
+            topo_pressure += min(0.2, len(topo.isolated_faculties) * ISOLATION_PENALTY_PER_FACULTY)
+        hunger = min(1.0, density_hunger + gap_pressure + time_hunger + topo_pressure)
 
     # Merge events
     recent = list((previous.recent_events if previous else []))
@@ -261,6 +319,7 @@ def compute_nourishment(
         faculty_gaps=faculty_gaps,
         recent_events=recent,
         lightning_eligible=lightning,
+        topology=topo,
         last_fed_at=last_fed,
         last_starved_at=last_starved,
         computed_at=now,

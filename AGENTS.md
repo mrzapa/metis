@@ -46,6 +46,61 @@ apps/metis-web/          Tauri + Next.js frontend
 
 ---
 
+## Development
+
+```bash
+# Install (dev mode)
+pip install -e ".[dev,api]"
+
+# Test — always run from repo root
+python -m pytest
+python -m pytest --cov=metis_app --cov-report=term
+
+# Lint
+ruff check .
+
+# Full dev check (lint + tests + settings validation)
+./scripts/dev_check.sh          # macOS / Linux
+.\scripts\dev_check.ps1         # Windows PowerShell
+```
+
+> **Pitfall**: run tests from the repo root, not a subdirectory. A different checkout may be on `PYTHONPATH` and silently shadow the local package.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for PR workflow and environment setup.
+
+---
+
+## Conventions
+
+### Backend
+
+- **Request/Result dataclasses** — engine operations pair `*Request` → `*Result` types (see `metis_app/engine/querying.py`)
+- **Adapter ABC** — new vector store backends implement `VectorStoreAdapter` (`metis_app/services/vector_store.py`); never call vector stores directly
+- **Settings secrets** — use `"env:VAR_NAME"` syntax in `settings.json`; the store resolves values from the environment at runtime. Never hardcode API keys.
+- **Schema migration** — increment `schema_version` for breaking settings changes and register a handler in `_MIGRATIONS` (`metis_app/settings_store.py`)
+- **`lru_cache` isolation** — always call `cache.cache_clear()` in `autouse` fixtures; tests share process state and cached values leak between runs
+
+### Testing
+
+- **Fresh client per test** — create `TestClient(create_app())` inside each test function, not at module level
+- **Prefer `monkeypatch`** — use `monkeypatch.setattr` over `unittest.mock` for factory injection (`create_llm`, `create_embedder`)
+- **Litestar tests** — wrap in a context manager: `with TestClient(app=create_app()) as client:`
+- **Pipeline path** — test new retrieval stages through `execute_retrieval_plan`; do not call the vector store adapters directly in tests
+
+### Frontend (`apps/metis-web`)
+
+- **Typed fetch wrappers** — all backend calls go through `lib/api.ts`; no raw `fetch()` inside components
+- **App Router** — pages live at `app/(route)/page.tsx` following Next.js App Router conventions
+- **Tauri API base** — resolved dynamically via `invoke('get_api_base_url')`, not a hardcoded constant; dev mode falls back to `NEXT_PUBLIC_METIS_API_BASE`
+
+---
+
+## Architecture decisions
+
+Key decisions live in `docs/adr/`. The canonical decision is **[ADR 0004](docs/adr/0004-one-interface-tauri-next-fastapi.md)**: single product interface — Next.js UI in Tauri shell; **Litestar is the default backend** (set `METIS_API_BACKEND=fastapi` for the FastAPI implementation). Qt GUI is deprecated and removed from the product surface; CLI is retained for automation.
+
+---
+
 ## Agentic capabilities
 
 ### RAG modes

@@ -2758,6 +2758,39 @@ export async function clearAssistantMemory(limit = 10): Promise<Record<string, u
   return res.json();
 }
 
+// ---------------------------------------------------------------------------
+// Star nourishment events (Wave 2)
+// ---------------------------------------------------------------------------
+
+export interface NourishmentEventBody {
+  event_type: "star_added" | "star_removed" | "star_evolved";
+  star_id?: string;
+  faculty_id?: string;
+  detail?: string;
+}
+
+export interface NourishmentEventResponse {
+  status: string;
+  reaction: string;
+  nourishment: Record<string, unknown>;
+  reflection?: Record<string, unknown> | null;
+}
+
+export async function postNourishmentEvent(
+  body: NourishmentEventBody,
+): Promise<NourishmentEventResponse> {
+  const res = await apiFetch(`${await getApiBase()}/v1/assistant/nourishment/event`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to post nourishment event (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
 export async function fetchAtlasCandidate(
   sessionId: string,
   runId: string,

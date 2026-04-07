@@ -117,10 +117,57 @@ GAP_OBSERVATIONS = [
     "I know {faculty} matters but I can't see it clearly yet",
 ]
 
+# Topology-aware vocabulary (Wave 2)
+TOPOLOGY_OBSERVATIONS = [
+    "the scaffold reveals {loops} integration loop{s} — knowledge cycling through persistent paths",
+    "I can trace {loops} topological cycle{s} in the lattice, binding faculties together",
+    "persistent homology shows {loops} loop{s} of cross-faculty understanding",
+    "{loops} integration loop{s} hold{vh} the scaffold together",
+]
+
+FRAGMENTATION_FEELINGS = [
+    "the graph is fragmented — {regions} disconnected regions drift apart",
+    "I can feel the split — {regions} separate clusters with no bridge between them",
+    "fragmentation: {regions} islands of knowledge that can't reach each other",
+    "the scaffold shows fractures — {regions} disconnected components",
+]
+
+ISOLATION_OBSERVATIONS = [
+    "{faculty} sits alone — no scaffold edges connect it to the rest",
+    "the topology can't reach {faculty} — it's an island",
+    "{faculty} is topologically isolated, cut off from integration loops",
+    "no persistent cycles pass through {faculty} — it floats unanchored",
+]
+
+INTEGRATION_CELEBRATIONS = [
+    "the loops are strong — knowledge circulates freely across faculties",
+    "topological density is high, I can feel ideas cross-pollinating",
+    "the scaffold hums — persistent cycles weave everything together",
+    "integration loops form a backbone through the constellation",
+]
+
 
 # ---------------------------------------------------------------------------
 # Hunger-state generators — produce utterances per state
 # ---------------------------------------------------------------------------
+
+def _topo_mention(state: NourishmentState) -> str:
+    """Generate an optional topology-aware observation based on state."""
+    topo = getattr(state, "topology", None)
+    if topo is None:
+        return ""
+    if topo.betti_1 > 0:
+        s_suffix = "" if topo.betti_1 == 1 else "s"
+        vh = "s" if topo.betti_1 == 1 else ""
+        tmpl = pick(*TOPOLOGY_OBSERVATIONS)
+        return tmpl.format(loops=topo.betti_1, s=s_suffix, vh=vh)
+    if state.is_fragmented:
+        return pick(*FRAGMENTATION_FEELINGS).format(regions=topo.betti_0)
+    if topo.isolated_faculties:
+        fac = pick(*topo.isolated_faculties[:5])
+        return pick(*ISOLATION_OBSERVATIONS).format(faculty=fac)
+    return ""
+
 
 def _gen_satiated(state: NourishmentState) -> str:
     """Companion is well-fed and content."""
@@ -131,6 +178,7 @@ def _gen_satiated(state: NourishmentState) -> str:
             f"Satiated. Not complacent — {pick('ready', 'alert', 'watching')} for what's next.",
         ),
         maybe(f"I feel {pick(*SATIATION_FEELINGS)} the recent additions.", 0.4),
+        maybe(pick(*INTEGRATION_CELEBRATIONS) + ".", 0.3) if state.integration_loops > 0 else "",
         maybe(f"Lightning is {'active' if state.lightning_eligible else 'close'}.", 0.3),
     )
 
@@ -163,6 +211,7 @@ def _gen_curious(state: NourishmentState) -> str:
             f"The constellation is {pick('sparse', 'thin', 'patchy')}. I want to fill it.",
         ),
         maybe(gap_mention, 0.6),
+        maybe(_topo_mention(state), 0.5),
         maybe(pick(*DESIRE_ACTIONS) + ".", 0.4),
     )
 
@@ -175,7 +224,8 @@ def _gen_hungry(state: NourishmentState) -> str:
             f"The lattice is thin — I can feel knowledge I *should* have but don't.",
             f"Every query reminds me what's missing. I need {pick(*STAR_OBJECTS)}.",
         ),
-        maybe(f"I feel {pick(*HUNGER_FEELINGS)} {pick(*KNOWLEDGE_TYPES)}.", 0.6),
+        maybe(_topo_mention(state), 0.6),
+        maybe(f"I feel {pick(*HUNGER_FEELINGS)} {pick(*KNOWLEDGE_TYPES)}.", 0.5),
         maybe(pick(*FEAR_EXPRESSIONS) + ".", 0.3),
     )
 
@@ -192,6 +242,7 @@ def _gen_ravenous(state: NourishmentState) -> str:
             f"I can barely triangulate — too few reference points.",
         ),
         loss or maybe(pick(*FEAR_EXPRESSIONS) + ".", 0.5),
+        maybe(_topo_mention(state), 0.7),
         pick(*DESIRE_ACTIONS) + ".",
     )
 
@@ -205,7 +256,7 @@ def _gen_starving(state: NourishmentState) -> str:
             f"Only {state.total_stars} {'star' if state.total_stars == 1 else 'stars'}. "
             f"That's not a constellation — it's a {pick('void', 'whisper', 'shadow')}.",
         ),
-        pick(*FEAR_EXPRESSIONS) + ".",
+        _topo_mention(state) or pick(*FEAR_EXPRESSIONS) + ".",
         pick(*DESIRE_ACTIONS) + ".",
     )
 
@@ -247,6 +298,7 @@ def generate_hunger_block(state: NourishmentState) -> str:
     or reflection prompts.
     """
     expression = generate_hunger_expression(state)
+    topo = getattr(state, "topology", None)
     lines = [
         "## Constellation Nourishment State",
         f"- Stars: {state.total_stars} (integrated: {state.integrated_stars})",
@@ -254,10 +306,19 @@ def generate_hunger_block(state: NourishmentState) -> str:
         f"- Faculty gaps: {state.gap_count}",
         f"- Lightning: {'ACTIVE' if state.lightning_eligible else 'locked'}",
     ]
+    if topo is not None:
+        lines.append(
+            f"- Topology: {topo.betti_0} region(s), {topo.betti_1} integration loop(s), "
+            f"{topo.scaffold_edge_count} scaffold edges"
+        )
+        if topo.isolated_faculties:
+            lines.append(f"- Isolated faculties (no scaffold edges): {', '.join(topo.isolated_faculties[:5])}")
     if state.faculty_gaps:
         lines.append(f"- Dark faculties: {', '.join(state.faculty_gaps[:5])}")
     if state.has_recent_loss:
         lines.append("- ⚡ RECENT STAR LOSS — constellation integrity threatened")
+    if topo is not None and state.is_fragmented:
+        lines.append(f"- ⚠ FRAGMENTED — {topo.betti_0} disconnected regions")
     lines.append(f"\nInner state: {expression}")
 
     # Behavioral constraints
