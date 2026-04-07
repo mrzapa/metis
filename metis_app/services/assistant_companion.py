@@ -18,6 +18,11 @@ from metis_app.models.assistant_types import (
     AssistantRuntime,
     AssistantStatus,
 )
+from metis_app.models.star_nourishment import (
+    NourishmentState,
+    StarEvent,
+    compute_nourishment,
+)
 from metis_app.services.assistant_repository import AssistantRepository
 from metis_app.services.skill_repository import SkillRepository, _DEFAULT_CANDIDATES_DB_PATH
 from metis_app.services.local_llm_recommender import LocalLlmRecommenderService
@@ -74,11 +79,13 @@ class AssistantCompanionService:
         runtime = resolve_assistant_runtime(active_settings)
         policy = resolve_assistant_policy(active_settings)
         status = self._resolve_status(active_settings, identity=identity, runtime=runtime)
+        nourishment = self._compute_nourishment(active_settings)
         return {
             "identity": identity.to_payload(),
             "runtime": runtime.to_payload(),
             "policy": policy.to_payload(),
             "status": status.to_payload(),
+            "nourishment": nourishment.to_payload(),
             "memory": [item.to_payload() for item in self.repository.list_memory(limit=8)],
             "playbooks": [item.to_payload() for item in self.repository.list_playbooks(limit=6)],
             "brain_links": [item.to_payload() for item in self.repository.list_brain_links(limit=64)],
@@ -472,6 +479,48 @@ class AssistantCompanionService:
                     return row
         return rows[0] if rows else None
 
+    # ------------------------------------------------------------------
+    # Star nourishment computation
+    # ------------------------------------------------------------------
+
+    # Default faculties used when the constellation hasn't declared its own
+    _DEFAULT_FACULTIES: list[dict[str, str]] = [
+        {"id": "mathematics", "name": "Mathematics"},
+        {"id": "physics", "name": "Physics"},
+        {"id": "literature", "name": "Literature"},
+        {"id": "history", "name": "History"},
+        {"id": "biology", "name": "Biology"},
+        {"id": "philosophy", "name": "Philosophy"},
+        {"id": "computer-science", "name": "Computer Science"},
+        {"id": "economics", "name": "Economics"},
+        {"id": "chemistry", "name": "Chemistry"},
+        {"id": "engineering", "name": "Engineering"},
+        {"id": "arts", "name": "Arts"},
+    ]
+
+    def _compute_nourishment(
+        self,
+        settings: dict[str, Any],
+        events: list[StarEvent] | None = None,
+    ) -> NourishmentState:
+        """Compute current nourishment state from settings star data."""
+        stars = list(settings.get("landing_constellation_user_stars") or [])
+        faculties = list(
+            settings.get("constellation_faculties") or self._DEFAULT_FACULTIES
+        )
+        # Load previous nourishment state if persisted
+        previous_raw = settings.get("_nourishment_state")
+        previous = (
+            NourishmentState.from_payload(previous_raw)
+            if isinstance(previous_raw, dict) else None
+        )
+        return compute_nourishment(
+            stars=stars,
+            faculties=faculties,
+            previous=previous,
+            events=events,
+        )
+
     def _install_companion_model(
         self,
         settings: dict[str, Any],
@@ -577,11 +626,15 @@ class AssistantCompanionService:
             return None
 
         summary_lines = list(heuristic.get("context_lines") or [])
+        nourishment = self._compute_nourishment(settings)
+        from metis_app.services.star_nourishment_gen import generate_hunger_block  # noqa: PLC0415
+        nourishment_block = generate_hunger_block(nourishment)
         prompt = build_assistant_reflection_prompt(
             resolve_assistant_identity(settings),
             context_lines=summary_lines,
             trace_events=trace_events,
             seed_summary=str(heuristic.get("summary") or ""),
+            nourishment_block=nourishment_block,
         )
         try:
             raw = llm.invoke(

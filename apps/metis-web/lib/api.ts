@@ -1808,6 +1808,33 @@ export async function uploadFiles(files: File[]): Promise<{ paths: string[] }> {
   return res.json();
 }
 
+export interface StarArchetypeSuggestion {
+  id: string;
+  name: string;
+  description: string;
+  icon_hint: string;
+  why: string;
+  settings_overrides: Record<string, unknown>;
+  score: number;
+}
+
+export async function suggestStarArchetypes(
+  filePaths: string[],
+): Promise<StarArchetypeSuggestion[]> {
+  try {
+    const res = await apiFetch(`${await getApiBase()}/v1/index/suggest-archetypes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_paths: filePaths }),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.archetypes ?? []) as StarArchetypeSuggestion[];
+  } catch {
+    return [];
+  }
+}
+
 export async function buildIndexStream(
   documentPaths: string[],
   settings: Record<string, unknown>,

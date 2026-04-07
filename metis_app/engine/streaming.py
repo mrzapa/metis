@@ -418,6 +418,34 @@ def stream_rag_answer(
             settings.get("agentic_convergence_threshold", 0.95) or 0.95
         )
 
+        # ------------------------------------------------------------------
+        # Agent Lightning gate — star-gated fast-path execution.
+        # When agent_lightning_enabled is True AND the constellation has
+        # enough stars (>= LIGHTNING_STAR_THRESHOLD), the iteration budget
+        # is boosted. When lightning is enabled but stars are insufficient,
+        # we cap iterations to 1 (earn it by feeding the constellation).
+        # ------------------------------------------------------------------
+        _lightning_enabled = bool(settings.get("agent_lightning_enabled", False))
+        if _lightning_enabled:
+            try:
+                from metis_app.models.star_nourishment import (  # noqa: PLC0415
+                    LIGHTNING_STAR_THRESHOLD,
+                    compute_nourishment,
+                )
+                _stars = list(settings.get("landing_constellation_user_stars") or [])
+                _lightning_eligible = len(_stars) >= LIGHTNING_STAR_THRESHOLD
+                if _lightning_eligible:
+                    # Lightning active: boost iteration budget by 50%
+                    agentic_iteration_budget = max(
+                        agentic_iteration_budget,
+                        int(agentic_iteration_budget * 1.5),
+                    )
+                else:
+                    # Lightning enabled but not enough stars: restrict to 1 iteration
+                    agentic_iteration_budget = min(agentic_iteration_budget, 1)
+            except Exception:  # noqa: BLE001
+                pass  # Nourishment module unavailable — no gate applied
+
         accumulated_context = query_result.context_block
         accumulated_sources = list(sources)
 

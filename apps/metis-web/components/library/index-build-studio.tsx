@@ -14,10 +14,13 @@ import {
   buildWebGraphIndexStream,
   fetchIndexes,
   fetchSettings,
+  suggestStarArchetypes,
   uploadFiles,
   type IndexBuildResult,
   type IndexSummary,
+  type StarArchetypeSuggestion,
 } from "@/lib/api";
+import { StarArchetypePicker } from "@/components/constellation/star-archetype-picker";
 import { cn } from "@/lib/utils";
 import {
   AlertCircle,
@@ -79,6 +82,7 @@ export function IndexBuildStudio({
   const [buildError, setBuildError] = useArrowState<string | null>(null);
   const [progress, setProgress] = useArrowState<ProgressState>(INITIAL_PROGRESS);
   const [buildResult, setBuildResult] = useArrowState<IndexBuildResult | null>(null);
+  const [selectedArchetype, setSelectedArchetype] = useArrowState<StarArchetypeSuggestion | null>(null);
 
   const [webGraphTopic, setWebGraphTopic] = useArrowState("");
 
@@ -186,10 +190,11 @@ export function IndexBuildStudio({
     setProgress({ reading: "active", embedding: "idle", saved: "idle" });
 
     try {
-      const settings =
+      const baseSettings =
         settingsOverrides && Object.keys(settingsOverrides).length > 0
           ? settingsOverrides
           : await fetchSettings();
+      const settings = { ...(selectedArchetype?.settings_overrides ?? {}), ...baseSettings };
 
       const result = await buildIndexStream(readyPaths, settings, (event) => {
         const type = String(event.type ?? "");
@@ -484,6 +489,14 @@ export function IndexBuildStudio({
         </section>
 
         <aside className="space-y-4">
+          {tab !== "web-graph" ? (
+            <StarArchetypePicker
+              filePaths={readyPaths}
+              selectedId={selectedArchetype?.id ?? null}
+              onSelect={setSelectedArchetype}
+            />
+          ) : null}
+
           <section className="glass-panel rounded-[1.7rem] p-5 sm:p-6">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -536,7 +549,7 @@ export function IndexBuildStudio({
 
               <Button
                 onClick={tab === "web-graph" ? handleWebGraphBuild : handleBuild}
-                disabled={building || (tab === "web-graph" ? !webGraphTopic.trim() : readyPaths.length === 0)}
+                disabled={building || (tab === "web-graph" ? !webGraphTopic.trim() : readyPaths.length === 0 || selectedArchetype === null)}
                 className="mt-4 gap-2"
               >
                 {building ? (

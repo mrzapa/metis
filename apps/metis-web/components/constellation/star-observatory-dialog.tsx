@@ -27,8 +27,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { buildIndexStream, fetchSettings, uploadFiles } from "@/lib/api";
-import type { IndexBuildResult, IndexSummary } from "@/lib/api";
+import { buildIndexStream, fetchSettings, suggestStarArchetypes, uploadFiles } from "@/lib/api";
+import type { IndexBuildResult, IndexSummary, StarArchetypeSuggestion } from "@/lib/api";
+import { StarArchetypePicker } from "@/components/constellation/star-archetype-picker";
 import {
   buildBrainPlacementIntent,
   buildFacultyAnchoredPlacement,
@@ -347,6 +348,8 @@ export function StarDetailsPanel({
   const [desktopPaths, setDesktopPaths] = useState<string[]>([]);
   const [pickError, setPickError] = useState<string | null>(null);
 
+  const [selectedArchetype, setSelectedArchetype] = useState<StarArchetypeSuggestion | null>(null);
+
   const [building, setBuilding] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
@@ -415,6 +418,7 @@ export function StarDetailsPanel({
     setPickError(null);
     setPathsConsent(false);
     setDeleteConfirmOpen(false);
+    setSelectedArchetype(null);
     setView(entryMode === "new" || nextAttachedManifestPaths.length === 0 ? "build" : "overview");
   }, [entryMode, open, star]);
 
@@ -741,7 +745,8 @@ export function StarDetailsPanel({
     setProgress({ reading: "active", embedding: "idle", saved: "idle" });
 
     try {
-      const settings = await fetchSettings();
+      const baseSettings = await fetchSettings();
+      const settings = { ...(selectedArchetype?.settings_overrides ?? {}), ...baseSettings };
       const result = await buildIndexStream(readyPaths, settings, (event) => {
         const type = String(event.type ?? "");
         if (type === "status") {
@@ -1120,6 +1125,12 @@ export function StarDetailsPanel({
                   ) : null}
                 </div>
 
+                <StarArchetypePicker
+                  filePaths={readyPaths}
+                  selectedId={selectedArchetype?.id ?? null}
+                  onSelect={setSelectedArchetype}
+                />
+
                 <div className="rounded-[1.6rem] border border-white/10 bg-black/18 p-4 sm:p-5">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -1136,7 +1147,7 @@ export function StarDetailsPanel({
                   </div>
 
                   <div className="mt-5 flex flex-wrap gap-3">
-                    <Button onClick={handleBuild} disabled={building || readyPaths.length === 0} className="gap-2">
+                    <Button onClick={handleBuild} disabled={building || readyPaths.length === 0 || selectedArchetype === null} className="gap-2">
                       {building ? <Loader2 className="size-4 animate-spin" /> : <Database className="size-4" />}
                       {building ? "Building..." : "Add and build"}
                     </Button>

@@ -19,6 +19,44 @@ from metis_app.services.nyx_catalog import get_default_nyx_catalog_broker
 from metis_app.services.nyx_runtime import append_system_instruction, build_nyx_runtime_context
 from metis_app.services.skill_repository import SCALAR_OVERRIDE_KEYS
 
+
+def _build_nourishment_block(settings: dict[str, Any]) -> str:
+    """Compute nourishment state from settings and return a prompt block.
+
+    Returns empty string when companion is disabled or no star data exists,
+    keeping the system prompt unchanged for non-companion queries.
+    """
+    identity_payload = settings.get("assistant_identity")
+    if isinstance(identity_payload, dict) and not identity_payload.get("companion_enabled", True):
+        return ""
+    stars = list(settings.get("landing_constellation_user_stars") or [])
+    if not stars and not settings.get("_nourishment_state"):
+        return ""
+    try:
+        from metis_app.models.star_nourishment import NourishmentState, compute_nourishment  # noqa: PLC0415
+        from metis_app.services.star_nourishment_gen import generate_hunger_block  # noqa: PLC0415
+
+        _DEFAULT_FACULTIES = [
+            {"id": "mathematics", "name": "Mathematics"},
+            {"id": "physics", "name": "Physics"},
+            {"id": "literature", "name": "Literature"},
+            {"id": "history", "name": "History"},
+            {"id": "biology", "name": "Biology"},
+            {"id": "philosophy", "name": "Philosophy"},
+            {"id": "computer-science", "name": "Computer Science"},
+            {"id": "economics", "name": "Economics"},
+            {"id": "chemistry", "name": "Chemistry"},
+            {"id": "engineering", "name": "Engineering"},
+            {"id": "arts", "name": "Arts"},
+        ]
+        faculties = list(settings.get("constellation_faculties") or _DEFAULT_FACULTIES)
+        previous_raw = settings.get("_nourishment_state")
+        previous = NourishmentState.from_payload(previous_raw) if isinstance(previous_raw, dict) else None
+        state = compute_nourishment(stars=stars, faculties=faculties, previous=previous)
+        return generate_hunger_block(state)
+    except Exception:  # noqa: BLE001
+        return ""
+
 MODE_ALIASES = {
     "qa": "Q&A",
     "q&a": "Q&A",
@@ -278,6 +316,7 @@ def build_system_prompt(
     agentic_max_iterations: int,
     citation_policy_append: list[str],
     enabled_skills: list[SkillDefinition] | None = None,
+    nourishment_block: str = "",
 ) -> str:
     base_instructions = str(
         settings.get("system_instructions")
@@ -321,6 +360,8 @@ def build_system_prompt(
     segments.append(
         f"Agentic: enabled={int(agentic_mode)}, max_iterations={agentic_max_iterations}."
     )
+    if nourishment_block:
+        segments.append(nourishment_block)
     output_style = str(settings.get("output_style", "") or "").strip()
     if output_style:
         segments.append(f"Output style: {output_style}")
@@ -457,6 +498,7 @@ def resolve_runtime_settings(
         agentic_max_iterations=agentic_max_iterations,
         citation_policy_append=citation_policy_append,
         enabled_skills=enabled_skills,
+        nourishment_block=_build_nourishment_block(settings),
     )
     conflicts = _scalar_conflicts(selected_skills)
     next_session_state = (session_skill_state or SkillSessionState()).normalized()
@@ -542,6 +584,7 @@ def build_assistant_reflection_prompt(
     context_lines: list[str],
     trace_events: list[dict[str, Any]] | None = None,
     seed_summary: str = "",
+    nourishment_block: str = "",
 ) -> str:
     trace_preview = [
         f"- {str(item.get('event_type') or item.get('stage') or 'event')}: {str((item.get('payload') or {}))[:180]}"
@@ -560,4 +603,6 @@ def build_assistant_reflection_prompt(
         prompt_parts.append("Context:\n" + "\n".join(f"- {line}" for line in context_lines if str(line).strip()))
     if trace_preview:
         prompt_parts.append("Trace preview:\n" + "\n".join(trace_preview))
+    if nourishment_block:
+        prompt_parts.append(nourishment_block)
     return "\n\n".join(part for part in prompt_parts if part.strip())

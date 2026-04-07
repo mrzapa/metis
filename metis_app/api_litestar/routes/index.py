@@ -142,6 +142,16 @@ async def api_build_index_stream(payload: IndexBuildRequestModel) -> ServerSentE
     return ServerSentEvent(_event_generator())
 
 
+@post("/v1/index/suggest-archetypes")
+def api_suggest_archetypes(data: SuggestArchetypesRequest) -> dict[str, Any]:
+    """Return ranked star archetype suggestions for a list of uploaded file paths."""
+    ranked = detect_archetypes(data.file_paths)
+    return {
+        "archetypes": [_ranked_to_dict(r) for r in ranked],
+        "top_id": ranked[0].archetype.id if ranked else None,
+    }
+
+
 router = Router(
     path="",
     route_handlers=[
@@ -149,6 +159,7 @@ router = Router(
         api_list_indexes,
         api_delete_index,
         api_build_index_stream,
+        api_suggest_archetypes,
     ],
     tags=["index"],
 )

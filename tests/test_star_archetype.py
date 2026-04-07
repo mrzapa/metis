@@ -103,14 +103,6 @@ We use the Basel problem. Consider $\int_0^\infty f(x) dx$.
         assert results[0].archetype.id == "ledger"
 
     def test_transcript_speaker_pattern_boosts_chronicle(self, tmp_path):
-        content = "\n".join([
-            "Meeting transcript 2026-01-15 10:00",
-            "Alice: Good morning. Let's discuss the Q1 roadmap.",
-            "Bob: I think we should prioritise the API work.",
-            "Carol: I agree. The timeline is tight.",
-            "Alice: Let's set a deadline for 10:30.",
-            f"Item {n}: some action point" for n in range(5)
-        ])
         path = _write(tmp_path, "notes.txt", "\n".join([
             "Alice: Good morning. Let's discuss the Q1 roadmap.",
             "Bob: I think we should prioritise the API work at 10:00.",

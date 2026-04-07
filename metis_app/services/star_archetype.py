@@ -202,8 +202,14 @@ def _score_for_file(
     # --- Codex ---
     if ext in _CODE_EXTENSIONS:
         scores["codex"] += 0.9
-    if snippet and (_RE_PYTHON_CODE.search(snippet) or _RE_GENERIC_CODE.search(snippet)):
-        scores["codex"] += 0.2
+    if snippet:
+        py_matches = len(_RE_PYTHON_CODE.findall(snippet))
+        gen_matches = len(_RE_GENERIC_CODE.findall(snippet))
+        code_hits = py_matches + gen_matches
+        if code_hits >= 3:
+            scores["codex"] += 0.45
+        elif code_hits >= 1:
+            scores["codex"] += 0.2
 
     # --- Chronicle ---
     if ext in _TRANSCRIPT_EXTENSIONS:
