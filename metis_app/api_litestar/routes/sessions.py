@@ -24,7 +24,7 @@ def list_sessions(search: str = "", skill: str = "") -> list[dict[str, object]]:
     return [SessionSummaryModel.from_dataclass(item).model_dump() for item in summaries]
 
 
-@post("/v1/sessions", status_code=201)
+@post("/v1/sessions", status_code=201, sync_to_thread=False)
 def create_session(payload: CreateSessionRequestModel) -> dict[str, object]:
     """Create a new session."""
     repo = get_session_repo()
@@ -32,7 +32,7 @@ def create_session(payload: CreateSessionRequestModel) -> dict[str, object]:
     return SessionSummaryModel.from_dataclass(summary).model_dump()
 
 
-@get("/v1/sessions/{session_id:str}")
+@get("/v1/sessions/{session_id:str}", sync_to_thread=False)
 def get_session(session_id: str) -> dict[str, object]:
     """Return session detail, including hydrated action results."""
     repo = get_session_repo()
