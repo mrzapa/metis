@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import type { LandingStarfieldFrame, LandingWebglStar } from "@/components/home/landing-starfield-webgl.types";
-import type { StarDiveOverlayView } from "@/components/home/star-dive-overlay";
+import type { LandingStarfieldFrame, LandingStarfieldFocusedStar, LandingWebglStar } from "@/components/home/landing-starfield-webgl.types";
+import type { StarDiveLabelsView } from "@/components/home/star-dive-labels";
 
 const LandingStarfieldWebgl = dynamic(
   () =>
@@ -14,10 +14,10 @@ const LandingStarfieldWebgl = dynamic(
     ),
   { ssr: false, loading: () => null },
 );
-const StarDiveOverlay = dynamic(
+const StarDiveLabels = dynamic(
   () =>
-    import("@/components/home/star-dive-overlay").then(
-      (m) => ({ default: m.StarDiveOverlay }),
+    import("@/components/home/star-dive-labels").then(
+      (m) => ({ default: m.StarDiveLabels }),
     ),
   { ssr: false, loading: () => null },
 );
@@ -827,7 +827,7 @@ export default function Home() {
   const starDiveFocusWorldPosRef = useRef<Point | null>(null);
   const starDiveFocusProfileRef = useRef<StellarProfile | null>(null);
   const starDiveFocusNameRef = useRef<string | null>(null);
-  const starDiveOverlayViewRef = useRef<StarDiveOverlayView | null>(null);
+  const starDiveLabelsViewRef = useRef<StarDiveLabelsView | null>(null);
   const starDivePanSuppressedRef = useRef(false);
   const starTooltipHideTimeoutRef = useRef<number | null>(null);
   const toastDismissTimeoutRef = useRef<number | null>(null);
@@ -2543,6 +2543,7 @@ export default function Home() {
         : null;
       const zoomNorm = Math.log2(Math.max(0.002, backgroundCamera.zoomFactor) + 1) / Math.log2(2001);
       landingStarfieldFrameRef.current = {
+        focusedStar: landingStarfieldFrameRef.current.focusedStar ?? null,
         height: H,
         revision: landingStarfieldFrameRef.current.revision + 1,
         stars: nextWebglStars,
@@ -3634,7 +3635,7 @@ export default function Home() {
         starDivePanSuppressedRef.current = false;
       }
 
-      // Project focused star world position to screen coords for StarDiveOverlay
+      // Project focused star world position to screen coords for NMS disc + labels
       if (
         diveFocusStrength > 0
         && starDiveFocusWorldPosRef.current
@@ -3642,15 +3643,27 @@ export default function Home() {
       ) {
         const wp = starDiveFocusWorldPosRef.current;
         const scale = getBackgroundCameraScale(backgroundCamera.zoomFactor);
-        starDiveOverlayViewRef.current = {
-          screenX: (wp.x - backgroundCamera.x) * scale + W / 2,
-          screenY: (wp.y - backgroundCamera.y) * scale + H / 2,
+        const screenX = (wp.x - backgroundCamera.x) * scale + W / 2;
+        const screenY = (wp.y - backgroundCamera.y) * scale + H / 2;
+        const focusedStar: LandingStarfieldFocusedStar = {
+          screenX,
+          screenY,
+          focusStrength: diveFocusStrength,
+          profile: starDiveFocusProfileRef.current,
+        };
+        // Drive the Three.js NMS disc via the starfield frame ref (read each RAF)
+        landingStarfieldFrameRef.current.focusedStar = focusedStar;
+        // Drive the HTML label overlay
+        starDiveLabelsViewRef.current = {
+          screenX,
+          screenY,
           focusStrength: diveFocusStrength,
           profile: starDiveFocusProfileRef.current,
           starName: starDiveFocusNameRef.current ?? undefined,
         };
       } else {
-        starDiveOverlayViewRef.current = null;
+        landingStarfieldFrameRef.current.focusedStar = null;
+        starDiveLabelsViewRef.current = null;
       }
 
       // Update reactive state (throttled — only when integer percentage changes)
@@ -4622,9 +4635,8 @@ export default function Home() {
         data-pan-active={isCanvasPanning ? "true" : "false"}
       />
 
-      <StarDiveOverlay
-        viewRef={starDiveOverlayViewRef}
-        reducedMotion={prefersReducedMotion()}
+      <StarDiveLabels
+        viewRef={starDiveLabelsViewRef}
       />
 
       <div className="metis-hero-overlay">

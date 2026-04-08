@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import type { MutableRefObject } from "react";
 import type { LandingWebglStar, LandingStarfieldFrame, LandingStarRenderTier } from "./landing-starfield-webgl.types";
+import { STAR_FRAG_THREEJS, STAR_VERT_THREEJS } from "@/lib/landing-stars/star-surface-shader";
 
 export type { LandingWebglStar, LandingStarfieldFrame } from "./landing-starfield-webgl.types";
 
@@ -252,6 +253,40 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
     const points = new THREE.Points(geometry, material);
     scene.add(points);
 
+    // ── NMS star-disc quad ────────────────────────────────────────────────────
+    // A 2×2 PlaneGeometry in NDC space. The vertex shader bypasses the camera
+    // so it always covers the full viewport. The fragment shader uses gl_FragCoord
+    // (physical pixels) to compute the disc/corona centred on u_starPos.
+    const nmsQuadGeo = new THREE.PlaneGeometry(2, 2);
+    const nmsMaterial = new THREE.ShaderMaterial({
+      blending: THREE.AdditiveBlending,
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+      vertexShader: STAR_VERT_THREEJS,
+      fragmentShader: STAR_FRAG_THREEJS,
+      uniforms: {
+        u_time: { value: 0 },
+        u_seed: { value: 0 },
+        u_color: { value: new THREE.Vector3() },
+        u_color2: { value: new THREE.Vector3() },
+        u_color3: { value: new THREE.Vector3() },
+        u_hasColor2: { value: 0 },
+        u_hasColor3: { value: 0 },
+        u_hasDiffraction: { value: 0 },
+        u_stage: { value: 0 },
+        u_res: { value: new THREE.Vector2() },
+        u_starPos: { value: new THREE.Vector2() },
+        u_focusStrength: { value: 0 },
+      },
+    });
+    const nmsQuad = new THREE.Mesh(nmsQuadGeo, nmsMaterial);
+    nmsQuad.visible = false;
+    nmsQuad.renderOrder = 1;
+    scene.add(nmsQuad);
+    // Last profile id seen — profile-level uniforms only update when star changes
+    let lastNmsProfileId = "";
+
     const renderer = new THREE.WebGLRenderer({
       alpha: true,
       antialias: false,
@@ -325,6 +360,44 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
 
       material.uniforms.uTime.value = timestampMs * 0.001;
       material.uniforms.uZoomScale.value = frame.zoomScale ?? 1;
+
+      // ── NMS disc ────────────────────────────────────────────────────────────
+      const focused = frame.focusedStar;
+      if (focused && focused.focusStrength > 0) {
+        nmsQuad.visible = true;
+        const dpr = Math.min(window.devicePixelRatio || 1, 1.8);
+        const physW = frame.width * dpr;
+        const physH = frame.height * dpr;
+        nmsMaterial.uniforms.u_time.value = timestampMs * 0.001;
+        nmsMaterial.uniforms.u_res.value.set(physW, physH);
+        // u_starPos: physical pixels from bottom-left (WebGL convention).
+        // screenY is CSS pixels from top → flip to bottom: (frame.height - screenY) * dpr.
+        // The disc effect is radially symmetric so Y-direction is irrelevant for dist/angle,
+        // but we flip for correctness with any future asymmetric additions.
+        nmsMaterial.uniforms.u_starPos.value.set(
+          focused.screenX * dpr,
+          (frame.height - focused.screenY) * dpr,
+        );
+        nmsMaterial.uniforms.u_focusStrength.value = focused.focusStrength;
+
+        const pid = `${focused.profile.seedHash}`;
+        if (pid !== lastNmsProfileId) {
+          lastNmsProfileId = pid;
+          const { palette, visual } = focused.profile;
+          nmsMaterial.uniforms.u_seed.value = (focused.profile.seedHash % 1000) / 1000;
+          nmsMaterial.uniforms.u_color.value.set(palette.core[0], palette.core[1], palette.core[2]);
+          nmsMaterial.uniforms.u_color2.value.set(palette.halo[0], palette.halo[1], palette.halo[2]);
+          nmsMaterial.uniforms.u_color3.value.set(palette.accent[0], palette.accent[1], palette.accent[2]);
+          nmsMaterial.uniforms.u_hasColor2.value = 1;
+          nmsMaterial.uniforms.u_hasColor3.value = 1;
+          nmsMaterial.uniforms.u_hasDiffraction.value = visual.diffractionStrength > 0.02 ? 1 : 0;
+          nmsMaterial.uniforms.u_stage.value = 2.0;
+        }
+      } else {
+        nmsQuad.visible = false;
+        lastNmsProfileId = "";
+      }
+
       renderer.render(scene, camera);
     };
 
@@ -334,8 +407,11 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
       window.cancelAnimationFrame(frameHandle);
       geometry.dispose();
       material.dispose();
+      nmsQuadGeo.dispose();
+      nmsMaterial.dispose();
       renderer.dispose();
       points.removeFromParent();
+      nmsQuad.removeFromParent();
       if (renderer.domElement.parentElement === container) {
         container.removeChild(renderer.domElement);
       }

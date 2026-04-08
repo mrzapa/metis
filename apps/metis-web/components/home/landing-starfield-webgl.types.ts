@@ -22,7 +22,15 @@ export interface LandingWebglStar {
   y: number;
 }
 
+export interface LandingStarfieldFocusedStar {
+  screenX: number;      // CSS pixels from viewport left
+  screenY: number;      // CSS pixels from viewport top
+  focusStrength: number; // 0→1
+  profile: StellarProfile;
+}
+
 export interface LandingStarfieldFrame {
+  focusedStar?: LandingStarfieldFocusedStar | null;
   height: number;
   revision: number;
   stars: LandingWebglStar[];
