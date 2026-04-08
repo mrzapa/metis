@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import MetisOrb from "@/components/home/metis-orb";
 import type { LandingStarfieldFrame, LandingWebglStar } from "@/components/home/landing-starfield-webgl.types";
 import type { StarDiveOverlayView } from "@/components/home/star-dive-overlay";
 
@@ -4952,14 +4953,7 @@ export default function Home() {
 
       {/* Companion orb button */}
       <Link href="/chat" className="metis-chat-bubble" aria-label="Open AI companion">
-        <div className="metis-orb">
-          <div className="metis-orb-plasma" />
-          <div className="metis-orb-plasma metis-orb-plasma--b" />
-          <div className="metis-orb-inner" />
-          <div className="metis-orb-crystal" />
-          <div className="metis-orb-sparks" />
-          <div className="metis-orb-spec" />
-        </div>
+        <MetisOrb />
       </Link>
     </>
   );
@@ -5640,52 +5634,7 @@ body {
   transform: scale(1.1);
   filter: drop-shadow(0 0 28px rgba(80,190,255,0.7)) drop-shadow(0 4px 32px rgba(40,130,255,0.5));
 }
-.metis-orb {
-  position: relative; width: 100%; height: 100%;
-  border-radius: 50%; overflow: hidden;
-  background: radial-gradient(circle at 42% 38%, #1a3060 0%, #0b1830 45%, #060e1e 100%);
-  box-shadow: inset 0 0 24px rgba(30,80,200,0.5), inset 0 0 8px rgba(100,200,255,0.15), 0 0 0 1px rgba(80,160,255,0.18);
-}
-.metis-orb-plasma {
-  position: absolute; inset: -10%; border-radius: 50%;
-  background: conic-gradient(from 0deg at 50% 50%, transparent 0deg, rgba(50,150,255,0.55) 40deg, rgba(120,220,255,0.35) 80deg, transparent 120deg, rgba(80,180,255,0.3) 200deg, rgba(140,230,255,0.45) 260deg, transparent 320deg, rgba(60,160,255,0.2) 360deg);
-  animation: metis-orbSpin 5s linear infinite;
-  mix-blend-mode: screen;
-}
-.metis-orb-plasma--b {
-  background: conic-gradient(from 0deg at 48% 52%, transparent 0deg, rgba(160,240,255,0.3) 30deg, transparent 90deg, rgba(80,180,255,0.4) 150deg, rgba(200,245,255,0.2) 210deg, transparent 280deg, rgba(100,200,255,0.35) 340deg, transparent 360deg);
-  animation: metis-orbSpinReverse 7s linear infinite;
-}
-.metis-orb-inner {
-  position: absolute; inset: 15%; border-radius: 50%;
-  background: radial-gradient(circle at 48% 44%, rgba(200,240,255,0.95) 0%, rgba(100,200,255,0.65) 20%, rgba(50,140,255,0.35) 45%, transparent 70%);
-  animation: metis-orbPulse 2.4s ease-in-out infinite;
-  mix-blend-mode: screen;
-}
-.metis-orb-crystal {
-  position: absolute; inset: 0; border-radius: 50%;
-  background: radial-gradient(ellipse 18% 40% at 44% 46%, rgba(255,255,255,0.9) 0%, transparent 100%), radial-gradient(ellipse 10% 25% at 58% 38%, rgba(200,240,255,0.7) 0%, transparent 100%), radial-gradient(ellipse 8% 18% at 36% 58%, rgba(180,230,255,0.5) 0%, transparent 100%), radial-gradient(ellipse 6% 14% at 62% 55%, rgba(220,245,255,0.4) 0%, transparent 100%);
-  animation: metis-orbCrystal 3.6s ease-in-out infinite;
-  mix-blend-mode: screen;
-}
-.metis-orb-sparks {
-  position: absolute; inset: 0; border-radius: 50%;
-  background: radial-gradient(circle at 50% 45%, rgba(255,255,255,0.98) 0%, rgba(220,245,255,0.8) 2%, transparent 9%), radial-gradient(circle at 38% 55%, rgba(200,240,255,0.85) 0%, transparent 7%), radial-gradient(circle at 63% 38%, rgba(255,255,255,0.7) 0%, transparent 5%), radial-gradient(circle at 44% 62%, rgba(180,230,255,0.6) 0%, transparent 5%), radial-gradient(circle at 56% 60%, rgba(160,220,255,0.45) 0%, transparent 4%);
-  animation: metis-orbFlash 2.8s ease-in-out infinite;
-  mix-blend-mode: screen;
-}
-.metis-orb-spec {
-  position: absolute; top: 10%; left: 16%;
-  width: 34%; height: 22%; border-radius: 50%;
-  background: radial-gradient(ellipse, rgba(255,255,255,0.85) 0%, rgba(200,235,255,0.4) 55%, transparent 100%);
-  filter: blur(2.5px);
-  pointer-events: none;
-}
-@keyframes metis-orbSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-@keyframes metis-orbSpinReverse { from { transform: rotate(0deg); } to { transform: rotate(-360deg); } }
-@keyframes metis-orbPulse { 0%, 100% { opacity: 0.75; transform: scale(0.92); } 50% { opacity: 1; transform: scale(1.08); } }
-@keyframes metis-orbCrystal { 0%, 100% { opacity: 0.6; } 33% { opacity: 1; } 66% { opacity: 0.45; } }
-@keyframes metis-orbFlash { 0%, 100% { opacity: 0.65; } 20% { opacity: 1; } 55% { opacity: 0.5; } 80% { opacity: 0.9; } }
+
 @keyframes metis-fadeUp { to { opacity: 1; transform: translateY(0); } }
 
 @media (max-width: 1100px) {
