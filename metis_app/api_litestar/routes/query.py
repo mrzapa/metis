@@ -101,7 +101,7 @@ def api_query_forecast(payload: ForecastQueryRequestModel) -> dict[str, Any]:
     return ForecastQueryResultModel.from_engine(result).model_dump(mode="json")
 
 
-@post("/v1/query/forecast/stream")
+@post("/v1/query/forecast/stream", sync_to_thread=False)
 def api_stream_forecast(payload: ForecastQueryRequestModel) -> ServerSentEvent:
     orchestrator = WorkspaceOrchestrator()
 
