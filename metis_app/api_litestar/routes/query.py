@@ -82,7 +82,7 @@ def api_forecast_preflight() -> dict[str, Any]:
     ).model_dump(mode="json")
 
 
-@post("/v1/forecast/schema")
+@post("/v1/forecast/schema", sync_to_thread=False)
 def api_forecast_schema(payload: ForecastSchemaRequestModel) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
     return ForecastSchemaResultModel.model_validate(
