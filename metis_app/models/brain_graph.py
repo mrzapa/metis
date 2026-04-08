@@ -110,6 +110,8 @@ class BrainGraph:
         indexes: list[Any],
         sessions: list[Any],
         assistant_payload: dict[str, Any] | None = None,
+        *,
+        skip_layout: bool = False,
     ) -> BrainGraph:
         self.clear()
 
@@ -278,8 +280,9 @@ class BrainGraph:
         self.compute_edge_weights()
 
         self._refresh_category_metadata()
-        self._seed_positions()
-        self.apply_force_layout()
+        if not skip_layout:
+            self._seed_positions()
+            self.apply_force_layout()
         return self
 
     def compute_edge_weights(self) -> None:

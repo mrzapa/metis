@@ -1,0 +1,28 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - img "repowise" [ref=e5]
+        - generic [ref=e6]: repowise
+        - button "Collapse sidebar" [ref=e7]:
+          - img [ref=e8]
+      - generic [ref=e13]:
+        - navigation [ref=e14]:
+          - link "Dashboard" [ref=e15] [cursor=pointer]:
+            - /url: /
+            - img [ref=e16]
+            - generic [ref=e21]: Dashboard
+          - link "Settings" [ref=e22] [cursor=pointer]:
+            - /url: /settings
+            - img [ref=e23]
+            - generic [ref=e26]: Settings
+        - button "Add Repository" [ref=e28]:
+          - img [ref=e29]
+          - generic [ref=e30]: Add Repository
+      - paragraph [ref=e32]: repowise v0.1.0
+    - main [ref=e34]:
+      - generic [ref=e36]:
+        - heading "404" [level=1] [ref=e37]
+        - heading "This page could not be found." [level=2] [ref=e39]
+  - region "Notifications alt+T"
+  - alert [ref=e40]

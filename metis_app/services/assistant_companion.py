@@ -550,7 +550,7 @@ class AssistantCompanionService:
             if topo_enabled:
                 from metis_app.services.topo_scaffold import compute_scaffold
                 from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
-                graph = WorkspaceOrchestrator().get_workspace_graph()
+                graph = WorkspaceOrchestrator().get_workspace_graph(skip_layout=True)
                 scaffold = compute_scaffold(graph)
                 # Derive isolated faculties: faculties with no scaffold edge
                 connected_ids: set[str] = set()
@@ -644,7 +644,7 @@ class AssistantCompanionService:
                 from metis_app.models.brain_graph import BrainGraph
                 from metis_app.services.topo_scaffold import compute_scaffold
                 from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
-                graph = WorkspaceOrchestrator().get_workspace_graph()
+                graph = WorkspaceOrchestrator().get_workspace_graph(skip_layout=True)
                 scaffold = compute_scaffold(graph)
                 topo_lines = [
                     f"Topology: {scaffold.betti_0} connected region(s), {scaffold.betti_1} integration loop(s).",
