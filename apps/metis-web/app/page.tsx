@@ -181,7 +181,7 @@ interface NodeData extends ConstellationNodePoint {
   baseSize: number;
   brightness: number; targetBrightness: number;
   concept: FacultyConcept;
-  awakenDelay: number; parallax: number;
+  awakenProg: number; parallax: number;
   hoverBoost: number; targetHoverBoost: number;
   _labelBottom: number;
   _labelLeft: number;
@@ -2083,7 +2083,7 @@ export default function Home() {
       baseSize: 1.5 + Math.random() * 1.5,
       brightness: 0.15, targetBrightness: 0.15,
       concept,
-      awakenDelay: 2000 + Math.random() * 1500,
+      awakenProg: 0,
       parallax: 0.015,
       hoverBoost: 0,
       targetHoverBoost: 0,
@@ -2200,9 +2200,13 @@ export default function Home() {
     }
 
     const mouse = mouseRef.current;
-    let awakened = false;
-    let awakenStart = 0;
     let animFrame = 0;
+    const awakeningTl = gsap.timeline({ delay: 2 }).to(nodes, {
+      awakenProg: 1,
+      duration: 1.5,
+      ease: "power2.out",
+      stagger: { each: 0.15, from: "random" },
+    });
     let lastVisibleStarfieldWidth = -1;
     let lastVisibleStarfieldHeight = -1;
     let lastVisibleStarfieldRevision = -1;
@@ -3378,10 +3382,7 @@ export default function Home() {
         const py = n.y + (mouse.y - H / 2) * n.parallax;
         const dx = px - mouse.x, dy = py - mouse.y, dist = Math.sqrt(dx * dx + dy * dy);
         const proximity = dist < 180 ? 1 - dist / 180 : 0;
-        let nodeAwakenProg = 0;
-        if (awakened && t - awakenStart > n.awakenDelay) {
-          nodeAwakenProg = Math.min(1, (t - awakenStart - n.awakenDelay) / 1500);
-        }
+        let nodeAwakenProg = n.awakenProg;
         n.targetBrightness = 0.1 + nodeAwakenProg * 0.2 + proximity * 0.5;
         if (ragFacultyHighlighted) {
           n.targetBrightness = Math.max(n.targetBrightness, 0.56 + ragPulseStrength * 0.34);
@@ -3800,9 +3801,6 @@ export default function Home() {
       rebuildProjectedUserStarRenderState(backgroundCamera, getRenderEpochMs(ts));
 
       ctx!.clearRect(0, 0, W, H);
-      if (!awakened && ts > 2000) {
-        awakened = true; awakenStart = ts;
-      }
 
       // Fade canvas overlay elements during Star Dive
       const canvasOverlayAlpha = 1 - starDiveFocusStrengthRef.current * 0.92;
@@ -4630,6 +4628,7 @@ export default function Home() {
     window.addEventListener("blur", onBlur);
 
     return () => {
+      awakeningTl.kill();
       cancelAnimationFrame(animFrame);
       cometSprites.length = 0;
       absorbBursts.length = 0;

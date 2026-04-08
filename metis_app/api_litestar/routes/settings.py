@@ -14,7 +14,7 @@ from metis_app.api.settings import SettingsUpdateRequest
 _API_KEY_PREFIX = "api_key_"
 
 
-@get("/v1/settings")
+@get("/v1/settings", sync_to_thread=False)
 def get_settings() -> dict[str, Any]:
     """Return active settings with api_key_* fields redacted."""
     return _store.safe_settings(_store.load_settings())
@@ -41,4 +41,6 @@ def post_settings(payload: dict[str, Any]) -> dict[str, Any]:
     return _store.safe_settings(merged)
 
 
-router = Router(path="", route_handlers=[get_settings, post_settings], tags=["settings"])
+router = Router(
+    path="", route_handlers=[get_settings, post_settings], tags=["settings"]
+)
