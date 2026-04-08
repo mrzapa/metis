@@ -1835,6 +1835,90 @@ export async function suggestStarArchetypes(
   }
 }
 
+// ── Improvement Pipeline ─────────────────────────────────────────────────────
+
+export type ArtifactType =
+  | "source"
+  | "idea"
+  | "hypothesis"
+  | "experiment"
+  | "algorithm"
+  | "result";
+
+export type ImprovementStatus =
+  | "draft"
+  | "active"
+  | "testing"
+  | "complete"
+  | "archived";
+
+export interface ImprovementEntry {
+  entry_id: string;
+  artifact_key: string;
+  artifact_type: ArtifactType;
+  title: string;
+  summary: string;
+  body_md: string;
+  session_id: string;
+  run_id: string;
+  status: ImprovementStatus;
+  tags: string[];
+  upstream_ids: string[];
+  metadata: Record<string, unknown>;
+  slug: string;
+  saved_at: string;
+  markdown_path: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateImprovementRequest {
+  artifact_type: ArtifactType;
+  title: string;
+  summary?: string;
+  body_md?: string;
+  session_id?: string;
+  run_id?: string;
+  status?: ImprovementStatus;
+  tags?: string[];
+  upstream_ids?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export async function listImprovements(opts?: {
+  artifact_type?: ArtifactType;
+  status?: ImprovementStatus;
+  limit?: number;
+}): Promise<ImprovementEntry[]> {
+  const params = new URLSearchParams();
+  if (opts?.artifact_type) params.set("artifact_type", opts.artifact_type);
+  if (opts?.status) params.set("status", opts.status);
+  if (typeof opts?.limit === "number") params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  const url = `${await getApiBase()}/v1/improvements${qs ? `?${qs}` : ""}`;
+  const res = await apiFetch(url);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch improvements (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function createImprovement(
+  body: CreateImprovementRequest,
+): Promise<ImprovementEntry> {
+  const res = await apiFetch(`${await getApiBase()}/v1/improvements`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to create improvement (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
 export async function buildIndexStream(
   documentPaths: string[],
   settings: Record<string, unknown>,
