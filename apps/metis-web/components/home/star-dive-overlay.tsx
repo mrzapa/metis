@@ -76,6 +76,7 @@ export function StarDiveOverlay({
     let raf = 0;
 
     function draw(ts: number) {
+      if (!gl) return;
       raf = requestAnimationFrame(draw);
       const view = viewRef.current;
       const wrapper = wrapperRef.current;
@@ -167,8 +168,8 @@ export function StarDiveOverlay({
 
     return () => {
       cancelAnimationFrame(raf);
-      gl.deleteBuffer(buf);
-      gl.deleteProgram(prog);
+      gl?.deleteBuffer(buf);
+      gl?.deleteProgram(prog);
     };
   }, [viewRef, reducedMotion]);
 
