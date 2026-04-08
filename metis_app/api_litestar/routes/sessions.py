@@ -43,7 +43,7 @@ def get_session(session_id: str) -> dict[str, object]:
     return SessionDetailModel.from_dataclass(detail).model_dump()
 
 
-@post("/v1/sessions/{session_id:str}/feedback")
+@post("/v1/sessions/{session_id:str}/feedback", sync_to_thread=False)
 def submit_feedback(session_id: str, payload: FeedbackRequestModel) -> dict[str, bool]:
     """Persist feedback for a run in a session."""
     repo = get_session_repo()
@@ -56,7 +56,7 @@ def submit_feedback(session_id: str, payload: FeedbackRequestModel) -> dict[str,
     return FeedbackResponseModel(ok=True).model_dump()
 
 
-@delete("/v1/sessions/{session_id:str}", status_code=200)
+@delete("/v1/sessions/{session_id:str}", status_code=200, sync_to_thread=False)
 def delete_session(session_id: str) -> dict[str, object]:
     """Delete a session and all associated messages and feedback."""
     repo = get_session_repo()
