@@ -28,6 +28,8 @@ from metis_app.api.models import (
     OpenAIChatCompletionUsageModel,
     RagQueryRequestModel,
     RagQueryResultModel,
+    SwarmQueryRequestModel,
+    SwarmQueryResultModel,
 )
 from metis_app.engine.querying import _normalize_run_id
 from metis_app.services.stream_replay import ReplayableRunStreamManager
@@ -182,6 +184,17 @@ def api_openai_chat_completions(
     return response.model_dump(mode="json")
 
 
+@post("/v1/query/swarm")
+def api_query_swarm(payload: SwarmQueryRequestModel) -> dict[str, Any]:
+    orchestrator = WorkspaceOrchestrator()
+    result = run_engine(
+        orchestrator.run_swarm_query,
+        payload.to_engine(),
+        session_id=payload.session_id,
+    )
+    return SwarmQueryResultModel.from_engine(result).model_dump(mode="json")
+
+
 @post("/v1/query/rag/stream")
 def api_stream_rag(
     payload: RagQueryRequestModel,
@@ -215,6 +228,7 @@ router = Router(
     path="",
     route_handlers=[
         api_query_rag,
+        api_query_swarm,
         api_search_knowledge,
         api_query_direct,
         api_forecast_preflight,

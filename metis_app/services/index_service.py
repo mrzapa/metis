@@ -28,7 +28,11 @@ from metis_app.models.session_types import EvidenceSource
 from metis_app.services.brain_pass import run_brain_pass
 from metis_app.services.reranker import rerank_hits
 from metis_app.services.semantic_chunker import chunk_text_semantic
-from metis_app.utils.document_loader import load_document
+from metis_app.utils.document_loader import (
+    load_document,
+    batch_extract_pdfs,
+    is_opendataloader_available,
+)
 from metis_app.utils.embedding_providers import create_embeddings
 from metis_app.utils.knowledge_graph import (
     KnowledgeGraph,
@@ -1013,7 +1017,9 @@ def build_index_bundle(
 ) -> IndexBundle:
     chunk_size = int(settings.get("chunk_size", 800))
     overlap = int(settings.get("chunk_overlap", 100))
-    use_kreuzberg = str(settings.get("document_loader", "auto") or "auto") != "plain"
+    doc_loader_setting = str(settings.get("document_loader", "auto") or "auto").strip().lower()
+    use_kreuzberg = doc_loader_setting not in {"plain", "opendataloader"}
+    use_opendataloader = doc_loader_setting == "opendataloader" and is_opendataloader_available()
     brain_pass = run_brain_pass(documents, settings, post_message=post_message)
     brain_pass_metadata = brain_pass.to_metadata()
     source_brain_metadata = {
@@ -1042,6 +1048,22 @@ def build_index_bundle(
         ),
     )
 
+    # Batch-extract all PDFs with opendataloader-pdf (single JVM startup).
+    _odl_cache: dict[str, str] = {}
+    if use_opendataloader:
+        pdf_paths = [
+            p for p in documents if pathlib.Path(p).suffix.lower() == ".pdf"
+        ]
+        if pdf_paths:
+            if callable(post_message):
+                post_message(
+                    {
+                        "type": "status",
+                        "text": f"Pre-extracting {len(pdf_paths)} PDF(s) with opendataloader-pdf…",
+                    }
+                )
+            _odl_cache = batch_extract_pdfs(pdf_paths)
+
     all_chunks: list[dict[str, Any]] = []
     total_docs = max(1, len(documents))
     all_outline_nodes: list[dict[str, Any]] = []
@@ -1054,9 +1076,9 @@ def build_index_bundle(
         source = pathlib.Path(path).name
         if callable(post_message):
             post_message({"type": "status", "text": f"Reading {source}…"})
-        text = brain_pass.index_text_by_source.get(str(path))
+        text = _odl_cache.get(str(path)) or brain_pass.index_text_by_source.get(str(path))
         if text is None:
-            text = load_document(path, use_kreuzberg=use_kreuzberg)
+            text = load_document(path, use_kreuzberg=use_kreuzberg, use_opendataloader=use_opendataloader)
         outline_nodes = _extract_outline_nodes(text, str(path))
         all_outline_nodes.extend(outline_nodes)
         all_events.extend(_extract_events(text, source))

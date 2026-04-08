@@ -79,6 +79,8 @@ runtime-all = [
     "weaviate-client>=4.0.0",
     "sentence-transformers",
     "llama-cpp-python",
+    "opendataloader-pdf",
+    "jdk4py",
 ]
 live-backends = [
     "weaviate-client>=4,<5",
@@ -88,6 +90,7 @@ kreuzberg = [
 ]
 opendataloader = [
     "opendataloader-pdf",
+    "jdk4py",
 ]
 tribev2 = [
     "tribev2 @ git+https://github.com/facebookresearch/tribev2.git@main ; python_version >= '3.11'",

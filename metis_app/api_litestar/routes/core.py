@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import pathlib
 import tempfile
@@ -10,6 +12,7 @@ import uuid
 from typing import Any
 
 from litestar import Request, Router, get, post
+from litestar.response import ServerSentEvent
 from litestar.datastructures import UploadFile
 from litestar.exceptions import HTTPException as LitestarHTTPException
 from pydantic import ValidationError
@@ -199,9 +202,7 @@ def api_get_nyx_component_detail(component_name: str) -> dict[str, Any]:
     return NyxCatalogComponentDetailModel.from_service(detail).model_dump(mode="json")
 
 
-@get("/v1/brain/graph")
-def api_brain_graph() -> dict[str, Any]:
-    graph = WorkspaceOrchestrator().get_workspace_graph()
+def _build_graph_payload(graph: Any) -> dict[str, Any]:
     return {
         "nodes": [
             {
@@ -225,6 +226,39 @@ def api_brain_graph() -> dict[str, Any]:
             for edge in graph.edges
         ],
     }
+
+
+@get("/v1/brain/graph")
+def api_brain_graph() -> dict[str, Any]:
+    graph = WorkspaceOrchestrator().get_workspace_graph()
+    return _build_graph_payload(graph)
+
+
+@get("/v1/brain/graph/events")
+async def api_brain_graph_events(poll_seconds: float = 5.0) -> ServerSentEvent:
+    poll_seconds = max(0.5, min(60.0, poll_seconds))
+
+    async def _generate() -> Any:
+        last_hash: str | None = None
+        while True:
+            await asyncio.sleep(poll_seconds)
+            try:
+                graph = WorkspaceOrchestrator().get_workspace_graph()
+                payload_dict = _build_graph_payload(graph)
+                payload_json = json.dumps(
+                    {"type": "brain_snapshot", "subject": "brain.graph", **payload_dict}
+                )
+                current_hash = hashlib.sha256(payload_json.encode()).hexdigest()[:16]
+                if current_hash != last_hash:
+                    last_hash = current_hash
+                    yield {"data": payload_json}
+            except Exception:
+                pass
+
+    return ServerSentEvent(
+        _generate(),
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @post("/v1/learning-routes/preview")
@@ -319,6 +353,37 @@ async def api_upload_files(request: Request[Any, Any, Any]) -> dict[str, list[st
 @get("/v1/traces/{run_id:str}")
 def api_get_trace(run_id: str) -> list[dict[str, Any]]:
     return TraceStore().read_run_events(run_id)
+
+
+@get("/v1/traces/{run_id:str}/playback")
+def api_trace_playback(run_id: str) -> dict[str, Any]:
+    events = TraceStore().read_run_events(run_id)
+    timestamps = [
+        float(e["timestamp"])
+        for e in events
+        if e.get("timestamp") is not None
+    ]
+    time_range = (
+        {"start": min(timestamps), "end": max(timestamps)}
+        if timestamps
+        else {"start": None, "end": None}
+    )
+    manifest_events = [
+        {
+            "event_type": e.get("event_type"),
+            "stage": e.get("stage"),
+            "timestamp": e.get("timestamp"),
+            "payload": e.get("payload"),
+        }
+        for e in events
+    ]
+    return {
+        "type": "manifest",
+        "run_id": run_id,
+        "time_range": time_range,
+        "event_count": len(events),
+        "events": manifest_events,
+    }
 
 
 @post("/v1/telemetry/ui")
@@ -521,10 +586,12 @@ router = Router(
         api_search_nyx_catalog,
         api_get_nyx_component_detail,
         api_brain_graph,
+        api_brain_graph_events,
         api_learning_route_preview,
         api_brain_scaffold,
         api_upload_files,
         api_get_trace,
+        api_trace_playback,
         api_ingest_ui_telemetry,
         api_ui_telemetry_summary,
         api_run_action,

@@ -120,6 +120,11 @@ const FORECAST_XREG_MODES = ["xreg + timesfm", "timesfm"];
 const FALLBACK_STRATEGIES = ["synthesize_anyway", "no_answer"];
 const KG_QUERY_MODES = ["hybrid", "vector", "keyword"];
 const COMPREHENSION_DEPTHS = ["Standard", "Deep", "Exhaustive"];
+const DOCUMENT_LOADERS = [
+  { value: "auto", label: "Auto (kreuzberg)" },
+  { value: "plain", label: "Plain text" },
+  { value: "opendataloader", label: "opendataloader-pdf (highest PDF accuracy)" },
+] as const;
 const UI_VARIANTS = [
   {
     value: "motion",
@@ -1236,8 +1241,16 @@ export default function SettingsPage() {
                       <FieldError message={errors.subquery_max_docs?.message} />
                     </div>
                     <div className="space-y-1.5">
-                      <FieldLabel htmlFor="document_loader" tooltip="auto — detect format automatically; alternatives: pymupdf, unstructured, pptx, etc.">Document loader</FieldLabel>
-                      <Input id="document_loader" type="text" {...register("document_loader")} />
+                      <FieldLabel htmlFor="document_loader" tooltip="auto — kreuzberg (75+ formats); plain — UTF-8 text only; opendataloader — highest-accuracy PDF extraction (bundled, no Java install needed).">Document loader</FieldLabel>
+                      <select
+                        id="document_loader"
+                        {...register("document_loader")}
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        {DOCUMENT_LOADERS.map((d) => (
+                          <option key={d.value} value={d.value}>{d.label}</option>
+                        ))}
+                      </select>
                       <FieldError message={errors.document_loader?.message} />
                     </div>
                     <div className="space-y-1.5">
