@@ -32,7 +32,7 @@ def create_session(payload: CreateSessionRequestModel) -> dict[str, object]:
     return SessionSummaryModel.from_dataclass(summary).model_dump()
 
 
-@get("/v1/sessions/{session_id:str}")
+@get("/v1/sessions/{session_id:str}", sync_to_thread=False)
 def get_session(session_id: str) -> dict[str, object]:
     """Return session detail, including hydrated action results."""
     repo = get_session_repo()
