@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import MetisOrb from "@/components/home/metis-orb";
+import MetisOrb, { drawOrbAt } from "@/components/home/metis-orb";
 import type { LandingStarfieldFrame, LandingWebglStar } from "@/components/home/landing-starfield-webgl.types";
 import type { StarDiveOverlayView } from "@/components/home/star-dive-overlay";
 
@@ -152,7 +152,7 @@ const NODE_LABEL_PADDING_Y = 8;
 const NODE_LABEL_EDGE_MARGIN_PX = 14;
 const NODE_LABEL_CENTER_OFFSET_RATIO = 0.28;
 
-type CanvasTool = "select" | "grab";
+type CanvasTool = "select" | "grab" | "add";
 type StarFocusPhase = "idle" | "focusing" | "details-open" | "returning";
 
 interface CanvasBounds {
@@ -771,6 +771,7 @@ export default function Home() {
   const [learningRouteLoading, setLearningRouteLoading] = useState(false);
   const [learningRouteError, setLearningRouteError] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const metisLogoImgRef = useRef<HTMLImageElement | null>(null);
   const starTooltipCardRef = useRef<HTMLDivElement>(null);
   const starTooltipDomainRef = useRef<HTMLDivElement>(null);
   const starTooltipTitleRef = useRef<HTMLDivElement>(null);
@@ -866,6 +867,12 @@ export default function Home() {
   }, [userStars]);
 
   useEffect(() => {
+    const img = new Image();
+    img.src = "/metis-logo.png";
+    img.onload = () => { metisLogoImgRef.current = img; };
+  }, []);
+
+  useEffect(() => {
     availableIndexesRef.current = availableIndexes;
     starfieldRevisionRef.current += 1;
   }, [availableIndexes]);
@@ -946,6 +953,10 @@ export default function Home() {
   const unmappedIndexes = useMemo(
     () => availableIndexes.filter((index) => !mappedManifestPaths.has(index.manifest_path)),
     [availableIndexes, mappedManifestPaths],
+  );
+  const hasUserContent = useMemo(
+    () => userStars.some((s) => getStarManifestPaths(s).length > 0) || availableIndexes.length > 0,
+    [availableIndexes, userStars],
   );
   const attachmentCount = useMemo(
     () => userStars.reduce((sum, star) => sum + getStarAttachmentCount(star), 0),
@@ -1030,6 +1041,13 @@ export default function Home() {
       }
 
       return "Hand tool active. Drag the constellation to pan, then switch back to Select to claim, inspect, or reposition stars.";
+    }
+
+    if (activeCanvasTool === "add") {
+      if (hoveredAddCandidateId) {
+        return "Field star acquired. Click once to claim it, then name it and attach sources.";
+      }
+      return "Add tool active. Hover over a field star to preview its connections, then click to claim it.";
     }
 
     if (dragMessage) {
@@ -2976,7 +2994,6 @@ export default function Home() {
       const ppx = projected.x + (mouse.x - W / 2) * 0.015;
       const ppy = projected.y + (mouse.y - H / 2) * 0.015;
       const sc = getZoomResponsiveNodeScale(backgroundZoomRef.current);
-      const coreR = 5 * sc;
 
       // ── Topology activity strength (0–1) derived from scaffold data ───────────
       const scaffResp = scaffoldResponseRef.current;
@@ -3152,28 +3169,9 @@ export default function Home() {
         ctx!.fill();
       });
 
-      // ── 3. Main Polaris / METIS core ─────────────────────────────────────────
-      // Outer gold-blue ambient glow — expands with topology knowledge
-      const outerR = (52 + topoStrength * 18) * sc; // 52 → 70 with full topology
-      const outerGrad = ctx!.createRadialGradient(ppx, ppy, 0, ppx, ppy, outerR);
-      const outerWarmth = topoStrength * 40; // shift toward warmer gold with activity
-      outerGrad.addColorStop(0,   `rgba(${210 + outerWarmth},${228},${255 - outerWarmth},${(0.10 + topoStrength * 0.06) * pulse})`);
-      outerGrad.addColorStop(0.4, `rgba(255,${240 - outerWarmth * 0.3},${180 - outerWarmth},${(0.08 + topoStrength * 0.05) * pulse})`);
-      outerGrad.addColorStop(1,   "rgba(0,0,0,0)");
-      ctx!.fillStyle = outerGrad;
-      ctx!.beginPath();
-      ctx!.arc(ppx, ppy, outerR, 0, Math.PI * 2);
-      ctx!.fill();
-
-      // Inner corona — grows with connected components
-      const coronaR = (20 + topoStrength * 10) * sc; // 20 → 30 with full topology
-      const midGrad = ctx!.createRadialGradient(ppx, ppy, 0, ppx, ppy, coronaR);
-      midGrad.addColorStop(0, `rgba(255,252,${220 - topoStrength * 30},${(0.38 + topoStrength * 0.12) * pulse})`);
-      midGrad.addColorStop(1, "rgba(0,0,0,0)");
-      ctx!.fillStyle = midGrad;
-      ctx!.beginPath();
-      ctx!.arc(ppx, ppy, coronaR, 0, Math.PI * 2);
-      ctx!.fill();
+      // ── 3. Plasma orb core ───────────────────────────────────────────────────
+      drawOrbAt(ctx!, ppx, ppy, 22 * sc, ts / 1000, metisLogoImgRef.current);
+      ctx!.globalCompositeOperation = "source-over";
 
       // ── 3a. Orbit ring — always present as idle breath, intensifies with H₁ ─
       if (!reducedMotion) {
@@ -3253,70 +3251,7 @@ export default function Home() {
         }
       }
 
-      // 8-point diffraction spikes: 4 long warm + 4 short cool (slowly rotating)
-      // Spike brightness boosted by topology activity
-      const spikeAngle = ts * 0.00007;
-      const spikeBoost = topoStrength * 0.25; // up to +25% alpha
-      ctx!.save();
-      ctx!.lineCap = "round";
-      for (let ii = 0; ii < 4; ii++) {
-        const a  = spikeAngle + (Math.PI / 4) * ii;
-        const a2 = a + Math.PI / 8;
-
-        // Long primary spike (warm gold — extends further with topology)
-        const primaryLen = (30 + topoStrength * 8) * sc;
-        ctx!.beginPath();
-        ctx!.moveTo(ppx + Math.cos(a) * coreR * 1.2, ppy + Math.sin(a) * coreR * 1.2);
-        ctx!.lineTo(ppx + Math.cos(a) * primaryLen,   ppy + Math.sin(a) * primaryLen);
-        ctx!.strokeStyle = `rgba(255,238,150,${(0.50 + spikeBoost) * pulse})`;
-        ctx!.lineWidth = 0.85 + topoStrength * 0.4;
-        ctx!.stroke();
-
-        // Short secondary spike (cool blue-white)
-        const secondaryLen = (16 + topoStrength * 4) * sc;
-        ctx!.beginPath();
-        ctx!.moveTo(ppx + Math.cos(a2) * coreR * 1.2, ppy + Math.sin(a2) * coreR * 1.2);
-        ctx!.lineTo(ppx + Math.cos(a2) * secondaryLen, ppy + Math.sin(a2) * secondaryLen);
-        ctx!.strokeStyle = `rgba(180,212,255,${(0.32 + spikeBoost * 0.6) * pulse})`;
-        ctx!.lineWidth = 0.55 + topoStrength * 0.25;
-        ctx!.stroke();
-      }
-
-      // ── Tertiary spikes — always shimmer faintly, amplify with H₁ loops ──
-      {
-        for (let ii = 0; ii < 4; ii++) {
-          const a3 = spikeAngle + (Math.PI / 8) + (Math.PI / 4) * ii;
-          const tertiaryLen = (8 + idleBreath * 3 + topoLoopStrength * 8) * sc;
-          const tertiaryAlpha = (0.06 + idleBreath * 0.06 + topoLoopStrength * 0.16) * pulse;
-          ctx!.beginPath();
-          ctx!.moveTo(ppx + Math.cos(a3) * coreR * 1.4, ppy + Math.sin(a3) * coreR * 1.4);
-          ctx!.lineTo(ppx + Math.cos(a3) * tertiaryLen,  ppy + Math.sin(a3) * tertiaryLen);
-          ctx!.strokeStyle = `rgba(160,180,255,${tertiaryAlpha})`;
-          ctx!.lineWidth = 0.35 + idleBreath * 0.1;
-          ctx!.stroke();
-        }
-      }
-      ctx!.restore();
-
-      // Core disk (warm white)
-      ctx!.beginPath();
-      ctx!.arc(ppx, ppy, coreR, 0, Math.PI * 2);
-      ctx!.fillStyle = `rgba(255,252,230,${0.96 * pulse})`;
-      ctx!.fill();
-
-      // Bright inner core
-      ctx!.beginPath();
-      ctx!.arc(ppx, ppy, coreR * 0.4, 0, Math.PI * 2);
-      ctx!.fillStyle = "rgba(255,255,255,1)";
-      ctx!.fill();
-
-      // ── 4. METIS label (above the topmost micro-node) ────────────────────────
-      const topNodeY  = ppy + MICRO[2][1]; // apex node absolute Y
-      const fontSize  = Math.round(10 + sc * 4);
-      ctx!.font       = buildCanvasFont(fontSize, NODE_LABEL_FONT_FAMILY, "600");
-      ctx!.textAlign  = "center";
-      ctx!.fillStyle  = `rgba(255,235,140,${0.72 * pulse})`;
-      ctx!.fillText("METIS", ppx, topNodeY - 8 * sc);
+      // ── 4. (METIS text label removed — identity is carried by the orb glyph) ─
     }
 
     function drawFacultyGlyph(
@@ -4246,7 +4181,7 @@ export default function Home() {
       }
 
       const canAddMoreStars = starLimit === null || userStarsRef.current.length < starLimit;
-      if (canAddMoreStars) {
+      if (canAddMoreStars && activeCanvasTool === "add") {
         const candidate = getHoveredCandidate(e.clientX, e.clientY);
 
         syncHoveredCandidate(candidate);
@@ -4437,11 +4372,19 @@ export default function Home() {
           closeConcept();
           return;
         }
+        {
+          const hasLinkedContent = userStarsRef.current.some(
+            (s) => getStarManifestPaths(s).length > 0,
+          );
+          const canAdd = activeCanvasTool === "add"
+            && (hasLinkedContent || hasSessionIndexedContentRef.current || availableIndexesRef.current.length > 0);
+          if (!canAdd) return;
+        }
         showConceptAtNode(hitNodeIndex);
         return;
       }
 
-      const candidate = (starLimit === null || currentUserStars.length < starLimit)
+      const candidate = (starLimit === null || currentUserStars.length < starLimit) && activeCanvasTool === "add"
         ? getHoveredCandidate(e.clientX, e.clientY)
         : null;
 
@@ -4492,6 +4435,7 @@ export default function Home() {
           });
           openStarDetails(createdStar, "new");
           clearHoveredCandidate();
+          setActiveCanvasTool("select");
         });
         closeConcept();
         return;
@@ -4735,6 +4679,17 @@ export default function Home() {
             title="Select stars and concepts"
           >
             Select
+          </button>
+          <button
+            type="button"
+            className={`metis-zoom-pill-btn metis-zoom-pill-tool-btn ${activeCanvasTool === "add" ? "is-active" : ""}`}
+            onClick={() => setActiveCanvasTool("add")}
+            disabled={canvasInteractionsLocked || !hasUserContent}
+            aria-label="Add star tool"
+            aria-pressed={activeCanvasTool === "add"}
+            title="Add a field star to your constellation"
+          >
+            Add
           </button>
           <button
             type="button"

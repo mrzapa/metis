@@ -4,7 +4,6 @@ import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SetupGuard } from "@/components/setup-guard";
 import { DesktopReadyGuard } from "@/components/desktop-ready";
-import { UiVariantBootstrap } from "@/components/ui-variant-bootstrap";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 const spaceGrotesk = Space_Grotesk({ subsets: ["latin"], variable: "--font-display" });
@@ -21,9 +20,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning data-ui-variant="refined">
+    <html lang="en" className="dark" suppressHydrationWarning data-ui-variant="motion">
       <body className={`${inter.variable} ${spaceGrotesk.variable} min-h-screen bg-background font-sans text-foreground antialiased`}>
-        <UiVariantBootstrap />
         {/* Persistent deep-space starfield — always behind all page content */}
         <div
           aria-hidden="true"

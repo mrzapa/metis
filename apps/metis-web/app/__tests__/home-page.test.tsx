@@ -101,6 +101,7 @@ function createCanvasContext(): CanvasRenderingContext2D {
     clearRect: vi.fn(),
     closePath: vi.fn(),
     setLineDash: vi.fn(),
+    clip: vi.fn(),
     createLinearGradient: vi.fn(() => gradient),
     createRadialGradient: vi.fn(() => gradient),
     font: "",
@@ -114,7 +115,7 @@ function createCanvasContext(): CanvasRenderingContext2D {
 
 async function renderHomePage() {
   render(<HomePage />);
-  await screen.findByRole("button", { name: "Seed indexed sources" });
+  await screen.findByRole("button", { name: "Select tool" });
 }
 
 function seedStoredStars(stars: UserStar[]) {
@@ -233,53 +234,10 @@ describe("Home page", () => {
 
     expect(screen.getByRole("link", { name: "Chat" })).toHaveAttribute("href", "/chat");
     expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
-    expect(screen.getByRole("link", { name: "Open chat" })).toHaveAttribute("href", "/chat");
+    expect(screen.getByRole("link", { name: "Open AI companion" })).toHaveAttribute("href", "/chat");
   });
 
-  it("maps detected indexes into orbit from the home controls", async () => {
-    vi.mocked(fetchIndexes).mockResolvedValue([
-      {
-        index_id: "Orbit dossier",
-        manifest_path: "/tmp/orbit-dossier.json",
-        document_count: 3,
-        chunk_count: 12,
-        backend: "faiss",
-        embedding_signature: "embed-orbit",
-        created_at: "2026-03-26T12:00:00.000Z",
-      },
-    ]);
 
-    await renderHomePage();
-
-    await waitFor(() => {
-      expect(screen.getByText("1 indexed source detected")).toBeInTheDocument();
-      expect(screen.getByText("1 source ready to map")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Seed indexed sources" })).not.toBeDisabled();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Seed indexed sources" }));
-
-    await waitFor(() => {
-      expect(screen.getByText(/1(\/\d+)? added stars/)).toBeInTheDocument();
-      expect(screen.getByText("0 sources ready to map")).toBeInTheDocument();
-      expect(screen.getByText("1 attachment in orbit")).toBeInTheDocument();
-    });
-
-    await waitFor(() => {
-      const stored = window.localStorage.getItem("metis_constellation_user_stars");
-      expect(stored).not.toBeNull();
-      expect(JSON.parse(stored ?? "[]")).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            label: "Orbit dossier",
-            primaryDomainId: "knowledge",
-            stage: "seed",
-            linkedManifestPath: "/tmp/orbit-dossier.json",
-          }),
-        ]),
-      );
-    });
-  });
 
   it("starts the focus flow when an existing star is selected", async () => {
     seedStoredStars([
@@ -314,7 +272,7 @@ describe("Home page", () => {
     });
 
     expect(screen.queryByTestId("star-details-panel")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Zoom closer" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Zoom in" })).toBeDisabled();
   });
 
   it("uses the hand tool to pan before switching back to select interactions", async () => {
@@ -431,7 +389,7 @@ describe("Home page", () => {
       expect(canvas).toHaveAttribute("data-focus-phase", "idle");
     });
 
-    expect(screen.getByRole("button", { name: "Zoom closer" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Zoom in" })).not.toBeDisabled();
   });
 
   it("opens and edits a settings-loaded default star like any existing star", async () => {

@@ -1,0 +1,23 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - paragraph [ref=e8]: METIS Launch
+        - heading "Bringing your local workspace online." [level=1] [ref=e9]
+        - paragraph [ref=e10]: METIS is starting its desktop sidecar, checking the local API, and preparing the workspace shell.
+      - generic [ref=e11]:
+        - generic [ref=e12]: Starting services
+        - generic [ref=e14]: Private by default
+        - generic [ref=e16]: Desktop-first
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - paragraph [ref=e21]: Launch phases
+        - generic [ref=e22]:
+          - generic [ref=e23]:
+            - img [ref=e24]
+            - generic [ref=e26]: Bootstrapping the local sidecar
+          - generic [ref=e29]: Negotiating a local API port
+          - generic [ref=e32]: Verifying workspace health
+      - paragraph [ref=e33]: This usually takes a few seconds. If it stalls, diagnostics stays available and you can retry without restarting the whole UI.
+  - button "Open Next.js Dev Tools" [ref=e39] [cursor=pointer]:
+    - img [ref=e40]

@@ -1,12 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { GlowCard } from "@/components/ui/glow-card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
@@ -125,15 +124,6 @@ const DOCUMENT_LOADERS = [
   { value: "plain", label: "Plain text" },
   { value: "opendataloader", label: "opendataloader-pdf (highest PDF accuracy)" },
 ] as const;
-const UI_VARIANTS = [
-  {
-    value: "motion",
-    label: "Motion",
-    description: "More obvious transitions with reduced-motion fallback.",
-  },
-] as const;
-
-type UiVariant = (typeof UI_VARIANTS)[number]["value"];
 
 const ASSISTANT_DEFAULT_VALUES: AssistantFormValues = {
   assistant_identity: {
@@ -418,7 +408,6 @@ export default function SettingsPage() {
   const [assistantSaving, setAssistantSaving] = useArrowState(false);
   const [assistantSaveError, setAssistantSaveError] = useArrowState<string | null>(null);
   const [assistantSaved, setAssistantSaved] = useArrowState(false);
-  const [uiVariant, setUiVariant] = useArrowState<UiVariant>("motion");
   const [searchQuery, setSearchQuery] = useArrowState("");
 
   const form = useForm<FormValues>({
@@ -492,26 +481,6 @@ export default function SettingsPage() {
       web_scrape_full_content: false,
     },
   });
-
-  const applyUiVariant = useCallback((nextVariant: UiVariant) => {
-    setUiVariant(nextVariant);
-    document.documentElement.dataset.uiVariant = nextVariant;
-    try {
-      window.localStorage.setItem("metis-ui-variant", nextVariant);
-    } catch {
-      // Ignore storage failures and keep the in-memory selection.
-    }
-  }, [setUiVariant]);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const current = document.documentElement.dataset.uiVariant;
-    if (current === "motion") {
-      setUiVariant(current);
-      return;
-    }
-    applyUiVariant("motion");
-  }, [applyUiVariant, setUiVariant]);
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = form;
   const assistantForm = useForm<AssistantFormValues>({
@@ -771,46 +740,6 @@ export default function SettingsPage() {
               must be set in <code className="rounded bg-sky-500/15 px-1">settings.json</code> at
               the repo root. Changes take effect on next server restart.
             </p>
-          </div>
-        </div>
-
-        <div className="glass-settings-pane space-y-3 rounded-[1.35rem]">
-          <div>
-            <p className="text-sm font-semibold">Interface direction</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Switch the live treatment for panes, toggles, sliders, and the chat composer.
-            </p>
-          </div>
-          <div className="grid gap-2 md:max-w-sm">
-            {UI_VARIANTS.map((variant) => {
-              const isActive = uiVariant === variant.value;
-              return (
-                <GlowCard
-                  key={variant.value}
-                  variant="cosmic"
-                  liquidColor="#a855f7"
-                  laserColor="#a855f7"
-                  intensity={1.0}
-                  allowCustomBackground
-                  className={cn(
-                    "p-0 rounded-[1.1rem] border transition-all duration-300",
-                    isActive
-                      ? "border-primary/40 shadow-[0_14px_36px_-22px_color-mix(in_oklch,var(--primary)_68%,transparent)]"
-                      : "border-white/8",
-                  )}
-                >
-                  <div className="w-full px-4 py-3 text-left">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-medium">{variant.label}</span>
-                      <span className="chat-control-pill rounded-full px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                        Active
-                      </span>
-                    </div>
-                    <p className="mt-2 text-xs leading-5 text-muted-foreground">{variant.description}</p>
-                  </div>
-                </GlowCard>
-              );
-            })}
           </div>
         </div>
 

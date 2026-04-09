@@ -43,6 +43,7 @@ function createCanvasContext(): CanvasRenderingContext2D {
     clearRect: vi.fn(),
     closePath: vi.fn(),
     setLineDash: vi.fn(),
+    clip: vi.fn(),
     createLinearGradient: vi.fn(() => gradient),
     createRadialGradient: vi.fn(() => gradient),
     font: "",
@@ -220,7 +221,7 @@ describe("Home page learning routes", () => {
 
   it("generates, saves, and launches a learning route into Tutor mode", async () => {
     render(<HomePage />);
-    await screen.findByRole("button", { name: "Seed indexed sources" });
+    await screen.findByRole("button", { name: "Select tool" });
     await waitFor(() => {
       const stored = window.localStorage.getItem("metis_constellation_user_stars") ?? "[]";
       expect(stored).toContain("\"route-star\"");

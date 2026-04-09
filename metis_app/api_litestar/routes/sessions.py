@@ -16,7 +16,7 @@ from metis_app.api.sessions import _hydrate_session_actions
 from metis_app.api_litestar.common import get_session_repo
 
 
-@get("/v1/sessions")
+@get("/v1/sessions", sync_to_thread=False)
 def list_sessions(search: str = "", skill: str = "") -> list[dict[str, object]]:
     """List session summaries with optional search and skill filtering."""
     repo = get_session_repo()

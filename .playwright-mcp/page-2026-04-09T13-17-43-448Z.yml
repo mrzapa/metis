@@ -1,0 +1,29 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]:
+          - text: METIS
+          - superscript [ref=e6]: AI
+        - link "Chat" [ref=e7] [cursor=pointer]:
+          - /url: /chat/
+        - link "Settings" [ref=e8] [cursor=pointer]:
+          - /url: /settings/
+    - generic:
+      - generic:
+        - heading "Discover everything" [level=1]
+    - generic:
+      - generic: 1.0x
+      - toolbar "Constellation tools":
+        - button "Select tool" [pressed] [ref=e10] [cursor=pointer]: Select
+        - button "Add star tool" [disabled] [ref=e11]: Add
+        - button "Grab tool" [ref=e12] [cursor=pointer]: Hand
+      - generic:
+        - button "Zoom out" [ref=e13] [cursor=pointer]: "-"
+        - button "Reset zoom" [disabled] [ref=e14]: 1x
+        - button "Zoom in" [ref=e15] [cursor=pointer]: +
+    - link "Open AI companion" [ref=e16] [cursor=pointer]:
+      - /url: /chat/
+  - button "Open Next.js Dev Tools" [ref=e23] [cursor=pointer]:
+    - img [ref=e24]
+  - alert [ref=e27]
