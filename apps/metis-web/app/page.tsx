@@ -23,6 +23,7 @@ const StarDiveOverlay = dynamic(
   { ssr: false, loading: () => null },
 );
 import { StarDetailsPanel } from "@/components/constellation/star-observatory-dialog";
+import { AddStarWizard } from "@/components/constellation/add-star-wizard";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
 import { useCometNews } from "@/hooks/use-news-comets";
 import { deleteIndex, fetchBrainScaffold, fetchIndexes, previewLearningRoute, subscribeCompanionActivity } from "@/lib/api";
@@ -749,6 +750,7 @@ export default function Home() {
 
   const [addMessage, setAddMessage] = useState<string | null>(null);
   const [selectedUserStarId, setSelectedUserStarId] = useState<string | null>(null);
+  const [addWizardOpen, setAddWizardOpen] = useState(false);
   const [starDetailsOpen, setStarDetailsOpen] = useState(false);
   const [starDetailsMode, setStarDetailsMode] = useState<"new" | "existing">("new");
   const [pendingDetailStar, setPendingDetailStar] = useState<UserStar | null>(null);
@@ -4687,8 +4689,8 @@ export default function Home() {
           <button
             type="button"
             className={`metis-zoom-pill-btn metis-zoom-pill-tool-btn ${activeCanvasTool === "add" ? "is-active" : ""}`}
-            onClick={() => setActiveCanvasTool("add")}
-            disabled={canvasInteractionsLocked || !hasUserContent}
+            onClick={() => setAddWizardOpen(true)}
+            disabled={canvasInteractionsLocked}
             aria-label="Add star tool"
             aria-pressed={activeCanvasTool === "add"}
             title="Add a field star to your constellation"
@@ -4854,6 +4856,14 @@ export default function Home() {
           ))}
         </svg>
       ) : null}
+
+      <AddStarWizard
+        open={addWizardOpen}
+        onOpenChange={setAddWizardOpen}
+        addUserStar={addUserStar}
+        onStarCreated={(star) => openStarDetails(star, "new")}
+        onIndexBuilt={handleIndexBuilt}
+      />
 
       <StarDetailsPanel
         open={starDetailsOpen}

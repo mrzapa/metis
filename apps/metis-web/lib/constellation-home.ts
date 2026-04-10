@@ -155,35 +155,78 @@ export const CONSTELLATION_FACULTIES: ConstellationFacultyMetadata[] = [
   // Knowledge (upper-right) — brain silhouette with spiral cortex
   createConstellationFaculty("knowledge", "Knowledge", "Structured facts, concepts, and durable associations.", -Math.PI / 2 + (Math.PI * 2) / 11, {
     stars: [
-      { dx: 0, dy: 0 },          // spiral core
-      { dx: -0.108, dy: -0.05 }, // upper-left lobe
-      { dx: -0.19, dy: 0.006 },  // left outer lobe
-      { dx: -0.124, dy: 0.094 }, // lower-left lobe
-      { dx: -0.022, dy: -0.144 },// top crest
-      { dx: 0.106, dy: -0.064 }, // upper-right lobe
-      { dx: 0.19, dy: 0.012 },   // right outer lobe
-      { dx: 0.146, dy: 0.114 },  // lower-right lobe
-      { dx: 0.088, dy: 0.214 },  // cerebellum
-      { dx: 0.028, dy: 0.314 },  // brain stem tip
-      { dx: -0.056, dy: 0.184 }, // rear lower lobe
+      { dx: 0, dy: 0 },            // spiral core
+      { dx: -0.034, dy: -0.02 },   // upper-left interior
+      { dx: -0.072, dy: -0.044 },  // upper-left rear lobe
+      { dx: -0.004, dy: -0.076 },  // top crest
+      { dx: 0.058, dy: -0.04 },    // upper-right lobe
+      { dx: 0.08, dy: 0.004 },     // front tip
+      { dx: 0.056, dy: 0.05 },     // lower-right lobe
+      { dx: 0.034, dy: 0.108 },    // cerebellum
+      { dx: 0.02, dy: 0.178 },     // stem tip
+      { dx: -0.034, dy: 0.054 },   // lower-left lobe
+      { dx: -0.074, dy: 0.008 },   // rear tip
+      { dx: -0.012, dy: 0.026 },   // lower center fold
     ],
     edges: [
-      [2,1],[1,4],[4,5],[5,6],
-      [6,7],[7,8],[8,9],
-      [10,3],[3,2],
-      [0,1],[0,4],[0,5],[0,10],[0,7],
-      [3,10],[10,8],
+      [10,2],[2,3],[3,4],[4,5],
+      [5,6],[6,7],[7,8],
+      [9,10],
+      [0,1],[1,3],[0,4],[0,6],[0,11],[11,9],
+      [9,7],
     ],
   }),
-  // Memory (right) — Draco-inspired 5-star winding chain
+  // Memory (right) — celestial hourglass with surrounding memory loop
   createConstellationFaculty("memory", "Memory", "Retention, recall, and context continuity.", -Math.PI / 2 + (Math.PI * 4) / 11, {
-    stars: [{dx:0,dy:0},{dx:0.040,dy:-0.040},{dx:0.068,dy:-0.100},{dx:0.020,dy:-0.140},{dx:-0.056,dy:-0.060}],
-    edges: [[0,1],[1,2],[2,3],[0,4]],
+    stars: [
+      { dx: 0, dy: 0 },            // neck / faculty anchor
+      { dx: -0.034, dy: -0.162 },  // top-left shoulder
+      { dx: -0.062, dy: -0.188 },  // top-left rim
+      { dx: 0.036, dy: -0.162 },   // top-right shoulder
+      { dx: 0.064, dy: -0.186 },   // top-right rim
+      { dx: -0.152, dy: -0.066 },  // left upper outer
+      { dx: -0.118, dy: -0.002 },  // left middle
+      { dx: -0.09, dy: 0.082 },    // left lower
+      { dx: -0.136, dy: 0.19 },    // left bottom outer
+      { dx: -0.05, dy: 0.262 },    // bottom-left base
+      { dx: 0.148, dy: -0.064 },   // right upper outer
+      { dx: 0.172, dy: 0.002 },    // right middle
+      { dx: 0.118, dy: 0.086 },    // right lower
+      { dx: 0.144, dy: 0.194 },    // right bottom outer
+      { dx: 0.054, dy: 0.262 },    // bottom-right base
+    ],
+    edges: [
+      [2,1],[1,3],[3,4],
+      [1,0],[3,0],[0,9],[0,14],
+      [5,6],[6,7],[7,8],[8,9],
+      [10,11],[11,12],[12,13],[13,14],
+      [5,1],[10,3],
+    ],
   }),
-  // Reasoning (lower-right) — Hercules-inspired 6-star keystone + spurs
+  // Reasoning (lower-right) — geometric balance scale
   createConstellationFaculty("reasoning", "Reasoning", "Inference, logic, and evidence-driven judgment.", -Math.PI / 2 + (Math.PI * 6) / 11, {
-    stars: [{dx:0,dy:0},{dx:-0.040,dy:-0.064},{dx:-0.072,dy:-0.040},{dx:-0.040,dy:0.056},{dx:0,dy:0.100},{dx:0.040,dy:-0.092}],
-    edges: [[0,1],[1,2],[2,3],[3,0],[0,4],[1,5]],
+    stars: [
+      { dx: 0, dy: 0 },            // top ring / faculty anchor
+      { dx: 0, dy: -0.11 },        // finial top
+      { dx: -0.13, dy: 0.012 },    // left beam end
+      { dx: 0.13, dy: 0.012 },     // right beam end
+      { dx: -0.13, dy: 0.114 },    // left hanger bottom
+      { dx: 0.13, dy: 0.114 },     // right hanger bottom
+      { dx: -0.09, dy: 0.26 },     // left lower arc
+      { dx: 0.09, dy: 0.26 },      // right lower arc
+      { dx: 0, dy: 0.316 },        // base center
+      { dx: 0, dy: 0.146 },        // stem midpoint
+      { dx: -0.056, dy: 0.064 },   // left inner arm
+      { dx: 0.056, dy: 0.064 },    // right inner arm
+    ],
+    edges: [
+      [1,0],
+      [2,0],[0,3],
+      [2,4],[3,5],
+      [4,6],[6,8],[8,7],[7,5],
+      [0,9],[9,8],
+      [10,0],[0,11],
+    ],
   }),
   // Skills (lower) — Gemini-inspired 5-star twin chain
   createConstellationFaculty("skills", "Skills", "Procedural capability, practiced technique, and execution fluency.", -Math.PI / 2 + (Math.PI * 8) / 11, {
