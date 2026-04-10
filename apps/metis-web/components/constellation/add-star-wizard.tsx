@@ -413,10 +413,10 @@ export function AddStarWizard({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent
         showCloseButton={step !== "building"}
-        className="w-full max-w-lg overflow-hidden p-0"
+        className="flex w-full max-w-lg flex-col overflow-hidden p-0 max-h-[min(90vh,44rem)]"
       >
         {/* Header */}
-        <DialogHeader className="border-b border-white/8 px-6 py-5">
+        <DialogHeader className="shrink-0 border-b border-white/8 px-6 py-5">
           <div className="flex items-start gap-3">
             {step === "match" && (
               <button
@@ -442,7 +442,7 @@ export function AddStarWizard({
         </DialogHeader>
 
         {/* Body */}
-        <div className="min-h-0 max-h-[70vh] overflow-y-auto px-6 py-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
 
           {/* ── Step: upload ─────────────────────────────────────────────── */}
           {step === "upload" && (

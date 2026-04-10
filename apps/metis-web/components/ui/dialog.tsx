@@ -42,6 +42,7 @@ function DialogOverlay({
 
 function DialogContent({
   className,
+  viewportClassName,
   children,
   showCloseButton = true,
   showOverlay = true,
@@ -49,35 +50,44 @@ function DialogContent({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
   showOverlay?: boolean
+  viewportClassName?: string
 }) {
   return (
     <DialogPortal>
       {showOverlay ? <DialogOverlay /> : null}
-      <DialogPrimitive.Popup
-        data-slot="dialog-content"
+      <DialogPrimitive.Viewport
+        data-slot="dialog-viewport"
         className={cn(
-          "glass-panel-strong fixed top-1/2 left-1/2 z-[270] grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-2xl border border-white/10 p-4 text-sm ring-1 ring-white/8 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
-          className
+          "fixed inset-0 z-[265] flex items-center justify-center p-4",
+          viewportClassName
         )}
-        {...props}
       >
-        {children}
-        {showCloseButton && (
-          <DialogPrimitive.Close
-            data-slot="dialog-close"
-            render={
-              <Button
-                variant="ghost"
-                className="absolute top-2 right-2"
-                size="icon-sm"
-              />
-            }
-          >
-            <AnimatedLucideIcon icon={XIcon} mode="hoverLift" />
-            <span className="sr-only">Close</span>
-          </DialogPrimitive.Close>
-        )}
-      </DialogPrimitive.Popup>
+        <DialogPrimitive.Popup
+          data-slot="dialog-content"
+          className={cn(
+            "glass-panel-strong relative grid w-full max-w-[calc(100%-2rem)] gap-4 rounded-2xl border border-white/10 p-4 text-sm ring-1 ring-white/8 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            className
+          )}
+          {...props}
+        >
+          {children}
+          {showCloseButton && (
+            <DialogPrimitive.Close
+              data-slot="dialog-close"
+              render={
+                <Button
+                  variant="ghost"
+                  className="absolute top-2 right-2"
+                  size="icon-sm"
+                />
+              }
+            >
+              <AnimatedLucideIcon icon={XIcon} mode="hoverLift" />
+              <span className="sr-only">Close</span>
+            </DialogPrimitive.Close>
+          )}
+        </DialogPrimitive.Popup>
+      </DialogPrimitive.Viewport>
     </DialogPortal>
   )
 }

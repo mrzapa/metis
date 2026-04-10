@@ -1,0 +1,62 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]:
+          - text: METIS
+          - superscript [ref=e6]: AI
+        - link [ref=e38] [cursor=pointer]:
+          - /url: /chat/
+          - text: Chat
+        - link [ref=e39] [cursor=pointer]:
+          - /url: /settings/
+          - text: Settings
+    - generic:
+      - generic:
+        - heading [level=1]: Discover everything
+    - generic:
+      - generic: 1.0x
+      - toolbar "Constellation tools":
+        - button "Select tool" [pressed] [ref=e10] [cursor=pointer]: Select
+        - button "Add star tool" [ref=e11] [cursor=pointer]: Add
+        - button "Grab tool" [ref=e12] [cursor=pointer]: Hand
+      - generic:
+        - button "Zoom out" [ref=e13] [cursor=pointer]: "-"
+        - button "Reset zoom" [disabled] [ref=e14]: 1x
+        - button "Zoom in" [ref=e15] [cursor=pointer]: +
+    - link [ref=e40] [cursor=pointer]:
+      - /url: /chat/
+  - generic [ref=e22] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e23]:
+      - img [ref=e24]
+    - generic [ref=e28]:
+      - button "Open issues overlay" [ref=e29]:
+        - generic [ref=e30]:
+          - generic [ref=e31]: "1"
+          - generic [ref=e32]: "2"
+        - generic [ref=e33]:
+          - text: Issue
+          - generic [ref=e34]: s
+      - button "Collapse issues badge" [ref=e35]:
+        - img [ref=e36]
+  - alert [ref=e27]
+  - dialog "Add a star" [ref=e44]:
+    - generic [ref=e47]:
+      - heading "Add a star" [level=2] [ref=e48]
+      - paragraph [ref=e49]: Upload content and we'll match it to the right place in your constellation.
+    - generic [ref=e51]:
+      - button "Drop files here or click to browse" [active] [ref=e52] [cursor=pointer]:
+        - img [ref=e53]
+        - paragraph [ref=e56]: Drop files here or click to browse
+        - paragraph [ref=e57]: PDF · MD · TXT · DOCX · CSV · JSON · Python · TypeScript · YAML · and more
+        - button "Choose File" [ref=e58]
+      - 'textbox "Optional: briefly describe this content (e.g. ''my research notes on attention mechanisms'')" [ref=e59]'
+      - generic [ref=e60]:
+        - button "Cancel" [ref=e61] [cursor=pointer]
+        - button "Analyse content" [disabled]:
+          - text: Analyse content
+          - img
+    - button "Close" [ref=e62] [cursor=pointer]:
+      - generic [ref=e63]:
+        - img
+      - generic [ref=e64]: Close
