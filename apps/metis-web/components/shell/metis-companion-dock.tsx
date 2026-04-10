@@ -28,6 +28,7 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
+  Monitor,
   Pause,
   Play,
   RefreshCw,
@@ -38,6 +39,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { BrainIcon } from "@/components/icons";
+import { HermesHud } from "@/components/shell/hud";
 import { useArrowState } from "@/hooks/use-arrow-state";
 import { useWebGPUCompanionContext } from "@/lib/webgpu-companion/webgpu-companion-context";
 
@@ -65,6 +67,8 @@ export function MetisCompanionDock({
   const previousContextRef = useRef<{ sessionId?: string | null; runId?: string | null } | null>(null);
   const atlasPromptedRunIdRef = useRef("");
   const researchAbortRef = useRef<AbortController | null>(null);
+
+  const [showHud, setShowHud] = useState(false);
 
   // WebGPU companion – shared instance from context, so the chat pane and dock
   // can drive the same model without loading a second 2 GB worker.
@@ -525,6 +529,20 @@ export function MetisCompanionDock({
                 </span>
               )}
             </span>
+          )}
+          {!minimized && (
+            <button
+              type="button"
+              onClick={() => setShowHud((v) => !v)}
+              className={cn(
+                "rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-white/8 hover:text-foreground",
+                showHud && "bg-white/8 text-foreground",
+              )}
+              aria-label="Open Hermes HUD"
+              title="Hermes HUD"
+            >
+              <Monitor className="size-3.5" />
+            </button>
           )}
           <button
             type="button"
@@ -994,6 +1012,14 @@ export function MetisCompanionDock({
           </div>
         ) : null}
       </div>
+      {showHud && (
+        <HermesHud
+          snapshot={snapshot}
+          thoughtLog={thoughts}
+          sessionId={sessionId}
+          onClose={() => setShowHud(false)}
+        />
+      )}
     </aside>
   );
 }
