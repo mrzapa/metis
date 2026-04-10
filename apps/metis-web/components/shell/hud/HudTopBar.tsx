@@ -22,14 +22,13 @@ interface HudTopBarProps {
 export function HudTopBar({ activeTab, onTabChange, onRefresh, onClose }: HudTopBarProps) {
   return (
     <div
-      className="shrink-0 border-b"
-      style={{ background: "var(--hud-bg-surface)", borderColor: "var(--hud-border)" }}
+      className="shrink-0 border-b px-5 py-3"
+      style={{ borderColor: "color-mix(in oklch, white 9%, transparent)" }}
     >
-      {/* Main bar */}
-      <div className="flex items-center gap-3 px-4 py-2.5">
+      <div className="flex items-center gap-4">
         {/* Wordmark */}
         <span
-          className="shrink-0 font-mono text-[12px] font-bold uppercase tracking-[0.3em]"
+          className="shrink-0 font-display text-[13px] font-bold uppercase tracking-[0.22em]"
           style={{
             background: "linear-gradient(90deg, var(--hud-primary), var(--hud-accent))",
             WebkitBackgroundClip: "text",
@@ -39,23 +38,19 @@ export function HudTopBar({ activeTab, onTabChange, onRefresh, onClose }: HudTop
           METIS HUD
         </span>
 
-        {/* Tabs */}
-        <div className="flex flex-1 items-center gap-0.5 overflow-x-auto pl-2">
+        {/* Tab strip */}
+        <div className="glass-tab-rail flex flex-1 items-center gap-0.5 overflow-x-auto px-1 py-1">
           {TABS.map((tab) => {
             const active = tab.id === activeTab;
             return (
               <button
                 key={tab.id}
                 type="button"
+                data-active={active || undefined}
                 onClick={() => onTabChange(tab.id)}
-                className="shrink-0 rounded px-3 py-1 font-mono text-[11px] font-medium uppercase tracking-[0.12em] transition-all"
-                style={{
-                  background: active ? "var(--hud-primary)" : "transparent",
-                  color: active ? "var(--hud-bg-deep)" : "var(--hud-text-dim)",
-                  boxShadow: active ? "0 0 10px var(--hud-primary-glow)" : "none",
-                }}
+                className="glass-tab-pill shrink-0 rounded-xl px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground transition-all"
               >
-                <span style={{ opacity: 0.55 }}>{tab.key} </span>
+                <span className="opacity-40">{tab.key} </span>
                 {tab.label}
               </button>
             );
@@ -63,13 +58,12 @@ export function HudTopBar({ activeTab, onTabChange, onRefresh, onClose }: HudTop
         </div>
 
         {/* Controls */}
-        <div className="ml-auto flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-0.5">
           <button
             type="button"
             onClick={onRefresh}
             title="Refresh (R)"
-            className="flex size-7 items-center justify-center rounded transition-opacity hover:opacity-80"
-            style={{ color: "var(--hud-text-dim)" }}
+            className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-white/8 hover:text-foreground"
           >
             <RefreshCw className="size-3.5" />
           </button>
@@ -77,23 +71,17 @@ export function HudTopBar({ activeTab, onTabChange, onRefresh, onClose }: HudTop
             type="button"
             onClick={onClose}
             title="Close (Esc)"
-            className="flex size-7 items-center justify-center rounded transition-opacity hover:opacity-80"
-            style={{ color: "var(--hud-text-dim)" }}
+            className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-white/8 hover:text-foreground"
           >
             <X className="size-4" />
           </button>
         </div>
       </div>
 
-      {/* Keyboard hint strip */}
-      <div
-        className="border-t px-4 py-1"
-        style={{ borderColor: "var(--hud-border)", background: "var(--hud-bg-deep)" }}
-      >
-        <p className="font-mono text-[10px]" style={{ color: "var(--hud-text-dim)" }}>
-          1–5 tabs · R refresh · Esc close
-        </p>
-      </div>
+      {/* Hint strip */}
+      <p className="mt-2 text-[10px] text-muted-foreground/50">
+        1–5 tabs · R refresh · Esc close
+      </p>
     </div>
   );
 }

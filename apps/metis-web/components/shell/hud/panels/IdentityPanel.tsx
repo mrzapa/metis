@@ -88,7 +88,7 @@ export function IdentityPanel({ snapshot, sessions, thoughtLog, sessionId }: Ide
               <span
                 key={m}
                 className="rounded px-1.5 py-0.5 text-[10px] font-medium"
-                style={{ background: "var(--hud-bg-hover)", color: "var(--hud-primary)" }}
+                style={{ background: "color-mix(in oklch, white 8%, transparent)", color: "var(--hud-primary)" }}
               >
                 {m}
               </span>

@@ -35,7 +35,7 @@ export function SessionsPanel({ sessions, currentSessionId }: SessionsPanelProps
                 key={s.session_id}
                 className="rounded px-2 py-2 transition-colors"
                 style={{
-                  background: isCurrent ? "var(--hud-bg-hover)" : "transparent",
+                  background: isCurrent ? "color-mix(in oklch, white 8%, transparent)" : "transparent",
                   borderLeft: isCurrent ? "2px solid var(--hud-primary)" : "2px solid transparent",
                 }}
               >
@@ -48,7 +48,7 @@ export function SessionsPanel({ sessions, currentSessionId }: SessionsPanelProps
                   </p>
                   <span
                     className="shrink-0 rounded px-1 py-0.5 text-[10px] font-bold uppercase"
-                    style={{ color: modeColor, background: "var(--hud-bg-hover)" }}
+                    style={{ color: modeColor, background: "color-mix(in oklch, white 8%, transparent)" }}
                   >
                     {s.mode || "—"}
                   </span>

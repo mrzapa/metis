@@ -1,13 +1,12 @@
 "use client";
 
-import type { ReactNode, MouseEvent } from "react";
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 interface HudPanelProps {
   title: string;
   children: ReactNode;
   className?: string;
-  /** Stretch to fill the remaining column space */
   fullHeight?: boolean;
 }
 
@@ -15,25 +14,15 @@ export function HudPanel({ title, children, className, fullHeight }: HudPanelPro
   return (
     <div
       className={cn(
-        "rounded-sm border-l-2 p-3 transition-shadow",
+        "glass-micro-surface rounded-2xl p-3.5",
+        "border-l-2",
         fullHeight && "flex flex-col",
         className,
       )}
-      style={{
-        background: "var(--hud-bg-panel)",
-        borderColor: "var(--hud-primary)",
-        boxShadow: "0 0 0 1px var(--hud-border)",
-      }}
-      onMouseEnter={(e: MouseEvent<HTMLDivElement>) => {
-        e.currentTarget.style.boxShadow =
-          "0 0 12px var(--hud-primary-glow), 0 0 0 1px var(--hud-border-hover)";
-      }}
-      onMouseLeave={(e: MouseEvent<HTMLDivElement>) => {
-        e.currentTarget.style.boxShadow = "0 0 0 1px var(--hud-border)";
-      }}
+      style={{ borderLeftColor: "color-mix(in oklch, var(--primary) 55%, transparent)" }}
     >
       <p
-        className="mb-2 text-[10px] font-bold uppercase tracking-[0.2em]"
+        className="mb-2.5 text-[10px] font-semibold uppercase tracking-[0.18em]"
         style={{ color: "var(--hud-primary)" }}
       >
         {title}
@@ -43,7 +32,7 @@ export function HudPanel({ title, children, className, fullHeight }: HudPanelPro
   );
 }
 
-/** A single stat displayed as a large number with a small label */
+/** Large number stat with label — e.g. "42 / Sessions" */
 export function HudStat({
   value,
   label,
@@ -62,7 +51,7 @@ export function HudStat({
         {value}
       </span>
       <span
-        className="text-[11px] uppercase tracking-[0.15em]"
+        className="text-[11px] uppercase tracking-[0.12em]"
         style={{ color: "var(--hud-text-dim)" }}
       >
         {label}
@@ -71,7 +60,7 @@ export function HudStat({
   );
 }
 
-/** A horizontal progress bar */
+/** Horizontal capacity bar that turns amber/red as it fills */
 export function HudBar({
   value,
   max,
@@ -82,18 +71,14 @@ export function HudBar({
   label?: string;
 }) {
   const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
-  const color =
-    pct >= 90
-      ? "var(--hud-error)"
-      : pct >= 70
-        ? "var(--hud-warning)"
-        : "var(--hud-success)";
+  const barColor =
+    pct >= 90 ? "var(--hud-error)" : pct >= 70 ? "var(--hud-warning)" : "var(--hud-success)";
 
   return (
     <div className="space-y-1">
       {label && (
         <div className="flex items-center justify-between">
-          <span className="text-[11px] uppercase tracking-[0.12em]" style={{ color: "var(--hud-text-dim)" }}>
+          <span className="text-[11px] uppercase tracking-[0.1em]" style={{ color: "var(--hud-text-dim)" }}>
             {label}
           </span>
           <span className="text-[11px] tabular-nums" style={{ color: "var(--hud-text-dim)" }}>
@@ -101,10 +86,13 @@ export function HudBar({
           </span>
         </div>
       )}
-      <div className="h-[5px] w-full overflow-hidden rounded-full" style={{ background: "var(--hud-bg-hover)" }}>
+      <div
+        className="h-[4px] w-full overflow-hidden rounded-full"
+        style={{ background: "color-mix(in oklch, var(--primary) 12%, transparent)" }}
+      >
         <div
           className="h-full rounded-full transition-all duration-500"
-          style={{ width: `${pct}%`, background: color }}
+          style={{ width: `${pct}%`, background: barColor }}
         />
       </div>
     </div>

@@ -85,7 +85,7 @@ export function MemoryPanel({ snapshot }: MemoryPanelProps) {
               <div
                 key={e.entry_id}
                 className="rounded px-2 py-1.5"
-                style={{ background: "var(--hud-bg-hover)" }}
+                style={{ background: "color-mix(in oklch, white 8%, transparent)" }}
               >
                 <div className="flex items-center justify-between gap-2">
                   <span

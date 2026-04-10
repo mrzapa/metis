@@ -48,7 +48,7 @@ export function SkillsPanel({ snapshot }: SkillsPanelProps) {
             <div
               key={skill.name}
               className="flex items-start gap-3 rounded px-2 py-1.5 transition-colors"
-              style={{ background: "var(--hud-bg-hover)" }}
+              style={{ background: "color-mix(in oklch, white 8%, transparent)" }}
             >
               <span
                 className="mt-0.5 size-1.5 shrink-0 rounded-full"
@@ -82,8 +82,8 @@ export function SkillsPanel({ snapshot }: SkillsPanelProps) {
                     <span
                       className="rounded px-1.5 py-0.5 text-[10px] font-bold uppercase"
                       style={{
-                        background: enabled ? "var(--hud-success)" : "var(--hud-bg-hover)",
-                        color: enabled ? "var(--hud-bg-deep)" : "var(--hud-text-dim)",
+                        background: enabled ? "var(--hud-success)" : "color-mix(in oklch, white 8%, transparent)",
+                        color: enabled ? "var(--primary-foreground)" : "var(--hud-text-dim)",
                       }}
                     >
                       {enabled ? "on" : "off"}
