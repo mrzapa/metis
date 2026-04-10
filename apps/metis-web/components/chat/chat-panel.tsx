@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useEffect, useLayoutEffect, useState, type KeyboardEvent, type RefObject } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useMemo, type KeyboardEvent, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,6 +20,7 @@ import { ArrowArtifactBoundary } from "@/components/chat/artifacts/arrow-artifac
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { useArrowState } from "@/hooks/use-arrow-state";
 import { AlertCircle, Bot, Loader2, SendHorizontal, Square } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import { AgenticStepIndicator } from "@/components/chat/agentic-step-indicator";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
 import { ModelStatusDialog } from "@/components/chat/model-status-dialog";
@@ -78,6 +79,201 @@ interface ChatPanelProps {
 
 const RAG_MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack", "Knowledge Search"] as const;
 const DEFAULT_RAG_MODE = "Q&A";
+
+// --- Hint pools: things a real person would actually ask ---
+const HINT_POOL = {
+  direct: [
+    "Why does my context window feel like it's never enough?",
+    "How would you test whether this prompt is actually working?",
+    "If this breaks in production, where does it break first?",
+    "What's the simplest version of this that could still work?",
+    "How do I know if I'm over-engineering this?",
+    "What would you change if you had to ship it tomorrow?",
+    "Is my chunking strategy the problem, or am I looking in the wrong place?",
+    "What's the difference between a RAG I'd trust and one I wouldn't?",
+  ] as const,
+  rag_with_index: [
+    "What's actually being claimed here, underneath all the caveats?",
+    "Which parts of this would you want a second source on?",
+    "What's the most surprising thing in here?",
+    "If you had to bet on one section being wrong, which one?",
+    "What does this leave out that you'd want to know?",
+    "Does any of this contradict what you already know?",
+    "What would the critics of this say?",
+  ] as const,
+  rag_no_index: [
+    "Pick an index and I will ground every answer in your sources.",
+  ] as const,
+  forecast: [
+    "Why is it missing the spike?",
+    "How far out can I actually trust these numbers?",
+    "What's driving this trend, or do we not know yet?",
+    "Are there outliers I should look at first?",
+    "Would this look different with more history?",
+  ] as const,
+} as const;
+
+const CHIP_POOL = {
+  direct: [
+    "What's the catch?",
+    "Think out loud",
+    "Spot the risks",
+    "Simpler approach?",
+    "Test my assumptions",
+    "What am I missing?",
+  ] as const,
+  rag: [
+    "Just the key points",
+    "Anything shaky?",
+    "What's missing?",
+    "Strongest claims",
+    "Second opinion",
+    "Surprising bits",
+  ] as const,
+  forecast: [
+    "Why the spike?",
+    "Can I trust this?",
+    "What's the trend?",
+    "Explain the dip",
+    "How far out?",
+  ] as const,
+} as const;
+
+function seededRand(seed: number) {
+  let s = seed | 0;
+  return () => {
+    s = Math.imul(s ^ (s >>> 16), 0x45d9f3b);
+    s = Math.imul(s ^ (s >>> 16), 0x45d9f3b);
+    s ^= s >>> 16;
+    return (s >>> 0) / 0xffffffff;
+  };
+}
+
+function shufflePick<T>(arr: readonly T[], count: number, rand: () => number): T[] {
+  const copy = [...arr] as T[];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, count);
+}
+
+function MetisEmptyStateHint({
+  queryMode,
+  activeIndexPath,
+  isKnowledgeSearchMode,
+  onSelect,
+}: {
+  queryMode: string;
+  activeIndexPath?: string | null;
+  isKnowledgeSearchMode?: boolean;
+  onSelect: (text: string) => void;
+}) {
+  const hintKey =
+    queryMode === "rag"
+      ? activeIndexPath
+        ? "rag_with_index"
+        : "rag_no_index"
+      : queryMode === "forecast"
+        ? "forecast"
+        : "direct";
+
+  const seedRef = useRef(Date.now());
+
+  const { hints, chips } = useMemo(() => {
+    if (hintKey === "rag_no_index") {
+      return { hints: ["Pick an index and I will ground every answer in your sources."], chips: [] };
+    }
+    const keyHash = hintKey.split("").reduce((a, c) => (Math.imul(a, 31) + c.charCodeAt(0)) | 0, 1);
+    const rand = seededRand(seedRef.current ^ keyHash);
+    const hintPool = hintKey === "rag_with_index" ? HINT_POOL.rag_with_index : hintKey === "forecast" ? HINT_POOL.forecast : HINT_POOL.direct;
+    const chipPool = hintKey === "rag_with_index" ? CHIP_POOL.rag : hintKey === "forecast" ? CHIP_POOL.forecast : CHIP_POOL.direct;
+    return {
+      hints: shufflePick(hintPool, hintPool.length, rand),
+      chips: shufflePick(chipPool, 3, rand),
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hintKey]);
+
+  const [idx, setIdx] = useState(0);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    setIdx(0);
+    setVisible(true);
+  }, [hints]);
+
+  useEffect(() => {
+    if (hints.length <= 1) return;
+    const id = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => {
+        setIdx((i) => (i + 1) % hints.length);
+        setVisible(true);
+      }, 320);
+    }, 3800);
+    return () => clearInterval(id);
+  }, [hints]);
+
+  return (
+    <div className="chat-empty-state glass-panel mx-auto flex max-w-3xl flex-col items-center justify-center rounded-[1.8rem] px-8 py-16 text-center">
+      {/* Pulse dot + label */}
+      <div className="mb-6 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground/50">
+        <motion.span
+          className="inline-block size-1.5 rounded-full bg-primary/60"
+          animate={{ opacity: [0.3, 1, 0.3] }}
+          transition={{ repeat: Infinity, duration: 2.4, ease: "easeInOut" }}
+        />
+        METIS
+      </div>
+
+      {/* Cycling procedural hint */}
+      <div className="relative min-h-14 w-full flex items-center justify-center">
+        <AnimatePresence mode="wait">
+          {visible && (
+            <motion.p
+              key={idx}
+              className="font-display text-[1.65rem] font-semibold leading-snug tracking-[-0.035em] text-foreground"
+              initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              exit={{ opacity: 0, y: -7, filter: "blur(3px)" }}
+              transition={{ duration: 0.28, ease: [0.25, 0, 0.3, 1] }}
+            >
+              {hints[idx]}
+            </motion.p>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Subtext */}
+      <p className="mt-5 max-w-md text-sm leading-[1.75] text-muted-foreground">
+        {queryMode === "rag" && !activeIndexPath
+          ? "Choose an index to unlock grounded answers backed by your sources."
+          : queryMode === "forecast"
+            ? "Upload a time-series file, map the columns, and run a structured forecast with quantile bands."
+            : isKnowledgeSearchMode
+              ? "Search the indexed material and inspect the strongest evidence without a full synthesis pass."
+              : "Or just ask anything. Direct mode never needs an index."}
+      </p>
+
+      {/* Procedurally assembled starter chips */}
+      {chips.length > 0 && (
+        <div className="mt-8 flex flex-wrap justify-center gap-2">
+          {chips.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onSelect(s)}
+              className="chat-control-pill rounded-full border border-white/10 px-3.5 py-1.5 text-xs text-muted-foreground transition-all hover:border-white/25 hover:bg-white/5 hover:text-foreground active:scale-[0.97]"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ChatPanel({
   messages,
@@ -686,22 +882,15 @@ export function ChatPanel({
           )}
 
           {!loading && !error && messages.length === 0 && (
-            <div className="chat-empty-state glass-panel mx-auto flex max-w-3xl flex-col items-center justify-center rounded-[1.8rem] px-8 py-16 text-center text-muted-foreground">
-              <p className="font-display text-3xl font-semibold tracking-[-0.04em] text-foreground">
-                Start with a question that feels specific.
-              </p>
-              <p className="mt-3 max-w-xl text-sm leading-7">
-                {queryMode === "rag"
-                  ? activeIndexPath
-                    ? isKnowledgeSearchMode
-                      ? "Search the indexed material first and inspect the strongest evidence without running a full synthesis pass."
-                      : "Ask about the material you indexed, compare documents, or request a high-confidence overview grounded in sources."
-                    : "Choose an index to unlock grounded RAG answers and evidence-backed synthesis."
-                  : queryMode === "forecast"
-                    ? "Upload a time-series file, map the timestamp and target columns, and run a structured forecast with quantile bands."
-                  : "Use direct mode for fast ideation, planning, or questions that do not need document grounding yet."}
-              </p>
-            </div>
+            <MetisEmptyStateHint
+              queryMode={queryMode}
+              activeIndexPath={activeIndexPath}
+              isKnowledgeSearchMode={isKnowledgeSearchMode}
+              onSelect={(text) => {
+                setDraft(text);
+                composerRef?.current?.focus();
+              }}
+            />
           )}
 
           {!loading && !error && displayedMessages.map((msg) => (
