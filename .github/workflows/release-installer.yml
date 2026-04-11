@@ -22,11 +22,14 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Enable pnpm
+        run: corepack enable
+
       - name: Build web UI static export
         run: |
           cd apps/metis-web
-          npm install --silent
-          npm run build
+          pnpm install --frozen-lockfile
+          pnpm build
           # Package the static export so end users can skip the Node.js requirement
           tar -czf ../../metis-web-dist.tar.gz -C out .
         continue-on-error: true
