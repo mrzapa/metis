@@ -1,15 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { GlowCard } from "@/components/ui/glow-card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -23,7 +23,6 @@ import {
   type AssistantSettings,
 } from "@/lib/api";
 import { AlertCircle, CheckCircle2, ChevronDown, HelpCircle, Info, Loader2, RotateCcw, Search, TriangleAlert } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { useArrowState } from "@/hooks/use-arrow-state";
 
 const FORECAST_MAX_CONTEXT_LIMIT = 15360;
@@ -125,15 +124,7 @@ const DOCUMENT_LOADERS = [
   { value: "plain", label: "Plain text" },
   { value: "opendataloader", label: "opendataloader-pdf (highest PDF accuracy)" },
 ] as const;
-const UI_VARIANTS = [
-  {
-    value: "motion",
-    label: "Motion",
-    description: "More obvious transitions with reduced-motion fallback.",
-  },
-] as const;
-
-type UiVariant = (typeof UI_VARIANTS)[number]["value"];
+type SettingsTabValue = "core" | "retrieval" | "graph" | "memory" | "provider" | "companion" | "models";
 
 const ASSISTANT_DEFAULT_VALUES: AssistantFormValues = {
   assistant_identity: {
@@ -418,9 +409,9 @@ export default function SettingsPage() {
   const [assistantSaving, setAssistantSaving] = useArrowState(false);
   const [assistantSaveError, setAssistantSaveError] = useArrowState<string | null>(null);
   const [assistantSaved, setAssistantSaved] = useArrowState(false);
-  const [uiVariant, setUiVariant] = useArrowState<UiVariant>("motion");
   const [searchQuery, setSearchQuery] = useArrowState("");
   const [forecastAdvancedOpen, setForecastAdvancedOpen] = useArrowState(false);
+  const [activeTab, setActiveTab] = useArrowState<SettingsTabValue>(initialTab);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -493,26 +484,6 @@ export default function SettingsPage() {
       web_scrape_full_content: false,
     },
   });
-
-  const applyUiVariant = useCallback((nextVariant: UiVariant) => {
-    setUiVariant(nextVariant);
-    document.documentElement.dataset.uiVariant = nextVariant;
-    try {
-      window.localStorage.setItem("metis-ui-variant", nextVariant);
-    } catch {
-      // Ignore storage failures and keep the in-memory selection.
-    }
-  }, [setUiVariant]);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const current = document.documentElement.dataset.uiVariant;
-    if (current === "motion") {
-      setUiVariant(current);
-      return;
-    }
-    applyUiVariant("motion");
-  }, [applyUiVariant, setUiVariant]);
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = form;
   const hasAdvancedForecastErrors = !!(
@@ -683,6 +654,11 @@ export default function SettingsPage() {
     reset(FORM_DEFAULT_VALUES);
   }
 
+  function jumpToSearchResult(tab: SettingsTabValue) {
+    setActiveTab(tab);
+    setSearchQuery("");
+  }
+
   return (
     <PageChrome
       eyebrow="Settings"
@@ -737,14 +713,20 @@ export default function SettingsPage() {
                 </p>
                 <ul className="divide-y divide-white/6">
                   {searchResults.map((entry) => (
-                    <li key={`${entry.tab}-${entry.label}`} className="flex items-start gap-3 py-3">
-                      <span className="mt-0.5 shrink-0 rounded-full bg-primary/12 px-2 py-0.5 text-xs uppercase tracking-[0.14em] text-primary/80">
-                        {entry.tab}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">{entry.label}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">{entry.description}</p>
-                      </div>
+                    <li key={`${entry.tab}-${entry.label}`} className="py-1">
+                      <button
+                        type="button"
+                        onClick={() => jumpToSearchResult(entry.tab as SettingsTabValue)}
+                        className="flex w-full items-start gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-white/5"
+                      >
+                        <span className="mt-0.5 shrink-0 rounded-full bg-primary/12 px-2 py-0.5 text-xs uppercase tracking-[0.14em] text-primary/80">
+                          {entry.tab}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium">{entry.label}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{entry.description}</p>
+                        </div>
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -779,46 +761,6 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="glass-settings-pane space-y-3 rounded-[1.35rem]">
-          <div>
-            <p className="text-sm font-semibold">Interface direction</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Switch the live treatment for panes, toggles, sliders, and the chat composer.
-            </p>
-          </div>
-          <div className="grid gap-2 md:max-w-sm">
-            {UI_VARIANTS.map((variant) => {
-              const isActive = uiVariant === variant.value;
-              return (
-                <GlowCard
-                  key={variant.value}
-                  variant="cosmic"
-                  liquidColor="#a855f7"
-                  laserColor="#a855f7"
-                  intensity={1.0}
-                  allowCustomBackground
-                  className={cn(
-                    "p-0 rounded-[1.1rem] border transition-all duration-300",
-                    isActive
-                      ? "border-primary/40 shadow-[0_14px_36px_-22px_color-mix(in_oklch,var(--primary)_68%,transparent)]"
-                      : "border-white/8",
-                  )}
-                >
-                  <div className="w-full px-4 py-3 text-left">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-medium">{variant.label}</span>
-                      <span className="chat-control-pill rounded-full px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                        Active
-                      </span>
-                    </div>
-                    <p className="mt-2 text-xs leading-5 text-muted-foreground">{variant.description}</p>
-                  </div>
-                </GlowCard>
-              );
-            })}
-          </div>
-        </div>
-
         {loadError && (
           <div className="flex items-center gap-1.5 text-sm text-destructive">
             <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-4" />
@@ -832,7 +774,7 @@ export default function SettingsPage() {
             Loading settings…
           </div>
         ) : (
-          <Tabs defaultValue={initialTab}>
+          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as SettingsTabValue)}>
             <TabsList className="glass-tab-rail h-auto w-full flex-wrap gap-1 p-1.5">
               <TabsTrigger value="core" className="glass-tab-pill">Core</TabsTrigger>
               <TabsTrigger value="retrieval" className="glass-tab-pill">Retrieval</TabsTrigger>
