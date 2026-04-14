@@ -109,6 +109,11 @@ import {
   measureSingleLineTextWidth,
   quantizeFontSize,
 } from "@/lib/pretext-labels";
+import {
+  buildSemanticSearchState,
+  buildSemanticShiftOffsets,
+  type SemanticSearchState,
+} from "@/lib/semantic-constellation";
 import { getFacultyArtDefinition } from "@/lib/constellation-faculty-art";
 import type {
   IndexBuildResult,
@@ -235,6 +240,7 @@ interface HomeToastState {
   onAction?: (() => void) | null;
   tone: "default" | "error";
 }
+
 
 interface LandingWorldStarRenderState extends LandingStarHitTarget {
   addable: boolean;
@@ -769,7 +775,10 @@ export default function Home() {
   const [learningRoutePreviewStarId, setLearningRoutePreviewStarId] = useState<string | null>(null);
   const [learningRouteLoading, setLearningRouteLoading] = useState(false);
   const [learningRouteError, setLearningRouteError] = useState<string | null>(null);
+  const [semanticQuery, setSemanticQuery] = useState("");
+  const [semanticSearchExpanded, setSemanticSearchExpanded] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const semanticSearchInputRef = useRef<HTMLInputElement>(null);
   const starTooltipCardRef = useRef<HTMLDivElement>(null);
   const starTooltipDomainRef = useRef<HTMLDivElement>(null);
   const starTooltipTitleRef = useRef<HTMLDivElement>(null);
@@ -843,6 +852,9 @@ export default function Home() {
   const ragPulseStateRef = useRef<HomeRagPulseState | null>(null);
   const starfieldRevisionRef = useRef(0);
   const learningRouteRequestIdRef = useRef(0);
+  const semanticSearchStateRef = useRef<SemanticSearchState>({ active: false, links: [], matchedIds: new Set(), rankedIds: [] });
+  const semanticOffsetAnimRef = useRef<Map<string, Point>>(new Map());
+  const semanticOffsetTweensRef = useRef<Map<string, gsap.core.Tween>>(new Map());
   const dragStateRef = useRef<{
     pointerId: number;
     starId: string;
@@ -927,6 +939,8 @@ export default function Home() {
     if (zoomInteractionTimeoutRef.current !== null) {
       window.clearTimeout(zoomInteractionTimeoutRef.current);
     }
+    semanticOffsetTweensRef.current.forEach((tween) => tween.kill());
+    semanticOffsetTweensRef.current.clear();
   }, []);
 
   const selectedUserStar = useMemo(
@@ -958,6 +972,52 @@ export default function Home() {
     () => (selectedUserStar ? resolveStarFaculty(selectedUserStar) : null),
     [selectedUserStar],
   );
+  const semanticSearchState = useMemo<SemanticSearchState>(
+    () => buildSemanticSearchState(semanticQuery, userStars),
+    [semanticQuery, userStars],
+  );
+
+  useEffect(() => {
+    if (!semanticSearchExpanded) {
+      return;
+    }
+    semanticSearchInputRef.current?.focus();
+  }, [semanticSearchExpanded]);
+
+  useEffect(() => {
+    semanticSearchStateRef.current = semanticSearchState;
+  }, [semanticSearchState]);
+
+  useEffect(() => {
+    const targetOffsets = buildSemanticShiftOffsets(userStarsRef.current, semanticSearchState);
+    const offsetAnimMap = semanticOffsetAnimRef.current;
+    const tweenMap = semanticOffsetTweensRef.current;
+    const activeIds = new Set(userStarsRef.current.map((star) => star.id));
+
+    offsetAnimMap.forEach((_offset, starId) => {
+      if (activeIds.has(starId)) {
+        return;
+      }
+      tweenMap.get(starId)?.kill();
+      tweenMap.delete(starId);
+      offsetAnimMap.delete(starId);
+    });
+
+    userStarsRef.current.forEach((star) => {
+      const current = offsetAnimMap.get(star.id) ?? { x: 0, y: 0 };
+      offsetAnimMap.set(star.id, current);
+      tweenMap.get(star.id)?.kill();
+      const target = targetOffsets.get(star.id) ?? { x: 0, y: 0 };
+      const tween = gsap.to(current, {
+        duration: semanticSearchState.active ? 0.86 : 0.62,
+        ease: semanticSearchState.active ? "power3.out" : "power2.inOut",
+        overwrite: true,
+        x: target.x,
+        y: target.y,
+      });
+      tweenMap.set(star.id, tween);
+    });
+  }, [semanticSearchState, userStars]);
   const removeStarWithUndo = useCallback(async (
     starId: string,
     options?: {
@@ -2611,14 +2671,21 @@ export default function Home() {
     ) {
       const currentSelectedStarId = selectedUserStarIdRef.current;
       const previewPositions = dragPreviewPositionsRef.current;
+      const animatedSemanticOffsets = semanticOffsetAnimRef.current;
       projectedUserStarTargets.length = 0;
       projectedUserStarRenderState = new Map();
 
       userStarsRef.current.forEach((star) => {
         const resolvedPoint = getResolvedStarPoint(star, previewPositions, star.id);
+        const easedOffset = animatedSemanticOffsets.get(star.id) ?? { x: 0, y: 0 };
+        const [shiftedX, shiftedY] = clampPointToOrbit(
+          resolvedPoint.x + easedOffset.x,
+          resolvedPoint.y + easedOffset.y,
+        );
+        const shiftedPoint = { x: shiftedX, y: shiftedY };
         const faculty = resolveStarFaculty({
-          x: resolvedPoint.x,
-          y: resolvedPoint.y,
+          x: shiftedPoint.x,
+          y: shiftedPoint.y,
           primaryDomainId: star.primaryDomainId,
         });
         const influenceColors = buildStarInfluenceColors({
@@ -2629,8 +2696,8 @@ export default function Home() {
         const target = buildProjectedUserStarHitTarget(
           {
             id: star.id,
-            x: resolvedPoint.x,
-            y: resolvedPoint.y,
+            x: shiftedPoint.x,
+            y: shiftedPoint.y,
             size: star.size,
           },
           W,
@@ -2801,6 +2868,35 @@ export default function Home() {
           }
         }
       }
+
+      const semanticState = semanticSearchStateRef.current;
+      if (semanticState.active && semanticState.links.length > 0) {
+        semanticState.links.forEach((link, index) => {
+          const fromState = projectedUserStarRenderState.get(link.fromId);
+          const toState = projectedUserStarRenderState.get(link.toId);
+          if (!fromState || !toState) {
+            return;
+          }
+          const alphaMultiplier = Math.max(0, Math.min(1, Math.min(fromState.fadeIn, toState.fadeIn) * edgeBreath));
+          const emphasis = Math.min(1, 0.5 + link.sharedTerms * 0.2);
+          const gradient = ctx!.createLinearGradient(
+            fromState.target.x,
+            fromState.target.y,
+            toState.target.x,
+            toState.target.y,
+          );
+          gradient.addColorStop(0, `rgba(180,112,255,${(0.2 + emphasis * 0.14) * alphaMultiplier})`);
+          gradient.addColorStop(1, `rgba(120,210,255,${(0.14 + emphasis * 0.1) * alphaMultiplier})`);
+          ctx!.strokeStyle = gradient;
+          ctx!.lineWidth = 1.1 + emphasis * 1.3;
+          ctx!.setLineDash([8, 8 + (index % 3)]);
+          ctx!.beginPath();
+          ctx!.moveTo(fromState.target.x, fromState.target.y);
+          ctx!.lineTo(toState.target.x, toState.target.y);
+          ctx!.stroke();
+          ctx!.setLineDash([]);
+        });
+      }
     }
 
     function drawUserStars(t: number) {
@@ -2829,6 +2925,7 @@ export default function Home() {
           target,
         } = projectedState;
         const ragHighlighted = ragPulseStrength > 0 && Boolean(ragPulseState?.starIds.has(star.id));
+        const semanticHighlighted = semanticSearchStateRef.current.matchedIds.has(star.id);
         const richness = 1 + Math.max(0, influenceColors.length - 1) * 0.18;
         const haloColor = mixRgbColors(
           applyTintBias(mixed, profile.tintBias * 1.05),
@@ -2848,7 +2945,8 @@ export default function Home() {
         );
         const px = target.x;
         const py = target.y;
-        const sz = (star.size * 1.5 + (selected ? 1.2 : 0) + (dragging ? 0.8 : 0)) * userStarScale;
+        const sz = (star.size * 1.5 + (selected ? 1.2 : 0) + (dragging ? 0.8 : 0) + (semanticHighlighted ? 0.65 : 0))
+          * userStarScale;
         const twinkle = 0.84
           + Math.sin(t * 0.003 + profile.twinklePhase) * 0.1
           + Math.cos(t * 0.0016 + profile.twinklePhase * 0.72) * 0.05;
@@ -2858,7 +2956,7 @@ export default function Home() {
         const auraRadius = sz * (2.8 + profile.coreIntensity * 0.72 + ringCount * 0.14);
 
         const halo = ctx!.createRadialGradient(haloCenterX, haloCenterY, sz * 0.22, px, py, haloRadius);
-        halo.addColorStop(0, `rgba(${haloColor[0]},${haloColor[1]},${haloColor[2]},${(0.14 + profile.coreIntensity * 0.04 + (selected ? 0.08 : 0) + (ragHighlighted ? ragPulseStrength * 0.12 : 0)) * fadeIn})`);
+        halo.addColorStop(0, `rgba(${haloColor[0]},${haloColor[1]},${haloColor[2]},${(0.14 + profile.coreIntensity * 0.04 + (selected ? 0.08 : 0) + (semanticHighlighted ? 0.08 : 0) + (ragHighlighted ? ragPulseStrength * 0.12 : 0)) * fadeIn})`);
         halo.addColorStop(Math.min(0.76, 0.48 + profile.haloFalloff * 0.18), `rgba(${fillColor[0]},${fillColor[1]},${fillColor[2]},${(0.05 + richness * 0.02) * fadeIn})`);
         halo.addColorStop(1, "rgba(0,0,0,0)");
         ctx!.fillStyle = halo;
@@ -2896,6 +2994,15 @@ export default function Home() {
           ctx!.strokeStyle = `rgba(${haloColor[0]},${haloColor[1]},${haloColor[2]},${0.26 + ragPulseStrength * 0.34})`;
           ctx!.lineWidth = 1.15 + ragPulseStrength * 0.7;
           ctx!.stroke();
+        }
+        if (semanticHighlighted) {
+          ctx!.beginPath();
+          ctx!.arc(px, py, sz * 4.6, 0, Math.PI * 2);
+          ctx!.strokeStyle = "rgba(178, 122, 255, 0.34)";
+          ctx!.lineWidth = 1.15;
+          ctx!.setLineDash([5, 6]);
+          ctx!.stroke();
+          ctx!.setLineDash([]);
         }
 
         if (profile.hasDiffraction) {
@@ -4778,6 +4885,32 @@ export default function Home() {
         </div>
       </div>
 
+      <div className={`metis-semantic-search ${semanticSearchExpanded ? "is-expanded" : ""}`}>
+        <button
+          type="button"
+          className="metis-semantic-search-toggle"
+          aria-label="Toggle semantic link search"
+          aria-expanded={semanticSearchExpanded}
+          onClick={() => setSemanticSearchExpanded((open) => !open)}
+        >
+          ✦
+        </button>
+        <input
+          ref={semanticSearchInputRef}
+          className="metis-semantic-search-input"
+          value={semanticQuery}
+          onChange={(event) => setSemanticQuery(event.target.value)}
+          placeholder="Type to thread stars by meaning…"
+          aria-label="Semantic star search"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              setSemanticQuery("");
+              setSemanticSearchExpanded(false);
+            }
+          }}
+        />
+      </div>
+
       {(detailsStar || addMessage) && (
         <section id="build-map" className="metis-build-section">
           <div className="metis-build-studio-shell">
@@ -5240,6 +5373,61 @@ body {
   width: auto;
   min-width: 44px;
   padding: 0 11px;
+}
+.metis-semantic-search {
+  position: fixed;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  z-index: 145;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: 54px;
+  padding: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(188, 168, 255, 0.2);
+  background: linear-gradient(180deg, rgba(14,19,32,0.92), rgba(8,12,22,0.95));
+  box-shadow: 0 14px 30px rgba(0,0,0,0.34);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  overflow: hidden;
+  transition: width 340ms cubic-bezier(0.16, 1, 0.3, 1), border-color 260ms ease;
+}
+.metis-semantic-search.is-expanded {
+  width: min(460px, calc(100vw - 36px));
+  border-color: rgba(190, 138, 255, 0.38);
+}
+.metis-semantic-search-toggle {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(185, 148, 255, 0.34);
+  background: radial-gradient(circle at 30% 30%, rgba(197,145,255,0.44), rgba(104,64,172,0.76));
+  color: rgba(245, 239, 255, 0.98);
+  cursor: pointer;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.metis-semantic-search-input {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: rgba(235, 239, 250, 0.95);
+  opacity: 0;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  transition: opacity 240ms ease;
+  outline: none;
+}
+.metis-semantic-search.is-expanded .metis-semantic-search-input {
+  opacity: 1;
+  pointer-events: auto;
+}
+.metis-semantic-search-input::placeholder {
+  color: rgba(186, 194, 220, 0.66);
 }
 .metis-hero-kicker {
   font-family: 'Space Grotesk', sans-serif;
