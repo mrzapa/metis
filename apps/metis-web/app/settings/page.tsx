@@ -22,7 +22,7 @@ import {
   updateSettings,
   type AssistantSettings,
 } from "@/lib/api";
-import { AlertCircle, CheckCircle2, HelpCircle, Info, Loader2, RotateCcw, Search, TriangleAlert } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronDown, HelpCircle, Info, Loader2, RotateCcw, Search, TriangleAlert } from "lucide-react";
 import { useArrowState } from "@/hooks/use-arrow-state";
 
 const FORECAST_MAX_CONTEXT_LIMIT = 15360;
@@ -410,6 +410,7 @@ export default function SettingsPage() {
   const [assistantSaveError, setAssistantSaveError] = useArrowState<string | null>(null);
   const [assistantSaved, setAssistantSaved] = useArrowState(false);
   const [searchQuery, setSearchQuery] = useArrowState("");
+  const [forecastAdvancedOpen, setForecastAdvancedOpen] = useArrowState(false);
   const [activeTab, setActiveTab] = useArrowState<SettingsTabValue>(initialTab);
 
   const form = useForm<FormValues>({
@@ -485,6 +486,12 @@ export default function SettingsPage() {
   });
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = form;
+  const hasAdvancedForecastErrors = !!(
+    errors.forecast_model_id ||
+    errors.forecast_xreg_mode ||
+    errors.forecast_max_context ||
+    errors.forecast_max_horizon
+  );
   const assistantForm = useForm<AssistantFormValues>({
     defaultValues: ASSISTANT_DEFAULT_VALUES,
   });
@@ -507,9 +514,7 @@ export default function SettingsPage() {
           chat_path:
             rawChatPath === "Direct"
               ? "Direct"
-              : rawChatPath === "Forecast"
-                ? "Forecast"
-                : "RAG",
+              : "RAG", // legacy "Forecast" is coerced to "RAG"; forecasting is now triggered by file attachment
           selected_mode: (raw.selected_mode as string) ?? "Q&A",
           output_style: (raw.output_style as string) ?? "Default answer",
           chat_history_max_turns: (raw.chat_history_max_turns as number) ?? 6,
@@ -807,9 +812,9 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <FieldLabel htmlFor="chat_path_rag" tooltip="RAG grounds answers in your documents via retrieval. Direct sends prompts straight to the LLM without any context. Forecast turns the same chat workspace into a structured TimesFM forecasting surface for uploaded CSV or TSV time series.">Query path</FieldLabel>
+                    <FieldLabel htmlFor="chat_path_RAG" tooltip="RAG grounds answers in your documents via retrieval. Direct sends prompts straight to the LLM without any context.">Query path</FieldLabel>
                     <div className="flex gap-4">
-                      {(["RAG", "Direct", "Forecast"] as const).map((path) => (
+                      {(["RAG", "Direct"] as const).map((path) => (
                         <label key={path} htmlFor={`chat_path_${path}`} className="flex cursor-pointer items-center gap-2 text-sm">
                           <input
                             id={`chat_path_${path}`}
@@ -818,11 +823,7 @@ export default function SettingsPage() {
                             {...register("chat_path")}
                             className="accent-primary"
                           />
-                          {path === "RAG"
-                            ? "RAG (document-grounded)"
-                            : path === "Forecast"
-                              ? "Forecast (time series)"
-                              : "Direct (LLM only)"}
+                          {path === "RAG" ? "RAG (document-grounded)" : "Direct (LLM only)"}
                         </label>
                       ))}
                     </div>
@@ -865,51 +866,78 @@ export default function SettingsPage() {
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <FieldLabel htmlFor="forecast_model_id" tooltip="TimesFM checkpoint identifier used for Forecast mode runs.">Forecast model ID</FieldLabel>
-                        <Input id="forecast_model_id" type="text" {...register("forecast_model_id")} />
-                        <FieldError message={errors.forecast_model_id?.message} />
-                      </div>
-                      <div className="space-y-1.5">
-                        <FieldLabel htmlFor="forecast_xreg_mode" tooltip="Covariate execution mode to send into TimesFM when regressors are mapped.">Forecast XReg mode</FieldLabel>
-                        <select
-                          id="forecast_xreg_mode"
-                          {...register("forecast_xreg_mode")}
-                          className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
-                        >
-                          {FORECAST_XREG_MODES.map((mode) => (
-                            <option key={mode} value={mode}>{mode}</option>
-                          ))}
-                        </select>
-                        <FieldError message={errors.forecast_xreg_mode?.message} />
-                      </div>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setForecastAdvancedOpen((prev) => !prev)}
+                      className={cn(
+                        "flex items-center gap-1.5 text-xs font-medium transition-colors",
+                        hasAdvancedForecastErrors
+                          ? "text-destructive hover:text-destructive/80"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                      aria-expanded={forecastAdvancedOpen || hasAdvancedForecastErrors}
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "size-3.5 transition-transform duration-150",
+                          forecastAdvancedOpen || hasAdvancedForecastErrors ? "rotate-0" : "-rotate-90",
+                        )}
+                      />
+                      Advanced
+                      {hasAdvancedForecastErrors && (
+                        <span className="ml-1 inline-block size-1.5 rounded-full bg-destructive" aria-hidden="true" />
+                      )}
+                    </button>
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <FieldLabel htmlFor="forecast_max_context" tooltip="Maximum number of historical points to pass into the TimesFM context window. TimesFM 2.5 supports substantially larger windows than the old 1k default, so METIS now defaults to a near-max 15,360-point context budget within the shared compile window.">Forecast max context</FieldLabel>
-                        <Input
-                          id="forecast_max_context"
-                          type="number"
-                          min={1}
-                          max={FORECAST_MAX_CONTEXT_LIMIT}
-                          {...register("forecast_max_context", { valueAsNumber: true })}
-                        />
-                        <FieldError message={errors.forecast_max_context?.message} />
+                    {(forecastAdvancedOpen || hasAdvancedForecastErrors) && (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="forecast_model_id" tooltip="TimesFM checkpoint identifier used for Forecast mode runs.">Forecast model ID</FieldLabel>
+                            <Input id="forecast_model_id" type="text" {...register("forecast_model_id")} />
+                            <FieldError message={errors.forecast_model_id?.message} />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="forecast_xreg_mode" tooltip="Covariate execution mode to send into TimesFM when regressors are mapped.">Forecast XReg mode</FieldLabel>
+                            <select
+                              id="forecast_xreg_mode"
+                              {...register("forecast_xreg_mode")}
+                              className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
+                            >
+                              {FORECAST_XREG_MODES.map((mode) => (
+                                <option key={mode} value={mode}>{mode}</option>
+                              ))}
+                            </select>
+                            <FieldError message={errors.forecast_xreg_mode?.message} />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="forecast_max_context" tooltip="Maximum number of historical points to pass into the TimesFM context window. TimesFM 2.5 supports substantially larger windows than the old 1k default, so METIS now defaults to a near-max 15,360-point context budget within the shared compile window.">Forecast max context</FieldLabel>
+                            <Input
+                              id="forecast_max_context"
+                              type="number"
+                              min={1}
+                              max={FORECAST_MAX_CONTEXT_LIMIT}
+                              {...register("forecast_max_context", { valueAsNumber: true })}
+                            />
+                            <FieldError message={errors.forecast_max_context?.message} />
+                          </div>
+                          <div className="space-y-1.5">
+                            <FieldLabel htmlFor="forecast_max_horizon" tooltip="Upper limit for horizon steps in Forecast mode. METIS now defaults to a 1k-step ceiling instead of the smaller 256-step cap.">Forecast max horizon</FieldLabel>
+                            <Input
+                              id="forecast_max_horizon"
+                              type="number"
+                              min={1}
+                              max={FORECAST_MAX_HORIZON_LIMIT}
+                              {...register("forecast_max_horizon", { valueAsNumber: true })}
+                            />
+                            <FieldError message={errors.forecast_max_horizon?.message} />
+                          </div>
+                        </div>
                       </div>
-                      <div className="space-y-1.5">
-                        <FieldLabel htmlFor="forecast_max_horizon" tooltip="Upper limit for horizon steps in Forecast mode. METIS now defaults to a 1k-step ceiling instead of the smaller 256-step cap.">Forecast max horizon</FieldLabel>
-                        <Input
-                          id="forecast_max_horizon"
-                          type="number"
-                          min={1}
-                          max={FORECAST_MAX_HORIZON_LIMIT}
-                          {...register("forecast_max_horizon", { valueAsNumber: true })}
-                        />
-                        <FieldError message={errors.forecast_max_horizon?.message} />
-                      </div>
-                    </div>
+                    )}
 
                     <div className="space-y-2">
                       <ToggleRow

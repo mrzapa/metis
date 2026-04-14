@@ -19,7 +19,7 @@ import { AssistantCopyActions } from "@/components/chat/assistant-copy-actions";
 import { ArrowArtifactBoundary } from "@/components/chat/artifacts/arrow-artifact-boundary";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { useArrowState } from "@/hooks/use-arrow-state";
-import { AlertCircle, Bot, Loader2, SendHorizontal, Square } from "lucide-react";
+import { AlertCircle, Bot, ChevronDown, FileSpreadsheet, Loader2, SendHorizontal, Square } from "lucide-react";
 import { AgenticStepIndicator } from "@/components/chat/agentic-step-indicator";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
 import { ModelStatusDialog } from "@/components/chat/model-status-dialog";
@@ -130,6 +130,7 @@ export function ChatPanel({
   const [pickerOpen, setPickerOpen] = useArrowState(false);
   const [buildStudioOpen, setBuildStudioOpen] = useArrowState(false);
   const [modelDialogOpen, setModelDialogOpen] = useArrowState(false);
+  const [covariatesOpen, setCovariatesOpen] = useArrowState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const forecastFileInputRef = useRef<HTMLInputElement>(null);
   const isKnowledgeSearchMode = queryMode === "rag" && selectedMode === "Knowledge Search";
@@ -248,10 +249,6 @@ export function ChatPanel({
     });
   }
 
-  function openForecastFilePicker() {
-    forecastFileInputRef.current?.click();
-  }
-
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     // Don't intercept keys while IME composition is active (CJK input, etc.)
     if (e.nativeEvent.isComposing) return;
@@ -266,9 +263,8 @@ export function ChatPanel({
   }
 
   function handleSend() {
-    if (isSending || isStreamingRag) return;
+    if (!canSend) return;
     const trimmedDraft = draft.trim();
-    if (queryMode !== "forecast" && !trimmedDraft) return;
     const text = trimmedDraft || "Generate a forecast for this dataset.";
     setDraft("");
     if (queryMode === "direct" && onDirectSend) {
@@ -470,32 +466,16 @@ export function ChatPanel({
                     : forecastPreflight?.install_guidance?.[0] ?? "Checking forecast dependencies…"}
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span
-                  className={cn(
-                    "chat-control-pill rounded-full px-2 py-1 text-[10px] font-medium",
-                    forecastPreflight?.ready
-                      ? "border-emerald-500/25 bg-emerald-500/12 text-emerald-100"
-                      : "border-amber-500/25 bg-amber-500/12 text-amber-100",
-                  )}
-                >
-                  {forecastPreflight?.ready ? "Forecast ready" : "Install required"}
-                </span>
-                <Button size="sm" variant="outline" className="h-8 px-3" onClick={openForecastFilePicker}>
-                  {forecastSchema?.file_name ? "Change CSV/TSV" : "Upload CSV/TSV"}
-                </Button>
-                <input
-                  ref={forecastFileInputRef}
-                  type="file"
-                  accept=".csv,.tsv,text/csv,text/tab-separated-values"
-                  className="hidden"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0] ?? null;
-                    onForecastFileSelect?.(file);
-                    event.currentTarget.value = "";
-                  }}
-                />
-              </div>
+              <span
+                className={cn(
+                  "chat-control-pill rounded-full px-2 py-1 text-[10px] font-medium",
+                  forecastPreflight?.ready
+                    ? "border-emerald-500/25 bg-emerald-500/12 text-emerald-100"
+                    : "border-amber-500/25 bg-amber-500/12 text-amber-100",
+                )}
+              >
+                {forecastPreflight?.ready ? "Forecast ready" : "Install required"}
+              </span>
             </div>
 
             {forecastSchema ? (
@@ -571,65 +551,75 @@ export function ChatPanel({
               </div>
             ) : null}
 
-            {forecastSchema ? (
+            {forecastSchema && forecastCovariateColumns.length > 0 ? (
               <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                    Covariates
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    Mark each remaining column as ignored, dynamic, or static.
-                  </span>
-                </div>
-                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                  {forecastCovariateColumns.map((column) => {
-                    const isDynamic = forecastSelectedMapping?.dynamic_covariates.includes(column.name);
-                    const isStatic = forecastSelectedMapping?.static_covariates.includes(column.name);
+                <button
+                  type="button"
+                  onClick={() => setCovariatesOpen((prev) => !prev)}
+                  className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:text-foreground"
+                  aria-expanded={covariatesOpen}
+                >
+                  <ChevronDown
+                    className={cn(
+                      "size-3 transition-transform duration-150",
+                      covariatesOpen ? "rotate-0" : "-rotate-90",
+                    )}
+                  />
+                  {covariatesOpen
+                    ? "Covariates"
+                    : `Configure covariates (${forecastCovariateColumns.length})`}
+                </button>
+                {covariatesOpen && (
+                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                    {forecastCovariateColumns.map((column) => {
+                      const isDynamic = forecastSelectedMapping?.dynamic_covariates.includes(column.name);
+                      const isStatic = forecastSelectedMapping?.static_covariates.includes(column.name);
 
-                    return (
-                      <div key={column.name} className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium text-foreground">{column.name}</p>
-                          <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                            {column.detected_type}
-                          </span>
+                      return (
+                        <div key={column.name} className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-medium text-foreground">{column.name}</p>
+                            <span className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                              {column.detected_type}
+                            </span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              className={cn(
+                                "chat-control-pill rounded-full px-2 py-1 text-[10px]",
+                                !isDynamic && !isStatic ? "border-white/20 bg-white/10 text-foreground" : "text-muted-foreground",
+                              )}
+                              onClick={() => setForecastCovariateMode(column.name, "ignore")}
+                            >
+                              Ignore
+                            </button>
+                            <button
+                              type="button"
+                              className={cn(
+                                "chat-control-pill rounded-full px-2 py-1 text-[10px]",
+                                isDynamic ? "border-sky-400/25 bg-sky-500/15 text-sky-100" : "text-muted-foreground",
+                              )}
+                              onClick={() => setForecastCovariateMode(column.name, "dynamic")}
+                            >
+                              Dynamic
+                            </button>
+                            <button
+                              type="button"
+                              className={cn(
+                                "chat-control-pill rounded-full px-2 py-1 text-[10px]",
+                                isStatic ? "border-amber-400/25 bg-amber-500/15 text-amber-100" : "text-muted-foreground",
+                              )}
+                              onClick={() => setForecastCovariateMode(column.name, "static")}
+                            >
+                              Static
+                            </button>
+                          </div>
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          <button
-                            type="button"
-                            className={cn(
-                              "chat-control-pill rounded-full px-2 py-1 text-[10px]",
-                              !isDynamic && !isStatic ? "border-white/20 bg-white/10 text-foreground" : "text-muted-foreground",
-                            )}
-                            onClick={() => setForecastCovariateMode(column.name, "ignore")}
-                          >
-                            Ignore
-                          </button>
-                          <button
-                            type="button"
-                            className={cn(
-                              "chat-control-pill rounded-full px-2 py-1 text-[10px]",
-                              isDynamic ? "border-sky-400/25 bg-sky-500/15 text-sky-100" : "text-muted-foreground",
-                            )}
-                            onClick={() => setForecastCovariateMode(column.name, "dynamic")}
-                          >
-                            Dynamic
-                          </button>
-                          <button
-                            type="button"
-                            className={cn(
-                              "chat-control-pill rounded-full px-2 py-1 text-[10px]",
-                              isStatic ? "border-amber-400/25 bg-amber-500/15 text-amber-100" : "text-muted-foreground",
-                            )}
-                            onClick={() => setForecastCovariateMode(column.name, "static")}
-                          >
-                            Static
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             ) : null}
 
@@ -855,19 +845,6 @@ export function ChatPanel({
             >
               RAG
             </button>
-            <button
-              type="button"
-              onClick={() => setQueryMode("forecast")}
-              data-active={queryMode === "forecast" ? "true" : "false"}
-              className={cn(
-                "chat-control-pill rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
-                queryMode === "forecast"
-                  ? "border-primary/30 bg-primary/90 text-primary-foreground"
-                  : "text-muted-foreground hover:bg-white/10"
-              )}
-            >
-              Forecast
-            </button>
             {queryMode === "rag" && (
               <>
                 <span className="text-[11px] text-muted-foreground/50">·</span>
@@ -901,8 +878,8 @@ export function ChatPanel({
                     ? "Search your indexed knowledge…"
                     : "Ask about your documents…"
                   : queryMode === "forecast"
-                    ? "Describe the forecast you want, or leave this blank to run with the selected dataset."
-                  : "Ask anything…"
+                    ? "Describe the forecast, or press Send to run with the selected columns."
+                  : "Ask anything, or attach a CSV/TSV to forecast…"
               }
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -911,6 +888,50 @@ export function ChatPanel({
               className="glass-micro-surface min-h-11 max-h-40 resize-none border-white/10 bg-white/6 px-3 py-2.5 text-sm leading-6 transition-[border-color,box-shadow] duration-200 focus:border-primary/30 focus:shadow-sm"
               aria-label="Message input"
               disabled={ragInputDisabled || forecastLoadingSchema}
+            />
+            {/* CSV/TSV attachment — always visible; attaching auto-activates forecast mode */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "size-11 shrink-0 rounded-2xl transition-colors",
+                forecastSchema
+                  ? "text-primary hover:text-primary/80"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => {
+                if (forecastSchema) {
+                  // Dataset already loaded — switch back to forecast mode without re-uploading
+                  setQueryMode("forecast");
+                } else {
+                  forecastFileInputRef.current?.click();
+                }
+              }}
+              title={
+                forecastSchema?.file_name
+                  ? queryMode === "forecast"
+                    ? `Dataset: ${forecastSchema.file_name}`
+                    : `Back to forecast — ${forecastSchema.file_name}`
+                  : "Attach CSV/TSV to forecast"
+              }
+              aria-label="Attach time series data"
+            >
+              <FileSpreadsheet className="size-4" />
+            </Button>
+            <input
+              ref={forecastFileInputRef}
+              type="file"
+              accept=".csv,.tsv,text/csv,text/tab-separated-values"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                if (file) {
+                  setQueryMode("forecast");
+                  onForecastFileSelect?.(file);
+                }
+                event.currentTarget.value = "";
+              }}
             />
             {isStreamingRag ? (
               <Button
@@ -941,11 +962,6 @@ export function ChatPanel({
           {isKnowledgeSearchMode && (
             <p className="text-[11px] text-muted-foreground/70">
               Retrieval-first mode returns a concise search summary plus the strongest sources.
-            </p>
-          )}
-          {queryMode === "forecast" && (
-            <p className="text-[11px] text-muted-foreground/70">
-              Upload a CSV or TSV, map the timestamp and target columns, then run a forecast in the same transcript.
             </p>
           )}
           <p className="select-none text-[11px] text-muted-foreground/60">

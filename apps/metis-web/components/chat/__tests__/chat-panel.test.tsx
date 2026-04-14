@@ -134,9 +134,14 @@ describe("ChatPanel", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Forecast" })).toHaveAttribute("data-active", "true");
+    // No manual Forecast path button — mode is entered by file attachment
+    expect(screen.queryByRole("button", { name: "Forecast" })).toBeNull();
+    // Attach button is always visible in the composer
+    expect(screen.getByRole("button", { name: "Attach time series data" })).toBeInTheDocument();
+    // Forecast preflight strip renders automatically when in forecast mode
     expect(screen.getByText("Forecast preflight")).toBeInTheDocument();
     expect(screen.getByText("Forecast ready")).toBeInTheDocument();
+    // Column mapping selectors are populated from the provided schema
     expect(screen.getByDisplayValue("ds")).toBeInTheDocument();
     expect(screen.getByDisplayValue("y")).toBeInTheDocument();
   });
