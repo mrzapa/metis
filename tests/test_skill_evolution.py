@@ -96,11 +96,12 @@ def test_stream_rag_answer_docstring_documents_iteration_complete():
 def test_reflect_spawns_promote_thread_on_completed_run(monkeypatch):
     """reflect() must spawn _promote_skill_candidates in a daemon thread for completed_run
     when allow_automatic_writes is True."""
-    import time
+    import threading
     from unittest.mock import MagicMock, patch
     from metis_app.services.assistant_companion import AssistantCompanionService
 
     promote_calls = []
+    promote_event = threading.Event()
 
     companion = AssistantCompanionService.__new__(AssistantCompanionService)
     companion.repository = MagicMock()
@@ -111,7 +112,12 @@ def test_reflect_spawns_promote_thread_on_completed_run(monkeypatch):
     companion.session_repo = None
     companion.trace_store = MagicMock(read_run_events=MagicMock(return_value=[]))
 
-    companion._promote_skill_candidates = lambda settings, **kw: promote_calls.append(settings) or 0
+    def _fake_promote(settings, **kw):
+        promote_calls.append(settings)
+        promote_event.set()
+        return 0
+
+    companion._promote_skill_candidates = _fake_promote
 
     fake_mem = MagicMock()
     fake_mem.to_payload = lambda: {}
@@ -147,7 +153,7 @@ def test_reflect_spawns_promote_thread_on_completed_run(monkeypatch):
         mock_mem_cls.create.return_value = fake_mem
         companion.reflect(trigger="completed_run", settings={}, force=True)
 
-    time.sleep(0.1)
+    assert promote_event.wait(timeout=5.0), "promote thread did not fire within 5s"
     assert len(promote_calls) >= 1
 
 

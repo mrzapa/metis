@@ -462,7 +462,14 @@ def test_reflect_promotes_high_scoring_skill_candidates(tmp_path) -> None:
     with patch("metis_app.services.assistant_companion.create_llm", return_value=mock_llm), \
          patch.object(svc, "_resolve_runtime_llm_settings", return_value={"llm_provider": "openai"}):
         svc.reflect(trigger="completed_run", settings=settings, force=True)
-        time.sleep(0.2)  # wait for daemon promotion thread
+
+        # Poll for the daemon promotion thread to write the skill file (up to 5s).
+        auto_dir = skills_dir / "auto-generated"
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if auto_dir.exists() and list(auto_dir.glob("*.md")):
+                break
+            time.sleep(0.02)
 
     auto_dir = skills_dir / "auto-generated"
     written = list(auto_dir.glob("*.md")) if auto_dir.exists() else []
