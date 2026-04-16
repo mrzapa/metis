@@ -91,7 +91,7 @@ NEXT_PUBLIC_METIS_API_BASE=http://127.0.0.1:8000
 
 - The API server must be running before the web UI can load data.
 - Both the API server and web dev server support hot reload — changes take effect immediately.
-- API docs are available at `http://127.0.0.1:8000/docs` when the server is running.
+- API docs are available at `http://127.0.0.1:8000/schema` when the server is running.
 - The default `pnpm ui:add -- <component>` flow still uses the built-in shadcn registry; Nyx is added as an extra source rather than replacing it.
 - NyxUI is configured as the `@nyx` shadcn registry source. Use `pnpm ui:list:nyx` to inspect the reviewed-installable subset before running `pnpm ui:add:nyx -- <component>`.
 - The review source of truth lives in `metis_app/assets/nyx_catalog_review.json`, and `python scripts/refresh_nyx_catalog.py` rebuilds the packaged snapshot consumed by both the API and the installer.

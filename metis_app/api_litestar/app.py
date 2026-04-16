@@ -1,7 +1,7 @@
-"""Experimental Litestar app factory.
+"""METIS Litestar app factory.
 
-This is a shadow port of the METIS FastAPI for evaluation purposes.
-The FastAPI implementation remains the production default.
+This is the production API. FastAPI was retired in favour of Litestar;
+see docs/experiments/deprecated/litestar_api.md for the migration history.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ log = logging.getLogger(__name__)
 
 
 def create_app() -> Litestar:
-    """Create the experimental Litestar app."""
+    """Create the METIS Litestar app."""
     cors_config = CORSConfig(
         allow_origins=cors_origins_from_env(),
         allow_credentials=True,
@@ -58,8 +58,8 @@ def create_app() -> Litestar:
     )
 
     openapi_config = OpenAPIConfig(
-        title="METIS API (Litestar Experimental)",
-        version="1.0-experimental",
+        title="METIS API",
+        version="1.0",
     )
 
     protected_routes = Router(

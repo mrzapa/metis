@@ -152,7 +152,7 @@ renders it as an interactive SVG at `/brain`.
 
 ## API reference
 
-All routes are documented at `http://localhost:8000/docs` when the server is
+All routes are documented at `http://localhost:8000/schema` when the server is
 running.
 
 Key endpoints:
