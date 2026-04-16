@@ -331,6 +331,21 @@ class AppSettings(BaseModel):
     brain_pass_model_id: str = "facebook/tribev2"
     brain_pass_cache_dir: str = ".metis_cache/tribev2"
     brain_pass_device: str = "auto"
+
+    # ── Brain encoder (CL1-inspired) ──────────────────────────────────────────
+    # Sparse top-k channel fingerprint computed from Tribev2 activity.
+    brain_encoder_channels: _EnvPassthrough = 62
+    brain_encoder_active_k: _EnvPassthrough = 8
+    brain_encoder_seed: _EnvPassthrough = 1337
+    brain_encoder_downsample: _EnvPassthrough = 1
+    brain_encoder_max_channels: _EnvPassthrough = 64
+    # Hebbian channel↔node reinforcement at retrieval time.
+    enable_hebbian: bool = True
+    hebbian_boost: float = 0.15
+    hebbian_decay: float = 0.999
+    # Candidate-level blended voting at synthesis time (1 = off).
+    brain_vote_candidates: _EnvPassthrough = 1
+    brain_vote_alpha: float = 0.3
     enable_arrow_artifacts: bool = False
     enable_arrow_artifact_runtime: bool = True
     enable_recursive_memory: bool = False

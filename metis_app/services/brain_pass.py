@@ -829,6 +829,8 @@ def _aggregate_native_analyses(native_results: list[dict[str, Any]]) -> dict[str
     timesteps = 0
     vertex_count = 0
     model_id = ""
+    coherence_accum: dict[str, list[float]] = {}
+    fingerprint_accum: dict[int, list[float]] = {}
     for result in native_results:
         mode = str(result.get("native_input_mode") or "")
         if mode:
@@ -841,6 +843,18 @@ def _aggregate_native_analyses(native_results: list[dict[str, Any]]) -> dict[str
             if roi_text and roi_text not in seen:
                 seen.add(roi_text)
                 top_rois.append(roi_text)
+        coherence = result.get("coherence") or {}
+        if isinstance(coherence, dict):
+            for key, value in coherence.items():
+                if isinstance(value, (int, float)):
+                    coherence_accum.setdefault(key, []).append(float(value))
+        fingerprint = result.get("fingerprint") or {}
+        if isinstance(fingerprint, dict):
+            for channel, amp in fingerprint.items():
+                try:
+                    fingerprint_accum.setdefault(int(channel), []).append(float(amp))
+                except (TypeError, ValueError):
+                    continue
 
     unique_modes = {mode for mode in input_modes if mode}
     if len(unique_modes) == 1:
@@ -850,6 +864,16 @@ def _aggregate_native_analyses(native_results: list[dict[str, Any]]) -> dict[str
     else:
         native_input_mode = ""
 
+    coherence_summary = {
+        key: (sum(values) / len(values)) if values else 0.0
+        for key, values in coherence_accum.items()
+    } if coherence_accum else {}
+    fingerprint_summary = {
+        channel: sum(values) / len(values)
+        for channel, values in fingerprint_accum.items()
+        if values
+    }
+
     return {
         "native_input_mode": native_input_mode,
         "top_rois": top_rois,
@@ -857,6 +881,8 @@ def _aggregate_native_analyses(native_results: list[dict[str, Any]]) -> dict[str
         "timesteps": timesteps,
         "vertex_count": vertex_count,
         "native_sources_used": len(native_results),
+        "coherence": coherence_summary,
+        "fingerprint": fingerprint_summary,
     }
 
 
@@ -1115,6 +1141,32 @@ def _run_native_tribev2(
         timesteps = 0
         vertex_count = 0
 
+    coherence: dict[str, float] | None = None
+    fingerprint: dict[int, float] | None = None
+    try:
+        import numpy as np
+
+        from metis_app.utils.brain_metrics import compute_coherence
+        from metis_app.utils.spatial_encoder import SpatialFingerprint
+
+        preds_array = np.asarray(preds)
+        if preds_array.ndim == 2 and preds_array.size > 0:
+            # Tribev2 hands us (T, V); coherence wants (V, T).
+            activity = preds_array.T
+            coherence = compute_coherence(
+                activity,
+                downsample=int(settings.get("brain_encoder_downsample", 1) or 1),
+                max_channels=int(settings.get("brain_encoder_max_channels", 64) or 64),
+            )
+            encoder = SpatialFingerprint(
+                n_channels=int(settings.get("brain_encoder_channels", 62) or 62),
+                active_k=int(settings.get("brain_encoder_active_k", 8) or 8),
+                seed=int(settings.get("brain_encoder_seed", 1337) or 1337),
+            )
+            fingerprint = encoder.encode_vector(activity.mean(axis=1))
+    except Exception as exc:  # noqa: BLE001
+        _LOG.debug("Coherence/fingerprint computation failed for %s: %s", input_path, exc)
+
     return {
         "native_input_mode": effective_input_mode,
         "native_input_path": input_path,
@@ -1122,6 +1174,8 @@ def _run_native_tribev2(
         "timesteps": timesteps,
         "vertex_count": vertex_count,
         "top_rois": top_rois,
+        "coherence": coherence,
+        "fingerprint": fingerprint,
     }
 
 
@@ -1403,6 +1457,25 @@ def run_brain_pass(
     analysis["blend_mode"] = placement.blend_mode
     analysis["blend_weights"] = dict(placement.blend_weights or {})
     analysis["final_blend_explanation"] = placement.final_blend_explanation
+
+    # Ensure downstream always sees a fingerprint, even when native Tribev2 did
+    # not run.  The heuristic fingerprint is keyed off the faculty score vector
+    # so similar-topic documents share channels.
+    if not analysis.get("fingerprint"):
+        try:
+            from metis_app.utils.spatial_encoder import SpatialFingerprint
+
+            encoder = SpatialFingerprint(
+                n_channels=int(settings.get("brain_encoder_channels", 62) or 62),
+                active_k=int(settings.get("brain_encoder_active_k", 8) or 8),
+                seed=int(settings.get("brain_encoder_seed", 1337) or 1337),
+            )
+            analysis["fingerprint"] = encoder.encode_id(placement.faculty_id)
+        except Exception as exc:  # noqa: BLE001
+            _LOG.debug("Heuristic fingerprint fallback failed: %s", exc)
+            analysis.setdefault("fingerprint", {})
+    if "coherence" not in analysis:
+        analysis["coherence"] = None
     index_text_by_source = {
         item.source_path: (item.extracted_text or _placeholder_text(pathlib.Path(item.source_path), item.source_modality, "No text extracted."))
         for item in normalized_sources

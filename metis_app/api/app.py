@@ -395,6 +395,64 @@ def create_app() -> FastAPI:
             ],
         }
 
+    @app.get("/v1/brain/coherence", dependencies=_auth)
+    def api_brain_coherence() -> dict[str, Any]:
+        """Aggregate coherence + Hebbian stats across the workspace.
+
+        Surfaces the CL1-derived brain health signal per index node plus a
+        workspace-wide average so the UI can render a single "coherence"
+        score and drill into individual nodes.
+        """
+        graph = WorkspaceOrchestrator().get_workspace_graph()
+        per_node: list[dict[str, Any]] = []
+        field_totals: dict[str, float] = {}
+        field_counts: dict[str, int] = {}
+        total_channels: set[int] = set()
+
+        for node in graph.nodes.values():
+            metadata = node.metadata or {}
+            coherence = metadata.get("coherence")
+            fingerprint = metadata.get("fingerprint") or {}
+            if isinstance(fingerprint, dict):
+                for ch in fingerprint:
+                    try:
+                        total_channels.add(int(ch))
+                    except (TypeError, ValueError):
+                        continue
+            if isinstance(coherence, dict) and coherence:
+                per_node.append({
+                    "node_id": node.node_id,
+                    "label": node.label,
+                    "coherence": coherence,
+                    "fingerprint_channels": sorted(int(c) for c in (fingerprint or {})),
+                })
+                for key, value in coherence.items():
+                    if isinstance(value, (int, float)):
+                        field_totals[key] = field_totals.get(key, 0.0) + float(value)
+                        field_counts[key] = field_counts.get(key, 0) + 1
+
+        workspace_mean = {
+            key: (field_totals[key] / field_counts[key])
+            for key in field_totals
+            if field_counts.get(key, 0) > 0
+        }
+
+        hebbian_stats: dict[str, float] = {}
+        try:
+            from metis_app.services.retrieval_pipeline import _get_hebbian  # noqa: PLC0415
+            settings = WorkspaceOrchestrator().load_settings() or {}
+            hebbian_stats = _get_hebbian(settings).stats()
+        except Exception:  # noqa: BLE001
+            pass
+
+        return {
+            "workspace_mean": workspace_mean,
+            "node_count": len(per_node),
+            "unique_channels": sorted(total_channels),
+            "hebbian": hebbian_stats,
+            "nodes": per_node,
+        }
+
     @app.get("/v1/brain/graph/events", dependencies=_auth)
     async def api_brain_graph_events(poll_seconds: float = 5.0) -> StreamingResponse:
         """SSE stream of brain graph snapshots.

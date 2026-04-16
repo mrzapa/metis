@@ -14,13 +14,18 @@ from metis_app.engine.querying import (
     _system_instructions,
     extract_arrow_artifacts,
 )
-from metis_app.services.retrieval_pipeline import execute_retrieval_plan, generate_sub_queries
+from metis_app.services.retrieval_pipeline import (
+    execute_retrieval_plan,
+    generate_sub_queries,
+    reinforce_query_outcome,
+)
 from metis_app.services.stream_events import normalize_stream_event
 from metis_app.services.vector_store import resolve_vector_store
 from metis_app.services.index_service import cosine_similarity as _cosine_similarity
 from metis_app.utils.embedding_providers import create_embeddings
 from metis_app.utils.llm_providers import create_llm, create_smart_llm
 from metis_app.utils.mock_embeddings import MockEmbeddings
+from metis_app.utils.spatial_encoder import SpatialFingerprint
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +42,62 @@ def _embed_text(text: str, settings: dict) -> list[float]:
     except (ValueError, ImportError):
         emb = MockEmbeddings(dimensions=32)
     return emb.embed_query(text)
+
+
+def _brain_vote_rank(
+    candidates: list[str],
+    *,
+    settings: dict[str, Any],
+    question: str,
+    sources: list[dict[str, Any]],
+) -> tuple[str, float, list[float]]:
+    """Pick the candidate answer most aligned with the brain-graph priors.
+
+    For each candidate, the score is the sum of fingerprint-Jaccard between
+    the query and the candidate embedding, plus a coherence-weighted bonus
+    from the sources the candidate lexically mentions.  Returns the winning
+    text, its score and the per-candidate score list (same order as input).
+    """
+    alpha = float(settings.get("brain_vote_alpha", 0.3) or 0.3)
+    if not candidates:
+        return "", 0.0, []
+
+    try:
+        embeddings = create_embeddings(settings)
+    except (ValueError, ImportError):
+        embeddings = MockEmbeddings(dimensions=32)
+
+    encoder = SpatialFingerprint(
+        n_channels=int(settings.get("brain_encoder_channels", 62) or 62),
+        active_k=int(settings.get("brain_encoder_active_k", 8) or 8),
+        seed=int(settings.get("brain_encoder_seed", 1337) or 1337),
+    )
+    try:
+        question_vec = embeddings.embed_query(question)
+        question_fp = encoder.encode_vector(question_vec)
+    except Exception:  # noqa: BLE001
+        question_fp = {}
+
+    scores: list[float] = []
+    for answer in candidates:
+        try:
+            answer_vec = embeddings.embed_query(answer or "")
+            answer_fp = encoder.encode_vector(answer_vec)
+        except Exception:  # noqa: BLE001
+            answer_fp = {}
+        affinity = SpatialFingerprint.similarity(question_fp, answer_fp)
+        coherence_bonus = 0.0
+        if sources and answer:
+            for source in sources:
+                path = str(source.get("file_path") or "")
+                if path and path in answer:
+                    c = source.get("coherence") or {}
+                    if isinstance(c, dict):
+                        coherence_bonus += float(c.get("c_score", 0.0) or 0.0)
+        scores.append(affinity + alpha * coherence_bonus)
+
+    winner_idx = max(range(len(candidates)), key=lambda i: scores[i])
+    return candidates[winner_idx], scores[winner_idx], scores
 
 
 def _generate_sub_queries(question: str, llm: Any) -> list[str]:
@@ -796,7 +857,42 @@ def stream_rag_answer(
         ]
 
         answer_parts: list[str] = []
-        if hasattr(synthesis_llm, "stream"):
+        vote_candidates = max(1, int(settings.get("brain_vote_candidates", 1) or 1))
+        if vote_candidates > 1:
+            # Candidate-level blended voting (CL1 TokenVotingEngineV3, adapted):
+            # sample N answers non-streamed, pick the one whose fingerprint
+            # best matches the query and whose cited sources score highest
+            # on coherence.  The winning answer is then emitted as a single
+            # token event so the client still sees a complete response.
+            candidates: list[str] = []
+            for _ in range(vote_candidates):
+                try:
+                    candidates.append(_response_text(synthesis_llm.invoke(messages)))
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("brain_vote candidate failed: %s", exc)
+            candidates = [c for c in candidates if c]
+            if candidates:
+                winner, winning_score, all_scores = _brain_vote_rank(
+                    candidates,
+                    settings=settings,
+                    question=question,
+                    sources=sources,
+                )
+                answer_parts.append(winner)
+                yield _emit({"type": "token", "run_id": run_id, "text": winner})
+                yield _emit({
+                    "type": "brain_vote",
+                    "run_id": run_id,
+                    "winner_score": round(float(winning_score), 4),
+                    "candidate_scores": [round(float(s), 4) for s in all_scores],
+                    "n_candidates": len(candidates),
+                })
+            else:
+                # All candidates failed; degrade to non-streamed invoke.
+                answer = _response_text(synthesis_llm.invoke(messages))
+                answer_parts.append(answer)
+                yield _emit({"type": "token", "run_id": run_id, "text": answer})
+        elif hasattr(synthesis_llm, "stream"):
             # LangChain streaming path — yields chunk objects with partial content
             for chunk in synthesis_llm.stream(messages):
                 text = _response_text(chunk)
@@ -823,6 +919,24 @@ def stream_rag_answer(
             "strategy_fingerprint": _final_strategy,
             **({"artifacts": final_artifacts} if final_artifacts else {}),
         })
+
+        # Hebbian reinforcement — on a successful, non-fallback answer,
+        # strengthen the association between the query's channels and the
+        # top-ranked source.  Runs after the final event so it never blocks
+        # the user-visible response.
+        if not retrieval_plan.fallback.triggered and sources:
+            try:
+                top_source = sources[0] if isinstance(sources[0], dict) else None
+                node_id = ""
+                if top_source:
+                    node_id = str(top_source.get("file_path") or "")
+                    if not node_id:
+                        idx = top_source.get("chunk_idx")
+                        node_id = f"chunk:{idx}" if idx is not None else ""
+                if node_id:
+                    reinforce_query_outcome(settings, question, node_id, reward=1.0)
+            except Exception as exc:  # noqa: BLE001
+                log.debug("Hebbian reinforcement skipped: %s", exc)
 
     except Exception as exc:  # noqa: BLE001
         yield _emit({"type": "error", "run_id": run_id, "message": str(exc)})

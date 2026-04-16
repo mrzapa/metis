@@ -10,15 +10,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import pathlib
 import re
+import threading
 from typing import Any
 
 from metis_app.services.hybrid_scorer import hybrid_rerank
 from metis_app.services.index_service import IndexBundle, QueryResult, build_query_result
 from metis_app.services.reranker import reciprocal_rank_fusion
 from metis_app.utils.embedding_providers import create_embeddings
+from metis_app.utils.hebbian_decoder import HebbianAssociations
 from metis_app.utils.llm_providers import create_llm
 from metis_app.utils.mock_embeddings import MockEmbeddings
+from metis_app.utils.spatial_encoder import SpatialFingerprint
 
 _EMB_DIM = 32
 _DEFAULT_MIN_SCORE = 0.15
@@ -184,6 +188,70 @@ def _load_query_embeddings(settings: dict[str, Any]) -> Any:
         return create_embeddings(settings)
     except (ValueError, ImportError):
         return MockEmbeddings(dimensions=_EMB_DIM)
+
+
+# ---------------------------------------------------------------------------
+# Hebbian channel↔node associations (CL1-style reinforcement)
+# ---------------------------------------------------------------------------
+
+_HEBBIAN_LOCK = threading.RLock()
+_HEBBIAN_CACHE: dict[str, HebbianAssociations] = {}
+
+
+def _hebbian_storage_path(settings: dict[str, Any]) -> pathlib.Path:
+    root = str(settings.get("cache_dir", ".metis_cache") or ".metis_cache").strip() or ".metis_cache"
+    return pathlib.Path(root) / "hebbian" / "associations.json"
+
+
+def _get_hebbian(settings: dict[str, Any]) -> HebbianAssociations:
+    path = str(_hebbian_storage_path(settings))
+    with _HEBBIAN_LOCK:
+        cached = _HEBBIAN_CACHE.get(path)
+        if cached is not None:
+            return cached
+        store = HebbianAssociations(
+            storage_path=path,
+            decay=float(settings.get("hebbian_decay", 0.999) or 0.999),
+        )
+        _HEBBIAN_CACHE[path] = store
+        return store
+
+
+def _query_fingerprint(settings: dict[str, Any], question: str) -> dict[int, float]:
+    embeddings = _load_query_embeddings(settings)
+    try:
+        vec = embeddings.embed_query(question)
+    except Exception:  # noqa: BLE001
+        return {}
+    encoder = SpatialFingerprint(
+        n_channels=int(settings.get("brain_encoder_channels", 62) or 62),
+        active_k=int(settings.get("brain_encoder_active_k", 8) or 8),
+        seed=int(settings.get("brain_encoder_seed", 1337) or 1337),
+    )
+    return encoder.encode_vector(vec)
+
+
+def reinforce_query_outcome(
+    settings: dict[str, Any],
+    question: str,
+    node_id: str,
+    *,
+    reward: float = 1.0,
+) -> None:
+    """Strengthen (or weaken) Hebbian links between the question's channels
+    and ``node_id``.  Called from ``engine/streaming.py`` after a successful
+    answer; caller passes a negative ``reward`` for thumbs-down feedback.
+    """
+    if not bool(settings.get("enable_hebbian", True)):
+        return
+    if not node_id:
+        return
+    fp = _query_fingerprint(settings, question)
+    if not fp:
+        return
+    store = _get_hebbian(settings)
+    store.update(fp.keys(), node_id, reward=float(reward))
+    store.save()
 
 
 def _score_bundle_against_question(
@@ -468,6 +536,56 @@ def execute_retrieval_plan(
                 )
         except Exception:  # noqa: BLE001
             pass  # MCES is best-effort; never block a query
+
+    # --- Hebbian re-rank: boost sources previously associated with this
+    # query's active channels.  No-op on cold state; over time it biases
+    # retrieval toward nodes the user consistently settles on.
+    if bool(settings.get("enable_hebbian", True)) and final_result.sources:
+        try:
+            query_fp = _query_fingerprint(settings, question)
+            if query_fp:
+                store = _get_hebbian(settings)
+                candidates = [
+                    ((s.file_path or f"chunk:{s.chunk_idx}"), float(s.score or 0.0))
+                    for s in final_result.sources
+                ]
+                boosted = store.boost(
+                    query_fp.keys(),
+                    candidates,
+                    weight=float(settings.get("hebbian_boost", 0.15) or 0.15),
+                )
+                score_by_id = {nid: score for nid, score in boosted}
+                for src in final_result.sources:
+                    key = src.file_path or f"chunk:{src.chunk_idx}"
+                    if key in score_by_id:
+                        src.score = score_by_id[key]
+                final_result.sources.sort(
+                    key=lambda s: float(s.score or 0.0), reverse=True,
+                )
+                final_result.top_score = (
+                    float(final_result.sources[0].score or 0.0)
+                    if final_result.sources else float(final_result.top_score)
+                )
+                # Keep earlier retrieval stages in sync so consumers that
+                # replay the plan see the same source order as the final
+                # result.  (The new `hebbian_rerank` stage still records the
+                # fact that a re-rank happened.)
+                refreshed_sources = [src.to_dict() for src in final_result.sources]
+                for stage in stages:
+                    if stage.stage_type in {"retrieval_complete", "retrieval_augmented"}:
+                        stage.payload["sources"] = refreshed_sources
+                        stage.payload["top_score"] = float(final_result.top_score)
+                stages.append(
+                    RetrievalStage(
+                        stage_type="hebbian_rerank",
+                        payload={
+                            "channels": sorted(int(c) for c in query_fp),
+                            "active_associations": len(store),
+                        },
+                    )
+                )
+        except Exception:  # noqa: BLE001
+            pass  # Hebbian is best-effort; never block a query
 
     fallback = _fallback_for_result(final_result, settings)
     stages.append(

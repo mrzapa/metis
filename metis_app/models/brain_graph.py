@@ -153,6 +153,15 @@ class BrainGraph:
             placement = _as_mapping(brain_pass.get("placement"))
             faculty_id = _as_text(placement.get("faculty_id"))
             secondary_faculty_id = _as_text(placement.get("secondary_faculty_id"))
+            analysis = _as_mapping(brain_pass.get("analysis"))
+            coherence = analysis.get("coherence") if isinstance(analysis.get("coherence"), dict) else None
+            fingerprint_raw = analysis.get("fingerprint") if isinstance(analysis.get("fingerprint"), dict) else {}
+            fingerprint: dict[int, float] = {}
+            for ch, amp in (fingerprint_raw or {}).items():
+                try:
+                    fingerprint[int(ch)] = float(amp)
+                except (TypeError, ValueError):
+                    continue
             metadata = {
                 "path": str(row.get("path", "") or ""),
                 "vector_backend": str(row.get("vector_backend", "") or ""),
@@ -165,6 +174,8 @@ class BrainGraph:
                 "manifest_path": str(row.get("manifest_path", "") or ""),
                 "legacy_compat": bool(row.get("legacy_compat", False)),
                 "brain_pass": brain_pass,
+                "coherence": coherence,
+                "fingerprint": fingerprint,
                 "scope": "workspace",
             }
             if faculty_id:
