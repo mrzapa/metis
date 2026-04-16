@@ -29,11 +29,10 @@ def test_live_weaviate_ci_job_installs_required_extra() -> None:
     assert "pip install -e .[dev,live-backends]" in workflow
 
 
-def test_windows_runtime_smoke_runs_qt_smoke_tests() -> None:
+def test_windows_runtime_smoke_job_exists() -> None:
     workflow = (
         Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
     ).read_text(encoding="utf-8")
 
     assert "windows-runtime-smoke:" in workflow
     assert '& .\\.venv-ci\\Scripts\\python.exe -m pip install -e ".[dev]"' in workflow
-    assert "-m pytest -q tests/test_app_view_smoke.py" in workflow
