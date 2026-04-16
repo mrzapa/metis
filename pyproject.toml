@@ -81,6 +81,7 @@ runtime-all = [
     "llama-cpp-python",
     "opendataloader-pdf",
     "jdk4py",
+    "pymupdf>=1.24",
 ]
 live-backends = [
     "weaviate-client>=4,<5",
@@ -91,6 +92,9 @@ kreuzberg = [
 opendataloader = [
     "opendataloader-pdf",
     "jdk4py",
+]
+vision = [
+    "pymupdf>=1.24",
 ]
 tribev2 = [
     "tribev2 @ git+https://github.com/facebookresearch/tribev2.git@main ; python_version >= '3.11'",
@@ -104,6 +108,7 @@ news = [
 all = [
     "kreuzberg",
     "weaviate-client>=4,<5",
+    "pymupdf>=1.24",
 ]
 
 [project.scripts]

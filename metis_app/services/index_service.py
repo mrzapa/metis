@@ -32,6 +32,7 @@ from metis_app.utils.document_loader import (
     load_document,
     batch_extract_pdfs,
     is_opendataloader_available,
+    is_vision_pdf_available,
 )
 from metis_app.utils.embedding_providers import create_embeddings
 from metis_app.utils.knowledge_graph import (
@@ -1018,8 +1019,22 @@ def build_index_bundle(
     chunk_size = int(settings.get("chunk_size", 800))
     overlap = int(settings.get("chunk_overlap", 100))
     doc_loader_setting = str(settings.get("document_loader", "auto") or "auto").strip().lower()
-    use_kreuzberg = doc_loader_setting not in {"plain", "opendataloader"}
+    use_kreuzberg = doc_loader_setting not in {"plain", "opendataloader", "vision"}
     use_opendataloader = doc_loader_setting == "opendataloader" and is_opendataloader_available()
+    use_vision = doc_loader_setting == "vision" and is_vision_pdf_available()
+    _vision_llm: Any | None = None
+    if use_vision:
+        try:
+            from metis_app.utils.llm_providers import create_llm as _create_llm_v
+            _vision_llm = _create_llm_v(settings)
+        except Exception as _exc:  # noqa: BLE001
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "vision-PDF loader requested but LLM init failed (%s) — falling back to kreuzberg",
+                _exc,
+            )
+            use_vision = False
+            use_kreuzberg = True
     brain_pass = run_brain_pass(documents, settings, post_message=post_message)
     brain_pass_metadata = brain_pass.to_metadata()
     source_brain_metadata = {
@@ -1078,7 +1093,13 @@ def build_index_bundle(
             post_message({"type": "status", "text": f"Reading {source}…"})
         text = _odl_cache.get(str(path)) or brain_pass.index_text_by_source.get(str(path))
         if text is None:
-            text = load_document(path, use_kreuzberg=use_kreuzberg, use_opendataloader=use_opendataloader)
+            text = load_document(
+                path,
+                use_kreuzberg=use_kreuzberg,
+                use_opendataloader=use_opendataloader,
+                use_vision=use_vision,
+                vision_llm=_vision_llm,
+            )
         outline_nodes = _extract_outline_nodes(text, str(path))
         all_outline_nodes.extend(outline_nodes)
         all_events.extend(_extract_events(text, source))
@@ -1257,17 +1278,29 @@ def build_index_bundle(
     # ── LLM knowledge-graph enrichment (optional) ─────────────────────
     _build_llm_kg = settings.get("build_llm_knowledge_graph", False)
     if _build_llm_kg and per_doc_chunks:
+        _gleaning_passes = max(1, min(int(settings.get("kg_gleaning_passes", 1) or 1), 5))
+        _want_descriptions = bool(settings.get("kg_entity_descriptions", True))
         if callable(post_message):
-            post_message({"type": "status", "text": "Enriching knowledge graph with LLM NER…"})
+            _suffix = f" (gleaning={_gleaning_passes})" if _gleaning_passes > 1 else ""
+            post_message({"type": "status", "text": f"Enriching knowledge graph with LLM NER{_suffix}…"})
         try:
             from metis_app.utils.llm_providers import create_llm as _create_llm
 
             _llm = _create_llm(settings)
             for _source, _file_path, _doc_texts in per_doc_chunks:
                 for _chunk_text in _doc_texts:
-                    _entities, _rels = llm_extract_entities_and_relations(_chunk_text, _llm)
-                    for _label, _entity in _entities:
-                        graph.add_node(_entity, entity_type=_label)
+                    _entities, _rels = llm_extract_entities_and_relations(
+                        _chunk_text,
+                        _llm,
+                        max_passes=_gleaning_passes,
+                        return_descriptions=_want_descriptions,
+                    )
+                    if _want_descriptions:
+                        for _label, _entity, _desc in _entities:  # type: ignore[misc]
+                            graph.add_node(_entity, entity_type=_label, description=_desc)
+                    else:
+                        for _label, _entity in _entities:  # type: ignore[misc]
+                            graph.add_node(_entity, entity_type=_label)
                     for _src, _rel, _tgt in _rels:
                         graph.add_edge(_src, _rel, _tgt)
             if callable(post_message):

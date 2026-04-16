@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import re
 from typing import Any
 
 from metis_app.services.hybrid_scorer import hybrid_rerank
@@ -26,6 +27,68 @@ _DEFAULT_FALLBACK_MESSAGE = (
     "confidently. Try Knowledge Search, increase retrieval depth, or rephrase "
     "the question."
 )
+
+
+def apply_glossary_expansion(
+    question: str, settings: dict[str, Any]
+) -> tuple[str, list[tuple[str, list[str]]]]:
+    """Expand a query with synonyms/expansions from the workspace glossary.
+
+    The glossary is read from ``settings["glossary"]`` and is a mapping of
+    ``term -> [synonym, synonym, …]``. When a glossary key (or any of its
+    synonyms) appears in the question (case-insensitive whole-word match),
+    the canonical term plus its other synonyms are appended in parentheses
+    so that the downstream retriever can match documents that use either
+    surface form.
+
+    Glossary entries are *never* surfaced as citations — they are pure
+    query rewrites.
+
+    Returns
+    -------
+    expanded_question:
+        The (possibly) rewritten question. Identical to ``question`` when
+        no glossary entries match or the glossary is empty.
+    matches:
+        Audit trail: ``[(canonical_term, [added_terms]), …]`` describing
+        which entries fired, for trace events.
+    """
+    glossary = settings.get("glossary") or {}
+    if not isinstance(glossary, dict) or not glossary or not question:
+        return question, []
+
+    lowered = question.lower()
+    matches: list[tuple[str, list[str]]] = []
+    additions: list[str] = []
+    seen_additions: set[str] = set()
+
+    for term, synonyms in glossary.items():
+        if not isinstance(term, str) or not term.strip():
+            continue
+        syn_list = [s for s in (synonyms or []) if isinstance(s, str) and s.strip()]
+        surface_forms = [term, *syn_list]
+        hit = False
+        for form in surface_forms:
+            pattern = r"\b" + re.escape(form.lower()) + r"\b"
+            if re.search(pattern, lowered):
+                hit = True
+                break
+        if not hit:
+            continue
+        added_for_term: list[str] = []
+        for form in surface_forms:
+            key = form.lower()
+            if key in lowered or key in seen_additions:
+                continue
+            seen_additions.add(key)
+            additions.append(form)
+            added_for_term.append(form)
+        if added_for_term:
+            matches.append((term, added_for_term))
+
+    if not additions:
+        return question, []
+    return f"{question} (also: {', '.join(additions)})", matches
 
 
 @dataclass(slots=True)
@@ -261,7 +324,24 @@ def execute_retrieval_plan(
         except Exception:  # noqa: BLE001
             _cache = None  # degrade gracefully; proceed with live retrieval
 
-    primary_result = adapter.query(bundle, question, settings)
+    # Glossary expansion: rewrite the user's question with workspace-defined
+    # synonyms before any retrieval. Original question is preserved for
+    # display/citations; the expanded form is what the retriever sees.
+    expanded_question, _glossary_matches = apply_glossary_expansion(question, settings)
+    glossary_stage: RetrievalStage | None = None
+    if _glossary_matches:
+        glossary_stage = RetrievalStage(
+            stage_type="glossary_expansion",
+            payload={
+                "original": question,
+                "expanded": expanded_question,
+                "matches": [
+                    {"term": term, "added": added} for term, added in _glossary_matches
+                ],
+            },
+        )
+
+    primary_result = adapter.query(bundle, expanded_question, settings)
 
     # Hybrid rerank: blend BM25 keyword scores with vector scores (Onyx-style alpha blending).
     # alpha=1.0 (default) is a no-op — pure vector, identical to previous behaviour.
@@ -283,7 +363,10 @@ def execute_retrieval_plan(
 
     effective_queries = [question]
 
-    stages: list[RetrievalStage] = [
+    stages: list[RetrievalStage] = []
+    if glossary_stage is not None:
+        stages.append(glossary_stage)
+    stages.append(
         RetrievalStage(
             stage_type="retrieval_complete",
             payload={
@@ -292,7 +375,7 @@ def execute_retrieval_plan(
                 "top_score": float(primary_result.top_score),
             },
         )
-    ]
+    )
 
     final_result = primary_result
 
@@ -316,7 +399,8 @@ def execute_retrieval_plan(
             ranked_lists: list[list[int]] = [list(primary_result.hit_indices)]
             for sub_query in sub_queries:
                 try:
-                    ranked_lists.append(list(adapter.query(bundle, sub_query, settings).hit_indices))
+                    expanded_sub, _ = apply_glossary_expansion(sub_query, settings)
+                    ranked_lists.append(list(adapter.query(bundle, expanded_sub, settings).hit_indices))
                 except Exception:  # noqa: BLE001
                     continue
             if len(ranked_lists) > 1:
