@@ -62,17 +62,21 @@ forecast-xreg = [
 ]
 runtime-all = [
     "rank-bm25>=0.2.2",
-    "langchain==0.3.28",
+    # LangChain surface in use (see metis_app/utils/llm_providers.py,
+    # metis_app/utils/embedding_providers.py, services/web_graph_service.py):
+    #   - core: Messages primitives
+    #   - openai / anthropic / google-genai: LLM providers
+    #   - voyageai: embeddings
+    #   - community: HuggingFaceEmbeddings
+    # langchain-cohere, langchain-chroma, langchain-weaviate, and
+    # langchain-text-splitters were dropped because they had no imports;
+    # Chroma/Weaviate are used via the native clients (chromadb, weaviate-client).
     "langchain-core==0.3.83",
-    "langchain-text-splitters==0.3.11",
     "langchain-openai==0.3.35",
     "langchain-anthropic==0.3.22",
     "langchain-google-genai==2.1.12",
-    "langchain-cohere==0.3.5",
     "langchain-voyageai==0.1.3",
     "langchain-community==0.3.31",
-    "langchain-chroma==0.2.6",
-    "langchain-weaviate==0.0.6",
     "chromadb>=0.5.0",
     "beautifulsoup4>=4.12.0",
     "tiktoken>=0.7.0",

@@ -1,4 +1,15 @@
-"""Refresh the bundled GGUF catalog snapshot from llmfit upstream."""
+"""Refresh the bundled GGUF catalog snapshot from llmfit upstream.
+
+Fetches the upstream ``hf_models.json`` and latest commit metadata from
+AlexsJones/llmfit on GitHub, then rewrites
+``metis_app/assets/llmfit_gguf_catalog.json`` with a normalized snapshot.
+
+Run this manually when a new llmfit release lands; there is no scheduled
+trigger. Output must be reviewed and committed.
+
+Invocation:
+    python scripts/refresh_llmfit_catalog.py
+"""
 
 from __future__ import annotations
 
