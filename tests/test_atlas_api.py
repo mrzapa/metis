@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from importlib import import_module
 
-from fastapi.testclient import TestClient as FastAPITestClient
-from litestar.testing import TestClient as LitestarTestClient
+from litestar.testing import TestClient
 
 
 def _candidate_payload(status: str = "candidate") -> dict[str, object]:
@@ -30,10 +29,8 @@ def _candidate_payload(status: str = "candidate") -> dict[str, object]:
     }
 
 
-def test_atlas_routes_round_trip_for_fastapi_and_litestar(monkeypatch) -> None:
-    fastapi_atlas = import_module("metis_app.api.atlas")
+def test_atlas_routes_round_trip(monkeypatch) -> None:
     litestar_atlas = import_module("metis_app.api_litestar.routes.atlas")
-    fastapi_app = import_module("metis_app.api.app")
     litestar_app = import_module("metis_app.api_litestar")
 
     captured: dict[str, object] = {}
@@ -58,38 +55,37 @@ def test_atlas_routes_round_trip_for_fastapi_and_litestar(monkeypatch) -> None:
             captured["list"] = limit
             return [_candidate_payload("saved")]
 
-    monkeypatch.setattr(fastapi_atlas, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
     monkeypatch.setattr(litestar_atlas, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
 
-    with FastAPITestClient(fastapi_app.create_app()) as fastapi_client, LitestarTestClient(
-        app=litestar_app.create_app()
-    ) as litestar_client:
-        fast_candidate = fastapi_client.get("/v1/atlas/candidate", params={"session_id": "session-1", "run_id": "run-1"})
-        lit_candidate = litestar_client.get("/v1/atlas/candidate", params={"session_id": "session-1", "run_id": "run-1"})
-        assert fast_candidate.status_code == 200
-        assert lit_candidate.status_code == 200
-        assert fast_candidate.json()["entry_id"] == "atlas-1"
-        assert lit_candidate.json()["entry_id"] == "atlas-1"
-
-        fast_save = fastapi_client.post(
-            "/v1/atlas/save",
-            json={"session_id": "session-1", "run_id": "run-1", "title": "Save this", "summary": "Atlas summary"},
+    with TestClient(app=litestar_app.create_app()) as client:
+        candidate = client.get(
+            "/v1/atlas/candidate", params={"session_id": "session-1", "run_id": "run-1"}
         )
-        lit_decision = litestar_client.post(
+        assert candidate.status_code == 200
+        assert candidate.json()["entry_id"] == "atlas-1"
+
+        save = client.post(
+            "/v1/atlas/save",
+            json={
+                "session_id": "session-1",
+                "run_id": "run-1",
+                "title": "Save this",
+                "summary": "Atlas summary",
+            },
+        )
+        assert save.status_code == 200
+        assert save.json()["status"] == "saved"
+
+        decision = client.post(
             "/v1/atlas/decision",
             json={"session_id": "session-1", "run_id": "run-1", "decision": "declined"},
         )
-        assert fast_save.status_code == 200
-        assert lit_decision.status_code == 200
-        assert fast_save.json()["status"] == "saved"
-        assert lit_decision.json()["status"] == "declined"
+        assert decision.status_code == 200
+        assert decision.json()["status"] == "declined"
 
-        fast_entries = fastapi_client.get("/v1/atlas/entries", params={"limit": 5})
-        lit_entries = litestar_client.get("/v1/atlas/entries", params={"limit": 5})
-        assert fast_entries.status_code == 200
-        assert lit_entries.status_code == 200
-        assert len(fast_entries.json()) == 1
-        assert len(lit_entries.json()) == 1
+        entries = client.get("/v1/atlas/entries", params={"limit": 5})
+        assert entries.status_code == 200
+        assert len(entries.json()) == 1
 
     assert captured["candidate"] == ("session-1", "run-1")
     assert captured["save"] == ("session-1", "run-1", "Save this", "Atlas summary")

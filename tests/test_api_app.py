@@ -4,7 +4,7 @@ import json
 from importlib import import_module
 from unittest.mock import MagicMock
 
-from fastapi.testclient import TestClient
+from litestar.testing import TestClient
 import pytest
 
 from metis_app.models.brain_graph import BrainGraph
@@ -24,7 +24,15 @@ from metis_app.services.nyx_install_executor import (
 )
 from metis_app.services.trace_store import TraceStore
 
-api_app_module = import_module("metis_app.api.app")
+api_app_module = import_module("metis_app.api_litestar")
+from tests._litestar_helpers import (
+    patch_workspace_orchestrator as _patch_workspace_orchestrator,
+    patch_trace_store as _patch_trace_store,
+    patch_execute_nyx_install_action as _patch_execute_nyx_install_action,
+    patch_rag_stream_manager as _patch_rag_stream_manager,
+)
+from metis_app.api_litestar.routes import autonomous as _autonomous_module  # noqa: E402
+from metis_app.api_litestar.routes import query as _query_module  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +49,7 @@ def reset_default_nyx_catalog_state() -> None:
 
 
 def test_healthz_returns_ok() -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.get("/healthz")
 
@@ -50,7 +58,7 @@ def test_healthz_returns_ok() -> None:
 
 
 def test_build_index_uses_orchestrator(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     captured: dict[str, object] = {}
 
     class _Result:
@@ -72,7 +80,7 @@ def test_build_index_uses_orchestrator(monkeypatch) -> None:
         return _Result()
 
     fake_orchestrator.build_index.side_effect = _fake_build_index
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/index/build",
@@ -98,7 +106,7 @@ def test_build_index_uses_orchestrator(monkeypatch) -> None:
 
 
 def test_stream_build_index_uses_orchestrator_and_progress_callback(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     captured: dict[str, object] = {}
 
     class _Result:
@@ -122,7 +130,7 @@ def test_stream_build_index_uses_orchestrator_and_progress_callback(monkeypatch)
         return _Result()
 
     fake_orchestrator.build_index.side_effect = _fake_build_index
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/index/build/stream",
@@ -150,7 +158,7 @@ def test_stream_build_index_uses_orchestrator_and_progress_callback(monkeypatch)
 
 
 def test_delete_index_removes_manifest_directory_and_preserves_sources(tmp_path) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     src = tmp_path / "notes.txt"
     src.write_text("Delete the METIS index but keep the source file.\n", encoding="utf-8")
     bundle = build_index_bundle([str(src)], {"embedding_provider": "mock", "vector_db_type": "json"})
@@ -170,7 +178,7 @@ def test_delete_index_removes_manifest_directory_and_preserves_sources(tmp_path)
 
 
 def test_delete_index_removes_legacy_bundle_and_preserves_sources(tmp_path) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     src = tmp_path / "legacy.txt"
     src.write_text("Legacy index bundles should delete through the API.\n", encoding="utf-8")
     bundle = build_index_bundle([str(src)], {"embedding_provider": "mock"})
@@ -189,7 +197,7 @@ def test_delete_index_removes_legacy_bundle_and_preserves_sources(tmp_path) -> N
 
 
 def test_delete_index_returns_404_for_missing_manifest(tmp_path) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     missing_manifest = tmp_path / "missing" / "manifest.json"
 
     response = client.delete("/v1/index", params={"manifest_path": str(missing_manifest)})
@@ -199,7 +207,7 @@ def test_delete_index_returns_404_for_missing_manifest(tmp_path) -> None:
 
 
 def test_search_nyx_catalog_uses_orchestrator(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     captured: dict[str, object] = {}
 
     fake_orchestrator = MagicMock()
@@ -236,7 +244,7 @@ def test_search_nyx_catalog_uses_orchestrator(monkeypatch) -> None:
         )
 
     fake_orchestrator.search_nyx_catalog.side_effect = _fake_search_nyx_catalog
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.get("/v1/nyx/catalog?q=glow&limit=5")
 
@@ -250,7 +258,7 @@ def test_search_nyx_catalog_uses_orchestrator(monkeypatch) -> None:
 
 
 def test_get_nyx_component_detail_uses_orchestrator(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     captured: dict[str, object] = {}
 
     fake_orchestrator = MagicMock()
@@ -285,7 +293,7 @@ def test_get_nyx_component_detail_uses_orchestrator(monkeypatch) -> None:
         )
 
     fake_orchestrator.get_nyx_component_detail.side_effect = _fake_get_nyx_component_detail
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.get("/v1/nyx/catalog/glow-card")
 
@@ -297,7 +305,7 @@ def test_get_nyx_component_detail_uses_orchestrator(monkeypatch) -> None:
 
 
 def test_get_nyx_component_detail_returns_404_for_unknown_component(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     fake_orchestrator = MagicMock()
     fake_orchestrator.get_nyx_component_detail.side_effect = (
@@ -305,7 +313,7 @@ def test_get_nyx_component_detail_returns_404_for_unknown_component(monkeypatch)
             "Unsupported NyxUI component: does-not-exist"
         )
     )
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.get("/v1/nyx/catalog/does-not-exist")
 
@@ -326,7 +334,7 @@ def test_nyx_catalog_endpoints_use_packaged_snapshot_without_live_fetch(
         raise AssertionError(f"Unexpected live Nyx fetch: {url}")
 
     monkeypatch.setattr(nyx_catalog_module, "_default_fetch_json", fail_fetch)
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     catalog_response = client.get("/v1/nyx/catalog", params={"q": "glow", "limit": 1})
     detail_response = client.get("/v1/nyx/catalog/glow-card")
@@ -354,7 +362,7 @@ def test_nyx_catalog_endpoints_expose_preview_only_snapshot_components_without_l
         raise AssertionError(f"Unexpected live Nyx fetch: {url}")
 
     monkeypatch.setattr(nyx_catalog_module, "_default_fetch_json", fail_fetch)
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     catalog_response = client.get("/v1/nyx/catalog", params={"q": "marquee", "limit": 5})
     detail_response = client.get("/v1/nyx/catalog/marquee")
@@ -377,7 +385,7 @@ def test_nyx_catalog_endpoints_expose_preview_only_snapshot_components_without_l
 
 
 def test_query_direct_happy_path(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     captured: dict[str, object] = {}
 
     class _Result:
@@ -395,7 +403,7 @@ def test_query_direct_happy_path(monkeypatch) -> None:
         return _Result()
 
     fake_orchestrator.run_direct_query.side_effect = _fake_run_direct_query
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/query/direct",
@@ -414,7 +422,7 @@ def test_query_direct_happy_path(monkeypatch) -> None:
 
 
 def test_query_direct_serializes_artifacts(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     class _Result:
         run_id = "run-nyx-direct"
@@ -451,7 +459,7 @@ def test_query_direct_serializes_artifacts(monkeypatch) -> None:
 
     fake_orchestrator = MagicMock()
     fake_orchestrator.run_direct_query.return_value = _Result()
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/query/direct",
@@ -469,7 +477,7 @@ def test_query_direct_serializes_artifacts(monkeypatch) -> None:
 
 
 def test_query_direct_serializes_nyx_install_actions(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     class _Result:
         run_id = "run-nyx-action"
@@ -533,7 +541,7 @@ def test_query_direct_serializes_nyx_install_actions(monkeypatch) -> None:
 
     fake_orchestrator = MagicMock()
     fake_orchestrator.run_direct_query.return_value = _Result()
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/query/direct",
@@ -632,9 +640,9 @@ def test_run_action_infers_nyx_approval_without_action_type(monkeypatch, tmp_pat
             stderr_excerpt="",
         )
 
-    monkeypatch.setattr(api_app_module, "TraceStore", lambda: trace_store)
-    monkeypatch.setattr(api_app_module, "execute_nyx_install_action", fake_execute_nyx_install_action)
-    client = TestClient(api_app_module.create_app())
+    _patch_trace_store(monkeypatch, lambda: trace_store)
+    _patch_execute_nyx_install_action(monkeypatch, fake_execute_nyx_install_action)
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post(
         "/v1/runs/run-nyx-action/actions",
@@ -666,8 +674,8 @@ def test_run_action_infers_nyx_decline_without_action_type(monkeypatch, tmp_path
         payload={"actions": [persisted_action]},
     )
 
-    monkeypatch.setattr(api_app_module, "TraceStore", lambda: trace_store)
-    client = TestClient(api_app_module.create_app())
+    _patch_trace_store(monkeypatch, lambda: trace_store)
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post(
         "/v1/runs/run-nyx-action/actions",
@@ -717,9 +725,9 @@ def test_run_action_returns_clear_nyx_mismatch_status_without_action_type(
             },
         )
 
-    monkeypatch.setattr(api_app_module, "TraceStore", lambda: trace_store)
-    monkeypatch.setattr(api_app_module, "execute_nyx_install_action", fake_execute_nyx_install_action)
-    client = TestClient(api_app_module.create_app())
+    _patch_trace_store(monkeypatch, lambda: trace_store)
+    _patch_execute_nyx_install_action(monkeypatch, fake_execute_nyx_install_action)
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post(
         "/v1/runs/run-nyx-action/actions",
@@ -823,9 +831,9 @@ def test_run_action_revalidates_persisted_nyx_install_proposal(monkeypatch, tmp_
             stderr_excerpt="",
         )
 
-    monkeypatch.setattr(api_app_module, "TraceStore", lambda: trace_store)
-    monkeypatch.setattr(api_app_module, "execute_nyx_install_action", fake_execute_nyx_install_action)
-    client = TestClient(api_app_module.create_app())
+    _patch_trace_store(monkeypatch, lambda: trace_store)
+    _patch_execute_nyx_install_action(monkeypatch, fake_execute_nyx_install_action)
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post(
         "/v1/runs/run-nyx-action/actions",
@@ -903,9 +911,9 @@ def test_run_action_records_failed_nyx_install_execution(monkeypatch, tmp_path) 
             metadata={"current_action_id": "nyx-install:def456"},
         )
 
-    monkeypatch.setattr(api_app_module, "TraceStore", lambda: trace_store)
-    monkeypatch.setattr(api_app_module, "execute_nyx_install_action", fake_execute_nyx_install_action)
-    client = TestClient(api_app_module.create_app())
+    _patch_trace_store(monkeypatch, lambda: trace_store)
+    _patch_execute_nyx_install_action(monkeypatch, fake_execute_nyx_install_action)
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post(
         "/v1/runs/run-nyx-action/actions",
@@ -932,7 +940,7 @@ def test_run_action_records_failed_nyx_install_execution(monkeypatch, tmp_path) 
 
 
 def test_query_rag_forwards_session_id_to_orchestrator(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     captured: dict[str, object] = {}
 
     class _Result:
@@ -953,7 +961,7 @@ def test_query_rag_forwards_session_id_to_orchestrator(monkeypatch) -> None:
         return _Result()
 
     fake_orchestrator.run_rag_query.side_effect = _fake_run_rag_query
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/query/rag",
@@ -972,7 +980,7 @@ def test_query_rag_forwards_session_id_to_orchestrator(monkeypatch) -> None:
 
 
 def test_query_rag_serializes_retrieval_plan_and_fallback(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     class _Result:
         run_id = "run-rag-plan"
@@ -986,7 +994,7 @@ def test_query_rag_serializes_retrieval_plan_and_fallback(monkeypatch) -> None:
 
     fake_orchestrator = MagicMock()
     fake_orchestrator.run_rag_query.return_value = _Result()
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/query/rag",
@@ -1004,7 +1012,7 @@ def test_query_rag_serializes_retrieval_plan_and_fallback(monkeypatch) -> None:
 
 
 def test_search_knowledge_forwards_session_id_to_orchestrator(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     captured: dict[str, object] = {}
 
     class _Result:
@@ -1025,7 +1033,7 @@ def test_search_knowledge_forwards_session_id_to_orchestrator(monkeypatch) -> No
         return _Result()
 
     fake_orchestrator.run_knowledge_search.side_effect = _fake_run_knowledge_search
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/search/knowledge",
@@ -1046,7 +1054,7 @@ def test_search_knowledge_forwards_session_id_to_orchestrator(monkeypatch) -> No
 
 
 def test_query_direct_forwards_session_id_to_orchestrator(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     captured: dict[str, object] = {}
 
     class _Result:
@@ -1064,7 +1072,7 @@ def test_query_direct_forwards_session_id_to_orchestrator(monkeypatch) -> None:
         return _Result()
 
     fake_orchestrator.run_direct_query.side_effect = _fake_run_direct_query
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/query/direct",
@@ -1083,7 +1091,7 @@ def test_query_direct_forwards_session_id_to_orchestrator(monkeypatch) -> None:
 
 def _set_stream_manager(monkeypatch, tmp_path) -> None:
     manager = ReplayableRunStreamManager(StreamReplayStore(tmp_path / "traces"))
-    monkeypatch.setattr(api_app_module, "_RAG_STREAM_MANAGER", manager)
+    _patch_rag_stream_manager(monkeypatch, manager)
 
 
 def _parse_sse_frames(body: str) -> list[tuple[int | None, dict[str, object]]]:
@@ -1106,7 +1114,7 @@ def _parse_sse_frames(body: str) -> list[tuple[int | None, dict[str, object]]]:
 
 def test_stream_rag_happy_path_includes_sse_ids(monkeypatch, tmp_path) -> None:
     _set_stream_manager(monkeypatch, tmp_path)
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     fake_orchestrator = MagicMock()
 
     def _fake_stream_rag_query(req, *, session_id=""):
@@ -1115,7 +1123,7 @@ def test_stream_rag_happy_path_includes_sse_ids(monkeypatch, tmp_path) -> None:
         yield {"type": "final", "run_id": "r1", "answer_text": "hello", "sources": []}
 
     fake_orchestrator.stream_rag_query.side_effect = _fake_stream_rag_query
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/query/rag/stream",
@@ -1154,7 +1162,7 @@ def test_stream_rag_happy_path_includes_sse_ids(monkeypatch, tmp_path) -> None:
 
 def test_stream_rag_replays_only_events_after_last_event_id(monkeypatch, tmp_path) -> None:
     _set_stream_manager(monkeypatch, tmp_path)
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     fake_orchestrator = MagicMock()
 
     def _fake_stream_rag_query(req, *, session_id=""):
@@ -1163,7 +1171,7 @@ def test_stream_rag_replays_only_events_after_last_event_id(monkeypatch, tmp_pat
         yield {"type": "final", "run_id": "r1", "answer_text": "hello", "sources": []}
 
     fake_orchestrator.stream_rag_query.side_effect = _fake_stream_rag_query
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     first = client.post(
         "/v1/query/rag/stream",
@@ -1204,10 +1212,10 @@ def test_stream_rag_replays_only_events_after_last_event_id(monkeypatch, tmp_pat
 
 def test_stream_rag_reconnect_ignores_unrelated_trace_rows(monkeypatch, tmp_path) -> None:
     _set_stream_manager(monkeypatch, tmp_path)
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     fake_orchestrator = MagicMock()
     fake_orchestrator.stream_rag_query.return_value = iter(())
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     TraceStore(tmp_path / "traces").append_event(
         run_id="run-with-trace-only",
@@ -1237,14 +1245,14 @@ def test_stream_rag_reconnect_ignores_unrelated_trace_rows(monkeypatch, tmp_path
 
 def test_stream_rag_error_event(monkeypatch, tmp_path) -> None:
     _set_stream_manager(monkeypatch, tmp_path)
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     fake_orchestrator = MagicMock()
 
     def _fake_stream_rag_query(req, *, session_id=""):
         yield {"type": "error", "run_id": "r0", "message": "question must not be empty."}
 
     fake_orchestrator.stream_rag_query.side_effect = _fake_stream_rag_query
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/query/rag/stream",
@@ -1263,10 +1271,10 @@ def test_stream_rag_error_event(monkeypatch, tmp_path) -> None:
 
 
 def test_brain_graph_returns_nodes_and_edges(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     fake_orchestrator = MagicMock()
     fake_orchestrator.get_workspace_graph.return_value = BrainGraph().build_from_indexes_and_sessions([], [])
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.get("/v1/brain/graph")
 
@@ -1283,10 +1291,10 @@ def test_brain_graph_returns_nodes_and_edges(monkeypatch) -> None:
 
 
 def test_brain_scaffold_returns_topology_payload(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     fake_orchestrator = MagicMock()
     fake_orchestrator.get_workspace_graph.return_value = BrainGraph().build_from_indexes_and_sessions([], [])
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.get("/v1/brain/scaffold")
 
@@ -1305,7 +1313,7 @@ def test_brain_scaffold_returns_topology_payload(monkeypatch) -> None:
 
 
 def test_ui_telemetry_endpoint_accepts_valid_events(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     captured: dict[str, object] = {}
 
     class _FakeOrchestrator:
@@ -1313,7 +1321,7 @@ def test_ui_telemetry_endpoint_accepts_valid_events(monkeypatch) -> None:
             captured["events"] = events
             return len(events)
 
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
+    _patch_workspace_orchestrator(monkeypatch, lambda: _FakeOrchestrator())
 
     response = client.post(
         "/v1/telemetry/ui",
@@ -1347,9 +1355,9 @@ def test_ui_telemetry_endpoint_accepts_valid_events(monkeypatch) -> None:
 
 
 def test_ui_telemetry_endpoint_rejects_invalid_payload(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     fake_orchestrator = MagicMock()
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.post(
         "/v1/telemetry/ui",
@@ -1377,7 +1385,7 @@ def test_ui_telemetry_endpoint_rejects_invalid_payload(monkeypatch) -> None:
 
 
 def test_ui_telemetry_endpoint_accepts_runtime_lifecycle_events(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     captured: dict[str, object] = {}
 
     class _FakeOrchestrator:
@@ -1385,7 +1393,7 @@ def test_ui_telemetry_endpoint_accepts_runtime_lifecycle_events(monkeypatch) -> 
             captured["events"] = events
             return len(events)
 
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
+    _patch_workspace_orchestrator(monkeypatch, lambda: _FakeOrchestrator())
 
     response = client.post(
         "/v1/telemetry/ui",
@@ -1426,7 +1434,7 @@ def test_ui_telemetry_endpoint_accepts_runtime_lifecycle_events(monkeypatch) -> 
 
 
 def test_ui_telemetry_endpoint_rejects_malformed_json() -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post(
         "/v1/telemetry/ui",
@@ -1439,7 +1447,7 @@ def test_ui_telemetry_endpoint_rejects_malformed_json() -> None:
 
 def test_ui_telemetry_endpoint_requires_auth_when_configured(monkeypatch) -> None:
     monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post(
         "/v1/telemetry/ui",
@@ -1461,7 +1469,7 @@ def test_ui_telemetry_endpoint_requires_auth_when_configured(monkeypatch) -> Non
 
 def test_ui_telemetry_endpoint_accepts_auth_when_configured(monkeypatch) -> None:
     monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     captured: dict[str, object] = {}
 
     class _FakeOrchestrator:
@@ -1469,7 +1477,7 @@ def test_ui_telemetry_endpoint_accepts_auth_when_configured(monkeypatch) -> None
             captured["events"] = events
             return len(events)
 
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
+    _patch_workspace_orchestrator(monkeypatch, lambda: _FakeOrchestrator())
 
     response = client.post(
         "/v1/telemetry/ui",
@@ -1495,7 +1503,7 @@ def test_ui_telemetry_endpoint_accepts_auth_when_configured(monkeypatch) -> None
 
 
 def test_ui_telemetry_endpoint_rejects_oversized_request() -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     response = client.post(
         "/v1/telemetry/ui",
         content="x" * 20_000,
@@ -1506,7 +1514,7 @@ def test_ui_telemetry_endpoint_rejects_oversized_request() -> None:
 
 
 def test_ui_telemetry_summary_endpoint_returns_structured_summary(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     class _FakeOrchestrator:
         def get_ui_telemetry_summary(self, *, window_hours=24, limit=50_000):
@@ -1568,7 +1576,7 @@ def test_ui_telemetry_summary_endpoint_returns_structured_summary(monkeypatch) -
                 },
             }
 
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
+    _patch_workspace_orchestrator(monkeypatch, lambda: _FakeOrchestrator())
 
     response = client.get("/v1/telemetry/ui/summary?window_hours=24&limit=999")
 
@@ -1580,7 +1588,7 @@ def test_ui_telemetry_summary_endpoint_returns_structured_summary(monkeypatch) -
 
 
 def test_ui_telemetry_summary_endpoint_validates_query_params() -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.get("/v1/telemetry/ui/summary?window_hours=0")
 
@@ -1589,7 +1597,7 @@ def test_ui_telemetry_summary_endpoint_validates_query_params() -> None:
 
 def test_ui_telemetry_summary_endpoint_requires_auth_when_configured(monkeypatch) -> None:
     monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.get("/v1/telemetry/ui/summary")
 
@@ -1598,7 +1606,7 @@ def test_ui_telemetry_summary_endpoint_requires_auth_when_configured(monkeypatch
 
 def test_ui_telemetry_summary_endpoint_accepts_auth_when_configured(monkeypatch) -> None:
     monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     class _FakeOrchestrator:
         def get_ui_telemetry_summary(self, *, window_hours=24, limit=50_000):
@@ -1637,7 +1645,7 @@ def test_ui_telemetry_summary_endpoint_accepts_auth_when_configured(monkeypatch)
                 },
             }
 
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
+    _patch_workspace_orchestrator(monkeypatch, lambda: _FakeOrchestrator())
 
     response = client.get(
         "/v1/telemetry/ui/summary",
@@ -1649,7 +1657,7 @@ def test_ui_telemetry_summary_endpoint_accepts_auth_when_configured(monkeypatch)
 
 
 def test_brain_graph_preserves_assistant_node_types_and_scope_metadata(monkeypatch) -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     fake_orchestrator = MagicMock()
     fake_orchestrator.get_workspace_graph.return_value = BrainGraph().build_from_indexes_and_sessions(
         [],
@@ -1693,7 +1701,7 @@ def test_brain_graph_preserves_assistant_node_types_and_scope_metadata(monkeypat
             ],
         },
     )
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
     response = client.get("/v1/brain/graph")
 
@@ -1721,7 +1729,7 @@ def test_brain_graph_preserves_assistant_node_types_and_scope_metadata(monkeypat
 
 
 def test_features_list_returns_known_flags() -> None:
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.get("/v1/features")
 
@@ -1733,14 +1741,16 @@ def test_features_list_returns_known_flags() -> None:
 
 
 def test_features_disable_and_enable_roundtrip(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", api_app_module.WorkspaceOrchestrator)
+    from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator as _RealWO
+
+    _patch_workspace_orchestrator(monkeypatch, _RealWO)
     import metis_app.settings_store as _store
 
     monkeypatch.setattr(_store, "USER_PATH", tmp_path / "settings.json")
     monkeypatch.setattr(_store, "DEFAULT_PATH", tmp_path / "default_settings.json")
     _store.DEFAULT_PATH.write_text("{}", encoding="utf-8")
 
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     disable_response = client.post(
         "/v1/features/api_compat_openai/disable",
@@ -1767,7 +1777,7 @@ def test_features_disable_and_enable_roundtrip(monkeypatch, tmp_path) -> None:
 
 def test_features_require_auth_when_token_is_configured(monkeypatch) -> None:
     monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.get("/v1/features")
 
@@ -1782,11 +1792,11 @@ def test_features_require_auth_when_token_is_configured(monkeypatch) -> None:
 def test_openai_chat_completions_disabled_by_default(monkeypatch) -> None:
     """Endpoint returns 404 when api_compat_openai flag is not enabled."""
     monkeypatch.setattr(
-        api_app_module._settings_store,
+        __import__("metis_app.settings_store", fromlist=["_"]),
         "load_settings",
         lambda: {},
     )
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post(
         "/v1/openai/chat/completions",
@@ -1800,7 +1810,7 @@ def test_openai_chat_completions_disabled_by_default(monkeypatch) -> None:
 def test_openai_chat_completions_happy_path(monkeypatch) -> None:
     """Endpoint returns an OpenAI-shaped response when flag is enabled."""
     monkeypatch.setattr(
-        api_app_module._settings_store,
+        __import__("metis_app.settings_store", fromlist=["_"]),
         "load_settings",
         lambda: {"feature_flags": {"api_compat_openai": True}},
     )
@@ -1814,9 +1824,9 @@ def test_openai_chat_completions_happy_path(monkeypatch) -> None:
 
     fake_orchestrator = MagicMock()
     fake_orchestrator.run_direct_query.return_value = _Result()
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     response = client.post(
         "/v1/openai/chat/completions",
         json={
@@ -1853,11 +1863,11 @@ def test_openai_chat_completions_happy_path(monkeypatch) -> None:
 def test_openai_chat_completions_rejects_empty_messages_list(monkeypatch) -> None:
     """Empty messages array fails Pydantic validation (min_length=1) → 422."""
     monkeypatch.setattr(
-        api_app_module._settings_store,
+        __import__("metis_app.settings_store", fromlist=["_"]),
         "load_settings",
         lambda: {"feature_flags": {"api_compat_openai": True}},
     )
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post(
         "/v1/openai/chat/completions",
@@ -1870,11 +1880,11 @@ def test_openai_chat_completions_rejects_empty_messages_list(monkeypatch) -> Non
 def test_openai_chat_completions_rejects_no_user_message(monkeypatch) -> None:
     """Messages with only system role and no user turn get 422."""
     monkeypatch.setattr(
-        api_app_module._settings_store,
+        __import__("metis_app.settings_store", fromlist=["_"]),
         "load_settings",
         lambda: {"feature_flags": {"api_compat_openai": True}},
     )
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post(
         "/v1/openai/chat/completions",
@@ -1888,11 +1898,11 @@ def test_openai_chat_completions_requires_auth_when_configured(monkeypatch) -> N
     """Auth parity: endpoint requires Bearer token when METIS_API_TOKEN is set."""
     monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
     monkeypatch.setattr(
-        api_app_module._settings_store,
+        __import__("metis_app.settings_store", fromlist=["_"]),
         "load_settings",
         lambda: {"feature_flags": {"api_compat_openai": True}},
     )
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post(
         "/v1/openai/chat/completions",
@@ -1906,7 +1916,7 @@ def test_openai_chat_completions_accepts_auth_when_configured(monkeypatch) -> No
     """Endpoint works with a valid Bearer token when auth is configured."""
     monkeypatch.setenv("METIS_API_TOKEN", "secret-token")
     monkeypatch.setattr(
-        api_app_module._settings_store,
+        __import__("metis_app.settings_store", fromlist=["_"]),
         "load_settings",
         lambda: {"feature_flags": {"api_compat_openai": True}},
     )
@@ -1920,9 +1930,9 @@ def test_openai_chat_completions_accepts_auth_when_configured(monkeypatch) -> No
 
     fake_orchestrator = MagicMock()
     fake_orchestrator.run_direct_query.return_value = _Result()
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    _patch_workspace_orchestrator(monkeypatch, lambda: fake_orchestrator)
 
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     response = client.post(
         "/v1/openai/chat/completions",
         headers={"Authorization": "Bearer secret-token"},
@@ -1936,11 +1946,11 @@ def test_openai_chat_completions_accepts_auth_when_configured(monkeypatch) -> No
 def test_openai_chat_completions_rejects_stream_true(monkeypatch) -> None:
     """Streaming is not supported in this slice — stream=true returns 501."""
     monkeypatch.setattr(
-        api_app_module._settings_store,
+        __import__("metis_app.settings_store", fromlist=["_"]),
         "load_settings",
         lambda: {"feature_flags": {"api_compat_openai": True}},
     )
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post(
         "/v1/openai/chat/completions",
@@ -1952,14 +1962,13 @@ def test_openai_chat_completions_rejects_stream_true(monkeypatch) -> None:
 
 def test_autonomous_status_returns_enabled_false_by_default(monkeypatch) -> None:
     """GET /v1/autonomous/status returns enabled: false when not configured."""
-    from metis_app.api import autonomous as _autonomous_module
 
     monkeypatch.setattr(
-        _autonomous_module._settings_store,
+        __import__("metis_app.settings_store", fromlist=["_"]),
         "load_settings",
         lambda: {},
     )
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.get("/v1/autonomous/status")
 
@@ -1971,10 +1980,9 @@ def test_autonomous_status_returns_enabled_false_by_default(monkeypatch) -> None
 
 def test_autonomous_trigger_returns_ok(monkeypatch) -> None:
     """POST /v1/autonomous/trigger returns ok field."""
-    from metis_app.api import autonomous as _autonomous_module
 
     monkeypatch.setattr(
-        _autonomous_module._settings_store,
+        __import__("metis_app.settings_store", fromlist=["_"]),
         "load_settings",
         lambda: {},
     )
@@ -1988,7 +1996,7 @@ def test_autonomous_trigger_returns_ok(monkeypatch) -> None:
         "WorkspaceOrchestrator",
         lambda: _FakeOrchestrator(),
     )
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post("/v1/autonomous/trigger")
 
@@ -1999,10 +2007,9 @@ def test_autonomous_trigger_returns_ok(monkeypatch) -> None:
 
 def test_autonomous_trigger_returns_500_on_error(monkeypatch) -> None:
     """POST /v1/autonomous/trigger returns 500 when research raises."""
-    from metis_app.api import autonomous as _autonomous_module
 
     monkeypatch.setattr(
-        _autonomous_module._settings_store,
+        __import__("metis_app.settings_store", fromlist=["_"]),
         "load_settings",
         lambda: {},
     )
@@ -2016,7 +2023,7 @@ def test_autonomous_trigger_returns_500_on_error(monkeypatch) -> None:
         "WorkspaceOrchestrator",
         lambda: BrokenOrchestrator(),
     )
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post("/v1/autonomous/trigger")
     assert response.status_code == 500
@@ -2024,10 +2031,9 @@ def test_autonomous_trigger_returns_500_on_error(monkeypatch) -> None:
 
 def test_autonomous_research_stream_returns_sse_events(monkeypatch) -> None:
     """POST /v1/autonomous/research/stream streams SSE events, starts with research_started."""
-    from metis_app.api import autonomous as _autonomous_module
 
     monkeypatch.setattr(
-        _autonomous_module._settings_store,
+        __import__("metis_app.settings_store", fromlist=["_"]),
         "load_settings",
         lambda: {},
     )
@@ -2044,7 +2050,7 @@ def test_autonomous_research_stream_returns_sse_events(monkeypatch) -> None:
         "WorkspaceOrchestrator",
         lambda: _FakeOrchestrator(),
     )
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post("/v1/autonomous/research/stream")
 
@@ -2058,10 +2064,9 @@ def test_autonomous_research_stream_returns_sse_events(monkeypatch) -> None:
 
 def test_autonomous_research_stream_emits_error_event_on_failure(monkeypatch) -> None:
     """POST /v1/autonomous/research/stream emits research_error when orchestrator raises."""
-    from metis_app.api import autonomous as _autonomous_module
 
     monkeypatch.setattr(
-        _autonomous_module._settings_store,
+        __import__("metis_app.settings_store", fromlist=["_"]),
         "load_settings",
         lambda: {},
     )
@@ -2075,7 +2080,7 @@ def test_autonomous_research_stream_emits_error_event_on_failure(monkeypatch) ->
         "WorkspaceOrchestrator",
         lambda: _BrokenOrchestrator(),
     )
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
 
     response = client.post("/v1/autonomous/research/stream")
 
@@ -2150,9 +2155,9 @@ def test_trace_playback_returns_manifest(monkeypatch, tmp_path) -> None:
 
     fake_store = MagicMock()
     fake_store.read_run_events.return_value = sample_events
-    monkeypatch.setattr(api_app_module, "TraceStore", lambda: fake_store)
+    _patch_trace_store(monkeypatch, lambda: fake_store)
 
-    client = TestClient(api_app_module.create_app())
+    client = TestClient(app=api_app_module.create_app())
     response = client.get(f"/v1/traces/{run_id}/playback")
 
     assert response.status_code == 200

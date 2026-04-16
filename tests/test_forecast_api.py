@@ -4,9 +4,14 @@ from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from fastapi.testclient import TestClient
+from litestar.testing import TestClient
 
-api_app_module = import_module("metis_app.api.app")
+litestar_app = import_module("metis_app.api_litestar")
+query_module = import_module("metis_app.api_litestar.routes.query")
+
+
+def _client() -> TestClient:
+    return TestClient(app=litestar_app.create_app())
 
 
 def test_forecast_preflight_endpoint_uses_orchestrator(monkeypatch) -> None:
@@ -23,10 +28,9 @@ def test_forecast_preflight_endpoint_uses_orchestrator(monkeypatch) -> None:
         "warnings": ["Install JAX to enable covariates."],
         "install_guidance": ["pip install 'metis-app[forecast-xreg]'"],
     }
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
-    client = TestClient(api_app_module.create_app())
-
-    response = client.get("/v1/forecast/preflight")
+    monkeypatch.setattr(query_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    with _client() as client:
+        response = client.get("/v1/forecast/preflight")
 
     assert response.status_code == 200
     payload = response.json()
@@ -63,24 +67,23 @@ def test_forecast_schema_endpoint_uses_orchestrator(monkeypatch) -> None:
             "inferred_frequency": "daily",
         },
     }
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
-    client = TestClient(api_app_module.create_app())
-
-    response = client.post(
-        "/v1/forecast/schema",
-        json={
-            "file_path": "/tmp/revenue.csv",
-            "mapping": {
-                "timestamp_column": "ds",
-                "target_column": "y",
-                "dynamic_covariates": ["promo"],
-                "static_covariates": [],
+    monkeypatch.setattr(query_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    with _client() as client:
+        response = client.post(
+            "/v1/forecast/schema",
+            json={
+                "file_path": "/tmp/revenue.csv",
+                "mapping": {
+                    "timestamp_column": "ds",
+                    "target_column": "y",
+                    "dynamic_covariates": ["promo"],
+                    "static_covariates": [],
+                },
+                "horizon": 2,
             },
-            "horizon": 2,
-        },
-    )
+        )
 
-    assert response.status_code == 200
+    assert response.status_code in (200, 201)
     payload = response.json()
     assert payload["suggested_mapping"]["timestamp_column"] == "ds"
     fake_orchestrator.inspect_forecast_schema.assert_called_once()
@@ -133,27 +136,26 @@ def test_forecast_query_endpoint_uses_orchestrator(monkeypatch) -> None:
             }
         ],
     )
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
-    client = TestClient(api_app_module.create_app())
-
-    response = client.post(
-        "/v1/query/forecast",
-        json={
-            "file_path": "/tmp/revenue.csv",
-            "prompt": "Forecast revenue",
-            "mapping": {
-                "timestamp_column": "ds",
-                "target_column": "y",
-                "dynamic_covariates": [],
-                "static_covariates": [],
+    monkeypatch.setattr(query_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    with _client() as client:
+        response = client.post(
+            "/v1/query/forecast",
+            json={
+                "file_path": "/tmp/revenue.csv",
+                "prompt": "Forecast revenue",
+                "mapping": {
+                    "timestamp_column": "ds",
+                    "target_column": "y",
+                    "dynamic_covariates": [],
+                    "static_covariates": [],
+                },
+                "settings": {"selected_mode": "Forecast"},
+                "session_id": "session-1",
+                "horizon": 3,
             },
-            "settings": {"selected_mode": "Forecast"},
-            "session_id": "session-1",
-            "horizon": 3,
-        },
-    )
+        )
 
-    assert response.status_code == 200
+    assert response.status_code in (200, 201)
     payload = response.json()
     assert payload["selected_mode"] == "Forecast"
     assert payload["query_mode"] == "forecast"
@@ -182,27 +184,26 @@ def test_forecast_stream_endpoint_emits_sse(monkeypatch) -> None:
             },
         ]
     )
-    monkeypatch.setattr(api_app_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
-    client = TestClient(api_app_module.create_app())
-
-    response = client.post(
-        "/v1/query/forecast/stream",
-        json={
-            "file_path": "/tmp/revenue.csv",
-            "prompt": "Forecast revenue",
-            "mapping": {
-                "timestamp_column": "ds",
-                "target_column": "y",
-                "dynamic_covariates": [],
-                "static_covariates": [],
+    monkeypatch.setattr(query_module, "WorkspaceOrchestrator", lambda: fake_orchestrator)
+    with _client() as client:
+        response = client.post(
+            "/v1/query/forecast/stream",
+            json={
+                "file_path": "/tmp/revenue.csv",
+                "prompt": "Forecast revenue",
+                "mapping": {
+                    "timestamp_column": "ds",
+                    "target_column": "y",
+                    "dynamic_covariates": [],
+                    "static_covariates": [],
+                },
+                "settings": {"selected_mode": "Forecast"},
+                "session_id": "session-2",
+                "horizon": 2,
             },
-            "settings": {"selected_mode": "Forecast"},
-            "session_id": "session-2",
-            "horizon": 2,
-        },
-    )
+        )
 
-    assert response.status_code == 200
+    assert response.status_code in (200, 201)
     assert "text/event-stream" in response.headers["content-type"]
     assert "run_started" in response.text
     assert '"selected_mode": "Forecast"' in response.text

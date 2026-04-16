@@ -7,11 +7,17 @@ from typing import Any
 
 from litestar import Router, get, post
 from litestar.exceptions import HTTPException as LitestarHTTPException
+from pydantic import BaseModel, ConfigDict
 
 import metis_app.settings_store as _store
-from metis_app.api.settings import SettingsUpdateRequest
 
 _API_KEY_PREFIX = "api_key_"
+
+
+class SettingsUpdateRequest(BaseModel):
+    updates: dict[str, Any]
+
+    model_config = ConfigDict(extra="forbid")
 
 
 @get("/v1/settings")
@@ -20,10 +26,18 @@ def get_settings() -> dict[str, Any]:
     return _store.safe_settings(_store.load_settings())
 
 
-@post("/v1/settings")
-def post_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    """Accept partial settings updates and persist them."""
-    updates = dict(payload.get("updates") or payload)
+@post("/v1/settings", status_code=200)
+def post_settings(data: dict[str, Any]) -> dict[str, Any]:
+    """Accept partial settings updates and persist them.
+
+    Security
+    --------
+    Keys that start with ``api_key_`` are **rejected** (HTTP 403) unless the
+    environment variable ``METIS_ALLOW_API_KEY_WRITE=1`` is explicitly set.
+    The response always has ``api_key_*`` fields stripped regardless of the
+    env flag.
+    """
+    updates = dict(data.get("updates") or data)
     validated = SettingsUpdateRequest.model_validate({"updates": updates})
     denied = [key for key in validated.updates if key.startswith(_API_KEY_PREFIX)]
     if denied and os.getenv("METIS_ALLOW_API_KEY_WRITE", "").strip() != "1":

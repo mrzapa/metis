@@ -1,17 +1,17 @@
-"""Tests for GET /v1/logs/tail and GET /v1/version endpoints."""
+"""Tests for GET /v1/logs/tail and GET /v1/logs/metrics endpoints."""
 
 from __future__ import annotations
 
 from importlib import import_module
 
-from fastapi.testclient import TestClient
+from litestar.testing import TestClient
 
-api_app_module = import_module("metis_app.api.app")
-logs_module = import_module("metis_app.api.logs")
+litestar_app = import_module("metis_app.api_litestar")
+logs_module = import_module("metis_app.api_litestar.routes.logs")
 
 
 def _client() -> TestClient:
-    return TestClient(api_app_module.create_app())
+    return TestClient(app=litestar_app.create_app())
 
 
 # ---------------------------------------------------------------------------
@@ -20,14 +20,16 @@ def _client() -> TestClient:
 
 
 def test_version_returns_200() -> None:
-    response = _client().get("/v1/version")
-    assert response.status_code == 200
+    with _client() as c:
+        response = c.get("/v1/version")
+        assert response.status_code == 200
 
 
 def test_version_returns_string() -> None:
-    data = _client().get("/v1/version").json()
-    assert isinstance(data.get("version"), str)
-    assert data["version"]  # non-empty
+    with _client() as c:
+        data = c.get("/v1/version").json()
+        assert isinstance(data.get("version"), str)
+        assert data["version"]  # non-empty
 
 
 # ---------------------------------------------------------------------------
@@ -36,15 +38,15 @@ def test_version_returns_string() -> None:
 
 
 def test_log_tail_missing_file(monkeypatch, tmp_path) -> None:
-    """When metis.log does not exist, endpoint returns missing=True, empty lines."""
     monkeypatch.setattr(
         logs_module._store,
         "load_settings",
         lambda: {"log_dir": str(tmp_path)},
     )
-    data = _client().get("/v1/logs/tail").json()
-    assert data["missing"] is True
-    assert data["lines"] == []
+    with _client() as c:
+        data = c.get("/v1/logs/tail").json()
+        assert data["missing"] is True
+        assert data["lines"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -60,9 +62,10 @@ def test_log_tail_returns_lines(monkeypatch, tmp_path) -> None:
         "load_settings",
         lambda: {"log_dir": str(tmp_path)},
     )
-    data = _client().get("/v1/logs/tail").json()
-    assert data["missing"] is False
-    assert data["lines"] == ["line1", "line2", "line3"]
+    with _client() as c:
+        data = c.get("/v1/logs/tail").json()
+        assert data["missing"] is False
+        assert data["lines"] == ["line1", "line2", "line3"]
 
 
 def test_log_tail_limits_to_200_lines(monkeypatch, tmp_path) -> None:
@@ -73,12 +76,12 @@ def test_log_tail_limits_to_200_lines(monkeypatch, tmp_path) -> None:
         "load_settings",
         lambda: {"log_dir": str(tmp_path)},
     )
-    data = _client().get("/v1/logs/tail").json()
-    assert len(data["lines"]) == 200
-    assert data["total_lines"] == 300
-    # Should be the last 200 lines
-    assert data["lines"][0] == "line100"
-    assert data["lines"][-1] == "line299"
+    with _client() as c:
+        data = c.get("/v1/logs/tail").json()
+        assert len(data["lines"]) == 200
+        assert data["total_lines"] == 300
+        assert data["lines"][0] == "line100"
+        assert data["lines"][-1] == "line299"
 
 
 # ---------------------------------------------------------------------------
@@ -94,11 +97,11 @@ def test_log_tail_redacts_api_key_assignment(monkeypatch, tmp_path) -> None:
         "load_settings",
         lambda: {"log_dir": str(tmp_path)},
     )
-    data = _client().get("/v1/logs/tail").json()
-    assert "sk-ant-secret123" not in data["lines"][0]
-    assert "[REDACTED]" in data["lines"][0]
-    # Key name should be preserved
-    assert "api_key_anthropic" in data["lines"][0]
+    with _client() as c:
+        data = c.get("/v1/logs/tail").json()
+        assert "sk-ant-secret123" not in data["lines"][0]
+        assert "[REDACTED]" in data["lines"][0]
+        assert "api_key_anthropic" in data["lines"][0]
 
 
 def test_log_tail_redacts_bearer_token(monkeypatch, tmp_path) -> None:
@@ -109,9 +112,10 @@ def test_log_tail_redacts_bearer_token(monkeypatch, tmp_path) -> None:
         "load_settings",
         lambda: {"log_dir": str(tmp_path)},
     )
-    data = _client().get("/v1/logs/tail").json()
-    assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in data["lines"][0]
-    assert "[REDACTED]" in data["lines"][0]
+    with _client() as c:
+        data = c.get("/v1/logs/tail").json()
+        assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in data["lines"][0]
+        assert "[REDACTED]" in data["lines"][0]
 
 
 def test_log_tail_redacts_long_token(monkeypatch, tmp_path) -> None:
@@ -123,9 +127,10 @@ def test_log_tail_redacts_long_token(monkeypatch, tmp_path) -> None:
         "load_settings",
         lambda: {"log_dir": str(tmp_path)},
     )
-    data = _client().get("/v1/logs/tail").json()
-    assert secret not in data["lines"][0]
-    assert "[REDACTED]" in data["lines"][0]
+    with _client() as c:
+        data = c.get("/v1/logs/tail").json()
+        assert secret not in data["lines"][0]
+        assert "[REDACTED]" in data["lines"][0]
 
 
 # ---------------------------------------------------------------------------
@@ -134,20 +139,17 @@ def test_log_tail_redacts_long_token(monkeypatch, tmp_path) -> None:
 
 
 def test_log_tail_no_path_param(monkeypatch, tmp_path) -> None:
-    """Endpoint must not accept a path query parameter."""
     monkeypatch.setattr(
         logs_module._store,
         "load_settings",
         lambda: {"log_dir": str(tmp_path)},
     )
-    # Passing an arbitrary path query param should be silently ignored (422 or 200 with safe path)
-    response = _client().get("/v1/logs/tail?path=/etc/passwd")
-    # FastAPI returns 422 for unexpected query params with strict models, or 200 ignoring it.
-    # Either way the response must not contain /etc/passwd content.
-    assert response.status_code in (200, 422)
-    if response.status_code == 200:
-        for line in response.json().get("lines", []):
-            assert "root:" not in line
+    with _client() as c:
+        response = c.get("/v1/logs/tail?path=/etc/passwd")
+        assert response.status_code in (200, 400, 422)
+        if response.status_code == 200:
+            for line in response.json().get("lines", []):
+                assert "root:" not in line
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +158,6 @@ def test_log_tail_no_path_param(monkeypatch, tmp_path) -> None:
 
 
 def _make_stub_trace_store(tmp_path):
-    """Return a pre-populated TraceStore in tmp_path."""
     from metis_app.services.trace_store import TraceStore as _RealStore
 
     stub = _RealStore(tmp_path)
@@ -170,14 +171,16 @@ class TestLogsMetrics:
         stub = _make_stub_trace_store(tmp_path)
         monkeypatch.setattr(logs_module, "TraceStore", lambda: stub)
 
-        response = _client().get("/v1/logs/metrics")
-        assert response.status_code == 200
+        with _client() as c:
+            response = c.get("/v1/logs/metrics")
+            assert response.status_code == 200
 
     def test_metrics_response_has_required_keys(self, monkeypatch, tmp_path) -> None:
         stub = _make_stub_trace_store(tmp_path)
         monkeypatch.setattr(logs_module, "TraceStore", lambda: stub)
 
-        data = _client().get("/v1/logs/metrics").json()
+        with _client() as c:
+            data = c.get("/v1/logs/metrics").json()
         for key in ("total_events", "event_type_counts", "status_counts", "duration_ms", "last_run_id"):
             assert key in data, f"missing key: {key}"
 
@@ -185,7 +188,8 @@ class TestLogsMetrics:
         stub = _make_stub_trace_store(tmp_path)
         monkeypatch.setattr(logs_module, "TraceStore", lambda: stub)
 
-        data = _client().get("/v1/logs/metrics").json()
+        with _client() as c:
+            data = c.get("/v1/logs/metrics").json()
         assert data["total_events"] == 2
         assert data["event_type_counts"].get("final") == 1
         assert data["event_type_counts"].get("run_started") == 1
@@ -194,14 +198,16 @@ class TestLogsMetrics:
         stub = _make_stub_trace_store(tmp_path)
         monkeypatch.setattr(logs_module, "TraceStore", lambda: stub)
 
-        data = _client().get("/v1/logs/metrics").json()
+        with _client() as c:
+            data = c.get("/v1/logs/metrics").json()
         assert data["status_counts"].get("success") == 1
 
     def test_metrics_duration_ms_structure(self, monkeypatch, tmp_path) -> None:
         stub = _make_stub_trace_store(tmp_path)
         monkeypatch.setattr(logs_module, "TraceStore", lambda: stub)
 
-        data = _client().get("/v1/logs/metrics").json()
+        with _client() as c:
+            data = c.get("/v1/logs/metrics").json()
         dur = data["duration_ms"]
         for key in ("count", "total_ms", "avg_ms", "min_ms", "max_ms"):
             assert key in dur, f"duration_ms missing key: {key}"
@@ -212,28 +218,29 @@ class TestLogsMetrics:
         empty_store = _RealStore(tmp_path)
         monkeypatch.setattr(logs_module, "TraceStore", lambda: empty_store)
 
-        data = _client().get("/v1/logs/metrics").json()
+        with _client() as c:
+            data = c.get("/v1/logs/metrics").json()
         assert data["total_events"] == 0
         assert data["event_type_counts"] == {}
         assert data["last_run_id"] is None
 
     def test_metrics_does_not_break_log_tail(self, monkeypatch, tmp_path) -> None:
-        """Verify /v1/logs/tail still works correctly after adding the metrics route."""
         log_file = tmp_path / "metis.log"
         log_file.write_text("line1\nline2\n", encoding="utf-8")
         monkeypatch.setattr(logs_module._store, "load_settings", lambda: {"log_dir": str(tmp_path)})
 
-        tail_data = _client().get("/v1/logs/tail").json()
+        with _client() as c:
+            tail_data = c.get("/v1/logs/tail").json()
         assert tail_data["missing"] is False
         assert "line1" in tail_data["lines"]
         assert "line2" in tail_data["lines"]
 
     def test_metrics_response_is_json_serializable(self, monkeypatch, tmp_path) -> None:
-        """Ensure the metrics response round-trips through JSON without error."""
         import json as _json
 
         stub = _make_stub_trace_store(tmp_path)
         monkeypatch.setattr(logs_module, "TraceStore", lambda: stub)
 
-        data = _client().get("/v1/logs/metrics").json()
-        _json.dumps(data)  # must not raise
+        with _client() as c:
+            data = c.get("/v1/logs/metrics").json()
+        _json.dumps(data)

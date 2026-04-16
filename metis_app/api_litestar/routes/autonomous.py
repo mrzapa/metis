@@ -30,7 +30,7 @@ def get_autonomous_status() -> dict[str, Any]:
     }
 
 
-@post("/v1/autonomous/trigger")
+@post("/v1/autonomous/trigger", status_code=200)
 def trigger_autonomous_research() -> dict[str, Any]:
     settings = _settings_store.load_settings()
     policy = dict(settings.get("assistant_policy") or {})
@@ -47,7 +47,7 @@ def trigger_autonomous_research() -> dict[str, Any]:
         raise LitestarHTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@post("/v1/autonomous/research/stream")
+@post("/v1/autonomous/research/stream", status_code=200)
 async def trigger_autonomous_research_stream() -> ServerSentEvent:
     """Trigger autonomous research and stream phase events via SSE."""
     settings = _settings_store.load_settings()

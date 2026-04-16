@@ -9,14 +9,14 @@ from typing import Any
 from litestar import Router, post
 from litestar.response import ServerSentEvent
 
-from metis_app.api.models import WebGraphBuildRequestModel
+from metis_app.api_litestar.models import WebGraphBuildRequestModel
 from metis_app.services.web_graph_service import create_web_graph_service
 from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
 
 from metis_app.api_litestar.common import run_engine
 
 
-@post("/v1/index/build/web-graph")
+@post("/v1/index/build/web-graph", status_code=200)
 def api_build_web_graph(data: WebGraphBuildRequestModel) -> dict[str, Any]:
     """Build a wikilinked knowledge-graph index from web sources."""
     orchestrator = WorkspaceOrchestrator()
@@ -30,28 +30,28 @@ def api_build_web_graph(data: WebGraphBuildRequestModel) -> dict[str, Any]:
     )
 
 
-@post("/v1/index/build/web-graph/stream")
-async def api_build_web_graph_stream(payload: WebGraphBuildRequestModel) -> ServerSentEvent:
+@post("/v1/index/build/web-graph/stream", status_code=200)
+async def api_build_web_graph_stream(data: WebGraphBuildRequestModel) -> ServerSentEvent:
     """Build a web-graph index and stream progress events over SSE."""
     orchestrator = WorkspaceOrchestrator()
-    service = create_web_graph_service(payload.settings)
+    service = create_web_graph_service(data.settings)
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
     future = loop.run_in_executor(
         None,
         lambda: service.build(
-            payload.topic,
-            payload.settings,
+            data.topic,
+            data.settings,
             orchestrator,
-            index_id=payload.index_id,
+            index_id=data.index_id,
         ),
     )
 
     async def _event_generator() -> Any:
         yield {
             "event": "message",
-            "data": json.dumps({"type": "build_started", "topic": payload.topic}, ensure_ascii=False),
+            "data": json.dumps({"type": "build_started", "topic": data.topic}, ensure_ascii=False),
         }
         while not future.done():
             await asyncio.sleep(0.05)

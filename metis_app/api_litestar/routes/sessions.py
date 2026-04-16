@@ -5,15 +5,15 @@ from __future__ import annotations
 from litestar import Router, delete, get, post
 from litestar.exceptions import HTTPException as LitestarHTTPException
 
-from metis_app.api.models import (
+from metis_app.api_litestar.models import (
     CreateSessionRequestModel,
     FeedbackRequestModel,
     FeedbackResponseModel,
     SessionDetailModel,
     SessionSummaryModel,
 )
-from metis_app.api.sessions import _hydrate_session_actions
 from metis_app.api_litestar.common import get_session_repo
+from metis_app.services.session_actions import hydrate_session_actions
 
 
 @get("/v1/sessions")
@@ -25,10 +25,10 @@ def list_sessions(search: str = "", skill: str = "") -> list[dict[str, object]]:
 
 
 @post("/v1/sessions", status_code=201)
-def create_session(payload: CreateSessionRequestModel) -> dict[str, object]:
+def create_session(data: CreateSessionRequestModel) -> dict[str, object]:
     """Create a new session."""
     repo = get_session_repo()
-    summary = repo.create_session(title=payload.title or "New Chat")
+    summary = repo.create_session(title=data.title or "New Chat")
     return SessionSummaryModel.from_dataclass(summary).model_dump()
 
 
@@ -39,19 +39,19 @@ def get_session(session_id: str) -> dict[str, object]:
     detail = repo.get_session(session_id)
     if detail is None:
         raise LitestarHTTPException(status_code=404, detail="Session not found")
-    detail = _hydrate_session_actions(detail)
+    detail = hydrate_session_actions(detail)
     return SessionDetailModel.from_dataclass(detail).model_dump()
 
 
-@post("/v1/sessions/{session_id:str}/feedback")
-def submit_feedback(session_id: str, payload: FeedbackRequestModel) -> dict[str, bool]:
+@post("/v1/sessions/{session_id:str}/feedback", status_code=200)
+def submit_feedback(session_id: str, data: FeedbackRequestModel) -> dict[str, bool]:
     """Persist feedback for a run in a session."""
     repo = get_session_repo()
     repo.save_feedback(
         session_id,
-        run_id=payload.run_id,
-        vote=payload.vote,
-        note=payload.note,
+        run_id=data.run_id,
+        vote=data.vote,
+        note=data.note,
     )
     return FeedbackResponseModel(ok=True).model_dump()
 

@@ -10,7 +10,7 @@ from typing import Any
 from litestar import Router, get, post
 from litestar.response import ServerSentEvent
 
-from metis_app.api.models import AbliterateStreamRequest
+from metis_app.api_litestar.models import AbliterateStreamRequest
 from metis_app.services.heretic_service import HereticService
 
 log = logging.getLogger(__name__)
@@ -78,8 +78,8 @@ def preflight() -> dict[str, Any]:
     }
 
 
-@post("/v1/heretic/abliterate/stream")
-async def abliterate_stream(payload: AbliterateStreamRequest) -> ServerSentEvent:
+@post("/v1/heretic/abliterate/stream", status_code=200)
+async def abliterate_stream(data: AbliterateStreamRequest) -> ServerSentEvent:
     loop = asyncio.get_running_loop()
     event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
@@ -90,9 +90,9 @@ async def abliterate_stream(payload: AbliterateStreamRequest) -> ServerSentEvent
     future = loop.run_in_executor(
         None,
         lambda: svc.run_pipeline(
-            payload.model_id,
-            bnb_4bit=payload.bnb_4bit,
-            outtype=payload.outtype,
+            data.model_id,
+            bnb_4bit=data.bnb_4bit,
+            outtype=data.outtype,
             post_message=_progress_cb,
         ),
     )
@@ -103,7 +103,7 @@ async def abliterate_stream(payload: AbliterateStreamRequest) -> ServerSentEvent
             "data": json.dumps(
                 {
                     "type": "started",
-                    "message": f"Starting abliteration pipeline for {payload.model_id}",
+                    "message": f"Starting abliteration pipeline for {data.model_id}",
                 },
                 ensure_ascii=False,
             ),
@@ -135,9 +135,9 @@ async def abliterate_stream(payload: AbliterateStreamRequest) -> ServerSentEvent
             gguf_path = future.result()
             # Fire personality_baked event to connect heretic → nourishment
             try:
-                _fire_personality_baked(payload.model_id)
+                _fire_personality_baked(data.model_id)
             except Exception:  # noqa: BLE001
-                log.warning("Failed to fire personality_baked event for %s", payload.model_id)
+                log.warning("Failed to fire personality_baked event for %s", data.model_id)
             yield {
                 "event": "message",
                 "data": json.dumps(
@@ -150,7 +150,7 @@ async def abliterate_stream(payload: AbliterateStreamRequest) -> ServerSentEvent
                 ),
             }
         except Exception as exc:  # noqa: BLE001
-            log.exception("Abliteration pipeline failed for %s", payload.model_id)
+            log.exception("Abliteration pipeline failed for %s", data.model_id)
             yield {
                 "event": "message",
                 "data": json.dumps(

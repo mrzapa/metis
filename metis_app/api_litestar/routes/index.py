@@ -11,7 +11,7 @@ from litestar.exceptions import HTTPException as LitestarHTTPException
 from litestar.response import ServerSentEvent
 from pydantic import BaseModel, Field
 
-from metis_app.api.models import IndexBuildRequestModel, IndexBuildResultModel, IndexDeleteResultModel
+from metis_app.api_litestar.models import IndexBuildRequestModel, IndexBuildResultModel, IndexDeleteResultModel
 from metis_app.engine import list_indexes
 from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
 from metis_app.services.star_archetype import detect_archetypes, RankedArchetype
@@ -38,7 +38,7 @@ def _ranked_to_dict(r: RankedArchetype) -> dict[str, Any]:
         "why": r.why,
     }
 
-@post("/v1/index/build")
+@post("/v1/index/build", status_code=200)
 def api_build_index(data: IndexBuildRequestModel) -> dict[str, Any]:
     """Build a new index from documents."""
     orchestrator = WorkspaceOrchestrator()
@@ -68,8 +68,8 @@ def api_delete_index(manifest_path: str) -> dict[str, Any]:
     return IndexDeleteResultModel(**result).model_dump()
 
 
-@post("/v1/index/build/stream")
-async def api_build_index_stream(payload: IndexBuildRequestModel) -> ServerSentEvent:
+@post("/v1/index/build/stream", status_code=200)
+async def api_build_index_stream(data: IndexBuildRequestModel) -> ServerSentEvent:
     """Build an index and stream progress events over SSE."""
     orchestrator = WorkspaceOrchestrator()
     loop = asyncio.get_running_loop()
@@ -81,9 +81,9 @@ async def api_build_index_stream(payload: IndexBuildRequestModel) -> ServerSentE
     future = loop.run_in_executor(
         None,
         lambda: orchestrator.build_index(
-            payload.document_paths,
-            payload.settings,
-            index_id=payload.index_id,
+            data.document_paths,
+            data.settings,
+            index_id=data.index_id,
             progress_cb=_progress_cb,
         ),
     )
@@ -141,7 +141,7 @@ async def api_build_index_stream(payload: IndexBuildRequestModel) -> ServerSentE
     return ServerSentEvent(_event_generator())
 
 
-@post("/v1/index/suggest-archetypes")
+@post("/v1/index/suggest-archetypes", status_code=200)
 def api_suggest_archetypes(data: SuggestArchetypesRequest) -> dict[str, Any]:
     """Return ranked star archetype suggestions for a list of uploaded file paths."""
     ranked = detect_archetypes(data.file_paths)

@@ -10,6 +10,7 @@ from typing import Any
 from litestar import Response
 from litestar.connection import ASGIConnection
 from litestar.exceptions import HTTPException as LitestarHTTPException
+from litestar.exceptions import ValidationException
 from litestar.handlers.base import BaseRouteHandler
 
 from metis_app.services.session_repository import SessionRepository
@@ -47,6 +48,10 @@ def handle_runtime_error(_: Any, exc: RuntimeError) -> Response[str]:
 
 def handle_http_exception(_: Any, exc: LitestarHTTPException) -> Response[str]:
     return json_error_response(exc.detail, status_code=exc.status_code)
+
+
+def handle_validation_exception(_: Any, exc: ValidationException) -> Response[str]:
+    return json_error_response(exc.detail or str(exc), status_code=422)
 
 
 def require_token_guard(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from importlib import import_module
 
-from fastapi.testclient import TestClient
+from litestar.testing import TestClient
 
 from metis_app.models.assistant_types import (
     AssistantBrainLink,
@@ -238,8 +238,8 @@ def test_assistant_service_dedupes_by_context_for_non_chat_reflections(
 
 
 def test_assistant_api_routes_return_snapshot_and_reflection(monkeypatch) -> None:
-    assistant_api = import_module("metis_app.api.assistant")
-    api_app = import_module("metis_app.api.app")
+    assistant_api = import_module("metis_app.api_litestar.routes.assistant")
+    api_app = import_module("metis_app.api_litestar")
 
     snapshot = {
         "identity": {
@@ -339,7 +339,7 @@ def test_assistant_api_routes_return_snapshot_and_reflection(monkeypatch) -> Non
 
     monkeypatch.setattr(assistant_api, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
 
-    client = TestClient(api_app.create_app())
+    client = TestClient(app=api_app.create_app())
 
     snapshot_response = client.get("/v1/assistant")
     assert snapshot_response.status_code == 200
