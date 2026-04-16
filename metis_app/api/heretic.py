@@ -19,7 +19,6 @@ from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from pydantic import ConfigDict
 
 from metis_app.api.models import AbliterateStreamRequest
 from metis_app.services.heretic_service import HereticService

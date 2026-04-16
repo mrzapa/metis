@@ -8,6 +8,11 @@ opendataloader-pdf (``document_loader = "opendataloader"`` in settings.json)
 is the highest-accuracy option for PDF-heavy workloads.  It is bundled with
 METIS via the ``jdk4py`` package — no separate Java installation is required.
 
+For scanned PDFs and complex tables, ``document_loader = "vision"`` renders
+each page to an image and asks a multimodal LLM (configured via the regular
+LLM provider settings) to transcribe the page. Requires PyMuPDF (``fitz``)
+to be installed.
+
 Usage
 -----
 ::
@@ -25,11 +30,13 @@ when kreuzberg is installed (e.g. when the user sets
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import pathlib
 import shutil
 import tempfile
+from typing import Any
 
 _log = logging.getLogger(__name__)
 
@@ -80,6 +87,28 @@ except ImportError:
         "opendataloader-pdf not installed — install with: pip install 'metis-app[opendataloader]'"
     )
 
+# ---------------------------------------------------------------------------
+# Optional PyMuPDF — required for vision-based PDF ingestion (page rasterise)
+# ---------------------------------------------------------------------------
+
+try:
+    import fitz as _fitz  # type: ignore[import]
+
+    _FITZ_AVAILABLE = True
+    _log.debug("PyMuPDF (fitz) available — vision-based PDF ingestion enabled")
+except ImportError:
+    _fitz = None  # type: ignore[assignment]
+    _FITZ_AVAILABLE = False
+    _log.debug(
+        "PyMuPDF not installed — vision-PDF mode unavailable; "
+        "install with: pip install pymupdf"
+    )
+
+# Vision-PDF caps: each page costs a multimodal LLM call. Hard guard rails
+# so a 1000-page PDF cannot accidentally burn the user's quota.
+_VISION_MAX_PAGES = 200
+_VISION_RENDER_DPI = 144  # balance OCR quality vs. payload size
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -94,6 +123,105 @@ def is_kreuzberg_available() -> bool:
 def is_opendataloader_available() -> bool:
     """Return ``True`` if opendataloader-pdf is installed and importable."""
     return _OPENDATALOADER_AVAILABLE
+
+
+def is_vision_pdf_available() -> bool:
+    """Return ``True`` if PyMuPDF is installed (required for vision-PDF mode)."""
+    return _FITZ_AVAILABLE
+
+
+_VISION_PROMPT = (
+    "Transcribe this PDF page to plain Markdown.\n\n"
+    "Rules:\n"
+    "- Preserve reading order (multi-column → top-to-bottom of leftmost first).\n"
+    "- Render tables as Markdown tables.\n"
+    "- Use heading levels (#, ##, ###) for visual headers.\n"
+    "- Describe figures briefly in italics: *Figure: <caption>*.\n"
+    "- Skip page numbers, running headers, and footers.\n"
+    "- Output ONLY the transcription — no preamble, no explanation."
+)
+
+
+def extract_pdf_with_vision(
+    path: str | pathlib.Path,
+    llm: Any,
+    *,
+    max_pages: int = _VISION_MAX_PAGES,
+    dpi: int = _VISION_RENDER_DPI,
+) -> str:
+    """Transcribe a PDF using a multimodal LLM, page-by-page.
+
+    Renders each page to a PNG and asks ``llm`` to transcribe it. Pages are
+    processed serially so a chat model that is not multimodal-capable fails
+    on the first page rather than silently for every page. Pages whose
+    extraction fails are replaced with an empty string and skipped — the
+    caller can fall back to a text-based loader for the whole document if
+    the result is empty.
+
+    Parameters
+    ----------
+    path:
+        Path to the PDF.
+    llm:
+        Multimodal LangChain ``BaseChatModel`` (e.g. GPT-4o, Claude 3,
+        Gemini Pro Vision). Must accept the OpenAI-style image_url message
+        content blocks.
+    max_pages:
+        Hard cap on pages processed (cost guardrail).
+    dpi:
+        Render resolution. 144 is a good middle ground.
+
+    Returns
+    -------
+    str
+        Concatenated Markdown transcription, with ``\\n\\n---\\n\\n`` as the
+        page separator. Empty string when no pages could be extracted.
+
+    Raises
+    ------
+    RuntimeError
+        If PyMuPDF is not installed.
+    """
+    if not _FITZ_AVAILABLE:
+        raise RuntimeError(
+            "Vision-PDF extraction requires PyMuPDF. Install with: pip install pymupdf"
+        )
+
+    pdf_path = pathlib.Path(path)
+    pages_text: list[str] = []
+    with _fitz.open(pdf_path) as doc:
+        page_count = min(len(doc), max(1, int(max_pages)))
+        zoom = float(dpi) / 72.0
+        matrix = _fitz.Matrix(zoom, zoom)
+        for page_idx in range(page_count):
+            page = doc.load_page(page_idx)
+            try:
+                pix = page.get_pixmap(matrix=matrix, alpha=False)
+                png_bytes = pix.tobytes("png")
+                b64 = base64.b64encode(png_bytes).decode("ascii")
+                response = llm.invoke([
+                    {
+                        "type": "human",
+                        "content": [
+                            {"type": "text", "text": _VISION_PROMPT},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{b64}"},
+                            },
+                        ],
+                    }
+                ])
+                content = (response.content or "").strip()
+                if content:
+                    pages_text.append(content)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning(
+                    "vision PDF page %d/%d failed for '%s': %s",
+                    page_idx + 1, page_count, pdf_path.name, exc,
+                )
+                continue
+
+    return "\n\n---\n\n".join(pages_text)
 
 
 # File extensions that kreuzberg handles well beyond plain text.
@@ -179,6 +307,8 @@ def load_document(
     *,
     use_kreuzberg: bool = True,
     use_opendataloader: bool = False,
+    use_vision: bool = False,
+    vision_llm: Any | None = None,
 ) -> str:
     """Extract text from *path* using the best available method.
 
@@ -193,6 +323,13 @@ def load_document(
         If ``True`` and opendataloader-pdf is installed, use it for ``.pdf``
         files (single-file mode — one JVM startup per call).  For bulk PDF
         indexing prefer :func:`batch_extract_pdfs` to amortise JVM startup.
+    use_vision:
+        If ``True`` and the file is a ``.pdf``, transcribe each page with the
+        provided ``vision_llm`` (multimodal). Falls through to other loaders
+        if vision extraction yields no text.
+    vision_llm:
+        A LangChain ``BaseChatModel`` capable of processing images. Required
+        when ``use_vision=True``.
 
     Returns
     -------
@@ -205,6 +342,21 @@ def load_document(
         If the file cannot be opened (plain-text path).
     """
     path = pathlib.Path(path)
+
+    if use_vision and _FITZ_AVAILABLE and vision_llm is not None and path.suffix.lower() == ".pdf":
+        try:
+            text = extract_pdf_with_vision(path, vision_llm)
+            if text.strip():
+                return text
+            _log.warning(
+                "vision PDF extraction returned empty result for '%s' — falling through",
+                path.name,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning(
+                "vision PDF extraction failed for '%s' (%s) — falling through",
+                path.name, exc,
+            )
 
     if use_opendataloader and _OPENDATALOADER_AVAILABLE and path.suffix.lower() == ".pdf":
         extracted = batch_extract_pdfs([path])

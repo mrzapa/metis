@@ -267,7 +267,8 @@ def test_run_with_target_faculty_id_skips_scan():
 
     events: list[dict] = []
     # run() will try to create LLM — patch it to bail at formulation
-    import sys, types
+    import sys
+    import types
     fake_lp = types.ModuleType("metis_app.utils.llm_providers")
     fake_lp.create_llm = lambda s: MagicMock(invoke=MagicMock(return_value=MagicMock(content="")))
     original = sys.modules.get("metis_app.utils.llm_providers")
@@ -361,7 +362,8 @@ def test_run_passes_demand_scores_to_scan_faculty_gaps():
         {"index_id": "user_doc_1", "brain_pass": {"placement": {"faculty_id": "reasoning"}}},
     ]
     # run() will try to create an LLM — patch llm_providers to avoid real calls
-    import sys, types
+    import sys
+    import types
     fake_lp = types.ModuleType("metis_app.utils.llm_providers")
     fake_lp.create_llm = lambda s: MagicMock(invoke=MagicMock(return_value=MagicMock(content="query")))
     original = sys.modules.get("metis_app.utils.llm_providers")

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pathlib
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -334,12 +334,12 @@ def detect_archetypes(file_paths: list[str]) -> list[RankedArchetype]:
         f"{ext_tally[e]} {e}" for e in dominant_exts if e
     ) or "unknown format"
 
-    reasons["ledger"].append(f"Tabular format detected ({ext_summary})" if totals["ledger"] > 0.25 else f"Structured row-based indexing")
-    reasons["codex"].append(f"Source code detected ({ext_summary})" if totals["codex"] > 0.25 else f"Code-optimised chunking")
-    reasons["chronicle"].append(f"Chronological / transcript content detected" if totals["chronicle"] > 0.25 else f"Temporal ordering support")
-    reasons["theorem"].append(f"Academic / mathematical content detected" if totals["theorem"] > 0.25 else f"Deep formal reasoning indexing")
-    reasons["signal"].append(f"Mixed media or figures detected ({ext_summary})" if totals["signal"] > 0.25 else f"Multimodal comprehension indexing")
-    reasons["dispatch"].append(f"Short-form content detected ({ext_summary})" if totals["dispatch"] > 0.25 else f"Granular short-text retrieval")
+    reasons["ledger"].append(f"Tabular format detected ({ext_summary})" if totals["ledger"] > 0.25 else "Structured row-based indexing")
+    reasons["codex"].append(f"Source code detected ({ext_summary})" if totals["codex"] > 0.25 else "Code-optimised chunking")
+    reasons["chronicle"].append("Chronological / transcript content detected" if totals["chronicle"] > 0.25 else "Temporal ordering support")
+    reasons["theorem"].append("Academic / mathematical content detected" if totals["theorem"] > 0.25 else "Deep formal reasoning indexing")
+    reasons["signal"].append(f"Mixed media or figures detected ({ext_summary})" if totals["signal"] > 0.25 else "Multimodal comprehension indexing")
+    reasons["dispatch"].append(f"Short-form content detected ({ext_summary})" if totals["dispatch"] > 0.25 else "Granular short-text retrieval")
     reasons["scroll"].append(f"Long-form prose ({ext_summary})")
 
     # Filter archetypes with a non-trivial score and rank

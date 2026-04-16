@@ -531,8 +531,8 @@ class ForecastService:
         rows: list[dict[str, str]] = []
         for raw_row in reader:
             row: dict[str, str] = {}
-            for field in fieldnames:
-                row[field] = str((raw_row or {}).get(field) or "").strip()
+            for field_name in fieldnames:
+                row[field_name] = str((raw_row or {}).get(field_name) or "").strip()
             rows.append(row)
         if not rows:
             raise ValueError("Forecast file does not contain any data rows.")

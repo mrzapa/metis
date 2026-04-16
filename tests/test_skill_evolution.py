@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import pathlib
 import sqlite3
 
 import pytest
@@ -190,7 +189,6 @@ def test_promote_skill_candidates_writes_md_and_marks_promoted(tmp_path):
 
 def test_iteration_complete_wired_in_wrapped(monkeypatch):
     """_wrapped() must call capture_skill_candidate when iteration_complete fires with iterations_used >= 2."""
-    import json
     from unittest.mock import MagicMock, patch
     from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
     from metis_app.services.skill_repository import _DEFAULT_CANDIDATES_DB_PATH

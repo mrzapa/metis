@@ -12,7 +12,6 @@ from typing import Any
 
 from metis_app.utils.llm_providers import create_llm
 from metis_app.utils.web_search import WebSearchResult, create_page_fetcher, create_web_search
-from langchain_core.messages import HumanMessage
 
 _log = logging.getLogger(__name__)
 
@@ -152,6 +151,8 @@ class WebGraphService:
             for i, r in enumerate(results)
         )
         prompt = _GRAPH_PROMPT.format(topic=topic, sources=sources_text)
+        from langchain_core.messages import HumanMessage
+
         response = llm.invoke([HumanMessage(content=prompt)])
         raw = response.content.strip()
 

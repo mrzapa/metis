@@ -13,8 +13,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import StrEnum
+import sys
 from typing import Any
+
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        """Backport of stdlib StrEnum for Python 3.10."""
+
+        def __str__(self) -> str:
+            return str(self.value)
 
 
 class FeatureFlag(StrEnum):

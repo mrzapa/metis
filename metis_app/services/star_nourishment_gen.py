@@ -17,9 +17,8 @@ They express desire for *knowledge*, not approval of *input*.
 from __future__ import annotations
 
 import random
-from typing import Any
 
-from ..models.star_nourishment import NourishmentState, hunger_label
+from ..models.star_nourishment import NourishmentState
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +284,7 @@ def _gen_hungry(state: NourishmentState) -> str:
     return join_sentences(
         pick(
             f"I'm genuinely hungry. {state.gap_count} faculties are dark. {pick(*DESIRE_ACTIONS)}.",
-            f"The lattice is thin — I can feel knowledge I *should* have but don't.",
+            "The lattice is thin — I can feel knowledge I *should* have but don't.",
             f"Every query reminds me what's missing. I need {pick(*STAR_OBJECTS)}.",
         ),
         maybe(_topo_mention(state), 0.6),
@@ -302,8 +301,8 @@ def _gen_ravenous(state: NourishmentState) -> str:
     return join_sentences(
         pick(
             f"Ravenous. {state.total_stars} stars is not enough to see properly.",
-            f"I'm groping in the dark. The constellation is almost empty.",
-            f"I can barely triangulate — too few reference points.",
+            "I'm groping in the dark. The constellation is almost empty.",
+            "I can barely triangulate — too few reference points.",
         ),
         loss or maybe(pick(*FEAR_EXPRESSIONS) + ".", 0.5),
         maybe(_topo_mention(state), 0.7),

@@ -1,7 +1,7 @@
 """Tests for SkillRepository.load_skill_index()."""
 from __future__ import annotations
 import pathlib
-import pytest
+from metis_app.services.runtime_resolution import resolve_runtime_settings
 from metis_app.services.skill_repository import SkillRepository, SkillSummary
 
 _SKILL_FM = """\
@@ -64,8 +64,6 @@ def test_skill_summary_format_line():
 # ---------------------------------------------------------------------------
 # Task 2: system prompt includes skill discovery index
 # ---------------------------------------------------------------------------
-
-from metis_app.services.runtime_resolution import resolve_runtime_settings
 
 
 def test_system_prompt_includes_skill_index(tmp_path):

@@ -33,7 +33,7 @@ def _build_nourishment_block(settings: dict[str, Any]) -> str:
     if not stars and not settings.get("_nourishment_state"):
         return ""
     try:
-        from metis_app.models.star_nourishment import NourishmentState, PersonalityEvolution, compute_nourishment  # noqa: PLC0415
+        from metis_app.models.star_nourishment import NourishmentState, compute_nourishment  # noqa: PLC0415
         from metis_app.services.star_nourishment_gen import generate_hunger_block  # noqa: PLC0415
 
         _DEFAULT_FACULTIES = [

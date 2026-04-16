@@ -1,6 +1,5 @@
 """Tests for metis_app.services.knowledge_cache."""
 
-import pathlib
 from unittest.mock import patch
 
 import pytest
@@ -8,7 +7,6 @@ import pytest
 from metis_app.services.knowledge_cache import (
     QueryResultCache,
     _cache_key,
-    _try_import_duckdb,
     _SCHEMA_VERSION,
 )
 

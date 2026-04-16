@@ -144,11 +144,6 @@ jobs:
         run: |
           & .\.venv-ci\Scripts\python.exe -m pip install -e ".[dev]"
 
-      - name: Install legacy PySide6 test extra
-        shell: pwsh
-        run: |
-          & .\.venv-ci\Scripts\python.exe -m pip install -e ".[legacy-pyside6]"
-
       - name: Verify dependency graph
         shell: pwsh
         run: |
@@ -177,10 +172,3 @@ jobs:
 
           print("CLI smoke test passed")
           '@ | & .\.venv-ci\Scripts\python.exe -
-
-      - name: Legacy Qt smoke tests
-        shell: pwsh
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          & .\.venv-ci\Scripts\python.exe -m pytest -q tests/test_app_view_smoke.py

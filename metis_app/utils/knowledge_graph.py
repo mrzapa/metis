@@ -47,11 +47,28 @@ class KnowledgeGraph:
     nodes: dict[str, dict[str, str]] = field(default_factory=dict)
     edges: dict[str, dict[str, set[str]]] = field(default_factory=dict)
 
-    def add_node(self, entity: str, *, entity_type: str = "ENTITY") -> None:
+    def add_node(
+        self,
+        entity: str,
+        *,
+        entity_type: str = "ENTITY",
+        description: str = "",
+    ) -> None:
         canonical = canonicalize_entity(entity)
         if not canonical:
             return
-        self.nodes.setdefault(canonical, {"type": entity_type})
+        existing = self.nodes.get(canonical)
+        if existing is None:
+            attrs: dict[str, str] = {"type": entity_type}
+            if description:
+                attrs["description"] = description.strip()
+            self.nodes[canonical] = attrs
+            return
+        # Promote a non-default type if the new extraction is more specific.
+        if existing.get("type", "ENTITY") in ("ENTITY", "OTHER", "PROPER_NOUN") and entity_type:
+            existing["type"] = entity_type
+        if description:
+            _merge_description(existing, description)
 
     def add_edge(self, source: str, relation: str, target: str) -> None:
         src = canonicalize_entity(source)
@@ -158,6 +175,27 @@ def canonicalize_entity(text: str) -> str:
     return re.sub(r"\s+", " ", normalized)
 
 
+def _merge_description(attrs: dict[str, str], new_desc: str) -> None:
+    """Merge a new description into an entity's existing attrs in place.
+
+    Keeps the descriptions short by deduplicating sentences (case-insensitive)
+    and capping total length, so a frequently-mentioned entity does not
+    accumulate an unbounded blob.
+    """
+    new_desc = new_desc.strip()
+    if not new_desc:
+        return
+    existing = attrs.get("description", "").strip()
+    if not existing:
+        attrs["description"] = new_desc[:600]
+        return
+    seen = {part.strip().lower() for part in existing.split(" | ") if part.strip()}
+    if new_desc.lower() in seen:
+        return
+    merged = f"{existing} | {new_desc}"
+    attrs["description"] = merged[:600]
+
+
 
 def extract_entities_and_relations(chunk: str) -> tuple[list[tuple[str, str]], list[tuple[str, str, str]]]:
     """Heuristic entity/relation extraction.
@@ -207,7 +245,12 @@ def llm_extract_entities_and_relations(
     *,
     max_entities: int = 30,
     max_relations: int = 20,
-) -> tuple[list[tuple[str, str]], list[tuple[str, str, str]]]:
+    max_passes: int = 1,
+    return_descriptions: bool = False,
+) -> (
+    tuple[list[tuple[str, str]], list[tuple[str, str, str]]]
+    | tuple[list[tuple[str, str, str]], list[tuple[str, str, str]]]
+):
     """LLM-powered entity and relationship extraction with few-shot examples.
 
     Sends a structured prompt to the LLM asking it to extract named entities
@@ -225,29 +268,61 @@ def llm_extract_entities_and_relations(
         Upper bound on returned entities (most salient first).
     max_relations:
         Upper bound on returned relation triples.
+    max_passes:
+        Number of extraction passes ("gleaning"). When > 1, the LLM is
+        re-prompted with already-extracted entities and asked to surface any
+        it missed; the loop stops early once a pass yields no new entities.
+        Cap is hard-clamped to 5 to bound cost.
+    return_descriptions:
+        When ``True``, returned entities are 3-tuples
+        ``(entity_type, entity_text, description)`` instead of 2-tuples.
 
     Returns
     -------
     entities:
-        List of ``(entity_type, entity_text)`` tuples.
+        List of ``(entity_type, entity_text)`` tuples (or 3-tuples with
+        descriptions when ``return_descriptions=True``).
     relations:
         List of ``(subject, predicate, object)`` triples.
     """
+    desc_clause = (
+        '. Each entity also includes a one-sentence description grounded only in this text'
+        if return_descriptions else ''
+    )
+    _entity_schema = (
+        '{"type": "<TYPE>", "text": "<text>", "description": "<one-sentence>"}'
+        if return_descriptions else
+        '{"type": "<TYPE>", "text": "<text>"}'
+    )
+    _example_entities_1 = (
+        '[{"type": "ORG", "text": "Apple Inc.", "description": "Acquired Shazam in 2018."}, '
+        '{"type": "ORG", "text": "Shazam", "description": "Acquired by Apple in 2018."}, '
+        '{"type": "PERSON", "text": "Tim Cook", "description": "Announced the Shazam acquisition."}]'
+        if return_descriptions else
+        '[{"type": "ORG", "text": "Apple Inc."}, {"type": "ORG", "text": "Shazam"}, '
+        '{"type": "PERSON", "text": "Tim Cook"}]'
+    )
+    _example_entities_2 = (
+        '[{"type": "OTHER", "text": "GDPR", "description": "EU regulation effective May 2018."}, '
+        '{"type": "GPE", "text": "EU", "description": "Bloc whose member states apply GDPR."}]'
+        if return_descriptions else
+        '[{"type": "OTHER", "text": "GDPR"}, {"type": "GPE", "text": "EU"}]'
+    )
     _FEW_SHOT = (
         'Example 1\n'
         'Input: "Apple Inc. acquired Shazam in 2018 for $400 million. Tim Cook announced the deal."\n'
-        'Output: {"entities": [{"type": "ORG", "text": "Apple Inc."}, {"type": "ORG", "text": "Shazam"}, '
-        '{"type": "PERSON", "text": "Tim Cook"}], "relations": [{"subject": "Apple Inc.", "predicate": "acquired", '
+        f'Output: {{"entities": {_example_entities_1}, '
+        '"relations": [{"subject": "Apple Inc.", "predicate": "acquired", '
         '"object": "Shazam"}, {"subject": "Tim Cook", "predicate": "announced", "object": "deal"}]}\n\n'
         'Example 2\n'
         'Input: "The GDPR regulation came into force in May 2018 across all EU member states."\n'
-        'Output: {"entities": [{"type": "OTHER", "text": "GDPR"}, {"type": "GPE", "text": "EU"}], '
+        f'Output: {{"entities": {_example_entities_2}, '
         '"relations": [{"subject": "GDPR", "predicate": "applies_to", "object": "EU member states"}]}'
     )
 
     system = (
         "You are a precise information-extraction assistant.\n"
-        "Extract named entities and subject-predicate-object relationships from the text.\n\n"
+        f"Extract named entities and subject-predicate-object relationships from the text{desc_clause}.\n\n"
         "Entity types: PERSON, ORG, GPE, PRODUCT, CONCEPT, EVENT, OTHER.\n\n"
         "Rejection rules — do NOT include:\n"
         "  - stopwords or pronouns (it, they, this, that, …)\n"
@@ -257,45 +332,88 @@ def llm_extract_entities_and_relations(
         f"Return at most {max_entities} entities and {max_relations} relations, "
         "most salient first.\n\n"
         "Output ONLY valid JSON in this exact schema, no prose, no markdown fences:\n"
-        '{"entities": [{"type": "<TYPE>", "text": "<text>"}], '
+        f'{{"entities": [{_entity_schema}], '
         '"relations": [{"subject": "<subj>", "predicate": "<pred>", "object": "<obj>"}]}\n\n'
         + _FEW_SHOT
     )
 
     user_text = text[:3000] if len(text) > 3000 else text
-    user = f'Input: "{user_text}"'
+    base_user = f'Input: "{user_text}"'
+    passes = max(1, min(int(max_passes or 1), 5))
 
-    try:
-        response = llm.invoke([
-            {"type": "system", "content": system},
-            {"type": "human", "content": user},
-        ])
-        raw = response.content
+    entities_with_desc: list[tuple[str, str, str]] = []
+    relations: list[tuple[str, str, str]] = []
+    seen_entity_keys: set[str] = set()
+    first_pass_failed = False
 
-        # Strip optional markdown code fences.
-        stripped = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
-        stripped = re.sub(r"```\s*$", "", stripped.strip())
+    for pass_idx in range(passes):
+        if pass_idx == 0:
+            user = base_user
+        else:
+            already = ", ".join(sorted({e[1] for e in entities_with_desc})[:50])
+            user = (
+                f"{base_user}\n\n"
+                f"You already extracted: [{already}].\n"
+                "Return ONLY entities and relations you previously MISSED. "
+                'If nothing was missed, return {"entities": [], "relations": []}.'
+            )
 
-        parsed = json.loads(stripped)
+        try:
+            response = llm.invoke([
+                {"type": "system", "content": system},
+                {"type": "human", "content": user},
+            ])
+            raw = response.content
 
-        entities: list[tuple[str, str]] = [
-            (item["type"], item["text"])
-            for item in parsed.get("entities", [])
-            if item.get("text") and item.get("type")
+            stripped = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
+            stripped = re.sub(r"```\s*$", "", stripped.strip())
+            parsed = json.loads(stripped)
+        except Exception as exc:  # noqa: BLE001
+            _log.debug(
+                "llm_extract pass %d/%d failed: %s", pass_idx + 1, passes, exc
+            )
+            if pass_idx == 0:
+                first_pass_failed = True
+            break  # later-pass failures keep what earlier passes produced
+
+        new_count = 0
+        for item in parsed.get("entities", []) or []:
+            txt = item.get("text")
+            typ = item.get("type")
+            if not txt or not typ:
+                continue
+            key = canonicalize_entity(txt)
+            if not key or key in seen_entity_keys:
+                continue
+            seen_entity_keys.add(key)
+            entities_with_desc.append((typ, txt, str(item.get("description") or "")))
+            new_count += 1
+
+        for r in parsed.get("relations", []) or []:
+            if r.get("subject") and r.get("predicate") and r.get("object"):
+                relations.append((r["subject"], r["predicate"], r["object"]))
+
+        if pass_idx > 0 and new_count == 0:
+            break  # gleaning converged
+
+    if first_pass_failed:
+        ents, rels = extract_entities_and_relations(text)
+        if return_descriptions:
+            return [(t, e, "") for t, e in ents], rels
+        return ents, rels
+
+    relations = glean_relationships(relations)
+
+    if return_descriptions:
+        normalized = [
+            (label, canonicalize_entity(text), desc)
+            for label, text, desc in entities_with_desc
+            if canonicalize_entity(text) and canonicalize_entity(text) not in _STOPWORDS
         ]
-        relations: list[tuple[str, str, str]] = [
-            (r["subject"], r["predicate"], r["object"])
-            for r in parsed.get("relations", [])
-            if r.get("subject") and r.get("predicate") and r.get("object")
-        ]
+        return normalized, relations
 
-        entities = normalise_entities(entities)
-        relations = glean_relationships(relations)
-        return entities, relations
-
-    except Exception as exc:  # noqa: BLE001
-        _log.debug("llm_extract_entities_and_relations fell back to heuristic: %s", exc)
-        return extract_entities_and_relations(text)
+    entities = normalise_entities([(label, text) for label, text, _ in entities_with_desc])
+    return entities, relations
 
 
 

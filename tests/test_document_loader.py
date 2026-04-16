@@ -15,7 +15,9 @@ import pytest
 
 from metis_app.utils.document_loader import (
     KREUZBERG_EXTENSIONS,
+    extract_pdf_with_vision,
     is_kreuzberg_available,
+    is_vision_pdf_available,
     load_document,
 )
 
@@ -118,3 +120,34 @@ class TestLoadDocumentKreuzberg:
         # Should not raise — either succeeds via kreuzberg or falls back.
         result = load_document(f, use_kreuzberg=True)
         assert isinstance(result, str)
+
+
+# ---------------------------------------------------------------------------
+# Vision PDF — guard rails
+# ---------------------------------------------------------------------------
+
+
+class TestVisionPdf:
+    def test_is_vision_pdf_available_returns_bool(self):
+        assert isinstance(is_vision_pdf_available(), bool)
+
+    def test_extract_without_pymupdf_raises(self, tmp_path: pathlib.Path, monkeypatch):
+        # Force PyMuPDF unavailability regardless of install state.
+        import metis_app.utils.document_loader as dl
+        monkeypatch.setattr(dl, "_FITZ_AVAILABLE", False)
+        f = tmp_path / "scan.pdf"
+        f.write_bytes(b"%PDF-1.4\n")
+        with pytest.raises(RuntimeError, match="PyMuPDF"):
+            extract_pdf_with_vision(f, llm=object())
+
+    def test_load_document_vision_falls_through_when_unavailable(
+        self, tmp_path: pathlib.Path, monkeypatch
+    ):
+        import metis_app.utils.document_loader as dl
+        monkeypatch.setattr(dl, "_FITZ_AVAILABLE", False)
+        f = tmp_path / "doc.txt"
+        f.write_text("plain text wins", encoding="utf-8")
+        # use_vision=True with no fitz available should silently fall through
+        # to plain-text reading rather than crash.
+        result = load_document(f, use_kreuzberg=False, use_vision=True, vision_llm=object())
+        assert result == "plain text wins"

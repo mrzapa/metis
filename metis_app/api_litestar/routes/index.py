@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
 from typing import Any
 
 from litestar import Router, delete, get, post

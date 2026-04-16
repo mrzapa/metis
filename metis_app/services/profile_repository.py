@@ -8,9 +8,9 @@ import logging
 import pathlib
 import re
 
-log = logging.getLogger(__name__)
-
 from metis_app.models.parity_types import AgentProfile
+
+log = logging.getLogger(__name__)
 
 _HERE = pathlib.Path(__file__).resolve().parent
 _PACKAGE_ROOT = _HERE.parent

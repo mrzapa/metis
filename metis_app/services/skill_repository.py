@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass as _dataclass
 from dataclasses import replace
 import pathlib
+import sqlite3
 from typing import Any
 
 import yaml
@@ -327,7 +328,6 @@ class SkillRepository:
 
     @staticmethod
     def _init_candidates_db(db_path: pathlib.Path) -> sqlite3.Connection:
-        import sqlite3
         conn = sqlite3.connect(str(db_path))
         conn.execute("""
             CREATE TABLE IF NOT EXISTS skill_candidates (
@@ -350,7 +350,6 @@ class SkillRepository:
         trace_json: str,
         convergence_score: float,
     ) -> None:
-        import sqlite3
         import time
         conn = self._init_candidates_db(db_path)
         with conn:
@@ -365,7 +364,6 @@ class SkillRepository:
         db_path: pathlib.Path,
         limit: int = 5,
     ) -> list[dict]:
-        import sqlite3
         conn = self._init_candidates_db(db_path)
         rows = conn.execute(
             "SELECT id, query_text, trace_json, convergence_score, created_at FROM skill_candidates "
@@ -378,7 +376,6 @@ class SkillRepository:
         ]
 
     def mark_candidate_promoted(self, *, db_path: pathlib.Path, candidate_id: int) -> None:
-        import sqlite3
         conn = self._init_candidates_db(db_path)
         with conn:
             conn.execute("UPDATE skill_candidates SET promoted = 1 WHERE id = ?", (candidate_id,))

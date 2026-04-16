@@ -641,7 +641,6 @@ class AssistantCompanionService:
         )
         if topo_enabled:
             try:
-                from metis_app.models.brain_graph import BrainGraph
                 from metis_app.services.topo_scaffold import compute_scaffold
                 from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
                 graph = WorkspaceOrchestrator().get_workspace_graph(skip_layout=True)
@@ -884,7 +883,6 @@ class AssistantCompanionService:
 
         Returns True if saved, False if below threshold.
         """
-        import pathlib
         from metis_app.services.skill_repository import SkillRepository
         if convergence_score < min_convergence or trace_iterations < min_iterations:
             return False
