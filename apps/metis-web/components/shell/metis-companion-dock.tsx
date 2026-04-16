@@ -71,7 +71,7 @@ export function MetisCompanionDock({
   const [showHud, setShowHud] = useState(false);
 
   // WebGPU companion – shared instance from context, so the chat pane and dock
-  // can drive the same model without loading a second 2 GB worker.
+  // can drive the same model without loading a second 500 MB worker.
   const webgpu = useWebGPUCompanionContext();
   const [quickAsk, setQuickAsk] = useState("");
   const [thoughts, setThoughts] = useState<CompanionActivityEvent[]>(() => {
@@ -88,6 +88,22 @@ export function MetisCompanionDock({
   const [researchPhase, setResearchPhase] = useState("");
   const [unseenCount, setUnseenCount] = useState(0);
   const [dockHistory, setDockHistory] = useState<Array<{ role: string; content: string }>>([]);
+
+  // Always-on Bonsai reflection — when enabled, each completed companion
+  // activity event triggers a local Bonsai reflection.  The latest few
+  // reflections are shown inline in the browser companion panel.
+  const [alwaysOn, setAlwaysOn] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("metis:bonsai-always-on") === "1";
+  });
+  const [insights, setInsights] = useState<
+    Array<{ timestamp: number; trigger: string; response: string }>
+  >([]);
+  const alwaysOnRef = useRef(alwaysOn);
+  const webgpuRef = useRef(webgpu);
+  const alwaysOnPendingRef = useRef<string | null>(null);
+  const prevWebgpuStatusRef = useRef(webgpu.status);
+
   const minimized = Boolean(snapshot?.identity.minimized);
   const showAtlasToast = Boolean(toastMessage?.startsWith("Saved to Atlas"));
 
@@ -190,6 +206,27 @@ export function MetisCompanionDock({
       if (event.source === "autonomous_research" && event.state === "completed") {
         setToastMessage("New star added to constellation");
       }
+      // Always-on: reflect locally on each completed event.  Skip if a
+      // reflection is already in flight so we don't stomp the user's chat
+      // stream or queue runaway work.
+      if (!alwaysOnRef.current) return;
+      if (event.state !== "completed") return;
+      if (alwaysOnPendingRef.current) return;
+      const g = webgpuRef.current;
+      if (g.status !== "ready") return;
+      const trigger = event.summary || event.source;
+      alwaysOnPendingRef.current = trigger;
+      g.send([
+        {
+          role: "system",
+          content:
+            "You are METIS, a concise research companion. In one or two sentences, note the most useful follow-up for the given event. Be direct and actionable.",
+        },
+        {
+          role: "user",
+          content: `Event (${event.source}): ${String(event.summary ?? "").slice(0, 400)}`,
+        },
+      ]);
     });
   }, [minimized]);
 
@@ -206,6 +243,46 @@ export function MetisCompanionDock({
       .then((s) => setAutonomousEnabled(s.enabled))
       .catch(() => {});
   }, []);
+
+  // Keep refs mirrored so the (stable) subscribeCompanionActivity callback
+  // always sees the latest alwaysOn flag and webgpu handle without forcing a
+  // re-subscription on every render.
+  useEffect(() => {
+    alwaysOnRef.current = alwaysOn;
+  }, [alwaysOn]);
+  useEffect(() => {
+    webgpuRef.current = webgpu;
+  }, [webgpu]);
+
+  // Persist the always-on toggle across reloads
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("metis:bonsai-always-on", alwaysOn ? "1" : "0");
+  }, [alwaysOn]);
+
+  // Auto-load Bonsai when the user opts into always-on
+  useEffect(() => {
+    if (alwaysOn && webgpu.status === "idle") {
+      webgpu.load();
+    }
+  }, [alwaysOn, webgpu.status, webgpu.load]);
+
+  // Capture the finished Bonsai response when an always-on reflection finishes.
+  // Runs on every status change; only commits on the "generating" → "ready"
+  // edge while a reflection is pending.
+  useEffect(() => {
+    const prev = prevWebgpuStatusRef.current;
+    prevWebgpuStatusRef.current = webgpu.status;
+    if (prev !== "generating" || webgpu.status !== "ready") return;
+    const trigger = alwaysOnPendingRef.current;
+    if (!trigger) return;
+    alwaysOnPendingRef.current = null;
+    const response = webgpu.output.trim();
+    if (!response) return;
+    setInsights((list) =>
+      [{ timestamp: Date.now(), trigger, response }, ...list].slice(0, 5),
+    );
+  }, [webgpu.status, webgpu.output]);
 
   // Abort any in-flight research stream on unmount
   useEffect(() => {
@@ -764,8 +841,8 @@ export function MetisCompanionDock({
                 {/* ── WebGPU browser-local companion ─────────────────────────
                     Shown only when no server runtime is configured.
                     All inference runs client-side via @huggingface/transformers
-                    + WebGPU.  Model (~2 GB) is cached in IndexedDB after the
-                    first download. ─────────────────────────────────────────── */}
+                    + WebGPU.  Bonsai 1.7B (~500 MB, q1) is cached in IndexedDB
+                    after the first download. ──────────────────────────────── */}
                 {noRuntime && (
                   <div className="rounded-[1.2rem] border border-white/10 bg-white/4 px-3 py-3 backdrop-blur-sm">
                     <div className="flex items-center gap-2">
@@ -774,6 +851,51 @@ export function MetisCompanionDock({
                         Browser companion
                       </p>
                     </div>
+
+                    {/* Always-on toggle — reflects locally on every completed
+                        companion activity event.  Hidden when WebGPU isn't
+                        available at all. */}
+                    {webgpu.status !== "unsupported" && (
+                      <button
+                        type="button"
+                        onClick={() => setAlwaysOn((v) => !v)}
+                        className="mt-3 flex w-full items-center justify-between gap-2 rounded-[1rem] border border-white/8 bg-white/4 px-3 py-2 text-left transition-colors hover:bg-white/8"
+                      >
+                        <div className="flex min-w-0 flex-col">
+                          <div className="flex items-center gap-2">
+                            <Bot className={cn("size-3.5 shrink-0", alwaysOn ? "text-primary" : "text-muted-foreground")} />
+                            <span className="text-xs font-medium text-foreground">Always-on reflection</span>
+                          </div>
+                          <span className="ml-5.5 text-[10px] text-muted-foreground">
+                            {alwaysOn
+                              ? "Bonsai reflects on every completed event"
+                              : "Reflect locally on each completed event"}
+                          </span>
+                        </div>
+                        <span className={cn(
+                          "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em]",
+                          alwaysOn ? "bg-primary/15 text-primary" : "bg-white/8 text-muted-foreground",
+                        )}>
+                          {alwaysOn ? "On" : "Off"}
+                        </span>
+                      </button>
+                    )}
+
+                    {/* Latest always-on insights — shown only when the feature
+                        is on and Bonsai has produced at least one response. */}
+                    {alwaysOn && insights.length > 0 && (
+                      <div className="mt-3 rounded-[1rem] border border-primary/15 bg-primary/5 px-3 py-2.5">
+                        <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-primary">
+                          Latest insight
+                        </p>
+                        <p className="text-xs leading-5 text-foreground/90">
+                          {insights[0].response}
+                        </p>
+                        <p className="mt-1.5 text-[10px] text-muted-foreground">
+                          on: {insights[0].trigger.slice(0, 80)}
+                        </p>
+                      </div>
+                    )}
 
                     {/* Unsupported browser */}
                     {webgpu.status === "unsupported" && (
@@ -795,8 +917,8 @@ export function MetisCompanionDock({
                     {webgpu.status === "idle" && (
                       <>
                         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                          LFM2 runs entirely in your browser via WebGPU — no API key or server needed.
-                          The model (~2 GB) is downloaded once and cached.
+                          Bonsai runs entirely in your browser via WebGPU — no API key or server needed.
+                          The model (~500 MB) is downloaded once and cached.
                         </p>
                         <Button
                           type="button"
@@ -817,8 +939,8 @@ export function MetisCompanionDock({
                           value={webgpu.progress?.pct ?? undefined}
                           label={
                             webgpu.progress && webgpu.progress.totalBytes > 0
-                              ? `${(webgpu.progress.loadedBytes / 1e9).toFixed(2)} GB of ${(webgpu.progress.totalBytes / 1e9).toFixed(2)} GB`
-                              : "Downloading LFM2…"
+                              ? `${(webgpu.progress.loadedBytes / 1e6).toFixed(0)} MB of ${(webgpu.progress.totalBytes / 1e6).toFixed(0)} MB`
+                              : "Downloading Bonsai…"
                           }
                         />
                         <p className="text-[11px] text-muted-foreground">
@@ -926,7 +1048,7 @@ export function MetisCompanionDock({
                           )}
                         </div>
                         <p className="text-[11px] text-muted-foreground">
-                          Running locally · LFM2 8B · WebGPU
+                          Running locally · Bonsai 1.7B · WebGPU
                         </p>
                       </div>
                     )}

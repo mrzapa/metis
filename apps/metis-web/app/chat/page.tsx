@@ -1094,7 +1094,7 @@ function ChatPageContent() {
           sources: [],
           query_mode: "direct",
           llm_provider: "webgpu",
-          llm_model: "LFM2 8B",
+          llm_model: "Bonsai 1.7B",
         },
         { status: "streaming" },
       );

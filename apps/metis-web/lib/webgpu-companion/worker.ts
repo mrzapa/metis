@@ -2,9 +2,10 @@
  * WebGPU inference Web Worker for the METIS companion.
  *
  * Runs @huggingface/transformers inside a dedicated worker thread so the main
- * UI thread stays responsive during the ~2 GB model download and token-by-token
- * generation.  The model is cached in the browser's IndexedDB by the library
- * after the first download, so subsequent page loads skip the network transfer.
+ * UI thread stays responsive during the ~500 MB model download and
+ * token-by-token generation.  The model is cached in the browser's IndexedDB
+ * by the library after the first download, so subsequent page loads skip the
+ * network transfer.
  *
  * Message protocol  (→ main→worker  ← worker→main):
  *
@@ -30,9 +31,12 @@ import {
   type TextGenerationPipeline,
 } from "@huggingface/transformers";
 
-// LFM2 8B-A1B: 8.3B params total, only 1.5B active per forward pass (MoE).
-// q4f16 quantisation keeps the cached size to ~2 GB while preserving quality.
-const MODEL_ID = "LiquidAI/LFM2-8B-A1B-ONNX";
+// Bonsai 1.7B ONNX with 1-bit quantisation (~500 MB cached).  Chosen so the
+// companion can run continuously in "always-on" mode — a smaller model plus
+// lower GPU pressure means less battery / thermal impact per autonomous event.
+// Mirrors the reference implementation at
+// https://huggingface.co/spaces/webml-community/bonsai-webgpu
+const MODEL_ID = "onnx-community/Bonsai-1.7B-ONNX";
 
 let gen: TextGenerationPipeline | null = null;
 const stopper = new InterruptableStoppingCriteria();
@@ -49,7 +53,7 @@ self.addEventListener("message", async (e: MessageEvent<IncomingMessage>) => {
   if (type === "load") {
     try {
       gen = await pipeline("text-generation", MODEL_ID, {
-        dtype: "q4f16",
+        dtype: "q1",
         device: "webgpu",
         progress_callback: (info: Record<string, unknown>) => {
           // Only forward meaningful download progress – skip compile/init events

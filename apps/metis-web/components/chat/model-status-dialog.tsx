@@ -79,13 +79,13 @@ export function ModelStatusDialog({
             disabled={saving}
             onClick={() => {
               setDraftProvider("webgpu");
-              setDraftModel("LFM2 8B");
+              setDraftModel("Bonsai 1.7B");
             }}
           >
             <Cpu className="size-3.5 shrink-0 text-primary" />
             <div className="min-w-0">
               <div className="font-medium leading-4 text-foreground">Use Browser (WebGPU)</div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">Runs LFM2&nbsp;8B entirely in your browser — no API key needed</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">Runs Bonsai&nbsp;1.7B entirely in your browser — no API key needed</div>
             </div>
           </button>
 

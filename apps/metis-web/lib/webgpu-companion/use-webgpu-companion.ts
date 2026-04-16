@@ -8,7 +8,7 @@
  * - navigator.gpu guard      — checked at initialisation time (SSR-safe).
  *                              Returns `status: "unsupported"` on older browsers.
  * - Opt-in download          — worker is created only when `load()` is called
- *                              so the ~2 GB network request never fires silently.
+ *                              so the ~500 MB network request never fires silently.
  * - Progress reporting       — `progress` streams GB loaded/total for a UI bar.
  * - OOM vs other errors      — `status: "oom"` is returned when the error looks
  *                              like device out-of-memory so the UI can give
