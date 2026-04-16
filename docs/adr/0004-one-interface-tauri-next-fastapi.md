@@ -1,15 +1,19 @@
-# 0004 - One Interface: Next.js + Tauri + FastAPI
+# 0004 - One Interface: Next.js + Tauri + Local API
 
 - **Status:** Accepted
 - **Date:** 2026-03-17
+- **Update (2026-04):** The local API sidecar was migrated from FastAPI to
+  Litestar (`metis_app.api_litestar.app:app`). The "one interface" decision
+  below is unchanged; only the ASGI framework differs. Historical references
+  to "FastAPI" in this document refer to the same local sidecar role.
 
 ## Decision
 
 METIS has one product interface only:
 
 - **UI Layer:** Next.js app (shipped in Tauri shell)
-- **Desktop Shell:** Tauri (wraps Next.js + FastAPI)
-- **Backend:** FastAPI (local sidecar)
+- **Desktop Shell:** Tauri (wraps Next.js + local API sidecar)
+- **Backend:** Litestar (local sidecar; originally FastAPI)
 - **CLI:** Developer/power-user workflows only
 
 The Qt GUI is deprecated and removed from the product surface. Browser-only mode is dev-only, not a product mode.

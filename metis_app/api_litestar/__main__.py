@@ -87,6 +87,8 @@ def main() -> None:
     else:
         port = _port_from_settings() or _find_free_port(host)
 
+    # Sentinel consumed by apps/metis-desktop/src-tauri/src/lib.rs via strip_prefix.
+    # Must remain a plain stdout line; reformatting breaks the Tauri host handshake.
     print(f"METIS_API_LISTENING=http://{host}:{port}", flush=True)
     sys.stdout.flush()
 

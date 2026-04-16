@@ -36,6 +36,6 @@ Use one of these statuses:
 ## Index
 
 - [0001-local-api-and-web-ui.md](0001-local-api-and-web-ui.md) - Superseded by 0004
-- [0002-streaming-protocol.md](0002-streaming-protocol.md)
+- [0002-streaming-protocol.md](0002-streaming-protocol.md) - Superseded by 0004
 - [0003-2026-tech-stack-review.md](0003-2026-tech-stack-review.md) - Superseded by 0004
 - [0004-one-interface-tauri-next-fastapi.md](0004-one-interface-tauri-next-fastapi.md)

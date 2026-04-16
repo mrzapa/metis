@@ -1,5 +1,8 @@
 # 0002: Streaming Protocol
 
+> ⚠️ **SUPERSEDED BY ADR 0004**  
+> FastAPI references below are historical. The API layer now runs on Litestar; see [ADR 0004](./0004-one-interface-tauri-next-fastapi.md).
+
 - `Status`: Superseded by ADR 0004
 - `Date`: 2026-03-13
 
