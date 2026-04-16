@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useGSAP } from "@gsap/react";
+import gsap from "gsap";
 import {
   bootstrapAssistant,
   clearAssistantMemory,
@@ -103,6 +106,35 @@ export function MetisCompanionDock({
   const webgpuRef = useRef(webgpu);
   const alwaysOnPendingRef = useRef<string | null>(null);
   const prevWebgpuStatusRef = useRef(webgpu.status);
+  const prevAlwaysOnRef = useRef(alwaysOn);
+  const browserCompanionScopeRef = useRef<HTMLDivElement | null>(null);
+  const prefersReducedMotion = useReducedMotion();
+
+  // GSAP flourish on always-on activation — a subtle scale + glow pulse on
+  // the browser companion panel the first moment the user opts in.  Honours
+  // prefers-reduced-motion by skipping the tween.
+  useGSAP(
+    () => {
+      const wasOn = prevAlwaysOnRef.current;
+      prevAlwaysOnRef.current = alwaysOn;
+      if (prefersReducedMotion) return;
+      if (!alwaysOn || wasOn) return;
+      const el = browserCompanionScopeRef.current;
+      if (!el) return;
+      gsap.fromTo(
+        el,
+        { scale: 0.985, boxShadow: "0 0 0 0 rgba(139,92,246,0)" },
+        {
+          scale: 1,
+          boxShadow: "0 0 24px 2px rgba(139,92,246,0.35)",
+          duration: 0.45,
+          ease: "power2.out",
+          clearProps: "boxShadow,scale",
+        },
+      );
+    },
+    { scope: browserCompanionScopeRef, dependencies: [alwaysOn, prefersReducedMotion] },
+  );
 
   const minimized = Boolean(snapshot?.identity.minimized);
   const showAtlasToast = Boolean(toastMessage?.startsWith("Saved to Atlas"));
@@ -844,26 +876,65 @@ export function MetisCompanionDock({
                     + WebGPU.  Bonsai 1.7B (~500 MB, q1) is cached in IndexedDB
                     after the first download. ──────────────────────────────── */}
                 {noRuntime && (
-                  <div className="rounded-[1.2rem] border border-white/10 bg-white/4 px-3 py-3 backdrop-blur-sm">
+                  <div
+                    ref={browserCompanionScopeRef}
+                    className="rounded-[1.2rem] border border-white/10 bg-white/4 px-3 py-3 backdrop-blur-sm"
+                  >
                     <div className="flex items-center gap-2">
                       <Cpu className="size-3.5 shrink-0 text-primary" />
                       <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">
                         Browser companion
                       </p>
+                      {/* Live pulse while an always-on reflection is generating */}
+                      <AnimatePresence>
+                        {alwaysOn && webgpu.status === "generating" && (
+                          <motion.span
+                            key="reflecting"
+                            initial={{ opacity: 0, scale: 0.6 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.6 }}
+                            transition={{ duration: 0.2 }}
+                            className="ml-auto flex items-center gap-1.5 text-[10px] text-violet-300"
+                            aria-live="polite"
+                          >
+                            <motion.span
+                              className="size-1.5 rounded-full bg-violet-400"
+                              animate={prefersReducedMotion ? undefined : { scale: [1, 1.6, 1], opacity: [0.6, 1, 0.6] }}
+                              transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
+                            />
+                            reflecting
+                          </motion.span>
+                        )}
+                      </AnimatePresence>
                     </div>
 
                     {/* Always-on toggle — reflects locally on every completed
                         companion activity event.  Hidden when WebGPU isn't
                         available at all. */}
                     {webgpu.status !== "unsupported" && (
-                      <button
+                      <motion.button
                         type="button"
                         onClick={() => setAlwaysOn((v) => !v)}
-                        className="mt-3 flex w-full items-center justify-between gap-2 rounded-[1rem] border border-white/8 bg-white/4 px-3 py-2 text-left transition-colors hover:bg-white/8"
+                        whileHover={prefersReducedMotion ? undefined : { scale: 1.01 }}
+                        whileTap={prefersReducedMotion ? undefined : { scale: 0.985 }}
+                        transition={{ type: "spring", stiffness: 380, damping: 26 }}
+                        className={cn(
+                          "mt-3 flex w-full items-center justify-between gap-2 rounded-[1rem] border px-3 py-2 text-left transition-colors",
+                          alwaysOn
+                            ? "border-primary/25 bg-primary/8 hover:bg-primary/12"
+                            : "border-white/8 bg-white/4 hover:bg-white/8",
+                        )}
+                        aria-pressed={alwaysOn}
                       >
                         <div className="flex min-w-0 flex-col">
                           <div className="flex items-center gap-2">
-                            <Bot className={cn("size-3.5 shrink-0", alwaysOn ? "text-primary" : "text-muted-foreground")} />
+                            <motion.span
+                              animate={alwaysOn && !prefersReducedMotion ? { rotate: [0, -8, 8, 0] } : { rotate: 0 }}
+                              transition={{ duration: 0.5, ease: "easeInOut" }}
+                              className="flex"
+                            >
+                              <Bot className={cn("size-3.5 shrink-0", alwaysOn ? "text-primary" : "text-muted-foreground")} />
+                            </motion.span>
                             <span className="text-xs font-medium text-foreground">Always-on reflection</span>
                           </div>
                           <span className="ml-5.5 text-[10px] text-muted-foreground">
@@ -872,30 +943,56 @@ export function MetisCompanionDock({
                               : "Reflect locally on each completed event"}
                           </span>
                         </div>
-                        <span className={cn(
-                          "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em]",
-                          alwaysOn ? "bg-primary/15 text-primary" : "bg-white/8 text-muted-foreground",
-                        )}>
-                          {alwaysOn ? "On" : "Off"}
+                        {/* Pill switch with a sliding indicator via shared layoutId */}
+                        <span
+                          className={cn(
+                            "relative flex h-5 w-10 shrink-0 items-center rounded-full px-0.5 transition-colors",
+                            alwaysOn ? "justify-end bg-primary/25" : "justify-start bg-white/10",
+                          )}
+                        >
+                          <motion.span
+                            layout
+                            transition={{ type: "spring", stiffness: 500, damping: 34 }}
+                            className={cn(
+                              "size-4 rounded-full shadow-sm",
+                              alwaysOn ? "bg-primary" : "bg-muted-foreground/60",
+                            )}
+                          />
                         </span>
-                      </button>
+                      </motion.button>
                     )}
 
                     {/* Latest always-on insights — shown only when the feature
-                        is on and Bonsai has produced at least one response. */}
-                    {alwaysOn && insights.length > 0 && (
-                      <div className="mt-3 rounded-[1rem] border border-primary/15 bg-primary/5 px-3 py-2.5">
-                        <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-primary">
-                          Latest insight
-                        </p>
-                        <p className="text-xs leading-5 text-foreground/90">
-                          {insights[0].response}
-                        </p>
-                        <p className="mt-1.5 text-[10px] text-muted-foreground">
-                          on: {insights[0].trigger.slice(0, 80)}
-                        </p>
-                      </div>
-                    )}
+                        is on and Bonsai has produced at least one response.
+                        AnimatePresence keyed on the timestamp so every fresh
+                        reflection cross-fades + slides in cleanly. */}
+                    <AnimatePresence mode="wait">
+                      {alwaysOn && insights.length > 0 && (
+                        <motion.div
+                          key={insights[0].timestamp}
+                          initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 8, filter: "blur(4px)" }}
+                          animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)" }}
+                          exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4, filter: "blur(4px)" }}
+                          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                          className="mt-3 overflow-hidden rounded-[1rem] border border-primary/15 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent px-3 py-2.5"
+                        >
+                          <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-primary">
+                            <motion.span
+                              animate={prefersReducedMotion ? undefined : { opacity: [0.7, 1, 0.7] }}
+                              transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+                              className="inline-block size-1.5 rounded-full bg-primary"
+                            />
+                            Latest insight
+                          </p>
+                          <p className="text-xs leading-5 text-foreground/90">
+                            {insights[0].response}
+                          </p>
+                          <p className="mt-1.5 text-[10px] text-muted-foreground">
+                            on: {insights[0].trigger.slice(0, 80)}
+                          </p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
                     {/* Unsupported browser */}
                     {webgpu.status === "unsupported" && (
