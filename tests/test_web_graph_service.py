@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytest.importorskip("langchain_core")
+
 from metis_app.services.web_graph_service import WebGraphService, create_web_graph_service
 from metis_app.utils.web_search import WebSearchResult
 
