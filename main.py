@@ -1,6 +1,6 @@
 """main.py — Canonical entry point for the METIS application.
 
-Starts the METIS API server (FastAPI + uvicorn) and opens the web interface
+Starts the METIS API server (Litestar + uvicorn) and opens the web interface
 in the default browser.  The primary interface is Tauri + Next.js located in
 ``apps/metis-web/``.
 

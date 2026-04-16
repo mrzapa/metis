@@ -6,7 +6,7 @@
 .DESCRIPTION
     Creates .venv311-forecast\ if absent, installs .[dev,api], pins the
     validated TimesFM source revision with torch extras, installs XReg
-    dependencies, and starts the FastAPI forecast backend on
+    dependencies, and starts the Litestar forecast backend on
     http://127.0.0.1:8000.
 
     Run from the repo root:
@@ -55,6 +55,5 @@ Write-Host "[run_forecast_api_dev] Installing TimesFM torch runtime from pinned 
 Write-Host "[run_forecast_api_dev] Installing XReg dependencies (jax + scikit-learn)..."
 & $VenvPip install --quiet jax scikit-learn
 
-$env:METIS_API_BACKEND = "fastapi"
-Write-Host "[run_forecast_api_dev] Starting FastAPI forecast backend at http://127.0.0.1:8000 (Ctrl-C to stop)"
-& $VenvPython -m uvicorn metis_app.api.app:app --reload --host 127.0.0.1 --port 8000
+Write-Host "[run_forecast_api_dev] Starting Litestar forecast backend at http://127.0.0.1:8000 (Ctrl-C to stop)"
+& $VenvPython -m uvicorn metis_app.api_litestar.app:app --reload --host 127.0.0.1 --port 8000

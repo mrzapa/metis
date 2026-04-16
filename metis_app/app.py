@@ -1,7 +1,7 @@
 """metis_app.app — Application bootstrap.
 
 Entry point for the METIS application.  Initialises logging and starts the
-FastAPI web server.  The primary interface is the Tauri + Next.js web
+Litestar API server.  The primary interface is the Tauri + Next.js web
 application in ``apps/metis-web/``.  The legacy PySide6 desktop interface
 has been removed.
 
@@ -16,7 +16,6 @@ Or directly::
 
 from __future__ import annotations
 
-import os
 import pathlib
 import sys
 import traceback
@@ -62,14 +61,7 @@ def run_app(
     *,
     open_browser: bool = True,
 ) -> None:
-    """Initialise logging and start the METIS API + web server.
-
-    The ASGI backend is selected via the ``METIS_API_BACKEND`` environment
-    variable (default: ``litestar``):
-
-    * ``METIS_API_BACKEND=litestar`` — use Litestar (production default)
-    * ``METIS_API_BACKEND=fastapi``  — use FastAPI (backward compat)
-    """
+    """Initialise logging and start the METIS Litestar API + web server."""
 
     # ── 1. Logging — must be first ────────────────────────────────────
     _default_log_dir = _REPO_ROOT / "logs"
@@ -81,17 +73,11 @@ def run_app(
     try:
         import uvicorn  # type: ignore[import-untyped]
 
-        _backend = os.getenv("METIS_API_BACKEND", "litestar").lower()
-        if _backend == "fastapi":
-            from metis_app.api.app import app as _asgi_app
-            _app_label = "FastAPI"
-        else:
-            from metis_app.api_litestar.app import create_app
-            _asgi_app = create_app()
-            _app_label = "Litestar"
+        from metis_app.api_litestar.app import create_app
+        _asgi_app = create_app()
 
         url = f"http://{host}:{port}"
-        logger.info("Starting METIS API (%s) on %s:%s", _app_label, host, port)
+        logger.info("Starting METIS API (Litestar) on %s:%s", host, port)
         logger.info("Starting API server at %s", url)
 
         if open_browser:

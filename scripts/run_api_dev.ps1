@@ -40,4 +40,4 @@ Write-Host "[run_api_dev] Installing .[dev,api]..."
 
 # ── Start dev server ──────────────────────────────────────────────────────────
 Write-Host "[run_api_dev] Starting uvicorn at http://127.0.0.1:8000 (Ctrl-C to stop)"
-& $VenvPython -m uvicorn metis_app.api.app:app --reload --host 127.0.0.1 --port 8000
+& $VenvPython -m uvicorn metis_app.api_litestar.app:app --reload --host 127.0.0.1 --port 8000

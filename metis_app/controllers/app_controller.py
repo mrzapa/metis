@@ -248,69 +248,45 @@ class AppController:
         if hasattr(widget, "configure"):
             widget.configure(state="normal" if enabled else "disabled")
 
-    def _dialog_parent(self) -> Any:
-        getter = getattr(self.view, "dialog_parent", None)
-        if callable(getter):
-            return getter()
-        return None
-
-    @staticmethod
-    def _to_qt_filter(filetypes: list[tuple[str, str]]) -> str:
-        parts: list[str] = []
-        for label, pattern in filetypes:
-            cleaned = " ".join(part.strip() for part in str(pattern or "").split() if part.strip())
-            cleaned = cleaned or "*"
-            parts.append(f"{label} ({cleaned})")
-        return ";;".join(parts)
+    # Dialog helpers delegate to the View rather than calling Qt directly.
+    # The Qt desktop interface was removed (ADR 0004); the Tauri + Next.js shell
+    # provides its own IPC-backed dialogs and does not route through the
+    # controller. These stubs remain so legacy callers (tests using FakeView)
+    # keep working.
 
     def _ask_yes_no(self, title: str, text: str) -> bool:
-        from PySide6.QtWidgets import QMessageBox
-
-        result = QMessageBox.question(
-            self._dialog_parent(),
-            title,
-            text,
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        return result == QMessageBox.Yes
+        handler = getattr(self.view, "ask_yes_no", None)
+        if callable(handler):
+            return bool(handler(title, text))
+        return False
 
     def _show_error_dialog(self, title: str, text: str) -> None:
-        from PySide6.QtWidgets import QMessageBox
-
-        QMessageBox.critical(self._dialog_parent(), title, text)
+        handler = getattr(self.view, "show_error", None)
+        if callable(handler):
+            handler(title, text)
 
     def _show_info_dialog(self, title: str, text: str) -> None:
-        from PySide6.QtWidgets import QMessageBox
-
-        QMessageBox.information(self._dialog_parent(), title, text)
+        handler = getattr(self.view, "show_info", None)
+        if callable(handler):
+            handler(title, text)
 
     def _pick_open_files(self, *, title: str, filetypes: list[tuple[str, str]]) -> list[str]:
-        from PySide6.QtWidgets import QFileDialog
-
-        paths, _ = QFileDialog.getOpenFileNames(
-            self._dialog_parent(),
-            title,
-            "",
-            self._to_qt_filter(filetypes),
-        )
-        return [str(path) for path in paths]
+        handler = getattr(self.view, "pick_open_files", None)
+        if callable(handler):
+            return [str(p) for p in (handler(title=title, filetypes=filetypes) or [])]
+        return []
 
     def _pick_open_file(self, *, title: str, filetypes: list[tuple[str, str]]) -> str:
-        from PySide6.QtWidgets import QFileDialog
-
-        path, _ = QFileDialog.getOpenFileName(
-            self._dialog_parent(),
-            title,
-            "",
-            self._to_qt_filter(filetypes),
-        )
-        return str(path or "")
+        handler = getattr(self.view, "pick_open_file", None)
+        if callable(handler):
+            return str(handler(title=title, filetypes=filetypes) or "")
+        return ""
 
     def _pick_directory(self, *, title: str) -> str:
-        from PySide6.QtWidgets import QFileDialog
-
-        return str(QFileDialog.getExistingDirectory(self._dialog_parent(), title) or "")
+        handler = getattr(self.view, "pick_directory", None)
+        if callable(handler):
+            return str(handler(title=title) or "")
+        return ""
 
     def _get_text_input(
         self,
@@ -319,10 +295,10 @@ class AppController:
         *,
         text: str = "",
     ) -> str:
-        from PySide6.QtWidgets import QInputDialog
-
-        value, accepted = QInputDialog.getText(self._dialog_parent(), title, label, text=text)
-        return str(value or "") if accepted else ""
+        handler = getattr(self.view, "get_text_input", None)
+        if callable(handler):
+            return str(handler(title, label, text=text) or "")
+        return ""
 
     def _pick_item_from_list(
         self,
@@ -333,20 +309,14 @@ class AppController:
         current: str = "",
         editable: bool = False,
     ) -> str:
-        from PySide6.QtWidgets import QInputDialog
-
         if not items:
             return ""
-        index = items.index(current) if current in items else 0
-        value, accepted = QInputDialog.getItem(
-            self._dialog_parent(),
-            title,
-            label,
-            items,
-            index,
-            editable,
-        )
-        return str(value or "") if accepted else ""
+        handler = getattr(self.view, "pick_item_from_list", None)
+        if callable(handler):
+            return str(
+                handler(title, label, items, current=current, editable=editable) or ""
+            )
+        return ""
 
     def _selected_history_session_id(self) -> str:
         getter = getattr(self.view, "get_selected_history_session_id", None)

@@ -2,10 +2,7 @@
 
 METIS is a local-first AI workspace that runs entirely on your machine.  The
 primary interface is the **Tauri + Next.js web application** (`apps/metis-web/`)
-backed by a **Litestar** ASGI service (default) or **FastAPI** (`metis_app/api/`).
-
-Set `METIS_API_BACKEND=fastapi` to use FastAPI instead of the Litestar default.
-Both backends are importable; Litestar is used when the env var is unset.
+backed by a **Litestar** ASGI service (`metis_app/api_litestar/`).
 
 ---
 
@@ -25,9 +22,9 @@ python main.py --cli query --file my_docs/ --question "What are the key findings
 ## Architecture overview
 
 ```
-main.py                  Entry point — starts Litestar (default) or FastAPI + opens browser
+main.py                  Entry point — starts Litestar + opens browser
 metis_app/
-  api/                   FastAPI routes (v1/*)
+  api_litestar/          Litestar routes (v1/*)
   engine/                Indexing + retrieval core (provider-agnostic)
   models/                BrainGraph, AppModel, session types
   services/              Session repository, index service, pipeline
@@ -97,7 +94,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for PR workflow and environment setup.
 
 ## Architecture decisions
 
-Key decisions live in `docs/adr/`. The canonical decision is **[ADR 0004](docs/adr/0004-one-interface-tauri-next-fastapi.md)**: single product interface — Next.js UI in Tauri shell; **Litestar is the default backend** (set `METIS_API_BACKEND=fastapi` for the FastAPI implementation). Qt GUI is deprecated and removed from the product surface; CLI is retained for automation.
+Key decisions live in `docs/adr/`. The canonical decision is **[ADR 0004](docs/adr/0004-one-interface-tauri-next-fastapi.md)**: single product interface — Next.js UI in Tauri shell, Litestar backend. Qt GUI is deprecated and removed from the product surface; CLI is retained for automation.
 
 ---
 

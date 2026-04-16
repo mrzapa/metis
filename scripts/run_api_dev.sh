@@ -35,7 +35,7 @@ printf '[run_api_dev] Installing .[dev,api]...\n'
 
 # ── Start dev server ──────────────────────────────────────────────────────────
 printf '[run_api_dev] Starting uvicorn at http://127.0.0.1:8000 (Ctrl-C to stop)\n'
-exec "$VENV_DIR/bin/python" -m uvicorn metis_app.api.app:app \
+exec "$VENV_DIR/bin/python" -m uvicorn metis_app.api_litestar.app:app \
     --reload \
     --host 127.0.0.1 \
     --port 8000

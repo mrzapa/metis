@@ -423,7 +423,7 @@ if ((Test-PortInUse -HostName `$apiHost -Port `$apiPort) -or (Test-PortInUse -Ho
 try {
     `$apiSplat = @{
         FilePath               = `$venvPython
-        ArgumentList           = @("-m", "uvicorn", "metis_app.api.app:app", "--host", `$apiHost, "--port", "`$apiPort")
+        ArgumentList           = @("-m", "uvicorn", "metis_app.api_litestar.app:app", "--host", `$apiHost, "--port", "`$apiPort")
         WorkingDirectory       = `$metisDir
         PassThru               = `$true
         WindowStyle            = "Minimized"

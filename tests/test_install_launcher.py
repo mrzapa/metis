@@ -66,8 +66,8 @@ class TestBashLauncher:
     def test_default_is_web_api_and_browser(self) -> None:
         """Default path should start the API, static web server, and open browser."""
         template = extract_sh_launcher_template()
-        assert "uvicorn metis_app.api.app:app" in template, (
-            "Default should start the API server"
+        assert "uvicorn metis_app.api_litestar.app:app" in template, (
+            "Default should start the Litestar API server"
         )
         assert "http.server" in template, "Default should start a static web server"
         assert "127.0.0.1:8000" in template, "Default API URL should be fixed"

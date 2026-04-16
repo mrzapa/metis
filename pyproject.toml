@@ -31,13 +31,9 @@ dependencies = ["psutil>=6", "PyYAML>=6", "pydantic>=2.0"]
 
 [project.optional-dependencies]
 api = [
-    "fastapi==0.135.3",
+    "litestar>=2.4",
     "python-multipart==0.0.26",
     "uvicorn[standard]==0.44.0",
-]
-# Legacy Qt dependency for deprecated tests only (per ADR 0004); keep for CI historical test coverage
-legacy-pyside6 = [
-    "PySide6>=6.6",
 ]
 dev = [
     "pytest>=8",
@@ -45,10 +41,13 @@ dev = [
     "ruff>=0.6",
     "pre-commit>=3.8",
     "httpx>=0.28",
-    "fastapi==0.135.3",
     "python-multipart==0.0.26",
     "uvicorn[standard]==0.44.0",
     "litestar>=2.4",
+    # fastapi retained in dev only: legacy FastAPI surface in metis_app/api/ is
+    # scheduled for removal but still covered by existing tests. Drop when those
+    # tests have migrated to Litestar's TestClient.
+    "fastapi==0.135.3",
 ]
 forecast = [
     "timesfm>=2,<3",
@@ -113,7 +112,7 @@ all = [
 
 [project.scripts]
 metis-parity-audit = "metis_app.audit:main"
-metis-api = "metis_app.api.__main__:main"
+metis-api = "metis_app.api_litestar.__main__:main"
 
 [tool.setuptools]
 license-files = ["LICENSE"]

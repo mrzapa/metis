@@ -345,10 +345,10 @@ API_STDERR="\$(mktemp)"
 WEB_STDOUT="\$(mktemp)"
 WEB_STDERR="\$(mktemp)"
 
-"\$VENV_PYTHON" -m uvicorn metis_app.api.app:app --host "\$API_HOST" --port "\$API_PORT" >"\$API_STDOUT" 2>"\$API_STDERR" &
+"\$VENV_PYTHON" -m uvicorn metis_app.api_litestar.app:app --host "\$API_HOST" --port "\$API_PORT" >"\$API_STDOUT" 2>"\$API_STDERR" &
 API_PID=\$!
 if ! wait_for_url "API" "\$API_HEALTH_URL" "\$API_PID"; then
-    startup_failure "API server" "\$API_PID" "\$API_STDOUT" "\$API_STDERR" "Verify that FastAPI dependencies are installed and that port \${API_PORT} is available."
+    startup_failure "API server" "\$API_PID" "\$API_STDOUT" "\$API_STDERR" "Verify that Litestar dependencies are installed and that port \${API_PORT} is available."
 fi
 
 "\$VENV_PYTHON" -m http.server "\$WEB_PORT" --bind "\$WEB_HOST" --directory "\$WEB_DIR" >"\$WEB_STDOUT" 2>"\$WEB_STDERR" &
