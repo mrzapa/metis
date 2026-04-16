@@ -17,7 +17,6 @@ from litestar.datastructures import UploadFile
 from litestar.exceptions import HTTPException as LitestarHTTPException
 from pydantic import ValidationError
 
-import metis_app.settings_store as _settings_store
 from metis_app.api.models import (
     LearningRoutePreviewModel,
     LearningRoutePreviewRequestModel,

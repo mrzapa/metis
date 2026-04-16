@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from metis_app.models.comet_event import CometEvent, NewsItem

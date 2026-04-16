@@ -1,7 +1,6 @@
 """Tests for metis_app.services.grep_retriever."""
 
 import json
-import subprocess
 from unittest.mock import patch
 
 import pytest

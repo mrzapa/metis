@@ -10,7 +10,6 @@ Covers:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -198,7 +197,9 @@ def _build_minimal_swarm_env(monkeypatch):
         # Detect what the swarm service is asking and return minimal valid JSON
         text = " ".join(str(m.get("content", "")) for m in messages)
         if "JSON array" in text and "topic" in text.lower():
-            r = MagicMock(); r.content = '["policy", "economics"]'; return r
+            r = MagicMock()
+            r.content = '["policy", "economics"]'
+            return r
         if "JSON array" in text or "persona" in text.lower():
             r = MagicMock()
             r.content = json.dumps([
@@ -212,7 +213,9 @@ def _build_minimal_swarm_env(monkeypatch):
             ])
             return r
         # Default: return a short response for post generation
-        r = MagicMock(); r.content = "I agree with this approach."; return r
+        r = MagicMock()
+        r.content = "I agree with this approach."
+        return r
 
     fake_llm.invoke.side_effect = _invoke
     monkeypatch.setattr("metis_app.services.swarm_service.create_llm", lambda _: fake_llm)
@@ -317,7 +320,6 @@ def _make_mock_report():
 
 def test_query_swarm_returns_swarm_query_result(tmp_path, monkeypatch):
     """query_swarm should return a SwarmQueryResult with populated fields."""
-    import json as _json
 
     from metis_app.engine.querying import SwarmQueryRequest, SwarmQueryResult
 

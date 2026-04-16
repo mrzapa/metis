@@ -1,12 +1,9 @@
 """Tests for metis_app.services.monte_carlo_sampler."""
 
 import types
-from unittest.mock import MagicMock
 
-import pytest
 
 from metis_app.services.monte_carlo_sampler import (
-    _PROBE_WINDOW,
     _ROI_WINDOW,
     _SMALL_FILE_THRESHOLD,
     _cosine_sim,

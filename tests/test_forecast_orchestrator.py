@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import ANY, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 

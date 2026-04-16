@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
 
 from metis_app.models.star_nourishment import (
-    FACULTY_GAP_THRESHOLD,
     LIGHTNING_STAR_THRESHOLD,
     AbliterationRecord,
-    FacultyNourishment,
     NourishmentState,
     PersonalityEvolution,
     StarEvent,
@@ -787,7 +784,6 @@ class TestPersonalityMentionHelpers:
         state = NourishmentState(total_stars=15, personality=evo)
         # swarm_personas > 8 → diversity path
         results = [_swarm_mention(state) for _ in range(30)]
-        non_empty = [r for r in results if r]
         # At least some should be non-empty (30% chance each)
         assert any(isinstance(r, str) for r in results)
 

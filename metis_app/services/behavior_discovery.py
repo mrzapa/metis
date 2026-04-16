@@ -23,7 +23,6 @@ import json
 import pathlib
 import re
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 from typing import Any
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent

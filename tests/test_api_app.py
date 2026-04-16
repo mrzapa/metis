@@ -2127,7 +2127,6 @@ def test_brain_graph_events_payload_structure(monkeypatch) -> None:
 
 def test_trace_playback_returns_manifest(monkeypatch, tmp_path) -> None:
     """GET /v1/traces/{run_id}/playback returns a PlaybackManifest."""
-    import metis_app.services.trace_store as trace_store_module
 
     run_id = "test-run-playback-001"
     sample_events = [

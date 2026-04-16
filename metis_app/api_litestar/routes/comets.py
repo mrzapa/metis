@@ -8,7 +8,6 @@ import json
 import logging
 import time
 from collections.abc import AsyncGenerator
-from typing import Any
 
 from litestar import Router, get, post
 from litestar.exceptions import HTTPException as LitestarHTTPException

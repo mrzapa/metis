@@ -2125,7 +2125,7 @@ def test_run_autonomous_research_concurrent_dispatches_multiple_faculties(tmp_pa
         "metis_app.utils.web_search.create_web_search",
         return_value=um.MagicMock(),
     ), um.patch.object(orc, "list_indexes", return_value=[]):
-        result = orc.run_autonomous_research(settings)
+        orc.run_autonomous_research(settings)
 
     assert run_batch_calls, "run_batch was not called"
     assert len(run_batch_calls[0]["faculty_ids"]) >= 2, (

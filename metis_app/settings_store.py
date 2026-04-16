@@ -385,7 +385,7 @@ def _validate_and_coerce(settings: dict[str, Any]) -> dict[str, Any]:
         ]
         raise ValueError(
             "METIS settings validation failed. Fix the following fields in "
-            f"settings.json:\n" + "\n".join(lines)
+            "settings.json:\n" + "\n".join(lines)
         ) from exc
 
     # model_dump() only returns AppSettings fields; re-merge extra keys so

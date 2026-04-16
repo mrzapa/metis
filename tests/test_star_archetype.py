@@ -2,12 +2,9 @@
 from __future__ import annotations
 
 import pathlib
-import tempfile
 
-import pytest
 
 from metis_app.services.star_archetype import (
-    RankedArchetype,
     detect_archetypes,
     get_archetype,
 )
@@ -109,7 +106,6 @@ We use the Basel problem. Consider $\int_0^\infty f(x) dx$.
             "Carol: Agreed. The timeline is 11:30.",
         ]))
         results = detect_archetypes([path])
-        top_ids = [r.archetype.id for r in results]
         # Either chronicle or scroll is reasonable for this content
         assert len(results) >= 1
 
@@ -197,7 +193,6 @@ class TestEdgeCases:
             assert len(r.why) > 0
 
     def test_all_archetypes_have_required_fields(self):
-        path = None
         from metis_app.services.star_archetype import _ARCHETYPES
         for aid, a in _ARCHETYPES.items():
             assert a.id == aid

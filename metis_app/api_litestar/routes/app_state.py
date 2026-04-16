@@ -6,7 +6,6 @@ import os
 
 from litestar import Router, delete, get, post
 from litestar.exceptions import HTTPException as LitestarHTTPException
-from litestar.params import Parameter
 from pydantic import BaseModel
 
 from metis_app.services.app_state_service import AppStateService

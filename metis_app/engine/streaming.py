@@ -430,7 +430,6 @@ def stream_rag_answer(
             try:
                 from metis_app.models.star_nourishment import (  # noqa: PLC0415
                     LIGHTNING_STAR_THRESHOLD,
-                    compute_nourishment,
                 )
                 _stars = list(settings.get("landing_constellation_user_stars") or [])
                 _lightning_eligible = len(_stars) >= LIGHTNING_STAR_THRESHOLD

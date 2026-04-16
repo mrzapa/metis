@@ -29,9 +29,6 @@ def _fire_personality_baked(model_id: str) -> None:
         assistant_now_iso,
         compute_nourishment,
     )
-    from metis_app.services.star_nourishment_gen import (  # noqa: PLC0415
-        generate_star_event_reaction,
-    )
     import metis_app.settings_store as _store  # noqa: PLC0415
 
     settings = _store.load_settings()

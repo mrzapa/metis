@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from litestar import Router, get, post
-from litestar.params import Parameter
 
 from metis_app.api.observe import (
     get_discover as _get_discover,
