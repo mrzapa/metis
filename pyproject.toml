@@ -45,10 +45,6 @@ dev = [
     "python-multipart==0.0.26",
     "uvicorn[standard]==0.44.0",
     "litestar>=2.4",
-    # fastapi retained in dev only: legacy FastAPI surface in metis_app/api/ is
-    # scheduled for removal but still covered by existing tests. Drop when those
-    # tests have migrated to Litestar's TestClient.
-    "fastapi==0.135.3",
 ]
 forecast = [
     "timesfm>=2,<3",

@@ -2144,9 +2144,9 @@ class TestApiBrainGraphUsesOrchestrator:
     def test_endpoint_returns_graph_shape(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from importlib import import_module
 
-        from fastapi.testclient import TestClient
+        from litestar.testing import TestClient
 
-        api_module = import_module("metis_app.api.app")
+        api_module = import_module("metis_app.api_litestar")
 
         # Patch out the orchestrator's graph builder
         fake_graph = BrainGraph()
@@ -2159,7 +2159,7 @@ class TestApiBrainGraphUsesOrchestrator:
             _fake_graph,
         )
 
-        client = TestClient(api_module.create_app())
+        client = TestClient(app=api_module.create_app())
         response = client.get("/v1/brain/graph")
 
         assert response.status_code == 200

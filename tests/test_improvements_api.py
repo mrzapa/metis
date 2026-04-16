@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from importlib import import_module
 
-from fastapi.testclient import TestClient as FastAPITestClient
-from litestar.testing import TestClient as LitestarTestClient
+from litestar.testing import TestClient
 
 
 def _entry_payload() -> dict[str, object]:
@@ -28,10 +27,8 @@ def _entry_payload() -> dict[str, object]:
     }
 
 
-def test_improvement_routes_round_trip_for_fastapi_and_litestar(monkeypatch) -> None:
-    fastapi_improvements = import_module("metis_app.api.improvements")
+def test_improvement_routes_round_trip(monkeypatch) -> None:
     litestar_improvements = import_module("metis_app.api_litestar.routes.improvements")
-    fastapi_app = import_module("metis_app.api.app")
     litestar_app = import_module("metis_app.api_litestar")
 
     captured: dict[str, object] = {}
@@ -47,43 +44,28 @@ def test_improvement_routes_round_trip_for_fastapi_and_litestar(monkeypatch) -> 
                 return None
             return _entry_payload()
 
-    monkeypatch.setattr(fastapi_improvements, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
     monkeypatch.setattr(litestar_improvements, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
 
-    with FastAPITestClient(fastapi_app.create_app()) as fastapi_client, LitestarTestClient(
-        app=litestar_app.create_app()
-    ) as litestar_client:
-        fast_list = fastapi_client.get(
+    with TestClient(app=litestar_app.create_app()) as client:
+        lst = client.get(
             "/v1/improvements",
             params={"artifact_type": "idea", "status": "draft", "limit": 5},
         )
-        lit_list = litestar_client.get(
-            "/v1/improvements",
-            params={"artifact_type": "idea", "status": "draft", "limit": 5},
-        )
-        assert fast_list.status_code == 200
-        assert lit_list.status_code == 200
-        assert fast_list.json()[0]["entry_id"] == "improvement-1"
-        assert lit_list.json()[0]["entry_id"] == "improvement-1"
+        assert lst.status_code == 200
+        assert lst.json()[0]["entry_id"] == "improvement-1"
 
-        fast_get = fastapi_client.get("/v1/improvements/improvement-1")
-        lit_get = litestar_client.get("/v1/improvements/improvement-1")
-        assert fast_get.status_code == 200
-        assert lit_get.status_code == 200
+        got = client.get("/v1/improvements/improvement-1")
+        assert got.status_code == 200
 
-        fast_missing = fastapi_client.get("/v1/improvements/missing")
-        lit_missing = litestar_client.get("/v1/improvements/missing")
-        assert fast_missing.status_code == 404
-        assert lit_missing.status_code == 404
+        missing = client.get("/v1/improvements/missing")
+        assert missing.status_code == 404
 
     assert captured["list"] == ("idea", "draft", 5)
     assert captured["get"] == "missing"
 
 
-def test_create_improvement_entry_fastapi_and_litestar(monkeypatch) -> None:
-    fastapi_improvements = import_module("metis_app.api.improvements")
+def test_create_improvement_entry(monkeypatch) -> None:
     litestar_improvements = import_module("metis_app.api_litestar.routes.improvements")
-    fastapi_app = import_module("metis_app.api.app")
     litestar_app = import_module("metis_app.api_litestar")
 
     created_payloads: list[dict] = []
@@ -101,13 +83,12 @@ def test_create_improvement_entry_fastapi_and_litestar(monkeypatch) -> None:
         def upsert_improvement_entry(self, payload: dict) -> dict:
             return _fake_upsert(payload)
 
-    monkeypatch.setattr(fastapi_improvements, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
     monkeypatch.setattr(litestar_improvements, "WorkspaceOrchestrator", lambda: _FakeOrchestrator())
 
     body = {"artifact_type": "idea", "title": "Test Hypothesis"}
 
-    with FastAPITestClient(fastapi_app.create_app()) as fastapi_client:
-        resp = fastapi_client.post("/v1/improvements", json=body)
+    with TestClient(app=litestar_app.create_app()) as client:
+        resp = client.post("/v1/improvements", json=body)
         assert resp.status_code == 201
         data = resp.json()
         assert data["artifact_type"] == "idea"
@@ -116,11 +97,4 @@ def test_create_improvement_entry_fastapi_and_litestar(monkeypatch) -> None:
         assert "idea" in data.get("artifact_key", "")
         assert "manual" in data.get("artifact_key", "")
 
-    with LitestarTestClient(app=litestar_app.create_app()) as litestar_client:
-        resp = litestar_client.post("/v1/improvements", json=body)
-        assert resp.status_code == 201
-        data = resp.json()
-        assert data["artifact_type"] == "idea"
-        assert data["title"] == "Test Hypothesis"
-
-    assert len(created_payloads) == 2
+    assert len(created_payloads) == 1

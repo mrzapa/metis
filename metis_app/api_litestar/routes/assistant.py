@@ -5,7 +5,7 @@ from __future__ import annotations
 from litestar import Router, delete, get, post
 from pydantic import BaseModel
 
-from metis_app.api.models import (
+from metis_app.api_litestar.models import (
     AssistantBootstrapRequestModel,
     AssistantReflectRequestModel,
     AssistantUpdateRequestModel,
@@ -18,13 +18,13 @@ def get_assistant() -> dict:
     return WorkspaceOrchestrator().get_assistant_snapshot()
 
 
-@post("/v1/assistant")
-def update_assistant(payload: AssistantUpdateRequestModel) -> dict:
+@post("/v1/assistant", status_code=200)
+def update_assistant(data: AssistantUpdateRequestModel) -> dict:
     return WorkspaceOrchestrator().update_assistant(
-        identity=payload.identity,
-        runtime=payload.runtime,
-        policy=payload.policy,
-        status=payload.status,
+        identity=data.identity,
+        runtime=data.runtime,
+        policy=data.policy,
+        status=data.status,
     )
 
 
@@ -34,23 +34,23 @@ def get_assistant_status() -> dict:
     return dict(snapshot.get("status") or {})
 
 
-@post("/v1/assistant/reflect")
-def reflect_assistant(payload: AssistantReflectRequestModel) -> dict:
+@post("/v1/assistant/reflect", status_code=200)
+def reflect_assistant(data: AssistantReflectRequestModel) -> dict:
     kwargs = {
-        "trigger": payload.trigger,
-        "session_id": payload.session_id,
-        "run_id": payload.run_id,
-        "force": payload.force,
+        "trigger": data.trigger,
+        "session_id": data.session_id,
+        "run_id": data.run_id,
+        "force": data.force,
     }
-    if payload.context_id:
-        kwargs["context_id"] = payload.context_id
+    if data.context_id:
+        kwargs["context_id"] = data.context_id
     return WorkspaceOrchestrator().reflect_assistant(**kwargs)
 
 
-@post("/v1/assistant/bootstrap")
-def bootstrap_assistant(payload: AssistantBootstrapRequestModel) -> dict:
+@post("/v1/assistant/bootstrap", status_code=200)
+def bootstrap_assistant(data: AssistantBootstrapRequestModel) -> dict:
     return WorkspaceOrchestrator().bootstrap_assistant(
-        install_local_model=payload.install_local_model,
+        install_local_model=data.install_local_model,
     )
 
 
@@ -76,8 +76,8 @@ class _StarEventBody(BaseModel):
     model_id: str = ""
 
 
-@post("/v1/assistant/nourishment/event")
-def report_star_event(payload: _StarEventBody) -> dict:
+@post("/v1/assistant/nourishment/event", status_code=200)
+def report_star_event(data: _StarEventBody) -> dict:
     """Report a star event to the companion nourishment system."""
     from metis_app.models.star_nourishment import (  # noqa: PLC0415
         NourishmentState,
@@ -92,11 +92,11 @@ def report_star_event(payload: _StarEventBody) -> dict:
     import metis_app.settings_store as _store  # noqa: PLC0415
 
     event = StarEvent(
-        event_type=payload.event_type,
-        star_id=payload.star_id,
-        faculty_id=payload.faculty_id,
+        event_type=data.event_type,
+        star_id=data.star_id,
+        faculty_id=data.faculty_id,
         timestamp=assistant_now_iso(),
-        detail=payload.detail,
+        detail=data.detail,
     )
 
     orch = WorkspaceOrchestrator()
@@ -112,10 +112,10 @@ def report_star_event(payload: _StarEventBody) -> dict:
 
     personality = previous.personality if previous else PersonalityEvolution()
 
-    if payload.event_type == "personality_baked" and payload.model_id:
+    if data.event_type == "personality_baked" and data.model_id:
         faculty_ids = [f["id"] for f in faculties if isinstance(f, dict)]
         personality.record_abliteration(
-            model_id=payload.model_id,
+            model_id=data.model_id,
             star_count=len(stars),
             hunger_level=previous.hunger_level if previous else 0.5,
             faculty_ids=faculty_ids,
@@ -130,7 +130,7 @@ def report_star_event(payload: _StarEventBody) -> dict:
     reaction = generate_star_event_reaction(state)
 
     reflection_result = None
-    if payload.event_type == "star_removed":
+    if data.event_type == "star_removed":
         try:
             reflection_result = orch.reflect_assistant(trigger="star_removed", force=True)
         except Exception:  # noqa: BLE001

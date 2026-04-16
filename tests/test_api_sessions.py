@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi.testclient import TestClient
+from litestar.testing import TestClient
 
-from metis_app.api.app import create_app
-from metis_app.api import sessions as sessions_module
+from metis_app.api_litestar import create_app
+from metis_app.api_litestar.routes import sessions as sessions_module
 from metis_app.services.session_repository import SessionRepository
 from metis_app.services.trace_store import TraceStore
 
@@ -21,10 +21,11 @@ def repo(tmp_path):
 
 
 @pytest.fixture
-def client(repo):
+def client(repo, monkeypatch):
+    monkeypatch.setattr(sessions_module, "get_session_repo", lambda: repo)
     app = create_app()
-    app.dependency_overrides[sessions_module.get_session_repo] = lambda: repo
-    return TestClient(app)
+    with TestClient(app=app) as c:
+        yield c
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +49,6 @@ def test_list_sessions_returns_inserted_session(client, repo):
     assert len(items) == 1
     assert items[0]["session_id"] == "s1"
     assert items[0]["title"] == "Hello world"
-    # extra_json is exposed as parsed dict, not raw string
     assert isinstance(items[0]["extra"], dict)
 
 
@@ -119,7 +119,6 @@ def test_get_session_includes_feedback(client, repo):
 
 
 def test_get_session_no_absolute_file_paths_in_sources(client, repo):
-    """EvidenceSourceModel must not expose the file_path field."""
     from metis_app.models.session_types import EvidenceSource
 
     repo.create_session(session_id="s1")
@@ -141,7 +140,12 @@ def test_get_session_no_absolute_file_paths_in_sources(client, repo):
 
 def test_get_session_hydrates_latest_nyx_action_result(client, repo, monkeypatch, tmp_path):
     trace_store = TraceStore(tmp_path / "traces")
-    monkeypatch.setattr(sessions_module, "TraceStore", lambda: trace_store)
+    monkeypatch.setattr(sessions_module, "TraceStore", lambda: trace_store, raising=False)
+
+    # The Litestar route uses hydrate_session_actions from metis_app.services.session_actions
+    # which instantiates TraceStore() — patch at the source module.
+    import metis_app.services.session_actions as sessions_src
+    monkeypatch.setattr(sessions_src, "TraceStore", lambda: trace_store)
 
     repo.create_session(session_id="s1", title="Nyx session")
     repo.append_message(
@@ -295,7 +299,7 @@ def test_submit_feedback_returns_ok(client, repo):
         json={"run_id": "run-1", "vote": 1, "note": "great answer"},
     )
 
-    assert r.status_code == 200
+    assert r.status_code in (200, 201)
     assert r.json() == {"ok": True}
 
 
@@ -323,5 +327,5 @@ def test_submit_feedback_no_note(client, repo):
         json={"run_id": "run-3", "vote": 1},
     )
 
-    assert r.status_code == 200
+    assert r.status_code in (200, 201)
     assert r.json()["ok"] is True

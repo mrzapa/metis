@@ -11,12 +11,14 @@ import logging
 from litestar import Litestar, Router
 from litestar.config.cors import CORSConfig
 from litestar.exceptions import HTTPException as LitestarHTTPException
+from litestar.exceptions import ValidationException
 from litestar.openapi.config import OpenAPIConfig
 
 from .common import (
     cors_origins_from_env,
     handle_http_exception,
     handle_runtime_error,
+    handle_validation_exception,
     handle_value_error,
     require_token_guard,
 )
@@ -91,6 +93,7 @@ def create_app() -> Litestar:
         exception_handlers={
             ValueError: handle_value_error,
             RuntimeError: handle_runtime_error,
+            ValidationException: handle_validation_exception,
             LitestarHTTPException: handle_http_exception,
         },
         route_handlers=[

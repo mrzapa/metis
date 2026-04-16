@@ -17,7 +17,7 @@ from litestar.datastructures import UploadFile
 from litestar.exceptions import HTTPException as LitestarHTTPException
 from pydantic import ValidationError
 
-from metis_app.api.models import (
+from metis_app.api_litestar.models import (
     LearningRoutePreviewModel,
     LearningRoutePreviewRequestModel,
     NyxCatalogComponentDetailModel,
@@ -190,6 +190,9 @@ def api_search_nyx_catalog(
 @get("/v1/nyx/catalog/{component_name:path}")
 def api_get_nyx_component_detail(component_name: str) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
+    # Litestar's ``path`` converter keeps the leading slash; strip it so
+    # orchestrators receive the bare component identifier (matches FastAPI behaviour).
+    component_name = component_name.lstrip("/")
     try:
         detail = orchestrator.get_nyx_component_detail(component_name)
     except NyxCatalogComponentNotFoundError as exc:
@@ -233,6 +236,60 @@ def api_brain_graph() -> dict[str, Any]:
     return _build_graph_payload(graph)
 
 
+@get("/v1/brain/coherence")
+def api_brain_coherence() -> dict[str, Any]:
+    """Aggregate coherence + Hebbian stats across the workspace."""
+    graph = WorkspaceOrchestrator().get_workspace_graph()
+    per_node: list[dict[str, Any]] = []
+    field_totals: dict[str, float] = {}
+    field_counts: dict[str, int] = {}
+    total_channels: set[int] = set()
+
+    for node in graph.nodes.values():
+        metadata = node.metadata or {}
+        coherence = metadata.get("coherence")
+        fingerprint = metadata.get("fingerprint") or {}
+        if isinstance(fingerprint, dict):
+            for ch in fingerprint:
+                try:
+                    total_channels.add(int(ch))
+                except (TypeError, ValueError):
+                    continue
+        if isinstance(coherence, dict) and coherence:
+            per_node.append({
+                "node_id": node.node_id,
+                "label": node.label,
+                "coherence": coherence,
+                "fingerprint_channels": sorted(int(c) for c in (fingerprint or {})),
+            })
+            for key, value in coherence.items():
+                if isinstance(value, (int, float)):
+                    field_totals[key] = field_totals.get(key, 0.0) + float(value)
+                    field_counts[key] = field_counts.get(key, 0) + 1
+
+    workspace_mean = {
+        key: (field_totals[key] / field_counts[key])
+        for key in field_totals
+        if field_counts.get(key, 0) > 0
+    }
+
+    hebbian_stats: dict[str, float] = {}
+    try:
+        from metis_app.services.retrieval_pipeline import _get_hebbian  # noqa: PLC0415
+        settings = WorkspaceOrchestrator().load_settings() or {}
+        hebbian_stats = _get_hebbian(settings).stats()
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "workspace_mean": workspace_mean,
+        "node_count": len(per_node),
+        "unique_channels": sorted(total_channels),
+        "hebbian": hebbian_stats,
+        "nodes": per_node,
+    }
+
+
 @get("/v1/brain/graph/events")
 async def api_brain_graph_events(poll_seconds: float = 5.0) -> ServerSentEvent:
     poll_seconds = max(0.5, min(60.0, poll_seconds))
@@ -260,21 +317,21 @@ async def api_brain_graph_events(poll_seconds: float = 5.0) -> ServerSentEvent:
     )
 
 
-@post("/v1/learning-routes/preview")
+@post("/v1/learning-routes/preview", status_code=200)
 def api_learning_route_preview(
-    payload: LearningRoutePreviewRequestModel,
+    data: LearningRoutePreviewRequestModel,
 ) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
     try:
         preview = orchestrator.preview_learning_route(
             origin_star=LearningRouteStarSnapshot(
-                id=payload.origin_star.id,
-                label=payload.origin_star.label,
-                intent=payload.origin_star.intent,
-                notes=payload.origin_star.notes,
-                active_manifest_path=payload.origin_star.active_manifest_path,
-                linked_manifest_paths=list(payload.origin_star.linked_manifest_paths),
-                connected_user_star_ids=list(payload.origin_star.connected_user_star_ids),
+                id=data.origin_star.id,
+                label=data.origin_star.label,
+                intent=data.origin_star.intent,
+                notes=data.origin_star.notes,
+                active_manifest_path=data.origin_star.active_manifest_path,
+                linked_manifest_paths=list(data.origin_star.linked_manifest_paths),
+                connected_user_star_ids=list(data.origin_star.connected_user_star_ids),
             ),
             connected_stars=[
                 LearningRouteStarSnapshot(
@@ -286,7 +343,7 @@ def api_learning_route_preview(
                     linked_manifest_paths=list(star.linked_manifest_paths),
                     connected_user_star_ids=list(star.connected_user_star_ids),
                 )
-                for star in payload.connected_stars
+                for star in data.connected_stars
             ],
             indexes=[
                 LearningRouteIndexSummary(
@@ -298,7 +355,7 @@ def api_learning_route_preview(
                     embedding_signature=index.embedding_signature,
                     brain_pass=dict(index.brain_pass or {}),
                 )
-                for index in payload.indexes
+                for index in data.indexes
             ],
         )
     except ValueError as exc:
@@ -325,7 +382,7 @@ def api_brain_scaffold() -> dict[str, Any]:
     return payload
 
 
-@post("/v1/files/upload")
+@post("/v1/files/upload", status_code=200)
 async def api_upload_files(request: Request[Any, Any, Any]) -> dict[str, list[str]]:
     form_data = await request.form()
     uploads = [
@@ -357,35 +414,28 @@ def api_get_trace(run_id: str) -> list[dict[str, Any]]:
 @get("/v1/traces/{run_id:str}/playback")
 def api_trace_playback(run_id: str) -> dict[str, Any]:
     events = TraceStore().read_run_events(run_id)
-    timestamps = [
-        float(e["timestamp"])
-        for e in events
-        if e.get("timestamp") is not None
-    ]
-    time_range = (
-        {"start": min(timestamps), "end": max(timestamps)}
-        if timestamps
-        else {"start": None, "end": None}
-    )
-    manifest_events = [
+    playback_events = [
         {
-            "event_type": e.get("event_type"),
-            "stage": e.get("stage"),
-            "timestamp": e.get("timestamp"),
-            "payload": e.get("payload"),
+            "type": e.get("event_type") or e.get("stage") or "unknown",
+            "timestamp": e.get("timestamp", ""),
+            "data": e.get("payload") or {},
         }
         for e in events
     ]
+    timestamps = [e["timestamp"] for e in playback_events if e["timestamp"]]
     return {
         "type": "manifest",
         "run_id": run_id,
-        "time_range": time_range,
-        "event_count": len(events),
-        "events": manifest_events,
+        "time_range": {
+            "start": min(timestamps, default=""),
+            "end": max(timestamps, default=""),
+        },
+        "event_count": len(playback_events),
+        "events": playback_events,
     }
 
 
-@post("/v1/telemetry/ui")
+@post("/v1/telemetry/ui", status_code=200)
 async def api_ingest_ui_telemetry(request: Request[Any, Any, Any]) -> dict[str, int]:
     content_length = request.headers.get("content-length", "").strip()
     if content_length:
@@ -434,17 +484,17 @@ def api_ui_telemetry_summary(
     return UiTelemetrySummaryResponseModel.model_validate(summary).model_dump(mode="json")
 
 
-@post("/v1/runs/{run_id:str}/actions")
-def api_run_action(run_id: str, payload: RunActionRequestModel) -> dict[str, Any]:
-    action_payload = dict(payload.payload or {})
-    action_type = str(payload.action_type or action_payload.get("action_type") or "").strip()
-    action_id = str(payload.action_id or action_payload.get("action_id") or "").strip()
+@post("/v1/runs/{run_id:str}/actions", status_code=200)
+def api_run_action(run_id: str, data: RunActionRequestModel) -> dict[str, Any]:
+    action_payload = dict(data.payload or {})
+    action_type = str(data.action_type or action_payload.get("action_type") or "").strip()
+    action_id = str(data.action_id or action_payload.get("action_id") or "").strip()
     proposal_token = str(
-        payload.proposal_token or action_payload.get("proposal_token") or ""
+        data.proposal_token or action_payload.get("proposal_token") or ""
     ).strip()
 
     infer_latest_nyx_action = (
-        not payload.approved
+        not data.approved
         and not action_id
         and not proposal_token
         and (not action_type or action_type == NYX_INSTALL_ACTION_TYPE)
@@ -501,7 +551,7 @@ def api_run_action(run_id: str, payload: RunActionRequestModel) -> dict[str, Any
         ]
         component_count = int(persisted_proposal.get("component_count") or len(component_names) or 0)
 
-        if not payload.approved:
+        if not data.approved:
             if matched_by == "action_id" and proposal_token:
                 raise LitestarHTTPException(
                     status_code=400,
@@ -576,7 +626,7 @@ def api_run_action(run_id: str, payload: RunActionRequestModel) -> dict[str, Any
         )
         return execution_result.to_response_payload(run_id=run_id, approved=True)
 
-    return {"run_id": run_id, "approved": payload.approved, "status": "accepted"}
+    return {"run_id": run_id, "approved": data.approved, "status": "accepted"}
 
 
 router = Router(
@@ -585,6 +635,7 @@ router = Router(
         api_search_nyx_catalog,
         api_get_nyx_component_detail,
         api_brain_graph,
+        api_brain_coherence,
         api_brain_graph_events,
         api_learning_route_preview,
         api_brain_scaffold,

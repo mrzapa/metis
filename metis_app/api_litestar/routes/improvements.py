@@ -7,7 +7,7 @@ import uuid as _uuid
 from litestar import Router, get, post
 from litestar.exceptions import HTTPException as LitestarHTTPException
 
-from metis_app.api.models import ImprovementCreateRequest, ImprovementEntryModel
+from metis_app.api_litestar.models import ImprovementCreateRequest, ImprovementEntryModel
 from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
 
 

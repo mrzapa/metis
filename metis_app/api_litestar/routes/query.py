@@ -11,7 +11,7 @@ from litestar.exceptions import HTTPException as LitestarHTTPException
 from litestar.response import ServerSentEvent
 
 import metis_app.settings_store as _settings_store
-from metis_app.api.models import (
+from metis_app.api_litestar.models import (
     DirectQueryRequestModel,
     DirectQueryResultModel,
     ForecastPreflightResultModel,
@@ -41,35 +41,35 @@ from metis_app.api_litestar.common import parse_last_event_id, run_engine
 _RAG_STREAM_MANAGER = ReplayableRunStreamManager()
 
 
-@post("/v1/query/rag")
-def api_query_rag(payload: RagQueryRequestModel) -> dict[str, Any]:
+@post("/v1/query/rag", status_code=200)
+def api_query_rag(data: RagQueryRequestModel) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
     result = run_engine(
         orchestrator.run_rag_query,
-        payload.to_engine(),
-        session_id=payload.session_id,
+        data.to_engine(),
+        session_id=data.session_id,
     )
     return RagQueryResultModel.from_engine(result).model_dump(mode="json")
 
 
-@post("/v1/search/knowledge")
-def api_search_knowledge(payload: KnowledgeSearchRequestModel) -> dict[str, Any]:
+@post("/v1/search/knowledge", status_code=200)
+def api_search_knowledge(data: KnowledgeSearchRequestModel) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
     result = run_engine(
         orchestrator.run_knowledge_search,
-        payload.to_engine(),
-        session_id=payload.session_id,
+        data.to_engine(),
+        session_id=data.session_id,
     )
     return KnowledgeSearchResultModel.from_engine(result).model_dump(mode="json")
 
 
-@post("/v1/query/direct")
-def api_query_direct(payload: DirectQueryRequestModel) -> dict[str, Any]:
+@post("/v1/query/direct", status_code=200)
+def api_query_direct(data: DirectQueryRequestModel) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
     result = run_engine(
         orchestrator.run_direct_query,
-        payload.to_engine(),
-        session_id=payload.session_id,
+        data.to_engine(),
+        session_id=data.session_id,
     )
     return DirectQueryResultModel.from_engine(result).model_dump(mode="json")
 
@@ -82,33 +82,33 @@ def api_forecast_preflight() -> dict[str, Any]:
     ).model_dump(mode="json")
 
 
-@post("/v1/forecast/schema")
-def api_forecast_schema(payload: ForecastSchemaRequestModel) -> dict[str, Any]:
+@post("/v1/forecast/schema", status_code=200)
+def api_forecast_schema(data: ForecastSchemaRequestModel) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
     return ForecastSchemaResultModel.model_validate(
-        orchestrator.inspect_forecast_schema(payload.to_engine())
+        orchestrator.inspect_forecast_schema(data.to_engine())
     ).model_dump(mode="json")
 
 
-@post("/v1/query/forecast")
-def api_query_forecast(payload: ForecastQueryRequestModel) -> dict[str, Any]:
+@post("/v1/query/forecast", status_code=200)
+def api_query_forecast(data: ForecastQueryRequestModel) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
     result = run_engine(
         orchestrator.run_forecast_query,
-        payload.to_engine(),
-        session_id=payload.session_id,
+        data.to_engine(),
+        session_id=data.session_id,
     )
     return ForecastQueryResultModel.from_engine(result).model_dump(mode="json")
 
 
-@post("/v1/query/forecast/stream")
-def api_stream_forecast(payload: ForecastQueryRequestModel) -> ServerSentEvent:
+@post("/v1/query/forecast/stream", status_code=200)
+def api_stream_forecast(data: ForecastQueryRequestModel) -> ServerSentEvent:
     orchestrator = WorkspaceOrchestrator()
 
     def _event_generator() -> Any:
         for event in orchestrator.stream_forecast_query(
-            payload.to_engine(),
-            session_id=payload.session_id,
+            data.to_engine(),
+            session_id=data.session_id,
         ):
             yield {
                 "event": "message",
@@ -118,9 +118,9 @@ def api_stream_forecast(payload: ForecastQueryRequestModel) -> ServerSentEvent:
     return ServerSentEvent(_event_generator())
 
 
-@post("/v1/openai/chat/completions")
+@post("/v1/openai/chat/completions", status_code=200)
 def api_openai_chat_completions(
-    payload: OpenAIChatCompletionRequestModel,
+    data: OpenAIChatCompletionRequestModel,
 ) -> dict[str, Any]:
     settings = _settings_store.load_settings()
     flag_enabled = any(
@@ -137,7 +137,7 @@ def api_openai_chat_completions(
             ),
         )
 
-    if payload.stream is True:
+    if data.stream is True:
         raise LitestarHTTPException(
             status_code=501,
             detail=(
@@ -147,7 +147,7 @@ def api_openai_chat_completions(
         )
 
     prompt = next(
-        (message.content for message in reversed(payload.messages) if message.role == "user"),
+        (message.content for message in reversed(data.messages) if message.role == "user"),
         "",
     )
     if not prompt.strip():
@@ -164,7 +164,7 @@ def api_openai_chat_completions(
         id=f"metis-{result.run_id}",
         object="chat.completion",
         created=int(time.time()),
-        model=payload.model,
+        model=data.model,
         choices=[
             OpenAIChatCompletionChoiceModel(
                 index=0,
@@ -184,23 +184,23 @@ def api_openai_chat_completions(
     return response.model_dump(mode="json")
 
 
-@post("/v1/query/swarm")
-def api_query_swarm(payload: SwarmQueryRequestModel) -> dict[str, Any]:
+@post("/v1/query/swarm", status_code=200)
+def api_query_swarm(data: SwarmQueryRequestModel) -> dict[str, Any]:
     orchestrator = WorkspaceOrchestrator()
     result = run_engine(
         orchestrator.run_swarm_query,
-        payload.to_engine(),
-        session_id=payload.session_id,
+        data.to_engine(),
+        session_id=data.session_id,
     )
     return SwarmQueryResultModel.from_engine(result).model_dump(mode="json")
 
 
-@post("/v1/query/rag/stream")
+@post("/v1/query/rag/stream", status_code=200)
 def api_stream_rag(
-    payload: RagQueryRequestModel,
+    data: RagQueryRequestModel,
     request: Request[Any, Any, Any],
 ) -> ServerSentEvent:
-    req = payload.to_engine()
+    req = data.to_engine()
     run_id = _normalize_run_id(req.run_id)
     req.run_id = run_id
     replay_after = parse_last_event_id(request.headers.get("Last-Event-ID"))
@@ -209,7 +209,7 @@ def api_stream_rag(
     if replay_after is None:
         _RAG_STREAM_MANAGER.ensure_run(
             run_id,
-            lambda: orchestrator.stream_rag_query(req, session_id=payload.session_id),
+            lambda: orchestrator.stream_rag_query(req, session_id=data.session_id),
         )
 
     def _event_generator() -> Any:

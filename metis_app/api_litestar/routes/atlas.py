@@ -5,7 +5,7 @@ from __future__ import annotations
 from litestar import Router, get, post
 from litestar.exceptions import HTTPException as LitestarHTTPException
 
-from metis_app.api.models import (
+from metis_app.api_litestar.models import (
     AtlasDecisionRequestModel,
     AtlasEntryModel,
     AtlasSaveRequestModel,

@@ -9,7 +9,7 @@ from typing import Any
 from litestar import Router, delete, get, post
 from litestar.exceptions import HTTPException as LitestarHTTPException
 
-from metis_app.api.models import GgufRegisterRequestModel, GgufValidateRequestModel
+from metis_app.api_litestar.models import GgufRegisterRequestModel, GgufValidateRequestModel
 from metis_app.services.gguf_serialization import (
     GgufValidationError,
     hardware_payload_from_recommender,
@@ -86,7 +86,7 @@ def validate_model(data: GgufValidateRequestModel) -> dict[str, Any]:
     return result.payload
 
 
-@post("/v1/gguf/refresh")
+@post("/v1/gguf/refresh", status_code=200)
 def refresh_catalog(use_case: str = "general") -> dict[str, Any]:
     """Refresh catalog metadata and return updated recommendations."""
     _RECOMMENDER.invalidate_hardware_cache()
@@ -100,13 +100,13 @@ def refresh_catalog(use_case: str = "general") -> dict[str, Any]:
     }
 
 
-@post("/v1/gguf/register")
-def register_model(payload: GgufRegisterRequestModel) -> dict[str, Any]:
+@post("/v1/gguf/register", status_code=200)
+def register_model(data: GgufRegisterRequestModel) -> dict[str, Any]:
     """Register a locally installed GGUF model into the registry."""
-    if not payload.name or not payload.path:
+    if not data.name or not data.path:
         raise LitestarHTTPException(status_code=400, detail="name and path are required")
 
-    model_path = pathlib.Path(payload.path).expanduser()
+    model_path = pathlib.Path(data.path).expanduser()
     if not model_path.exists():
         raise LitestarHTTPException(
             status_code=404,
@@ -116,15 +116,15 @@ def register_model(payload: GgufRegisterRequestModel) -> dict[str, Any]:
     registry = _load_registry()
     updated = _REGISTRY.add_gguf(
         registry,
-        name=payload.name,
+        name=data.name,
         path=str(model_path),
-        metadata=payload.metadata or {},
+        metadata=data.metadata or {},
     )
     _save_registry(updated)
 
     entries = _REGISTRY.list_entries(updated)
     entry = next(
-        (item for item in entries if item.name == payload.name and item.model_type == "gguf"),
+        (item for item in entries if item.name == data.name and item.model_type == "gguf"),
         None,
     )
     if entry is None:

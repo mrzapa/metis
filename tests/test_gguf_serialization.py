@@ -319,12 +319,12 @@ class TestSerializeCatalogEntry:
         assert not hasattr(result, "model_validate")
 
 
-class TestCrossFrameworkConsistency:
-    """Test that FastAPI and Litestar produce identical JSON."""
+class TestPydanticRoundTripConsistency:
+    """Test that the Pydantic model roundtrips preserve every field."""
 
-    def test_fastapi_and_litestar_serialize_identically(self) -> None:
-        """Verify both frameworks produce identical JSON from same input."""
-        from metis_app.api.models import GgufCatalogEntryModel
+    def test_catalog_entry_model_roundtrip_matches_raw_dict(self) -> None:
+        """Verify Pydantic model dump matches the raw ``serialize_catalog_entry`` output."""
+        from metis_app.api_litestar.models import GgufCatalogEntryModel
 
         entry_dict = {
             "model_name": "Qwen2.5-7B",
@@ -346,23 +346,18 @@ class TestCrossFrameworkConsistency:
             "source_provider": "bartowski",
         }
 
-        # Litestar returns plain dict (shared serialization output)
-        litestar_result = serialize_catalog_entry(entry_dict)
+        raw_result = serialize_catalog_entry(entry_dict)
+        model_result = GgufCatalogEntryModel(**raw_result).model_dump()
 
-        # FastAPI wraps in Pydantic model and converts back to dict
-        fastapi_pydantic = GgufCatalogEntryModel(**serialize_catalog_entry(entry_dict))
-        fastapi_result = fastapi_pydantic.model_dump()
+        assert set(model_result.keys()) == set(raw_result.keys())
 
-        # Both should have identical structure and values
-        assert set(fastapi_result.keys()) == set(litestar_result.keys())
-
-        for key in litestar_result.keys():
-            if isinstance(litestar_result[key], (list, dict)):
-                assert litestar_result[key] == fastapi_result[key]
-            elif isinstance(litestar_result[key], float):
-                assert abs(litestar_result[key] - fastapi_result[key]) < 0.0001
+        for key in raw_result.keys():
+            if isinstance(raw_result[key], (list, dict)):
+                assert raw_result[key] == model_result[key]
+            elif isinstance(raw_result[key], float):
+                assert abs(raw_result[key] - model_result[key]) < 0.0001
             else:
-                assert litestar_result[key] == fastapi_result[key]
+                assert raw_result[key] == model_result[key]
 
 
 class TestHardwarePayloadHelpers:

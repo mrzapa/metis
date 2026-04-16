@@ -185,7 +185,7 @@ class TestSingleInstanceGuard:
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Verify lock file is created when acquiring."""
-        import metis_app.api.__main__ as api_main
+        import metis_app.api_litestar.__main__ as api_main
 
         monkeypatch.setattr(api_main, "_LOCK_FILE", tmp_path / ".lock")
 
@@ -197,7 +197,7 @@ class TestSingleInstanceGuard:
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Verify second instance is rejected when lock is held."""
-        import metis_app.api.__main__ as api_main
+        import metis_app.api_litestar.__main__ as api_main
 
         lock_file = tmp_path / ".lock"
         monkeypatch.setattr(api_main, "_LOCK_FILE", lock_file)
@@ -211,7 +211,7 @@ class TestSingleInstanceGuard:
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Verify lock is released on exit."""
-        import metis_app.api.__main__ as api_main
+        import metis_app.api_litestar.__main__ as api_main
 
         lock_file = tmp_path / ".lock"
         monkeypatch.setattr(api_main, "_LOCK_FILE", lock_file)

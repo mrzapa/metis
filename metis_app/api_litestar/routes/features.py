@@ -6,9 +6,9 @@ from typing import Any
 
 from litestar import Router, get, post
 from litestar.exceptions import HTTPException as LitestarHTTPException
+from pydantic import BaseModel, ConfigDict, Field
 
 import metis_app.settings_store as _store
-from metis_app.api.features import FeatureEnableRequest, FeatureKillSwitchRequest
 from metis_app.utils.feature_flags import (
     clear_kill_switch,
     disable_feature_for_duration,
@@ -16,6 +16,19 @@ from metis_app.utils.feature_flags import (
     set_feature_enabled,
     validate_feature_name,
 )
+
+
+class FeatureKillSwitchRequest(BaseModel):
+    reason: str = ""
+    duration_ms: int = Field(default=0, ge=0)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FeatureEnableRequest(BaseModel):
+    enabled: bool = True
+
+    model_config = ConfigDict(extra="forbid")
 
 
 @get("/v1/features")
@@ -35,10 +48,10 @@ def list_features() -> dict[str, list[dict[str, Any]]]:
     }
 
 
-@post("/v1/features/{feature_name:str}/disable")
+@post("/v1/features/{feature_name:str}/disable", status_code=200)
 def disable_feature(
     feature_name: str,
-    payload: FeatureKillSwitchRequest,
+    data: FeatureKillSwitchRequest,
 ) -> dict[str, Any]:
     try:
         normalized = validate_feature_name(feature_name)
@@ -49,8 +62,8 @@ def disable_feature(
     updated = disable_feature_for_duration(
         current,
         normalized,
-        reason=payload.reason,
-        duration_ms=int(payload.duration_ms),
+        reason=data.reason,
+        duration_ms=int(data.duration_ms),
     )
     try:
         _store.save_settings(updated)
@@ -67,10 +80,10 @@ def disable_feature(
     }
 
 
-@post("/v1/features/{feature_name:str}/enable")
+@post("/v1/features/{feature_name:str}/enable", status_code=200)
 def enable_feature(
     feature_name: str,
-    payload: FeatureEnableRequest,
+    data: FeatureEnableRequest,
 ) -> dict[str, Any]:
     try:
         normalized = validate_feature_name(feature_name)
@@ -78,8 +91,8 @@ def enable_feature(
         raise LitestarHTTPException(status_code=422, detail=str(exc)) from exc
 
     current = _store.load_settings()
-    updated = set_feature_enabled(current, normalized, payload.enabled)
-    if payload.enabled:
+    updated = set_feature_enabled(current, normalized, data.enabled)
+    if data.enabled:
         updated = clear_kill_switch(updated, normalized)
 
     try:
