@@ -1,12 +1,13 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
-import { fetchSettings, updateSettings } from "@/lib/api";
+import { fetchSettings, postNourishmentEvent, updateSettings } from "@/lib/api";
 import { normalizeUserStar, type UserStar } from "@/lib/constellation-types";
 
 vi.mock("@/lib/api", () => ({
   fetchSettings: vi.fn(),
   updateSettings: vi.fn(),
+  postNourishmentEvent: vi.fn(),
 }));
 
 const STORAGE_KEY = "metis_constellation_user_stars";
@@ -22,6 +23,7 @@ describe("useConstellationStars", () => {
     vi.clearAllMocks();
     vi.mocked(fetchSettings).mockResolvedValue({} as Record<string, unknown>);
     vi.mocked(updateSettings).mockResolvedValue({});
+    vi.mocked(postNourishmentEvent).mockResolvedValue(undefined as never);
   });
 
   it("removeUserStarById uses current stars and prunes inbound connections", async () => {

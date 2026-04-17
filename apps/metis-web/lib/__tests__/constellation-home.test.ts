@@ -472,8 +472,8 @@ describe("findHoveredAddCandidate", () => {
 describe("constellation projection helpers", () => {
   it("softens constellation scaling so faculties stay legible at deep zoom", () => {
     expect(getConstellationCameraScale(1)).toBeCloseTo(1, 6);
-    expect(getConstellationCameraScale(200)).toBeGreaterThan(getBackgroundCameraScale(200));
-    expect(getConstellationCameraScale(200)).toBeCloseTo(0.145, 3);
+    expect(getConstellationCameraScale(200)).toBeLessThan(getBackgroundCameraScale(200));
+    expect(getConstellationCameraScale(200)).toBeCloseTo(0.08 + Math.sqrt(200) * 0.92, 3);
   });
 
   it("round-trips constellation points through screen projection", () => {
@@ -555,9 +555,9 @@ describe("background zoom helpers", () => {
     expect(clampBackgroundZoomFactor(24)).toBe(24);
   });
 
-  it("uses a square-root scale so a 200x zoom factor expands area without blowing up span", () => {
+  it("uses a square-root scale so a 200x zoom factor grows the viewport without blowing up span", () => {
     expect(getBackgroundCameraScale(1)).toBeCloseTo(1, 6);
-    expect(getBackgroundCameraScale(200)).toBeCloseTo(1 / Math.sqrt(200), 6);
+    expect(getBackgroundCameraScale(200)).toBeCloseTo(Math.sqrt(200), 6);
   });
 
   it("round-trips world coordinates through screen projection", () => {
@@ -575,12 +575,12 @@ describe("background zoom helpers", () => {
     expect(roundTripped.y).toBeCloseTo(worldPoint.y, 6);
   });
 
-  it("expands the visible world bounds as the zoom factor grows", () => {
-    const nearBounds = getBackgroundViewportWorldBounds(WIDTH, HEIGHT, { x: 0, y: 0, zoomFactor: 1 });
-    const farBounds = getBackgroundViewportWorldBounds(WIDTH, HEIGHT, { x: 0, y: 0, zoomFactor: 64 });
+  it("shrinks the visible world bounds as the zoom factor grows (zoom in = closer)", () => {
+    const wideBounds = getBackgroundViewportWorldBounds(WIDTH, HEIGHT, { x: 0, y: 0, zoomFactor: 1 });
+    const tightBounds = getBackgroundViewportWorldBounds(WIDTH, HEIGHT, { x: 0, y: 0, zoomFactor: 64 });
 
-    expect(farBounds.right - farBounds.left).toBeGreaterThan(nearBounds.right - nearBounds.left);
-    expect(farBounds.bottom - farBounds.top).toBeGreaterThan(nearBounds.bottom - nearBounds.top);
+    expect(tightBounds.right - tightBounds.left).toBeLessThan(wideBounds.right - wideBounds.left);
+    expect(tightBounds.bottom - tightBounds.top).toBeLessThan(wideBounds.bottom - wideBounds.top);
   });
 });
 

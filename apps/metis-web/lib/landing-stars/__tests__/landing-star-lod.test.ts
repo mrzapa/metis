@@ -64,6 +64,6 @@ describe("landing star LOD", () => {
     expect(plan.batches.hero).toHaveLength(2);
     expect(plan.batches.sprite).toHaveLength(1);
     expect(plan.batches.sprite[0].id).toBe("hero-3");
-    expect(plan.tierCounts).toEqual({ hero: 2, point: 1, sprite: 1 });
+    expect(plan.tierCounts).toEqual({ closeup: 0, hero: 2, point: 1, sprite: 1 });
   });
 });

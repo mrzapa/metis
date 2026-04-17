@@ -46,7 +46,7 @@ describe("constellation focus helpers", () => {
         { x: 0.5, y: 0.5 },
         1440,
         900,
-        999,
+        MAX_BACKGROUND_ZOOM_FACTOR * 2,
         DESKTOP_STAR_FOCUS_LAYOUT,
       ).zoomFactor,
     ).toBe(MAX_BACKGROUND_ZOOM_FACTOR);
@@ -56,7 +56,7 @@ describe("constellation focus helpers", () => {
         { x: 0.5, y: 0.5 },
         1440,
         900,
-        0.01,
+        MIN_BACKGROUND_ZOOM_FACTOR / 2,
         MOBILE_STAR_FOCUS_LAYOUT,
       ).zoomFactor,
     ).toBe(MIN_BACKGROUND_ZOOM_FACTOR);
