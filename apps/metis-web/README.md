@@ -30,7 +30,7 @@ Or on Windows (PowerShell):
 .\scripts\run_api_dev.ps1
 ```
 
-This starts a hot-reloading FastAPI server at `http://127.0.0.1:8000`.
+This starts a hot-reloading Litestar server at `http://127.0.0.1:8000`.
 
 ### 2. Start the web UI
 

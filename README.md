@@ -15,7 +15,7 @@
 
 <br />
 
-**METIS AI** is a **local-first frontier AI workspace** built with Tauri + Next.js + FastAPI. It runs entirely on your machine. Your files never leave your device.
+**METIS AI** is a **local-first frontier AI workspace** built with Tauri + Next.js + Litestar. It runs entirely on your machine. Your files never leave your device.
 
 - **Fully local.** Run with a local GGUF model and you don't even need an internet connection.
 - **Swap anything.** LLM, embeddings, vector store. Change providers in a config file. Today it's OpenAI, tomorrow it's a model on your laptop.
@@ -192,7 +192,7 @@ This starts:
 
 TimesFM 2.5 currently works best in a dedicated Python 3.11 environment on
 Windows. METIS includes a helper script that reproduces the validated setup and
-starts the FastAPI backend with forecast support enabled:
+starts the Litestar backend with forecast support enabled:
 
 ```powershell
 .\scripts\run_forecast_api_dev.ps1
@@ -204,7 +204,7 @@ That script:
 - installs `.[dev,api]`
 - installs TimesFM from a pinned upstream Git revision with torch extras
 - installs `jax` and `scikit-learn` for covariate-backed XReg runs
-- starts the API on `http://127.0.0.1:8000` using the FastAPI backend
+- starts the API on `http://127.0.0.1:8000` using the Litestar backend
 
 Then run the web UI separately:
 
@@ -269,7 +269,7 @@ python -m pytest --cov=metis_app --cov-report=term
 
 ```
 metis_app/
-├── api/            # FastAPI routes (v1/*)
+├── api_litestar/   # Litestar routes (v1/*)
 ├── engine/         # Indexing + retrieval core (provider-agnostic)
 ├── models/         # BrainGraph, AppModel, session types
 ├── services/       # Session repository, index service, pipeline
