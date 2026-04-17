@@ -4,7 +4,33 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
-const nyxModulePromise = import("../add-nyx-component.mjs");
+interface NyxComponentSpec {
+  installable?: boolean;
+  [key: string]: unknown;
+}
+interface NyxAuditResult {
+  invalidComponents: string[];
+  issuesByComponent: Record<string, string[]>;
+}
+interface NyxModule {
+  CURATED_NYX_COMPONENTS: Record<string, NyxComponentSpec>;
+  PREVIEWABLE_NYX_COMPONENTS: Record<string, NyxComponentSpec>;
+  resolveNyxComponents: (specs: string[]) => { rejected: string[]; selected: string[] };
+  validateInstalledShadcnConfig: (appRoot: string) => Promise<{
+    registries: Record<string, string | { url: string }>;
+  }>;
+  findMissingDependencies: (names: string[], manifest: unknown) => string[];
+  auditNyxRegistryItem: (name: string, item: unknown) => string[];
+  auditCuratedNyxComponents: (names: string[], urlTemplate: string) => Promise<NyxAuditResult>;
+  runShadcnCommand: (
+    action: string,
+    components: string[],
+    extraArgs: string[],
+    options: { cwd: string; spawnImplementation: (...args: unknown[]) => { status: number }; stdio: string },
+  ) => number;
+}
+
+const nyxModulePromise = import("../add-nyx-component.mjs") as unknown as Promise<NyxModule>;
 const testFilePath = fileURLToPath(import.meta.url);
 const testDir = path.dirname(testFilePath);
 const appRoot = path.resolve(testDir, "../..");
@@ -159,7 +185,7 @@ describe("add-nyx-component", () => {
 
   it("forwards shadcn args as literal argv entries without shell execution", async () => {
     const { runShadcnCommand } = await nyxModulePromise;
-    const spawnImplementation = vi.fn(() => ({ status: 0 }));
+    const spawnImplementation = vi.fn((..._args: unknown[]) => ({ status: 0 }));
     const forwardedArg = "--path=foo&ver";
 
     expect(
@@ -172,7 +198,8 @@ describe("add-nyx-component", () => {
 
     expect(spawnImplementation).toHaveBeenCalledOnce();
 
-    const [command, args, options] = spawnImplementation.mock.calls[0];
+    const [command, rawArgs, options] = spawnImplementation.mock.calls[0];
+    const args = rawArgs as string[];
 
     expect(command).toBe(process.execPath);
     expect(args[0]).toContain(path.join("node_modules", "shadcn", "dist", "index.js"));

@@ -25,14 +25,13 @@ from metis_app.services.nyx_install_executor import (
 from metis_app.services.trace_store import TraceStore
 
 api_app_module = import_module("metis_app.api_litestar")
-from tests._litestar_helpers import (
+from tests._litestar_helpers import (  # noqa: E402
     patch_workspace_orchestrator as _patch_workspace_orchestrator,
     patch_trace_store as _patch_trace_store,
     patch_execute_nyx_install_action as _patch_execute_nyx_install_action,
     patch_rag_stream_manager as _patch_rag_stream_manager,
 )
 from metis_app.api_litestar.routes import autonomous as _autonomous_module  # noqa: E402
-from metis_app.api_litestar.routes import query as _query_module  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

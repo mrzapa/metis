@@ -280,10 +280,10 @@ describe("Home page", () => {
   });
 
   it.skip("uses the hand tool to pan before switching back to select interactions", async () => {
-    let scheduledFrame: FrameRequestCallback | null = null;
+    const scheduled: { current: FrameRequestCallback | null } = { current: null };
     let frameId = 0;
     vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
-      scheduledFrame = callback;
+      scheduled.current = callback;
       frameId += 1;
       return frameId;
     }));
@@ -304,7 +304,7 @@ describe("Home page", () => {
     const canvas = await prepareCanvas();
     elementFromPointMock.mockImplementation(() => canvas);
 
-    scheduledFrame?.(16);
+    scheduled.current?.(16);
 
     expect(canvas).toHaveAttribute("data-canvas-tool", "select");
 
@@ -328,7 +328,7 @@ describe("Home page", () => {
       pointerId: 1,
     });
 
-    scheduledFrame?.(32);
+    scheduled.current?.(32);
 
     expect(screen.queryByTestId("star-details-panel")).not.toBeInTheDocument();
 
@@ -698,21 +698,24 @@ describe("Home page", () => {
     const canvas = await prepareCanvas();
     elementFromPointMock.mockImplementation(() => canvas);
 
-    const canvasContexts = getContextSpy.mock.results
+    type FillTextCtx = CanvasRenderingContext2D & { fillText: ReturnType<typeof vi.fn> };
+    const canvasContexts = (getContextSpy.mock.results as Array<{ value: unknown }>)
       .map((result) => result.value)
-      .filter((value): value is CanvasRenderingContext2D & { fillText: ReturnType<typeof vi.fn> } => (
+      .filter((value): value is FillTextCtx => (
         Boolean(value) && typeof (value as { fillText?: unknown }).fillText === "function"
       ));
 
     await waitFor(() => {
       expect(
-        canvasContexts.some((context) => context.fillText.mock.calls.some(([text]) => text === "Perception")),
+        canvasContexts.some((context: FillTextCtx) =>
+          context.fillText.mock.calls.some(([text]: unknown[]) => text === "Perception"),
+        ),
       ).toBe(true);
     });
 
     const perceptionLabelCall = canvasContexts
-      .flatMap((context) => context.fillText.mock.calls)
-      .find(([text]) => text === "Perception");
+      .flatMap((context: FillTextCtx) => context.fillText.mock.calls)
+      .find(([text]: unknown[]) => text === "Perception");
     expect(perceptionLabelCall).toBeTruthy();
 
     const [, labelX, labelY] = perceptionLabelCall as [string, number, number];

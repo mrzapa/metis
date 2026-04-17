@@ -6,8 +6,7 @@
     "beforeDevCommand": "cd ../metis-web && pnpm dev",
     "devUrl": "http://localhost:3000",
     "beforeBuildCommand": "cd ../metis-web && pnpm build",
-    "frontendDist": "../metis-web/out",
-    "devtools": true
+    "frontendDist": "../metis-web/out"
   },
   "app": {
     "windows": [

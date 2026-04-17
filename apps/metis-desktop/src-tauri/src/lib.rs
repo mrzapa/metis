@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 
+use tauri::{Emitter, Manager};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
@@ -18,7 +19,7 @@ fn get_api_base_url(state: tauri::State<'_, ApiState>) -> Option<String> {
 
 fn emit_sidecar_error(app_handle: &tauri::AppHandle, message: &str) {
     let _ = app_handle.emit("sidecar-error", message);
-    eprintln!("[metis-desktop] {}", message);
+    eprintln!("[metis-desktop] {message}");
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -32,12 +33,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![get_api_base_url])
         .setup(|app| {
+            let app_handle = app.handle().clone();
             match app.shell().sidecar("metis-api") {
                 Ok(cmd) => match cmd.spawn() {
                     Ok((mut rx, child)) => {
                         *app.state::<ApiState>()._child.lock().unwrap() = Some(child);
 
-                        let app_handle = app.handle().clone();
                         tauri::async_runtime::spawn(async move {
                             let mut found = false;
                             let mut stdout_buf = String::new();
@@ -72,15 +73,16 @@ pub fn run() {
                                         }
                                         Some(CommandEvent::Terminated(status)) => {
                                             if !found {
-                                                let msg = if !stderr_buf.is_empty() {
-                                                    format!(
-                                                        "API sidecar terminated unexpectedly (exit code: {:?}). stderr: {}",
-                                                        status.code, stderr_buf.trim()
-                                                    )
-                                                } else {
+                                                let msg = if stderr_buf.is_empty() {
                                                     format!(
                                                         "API sidecar terminated unexpectedly (exit code: {:?})",
                                                         status.code
+                                                    )
+                                                } else {
+                                                    format!(
+                                                        "API sidecar terminated unexpectedly (exit code: {:?}). stderr: {}",
+                                                        status.code,
+                                                        stderr_buf.trim()
                                                     )
                                                 };
                                                 emit_sidecar_error(&app_handle, &msg);
@@ -94,25 +96,25 @@ pub fn run() {
                             }
 
                             if !found {
-                                let msg = if !stdout_buf.is_empty() {
+                                let msg = if stdout_buf.is_empty() {
+                                    "The local API did not start in time. Please quit and restart the application.".to_string()
+                                } else {
                                     format!(
                                         "API did not start in time. stdout: {}",
                                         stdout_buf.trim()
                                     )
-                                } else {
-                                    "The local API did not start in time. Please quit and restart the application.".to_string()
                                 };
                                 emit_sidecar_error(&app_handle, &msg);
                             }
                         });
                     }
                     Err(e) => {
-                        let msg = format!("Failed to start API sidecar: {}", e);
+                        let msg = format!("Failed to start API sidecar: {e}");
                         emit_sidecar_error(&app_handle, &msg);
                     }
                 },
                 Err(e) => {
-                    let msg = format!("Sidecar binary not found: {}. Make sure the sidecar was built.", e);
+                    let msg = format!("Sidecar binary not found: {e}. Make sure the sidecar was built.");
                     emit_sidecar_error(&app_handle, &msg);
                 }
             }

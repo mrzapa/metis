@@ -27,7 +27,7 @@ classifiers = [
 # Runtime dependencies are intentionally minimal; heavy ML libs (LangChain,
 # sentence-transformers, llama-cpp-python) are optional/user-installed unless
 # the installer opts into the pinned runtime-all bundle.
-dependencies = ["psutil>=6", "PyYAML>=6", "pydantic>=2.0"]
+dependencies = ["psutil>=6", "PyYAML>=6", "pydantic>=2.0", "numpy>=1.26,<3"]
 
 [project.optional-dependencies]
 api = [
