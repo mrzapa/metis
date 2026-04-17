@@ -3,6 +3,7 @@
 import { useArrowState } from "@/hooks/use-arrow-state";
 import { Copy, Check, ChevronDown, ChevronUp } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { BorderBeam } from "@/components/ui/border-beam";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -74,6 +75,7 @@ export function EvidenceSourceCard({ source: src }: EvidenceSourceCardProps) {
 
   return (
     <TooltipProvider>
+      <BorderBeam size="line" colorVariant="ocean" strength={0.7}>
       <Card className="gap-0 py-0">
         <CardHeader className="px-3 py-1.5">
           <div className="flex items-start justify-between gap-2">
@@ -207,6 +209,7 @@ export function EvidenceSourceCard({ source: src }: EvidenceSourceCardProps) {
           )}
         </CardContent>
       </Card>
+      </BorderBeam>
     </TooltipProvider>
   );
 }
