@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 
+use tauri::{Emitter, Manager};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
@@ -32,12 +33,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![get_api_base_url])
         .setup(|app| {
+            let app_handle = app.handle().clone();
             match app.shell().sidecar("metis-api") {
                 Ok(cmd) => match cmd.spawn() {
                     Ok((mut rx, child)) => {
                         *app.state::<ApiState>()._child.lock().unwrap() = Some(child);
 
-                        let app_handle = app.handle().clone();
                         tauri::async_runtime::spawn(async move {
                             let mut found = false;
                             let mut stdout_buf = String::new();
