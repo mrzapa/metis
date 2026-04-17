@@ -22,6 +22,7 @@ const StarDiveOverlay = dynamic(
   { ssr: false, loading: () => null },
 );
 import { StarDetailsPanel } from "@/components/constellation/star-observatory-dialog";
+import { BorderBeam } from "@/components/ui/border-beam";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
 import { useCometNews } from "@/hooks/use-news-comets";
 import { deleteIndex, fetchBrainScaffold, fetchIndexes, fetchSettings, previewLearningRoute, subscribeCompanionActivity } from "@/lib/api";
@@ -4841,9 +4842,11 @@ export default function Home() {
       />
 
       <div className="metis-hero-overlay">
-        <div className={`metis-hero-shell ${zoomInteracting || canvasInteractionsLocked ? "is-muted" : ""}`}>
-          <h1 className="metis-hero-headline">Discover everything</h1>
-        </div>
+        <BorderBeam size="md" colorVariant="sunset" strength={0.8}>
+          <div className={`metis-hero-shell ${zoomInteracting || canvasInteractionsLocked ? "is-muted" : ""}`}>
+            <h1 className="metis-hero-headline">Discover everything</h1>
+          </div>
+        </BorderBeam>
       </div>
 
       <div className={`metis-zoom-pill ${canvasInteractionsLocked ? "is-muted" : ""}`} aria-live="polite">

@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { BorderBeam } from "@/components/ui/border-beam";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PageChrome } from "@/components/shell/page-chrome";
@@ -1609,7 +1610,8 @@ export default function SettingsPage() {
                     </div>
                   ) : (
                     <div className="space-y-6">
-                      <div className="space-y-4">
+                      <BorderBeam size="md" colorVariant="mono" strength={0.55}>
+                      <div className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
                         <div>
                           <h3 className="text-sm font-semibold">Assistant identity</h3>
                           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -1686,6 +1688,7 @@ export default function SettingsPage() {
                           />
                         </div>
                       </div>
+                      </BorderBeam>
 
                       <div className="space-y-4">
                         <div>

@@ -3,6 +3,7 @@
 import { animate, motion, useMotionValue, useTransform } from "motion/react";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
+import { BorderBeam } from "@/components/ui/border-beam";
 import { cn } from "@/lib/utils";
 
 interface StatCardProps {
@@ -11,6 +12,7 @@ interface StatCardProps {
   value: string | number;
   detail?: string;
   className?: string;
+  beam?: boolean;
 }
 
 function isNumericValue(value: string | number): value is number {
@@ -52,8 +54,8 @@ function AnimatedValue({ value }: { value: string | number }) {
   return <motion.span>{rounded}</motion.span>;
 }
 
-export function StatCard({ icon, label, value, detail, className }: StatCardProps) {
-  return (
+export function StatCard({ icon, label, value, detail, className, beam = false }: StatCardProps) {
+  const body = (
     <div className={cn("glass-panel rounded-2xl p-4", className)}>
       <div className="flex items-center gap-3">
         {icon && (
@@ -74,5 +76,15 @@ export function StatCard({ icon, label, value, detail, className }: StatCardProp
         <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{detail}</p>
       )}
     </div>
+  );
+
+  if (!beam) {
+    return body;
+  }
+
+  return (
+    <BorderBeam size="md" colorVariant="mono" strength={0.6}>
+      {body}
+    </BorderBeam>
   );
 }
