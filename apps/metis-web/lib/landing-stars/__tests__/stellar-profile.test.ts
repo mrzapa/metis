@@ -112,4 +112,30 @@ describe("generateStellarProfile", () => {
     // Content type only affects visualArchetype; other fields come from the seed.
     expect({ ...tagged, visualArchetype: baseline.visualArchetype }).toEqual(baseline);
   });
+
+  it("leaves annotations undefined — they are content-driven, not procedural", () => {
+    const profile = generateStellarProfile("atlas");
+    expect(profile.annotations).toBeUndefined();
+
+    const tagged = generateStellarProfile("atlas", { contentType: "learning_route" });
+    expect(tagged.annotations).toBeUndefined();
+  });
+
+  it("accepts an externally-supplied annotations field without mutating the seeded output", () => {
+    const baseline = generateStellarProfile("atlas");
+    const annotated: typeof baseline = {
+      ...baseline,
+      annotations: {
+        halo: { strength: 0.7 },
+        ring: { count: 2 },
+      },
+    };
+
+    // Stripping annotations reproduces the untouched seeded profile.
+    const rest = { ...annotated, annotations: undefined };
+    delete (rest as { annotations?: unknown }).annotations;
+    expect(rest).toEqual(baseline);
+    expect(annotated.annotations?.halo?.strength).toBeCloseTo(0.7, 5);
+    expect(annotated.annotations?.ring?.count).toBe(2);
+  });
 });
