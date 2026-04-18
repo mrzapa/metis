@@ -1,7 +1,7 @@
 ---
 Milestone: M02 — Constellation 2D refactor
 Status: In progress
-Claim: claude/m02-archetype-scaffold (Phase 0)
+Claim: claude/m02-camera-dive (Phase 2)
 Last updated: 2026-04-18 by claude-opus-4-7
 Vision pillar: Cosmos
 ADR: docs/adr/0006-constellation-design-2d-primary.md
@@ -62,6 +62,45 @@ aligns the constellation with the vision.
 207 passed, 10 skipped, 0 failed. `pnpm exec tsc --noEmit` → exit 0.
 `pnpm lint` on touched files → clean.
 
+**Phase 2 — Cinematic 2D camera (partial ✅, 2026-04-18 by claude-opus-4-7):**
+- 2.1 ✅ — Extracted the camera easing loop out of `page.tsx` into a new
+  `apps/metis-web/hooks/use-constellation-camera.ts`. The hook owns the four
+  refs (`origin`, `targetOrigin`, `zoom`, `zoomTarget`) plus a `scrollVelocity`
+  ref, and exposes `stepCamera({ reducedMotion, focusStrength })`,
+  `setTargetOrigin`, `setZoomTarget`, `jumpTo`, `getState`, `getTargetState`,
+  `registerScrollVelocity`, and `easeDive`. `page.tsx` now aliases its existing
+  ref names to the hook's refs so all downstream reads keep working; the
+  inline origin + galaxy-pullback + zoom easing in `render()` is a single
+  `stepCamera` call.
+- 2.2 ✅ — `CONSTELLATION_DIVE_DURATION_MS = 700` and `cubicOutEasing` are
+  exported from the hook. `easeDive(elapsed, duration?)` drives the cubic-out
+  curve for any future time-based tweens; the in-loop easing keeps its
+  per-frame exponential form but the ease factors (`0.12` base, `0.18` above
+  the dive threshold) are configurable on the hook and calibrated to match
+  ~0.7 s settling.
+- 2.3 ✅ — `landing-starfield-webgl.tsx` gained four new uniforms
+  (`uFocusCenter`, `uFocusStrength`, `uFocusRadius`, `uFocusFalloff`). The
+  vertex shader computes screen-space distance from the dive focus, broadens
+  point size (up to 1.6×) and dims ambient stars (up to 85 %) outside the
+  sharp radius. The fragment shader reuses the same varyings to shift alpha
+  from core toward halo, giving a bokeh-ish bloom without leaving the
+  existing WebGL context. `LandingStarfieldFrame` is extended with the
+  matching optional fields, and `page.tsx` populates them from
+  `starDiveOverlayViewRef`.
+- 2.4 ✅ — Focused-star size boost and brightness dim for ambient stars are
+  already driven on the CPU side in `page.tsx` (lines 2597-2614); shader-side
+  point-size boost + halo widening stack on top via the new uniforms.
+- 2.5 ✅ — Reduced-motion snap path runs through `stepCamera`: when the flag
+  is set, both origin and zoom jump straight to their targets; the dive
+  ease boost is skipped.
+- **Tests:** `apps/metis-web/hooks/__tests__/use-constellation-camera.test.ts`
+  covers init, origin ease, reduced-motion snap, dive-zone zoom ease,
+  `jumpTo` clamp, scroll-velocity decay, and `easeDive` curve shape.
+
+**Verification:** `pnpm test` → 216 passed, 10 skipped, 0 failed.
+`pnpm exec tsc --noEmit` → exit 0. `pnpm lint` → 0 errors (pre-existing
+warnings only).
+
 ## Next up
 
 - **Phase 0.3** — Thread a real `contentType` from the landing-star producer
@@ -70,7 +109,9 @@ aligns the constellation with the vision.
   real stars.
 - Phase 1 task 1.1: implement tiered naming in `star-name-generator.ts` — it's
   the lowest-risk piece, independent of renderer changes, visible immediately.
-- In parallel, phase 2 can start (cinematic 2D camera) while 1.1 ships.
+- Phase 3 can now start (closeup shader tier with archetype branches); the
+  focus uniforms land on the right side of the shader for archetype-specific
+  effects to build on.
 
 ## Blockers
 

@@ -23,6 +23,7 @@ const StarDiveOverlay = dynamic(
 );
 import { StarDetailsPanel } from "@/components/constellation/star-observatory-dialog";
 import { BorderBeam } from "@/components/ui/border-beam";
+import { useConstellationCamera } from "@/hooks/use-constellation-camera";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
 import { useCometNews } from "@/hooks/use-news-comets";
 import { deleteIndex, fetchBrainScaffold, fetchIndexes, fetchSettings, previewLearningRoute, subscribeCompanionActivity } from "@/lib/api";
@@ -74,7 +75,6 @@ import {
   projectConstellationPoint,
   screenToConstellationPoint,
   screenToWorldPoint,
-  STAR_DIVE_ZOOM_THRESHOLD,
   type ConstellationFacultyMetadata,
   type ConstellationFieldStar,
   type ConstellationNodePoint,
@@ -829,10 +829,11 @@ export default function Home() {
     width: 0,
     height: 0,
   });
-  const backgroundCameraOriginRef = useRef<Point>({ x: 0, y: 0 });
-  const backgroundCameraTargetOriginRef = useRef<Point>({ x: 0, y: 0 });
-  const backgroundZoomRef = useRef(1);
-  const backgroundZoomTargetRef = useRef(1);
+  const constellationCamera = useConstellationCamera();
+  const backgroundCameraOriginRef = constellationCamera.originRef;
+  const backgroundCameraTargetOriginRef = constellationCamera.targetOriginRef;
+  const backgroundZoomRef = constellationCamera.zoomRef;
+  const backgroundZoomTargetRef = constellationCamera.zoomTargetRef;
   const starFocusPhaseRef = useRef<StarFocusPhase>("idle");
   const starFocusSessionRef = useRef<{
     starId: string | null;
@@ -2649,12 +2650,26 @@ export default function Home() {
         ? buildLandingStarSpatialHash(landingRenderableStars)
         : null;
       const zoomNorm = Math.log2(Math.max(0.002, backgroundCamera.zoomFactor) + 1) / Math.log2(2001);
+      const diveView = starDiveOverlayViewRef.current;
+      const focusStrengthForFrame = diveView ? diveView.focusStrength : 0;
+      const focusCenterX = diveView ? diveView.screenX : 0;
+      const focusCenterY = diveView ? diveView.screenY : 0;
+      // Focus sharp-zone shrinks as dive progresses so more ambient stars drift
+      // into bokeh; widen from ~40% of min viewport dim down to ~12%.
+      const minViewportDim = Math.min(W, H);
+      const focusRadius = minViewportDim * (0.4 - 0.28 * focusStrengthForFrame);
+      const focusFalloff = minViewportDim * 0.55;
       landingStarfieldFrameRef.current = {
         height: H,
         revision: landingStarfieldFrameRef.current.revision + 1,
         stars: nextWebglStars,
         width: W,
         zoomScale: zoomNorm,
+        focusCenterX,
+        focusCenterY,
+        focusStrength: focusStrengthForFrame,
+        focusRadius,
+        focusFalloff,
       };
       lastVisibleStarfieldWidth = W;
       lastVisibleStarfieldHeight = H;
@@ -3733,54 +3748,10 @@ export default function Home() {
     }
 
     function render(ts: number) {
-      const originDeltaX = backgroundCameraTargetOriginRef.current.x - backgroundCameraOriginRef.current.x;
-      const originDeltaY = backgroundCameraTargetOriginRef.current.y - backgroundCameraOriginRef.current.y;
-      if (Math.abs(originDeltaX) > 0.05 || Math.abs(originDeltaY) > 0.05) {
-        backgroundCameraOriginRef.current = reducedMotion
-          ? { ...backgroundCameraTargetOriginRef.current }
-          : {
-              x: backgroundCameraOriginRef.current.x + originDeltaX * 0.14,
-              y: backgroundCameraOriginRef.current.y + originDeltaY * 0.14,
-            };
-      } else {
-        backgroundCameraOriginRef.current = { ...backgroundCameraTargetOriginRef.current };
-      }
-
-      // At very low zoom (galaxy view), smoothly pull camera origin back to world centre
-      // so the constellation nucleus stays centred in the galaxy glow.
-      const zoomNow = backgroundZoomRef.current;
-      if (zoomNow < 0.15) {
-        const pullStrength = Math.min(1, (0.15 - zoomNow) / 0.13) * 0.06;
-        backgroundCameraOriginRef.current = {
-          x: backgroundCameraOriginRef.current.x * (1 - pullStrength),
-          y: backgroundCameraOriginRef.current.y * (1 - pullStrength),
-        };
-        backgroundCameraTargetOriginRef.current = {
-          x: backgroundCameraTargetOriginRef.current.x * (1 - pullStrength),
-          y: backgroundCameraTargetOriginRef.current.y * (1 - pullStrength),
-        };
-      }
-
-      const zoomDelta = backgroundZoomTargetRef.current - backgroundZoomRef.current;
-      if (Math.abs(zoomDelta) > 0.0005) {
-        // Accelerate zoom easing above Star Dive threshold (12% → 18%)
-        const zoomEasing = reducedMotion
-          ? 1
-          : backgroundZoomRef.current > STAR_DIVE_ZOOM_THRESHOLD
-            ? 0.18
-            : 0.12;
-        backgroundZoomRef.current = reducedMotion
-          ? backgroundZoomTargetRef.current
-          : backgroundZoomRef.current + zoomDelta * zoomEasing;
-      } else {
-        backgroundZoomRef.current = backgroundZoomTargetRef.current;
-      }
-
-      const backgroundCamera: BackgroundCameraState = {
-        x: backgroundCameraOriginRef.current.x,
-        y: backgroundCameraOriginRef.current.y,
-        zoomFactor: backgroundZoomRef.current,
-      };
+      const backgroundCamera = constellationCamera.stepCamera({
+        reducedMotion,
+        focusStrength: starDiveFocusStrengthRef.current,
+      });
 
       // --- Star Dive: focus detection + auto-drift ---
       const diveFocusStrength = getStarDiveFocusStrength(backgroundCamera.zoomFactor);
@@ -4728,6 +4699,7 @@ export default function Home() {
       backgroundCameraOriginRef.current = nextOrigin;
       backgroundCameraTargetOriginRef.current = nextOrigin;
 
+      constellationCamera.registerScrollVelocity(e.deltaY);
       clearConstellationHoverState();
       setBackgroundZoomTarget(nextZoomFactor);
     }

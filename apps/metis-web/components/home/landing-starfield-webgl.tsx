@@ -22,6 +22,10 @@ attribute vec2 aTwinkle;
 uniform float uDpr;
 uniform float uTime;
 uniform float uZoomScale;
+uniform vec2 uFocusCenter;
+uniform float uFocusStrength;
+uniform float uFocusRadius;
+uniform float uFocusFalloff;
 
 varying float vAddable;
 varying float vBloom;
@@ -30,6 +34,8 @@ varying float vCoreRadius;
 varying float vDiffraction;
 varying float vTier;
 varying float vTwinkle;
+varying float vFocusDim;
+varying float vFocusBlur;
 varying vec3 vAccentColor;
 varying vec3 vCoreColor;
 varying vec3 vHaloColor;
@@ -42,7 +48,19 @@ void main() {
   float tierBoost = aShape.w > 1.5 ? 1.45 : (aShape.w > 0.5 ? 1.18 : 1.0);
   float heroGlow = aShape.w > 1.5 ? 1.0 + aColorC.w * 0.32 : 1.0;
   float zoomSizeScale = mix(0.15, 1.0, smoothstep(0.0, 0.4, uZoomScale));
-  gl_PointSize = max(1.0, aShape.z * uDpr * tierBoost * heroGlow * twinkle * zoomSizeScale);
+
+  // Depth-of-field-like falloff from the dive focus centre. The focused star
+  // (closeup tier, aShape.w > 2.5) keeps its full size; ambient stars dim and
+  // bloom outward as the viewer settles on the target.
+  float focusDist = distance(position.xy, uFocusCenter);
+  float outsideFocus = smoothstep(uFocusRadius, uFocusRadius + max(1.0, uFocusFalloff), focusDist);
+  float isFocused = step(2.5, aShape.w);
+  float falloff = outsideFocus * uFocusStrength * (1.0 - isFocused);
+  // Ambient stars: dim up to 85%, broaden halo (blur) by up to 1.6x.
+  float dim = 1.0 - falloff * 0.85;
+  float blur = 1.0 + falloff * 0.6;
+
+  gl_PointSize = max(1.0, aShape.z * uDpr * tierBoost * heroGlow * twinkle * zoomSizeScale * blur);
 
   vAddable = aColorA.w;
   vBloom = aColorC.w;
@@ -51,6 +69,8 @@ void main() {
   vDiffraction = aShape.y;
   vTier = aShape.w;
   vTwinkle = twinkle;
+  vFocusDim = dim;
+  vFocusBlur = falloff;
   vAccentColor = aColorA.rgb;
   vCoreColor = aColorB.rgb;
   vHaloColor = aColorC.rgb;
@@ -65,6 +85,8 @@ varying float vCoreRadius;
 varying float vDiffraction;
 varying float vTier;
 varying float vTwinkle;
+varying float vFocusDim;
+varying float vFocusBlur;
 varying vec3 vAccentColor;
 varying vec3 vCoreColor;
 varying vec3 vHaloColor;
@@ -115,7 +137,15 @@ void main() {
   float alpha = haloMask * alphaBase + coreMask * 0.28 + rimMask * 0.08;
   alpha = clamp(alpha * (0.9 + vBloom * 0.12), 0.0, 1.0);
 
-  gl_FragColor = vec4(color * (0.86 + vBrightness * 0.34), alpha);
+  // Depth-of-field: ambient stars dim and soften outside the focus radius.
+  // vFocusBlur ∈ [0,1]; larger values shift alpha away from the core toward the halo.
+  if (vFocusBlur > 0.001) {
+    float softened = mix(alpha, alpha * 0.55 + haloMask * 0.1, vFocusBlur);
+    alpha = softened;
+  }
+  alpha *= vFocusDim;
+
+  gl_FragColor = vec4(color * (0.86 + vBrightness * 0.34) * vFocusDim, alpha);
 }
 `;
 
@@ -246,6 +276,10 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
         uDpr: { value: 1 },
         uTime: { value: 0 },
         uZoomScale: { value: 1 },
+        uFocusCenter: { value: new THREE.Vector2(0, 0) },
+        uFocusStrength: { value: 0 },
+        uFocusRadius: { value: 200 },
+        uFocusFalloff: { value: 400 },
       },
       vertexShader,
     });
@@ -325,6 +359,11 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
 
       material.uniforms.uTime.value = timestampMs * 0.001;
       material.uniforms.uZoomScale.value = frame.zoomScale ?? 1;
+      const focusCenter = material.uniforms.uFocusCenter.value as THREE.Vector2;
+      focusCenter.set(frame.focusCenterX ?? 0, frame.focusCenterY ?? 0);
+      material.uniforms.uFocusStrength.value = frame.focusStrength ?? 0;
+      material.uniforms.uFocusRadius.value = frame.focusRadius ?? 200;
+      material.uniforms.uFocusFalloff.value = frame.focusFalloff ?? 400;
       renderer.render(scene, camera);
     };
 
