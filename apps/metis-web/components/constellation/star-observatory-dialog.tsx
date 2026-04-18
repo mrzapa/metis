@@ -19,6 +19,10 @@ import { Button } from "@/components/ui/button";
 import { FacultyGlyphPanel } from "@/components/constellation/faculty-glyph-panel";
 import { LearningRoutePanel } from "@/components/constellation/learning-route-panel";
 import {
+  ObservatoryOrbitalLayout,
+  useIsOrbitalViewport,
+} from "@/components/constellation/observatory-orbital-layout";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -195,6 +199,36 @@ function resolveDefaultStage(
     return "growing";
   }
   return "seed";
+}
+
+/**
+ * Track the viewer's `prefers-reduced-motion` preference. The orbital ring
+ * entrance is the only motion the Observatory owns; when reduced motion is
+ * requested the rings snap to place without staggered transforms.
+ */
+function useReducedMotionPreference(): boolean {
+  const [reduced, setReduced] = useState<boolean>(() => {
+    if (typeof window === "undefined" || !window.matchMedia) {
+      return false;
+    }
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) {
+      return;
+    }
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const handler = (event: MediaQueryListEvent) => setReduced(event.matches);
+    if (typeof query.addEventListener === "function") {
+      query.addEventListener("change", handler);
+      return () => query.removeEventListener("change", handler);
+    }
+    query.addListener(handler);
+    return () => query.removeListener(handler);
+  }, []);
+
+  return reduced;
 }
 
 
@@ -547,6 +581,15 @@ export function StarDetailsPanel({
     }).primary.faculty;
   }, [primaryDomainIdDraft, star]);
 
+  // Phase 4: on desktop, surface the three observatory sub-panels (faculty
+  // glyph, archetype picker, learning route) as docked rings around the star.
+  // On mobile fall back to the classic side-rail modal where these render
+  // inline. See ObservatoryOrbitalLayout for the slot API + stagger curve.
+  // Called unconditionally (before the early return below) to satisfy Rules
+  // of Hooks.
+  const isOrbital = useIsOrbitalViewport();
+  const prefersReducedMotion = useReducedMotionPreference();
+
   if (!star) {
     return null;
   }
@@ -839,7 +882,55 @@ export function StarDetailsPanel({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
+      {isOrbital && open ? (
+        <ObservatoryOrbitalLayout
+          open={open}
+          reducedMotion={prefersReducedMotion}
+          className="pointer-events-none fixed inset-0 z-[265]"
+          slotClassName={{
+            top: "w-[min(560px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] mt-4",
+            left: "ml-4 w-[min(340px,calc(50vw-12rem))] max-w-[min(340px,calc(50vw-8rem))]",
+            bottom: "mb-4 w-[min(640px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]",
+            right: "mr-4 w-[min(320px,calc(50vw-12rem))] max-w-[min(320px,calc(50vw-8rem))]",
+          }}
+          slots={{
+            top: view === "build" ? (
+              <div className="pointer-events-auto rounded-[1.6rem] border border-white/12 bg-[linear-gradient(180deg,rgba(14,20,34,0.92),rgba(10,13,23,0.9))] p-4 shadow-[0_24px_80px_rgba(3,8,19,0.55)] backdrop-blur-md">
+                <StarArchetypePicker
+                  filePaths={readyPaths}
+                  selectedId={selectedArchetype?.id ?? null}
+                  onSelect={setSelectedArchetype}
+                />
+              </div>
+            ) : null,
+            left: activeFaculty ? (
+              <div className="pointer-events-auto">
+                <FacultyGlyphPanel faculty={activeFaculty} />
+              </div>
+            ) : null,
+            bottom: (
+              <div className="pointer-events-auto rounded-[1.6rem] border border-white/12 bg-[linear-gradient(180deg,rgba(14,20,34,0.92),rgba(10,13,23,0.9))] p-4 shadow-[0_24px_80px_rgba(3,8,19,0.55)] backdrop-blur-md">
+                <LearningRoutePanel
+                  route={displayedLearningRoute}
+                  previewActive={learningRoutePreview !== null}
+                  eligible={hasCourseSource}
+                  loading={learningRouteLoading}
+                  error={learningRouteError}
+                  unavailableManifestPaths={unavailableManifestPaths}
+                  onStartCourse={onStartCourse}
+                  onSaveRoute={onSaveLearningRoutePreview}
+                  onDiscardPreview={onDiscardLearningRoutePreview}
+                  onRegenerateRoute={onRegenerateLearningRoute}
+                  onLaunchStep={onLaunchLearningRouteStep}
+                  onSetStepStatus={onSetLearningRouteStepStatus}
+                />
+              </div>
+            ),
+          }}
+        />
+      ) : null}
       <DialogContent
+        data-orbital={isOrbital ? "true" : "false"}
         className="left-1/2 top-auto bottom-3 flex h-[calc(100vh-1.5rem)] max-h-[calc(100vh-1.5rem)] w-[calc(100%-1.5rem)] max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-0 flex-col gap-0 overflow-hidden rounded-[1.75rem] border-white/12 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(8,11,20,0.96))] p-0 sm:left-auto sm:right-4 sm:top-4 sm:bottom-4 sm:h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-2rem)] sm:w-[min(460px,calc(100vw-2rem))] sm:max-w-[460px] sm:translate-x-0 sm:translate-y-0 lg:w-[min(520px,calc(100vw-2rem))] lg:max-w-[520px] xl:w-[min(580px,calc(100vw-2rem))] xl:max-w-[580px]"
         data-testid="star-details-panel"
         showCloseButton={true}
@@ -920,7 +1011,7 @@ export function StarDetailsPanel({
               </button>
             </div>
 
-            <FacultyGlyphPanel faculty={activeFaculty} />
+            {isOrbital ? null : <FacultyGlyphPanel faculty={activeFaculty} />}
           </DialogHeader>
         </div>
 
@@ -1125,11 +1216,13 @@ export function StarDetailsPanel({
                   ) : null}
                 </div>
 
-                <StarArchetypePicker
-                  filePaths={readyPaths}
-                  selectedId={selectedArchetype?.id ?? null}
-                  onSelect={setSelectedArchetype}
-                />
+                {isOrbital ? null : (
+                  <StarArchetypePicker
+                    filePaths={readyPaths}
+                    selectedId={selectedArchetype?.id ?? null}
+                    onSelect={setSelectedArchetype}
+                  />
+                )}
 
                 <div className="rounded-[1.6rem] border border-white/10 bg-black/18 p-4 sm:p-5">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1482,20 +1575,22 @@ export function StarDetailsPanel({
                 </div>
               </div>
 
-              <LearningRoutePanel
-                route={displayedLearningRoute}
-                previewActive={learningRoutePreview !== null}
-                eligible={hasCourseSource}
-                loading={learningRouteLoading}
-                error={learningRouteError}
-                unavailableManifestPaths={unavailableManifestPaths}
-                onStartCourse={onStartCourse}
-                onSaveRoute={onSaveLearningRoutePreview}
-                onDiscardPreview={onDiscardLearningRoutePreview}
-                onRegenerateRoute={onRegenerateLearningRoute}
-                onLaunchStep={onLaunchLearningRouteStep}
-                onSetStepStatus={onSetLearningRouteStepStatus}
-              />
+              {isOrbital ? null : (
+                <LearningRoutePanel
+                  route={displayedLearningRoute}
+                  previewActive={learningRoutePreview !== null}
+                  eligible={hasCourseSource}
+                  loading={learningRouteLoading}
+                  error={learningRouteError}
+                  unavailableManifestPaths={unavailableManifestPaths}
+                  onStartCourse={onStartCourse}
+                  onSaveRoute={onSaveLearningRoutePreview}
+                  onDiscardPreview={onDiscardLearningRoutePreview}
+                  onRegenerateRoute={onRegenerateLearningRoute}
+                  onLaunchStep={onLaunchLearningRouteStep}
+                  onSetStepStatus={onSetLearningRouteStepStatus}
+                />
+              )}
 
               {statusMessage ? (
                 <div
