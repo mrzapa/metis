@@ -1,7 +1,7 @@
 ---
 Milestone: M02 — Constellation 2D refactor
 Status: In progress
-Claim: claude/m02-orbital-observatory (Phase 4 landed) — Phase 5 deletion next
+Claim: claude/metis-vision-strategy-Bj7jJ (Phase 5 landed) — Phase 6 annotations next
 Last updated: 2026-04-18 by claude-opus-4-7
 Vision pillar: Cosmos
 ADR: docs/adr/0006-constellation-design-2d-primary.md
@@ -292,6 +292,80 @@ from 241 with 6 new orbital-layout tests). `pnpm exec tsc --noEmit`
 → exit 0. `pnpm exec eslint` on touched files → 0 errors; pre-
 existing warnings unchanged.
 
+**Phase 5 — Deletion (landed, 2026-04-18 by claude-opus-4-7):**
+- 5.1 ✅ — Deleted `apps/metis-web/components/home/star-dive-overlay.tsx`
+  (the 3D sphere overlay component, its `StarDiveOverlayView` interface, and
+  the `StarSurfaceShader`-driven WebGL2 draw loop).
+- 5.2 ✅ — Deleted `apps/metis-web/lib/landing-stars/star-surface-shader.ts`
+  (the procedural stellar-surface fragment shader: granulation, prominences,
+  sunspots, corona, and the `u_stage` staging uniform).
+- 5.3 ✅ — Removed the `StarDiveOverlayView` and `StarDiveOverlay` imports
+  from `app/page.tsx`; removed the `{ STAR_VERT, STAR_FRAG, compileShader,
+  createStarProgram }` imports from
+  `components/constellation/star-observatory-dialog.tsx`. Replaced the
+  inline `StarDiveOverlayView` ref type with a local `StarDiveFocusView`
+  interface in `page.tsx` — the ref is still populated every frame because
+  Phase 2.3 reads `screenX / screenY / focusStrength` off it to drive the
+  2D starfield's depth-of-field focus uniforms. The ref was renamed from
+  `starDiveOverlayViewRef` to `starDiveFocusViewRef` to reflect its actual
+  role post-deletion. `pnpm exec tsc --noEmit` → exit 0.
+- 5.4 ✅ — No standalone CSS file existed for the 3D overlay; all its
+  styles were inline in the deleted component (wrapper transform, fade-in,
+  box-shadow, transition curves). The `<StarDiveOverlay>` JSX mount in
+  `page.tsx` was removed. No other CSS references survived the deletion.
+- 5.5 ✅ — `u_stage`, the procedural stellar-surface noise (granulation +
+  prominence + sunspot + corona calls), and the related shader uniforms
+  (`u_color`, `u_color2`, `u_color3`, `u_hasColor2`, `u_hasColor3`,
+  `u_hasDiffraction`, `u_seed`, `u_res`) were all removed as part of 5.2
+  since they lived entirely inside `star-surface-shader.ts`. The 2D focus
+  uniforms in `landing-starfield-webgl.tsx` (`uFocusCenter`, `uFocusStrength`,
+  `uFocusRadius`, `uFocusFalloff`) are untouched — those belong to the
+  2D archetype path and are explicitly out of scope per the Phase 5
+  guardrail.
+- 5.6 ✅ — No tests exclusively covered the deleted code and no tests
+  asserted on a 2D → 3D swap; grep for `star-dive`/`star-surface`/
+  `StarDiveOverlay`/`StarMiniPreview` across
+  `apps/metis-web/**/__tests__/**` returned nothing before deletion. A
+  stale comment in `hooks/__tests__/use-constellation-camera.test.ts`
+  references the "star-dive zone" (the zoom tier where dive easing kicks
+  in, still live) and is left intact — that behaviour still exists.
+  The doc comment in `components/home/landing-starfield-webgl.types.ts`
+  that said the focus centre "matches the star-dive overlay" was
+  rewritten to describe the 2D depth-of-field consumer instead.
+- **Collateral inside `star-observatory-dialog.tsx`:** the dialog's
+  `StarMiniPreview` component rendered a WebGL2 thumbnail using the
+  deleted `createStarProgram` + `u_stage` shader. Replaced with a static
+  CSS radial-gradient disc driven by faculty color + stage; the dead
+  `domainSeed` helper (only used for the shader's `u_seed` uniform) was
+  also removed. Same props signature, no caller-site changes.
+
+**Verification:** `pnpm test` → 247 passed, 10 skipped, 0 failed
+(unchanged from Phase 4 — no tests cover deleted code exclusively,
+see 5.6 above). `pnpm exec tsc --noEmit` → exit 0. `pnpm exec eslint`
+on touched files → 0 errors, 18 warnings (all pre-existing on
+`page.tsx` unused-vars + react-hooks/exhaustive-deps + one unused
+import in the dialog; unchanged by this phase). `pnpm build` →
+compiled successfully in 18.4 s, static pages generated. Bundle-size
+delta vs pre-Phase-5 main not captured as concrete bytes (Next 16
+Turbopack build output doesn't surface per-route byte totals at the
+default log level); `.next/static` sits at ~37.17 MB on this build
+as a reference point for the next comparison. Final DoD grep:
+`rg star-surface-shader apps/ metis_app/` and
+`rg star-dive-overlay apps/ metis_app/` both return empty.
+
+**Notes for the next agent (Phase 5):**
+- `starDive*Ref` names in `page.tsx` (focus state, world pos, profile,
+  name, strength, pan-suppressed) refer to the 2D *camera* focus state,
+  not the retired 3D overlay. They stay. The sole rename in Phase 5
+  was `starDiveOverlayViewRef` → `starDiveFocusViewRef`.
+- The Observatory dialog's star thumbnail is now a simple faculty-
+  tinted radial gradient. If Phase 6 annotations surface a richer
+  2D preview (e.g. the archetype's closeup-tier shader rendered into
+  a tiny canvas), it's a natural replacement for `StarMiniPreview`.
+- `useReducedMotionPreference` inside `star-observatory-dialog.tsx`
+  is currently dead (declared, never called). Left in place because
+  it's not 3D-related — cleanup candidate for a later pass.
+
 **Open Phase 3 items for future slices:**
 - Mobile perf ceiling number (ADR 0006 open question, Phase 3 DoD):
   still unmeasured. With the uber-shader approach the hot path is a
@@ -305,6 +379,10 @@ existing warnings unchanged.
 
 ## Next up
 
+- **Phase 6 — Annotations (2D accoutrements)**: halos (recency), rings
+  (document series), orbiting satellites (sub-nodes). Parametrised via
+  new `StellarProfile.annotations` fields and rendered in the 2D shader
+  family. Unblocked now that Phase 5 has retired the 3D path.
 - **Phase 1.4 wiring for individual landmark stars** (follow-up): today
   the faculty constellations render as anchor + edges without per-star
   Bayer labels surfaced on hover. The landmark tier API is ready; a
@@ -319,8 +397,6 @@ existing warnings unchanged.
   layout once real faculty-star content drives them; cover more of
   `wolf_rayet` / `variable` with palette research if playtest reveals
   them as too uniform.
-- **Phase 4 Orbital Observatory** — unblocked by Phases 0+1+2+3 scaffold.
-  Suggested claim: `claude/m02-orbital-observatory`.
 
 ## Blockers
 
