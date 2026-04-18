@@ -6,6 +6,25 @@ backed by a **Litestar** ASGI service (`metis_app/api_litestar/`).
 
 ---
 
+## Before you implement anything new
+
+If the user asks you to implement something that came from **outside this
+repo** — a GitHub link, a paper, a concept, a technique, a screenshot —
+**do not start coding.** Run the intake workflow documented in
+[`plans/README.md`](plans/README.md#intake-workflow-for-implementation-requests-from-external-sources):
+
+1. File the request to [`plans/IDEAS.md`](plans/IDEAS.md).
+2. Triage inline (pillar fit, overlap, recommendation, scope).
+3. Wait for go/no-go from the user.
+4. Only then promote to a milestone / plan doc, or merge into an existing
+   one, and implement.
+
+Skip this only for bug fixes, trivial tweaks, or when the user explicitly
+says "just do it". See [`VISION.md`](VISION.md) for the product pillars the
+triage step checks against.
+
+---
+
 ## Quick start
 
 ```bash

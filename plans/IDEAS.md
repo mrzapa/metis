@@ -32,7 +32,29 @@
 
 ## Open ideas
 
-<!-- Append new ideas below. Newest at the top is fine. One-liners welcome. -->
+<!--
+Append new ideas below. Newest at the top is fine.
+
+When a user asks an agent to "implement X from GitHub" or similar, the
+agent files it here using the template below (see plans/README.md →
+"Intake workflow"). One-liner user notes are also welcome — the template
+is only required for agent-filed intake entries.
+
+Template for agent-filed intake:
+
+### <short title>
+- **Source:** <link or description>
+- **Ask:** <one-line summary of the user request>
+- **Context:** <anything the user said>
+- **Filed:** YYYY-MM-DD by <agent/session>
+- **Triage:**
+  - What it is: <one paragraph>
+  - Pillar fit: Cosmos / Companion / Cortex / Cross-cutting / doesn't fit
+  - Overlap: <M## rows it touches>
+  - Recommendation: Promote | Merge into M## | Park | Reject
+  - Rough scope: patch | day | multi-day | multi-week | multi-month
+- **Decision:** <awaiting go/no-go | promoted as M## | merged into M## | parked | rejected>
+-->
 
 *(empty — add your first idea here)*
 

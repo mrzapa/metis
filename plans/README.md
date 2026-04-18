@@ -87,6 +87,74 @@ pass**: walk `IDEAS.md` top-to-bottom and either:
 
 Leave the rest in the inbox for next time.
 
+## Intake workflow (for implementation requests from external sources)
+
+**When the user asks an agent to implement something from outside the repo**
+— a GitHub link, a paper, a technique, a tweet, a screenshot, a concept —
+the agent **does not start coding**. It runs this intake sequence first.
+
+This keeps velocity high without letting the codebase sprawl. The user can
+still drop raw ideas into `IDEAS.md` directly — this workflow only kicks in
+when they phrase it as "implement X" / "add X" / "build X" / "can we do X".
+
+### The sequence
+
+1. **File it.** Append a new entry under *Open ideas* in
+   [`IDEAS.md`](IDEAS.md) with:
+   - **Source** — link, paper title, tweet URL, or "concept from user".
+   - **Ask** — one-line summary of what the user wants.
+   - **Context** — any extra information the user provided.
+   - **Filed** — today's date.
+2. **Triage inline, in the same response.** Produce a short review:
+   - **What it is** — one paragraph summary from the source (not a
+     copy-paste; a genuine read).
+   - **Pillar fit** — Cosmos / Companion / Cortex / Cross-cutting / or
+     "doesn't fit the vision" with reason.
+   - **Overlap** — which rows in [`IMPLEMENTATION.md`](IMPLEMENTATION.md)
+     it touches or depends on. Call out collision risk.
+   - **Recommendation** — one of:
+     - **Promote** — worth its own milestone row.
+     - **Merge** — fold into an existing milestone.
+     - **Park** — Iced; revisit later.
+     - **Reject** — with reason.
+   - **Rough scope** — 1-hour patch / day / multi-day / multi-week /
+     multi-month. Honest.
+3. **Ask for a go/no-go.** Stop. Do not implement until the user confirms
+   (or overrides) the recommendation.
+4. **If promoted** — add a row to `IMPLEMENTATION.md` and create a plan
+   doc stub under `plans/<slug>/plan.md` with the standard frontmatter.
+   Then implement against that plan, using normal claim rules.
+5. **If merged** — append to the target plan doc's *Notes for the next
+   agent* section. Implement within that milestone's scope.
+6. **If parked or rejected** — update `IDEAS.md` (move to *Iced* or
+   *Rejected* with the reason). Stop.
+
+### When to skip intake
+
+Skip this workflow and just do the work when:
+
+- The user explicitly says "skip triage", "just do it", "don't file it",
+  or similar.
+- The ask is a bug fix, typo, copy edit, or trivial tweak (<30 min of
+  work) on existing code.
+- The work is already claimed by an active `IMPLEMENTATION.md` row and
+  the user is asking to continue it — follow that plan doc instead.
+- The user is asking a question (not requesting an implementation).
+
+### Why this exists
+
+Two problems it solves:
+
+1. **Codebase sprawl.** Without a gate, every "cool idea this week" turns
+   into a half-finished branch. Triage forces a decision before any code
+   is written.
+2. **Vision drift.** Without a pillar-fit check, METIS becomes "whatever
+   was last implemented." The intake step asks the question every time.
+
+The cost is one extra paragraph in the agent's reply before it starts
+work. The benefit is that every line of code traces back to a row in
+`IMPLEMENTATION.md` that traces back to `VISION.md`.
+
 ## Why this structure
 
 - **Agents can join cold.** Every plan has a fixed frontmatter that tells
