@@ -1,7 +1,7 @@
 ---
 Milestone: M02 — Constellation 2D refactor
 Status: In progress
-Claim: claude/m02-archetypes-nebula-bh-rg (Phase 3: all 12 archetypes) — Phases 0/0.3/1/2/3-scaffold+pulsar landed
+Claim: claude/m02-orbital-observatory (Phase 4 landed) — Phase 5 deletion next
 Last updated: 2026-04-18 by claude-opus-4-7
 Vision pillar: Cosmos
 ADR: docs/adr/0006-constellation-design-2d-primary.md
@@ -70,8 +70,27 @@ aligns the constellation with the vision.
 no new errors or warnings (existing `page.tsx` pre-existing warnings are
 unchanged).
 
-**Phase 1 — Tiered naming (in progress, 2026-04-18 by claude-opus-4-7):**
-See the Phase 1 task boxes below for per-task status as the work lands.
+**Phase 1 — Tiered naming (done modulo Phase 4 follow-up, 2026-04-18 by claude-opus-4-7):**
+- 1.1 ✅ — `generateStarName` accepts `nameTier: "field" | "landmark" | "user"`;
+  field → null, landmark → classical name, user → caller-supplied.
+  (`apps/metis-web/lib/star-catalogue/star-name-generator.ts:17-74`)
+- 1.2 ✅ — `GeneratedStarName` returns `{ name, kind }` where
+  `NameKind = "classical" | "user" | null`. `CatalogueStar.name` widened to
+  `string | null`.
+- 1.3 ⚠️ **Deferred to Phase 4.** Faculty constellation stars render as
+  anchor + edges in the starfield today; they are not individual
+  `CatalogueStar` rows, so `generateStarName` is never called for them.
+  Per-star `landmark` wiring requires making faculty stars individually
+  inspectable — the Orbital Observatory scope. User stars: legacy fallback
+  still uses `generateClassicalDesignation` at `apps/metis-web/app/page.tsx:4122`;
+  explicit `user`-tier wiring rolls in with Observatory's user-star surface.
+- 1.4 ⚠️ **Deferred to Phase 4.** Field-star hover suppression is in place
+  (`page.tsx:4410` gates the catalogue tooltip on non-null `catalogueName`).
+  Per-landmark classical-name tooltip with "Bayer/Flamsteed convention" footer
+  and user-name bold styling roll in with the Observatory hover surface.
+- 1.5 ✅ — 16 unit tests in
+  `apps/metis-web/lib/star-catalogue/__tests__/star-name-generator.test.ts`
+  cover all tier branches, determinism, and error cases.
 
 **Errata — 8 vs 11 faculty landmarks:** ADR 0006 line 103 and the Phase 1
 section below say "eight faculty landmarks (Perseus, Auriga, Draco,
@@ -209,6 +228,69 @@ first two archetypes ✅, 2026-04-18 by claude-opus-4-7):**
 **Verification:** `pnpm test` → 241 passed, 10 skipped, 0 failed (up from
 216). `pnpm exec tsc --noEmit` → exit 0. `pnpm exec eslint` on touched
 files → 0 errors, 0 warnings.
+
+**Phase 4 — Orbital Observatory (landed, 2026-04-18 by claude-opus-4-7):**
+- 4.1 ✅ — **Layout decision: docked rings.** Panel rings sit at top /
+  right / bottom / left around the star so the star stays centred and
+  visible. Slot spacing lands the horizontal rings with
+  `w-[min(560–640px,calc(100vw-2rem))]` and the vertical rings with
+  `w-[min(320–340px,calc(50vw-12rem))]` so the centre column stays
+  clear at 1280px+ widths. Cardinal slots only; radial cards / magazine
+  spread deferred until the Observatory surfaces demand them.
+- 4.2 ✅ — New `apps/metis-web/components/constellation/observatory-orbital-layout.tsx`
+  exposes a named-slot API (`top | right | bottom | left`) with abstract
+  slots — callers decide which panel goes where. Empty slots render as
+  `data-slot-filled="false"` spacers so the ring geometry stays stable
+  when a panel is contextually absent (e.g. archetype picker only in
+  build view). Covered by 6 unit tests in
+  `observatory-orbital-layout.test.tsx` (ring order, empty marking,
+  reduced-motion, stagger timing, exit transition, breakpoint).
+- 4.3 ✅ — Entrance animation: each slot fades + slides inward from its
+  off-stage edge (`translate` by `OFFSTAGE_OFFSET_PX = 48px` + 100%) with
+  an 80 ms stagger in `OBSERVATORY_SLOT_ORDER` (top → right → bottom →
+  left). Duration is `CONSTELLATION_DIVE_DURATION_MS = 700` ms on the
+  `cubic-bezier(0.33, 1, 0.68, 1)` curve — same curve as the camera
+  hook's `cubicOutEasing` so the rings settle with the camera pullback.
+- 4.4 ✅ — Exit animation: reverses translate + fades opacity back to 0
+  on `OBSERVATORY_EXIT_DURATION_MS = 420` ms (60 % of the entrance). The
+  orbital layout only mounts while `open && isOrbital`, so closing the
+  dialog tears the overlay down after the Base UI dialog's own exit —
+  there's no orphaned camera state.
+- 4.5 ✅ — Esc dismiss + click-outside dismiss + focus trap all stay
+  with the underlying `<Dialog>` (`@base-ui/react`), which the orbital
+  layout wraps as a sibling portal — it doesn't replace the dialog
+  primitive. Accessibility regression: hover/focus tooltips continue to
+  render from the existing refs; the layout itself is `aria-hidden` at
+  the centre spacer and passes keyboard focus through to slot children.
+- 4.6 ✅ — Mobile fallback: `useIsOrbitalViewport()` watches
+  `(min-width: 768px)`. On narrower viewports the orbital overlay is
+  not mounted at all; the classic side-rail modal renders the three
+  sub-panels inline as before. Inline copies are hidden on desktop
+  (`isOrbital ? null : <Panel ... />`) so a sub-panel instance only
+  exists once per open dialog.
+
+**Phase 1.4 follow-up (landed in the same slice, 2026-04-18):**
+- Landmark hover: new `getHoveredLandmarkStar` in `page.tsx` hit-tests
+  the faculty anchor + secondary stars (11 constellations ×
+  5–7 stars). Names come from `generateStarName({ tier: "landmark",
+  rng, magnitude })` seeded deterministically on
+  `(facultyId, starIndex)` — same anchor yields the same Bayer /
+  Flamsteed designation across sessions. Index 0 (anchor) uses
+  magnitude ~2 for a bright classical name; secondaries use ~3.5
+  for Flamsteed numbers. Tooltip shows classical name + italic
+  footer "Classical star name (Bayer/Flamsteed convention)".
+- User-content hover: the legacy `generateClassicalDesignation`
+  fallback at `page.tsx:4093` is replaced by
+  `generateStarName({ tier: "user", userSuppliedName: star.label })`.
+  Unnamed user stars now fall back to their id rather than fabricate
+  a classical designation. User names render bold via a
+  `data-name-kind="user"` attribute on the tooltip title.
+- Field stars stay suppressed as before.
+
+**Verification:** `pnpm test` → 247 passed, 10 skipped, 0 failed (up
+from 241 with 6 new orbital-layout tests). `pnpm exec tsc --noEmit`
+→ exit 0. `pnpm exec eslint` on touched files → 0 errors; pre-
+existing warnings unchanged.
 
 **Open Phase 3 items for future slices:**
 - Mobile perf ceiling number (ADR 0006 open question, Phase 3 DoD):
@@ -452,20 +534,24 @@ animates in around the star. The data model and most sub-components
 layout/entrance changes.
 
 **Tasks:**
-- **4.1** — ADR 0006 leaves the exact layout open (radial cards / docked rings
-  / magazine spread). Pick one for an MVP — **recommendation: docked rings**
-  (panel rings at top/right/bottom/left around the star, so the star stays
-  visible at centre). Document the choice in this plan's *Notes*.
-- **4.2** — Build a layout container component
-  `observatory-orbital-layout.tsx` that positions existing sub-panels as
-  slots.
-- **4.3** — Animate entrance: each slot fades + slides inward from its edge,
-  staggered ~80ms, synced to the camera easing from Phase 2.
-- **4.4** — Exit animation on dismiss: reverse.
-- **4.5** — Keyboard dismiss (Esc) + click-outside dismiss still work.
-  Focus trap still works. (Accessibility regression check.)
-- **4.6** — Mobile: fall back to the existing modal on small viewports
-  (`<768px`). Orbital layout assumes desktop real estate.
+- **4.1** ✅ — **Docked rings chosen.** Panel rings dock at top/right/
+  bottom/left around the star; the star stays visible at centre. See
+  *Notes for the next agent* for spacing + caller mapping.
+- **4.2** ✅ — `apps/metis-web/components/constellation/observatory-orbital-layout.tsx`
+  ships with an abstract named-slot API. Caller-driven panel mapping
+  (archetype picker top, faculty glyph left, learning route bottom).
+- **4.3** ✅ — Entrance: each slot fades + slides inward from its edge,
+  staggered 80 ms, duration `CONSTELLATION_DIVE_DURATION_MS` (700 ms)
+  on a cubic-out curve that matches the camera hook.
+- **4.4** ✅ — Exit reverses translate + fades on a 60 %-shortened
+  duration. The overlay is only mounted while `open && isOrbital` so
+  dismissal tears down cleanly without orphaning the camera.
+- **4.5** ✅ — Esc / click-outside / focus trap continue through the
+  underlying `@base-ui/react` Dialog primitive; the orbital layout is a
+  sibling portal that does not replace it.
+- **4.6** ✅ — `useIsOrbitalViewport()` gates the orbital overlay at
+  `(min-width: 768px)`. Narrower viewports render the classic side-
+  rail modal only.
 
 **Definition of done:** diving into a star zooms camera + rings animate in
 around it. Observatory sub-panels (archetype picker, faculty glyphs, learning

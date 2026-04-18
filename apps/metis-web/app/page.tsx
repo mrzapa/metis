@@ -108,7 +108,7 @@ import {
   buildLandingStarSpatialHash,
   findClosestLandingStarHitTarget,
 } from "@/lib/landing-stars/landing-star-spatial-index";
-import { StarCatalogue, DEFAULT_CATALOGUE_CONFIG, fnv1a32, SeededRNG, generateClassicalDesignation } from "@/lib/star-catalogue";
+import { StarCatalogue, DEFAULT_CATALOGUE_CONFIG, fnv1a32, SeededRNG, generateStarName } from "@/lib/star-catalogue";
 import type { CatalogueStar } from "@/lib/star-catalogue";
 import {
   buildCanvasFont,
@@ -4088,10 +4088,15 @@ export default function Home() {
       }
 
       const faculty = resolveStarFaculty(star);
-      const title = star.label?.trim() || (() => {
-        const rng = new SeededRNG(fnv1a32(star.id));
-        return generateClassicalDesignation(rng, Math.max(1, 7 - (star.size * 2.5)));
-      })();
+      // Phase 1.4: route user-star naming through generateStarName so the
+      // tier policy is enforced in one place. User stars without an explicit
+      // label fall back to their id rather than a fabricated classical
+      // designation — ADR 0006 reserves classical names for landmark tier.
+      const userName = generateStarName({
+        tier: "user",
+        userSuppliedName: star.label,
+      });
+      const title = userName.name ?? star.id;
       const description = getStarTooltipDescription(star, faculty);
       const domainLabel = faculty.label;
 
@@ -4100,6 +4105,10 @@ export default function Home() {
       }
       if (starTooltipTitleRef.current) {
         starTooltipTitleRef.current.textContent = title;
+        starTooltipTitleRef.current.setAttribute(
+          "data-name-kind",
+          userName.kind ?? "none",
+        );
       }
       if (starTooltipDescRef.current) {
         starTooltipDescRef.current.textContent = description;
@@ -4154,16 +4163,39 @@ export default function Home() {
       }, 180);
     }
 
-    function showCatalogueTooltip(hit: LandingWorldStarRenderState, clientX: number, clientY: number) {
+    /**
+     * Phase 1.4: display a tiered name tooltip.
+     *
+     * - `classical` (landmark) kind sets the Bayer/Flamsteed convention footer.
+     * - `user` kind bolds the name via the `[data-kind="user"]` CSS selector.
+     * - The `class` slot stays dimmed monospace and optional.
+     */
+    function showCatalogueTooltip(
+      params: {
+        name: string;
+        kind: "classical" | "user";
+        spectralClass?: string | null;
+        clientX: number;
+        clientY: number;
+      },
+    ) {
       const el = catalogueTooltipRef.current;
       if (!el) return;
       const nameEl = el.querySelector<HTMLSpanElement>('[data-field="name"]');
       const classEl = el.querySelector<HTMLSpanElement>('[data-field="class"]');
-      if (nameEl) nameEl.textContent = hit.catalogueName ?? hit.id;
-      if (classEl) classEl.textContent = hit.profile.spectralClass;
+      const footerEl = el.querySelector<HTMLSpanElement>('[data-field="footer"]');
+      if (nameEl) nameEl.textContent = params.name;
+      if (classEl) classEl.textContent = params.spectralClass ?? "";
+      if (footerEl) {
+        footerEl.textContent = params.kind === "classical"
+          ? "Classical star name (Bayer/Flamsteed convention)"
+          : "";
+      }
+      el.setAttribute("data-kind", params.kind);
+      el.setAttribute("data-footer", params.kind === "classical" ? "true" : "false");
       el.style.display = "flex";
-      el.style.left = `${clientX + 14}px`;
-      el.style.top = `${clientY - 10}px`;
+      el.style.left = `${params.clientX + 14}px`;
+      el.style.top = `${params.clientY - 10}px`;
     }
 
     function hideCatalogueTooltip() {
@@ -4220,6 +4252,76 @@ export default function Home() {
         pointer.y,
         { queryPaddingPx: 12 },
       ) ?? null;
+    }
+
+    /**
+     * Phase 1.4 — landmark hit-test.
+     *
+     * The 11 faculty constellations in `CONSTELLATION_FACULTIES` render as
+     * anchor + secondary stars on the 2D canvas (not part of the WebGL
+     * starfield), so they never land in `landingStarSpatialHash`. This helper
+     * walks the small nodes list, computes each faculty star's screen
+     * position using the same parallax + camera scale math as the draw loop,
+     * and returns the closest hit within a small radius.
+     *
+     * Names are generated through `generateStarName({ tier: "landmark" })`
+     * so the tiered-naming policy is enforced in one place. The seed is
+     * deterministic in `(facultyId, starIndex)` so the same anchor star
+     * always yields the same classical designation across sessions.
+     */
+    function getHoveredLandmarkStar(clientX: number, clientY: number): {
+      facultyId: string;
+      starIndex: number;
+      classicalName: string;
+    } | null {
+      const bounds = readCanvasBounds();
+      const pointerX = clientX - bounds.left;
+      const pointerY = clientY - bounds.top;
+      const cameraScale = getConstellationCameraScale(backgroundZoomRef.current);
+      const hitRadiusPx = coarsePointerRef.current ? 22 : 14;
+      const hitRadiusSq = hitRadiusPx * hitRadiusPx;
+
+      let bestDistSq = Number.POSITIVE_INFINITY;
+      let bestHit: { facultyId: string; starIndex: number } | null = null;
+
+      for (const node of nodes) {
+        const parallax = node.parallax ?? 0;
+        const anchorX = node.x + (mouse.x - W / 2) * parallax;
+        const anchorY = node.y + (mouse.y - H / 2) * parallax;
+        const stars = node.concept.faculty.shape.stars;
+        for (let i = 0; i < stars.length; i += 1) {
+          const shapeStar = stars[i];
+          const sx = anchorX + shapeStar.dx * W * cameraScale;
+          const sy = anchorY + shapeStar.dy * H * cameraScale;
+          const dx = sx - pointerX;
+          const dy = sy - pointerY;
+          const distSq = dx * dx + dy * dy;
+          if (distSq < hitRadiusSq && distSq < bestDistSq) {
+            bestDistSq = distSq;
+            bestHit = { facultyId: node.concept.faculty.id, starIndex: i };
+          }
+        }
+      }
+
+      if (!bestHit) return null;
+
+      // Deterministic seed per landmark star — same name across sessions.
+      const seedKey = `landmark|${bestHit.facultyId}|${bestHit.starIndex}`;
+      const rng = new SeededRNG(fnv1a32(seedKey));
+      // Landmark anchor stars (index 0) → bright classical (mag ~2);
+      // secondary stars (index >= 1) → dimmer Flamsteed number (mag ~3–5).
+      const magnitude = bestHit.starIndex === 0 ? 2 : 3.5;
+      const generated = generateStarName({
+        tier: "landmark",
+        rng,
+        magnitude,
+      });
+
+      return {
+        facultyId: bestHit.facultyId,
+        starIndex: bestHit.starIndex,
+        classicalName: generated.name ?? bestHit.facultyId,
+      };
     }
 
     function releaseCanvasPointerCapture(pointerId?: number | null) {
@@ -4405,12 +4507,32 @@ export default function Home() {
       }
 
       if (hover < 0) {
-        const catHit = getHoveredCatalogueStar(e.clientX, e.clientY);
-        // ADR 0006: field stars (no name) hover silently.
-        if (catHit && !catHit.addable && catHit.catalogueName) {
-          showCatalogueTooltip(catHit, e.clientX, e.clientY);
+        // Phase 1.4: check faculty constellation stars first — they're the
+        // landmark tier (classical Bayer/Flamsteed name + convention footer).
+        // Falls through to catalogue stars, which are field tier (nameless).
+        const landmarkHit = getHoveredLandmarkStar(e.clientX, e.clientY);
+        if (landmarkHit) {
+          showCatalogueTooltip({
+            name: landmarkHit.classicalName,
+            kind: "classical",
+            spectralClass: null,
+            clientX: e.clientX,
+            clientY: e.clientY,
+          });
         } else {
-          hideCatalogueTooltip();
+          const catHit = getHoveredCatalogueStar(e.clientX, e.clientY);
+          // ADR 0006: field stars (no name) hover silently.
+          if (catHit && !catHit.addable && catHit.catalogueName) {
+            showCatalogueTooltip({
+              name: catHit.catalogueName,
+              kind: "classical",
+              spectralClass: catHit.profile.spectralClass,
+              clientX: e.clientX,
+              clientY: e.clientY,
+            });
+          } else {
+            hideCatalogueTooltip();
+          }
         }
       } else {
         hideCatalogueTooltip();
@@ -5090,10 +5212,19 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Catalogue star tooltip (lightweight, no actions) */}
-      <div ref={catalogueTooltipRef} className="metis-catalogue-tooltip" style={{ display: "none", position: "fixed", pointerEvents: "none", zIndex: 50 }}>
+      {/* Catalogue star tooltip (lightweight, no actions).
+          Phase 1.4: surfaces tiered names per ADR 0006 —
+          field = nothing; landmark = classical Bayer/Flamsteed + footer;
+          user = user-supplied label in bold. */}
+      <div
+        ref={catalogueTooltipRef}
+        className="metis-catalogue-tooltip"
+        data-kind="classical"
+        style={{ display: "none", position: "fixed", pointerEvents: "none", zIndex: 50 }}
+      >
         <span data-field="name" />
         <span data-field="class" />
+        <span data-field="footer" />
       </div>
 
       {/* Chat bubble */}
@@ -5760,6 +5891,9 @@ body {
   font-size: 18px;
   line-height: 1.25;
 }
+.metis-star-tooltip-title[data-name-kind="user"] {
+  font-weight: 700;
+}
 
 .metis-star-tooltip-desc {
   margin-top: 10px;
@@ -5819,9 +5953,10 @@ body {
 /* CATALOGUE STAR TOOLTIP */
 .metis-catalogue-tooltip {
   display: none;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
   border-radius: 6px;
   background: rgba(12,18,35,0.88);
   border: 1px solid rgba(196,149,58,0.15);
@@ -5830,14 +5965,33 @@ body {
   color: rgba(200,210,240,0.85);
   white-space: nowrap;
 }
+.metis-catalogue-tooltip .metis-catalogue-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .metis-catalogue-tooltip [data-field="name"] {
   font-weight: 500;
   color: rgba(220,225,245,0.95);
+}
+.metis-catalogue-tooltip[data-kind="user"] [data-field="name"] {
+  font-weight: 700;
+  color: rgba(245,240,220,1);
 }
 .metis-catalogue-tooltip [data-field="class"] {
   opacity: 0.7;
   font-family: monospace;
   font-size: 10px;
+}
+.metis-catalogue-tooltip [data-field="footer"] {
+  display: none;
+  font-size: 10px;
+  font-style: italic;
+  opacity: 0.6;
+  color: rgba(196,170,108,0.9);
+}
+.metis-catalogue-tooltip[data-kind="classical"][data-footer="true"] [data-field="footer"] {
+  display: inline;
 }
 
 /* CHAT BUBBLE */
