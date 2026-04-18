@@ -19,9 +19,12 @@ repo** — a GitHub link, a paper, a concept, a technique, a screenshot —
 4. Only then promote to a milestone / plan doc, or merge into an existing
    one, and implement.
 
-Skip this only for bug fixes, trivial tweaks, or when the user explicitly
-says "just do it". See [`VISION.md`](VISION.md) for the product pillars the
-triage step checks against.
+Skip this for:
+- Bug fixes, trivial tweaks (<30 min), or when the user explicitly says "just do it".
+- Work already claimed by an active `plans/IMPLEMENTATION.md` row — follow that plan doc instead.
+- The user is asking a question, not requesting an implementation.
+
+See [`VISION.md`](VISION.md) for the product pillars the triage step checks against.
 
 ---
 
