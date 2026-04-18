@@ -7,7 +7,12 @@ import type { CatalogueStar, CatalogueSector, SectorKey, StarCatalogueConfig } f
 // In the actual codebase this would be:
 //   import { generateStellarProfile } from "@/lib/landing-stars/stellar-profile";
 // For now we declare the dependency explicitly.
-type StellarProfileGenerator = (seed: string | number) => import("@/lib/landing-stars/types").StellarProfile;
+type StellarProfileOptions =
+  import("@/lib/landing-stars/stellar-profile").GenerateStellarProfileOptions;
+type StellarProfileGenerator = (
+  seed: string | number,
+  options?: StellarProfileOptions,
+) => import("@/lib/landing-stars/types").StellarProfile;
 
 const MAX_CACHED_SECTORS = 512;
 

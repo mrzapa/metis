@@ -1,7 +1,7 @@
 ---
 Milestone: M02 — Constellation 2D refactor
 Status: In progress
-Claim: claude/m02-archetype-scaffold (Phase 0)
+Claim: claude/m02-content-type-wiring (Phase 0.3)
 Last updated: 2026-04-18 by claude-opus-4-7
 Vision pillar: Cosmos
 ADR: docs/adr/0006-constellation-design-2d-primary.md
@@ -42,12 +42,19 @@ aligns the constellation with the vision.
   `generateStellarProfile` now accepts an optional
   `GenerateStellarProfileOptions { contentType? }` 2nd arg. Content type only
   affects `visualArchetype`; all other fields remain deterministic from seed.
-- 0.3 ⏸ — **Deferred.** No caller currently produces real content-type data at
-  the landing-star generation site; fixtures and procedural field stars just
-  get `main_sequence` via the default. Wire this up when content-type source
-  arrives (likely alongside M12 Interactive star catalogue, or a fixture
-  refresh that tags stars with content types). The API is already in place —
-  pass `{ contentType }` to `generateStellarProfile` at the call site.
+- 0.3 ✅ — Threaded `contentType` through the landing-star producers.
+  `StellarProfileGenerator` in `apps/metis-web/lib/star-catalogue/star-catalogue.ts`
+  now accepts the same `GenerateStellarProfileOptions` second arg as
+  `generateStellarProfile`, so the procedural field-star path is option-ready
+  (still defaults to `main_sequence` — catalogue stars have no content type).
+  In `apps/metis-web/app/page.tsx`, `getCachedStellarProfile` takes an optional
+  `contentType` and keys the cache by `${starId}|${contentType}` so a star's
+  archetype refreshes if its content type changes. A new helper
+  `deriveUserStarContentType` in `apps/metis-web/lib/user-star-content-type.ts`
+  infers the content type from a `UserStar` (learning route → `learning_route`,
+  else manifest path present → `document`, else `null`). That inference is
+  applied at the two user-star call sites: `rebuildProjectedUserStarRenderState`
+  and the Star Dive focus acquisition fallback.
 - 0.4 ✅ — `LandingProjectedStar` now carries optional
   `visualArchetype?: StarVisualArchetype` so downstream render tiers can
   branch on it. Optional so pure-procedural field stars can omit it (omission
@@ -58,19 +65,20 @@ aligns the constellation with the vision.
   and three new cases in `stellar-profile.test.ts` (default archetype,
   archetype driven by content type, determinism of all other fields).
 
-**Verification:** `pnpm test -- star-visual-archetype stellar-profile` →
-207 passed, 10 skipped, 0 failed. `pnpm exec tsc --noEmit` → exit 0.
-`pnpm lint` on touched files → clean.
+**Verification:** `pnpm test` → 211 passed, 10 skipped, 0 failed.
+`pnpm exec tsc --noEmit` → exit 0. `pnpm exec eslint` on touched files →
+no new errors or warnings (existing `page.tsx` pre-existing warnings are
+unchanged).
 
 ## Next up
 
-- **Phase 0.3** — Thread a real `contentType` from the landing-star producer
-  into `generateStellarProfile`. No blocker for other phases, but worth
-  closing before Phase 3 so closeup shaders see non-default archetypes on
-  real stars.
 - Phase 1 task 1.1: implement tiered naming in `star-name-generator.ts` — it's
   the lowest-risk piece, independent of renderer changes, visible immediately.
 - In parallel, phase 2 can start (cinematic 2D camera) while 1.1 ships.
+- Phase 3 closeup shader tier can now rely on real archetypes flowing from
+  user-tagged content (via `deriveUserStarContentType`). Revisit the
+  inference table if user research surfaces a richer content-type signal on
+  `UserStar` (e.g. an explicit `contentType` field from the backend).
 
 ## Blockers
 
