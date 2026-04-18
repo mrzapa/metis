@@ -1,7 +1,7 @@
 ---
 Milestone: M02 — Constellation 2D refactor
 Status: In progress
-Claim: claude/metis-vision-strategy-Bj7jJ (Phase 5 landed) — Phase 6 annotations next
+Claim: claude/metis-vision-strategy-Bj7jJ (Phase 6 landed) — Phase 7 Observatory polish next
 Last updated: 2026-04-18 by claude-opus-4-7
 Vision pillar: Cosmos
 ADR: docs/adr/0006-constellation-design-2d-primary.md
@@ -363,8 +363,95 @@ as a reference point for the next comparison. Final DoD grep:
   2D preview (e.g. the archetype's closeup-tier shader rendered into
   a tiny canvas), it's a natural replacement for `StarMiniPreview`.
 - `useReducedMotionPreference` inside `star-observatory-dialog.tsx`
-  is currently dead (declared, never called). Left in place because
-  it's not 3D-related — cleanup candidate for a later pass.
+  is **load-bearing** — STAND DOWN, do not remove. (The Phase 5 note
+  calling it "dead" was wrong; leaving the correction here for the
+  next agent.)
+
+**Phase 6 — Annotations (landed, 2026-04-18 by claude-opus-4-7):**
+- 6.1 ✅ — Shipped the top 3 annotations: **halos (recency)**, **rings
+  (document series)**, **orbiting satellites (sub-nodes)**. Comet tails,
+  dust trails, and binary companions remain deferred per the Phase 6
+  DoD.
+- 6.2 ✅ — All three render inside the existing
+  `landing-starfield-webgl.tsx` uber-shader (no second WebGL context).
+  New `StellarProfile.annotations?: StarAnnotations` field; default
+  `undefined` — `generateStellarProfile` never populates it because
+  annotations are content-driven, not procedural. `LandingProjectedStar`
+  mirrors the optional field so user-star producers can thread it
+  through. Attribute-packing adds six new per-vertex floats
+  (`aHaloStrength`, `aRingCount`, `aRingOpacity`, `aSatelliteCount`,
+  `aSatelliteRadius`, `aSatellitePeriod`) appended to the same combined
+  buffer as `aArchetype`; gated in the fragment stage on
+  `isCloseup` (`vTier > 2.5`) so ambient/point/sprite/hero rendering is
+  unchanged. The shader recalculates the point-sprite UV remap when
+  satellites are on — the vertex stage widens `gl_PointSize` by
+  `max(1, vSatelliteRadius + 1)` and the fragment stage scales `uv` by
+  the same factor so the star silhouette stays visually the same while
+  the satellite orbit at radius 1.8–3.2 lands inside the sprite.
+  Reduced motion rides on the existing `uTime` path (orbits freeze the
+  same way archetype pulsation does) — no second gate introduced.
+- 6.3 ✅ — 22 new vitest tests across two files. New
+  `apps/metis-web/lib/landing-stars/__tests__/star-annotations.test.ts`
+  covers `haloStrengthFromAge` curve shape at 0 / half-life / 2× half-
+  life and future clamp; `deriveStarAnnotations` for individual signals
+  (none / only recency / only ring / only satellites) and the stacked
+  all-three case; learning-route `updatedAt` preference over
+  `createdAt`; and `getStarAnnotationAttributeValues` attribute
+  encoding (null passthrough, halo clamp, ring count + opacity
+  override, satellite count + radius + default/override period,
+  stacked no-cross-talk). `stellar-profile.test.ts` gains two tests
+  covering `annotations` defaulting to undefined and the pass-through /
+  determinism contract when a caller attaches one.
+
+**Verification:** `pnpm test` → **269 passed**, 10 skipped, 0 failed
+(up from 247 by 22 new tests). `pnpm exec tsc --noEmit` → exit 0.
+`pnpm exec eslint` on new + modified files (`star-annotations.ts`,
+`star-annotations.test.ts`, `types.ts`, `landing-star-types.ts`,
+`stellar-profile.test.ts`, `index.ts`, `landing-starfield-webgl.tsx`)
+→ 0 errors, 0 warnings. `page.tsx` still carries its 18 pre-existing
+warnings (unused vars, react-hooks/exhaustive-deps) — unchanged by
+this phase. `pnpm build` → compiled successfully in 12.4 s, static
+pages generated. DoD greps: `rg star-surface-shader apps/ metis_app/`
+and `rg star-dive-overlay apps/ metis_app/` still return empty.
+
+**Notes for the next agent (Phase 6):**
+- Annotations are plumbed end-to-end for user stars, but user stars do
+  not yet flow through the WebGL starfield batch. The webgl stream
+  today is catalogue-only (`landingRenderableStars` is built from
+  `visibleWorldStars` in `page.tsx`). The CPU-side derive + attach is
+  ready (`rebuildProjectedUserStarRenderState` and the Star Dive focus
+  path both attach annotations to the stellar profile they emit); the
+  day a user star makes it into `landingStarfieldFrameRef.current.stars`,
+  halos / rings / satellites will render automatically. Until then the
+  visible effect of Phase 6 is zero because no catalogue star has
+  annotations today. Follow-up: inject the focused user star into the
+  closeup tier of the WebGL batch so the dive silhouette carries its
+  annotations.
+- The fragment shader remaps `uv` / `dist` by `satelliteSpriteBoost`
+  only when satellites are present. The original star silhouette stays
+  visually the same size; ring and halo annotations reuse the remapped
+  `dist` so they sit where the archetype expected them. If a future
+  annotation needs to reach beyond the original sprite (e.g. dust
+  trails streaming outside UV 1.0), it must either ride on the boosted
+  sprite path or trigger its own size boost.
+- `aRingOpacity` is packed as a float 0..1 alongside `aRingCount` (not
+  bit-packed with the count) — the spec called out two attributes for
+  simplicity, and that's what landed. Future annotations should follow
+  the same one-attribute-per-float rule unless bit-packing buys
+  meaningful bandwidth.
+- Reduced motion: satellites freeze whenever `uTime` freezes. We
+  confirmed no separate gate is needed — the existing material
+  uniform path already handles this.
+- Annotation decay signals:
+  - Halo: reads `learningRoute.updatedAt` when present, else
+    `createdAt`. Once `UserStar` gains a real `lastTouchedAt`, update
+    `pickTouchedAtMs` in `star-annotations.ts` to prefer it.
+  - Rings: `linkedManifestPaths.length` (with `activeManifestPath`
+    as a fallback for single-document).
+  - Satellites: `connectedUserStarIds.length`, clamped at 4.
+- The `StarMiniPreview` thumbnail in `star-observatory-dialog.tsx`
+  (the CSS-gradient stand-in from Phase 5) is still a natural fit for
+  a richer closeup-tier render. Phase 6 does not touch it.
 
 **Open Phase 3 items for future slices:**
 - Mobile perf ceiling number (ADR 0006 open question, Phase 3 DoD):
@@ -379,10 +466,16 @@ as a reference point for the next comparison. Final DoD grep:
 
 ## Next up
 
-- **Phase 6 — Annotations (2D accoutrements)**: halos (recency), rings
-  (document series), orbiting satellites (sub-nodes). Parametrised via
-  new `StellarProfile.annotations` fields and rendered in the 2D shader
-  family. Unblocked now that Phase 5 has retired the 3D path.
+- **Phase 7 — Naming + Observatory polish**: surface
+  `StellarProfile` identity fields in the Observatory character sheet;
+  landmark-tooltip Bayer/Flamsteed footer (already shipped in Phase 1.4
+  follow-up — confirm coverage); end-to-end reduced-motion pass now
+  that Phase 6 annotations also ride `uTime`.
+- **Phase 6 follow-up — inject focused user star into WebGL closeup
+  tier**: today the webgl starfield renders catalogue stars only, so
+  annotations plumbed through `StellarProfile` are invisible until a
+  user star joins that stream. Tracked in *Notes for the next agent
+  (Phase 6)* above.
 - **Phase 1.4 wiring for individual landmark stars** (follow-up): today
   the faculty constellations render as anchor + edges without per-star
   Bayer labels surfaced on hover. The landmark tier API is ready; a
