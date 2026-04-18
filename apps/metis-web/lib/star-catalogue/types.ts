@@ -14,8 +14,12 @@ export interface CatalogueStar {
   wy: number;
   /** Full procedural stellar profile */
   profile: StellarProfile;
-  /** Procedurally generated star name (Bayer or catalogue style) */
-  name: string;
+  /**
+   * Display name. `null` for field stars (background decorative stars)
+   * per ADR 0006. Populated only when a star is promoted to a named
+   * landmark or carries user content.
+   */
+  name: string | null;
   /** Apparent magnitude (0=brightest, 6.5=dimmest visible) */
   apparentMagnitude: number;
   /** Depth layer for parallax (0=closest, 1=farthest) */

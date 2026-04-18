@@ -10,17 +10,20 @@ import {
   normalizeUserStar,
   parseUserStars,
 } from "@/lib/constellation-types";
-import { fnv1a32, SeededRNG, generateStarName } from "@/lib/star-catalogue";
+import { fnv1a32, SeededRNG, generateClassicalDesignation } from "@/lib/star-catalogue";
 
 /**
- * Procedurally generate a star name from position and timestamp.
- * Size [0.5, 2.0] maps to magnitude [6, 1] — bigger = brighter = more prestigious name.
+ * Legacy procedural fallback for user stars created without an explicit
+ * label. ADR 0006 calls for user-supplied names on user-content stars;
+ * this helper keeps the current click-to-add UX intact by producing a
+ * classical-style designation until the Observatory naming UI lands.
+ * Size [0.5, 2.0] maps to magnitude [6, 1] — bigger = brighter.
  */
 function makeProceduralStarName(x: number, y: number, now: number, size: number): string {
   const seed = fnv1a32(`${Math.round(x * 10000)},${Math.round(y * 10000)},${now}`);
   const rng = new SeededRNG(seed);
   const magnitude = Math.max(1, 7 - (size * 2.5));
-  return generateStarName(rng, magnitude);
+  return generateClassicalDesignation(rng, magnitude);
 }
 
 const STORAGE_KEY = "metis_constellation_user_stars";

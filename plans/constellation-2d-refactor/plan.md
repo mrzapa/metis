@@ -1,7 +1,7 @@
 ---
 Milestone: M02 — Constellation 2D refactor
 Status: In progress
-Claim: claude/m02-content-type-wiring (Phase 0.3)
+Claim: claude/m02-tiered-naming (Phase 1) — Phase 0 + 0.3 landed
 Last updated: 2026-04-18 by claude-opus-4-7
 Vision pillar: Cosmos
 ADR: docs/adr/0006-constellation-design-2d-primary.md
@@ -70,15 +70,34 @@ aligns the constellation with the vision.
 no new errors or warnings (existing `page.tsx` pre-existing warnings are
 unchanged).
 
+**Phase 1 — Tiered naming (in progress, 2026-04-18 by claude-opus-4-7):**
+See the Phase 1 task boxes below for per-task status as the work lands.
+
+**Errata — 8 vs 11 faculty landmarks:** ADR 0006 line 103 and the Phase 1
+section below say "eight faculty landmarks (Perseus, Auriga, Draco,
+Hercules, Gemini, Big Dipper, Lyra, Boötes)". The code has drifted:
+`apps/metis-web/lib/constellation-home.ts:130–186` defines **11**
+faculty constellations — the original 8 plus **Synthesis** (Andromeda),
+**Autonomy** (Cygnus), and **Emergence** (Cassiopeia). Phase 1 treats the
+`landmark` tier as applying to all faculty-constellation stars, whatever
+count exists. ADR 0006 should be updated to reflect 11 as part of M02
+landing.
+
 ## Next up
 
-- Phase 1 task 1.1: implement tiered naming in `star-name-generator.ts` — it's
-  the lowest-risk piece, independent of renderer changes, visible immediately.
-- In parallel, phase 2 can start (cinematic 2D camera) while 1.1 ships.
-- Phase 3 closeup shader tier can now rely on real archetypes flowing from
-  user-tagged content (via `deriveUserStarContentType`). Revisit the
-  inference table if user research surfaces a richer content-type signal on
-  `UserStar` (e.g. an explicit `contentType` field from the backend).
+- **Phase 2** — Cinematic 2D camera. Independent of Phase 1; can run in
+  parallel. Suggested claim: `claude/m02-camera-dive`.
+- **Phase 1.4 wiring for individual landmark stars** (follow-up): today
+  the faculty constellations render as anchor + edges without per-star
+  Bayer labels surfaced on hover. The landmark tier API is ready; a
+  follow-up phase should decide where per-star labels appear (likely
+  Phase 4 Orbital Observatory when faculty stars become individually
+  inspectable).
+- Phase 3 closeup shader tier can now rely on real archetypes flowing
+  from user-tagged content (via `deriveUserStarContentType`). Revisit
+  the inference table if user research surfaces a richer content-type
+  signal on `UserStar` (e.g. an explicit `contentType` field from the
+  backend).
 
 ## Blockers
 

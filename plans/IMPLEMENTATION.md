@@ -54,7 +54,7 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 | # | Milestone | Pillar | Status | Plan doc | Claim | Last updated | Depends on |
 |---|---|---|---|---|---|---|---|
 | M01 | **Preserve & productise** — audit, surface, cut dead paths | 🔧 | Rolling | [`docs/preserve-and-productize-plan.md`](../docs/preserve-and-productize-plan.md) | — | 2026-04-18 | — |
-| M02 | **Constellation 2D refactor** — retire 3D sphere, 2D archetype dive (ADR 0006) | 🌌 | In progress | [`plans/constellation-2d-refactor/plan.md`](constellation-2d-refactor/plan.md) | `claude/m02-archetype-scaffold` (Phase 0) | 2026-04-18 | — |
+| M02 | **Constellation 2D refactor** — retire 3D sphere, 2D archetype dive (ADR 0006) | 🌌 | In progress | [`plans/constellation-2d-refactor/plan.md`](constellation-2d-refactor/plan.md) | `claude/m02-tiered-naming` (Phase 1) — Phase 0 landed #499 | 2026-04-18 | — |
 | M03 | **IterRAG convergence** — agentic loop with convergence detection | 🧠 | Ready | [`docs/plans/2026-04-01-hermes-sotaku-implementation.md`](../docs/plans/2026-04-01-hermes-sotaku-implementation.md) (Phase 1) | — | 2026-04-04 | — |
 | M04 | **Reverse curriculum** — faculty hardness scoring drives research order | 🧠 | Ready | [`docs/plans/2026-04-04-reverse-curriculum-implementation.md`](../docs/plans/2026-04-04-reverse-curriculum-implementation.md) | — | 2026-04-04 | M03 |
 | M05 | **Parallel research** — concurrent faculty workers + batch fixes | 🧠 | Ready | [`docs/plans/2026-04-04-parallel-research-implementation.md`](../docs/plans/2026-04-04-parallel-research-implementation.md) | — | 2026-04-04 | — |

@@ -108,7 +108,7 @@ import {
   buildLandingStarSpatialHash,
   findClosestLandingStarHitTarget,
 } from "@/lib/landing-stars/landing-star-spatial-index";
-import { StarCatalogue, DEFAULT_CATALOGUE_CONFIG, fnv1a32, SeededRNG, generateStarName } from "@/lib/star-catalogue";
+import { StarCatalogue, DEFAULT_CATALOGUE_CONFIG, fnv1a32, SeededRNG, generateClassicalDesignation } from "@/lib/star-catalogue";
 import type { CatalogueStar } from "@/lib/star-catalogue";
 import {
   buildCanvasFont,
@@ -226,7 +226,7 @@ interface WorldStarData {
   hasDiffraction: boolean;
   revealZoomFactor: number;
   profile: StellarProfile;
-  catalogueName: string;
+  catalogueName: string | null;
 }
 
 interface HomeRagPulseState {
@@ -251,7 +251,7 @@ interface HomeToastState {
 
 interface LandingWorldStarRenderState extends LandingStarHitTarget {
   addable: boolean;
-  catalogueName?: string;
+  catalogueName?: string | null;
   profile: StellarProfile;
 }
 
@@ -2295,7 +2295,7 @@ export default function Home() {
     let lastVisibleStarfieldY = Number.NaN;
     let lastVisibleWorldZoom = Number.NaN;
     let visibleWorldStars: WorldStarData[] = [];
-    const visibleStarNameMap = new Map<string, string>();
+    const visibleStarNameMap = new Map<string, string | null>();
     let lastConstellationProjectionWidth = -1;
     let lastConstellationProjectionHeight = -1;
     let lastConstellationProjectionZoom = Number.NaN;
@@ -4119,7 +4119,7 @@ export default function Home() {
       const faculty = resolveStarFaculty(star);
       const title = star.label?.trim() || (() => {
         const rng = new SeededRNG(fnv1a32(star.id));
-        return generateStarName(rng, Math.max(1, 7 - (star.size * 2.5)));
+        return generateClassicalDesignation(rng, Math.max(1, 7 - (star.size * 2.5)));
       })();
       const description = getStarTooltipDescription(star, faculty);
       const domainLabel = faculty.label;
@@ -4435,7 +4435,8 @@ export default function Home() {
 
       if (hover < 0) {
         const catHit = getHoveredCatalogueStar(e.clientX, e.clientY);
-        if (catHit && !catHit.addable) {
+        // ADR 0006: field stars (no name) hover silently.
+        if (catHit && !catHit.addable && catHit.catalogueName) {
           showCatalogueTooltip(catHit, e.clientX, e.clientY);
         } else {
           hideCatalogueTooltip();
