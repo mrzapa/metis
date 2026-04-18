@@ -1,7 +1,7 @@
 ---
 Milestone: M02 — Constellation 2D refactor
 Status: In progress
-Claim: claude/m02-tiered-naming (Phase 1) — Phase 0 + 0.3 landed
+Claim: claude/m02-camera-dive (Phase 2) — Phase 0 + 0.3 + 1 landed
 Last updated: 2026-04-18 by claude-opus-4-7
 Vision pillar: Cosmos
 ADR: docs/adr/0006-constellation-design-2d-primary.md
@@ -83,21 +83,62 @@ faculty constellations — the original 8 plus **Synthesis** (Andromeda),
 count exists. ADR 0006 should be updated to reflect 11 as part of M02
 landing.
 
+**Phase 2 — Cinematic 2D camera (partial ✅, 2026-04-18 by claude-opus-4-7):**
+- 2.1 ✅ — Extracted the camera easing loop out of `page.tsx` into a new
+  `apps/metis-web/hooks/use-constellation-camera.ts`. The hook owns the four
+  refs (`origin`, `targetOrigin`, `zoom`, `zoomTarget`) plus a `scrollVelocity`
+  ref, and exposes `stepCamera({ reducedMotion, focusStrength })`,
+  `setTargetOrigin`, `setZoomTarget`, `jumpTo`, `getState`, `getTargetState`,
+  `registerScrollVelocity`, and `easeDive`. `page.tsx` now aliases its existing
+  ref names to the hook's refs so all downstream reads keep working; the
+  inline origin + galaxy-pullback + zoom easing in `render()` is a single
+  `stepCamera` call.
+- 2.2 ✅ — `CONSTELLATION_DIVE_DURATION_MS = 700` and `cubicOutEasing` are
+  exported from the hook. `easeDive(elapsed, duration?)` drives the cubic-out
+  curve for any future time-based tweens; the in-loop easing keeps its
+  per-frame exponential form but the ease factors (`0.12` base, `0.18` above
+  the dive threshold) are configurable on the hook and calibrated to match
+  ~0.7 s settling.
+- 2.3 ✅ — `landing-starfield-webgl.tsx` gained four new uniforms
+  (`uFocusCenter`, `uFocusStrength`, `uFocusRadius`, `uFocusFalloff`). The
+  vertex shader computes screen-space distance from the dive focus, broadens
+  point size (up to 1.6×) and dims ambient stars (up to 85 %) outside the
+  sharp radius. The fragment shader reuses the same varyings to shift alpha
+  from core toward halo, giving a bokeh-ish bloom without leaving the
+  existing WebGL context. `LandingStarfieldFrame` is extended with the
+  matching optional fields, and `page.tsx` populates them from
+  `starDiveOverlayViewRef`.
+- 2.4 ✅ — Focused-star size boost and brightness dim for ambient stars are
+  already driven on the CPU side in `page.tsx` (lines 2597-2614); shader-side
+  point-size boost + halo widening stack on top via the new uniforms.
+- 2.5 ✅ — Reduced-motion snap path runs through `stepCamera`: when the flag
+  is set, both origin and zoom jump straight to their targets; the dive
+  ease boost is skipped.
+- **Tests:** `apps/metis-web/hooks/__tests__/use-constellation-camera.test.ts`
+  covers init, origin ease, reduced-motion snap, dive-zone zoom ease,
+  `jumpTo` clamp, scroll-velocity decay, and `easeDive` curve shape.
+
+**Verification:** `pnpm test` → 216 passed, 10 skipped, 0 failed.
+`pnpm exec tsc --noEmit` → exit 0. `pnpm lint` → 0 errors (pre-existing
+warnings only).
+
 ## Next up
 
-- **Phase 2** — Cinematic 2D camera. Independent of Phase 1; can run in
-  parallel. Suggested claim: `claude/m02-camera-dive`.
 - **Phase 1.4 wiring for individual landmark stars** (follow-up): today
   the faculty constellations render as anchor + edges without per-star
   Bayer labels surfaced on hover. The landmark tier API is ready; a
   follow-up phase should decide where per-star labels appear (likely
   Phase 4 Orbital Observatory when faculty stars become individually
   inspectable).
-- Phase 3 closeup shader tier can now rely on real archetypes flowing
-  from user-tagged content (via `deriveUserStarContentType`). Revisit
-  the inference table if user research surfaces a richer content-type
-  signal on `UserStar` (e.g. an explicit `contentType` field from the
-  backend).
+- **Phase 3** can now start (closeup shader tier with archetype branches).
+  Two enabling pieces are in: (a) real archetypes flow from user-tagged
+  content via `deriveUserStarContentType`, and (b) the dive focus uniforms
+  on `landing-starfield-webgl.tsx` (`uFocusCenter`, `uFocusStrength`,
+  `uFocusRadius`, `uFocusFalloff`) sit on the right side of the shader
+  for archetype-specific effects to build on. Revisit the
+  `deriveUserStarContentType` inference table if user research surfaces a
+  richer content-type signal on `UserStar` (e.g. an explicit `contentType`
+  field from the backend).
 
 ## Blockers
 

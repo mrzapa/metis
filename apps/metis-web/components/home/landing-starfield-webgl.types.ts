@@ -28,4 +28,16 @@ export interface LandingStarfieldFrame {
   stars: LandingWebglStar[];
   width: number;
   zoomScale: number;
+  /**
+   * Dive focus centre in screen-space pixels (matches the star-dive overlay).
+   * When `focusStrength === 0`, the values are ignored by the shader.
+   */
+  focusCenterX?: number;
+  focusCenterY?: number;
+  /** 0 when not in a dive; 1 at full dive. */
+  focusStrength?: number;
+  /** Pixel radius around the focus centre kept sharp (no DoF). */
+  focusRadius?: number;
+  /** Pixel width over which DoF ramps in from `focusRadius` outward. */
+  focusFalloff?: number;
 }
