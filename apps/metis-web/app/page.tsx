@@ -5,19 +5,11 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { LandingStarfieldFrame, LandingWebglStar } from "@/components/home/landing-starfield-webgl.types";
-import type { StarDiveOverlayView } from "@/components/home/star-dive-overlay";
 
 const LandingStarfieldWebgl = dynamic(
   () =>
     import("@/components/home/landing-starfield-webgl").then(
       (m) => ({ default: m.LandingStarfieldWebgl }),
-    ),
-  { ssr: false, loading: () => null },
-);
-const StarDiveOverlay = dynamic(
-  () =>
-    import("@/components/home/star-dive-overlay").then(
-      (m) => ({ default: m.StarDiveOverlay }),
     ),
   { ssr: false, loading: () => null },
 );
@@ -274,6 +266,22 @@ interface ChatLaunchPayload {
   label: string;
   selectedMode?: string;
   draft?: string;
+}
+
+/**
+ * Camera focus state projected to screen-space for the 2D starfield shader.
+ * Populated every frame while a star dive is in progress; consumed by
+ * `landing-starfield-webgl` via the focus uniforms to drive depth-of-field
+ * falloff around the focused star. Previously also fed the 3D
+ * `StarDiveOverlay` sphere, which was retired in M02 Phase 5. The screen-
+ * space projection is still required for the 2D focus falloff and stays here.
+ */
+interface StarDiveFocusView {
+  screenX: number;
+  screenY: number;
+  focusStrength: number;
+  profile: StellarProfile;
+  starName?: string;
 }
 
 interface LearningRouteOverlayStop {
@@ -868,7 +876,7 @@ export default function Home() {
   const starDiveFocusWorldPosRef = useRef<Point | null>(null);
   const starDiveFocusProfileRef = useRef<StellarProfile | null>(null);
   const starDiveFocusNameRef = useRef<string | null>(null);
-  const starDiveOverlayViewRef = useRef<StarDiveOverlayView | null>(null);
+  const starDiveFocusViewRef = useRef<StarDiveFocusView | null>(null);
   const starDivePanSuppressedRef = useRef(false);
   const starTooltipHideTimeoutRef = useRef<number | null>(null);
   const toastDismissTimeoutRef = useRef<number | null>(null);
@@ -2662,7 +2670,7 @@ export default function Home() {
         ? buildLandingStarSpatialHash(landingRenderableStars)
         : null;
       const zoomNorm = Math.log2(Math.max(0.002, backgroundCamera.zoomFactor) + 1) / Math.log2(2001);
-      const diveView = starDiveOverlayViewRef.current;
+      const diveView = starDiveFocusViewRef.current;
       const focusStrengthForFrame = diveView ? diveView.focusStrength : 0;
       const focusCenterX = diveView ? diveView.screenX : 0;
       const focusCenterY = diveView ? diveView.screenY : 0;
@@ -3834,7 +3842,8 @@ export default function Home() {
         starDivePanSuppressedRef.current = false;
       }
 
-      // Project focused star world position to screen coords for StarDiveOverlay
+      // Project focused star world position to screen coords for the 2D
+      // starfield focus uniforms (depth-of-field falloff around the dive star).
       if (
         diveFocusStrength > 0
         && starDiveFocusWorldPosRef.current
@@ -3842,7 +3851,7 @@ export default function Home() {
       ) {
         const wp = starDiveFocusWorldPosRef.current;
         const scale = getBackgroundCameraScale(backgroundCamera.zoomFactor);
-        starDiveOverlayViewRef.current = {
+        starDiveFocusViewRef.current = {
           screenX: (wp.x - backgroundCamera.x) * scale + W / 2,
           screenY: (wp.y - backgroundCamera.y) * scale + H / 2,
           focusStrength: diveFocusStrength,
@@ -3850,7 +3859,7 @@ export default function Home() {
           starName: starDiveFocusNameRef.current ?? undefined,
         };
       } else {
-        starDiveOverlayViewRef.current = null;
+        starDiveFocusViewRef.current = null;
       }
 
       // Update reactive state (throttled — only when integer percentage changes)
@@ -4938,11 +4947,6 @@ export default function Home() {
       <LandingStarfieldWebgl
         className="metis-starfield-webgl"
         frameRef={landingStarfieldFrameRef}
-      />
-
-      <StarDiveOverlay
-        viewRef={starDiveOverlayViewRef}
-        reducedMotion={prefersReducedMotion()}
       />
 
       <canvas
