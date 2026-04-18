@@ -1,3 +1,5 @@
+import type { StarVisualArchetype } from "./star-visual-archetype";
+
 export type LandingStarRenderTier = "point" | "sprite" | "hero" | "closeup";
 
 export interface LandingProjectedStar {
@@ -6,6 +8,12 @@ export interface LandingProjectedStar {
   y: number;
   apparentSize: number;
   brightness: number;
+  /**
+   * Visual template driving closeup-tier rendering per ADR 0006.
+   * Optional so callers that don't care (e.g. pure-procedural field
+   * stars) can omit it; omitted = `main_sequence` at render time.
+   */
+  visualArchetype?: StarVisualArchetype;
 }
 
 export interface LandingStarHitTarget extends LandingProjectedStar {

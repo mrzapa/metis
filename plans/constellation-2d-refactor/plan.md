@@ -1,8 +1,8 @@
 ---
 Milestone: M02 — Constellation 2D refactor
-Status: Ready
-Claim: unclaimed
-Last updated: 2026-04-18 by vision-strategy-session
+Status: In progress
+Claim: claude/m02-archetype-scaffold (Phase 0)
+Last updated: 2026-04-18 by claude-opus-4-7
 Vision pillar: Cosmos
 ADR: docs/adr/0006-constellation-design-2d-primary.md
 ---
@@ -30,11 +30,44 @@ aligns the constellation with the vision.
 ## Progress
 
 <!-- Append as phases land. -->
-*(nothing started yet)*
+
+**Phase 0 — Archetype scaffold (partial ✅, 2026-04-18 by claude-opus-4-7):**
+- 0.1 ✅ — Added `StarVisualArchetype` + `StarContentType` + `selectStarVisualArchetype`
+  + `CONTENT_TYPE_ARCHETYPE_MAP` + `DEFAULT_VISUAL_ARCHETYPE` in new
+  `apps/metis-web/lib/landing-stars/star-visual-archetype.ts`. Named
+  `StarVisualArchetype` (not `StarArchetype`) to avoid collision with the
+  backend `StarArchetype` indexing-strategy enum in
+  `metis_app/services/star_archetype.py` — those are different concepts.
+- 0.2 ✅ — `StellarProfile` gained `visualArchetype: StarVisualArchetype`.
+  `generateStellarProfile` now accepts an optional
+  `GenerateStellarProfileOptions { contentType? }` 2nd arg. Content type only
+  affects `visualArchetype`; all other fields remain deterministic from seed.
+- 0.3 ⏸ — **Deferred.** No caller currently produces real content-type data at
+  the landing-star generation site; fixtures and procedural field stars just
+  get `main_sequence` via the default. Wire this up when content-type source
+  arrives (likely alongside M12 Interactive star catalogue, or a fixture
+  refresh that tags stars with content types). The API is already in place —
+  pass `{ contentType }` to `generateStellarProfile` at the call site.
+- 0.4 ✅ — `LandingProjectedStar` now carries optional
+  `visualArchetype?: StarVisualArchetype` so downstream render tiers can
+  branch on it. Optional so pure-procedural field stars can omit it (omission
+  = `main_sequence` at render time).
+- 0.5 ✅ — Tests added:
+  `apps/metis-web/lib/landing-stars/__tests__/star-visual-archetype.test.ts`
+  (3 cases: null/undefined default, 12 canonical mappings, map completeness)
+  and three new cases in `stellar-profile.test.ts` (default archetype,
+  archetype driven by content type, determinism of all other fields).
+
+**Verification:** `pnpm test -- star-visual-archetype stellar-profile` →
+207 passed, 10 skipped, 0 failed. `pnpm exec tsc --noEmit` → exit 0.
+`pnpm lint` on touched files → clean.
 
 ## Next up
 
-- Phase 0 task 0.1: set up an archetype enum scaffold (blocker for most phases).
+- **Phase 0.3** — Thread a real `contentType` from the landing-star producer
+  into `generateStellarProfile`. No blocker for other phases, but worth
+  closing before Phase 3 so closeup shaders see non-default archetypes on
+  real stars.
 - Phase 1 task 1.1: implement tiered naming in `star-name-generator.ts` — it's
   the lowest-risk piece, independent of renderer changes, visible immediately.
 - In parallel, phase 2 can start (cinematic 2D camera) while 1.1 ships.
@@ -45,6 +78,15 @@ None at plan-time. Live blockers go here.
 
 ## Notes for the next agent
 
+- **Naming convention:** the frontend type is `StarVisualArchetype` because
+  backend `metis_app/services/star_archetype.py` already owns a
+  `StarArchetype` enum for indexing-strategy (Scroll/Ledger/Codex/…). They
+  are different concepts — do not merge them. If you need to surface both in
+  the same context, alias the backend one.
+- **Plan phrasing below still says `StarArchetype`** in task 0.1 — that
+  wording is retained for historical context; the landed code uses
+  `StarVisualArchetype`. Future phases should read field names from the
+  landed source, not from this prose.
 - The 3D sphere's CSS, focus-strength animations, and scroll-direction mapping
   are still desirable on the 2D dive. Don't delete animation intent — re-home
   it on the 2D camera + shader.

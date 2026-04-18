@@ -84,4 +84,32 @@ describe("generateStellarProfile", () => {
     expectRgbChannelRange(palette.accent);
     expectRgbChannelRange(palette.rim);
   });
+
+  it("defaults visualArchetype to main_sequence when content type is omitted", () => {
+    const profile = generateStellarProfile("atlas");
+    expect(profile.visualArchetype).toBe("main_sequence");
+  });
+
+  it("sets visualArchetype from the provided content type", () => {
+    expect(generateStellarProfile("atlas", { contentType: "podcast" }).visualArchetype).toBe(
+      "pulsar",
+    );
+    expect(generateStellarProfile("atlas", { contentType: "archive" }).visualArchetype).toBe(
+      "black_hole",
+    );
+    expect(generateStellarProfile("atlas", { contentType: "live_feed" }).visualArchetype).toBe(
+      "comet",
+    );
+    expect(generateStellarProfile("atlas", { contentType: null }).visualArchetype).toBe(
+      "main_sequence",
+    );
+  });
+
+  it("keeps the rest of the profile deterministic regardless of content type", () => {
+    const baseline = generateStellarProfile("atlas");
+    const tagged = generateStellarProfile("atlas", { contentType: "video" });
+
+    // Content type only affects visualArchetype; other fields come from the seed.
+    expect({ ...tagged, visualArchetype: baseline.visualArchetype }).toEqual(baseline);
+  });
 });

@@ -1,3 +1,5 @@
+import type { StarVisualArchetype } from "./star-visual-archetype";
+
 export type SeedInput = string | number;
 
 export type StellarType =
@@ -53,4 +55,5 @@ export interface StellarProfile {
   stellarType: StellarType;
   temperatureK: number;
   visual: StellarVisualProfile;
+  visualArchetype: StarVisualArchetype;
 }

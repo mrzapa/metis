@@ -6,6 +6,16 @@ import type {
   StellarType,
   StellarVisualProfile,
 } from "./types";
+import { selectStarVisualArchetype, type StarContentType } from "./star-visual-archetype";
+
+export interface GenerateStellarProfileOptions {
+  /**
+   * What kind of content the star represents (document, podcast, video, …).
+   * Drives the star's visualArchetype per ADR 0006's content-type mapping.
+   * When omitted, the archetype falls back to `main_sequence`.
+   */
+  contentType?: StarContentType | null;
+}
 
 interface WeightedChoice<T> {
   readonly weight: number;
@@ -558,7 +568,10 @@ function buildVisualProfile(
   };
 }
 
-export function generateStellarProfile(seed: SeedInput): StellarProfile {
+export function generateStellarProfile(
+  seed: SeedInput,
+  options?: GenerateStellarProfileOptions,
+): StellarProfile {
   const random = createSeededRandom(seed);
   const base = chooseStellarBaseProfile(random);
   const baseColor = buildBaseColor(base.stellarType, base.temperatureK, random);
@@ -580,6 +593,7 @@ export function generateStellarProfile(seed: SeedInput): StellarProfile {
     stellarType: base.stellarType,
     temperatureK: Math.round(base.temperatureK),
     visual,
+    visualArchetype: selectStarVisualArchetype(options?.contentType),
   };
 }
 

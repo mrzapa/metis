@@ -6,6 +6,16 @@ export type {
   StellarType,
   StellarVisualProfile,
 } from "./types";
+export type {
+  StarContentType,
+  StarVisualArchetype,
+} from "./star-visual-archetype";
+export {
+  CONTENT_TYPE_ARCHETYPE_MAP,
+  DEFAULT_VISUAL_ARCHETYPE,
+  selectStarVisualArchetype,
+} from "./star-visual-archetype";
+export type { GenerateStellarProfileOptions } from "./stellar-profile";
 export {
   createStellarPaletteFromTemperature,
   createStellarSeededRandom,
