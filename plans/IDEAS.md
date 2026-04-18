@@ -81,19 +81,6 @@ Template for agent-filed intake:
   - **Non-findings:** No lifetime-deal platform playbooks (my earlier note about AppSumo guidance was wrong — the kit doesn't cover LTD ops). AI-tool section is copywriting/chat (Copy.ai, Jasper) — not relevant. PG/Sama essays are mostly VC/YC-shaped; only *Do Things That Don't Scale* and *Maker's Schedule* are universal — already implicit in METIS's indie stance.
   - Triage recommendation unchanged: **Reject** at vision level, **Merge** the items above into M15's plan doc when it drafts.
 
-### Local-first product analytics for onboarding measurement
-- **Source:** Observation from founders-kit review pass (2026-04-18)
-- **Ask:** Decide how METIS measures whether onboarding works — time-to-magic-moment, setup-wizard completion, first-query success — without violating *local by default, always*.
-- **Context:** M01 (preserve-and-productize) frames onboarding tactically as "route to setup wizard if no config"; there is currently no measurement layer. Founders-kit surfaces PostHog / Microsoft Clarity / session replay as defaults, but all are cloud-hosted and would contradict the *nothing phones home* stance. Options to weigh when this comes up: self-hosted PostHog, opt-in anonymized telemetry (single-pixel ping), local-only event log inspectable by the user through the trace timeline, or no remote analytics at all. This touches M01 (onboarding) and has real vision tension with M17 (Network audit), which argues for treating both as a single posture decision.
-- **Filed:** 2026-04-18 by claude/review-metis-strategy-EiscA
-- **Triage:**
-  - What it is: A posture decision, not a feature. How (if at all) does METIS observe its own users' behaviour, and how does that square with local-first?
-  - Pillar fit: Cross-cutting (affects M01 onboarding, M15 launch, M17 network audit).
-  - Overlap: M01 (Rolling), M15 (Draft needed), M17 (Draft needed).
-  - Recommendation: **Park** until M13 (Seedling) lands, then revisit alongside M17 so the product-telemetry and outbound-call posture are decided together rather than drift-wise.
-  - Rough scope: posture decision → ADR (1 day). Implementation of the chosen option (if any) → multi-day.
-- **Decision:** awaiting user confirmation of **Park**.
-
 ---
 
 ## Agent observations
@@ -108,7 +95,18 @@ Template for agent-filed intake:
 
 <!-- Parked ideas — not rejected, not active. -->
 
-*(empty)*
+### Local-first product analytics for onboarding measurement
+- **Source:** Observation from founders-kit review pass (2026-04-18)
+- **Ask:** Decide how METIS measures whether onboarding works — time-to-magic-moment, setup-wizard completion, first-query success — without violating *local by default, always*.
+- **Context:** M01 (preserve-and-productize) frames onboarding tactically as "route to setup wizard if no config"; there is currently no measurement layer. Founders-kit surfaces PostHog / Microsoft Clarity / session replay as defaults, but all are cloud-hosted and would contradict the *nothing phones home* stance. Options to weigh when this comes up: self-hosted PostHog, opt-in anonymized telemetry (single-pixel ping), local-only event log inspectable by the user through the trace timeline, or no remote analytics at all. This touches M01 (onboarding) and has real vision tension with M17 (Network audit), which argues for treating both as a single posture decision.
+- **Filed:** 2026-04-18 by claude/review-metis-strategy-EiscA
+- **Triage:**
+  - What it is: A posture decision, not a feature. How (if at all) does METIS observe its own users' behaviour, and how does that square with local-first?
+  - Pillar fit: Cross-cutting (affects M01 onboarding, M15 launch, M17 network audit).
+  - Overlap: M01 (Rolling), M15 (Draft needed), M17 (Draft needed).
+  - Recommendation: **Park** until M13 (Seedling) lands, then revisit alongside M17 so the product-telemetry and outbound-call posture are decided together rather than drift-wise.
+  - Rough scope: posture decision → ADR (1 day). Implementation of the chosen option (if any) → multi-day.
+- **Decision:** **Parked** 2026-04-18. Revisit when M13 lands or when M17 (Network audit) is next-up — whichever comes first.
 
 ---
 
