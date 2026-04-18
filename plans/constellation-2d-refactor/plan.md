@@ -1,7 +1,7 @@
 ---
 Milestone: M02 — Constellation 2D refactor
 Status: In progress
-Claim: claude/m02-archetypes-nebula-bh-rg (Phase 3: nebula/black_hole/red_giant) — Phases 0/0.3/1/2/3-scaffold+pulsar landed
+Claim: claude/m02-archetypes-nebula-bh-rg (Phase 3: all 12 archetypes) — Phases 0/0.3/1/2/3-scaffold+pulsar landed
 Last updated: 2026-04-18 by claude-opus-4-7
 Vision pillar: Cosmos
 ADR: docs/adr/0006-constellation-design-2d-primary.md
@@ -142,7 +142,7 @@ first two archetypes ✅, 2026-04-18 by claude-opus-4-7):**
   archetype attribute is *only consulted on the closeup tier*
   (`vTier > 2.5`) — ambient/point/sprite/hero rendering stays untouched,
   so Phase 3 cannot regress the galaxy view.
-- 3.3 ✅ **(5 of 12 archetypes shipped):**
+- 3.3 ✅ **(all 12 archetypes shipped):**
   - `main_sequence` — baseline. The closeup branch is a no-op; output is
     bit-identical to the pre-Phase-3 renderer once the attribute is
     omitted or pinned to 0.
@@ -151,10 +151,21 @@ first two archetypes ✅, 2026-04-18 by claude-opus-4-7):**
     diffraction rays (×1.9 boost + steeper exp falloff) so the Bayer
     spikes read as lighthouse beams. Pulsation also modulates final
     alpha so spikes breathe with the size beat.
+  - `quasar` — modest ~1.3 Hz bright pulse + two opposing polar jets
+    along the Y axis (`exp(-abs(uv.x) * 8.0)` cross a
+    `smoothstep(0.25, 1.0, abs(uv.y))` extent, time-modulated with
+    `sin(uTime * 6.0 + abs(uv.y) * 10.0)`). Jet colour mixes accent
+    with a near-white tint. Diffraction suppressed.
+  - `brown_dwarf` — dim, small (size ×0.75). Palette heavily mixed with
+    rust `vec3(0.6, 0.3, 0.15)` at 0.55 weight. Halo/core/rim alpha all
+    pulled down. No pulsation.
   - `red_giant` — slow ~0.5 Hz swell (`sin(uTime * 3.14) * 0.06`), point-
     size bloat ×1.12, halo alpha ×1.18, core alpha ×0.92, and a warm
     colour mix (`mix(core, vec3(1.0, 0.56, 0.28), 0.42)` at 0.35 weight)
     so the disc reads as a broad, cool-burning giant.
+  - `binary` — primary disc at centre + companion core blob orbiting at
+    radius 0.6 with period `uTime * 1.6`. Primary halo alpha ×0.85,
+    core ×1.1 so the companion reads. Diffraction suppressed.
   - `nebula` — no sharp star. Point-size bloat ×1.18; the default core/
     rim are suppressed (core alpha ×0.2, rim ×0.4); halo alpha ×1.55;
     the visible pixels come from a two-frequency angular+radial sine
@@ -167,10 +178,28 @@ first two archetypes ✅, 2026-04-18 by claude-opus-4-7):**
     halo + accent colours scaled ×1.6. Halo/core/rim alpha stack
     zeroed out — the only visible contribution comes from the ring
     mask (`0.6 + brightness * 0.35`). Diffraction spikes suppressed.
-  - Remaining 7 archetypes (`quasar`, `brown_dwarf`, `binary`, `comet`,
-    `constellation`, `variable`, `wolf_rayet`) still deferred per
-    ADR 0006 "one PR per archetype is fine" — scaffold and attribute
-    plumbing already in place.
+  - `comet` — bright head biased to the right at `uv = (0.45, 0.0)`
+    with a soft-edged disc, plus a tail streaming leftward with
+    exponential falloff (`exp(-tailX * 2.4) * exp(-(uv.y * 4)^2)`).
+    Head colour is a warm whitish blend; tail colour is halo/accent
+    mix. Diffraction and default halo/core/rim suppressed. Starter
+    implementation within a single point sprite — ADR 0006 notes
+    sprite-strip or per-frame offset buffer as the richer long-term
+    path for real motion trails.
+  - `constellation` — five anchor points
+    (`(0.0, -0.55), (-0.5, -0.1), (0.55, 0.05), (-0.15, 0.55), (0.3, 0.35)`)
+    with thin connecting links between a fixed pair sequence. Anchors
+    rendered as soft discs; links computed via per-segment
+    point-to-segment distance with a thin falloff. Default halo/core/
+    rim and diffraction suppressed — the pattern carries the alpha.
+  - `variable` — irregular brightness only. No structural change; two
+    incommensurate sines (`sin(uTime * 4.2) * 0.09 + sin(uTime * 1.7 +
+    1.1) * 0.05`) drive `pulseAlpha = 0.7 + pulse * 0.45` so the star
+    breathes with a non-repeating beat. Core warm-shifted in sympathy.
+  - `wolf_rayet` — hot-spectrum tint (`vec3(0.6, 0.78, 1.0)` at 0.38)
+    plus animated radial wind bands (`0.5 + 0.5 * sin(dist * 26.0 -
+    uTime * 8.0)`) modulating the outgoing halo/accent mix. Size ×1.08,
+    fast ~1.75 Hz pulse.
 - 3.4 ✅ — Render-plan tests assert the closeup tier wiring. Shader-side
   archetype effect visual tests are intentionally out of scope (vitest
   runs in jsdom, no WebGL context). Plumbing the render params through
@@ -200,14 +229,14 @@ files → 0 errors, 0 warnings.
   follow-up phase should decide where per-star labels appear (likely
   Phase 4 Orbital Observatory when faculty stars become individually
   inspectable).
-- **Phase 3 follow-up archetypes** — 7 remaining archetypes can land
-  incrementally. Suggested priority (demo-value first): `comet`,
-  `quasar`, `binary`, `brown_dwarf`, `variable`, `wolf_rayet`,
-  `constellation`. Each PR should touch only the vertex/fragment
-  branch blocks marked by archetype id. No buffer-layout changes
-  needed. `comet` is the biggest lift of the remaining set — the
-  trailing tail likely needs a sprite strip or per-frame offset
-  buffer, per ADR 0006.
+- **Phase 3 follow-ups** — all 12 archetypes are visually
+  distinct at closeup tier now. Remaining work if we want richer
+  looks: promote `comet` from its single-point-sprite UV fake to a
+  sprite strip / per-frame offset buffer (ADR 0006); revisit the
+  `binary` companion-blob radius and the `constellation` anchor
+  layout once real faculty-star content drives them; cover more of
+  `wolf_rayet` / `variable` with palette research if playtest reveals
+  them as too uniform.
 - **Phase 4 Orbital Observatory** — unblocked by Phases 0+1+2+3 scaffold.
   Suggested claim: `claude/m02-orbital-observatory`.
 

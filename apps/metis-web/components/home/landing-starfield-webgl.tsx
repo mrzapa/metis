@@ -75,16 +75,56 @@ void main() {
     if (aArchetype > 0.5 && aArchetype < 1.5) {
       archetypePulse = 1.0 + sin(uTime * 18.85) * 0.18;
     }
+    // Quasar (id 2): steady bright, modest size so the jets in the
+    // fragment stage have a visible host disc.
+    else if (aArchetype > 1.5 && aArchetype < 2.5) {
+      archetypeSizeScale = 1.22;
+      archetypePulse = 1.0 + sin(uTime * 8.0) * 0.06;
+    }
+    // Brown dwarf (id 3): dim and small so the rendered disc feels
+    // intrinsically weak.
+    else if (aArchetype > 2.5 && aArchetype < 3.5) {
+      archetypeSizeScale = 0.75;
+    }
     // Red giant (id 4): slow ~0.5 Hz swell, mild point-size bloat so the
     // warm bloom reads as physically large.
     else if (aArchetype > 3.5 && aArchetype < 4.5) {
       archetypePulse = 1.0 + sin(uTime * 3.14) * 0.06;
       archetypeSizeScale = 1.12;
     }
+    // Binary (id 5): give the sprite enough canvas for a companion blob
+    // alongside the primary.
+    else if (aArchetype > 4.5 && aArchetype < 5.5) {
+      archetypeSizeScale = 1.18;
+    }
     // Nebula (id 6): no sharp core at all — give the sprite more canvas
     // so the diffuse cloud effect in the fragment stage can spread.
     else if (aArchetype > 5.5 && aArchetype < 6.5) {
       archetypeSizeScale = 1.18;
+    }
+    // Comet (id 8): tail extends across the sprite; needs more canvas.
+    // Starter implementation renders the tail inside a single point
+    // sprite via UV space (ADR 0006 suggests sprite strip or per-frame
+    // offset buffer as a follow-up for true motion trails).
+    else if (aArchetype > 7.5 && aArchetype < 8.5) {
+      archetypeSizeScale = 1.35;
+    }
+    // Constellation (id 9): multi-point pattern needs canvas too.
+    else if (aArchetype > 8.5 && aArchetype < 9.5) {
+      archetypeSizeScale = 1.32;
+    }
+    // Variable (id 10): irregular brightness. Two overlapping sines with
+    // incommensurate periods give a non-repeating feel within the
+    // demo-length dive.
+    else if (aArchetype > 9.5 && aArchetype < 10.5) {
+      archetypePulse = 1.0
+        + sin(uTime * 4.2) * 0.09
+        + sin(uTime * 1.7 + 1.1) * 0.05;
+    }
+    // Wolf-Rayet (id 11): energetic, slightly larger, rapid flare beat.
+    else if (aArchetype > 10.5 && aArchetype < 11.5) {
+      archetypeSizeScale = 1.08;
+      archetypePulse = 1.0 + sin(uTime * 11.0) * 0.1;
     }
   }
 
@@ -108,6 +148,8 @@ void main() {
 `;
 
 const fragmentShader = `
+uniform float uTime;
+
 varying float vAddable;
 varying float vBloom;
 varying float vBrightness;
@@ -138,13 +180,25 @@ void main() {
   }
 
   // Archetype flags. Only fire on closeup tier. Ids come from
-  // STAR_VISUAL_ARCHETYPE_IDS (main_sequence=0 baseline / pulsar=1 /
-  // red_giant=4 / nebula=6 / black_hole=7).
+  // STAR_VISUAL_ARCHETYPE_IDS — see
+  // apps/metis-web/lib/landing-stars/star-visual-archetype.ts.
   bool isCloseup = vTier > 2.5;
   bool isPulsar = isCloseup && vArchetype > 0.5 && vArchetype < 1.5;
+  bool isQuasar = isCloseup && vArchetype > 1.5 && vArchetype < 2.5;
+  bool isBrownDwarf = isCloseup && vArchetype > 2.5 && vArchetype < 3.5;
   bool isRedGiant = isCloseup && vArchetype > 3.5 && vArchetype < 4.5;
+  bool isBinary = isCloseup && vArchetype > 4.5 && vArchetype < 5.5;
   bool isNebula = isCloseup && vArchetype > 5.5 && vArchetype < 6.5;
   bool isBlackHole = isCloseup && vArchetype > 6.5 && vArchetype < 7.5;
+  bool isComet = isCloseup && vArchetype > 7.5 && vArchetype < 8.5;
+  bool isConstellation = isCloseup && vArchetype > 8.5 && vArchetype < 9.5;
+  bool isVariable = isCloseup && vArchetype > 9.5 && vArchetype < 10.5;
+  bool isWolfRayet = isCloseup && vArchetype > 10.5 && vArchetype < 11.5;
+
+  // Several archetypes repaint the sprite from scratch and should skip
+  // the default halo/core/rim stack. Consolidate the flag so later
+  // branches stay readable.
+  bool suppressDefaultDisc = isNebula || isBlackHole || isComet || isConstellation;
 
   float tierBlend = vTier > 1.5 ? 1.0 : (vTier > 0.5 ? 0.6 : 0.0);
   float haloMask = safeSmoothstep(1.0, max(0.0, 0.16 + (1.0 - tierBlend) * 0.22), dist);
@@ -168,6 +222,23 @@ void main() {
   if (isRedGiant) {
     vec3 warmTint = mix(vCoreColor, vec3(1.0, 0.56, 0.28), 0.42);
     color = mix(color, warmTint, 0.35);
+  }
+
+  // Brown dwarf (id 3): dim rust palette. Keep the star shape but mute
+  // colour + bias toward a rust/accent blend. No pulsation.
+  if (isBrownDwarf) {
+    vec3 rust = vec3(0.6, 0.3, 0.15);
+    color = mix(color, rust, 0.55);
+  }
+
+  // Wolf-Rayet (id 11): energetic hot-star spectrum with radial wind
+  // bands. Tint toward blue/violet and overlay a high-frequency band
+  // pattern that animates outward to read as stellar wind.
+  if (isWolfRayet) {
+    vec3 hotTint = vec3(0.6, 0.78, 1.0);
+    color = mix(color, hotTint, 0.38);
+    float windBand = 0.5 + 0.5 * sin(dist * 26.0 - uTime * 8.0);
+    color += mix(vHaloColor, vAccentColor, 0.5) * windBand * (1.0 - dist) * 0.2;
   }
 
   // Nebula (id 6): replace the sharp star look with a diffuse, noise-
@@ -194,12 +265,103 @@ void main() {
     color += ringColor * ringMask;
   }
 
+  // Quasar (id 2): host disc + two opposing polar jets along the y axis.
+  // Jet mask widens radially so the lobes feel energetic at the poles.
+  if (isQuasar) {
+    float jetWidth = exp(-abs(uv.x) * 8.0);
+    float jetExtent = smoothstep(0.25, 1.0, abs(uv.y));
+    float jet = jetWidth * jetExtent * (0.7 + 0.3 * sin(uTime * 6.0 + abs(uv.y) * 10.0));
+    vec3 jetColor = mix(vAccentColor, vec3(0.85, 0.95, 1.0), 0.35);
+    color += jetColor * jet * 0.9;
+  }
+
+  // Binary (id 5): primary at centre + companion blob orbiting at ~0.6
+  // radius. Companion position rotates slowly around the primary so the
+  // pair reads as a bound system.
+  if (isBinary) {
+    float phase = uTime * 1.6;
+    vec2 companion = vec2(cos(phase), sin(phase)) * 0.6;
+    float companionDist = length(uv - companion);
+    float companionCore = safeSmoothstep(0.22, 0.04, companionDist);
+    color += mix(vCoreColor, vAccentColor, 0.35) * companionCore * 0.9;
+  }
+
+  // Comet (id 8): head biased to the right, tail streaming left with
+  // an exponential alpha/intensity falloff. Starter implementation —
+  // ADR 0006 notes a sprite strip / per-frame offset buffer as the
+  // richer long-term option.
+  if (isComet) {
+    vec2 headPos = vec2(0.45, 0.0);
+    float headDist = length(uv - headPos);
+    float head = safeSmoothstep(0.26, 0.0, headDist);
+    float tailX = clamp((headPos.x - uv.x) / 1.5, 0.0, 1.0);
+    float tailFalloff = exp(-tailX * 2.4);
+    float tailSpread = exp(-pow(uv.y * 4.0, 2.0));
+    float tail = tailFalloff * tailSpread * 0.75;
+    vec3 headColor = mix(vCoreColor, vec3(1.0, 0.95, 0.8), 0.35);
+    vec3 tailColor = mix(vHaloColor, vAccentColor, 0.55);
+    color = mix(vec3(0.0), headColor, head) + tailColor * tail;
+  }
+
+  // Constellation (id 9): five anchors plus thin connecting links so the
+  // closeup reads as a composite group. Fixed positions; the small
+  // motion in uTime gives a gentle collective shimmer.
+  if (isConstellation) {
+    vec2 nodes[5];
+    nodes[0] = vec2(0.0, -0.55);
+    nodes[1] = vec2(-0.5, -0.1);
+    nodes[2] = vec2(0.55, 0.05);
+    nodes[3] = vec2(-0.15, 0.55);
+    nodes[4] = vec2(0.3, 0.35);
+    float pattern = 0.0;
+    for (int i = 0; i < 5; i++) {
+      pattern += safeSmoothstep(0.14, 0.0, length(uv - nodes[i]));
+    }
+    // Thin links between pairs 0→2, 2→4, 4→3, 3→1, 1→0.
+    vec2 links[5];
+    links[0] = nodes[2] - nodes[0];
+    links[1] = nodes[4] - nodes[2];
+    links[2] = nodes[3] - nodes[4];
+    links[3] = nodes[1] - nodes[3];
+    links[4] = nodes[0] - nodes[1];
+    vec2 origins[5];
+    origins[0] = nodes[0];
+    origins[1] = nodes[2];
+    origins[2] = nodes[4];
+    origins[3] = nodes[3];
+    origins[4] = nodes[1];
+    float lineAcc = 0.0;
+    for (int i = 0; i < 5; i++) {
+      vec2 d = uv - origins[i];
+      float t = clamp(dot(d, links[i]) / max(dot(links[i], links[i]), 0.0001), 0.0, 1.0);
+      float perp = length(d - links[i] * t);
+      lineAcc += safeSmoothstep(0.03, 0.0, perp);
+    }
+    vec3 nodeColor = mix(vCoreColor, vAccentColor, 0.4);
+    vec3 linkColor = mix(vHaloColor, vAccentColor, 0.6) * 0.65;
+    color = nodeColor * pattern + linkColor * lineAcc;
+  }
+
+  // Variable (id 10): oscillating brightness, no structural change. The
+  // irregular dual-sine beat on vArchetypePulse flows through pulseAlpha
+  // below; here we warm-shift the core mildly so the oscillation reads
+  // as a living star rather than a flicker.
+  if (isVariable) {
+    vec3 warmPulse = mix(vCoreColor, vec3(1.0, 0.78, 0.45), 0.25 + 0.25 * (vArchetypePulse - 1.0));
+    color = mix(color, warmPulse, 0.28);
+  }
+
   // Pulsar (id 1): sharpened diffraction rays (×1.9 boost, steeper exp
-  // falloff). Baseline + other archetypes keep the standard strength.
+  // falloff). Baseline + most archetypes keep the standard strength;
+  // archetypes that repaint the sprite (nebula, black hole, comet,
+  // constellation) or use opposing jets (quasar) or a companion blob
+  // (binary) would read as visually wrong with the default cross, so we
+  // suppress the diffraction stage for them.
   float diffractionBoost = isPulsar ? 1.9 : 1.0;
   float diffractionFalloff = isPulsar ? 19.0 : 13.0;
+  bool skipDiffraction = suppressDefaultDisc || isQuasar || isBinary;
 
-  if (vDiffraction > 0.02 && !isNebula && !isBlackHole) {
+  if (vDiffraction > 0.02 && !skipDiffraction) {
     float crossX = exp(-abs(uv.x) * diffractionFalloff);
     float crossY = exp(-abs(uv.y) * diffractionFalloff);
     float diffraction = max(crossX, crossY) * (1.0 - dist) * vDiffraction * (0.18 + tierBlend * 0.2) * diffractionBoost;
@@ -212,11 +374,6 @@ void main() {
 
   // Archetype alpha adjustments. Each archetype tunes halo/core/rim alpha
   // and an overall pulse term independently.
-  // Pulsar: tight visible disc (halo ×0.72, core ×1.35) + pulse alpha.
-  // Red giant: wide soft halo (halo ×1.18) + slow pulse.
-  // Nebula: no hard core (core ×0.2), boosted halo (halo ×1.55).
-  // Black hole: suppress the entire default alpha stack — the ring above
-  //             already wrote the only visible contribution.
   float haloScale = 1.0;
   float coreScale = 1.0;
   float rimScale = 1.0;
@@ -225,18 +382,42 @@ void main() {
     haloScale = 0.72;
     coreScale = 1.35;
     pulseAlpha = 0.85 + vArchetypePulse * 0.3;
+  } else if (isQuasar) {
+    haloScale = 0.65;
+    coreScale = 1.2;
+    pulseAlpha = 0.95 + vArchetypePulse * 0.08;
+  } else if (isBrownDwarf) {
+    haloScale = 0.55;
+    coreScale = 0.75;
+    rimScale = 0.6;
   } else if (isRedGiant) {
     haloScale = 1.18;
     coreScale = 0.92;
     pulseAlpha = 0.94 + vArchetypePulse * 0.12;
-  } else if (isNebula) {
-    haloScale = 1.55;
-    coreScale = 0.2;
-    rimScale = 0.4;
-  } else if (isBlackHole) {
+  } else if (isBinary) {
+    // Primary disc a touch smaller so the companion blob reads.
+    haloScale = 0.85;
+    coreScale = 1.1;
+  } else if (isVariable) {
+    pulseAlpha = 0.7 + vArchetypePulse * 0.45;
+  } else if (isWolfRayet) {
+    haloScale = 1.05;
+    coreScale = 1.15;
+    pulseAlpha = 0.9 + vArchetypePulse * 0.18;
+  } else if (suppressDefaultDisc) {
+    // Nebula, black hole, comet, constellation all paint their own
+    // silhouette; the default halo/core/rim stack would muddy the
+    // intended look.
     haloScale = 0.0;
     coreScale = 0.0;
     rimScale = 0.0;
+  }
+  // Nebula still wants a soft ambient glow outside the cloud sines so
+  // the star feels present — dial the halo back in partially.
+  if (isNebula) {
+    haloScale = 1.55;
+    coreScale = 0.2;
+    rimScale = 0.4;
   }
 
   float alphaBase = (0.18 + vBrightness * 0.46) * vTwinkle;
@@ -246,6 +427,29 @@ void main() {
     // though halo/core/rim scales are 0.
     float ringMask = safeSmoothstep(0.53, 0.6, dist) * (1.0 - safeSmoothstep(0.72, 0.82, dist));
     alpha = ringMask * (0.6 + vBrightness * 0.35);
+  } else if (isComet) {
+    // Comet owns its alpha from the head/tail masks. Recompute here so
+    // the default alpha stack (zeroed via suppressDefaultDisc) doesn't
+    // contribute.
+    vec2 headPos = vec2(0.45, 0.0);
+    float headDist = length(uv - headPos);
+    float head = safeSmoothstep(0.26, 0.0, headDist);
+    float tailX = clamp((headPos.x - uv.x) / 1.5, 0.0, 1.0);
+    float tail = exp(-tailX * 2.4) * exp(-pow(uv.y * 4.0, 2.0));
+    alpha = clamp(head * (0.7 + vBrightness * 0.3) + tail * 0.55, 0.0, 1.0);
+  } else if (isConstellation) {
+    // Constellation owns its alpha too — anchors + links each contribute.
+    vec2 nodes[5];
+    nodes[0] = vec2(0.0, -0.55);
+    nodes[1] = vec2(-0.5, -0.1);
+    nodes[2] = vec2(0.55, 0.05);
+    nodes[3] = vec2(-0.15, 0.55);
+    nodes[4] = vec2(0.3, 0.35);
+    float nodeAlpha = 0.0;
+    for (int i = 0; i < 5; i++) {
+      nodeAlpha += safeSmoothstep(0.14, 0.0, length(uv - nodes[i]));
+    }
+    alpha = clamp(nodeAlpha * 0.9 + 0.08 * (1.0 - dist), 0.0, 1.0);
   }
   alpha = clamp(alpha * (0.9 + vBloom * 0.12) * pulseAlpha, 0.0, 1.0);
 
