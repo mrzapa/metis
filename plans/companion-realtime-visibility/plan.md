@@ -1,7 +1,87 @@
+---
+Milestone: M09 — Companion realtime visibility
+Status: In progress
+Claim: claude/parallel-task-development-hBZgg (Steps 1–5 landed; is_running flag + tests added in this slice)
+Last updated: 2026-04-18 by claude-opus-4-7
+Vision pillar: Companion
+---
+
 # Companion Real-Time Visibility
 
 **Branch:** `feat/companion-realtime-visibility`
 **Description:** Surface METIS companion thoughts, autonomous research phases, and new constellation stars to the user in real-time via an activity log in the dock and auto-refresh on the constellation canvas.
+
+## Progress
+
+**All 5 steps have code landed in main as of 2026-04-18.** This slice closes
+the two remaining gaps called out in Step 2's definition of done and adds
+the regression tests that had been deferred.
+
+- **Step 1 — Phase events inside `AutonomousResearchService`** ✅
+  (`metis_app/services/autonomous_research_service.py`:60-151). `run()` and
+  `run_batch()` both accept `progress_cb` and emit typed phase dicts.
+  Orchestrator (`workspace_orchestrator.run_autonomous_research`) threads
+  the callback through. Unit tests exist at
+  `tests/test_autonomous_research_service.py:178-242`.
+
+- **Step 2 — SSE stream + status endpoint** ⚠️→✅.
+  - `POST /v1/autonomous/research/stream` landed earlier
+    (`metis_app/api_litestar/routes/autonomous.py:50-96`). Integration tests
+    exist at `tests/test_api_app.py:2031-2087`.
+  - **This slice:** added the `is_running` in-process flag. Module-level
+    counter + lock in `workspace_orchestrator.py` wraps every
+    `run_autonomous_research` invocation so the SSE and fire-and-forget
+    trigger endpoints are both covered. `GET /v1/autonomous/status` now
+    returns `is_running: bool`. Frontend `AutonomousStatus` interface
+    gained an optional `is_running` field.
+  - Note: the plan mentioned a FastAPI router duplicate at
+    `metis_app/api/autonomous.py`. That tree no longer exists — METIS is
+    Litestar-only. No FastAPI work to do.
+
+- **Step 3 — Frontend API client** ✅
+  (`apps/metis-web/lib/api.ts`): `CompanionActivityEvent.source` union,
+  `AutoResearchStreamEvent` type, `triggerAutonomousResearchStream`, and
+  `reflectAssistant` emitting companion activity events all landed
+  (lines 981-2808).
+
+- **Step 4 — Live thought log in `MetisCompanionDock`** ✅
+  (`apps/metis-web/components/shell/metis-companion-dock.tsx`:80-263).
+  sessionStorage-backed ring buffer of the last 8 events, "Recent activity"
+  section, source-colour badges, state icons, unseen-count badge while
+  minimized, auto-refresh toast on autonomous completion. **This slice
+  added** the regression test
+  (`components/shell/__tests__/metis-companion-dock.test.tsx`) that fires a
+  simulated companion event stream and asserts the thought log renders.
+
+- **Step 5 — Constellation auto-refresh** ✅
+  (`apps/metis-web/app/page.tsx`:1572-1582). A `useEffect` subscribes and,
+  on `autonomous_research` + `completed`, calls `refreshAvailableIndexes`
+  in silent mode. **This slice added** the regression test
+  (`apps/metis-web/app/__tests__/home-page.test.tsx`) that captures the
+  listener, fires an event, asserts `fetchIndexes` is called again, and
+  that non-matching events do not trigger a refetch.
+
+## Verification
+
+- `pytest tests/test_autonomous_research_service.py tests/test_workspace_orchestrator.py tests/test_api_app.py -q` — new
+  tests for the is_running counter and the status endpoint's is_running
+  field pass alongside the existing suite.
+- `pnpm --filter metis-web test -- components/shell/__tests__/metis-companion-dock.test.tsx apps/metis-web/app/__tests__/home-page.test.tsx`
+  — new thought-log and auto-refresh tests pass.
+- `pnpm exec tsc --noEmit` — clean.
+
+## Notes for the next agent
+
+- **Out-of-scope items remain deferred** (see the section at the bottom of
+  this plan): constellation visual pulse during research, reflection
+  streaming, notification toasts.
+- **`is_running` is an in-process flag.** If the API is ever split across
+  multiple processes (e.g., a worker pool), the flag will not be
+  authoritative — swap for a cross-process signal (Redis, a status row in
+  the sessions DB) before that point.
+- The `is_running` counter tolerates overlapping calls (e.g., the
+  fire-and-forget trigger and the SSE endpoint both running). It reaches 0
+  only when every in-flight call has cleared its finally block.
 
 ## Goal
 

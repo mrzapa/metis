@@ -2133,6 +2133,74 @@ def test_run_autonomous_research_concurrent_dispatches_multiple_faculties(tmp_pa
     )
 
 
+def test_is_autonomous_research_running_tracks_in_flight_runs(tmp_path):
+    """is_autonomous_research_running() reflects whether a run is active.
+
+    The flag is used by GET /v1/autonomous/status so the UI can disable the
+    "Research Now" button and surface an in-flight indicator. The counter is
+    incremented for the duration of run_autonomous_research and cleared in a
+    finally block even if the inner pipeline raises.
+    """
+    import unittest.mock as um
+    from metis_app.services.workspace_orchestrator import (
+        WorkspaceOrchestrator,
+        is_autonomous_research_running,
+    )
+
+    # Baseline: no run in flight.
+    assert is_autonomous_research_running() is False
+
+    settings = {
+        "assistant_policy": {"autonomous_research_enabled": True},
+        "llm_provider": "mock",
+    }
+
+    improvement_repo = ImprovementRepository(
+        db_path=":memory:",
+        improvements_root=tmp_path,
+    )
+    orc = WorkspaceOrchestrator(improvement_repo=improvement_repo)
+
+    observed: list[bool] = []
+
+    def _observe_running(*_args, **_kwargs):
+        observed.append(is_autonomous_research_running())
+        return {"faculty_id": "x", "index_id": "auto_x_1", "title": "t", "sources": []}
+
+    mock_svc_instance = um.MagicMock()
+    mock_svc_instance.run.side_effect = _observe_running
+
+    with um.patch(
+        "metis_app.services.autonomous_research_service.AutonomousResearchService",
+        um.MagicMock(return_value=mock_svc_instance),
+    ), um.patch(
+        "metis_app.utils.web_search.create_web_search",
+        return_value=um.MagicMock(),
+    ), um.patch.object(orc, "list_indexes", return_value=[]):
+        orc.run_autonomous_research(settings)
+
+    assert observed == [True], (
+        f"is_running should be True inside run(); observed {observed}"
+    )
+    assert is_autonomous_research_running() is False
+
+    # Counter is cleared even if the inner pipeline raises.
+    mock_svc_instance.run.side_effect = RuntimeError("boom")
+    with um.patch(
+        "metis_app.services.autonomous_research_service.AutonomousResearchService",
+        um.MagicMock(return_value=mock_svc_instance),
+    ), um.patch(
+        "metis_app.utils.web_search.create_web_search",
+        return_value=um.MagicMock(),
+    ), um.patch.object(orc, "list_indexes", return_value=[]):
+        try:
+            orc.run_autonomous_research(settings)
+        except RuntimeError:
+            pass
+
+    assert is_autonomous_research_running() is False
+
+
 # ---------------------------------------------------------------------------
 # API integration — brain graph uses orchestrator
 # ---------------------------------------------------------------------------

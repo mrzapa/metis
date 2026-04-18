@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import { MetisCompanionDock } from "../metis-companion-dock";
-import type { AssistantSnapshot } from "@/lib/api";
+import type { AssistantSnapshot, CompanionActivityEvent } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({
   fetchAssistant: vi.fn(),
@@ -29,6 +29,7 @@ const {
   fetchAtlasCandidate,
   saveAtlasEntry,
   decideAtlasCandidate,
+  subscribeCompanionActivity,
 } = await import("@/lib/api");
 
 function buildSnapshot(overrides: Partial<AssistantSnapshot> = {}): AssistantSnapshot {
@@ -245,5 +246,54 @@ describe("MetisCompanionDock", () => {
     await waitFor(() => {
       expect(screen.queryByText("Atlas Suggestion")).not.toBeInTheDocument();
     });
+  });
+  it("renders the thought log when companion activity events arrive", async () => {
+    // Capture the subscribeCompanionActivity listener so the test can fire
+    // simulated activity events into the dock's useEffect hook.
+    const listeners: Array<(event: CompanionActivityEvent) => void> = [];
+    vi.mocked(subscribeCompanionActivity).mockImplementation((listener) => {
+      listeners.push(listener);
+      return () => {
+        const idx = listeners.indexOf(listener);
+        if (idx >= 0) listeners.splice(idx, 1);
+      };
+    });
+
+    // Render expanded so the Recent activity section is visible.
+    vi.mocked(fetchAssistant).mockResolvedValueOnce(
+      buildSnapshot({ identity: { minimized: false } as AssistantSnapshot["identity"] }),
+    );
+    vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
+
+    render(<MetisCompanionDock />);
+
+    await waitFor(() => expect(fetchAssistant).toHaveBeenCalled());
+    await waitFor(() => expect(listeners.length).toBeGreaterThan(0));
+
+    const fire = (event: CompanionActivityEvent) =>
+      act(() => {
+        for (const listener of listeners) listener(event);
+      });
+
+    fire({
+      source: "autonomous_research",
+      state: "running",
+      trigger: "manual",
+      summary: "Searching the web…",
+      timestamp: Date.now(),
+    });
+    fire({
+      source: "autonomous_research",
+      state: "completed",
+      trigger: "manual",
+      summary: "New star added to constellation",
+      timestamp: Date.now(),
+    });
+
+    expect(await screen.findByText("Recent activity")).toBeInTheDocument();
+    expect(screen.getByText("Searching the web…")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("New star added to constellation").length,
+    ).toBeGreaterThan(0);
   });
 });

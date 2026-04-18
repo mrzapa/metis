@@ -2940,6 +2940,7 @@ export interface AutonomousStatus {
   enabled: boolean;
   provider: string;
   web_search_api_key_set: boolean;
+  is_running?: boolean;
 }
 
 export async function fetchAutonomousStatus(): Promise<AutonomousStatus> {

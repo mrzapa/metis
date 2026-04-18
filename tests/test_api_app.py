@@ -1975,6 +1975,38 @@ def test_autonomous_status_returns_enabled_false_by_default(monkeypatch) -> None
     data = response.json()
     assert "enabled" in data
     assert data["enabled"] is False
+    # M09 — status exposes an in-process is_running flag so the UI can reflect
+    # whether a research cycle is currently in flight.
+    assert "is_running" in data
+    assert data["is_running"] is False
+
+
+def test_autonomous_status_reports_is_running_while_research_runs(monkeypatch) -> None:
+    """GET /v1/autonomous/status reports is_running=True during a run."""
+    from metis_app.services import workspace_orchestrator as _orchestrator_module
+
+    monkeypatch.setattr(
+        __import__("metis_app.settings_store", fromlist=["_"]),
+        "load_settings",
+        lambda: {},
+    )
+    client = TestClient(app=api_app_module.create_app())
+
+    # Simulate an in-flight run by directly incrementing the module-level
+    # counter. The route's helper reads this counter under the same lock.
+    with _orchestrator_module._autonomous_running_lock:
+        _orchestrator_module._autonomous_running_count += 1
+    try:
+        response = client.get("/v1/autonomous/status")
+        assert response.status_code == 200
+        assert response.json()["is_running"] is True
+    finally:
+        with _orchestrator_module._autonomous_running_lock:
+            _orchestrator_module._autonomous_running_count -= 1
+
+    # Counter is clear again once the run completes.
+    response = client.get("/v1/autonomous/status")
+    assert response.json()["is_running"] is False
 
 
 def test_autonomous_trigger_returns_ok(monkeypatch) -> None:

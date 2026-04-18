@@ -1,12 +1,16 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteIndex, fetchIndexes, fetchSettings, updateSettings } from "@/lib/api";
-import type { IndexSummary } from "@/lib/api";
+import { deleteIndex, fetchIndexes, fetchSettings, subscribeCompanionActivity, updateSettings } from "@/lib/api";
+import type { CompanionActivityEvent, IndexSummary } from "@/lib/api";
 import type { UserStar } from "@/lib/constellation-types";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
+
+// Capture the home page's companion activity listener so tests can simulate
+// autonomous research events without reaching into api.ts internals.
+const companionListeners: Array<(event: CompanionActivityEvent) => void> = [];
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -16,6 +20,13 @@ vi.mock("@/lib/api", async (importOriginal) => {
     fetchIndexes: vi.fn().mockResolvedValue([]),
     fetchSettings: vi.fn().mockResolvedValue({}),
     updateSettings: vi.fn().mockResolvedValue({}),
+    subscribeCompanionActivity: vi.fn((listener: (event: CompanionActivityEvent) => void) => {
+      companionListeners.push(listener);
+      return () => {
+        const idx = companionListeners.indexOf(listener);
+        if (idx >= 0) companionListeners.splice(idx, 1);
+      };
+    }),
   };
 });
 
@@ -166,6 +177,7 @@ describe("Home page", () => {
   beforeEach(() => {
     reducedMotion = false;
     window.localStorage.clear();
+    companionListeners.length = 0;
     vi.mocked(deleteIndex).mockImplementation(async (manifestPath) => ({
       deleted: true,
       manifest_path: manifestPath,
@@ -235,6 +247,58 @@ describe("Home page", () => {
     expect(screen.getByRole("link", { name: "Chat" })).toHaveAttribute("href", "/chat");
     expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
     expect(screen.getByRole("link", { name: "Open chat" })).toHaveAttribute("href", "/chat");
+  });
+
+  it("re-fetches indexes when an autonomous_research activity completes", async () => {
+    // M09 Step 5 — the constellation auto-refreshes when the companion
+    // lands a new autonomous-research star so the new star appears on the
+    // canvas without a page reload.
+    await renderHomePage();
+
+    expect(subscribeCompanionActivity).toHaveBeenCalled();
+    await waitFor(() => expect(companionListeners.length).toBeGreaterThan(0));
+
+    const callsBefore = vi.mocked(fetchIndexes).mock.calls.length;
+
+    act(() => {
+      for (const listener of companionListeners) {
+        listener({
+          source: "autonomous_research",
+          state: "completed",
+          trigger: "manual",
+          summary: "New star added to constellation",
+          timestamp: Date.now(),
+        });
+      }
+    });
+
+    await waitFor(() => {
+      expect(vi.mocked(fetchIndexes).mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+
+    // Events that aren't completed autonomous research must NOT refetch.
+    const callsAfter = vi.mocked(fetchIndexes).mock.calls.length;
+    act(() => {
+      for (const listener of companionListeners) {
+        listener({
+          source: "autonomous_research",
+          state: "running",
+          trigger: "manual",
+          summary: "Searching…",
+          timestamp: Date.now(),
+        });
+        listener({
+          source: "rag_stream",
+          state: "completed",
+          trigger: "manual",
+          summary: "Answered from atlas",
+          timestamp: Date.now(),
+        });
+      }
+    });
+    // Give any scheduled microtasks a chance to flush.
+    await Promise.resolve();
+    expect(vi.mocked(fetchIndexes).mock.calls.length).toBe(callsAfter);
   });
 
   // The tests below drive pointer-event integration flows against the home

@@ -12,7 +12,10 @@ from litestar.exceptions import HTTPException as LitestarHTTPException
 from litestar.response import ServerSentEvent
 
 import metis_app.settings_store as _settings_store
-from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
+from metis_app.services.workspace_orchestrator import (
+    WorkspaceOrchestrator,
+    is_autonomous_research_running,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -27,6 +30,7 @@ def get_autonomous_status() -> dict[str, Any]:
         "web_search_api_key_set": bool(
             str(settings.get("web_search_api_key") or "").strip()
         ),
+        "is_running": is_autonomous_research_running(),
     }
 
 

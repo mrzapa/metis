@@ -22,6 +22,7 @@ import json
 import os
 import pathlib
 import re
+import threading
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -82,6 +83,20 @@ from metis_app.services.session_repository import SessionRepository
 from metis_app.services.skill_repository import SkillRepository, _DEFAULT_CANDIDATES_DB_PATH
 from metis_app.services.trace_store import TraceStore
 from metis_app.models.parity_types import SkillDefinition
+
+# Module-level in-process flag: True while any autonomous research run is
+# executing. Used by GET /v1/autonomous/status so the UI can dim the
+# "Research Now" button or reflect an in-flight run. Guarded by a lock
+# because run_autonomous_research may be invoked concurrently from the SSE
+# endpoint and the fire-and-forget trigger endpoint.
+_autonomous_running_lock = threading.Lock()
+_autonomous_running_count = 0
+
+
+def is_autonomous_research_running() -> bool:
+    """Return True if any autonomous research run is currently in flight."""
+    with _autonomous_running_lock:
+        return _autonomous_running_count > 0
 
 
 class WorkspaceOrchestrator:
@@ -962,57 +977,64 @@ class WorkspaceOrchestrator:
         if not policy.autonomous_research_enabled:
             return None
 
-        # Resolve LLM/embedding settings for the research service
-        resolved = self._resolve_query_settings(settings)
+        global _autonomous_running_count
+        with _autonomous_running_lock:
+            _autonomous_running_count += 1
+        try:
+            # Resolve LLM/embedding settings for the research service
+            resolved = self._resolve_query_settings(settings)
 
-        index_dicts = self.list_indexes()
-        index_list = [
-            {"index_id": idx.get("index_id", ""), "document_count": idx.get("document_count", 0)}
-            for idx in index_dicts
-        ]
-        concurrency = max(1, int(raw_policy.get("autonomous_research_concurrency", 1) or 1))
-        delay_ms = max(0, int(raw_policy.get("autonomous_research_request_delay_ms", 500) or 500))
+            index_dicts = self.list_indexes()
+            index_list = [
+                {"index_id": idx.get("index_id", ""), "document_count": idx.get("document_count", 0)}
+                for idx in index_dicts
+            ]
+            concurrency = max(1, int(raw_policy.get("autonomous_research_concurrency", 1) or 1))
+            delay_ms = max(0, int(raw_policy.get("autonomous_research_request_delay_ms", 500) or 500))
 
-        svc = AutonomousResearchService(web_search=create_web_search(resolved))
+            svc = AutonomousResearchService(web_search=create_web_search(resolved))
 
-        if concurrency <= 1:
-            # Original single-gap behaviour — backwards compatible
-            result = svc.run(
-                settings=resolved,
-                indexes=index_list,
-                orchestrator=self,
-                progress_cb=progress_cb,
+            if concurrency <= 1:
+                # Original single-gap behaviour — backwards compatible
+                result = svc.run(
+                    settings=resolved,
+                    indexes=index_list,
+                    orchestrator=self,
+                    progress_cb=progress_cb,
+                )
+                self._capture_improvement_sources_from_autonomous_result(result)
+                return result
+
+            # Collect all sparse faculty gaps
+            import asyncio
+            faculty_ids: list[str] = []
+            temp_indexes = list(index_list)
+            for _ in range(concurrency * 2):  # cap scan to avoid infinite loop
+                fid = svc.scan_faculty_gaps(temp_indexes)
+                if fid is None or fid in faculty_ids:
+                    break
+                faculty_ids.append(fid)
+                # Temporarily mark as covered so scan finds the next gap
+                temp_indexes = temp_indexes + [{"index_id": f"auto_{fid}_placeholder"}]
+
+            if not faculty_ids:
+                return None
+
+            results = asyncio.run(
+                svc.run_batch(
+                    faculty_ids=faculty_ids,
+                    settings=resolved,
+                    orchestrator=self,
+                    concurrency=concurrency,
+                    request_delay_ms=delay_ms,
+                    progress_cb=progress_cb,
+                )
             )
-            self._capture_improvement_sources_from_autonomous_result(result)
-            return result
-
-        # Collect all sparse faculty gaps
-        import asyncio
-        faculty_ids: list[str] = []
-        temp_indexes = list(index_list)
-        for _ in range(concurrency * 2):  # cap scan to avoid infinite loop
-            fid = svc.scan_faculty_gaps(temp_indexes)
-            if fid is None or fid in faculty_ids:
-                break
-            faculty_ids.append(fid)
-            # Temporarily mark as covered so scan finds the next gap
-            temp_indexes = temp_indexes + [{"index_id": f"auto_{fid}_placeholder"}]
-
-        if not faculty_ids:
-            return None
-
-        results = asyncio.run(
-            svc.run_batch(
-                faculty_ids=faculty_ids,
-                settings=resolved,
-                orchestrator=self,
-                concurrency=concurrency,
-                request_delay_ms=delay_ms,
-                progress_cb=progress_cb,
-            )
-        )
-        self._capture_improvement_sources_from_autonomous_result(results)
-        return results[0] if results else None
+            self._capture_improvement_sources_from_autonomous_result(results)
+            return results[0] if results else None
+        finally:
+            with _autonomous_running_lock:
+                _autonomous_running_count -= 1
 
     def list_improvement_entries(
         self,
