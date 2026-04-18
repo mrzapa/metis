@@ -67,7 +67,7 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 | M12 | **Interactive star catalogue** — searchable, filterable star explorer | 🌌 | Ready | [`docs/plans/2026-04-05-interactive-star-catalogue.md`](../docs/plans/2026-04-05-interactive-star-catalogue.md) | — | 2026-04-05 | M02 (share renderer) |
 | M13 | **Seedling + Feed** — always-on quantized local model, news-comet ingestion, growth stages | 🌱 | Draft needed | *(to be created: `plans/seedling-and-feed/plan.md`)* | — | — | M01 |
 | M14 | **The Forge** — technique gallery UI, togglable frontier modules | 🌱🧠 | Draft needed | *(to be created: `plans/the-forge/plan.md`)* | — | — | M02, M06 |
-| M15 | **Pro tier + public launch** — paywall, skill pack, HN/r/LocalLLaMA launch | 🔧 | Draft needed | *(to be created: `plans/pro-tier-launch/plan.md`)* | — | — | M13, M14 |
+| M15 | **Pro tier + public launch** — paywall, skill pack, HN/r/LocalLLaMA launch | 🔧 | Draft needed | [`plans/pro-tier-launch/plan.md`](pro-tier-launch/plan.md) (harvest stub) | — | 2026-04-18 | M13, M14 |
 | M16 | **Personal evals** — track companion improvement on user's specific tasks | 🌱 | Draft needed | *(to be created: `plans/personal-evals/plan.md`)* | — | — | M13 |
 | M17 | **Network audit** — outbound call panel, per-provider block, offline proof | 🔧 | Draft needed | *(to be created: `plans/network-audit/plan.md`)* | — | — | — |
 | M18 | **LoRA fine-tuning (stretch)** — companion weights adapt to user data | 🌱 | Draft needed | *(to be created: `plans/lora-stretch/plan.md`)* | — | — | M13 |
