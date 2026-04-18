@@ -251,8 +251,8 @@ function StarMiniPreview({
   const [r2, g2, b2] = (relatedDomainIds ?? [])[0]
     ? getFacultyColor(relatedDomainIds![0])
     : [208, 216, 232];
-  const core = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
-  const halo = `rgba(${Math.round(r2 * 255)}, ${Math.round(g2 * 255)}, ${Math.round(b2 * 255)}, 0.55)`;
+  const core = `rgb(${r}, ${g}, ${b})`;
+  const halo = `rgba(${r2}, ${g2}, ${b2}, 0.55)`;
   const hasRing = stage === "integrated" || stage === "growing";
 
   return (
