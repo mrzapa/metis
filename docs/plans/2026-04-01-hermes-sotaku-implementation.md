@@ -12,6 +12,8 @@
 
 ## Phase 1: IterRAG — Convergence-Based Retrieval Loop
 
+> **Claim (2026-04-18):** M03 **IterRAG convergence** is claimed as **backend-only** work with **zero collision risk with M02**.
+
 **Files:**
 - Modify: `metis_app/engine/streaming.py` (lines ~250–360)
 - Modify: `metis_app/default_settings.json`

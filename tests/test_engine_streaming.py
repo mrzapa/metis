@@ -500,6 +500,55 @@ def test_stream_agentic_mode_respects_max_iterations(tmp_path, monkeypatch) -> N
     assert event_types[-1] == "final"
 
 
+def test_stream_agentic_mode_emits_convergence_and_stops_early(tmp_path, monkeypatch) -> None:
+    """Convergence event is emitted and loop exits before iteration budget."""
+    build_result = _build_test_index(tmp_path, monkeypatch)
+
+    monkeypatch.setattr(
+        engine_streaming,
+        "_identify_gaps",
+        lambda question, draft, ctx, llm: ["gap Q"],
+    )
+    monkeypatch.setattr(
+        engine_streaming,
+        "_embed_text",
+        lambda text, settings: [1.0, 0.0, 0.0],  # stable draft embedding => converge
+    )
+
+    req = RagQueryRequest(
+        manifest_path=build_result.manifest_path,
+        question="Who wrote the first algorithm?",
+        settings={
+            "embedding_provider": "mock",
+            "llm_provider": "mock",
+            "vector_db_type": "json",
+            "agentic_mode": True,
+            "agentic_iteration_budget": 4,
+            "agentic_convergence_threshold": 0.95,
+            "top_k": 2,
+            "retrieval_k": 2,
+        },
+        run_id="agentic-converges",
+    )
+
+    events = list(stream_rag_answer(req))
+    event_types = [e["type"] for e in events]
+    assert "error" not in event_types
+
+    starts = [e for e in events if e["type"] == "iteration_start"]
+    # First pass seeds previous embedding; second pass reaches convergence.
+    assert [e["iteration"] for e in starts] == [1, 2]
+
+    converged = [e for e in events if e["type"] == "iteration_converged"]
+    assert len(converged) == 1
+    assert converged[0]["iteration"] == 2
+    assert converged[0]["convergence_score"] >= 0.95
+
+    complete = next(e for e in events if e["type"] == "iteration_complete")
+    assert complete["iterations_used"] == 2
+    assert complete["strategy_fingerprint"] == "convergence"
+
+
 def test_stream_non_agentic_no_agentic_events(tmp_path, monkeypatch) -> None:
     """When agentic_mode is False, no agentic events are emitted."""
     build_result = _build_test_index(tmp_path, monkeypatch)
