@@ -1,110 +1,145 @@
 # METIS — Vision
 
-> **The Cognitive Cosmos.**
-> A private, local-first AI companion that turns everything you read, watch, and think into a living universe you can navigate — and grows alongside you.
+> **Grow an AI that actually knows you.**
+>
+> A living workspace where a small AI companion takes root, learns from your life, and blooms into something no cloud chatbot can match.
 
 ---
 
-## Why this exists
-
-The last three years produced two kinds of AI products:
-
-1. **Cloud chat** — ChatGPT, Claude, Perplexity. Powerful, general, and built on the assumption that your data can leave your machine.
-2. **Cloud workspaces** — Notion AI, Glean, Mem. Competent retrieval on top of documents you've already handed to a vendor.
-
-Neither option works for people whose knowledge is the *product*: analysts, researchers, consultants, lawyers, clinicians, investigators, IP-sensitive professionals. For them, every prompt is a leak risk and every vendor is a lock-out.
-
-METIS exists for them. The bet is simple: there is a durable market for an AI workspace that is private by default, beautiful enough to be loved, and rich enough to compete on capability — not just on "we don't train on your data."
-
 ## What METIS is
 
-METIS is three things fused into one product:
+METIS is a **living AI workspace**. Not a chat app. Not a notes app. Not a RAG tool. A workspace where an AI companion lives inside your machine, grows from what you feed it, and becomes — slowly, compoundingly, unmistakably — *yours*.
 
-- **Cosmos** — every document, paper, podcast, video, conversation, and note you drop into METIS becomes a *star* in a navigable 3D universe. Stars are placed by faculty (Perception, Knowledge, Memory, Reasoning, Skills, Strategy, Personality, Values). Indexes, sessions, and topics become constellations. The graph is not decoration; it is the primary navigation.
+You drop in documents, papers, podcasts, videos. They take root as stars in a navigable cosmos. A small, always-on local model watches, reads, reflects, and remembers. When a new technique from the AI frontier catches your eye — IterRAG, Swarm, Heretic, multimodal faculty extraction, time-series forecasting — you graft it in. The companion learns to use it. Over weeks and months, what started as a blank workspace becomes an intelligence grown on your life.
 
-- **Companion** — a persistent AI entity that lives in the workspace shell. It has an identity that bootstraps on first run, an Atlas of episodic memories that persists across sessions, a reflection loop that runs in the background, and an autonomous-research mode that follows its own curiosity while you work. Over months, it becomes *yours*.
+Every layer is swappable. Every capability is inspectable. Everything runs locally. METIS works on an airplane.
 
-- **Cortex** — a research-grade RAG engine with five tuned modes (Q&A, Summary, Tutor, Research, Evidence Pack), hybrid retrieval, sub-query expansion, iterative agentic refinement with convergence-based early-stopping, skills that auto-evolve from your own traces, and a trace timeline that makes every retrieval decision inspectable.
+## The pitch in one line
 
-All of it runs locally. Every layer — LLM, embeddings, vector store — is swappable. With a local GGUF model, METIS works on an airplane.
+**Every other AI product rents you a stranger's mind. METIS grows one with you.**
+
+## The three pillars
+
+Every capability in the codebase lives under one of three:
+
+### 🌌 Cosmos — your knowledge as a universe
+Every document, paper, podcast, video, tweet, and note becomes a *star*. Stars are placed by faculty (Perception, Knowledge, Memory, Reasoning, Skills, Strategy, Personality, Values). Indexes become constellations. Live activity renders as comets. Individual stars open into a Star Observatory where you assign archetypes, plan learning routes, and link sources. The constellation is the primary navigation — not decoration.
+
+### 🌱 Companion — an AI that grows
+The beating heart of METIS. A persistent local AI entity that bootstraps an identity on first run, keeps an Atlas of episodic memories, runs reflection loops in the background, and follows its own curiosity when you're away. It ingests news feeds, RSS, podcasts, and your documents as continuous nutrients. It has visible growth stages. Over months, its brain graph densifies and its skills accumulate until it knows your thinking better than any cloud assistant ever could.
+
+### 🧠 Cortex — every frontier technique, plug and play
+Five tuned modes (Q&A, Summary, Tutor, Research, Evidence Pack). Hybrid retrieval with MMR and reranking. Sub-query decomposition. IterRAG convergence for agentic refinement. Swarm persona simulation. Tribev2 multimodal faculty classification for audio, video, images. TimesFM 2.5 forecasting. Heretic abliteration for uncensored open-weight models. A trace timeline that makes every retrieval, reflection, and agentic iteration inspectable. Any LLM, any embedder, any vector store.
+
+Most AI products have one of these done well. METIS has all three, fused, local, beautiful.
+
+## How an AI grows in METIS
+
+The promise is simple: every day, your companion gets smarter — about you, not about everyone.
+
+- **Feed it.** Drop documents, paste URLs, subscribe to RSS, point it at a podcast feed. The news-comet service streams fresh signal continuously.
+- **Graft in techniques.** Browse the Forge — a gallery of frontier AI techniques as togglable modules. IterRAG convergence, swarm simulation, multimodal ingestion, abliterated models, sub-query expansion. Paste an arXiv link, get a new skill.
+- **Let it dream.** Overnight, the companion reflects. Candidate skills emerge from high-convergence traces. Memory consolidates. In the morning, it proposes what it learned.
+- **Watch it grow.** Companion stages (Seedling → Sapling → Bloom → Elder) track knowledge density, skill count, reflection depth. The brain graph densifies visibly. Personal evals track how the companion is getting better at *your* specific tasks.
+- **Keep it yours.** Nothing phones home. Every call is inspectable. The weights, the memory, the graph — all portable, all on your machine.
+
+The stretch goal: overnight LoRA fine-tuning on your data. Not promised on day one, because real continual learning is hard. But it's a goal — the moment the companion's *weights* adapt to you, not just its behaviour, METIS becomes genuinely uncloneable.
+
+## Why this wins
+
+- **Nobody else does this.** Jan, LM Studio, Open WebUI, AnythingLLM are stateless per-session. Notion AI, ChatGPT, Perplexity are stateless and off-premise. None grow. None live. None compound.
+- **The constellation UI.** WebGL starfield with LOD and spatial indexing, Three.js brain graph subscribing to live retrieval, Star Observatory, comets. No competitor has anything close. Brand and product simultaneously.
+- **Emotionally sticky.** You don't leave an AI you grew. The switching cost is the AI itself.
+- **Democratic.** No PhD needed. No fine-tuning knowledge. Plug in, feed it, watch. A curious dad with a laptop can end up with a companion nobody else has.
+- **Every weird capability pays off.** Heretic, Swarm, Tribev2, TimesFM — these stop being loose experiments and start being *nutrients* for the companion's growth. Maximalism becomes the feature.
 
 ## Who it is for
 
-**Primary wedge (first 12 months):**
+Anyone who has ever thought *I wish I could just try that* about an AI paper, trick, or technique. Anyone who wants an AI that feels like *theirs* rather than rented by the month. Concretely:
 
-- **Independent analysts and boutique researchers** — earnings prep, sector reports, competitive intelligence. Forecast mode (TimesFM 2.5) and Evidence Pack → PPTX match their actual deliverables.
+- AI-curious professionals who don't code
+- Indie writers, fiction authors, creators
+- Hobbyist researchers, autodidacts, students
+- Homelabbers, tinkerers, r/LocalLLaMA regulars
+- Privacy people — already paying for Obsidian, Kagi, Mullvad, Proton, Framework
+- Anyone whose knowledge is their work product and doesn't want it on someone else's servers
 
-**Secondary expansions (12–24 months):**
-
-- **Academic researchers** — paper ingestion, Tutor mode, multimodal lectures, knowledge graph densification over time.
-- **Legal and compliance teams** — discovery, due diligence, claim-level grounding, audit-ready citation trails.
-- **Regulated enterprise** — defense, finance, healthcare, government. On-prem, local-only, SSO.
-
-We do not try to be ChatGPT. We do not try to be Notion. We try to be the private, intelligent workspace that a professional chooses for life.
-
-## Why METIS wins
-
-Five moats, all already partially built:
-
-1. **The constellation UI.** A WebGL starfield with LOD rendering, a Three.js brain graph that subscribes to live retrieval activity, a Star Observatory with ML-suggested archetypes and learning-route planning, and news/activity rendered as animated comets. No competitor in the RAG or second-brain space has anything close. It is brand and product simultaneously.
-2. **The companion with identity and memory.** Persistent Hermes HUD, Atlas episodic memory, reflection cycles, autonomous research, WebGPU-backed local embeddings. The "AI that actually knows me" substrate that most startups are raising rounds to build.
-3. **The skill system.** YAML-defined, triggered passively by query shape and file type, tunable per-mode, and — on the roadmap — self-evolving from high-convergence traces. A declarative personalisation layer that replaces a wall of toggles.
-4. **Research-grade retrieval.** Five modes with independent tuning, hybrid BM25 + semantic retrieval, MMR, reranker, sub-query expansion, IterRAG convergence, swarm persona simulation, and Tribev2 multimodal faculty classification. Trace timeline makes every decision inspectable.
-5. **Local-first with no vendor lock-in.** Tauri, SQLite, local GGUF, factory pattern for every provider. The only serious private AI workspace on the market.
-
-Individually, any one of these is catchable. Together, they are a product nobody else is building.
+**Not a target:** Regulated-industry compliance buyers, enterprise procurement, anyone who needs SOC 2 on day one. Those pitches are incompatible with Heretic and the living-companion ethos. We don't chase them.
 
 ## Product principles
 
-1. **Private by default. Never by apology.** Local, encrypted, portable. Sync is opt-in and end-to-end encrypted. No telemetry without explicit consent.
+1. **Intelligence grown, not bought.** Every session leaves the companion smarter about you. Growth is the product.
 2. **Beauty is a feature.** The constellation is not decoration. If a surface is not beautiful, it is not finished.
-3. **The companion grows.** Every session leaves the companion smarter about you, not about everyone.
-4. **Skills over settings.** New capabilities arrive as skills that auto-activate; we do not grow the settings page.
-5. **Trace everything.** Every retrieval, every reflection, every agentic iteration is inspectable. Transparency is the antidote to hallucination.
-6. **Preserve and productise.** The codebase is an asset. We surface what exists before we build what does not.
-7. **One interface.** Next.js in Tauri, backed by a local Litestar API. No Qt, no Electron, no browser-only mode (per ADR 0004).
+3. **Every technique, plug and play.** If it's in the codebase, it's one click away. The Forge is how new capabilities arrive.
+4. **Skills over settings.** New capabilities arrive as skills that auto-activate. The settings page does not grow.
+5. **Trace everything.** Every retrieval, reflection, and iteration is inspectable. Transparency is the antidote to hallucination.
+6. **Local by default. Always.** Nothing phones home without explicit consent. Cloud features are opt-in and end-to-end encrypted.
+7. **Preserve and productise.** The codebase is an asset. Surface what exists before building what doesn't.
+8. **One interface.** Next.js in Tauri, backed by a local Litestar API (per ADR 0004).
+9. **No capability without a star.** If a feature has no home in the constellation, it doesn't ship.
 
 ## Business model
 
-A freemium ladder where the business-model unlock is encrypted sync for teams.
+A lifestyle business. No team tier. No enterprise. No employees unless the founder decides otherwise. No venture capital.
 
-| Tier | Price | For | Delivers |
-|------|-------|-----|----------|
-| **Solo — Free** | $0 | Individual experimentation | Full local features, one active constellation, community models |
-| **Solo — Pro** | $29/mo | Power users | Unlimited constellations, companion autonomous research, forecast mode, PPTX export, skill marketplace, priority presets |
-| **Team** | $79/seat/mo | Research groups, boutique firms | Everything in Pro + end-to-end encrypted constellation sync, shared skills, team-scoped Atlas memory |
-| **Enterprise** | Custom | Regulated industries | On-prem, SSO, audit log, managed GGUF inference, dedicated skill engineering, SLAs |
+| Tier | Price | What you get |
+|------|-------|--------------|
+| **Free** | $0 | Full local features, one active constellation, community models. Free forever. |
+| **Pro** | $29/mo · $290/yr | Unlimited constellations, companion autonomous research, forecast mode, PPTX export, the Forge, skill marketplace, priority presets |
+| **Lifetime** | $499 one-time | Everything in Pro, forever. No subscription. The price of never being held hostage. |
+| **Supporter** | $10/mo (optional) | Same as Free, plus a supporter badge and direct access to the maintainer |
 
-Optional long-tail (18–24 months): **METIS Platform.** Open the Skills SDK and Atlas memory API so other applications can embed persistent companions. Memory-as-a-service for the next wave of agentic apps.
+Revenue target: $200–400k/yr solo. Example mix: 500 Pro × $29/mo ($174k/yr) + 200 Lifetime × $499 ($100k, replenishing) + Supporter and incidental revenue. Achievable from r/LocalLLaMA, HN, AI Twitter, and indie-creator communities.
 
-## Roadmap (next 12 months)
+Optional once Pro base is meaningful: skill marketplace revenue share (creators earn 80%, METIS 20%). No rush on this.
 
-**Q1 — Preserve and productise.**
-Finish the preserve-and-productize plan. Ship IterRAG convergence. Wire the companion into evidence and trace surfaces so it visibly reflects on active work. Kill or flag-gate dead surfaces (Qt refs, metis-reflex, metis-web-lite, Heretic). Onboarding path: three minutes to first magic moment.
+## What we're building, in order
 
-**Q2 — "METIS for Analysts" showcase.**
-Opinionated persona onboarding. Forecast + Research + Evidence Pack → PPTX pre-tuned end-to-end. First skill pack shipped. Pro tier launch.
+We're sprinting — no quarter targets. What matters is the order, not the calendar.
 
-**Q3 — Skill marketplace and self-evolution.**
-Ship roadmap Phase 3 (skills auto-generated from high-convergence traces). Public skill sharing. This creates the network effect a local-first product normally lacks.
+**Now — preserve and productise.**
+Finish the preserve-and-productize plan. Ship IterRAG convergence. Wire the companion visibly into evidence and trace surfaces. Kill or flag-gate dead paths (Qt refs, `metis-reflex`, `metis-web-lite`). Tighten onboarding so a new user hits a magic moment within minutes.
 
-**Q4 — Encrypted team sync.**
-CRDT-based constellation sync, end-to-end encrypted. Team tier launch. The moment METIS becomes a business, not a beautiful app.
+**Next — the Seedling and the Feed.**
+The small-LLM-that-lives. A persistent quantized local model (Phi-class or Llama-3.2-1B) running as a background worker. Continuous ingestion of news, RSS, and user documents. Visible growth stages. Overnight reflection cycle. This is the feature the whole pitch rests on.
+
+**Next — the Forge.**
+Technique gallery UI. Every frontier method in the codebase (IterRAG, Swarm, Heretic, Tribev2, TimesFM, sub-query expansion) becomes a togglable module. Paste an arXiv link, browse curated techniques, watch the companion absorb them.
+
+**Next — Pro tier and public launch.**
+Pro tier ships. Launch announcement to r/LocalLLaMA, HN, indie AI Twitter. First skill pack shipped. Public roadmap published.
+
+**Next — Dreams and self-evolution.**
+Phase 3 of the existing roadmap: skills auto-generated from high-convergence traces. Companion proposes new skills each morning. Skill marketplace opens. Lifetime tier launches.
+
+**Next — Personal Evals and Network Audit.**
+Track how the companion is getting better at the user's specific tasks over time. Network audit panel — show every outbound call, block per provider, prove offline.
+
+**Stretch — LoRA fine-tuning on user data.**
+The moment the companion's *weights* adapt to the user, not just its behaviour. Genuinely uncloneable. Hard problem (catastrophic forgetting, eval hell, GPU demands) — not promised on the tin, but worth aiming at.
+
+**Stretch — mobile read-only companion.**
+Tauri Mobile or a thin PWA that reads from your desktop METIS. Companion in your pocket, knowledge on your laptop.
 
 ## What we are explicitly not doing
 
 - Not a general-purpose chat assistant. ChatGPT owns that.
 - Not a Notion competitor. Docs-as-pages is not the metaphor.
-- Not a cloud-first product with a local fallback. Local-first is the product.
-- Not a platform before it is a product. Skills SDK is year two, not year one.
-- Not adding capabilities that cannot be reached from the constellation. If it has no star, it does not ship.
+- Not a cloud-first product with a local fallback. Local is the product.
+- Not a team/enterprise tier. No SSO, no SOC 2, no compliance pitch.
+- Not raising venture capital. Not building a company with employees unless the founder chooses to.
+- Not a platform before it is a product. Any SDK is years out.
+- Not shipping any capability that cannot be reached from the constellation.
+- Not promising things we don't ship — LoRA fine-tuning, continual learning, and mobile are stretch goals, not guarantees.
 
 ## Risks and honest tradeoffs
 
-- **Privacy + local + beauty may be a niche, not a mass market.** The hedge is to own the lucrative niche (regulated professions) rather than fight ChatGPT and Perplexity for general knowledge work.
-- **The codebase has ~10 partially-finished sophisticated systems.** The highest-leverage act for the next quarter is *cutting* three of them, not adding new ones.
-- **The companion is the biggest emotional moat and the biggest execution risk.** If it feels dumb or forgetful, the whole pitch collapses. Memory quality, identity persistence, and the "does it actually know me" feel must be invested in disproportionately.
+- **The small-LLM-that-lives is the hardest technical claim.** Real continual learning is brittle. The honest default is that the *system* grows (skills accumulate, memory densifies, retrieval sharpens, traces become skills) — not the model weights. That's still differentiated enough to win. LoRA fine-tuning is a stretch goal.
+- **Ten partially-finished sophisticated systems in the codebase.** Cutting three of them is higher-leverage than adding new ones. The Forge is the mechanism — if a technique doesn't earn a slot in the gallery, it doesn't survive.
+- **The companion is the biggest emotional moat and the biggest execution risk.** If it feels dumb or forgetful, the whole pitch collapses. Memory quality, identity persistence, and "does it actually know me" feel must be invested in disproportionately.
+- **Solo-founder capacity.** Scope is cuttable. Any item above the stretch line can slip without breaking the pitch, as long as preserve-and-productise holds.
+- **"Intelligence grown, not bought" is a promise. If the companion doesn't visibly grow, users will churn.** Growth rings, personal evals, and the morning "here's what I learned overnight" surface aren't nice-to-have — they're the product.
 
 ## One-line summary
 
-**METIS is the private AI workspace for people whose knowledge is their product — a cognitive cosmos they navigate, inhabited by a companion that grows with them.**
+**METIS is a living AI workspace where a small local companion takes root, learns from your life, and grows into something no cloud chatbot can match. Intelligence grown, not bought.**
