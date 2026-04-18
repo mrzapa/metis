@@ -66,14 +66,29 @@ void main() {
 
   // Archetype branches only fire for the closeup (focused) star. Other
   // tiers ignore archetype so point / sprite / hero rendering stays
-  // untouched.
-  // Pulsar (id 1): ~3 Hz size pulsation on top of twinkle.
+  // untouched. Archetype ids come from STAR_VISUAL_ARCHETYPE_IDS and are
+  // the ABI between this shader and the CPU attribute packer.
   float archetypePulse = 1.0;
-  if (isFocused > 0.5 && aArchetype > 0.5 && aArchetype < 1.5) {
-    archetypePulse = 1.0 + sin(uTime * 18.85) * 0.18;
+  float archetypeSizeScale = 1.0;
+  if (isFocused > 0.5) {
+    // Pulsar (id 1): ~3 Hz size pulsation on top of twinkle.
+    if (aArchetype > 0.5 && aArchetype < 1.5) {
+      archetypePulse = 1.0 + sin(uTime * 18.85) * 0.18;
+    }
+    // Red giant (id 4): slow ~0.5 Hz swell, mild point-size bloat so the
+    // warm bloom reads as physically large.
+    else if (aArchetype > 3.5 && aArchetype < 4.5) {
+      archetypePulse = 1.0 + sin(uTime * 3.14) * 0.06;
+      archetypeSizeScale = 1.12;
+    }
+    // Nebula (id 6): no sharp core at all — give the sprite more canvas
+    // so the diffuse cloud effect in the fragment stage can spread.
+    else if (aArchetype > 5.5 && aArchetype < 6.5) {
+      archetypeSizeScale = 1.18;
+    }
   }
 
-  gl_PointSize = max(1.0, aShape.z * uDpr * tierBoost * heroGlow * twinkle * zoomSizeScale * blur * archetypePulse);
+  gl_PointSize = max(1.0, aShape.z * uDpr * tierBoost * heroGlow * twinkle * zoomSizeScale * blur * archetypePulse * archetypeSizeScale);
 
   vAddable = aColorA.w;
   vBloom = aColorC.w;
@@ -122,6 +137,15 @@ void main() {
     discard;
   }
 
+  // Archetype flags. Only fire on closeup tier. Ids come from
+  // STAR_VISUAL_ARCHETYPE_IDS (main_sequence=0 baseline / pulsar=1 /
+  // red_giant=4 / nebula=6 / black_hole=7).
+  bool isCloseup = vTier > 2.5;
+  bool isPulsar = isCloseup && vArchetype > 0.5 && vArchetype < 1.5;
+  bool isRedGiant = isCloseup && vArchetype > 3.5 && vArchetype < 4.5;
+  bool isNebula = isCloseup && vArchetype > 5.5 && vArchetype < 6.5;
+  bool isBlackHole = isCloseup && vArchetype > 6.5 && vArchetype < 7.5;
+
   float tierBlend = vTier > 1.5 ? 1.0 : (vTier > 0.5 ? 0.6 : 0.0);
   float haloMask = safeSmoothstep(1.0, max(0.0, 0.16 + (1.0 - tierBlend) * 0.22), dist);
   float surfaceMask = safeSmoothstep(0.84, max(0.06, vCoreRadius * 1.95), dist);
@@ -139,15 +163,43 @@ void main() {
     color += vAccentColor * accent;
   }
 
-  // Archetype: pulsar (id 1, closeup only) sharpens diffraction rays so the
-  // twin spikes read as lighthouse beams. Baseline main_sequence (id 0) and
-  // all other archetypes keep the standard diffraction strength.
-  bool isCloseup = vTier > 2.5;
-  bool isPulsar = isCloseup && vArchetype > 0.5 && vArchetype < 1.5;
+  // Red giant (id 4): warm-shift the base colour mix and widen the halo
+  // so the disc reads as large and cool.
+  if (isRedGiant) {
+    vec3 warmTint = mix(vCoreColor, vec3(1.0, 0.56, 0.28), 0.42);
+    color = mix(color, warmTint, 0.35);
+  }
+
+  // Nebula (id 6): replace the sharp star look with a diffuse, noise-
+  // modulated cloud. Angular + radial sines break the smooth circle into a
+  // patchy glow; the accent channel carries wisps. No hard core survives.
+  if (isNebula) {
+    float ang = atan(uv.y, uv.x);
+    float cloud = 0.5
+      + 0.25 * sin(ang * 3.0 + dist * 6.0)
+      + 0.15 * sin(ang * 7.0 - dist * 11.0 + vTwinkle * 3.0);
+    cloud = clamp(cloud, 0.0, 1.0);
+    vec3 cloudColor = mix(vHaloColor, vAccentColor, 0.55);
+    color = mix(color, cloudColor * (0.55 + cloud * 0.55), 0.82);
+  }
+
+  // Black hole (id 7): crush the inner disc to near-black; draw a
+  // luminous accretion ring at ~0.55..0.72 radius; keep a faint bent-light
+  // halo just outside it. The halo/accent colours drive the ring hue.
+  if (isBlackHole) {
+    float ringMask = safeSmoothstep(0.53, 0.6, dist) * (1.0 - safeSmoothstep(0.72, 0.82, dist));
+    vec3 ringColor = mix(vHaloColor, vAccentColor, 0.4) * 1.6;
+    float darken = 1.0 - safeSmoothstep(0.5, 0.0, dist);
+    color = mix(vec3(0.0), color, darken);
+    color += ringColor * ringMask;
+  }
+
+  // Pulsar (id 1): sharpened diffraction rays (×1.9 boost, steeper exp
+  // falloff). Baseline + other archetypes keep the standard strength.
   float diffractionBoost = isPulsar ? 1.9 : 1.0;
   float diffractionFalloff = isPulsar ? 19.0 : 13.0;
 
-  if (vDiffraction > 0.02) {
+  if (vDiffraction > 0.02 && !isNebula && !isBlackHole) {
     float crossX = exp(-abs(uv.x) * diffractionFalloff);
     float crossY = exp(-abs(uv.y) * diffractionFalloff);
     float diffraction = max(crossX, crossY) * (1.0 - dist) * vDiffraction * (0.18 + tierBlend * 0.2) * diffractionBoost;
@@ -158,15 +210,43 @@ void main() {
     color = mix(color, vec3(0.95, 0.82, 0.55), 0.12);
   }
 
-  // Pulsar tightens the visible disc: halo contribution dims, core brightens,
-  // and the ~3 Hz size pulsation from the vertex stage also modulates alpha
-  // so the spikes breathe in sync with the size beat.
-  float haloScale = isPulsar ? 0.72 : 1.0;
-  float coreScale = isPulsar ? 1.35 : 1.0;
-  float pulseAlpha = isPulsar ? (0.85 + vArchetypePulse * 0.3) : 1.0;
+  // Archetype alpha adjustments. Each archetype tunes halo/core/rim alpha
+  // and an overall pulse term independently.
+  // Pulsar: tight visible disc (halo ×0.72, core ×1.35) + pulse alpha.
+  // Red giant: wide soft halo (halo ×1.18) + slow pulse.
+  // Nebula: no hard core (core ×0.2), boosted halo (halo ×1.55).
+  // Black hole: suppress the entire default alpha stack — the ring above
+  //             already wrote the only visible contribution.
+  float haloScale = 1.0;
+  float coreScale = 1.0;
+  float rimScale = 1.0;
+  float pulseAlpha = 1.0;
+  if (isPulsar) {
+    haloScale = 0.72;
+    coreScale = 1.35;
+    pulseAlpha = 0.85 + vArchetypePulse * 0.3;
+  } else if (isRedGiant) {
+    haloScale = 1.18;
+    coreScale = 0.92;
+    pulseAlpha = 0.94 + vArchetypePulse * 0.12;
+  } else if (isNebula) {
+    haloScale = 1.55;
+    coreScale = 0.2;
+    rimScale = 0.4;
+  } else if (isBlackHole) {
+    haloScale = 0.0;
+    coreScale = 0.0;
+    rimScale = 0.0;
+  }
 
   float alphaBase = (0.18 + vBrightness * 0.46) * vTwinkle;
-  float alpha = haloMask * alphaBase * haloScale + coreMask * 0.28 * coreScale + rimMask * 0.08;
+  float alpha = haloMask * alphaBase * haloScale + coreMask * 0.28 * coreScale + rimMask * 0.08 * rimScale;
+  if (isBlackHole) {
+    // Ring has its own mask; read it back so the pixel is visible even
+    // though halo/core/rim scales are 0.
+    float ringMask = safeSmoothstep(0.53, 0.6, dist) * (1.0 - safeSmoothstep(0.72, 0.82, dist));
+    alpha = ringMask * (0.6 + vBrightness * 0.35);
+  }
   alpha = clamp(alpha * (0.9 + vBloom * 0.12) * pulseAlpha, 0.0, 1.0);
 
   // Depth-of-field: ambient stars dim and soften outside the focus radius.

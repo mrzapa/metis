@@ -1,7 +1,7 @@
 ---
 Milestone: M02 — Constellation 2D refactor
 Status: In progress
-Claim: claude/m02-closeup-archetype (Phase 3 scaffold) — Phases 0/0.3/1/2 landed
+Claim: claude/m02-archetypes-nebula-bh-rg (Phase 3: nebula/black_hole/red_giant) — Phases 0/0.3/1/2/3-scaffold+pulsar landed
 Last updated: 2026-04-18 by claude-opus-4-7
 Vision pillar: Cosmos
 ADR: docs/adr/0006-constellation-design-2d-primary.md
@@ -142,7 +142,7 @@ first two archetypes ✅, 2026-04-18 by claude-opus-4-7):**
   archetype attribute is *only consulted on the closeup tier*
   (`vTier > 2.5`) — ambient/point/sprite/hero rendering stays untouched,
   so Phase 3 cannot regress the galaxy view.
-- 3.3 ✅ **(first two archetypes only):**
+- 3.3 ✅ **(5 of 12 archetypes shipped):**
   - `main_sequence` — baseline. The closeup branch is a no-op; output is
     bit-identical to the pre-Phase-3 renderer once the attribute is
     omitted or pinned to 0.
@@ -151,13 +151,26 @@ first two archetypes ✅, 2026-04-18 by claude-opus-4-7):**
     diffraction rays (×1.9 boost + steeper exp falloff) so the Bayer
     spikes read as lighthouse beams. Pulsation also modulates final
     alpha so spikes breathe with the size beat.
-  - Remaining 10 archetypes (`quasar`, `brown_dwarf`, `red_giant`,
-    `binary`, `nebula`, `black_hole`, `comet`, `constellation`,
-    `variable`, `wolf_rayet`) are **deferred to follow-up slices** per
-    ADR 0006 "one PR per archetype is fine" guidance. Scaffold is
-    ready; each archetype can ship as a short PR that adds its id
-    branches in the vertex/fragment shader without buffer-layout
-    churn.
+  - `red_giant` — slow ~0.5 Hz swell (`sin(uTime * 3.14) * 0.06`), point-
+    size bloat ×1.12, halo alpha ×1.18, core alpha ×0.92, and a warm
+    colour mix (`mix(core, vec3(1.0, 0.56, 0.28), 0.42)` at 0.35 weight)
+    so the disc reads as a broad, cool-burning giant.
+  - `nebula` — no sharp star. Point-size bloat ×1.18; the default core/
+    rim are suppressed (core alpha ×0.2, rim ×0.4); halo alpha ×1.55;
+    the visible pixels come from a two-frequency angular+radial sine
+    cloud (`sin(ang * 3 + dist * 6) + 0.6 * sin(ang * 7 - dist * 11)`)
+    blended with accent colour. Diffraction spikes suppressed so no
+    hard cross survives.
+  - `black_hole` — crushes the inner disc to black
+    (`mix(vec3(0.0), color, 1.0 - smoothstep(0.5, 0.0, dist))`) and
+    draws a luminous accretion ring at ~0.55-0.72 radius from the
+    halo + accent colours scaled ×1.6. Halo/core/rim alpha stack
+    zeroed out — the only visible contribution comes from the ring
+    mask (`0.6 + brightness * 0.35`). Diffraction spikes suppressed.
+  - Remaining 7 archetypes (`quasar`, `brown_dwarf`, `binary`, `comet`,
+    `constellation`, `variable`, `wolf_rayet`) still deferred per
+    ADR 0006 "one PR per archetype is fine" — scaffold and attribute
+    plumbing already in place.
 - 3.4 ✅ — Render-plan tests assert the closeup tier wiring. Shader-side
   archetype effect visual tests are intentionally out of scope (vitest
   runs in jsdom, no WebGL context). Plumbing the render params through
@@ -187,13 +200,14 @@ files → 0 errors, 0 warnings.
   follow-up phase should decide where per-star labels appear (likely
   Phase 4 Orbital Observatory when faculty stars become individually
   inspectable).
-- **Phase 3 follow-up archetypes** — 10 remaining archetypes can land
-  incrementally. Suggested priority (demo-value first): `nebula`,
-  `black_hole`, `comet`, `quasar`, `red_giant`, `binary`,
-  `brown_dwarf`, `variable`, `wolf_rayet`, `constellation`. Each PR
-  should touch only the vertex/fragment branch blocks marked by
-  archetype id and add one render-plan param test. No buffer-layout
-  changes needed.
+- **Phase 3 follow-up archetypes** — 7 remaining archetypes can land
+  incrementally. Suggested priority (demo-value first): `comet`,
+  `quasar`, `binary`, `brown_dwarf`, `variable`, `wolf_rayet`,
+  `constellation`. Each PR should touch only the vertex/fragment
+  branch blocks marked by archetype id. No buffer-layout changes
+  needed. `comet` is the biggest lift of the remaining set — the
+  trailing tail likely needs a sprite strip or per-frame offset
+  buffer, per ADR 0006.
 - **Phase 4 Orbital Observatory** — unblocked by Phases 0+1+2+3 scaffold.
   Suggested claim: `claude/m02-orbital-observatory`.
 
