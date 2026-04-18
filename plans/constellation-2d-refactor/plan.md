@@ -110,10 +110,13 @@ Add the archetype concept to types and data model. Everything else depends on
 this being present (even if content-type mapping is placeholder-only at first).
 
 **Tasks:**
-- **0.1** — Add `StarArchetype` enum to `landing-star-types.ts`. Values from
-  ADR 0006 table: `main_sequence`, `pulsar`, `quasar`, `brown_dwarf`,
-  `red_giant`, `binary`, `nebula`, `black_hole`, `comet`, `constellation`,
-  `variable`, `wolf_rayet`.
+- **0.1** — Add `StarArchetype` enum to `landing-star-types.ts`. Identifiers
+  are snake_case transliterations of the archetype display names in
+  [ADR 0006](../../docs/adr/0006-constellation-design-2d-primary.md):
+  `main_sequence`, `pulsar`, `quasar`, `brown_dwarf`, `red_giant`, `binary`,
+  `nebula`, `black_hole`, `comet`, `constellation`, `variable`, `wolf_rayet`.
+  (ADR 0006 spells the last one "Wolf-Rayet" in prose; the code identifier
+  is `wolf_rayet` for consistency with the other snake_case values.)
 - **0.2** — Add `archetype: StarArchetype` field to `StellarProfile` in
   `stellar-profile.ts`. Populate via a new `selectArchetype(profile, contentType)`
   function. For now, content-type → archetype mapping lives in a single table
@@ -276,9 +279,11 @@ Only after phases 0–4 are ✅. Remove the retired 3D system.
 - **5.6** — Delete tests that only cover the deleted code. Adapt tests that
   asserted on the 2D→3D swap to the new camera-zoom behaviour.
 
-**Definition of done:** `rg star-surface-shader` and `rg star-dive-overlay`
-return nothing. `tsc` and `pnpm test` pass. `pnpm build` produces a smaller
-bundle.
+**Definition of done:** from the repo root,
+`rg star-surface-shader apps/ metis_app/` and
+`rg star-dive-overlay apps/ metis_app/` return nothing (grep is scoped to
+source trees; this plan doc still mentions the names and that's fine).
+`tsc` and `pnpm test` pass. `pnpm build` produces a smaller bundle.
 
 ### Phase 6 — Annotations (2D accoutrements)
 

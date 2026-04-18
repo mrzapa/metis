@@ -22,8 +22,12 @@ do the work, update the row when they stop.
 
 - **Status**: `Draft` (plan being shaped) · `Ready` (plan complete, can be
   picked up) · `Next up` (currently at the front of the queue) · `In progress`
-  (someone is actively working) · `Blocked` · `Landed` · `Superseded`.
+  (someone is actively working — `Claim` must be non-empty) ·
+  `Rolling` (ongoing reference plan that anyone can chip at; no single claim
+  expected — used for M01 preserve & productise) ·
+  `Blocked` · `Landed` · `Superseded`.
 - **Claim**: session ID, agent name, or branch name. Blank = available.
+  Required whenever `Status` is `In progress`; optional for `Rolling`.
 - **Pillar**: 🌌 Cosmos · 🌱 Companion · 🧠 Cortex · 🔧 Cross-cutting.
 
 ---
@@ -49,7 +53,7 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 
 | # | Milestone | Pillar | Status | Plan doc | Claim | Last updated | Depends on |
 |---|---|---|---|---|---|---|---|
-| M01 | **Preserve & productise** — audit, surface, cut dead paths | 🔧 | In progress | [`docs/preserve-and-productize-plan.md`](../docs/preserve-and-productize-plan.md) | — | 2026-04-18 | — |
+| M01 | **Preserve & productise** — audit, surface, cut dead paths | 🔧 | Rolling | [`docs/preserve-and-productize-plan.md`](../docs/preserve-and-productize-plan.md) | — | 2026-04-18 | — |
 | M02 | **Constellation 2D refactor** — retire 3D sphere, 2D archetype dive (ADR 0006) | 🌌 | Ready | [`plans/constellation-2d-refactor/plan.md`](constellation-2d-refactor/plan.md) | — | 2026-04-18 | — |
 | M03 | **IterRAG convergence** — agentic loop with convergence detection | 🧠 | Ready | [`docs/plans/2026-04-01-hermes-sotaku-implementation.md`](../docs/plans/2026-04-01-hermes-sotaku-implementation.md) (Phase 1) | — | 2026-04-04 | — |
 | M04 | **Reverse curriculum** — faculty hardness scoring drives research order | 🧠 | Ready | [`docs/plans/2026-04-04-reverse-curriculum-implementation.md`](../docs/plans/2026-04-04-reverse-curriculum-implementation.md) | — | 2026-04-04 | M03 |

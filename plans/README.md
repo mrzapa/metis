@@ -33,7 +33,7 @@ Every milestone plan doc starts with this block. Agents **must** keep it current
 ```markdown
 ---
 Milestone: <name from IMPLEMENTATION.md>
-Status: Draft | Ready | In progress | Blocked | Landed | Superseded
+Status: Draft | Ready | In progress | Rolling | Blocked | Landed | Superseded
 Claim: <session id / branch / agent name, or "unclaimed">
 Last updated: YYYY-MM-DD by <who>
 Vision pillar: Cosmos | Companion | Cortex | Cross-cutting
