@@ -7,7 +7,7 @@ This is the **single source of truth for what is being worked on in METIS and
 what comes next.** Every row is a milestone from `VISION.md`. Agents claim rows,
 do the work, update the row when they stop.
 
-**Last reviewed:** 2026-04-19 (reconciled M07/M08/M09/M11 → Landed; M12 Phase 1 landed; M13 plan drafted)
+**Last reviewed:** 2026-04-19 (reconciled M07/M08/M09/M11 → Landed; M12 Phase 1 landed; M13/M14/M16/M17 plans drafted)
 
 ## Quick start for a fresh agent
 
@@ -66,10 +66,10 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 | M11 | **Agent-native state + polling** — KV store, structured chat bridge | 🔧 | Landed | [`docs/plan/agent-native-impl-20260402/plan.yaml`](../docs/plan/agent-native-impl-20260402/plan.yaml) | Landed via PR #459 (`5fd0a3f`, 2026-04-03) | 2026-04-03 | — |
 | M12 | **Interactive star catalogue** — searchable, filterable star explorer | 🌌 | Ready | [`docs/plans/2026-04-05-interactive-star-catalogue.md`](../docs/plans/2026-04-05-interactive-star-catalogue.md) | Phase 1 data layer landed 2026-04-19 (rng, name gen, galaxy distribution, `StarCatalogue` + 48 vitest assertions); Phase 2 renderer pending | 2026-04-19 | M02 (share renderer) |
 | M13 | **Seedling + Feed** — always-on quantized local model, news-comet ingestion, growth stages | 🌱 | Draft | [`plans/seedling-and-feed/plan.md`](seedling-and-feed/plan.md) | — | 2026-04-19 | M01 |
-| M14 | **The Forge** — technique gallery UI, togglable frontier modules | 🌱🧠 | Draft needed | *(to be created: `plans/the-forge/plan.md`)* | — | — | M02, M06 |
+| M14 | **The Forge** — technique gallery UI, togglable frontier modules | 🌱🧠 | Draft | [`plans/the-forge/plan.md`](the-forge/plan.md) | — | 2026-04-19 | M02, M06, M12 |
 | M15 | **Pro tier + public launch** — paywall, skill pack, HN/r/LocalLLaMA launch | 🔧 | Draft needed | [`plans/pro-tier-launch/plan.md`](pro-tier-launch/plan.md) (harvest stub) | — | 2026-04-18 | M13, M14 |
-| M16 | **Personal evals** — track companion improvement on user's specific tasks | 🌱 | Draft needed | *(to be created: `plans/personal-evals/plan.md`)* | — | — | M13 |
-| M17 | **Network audit** — outbound call panel, per-provider block, offline proof | 🔧 | Draft needed | *(to be created: `plans/network-audit/plan.md`)* | — | — | — |
+| M16 | **Personal evals** — track companion improvement on user's specific tasks | 🌱 | Draft | [`plans/personal-evals/plan.md`](personal-evals/plan.md) | — | 2026-04-19 | M13 |
+| M17 | **Network audit** — outbound call panel, per-provider block, offline proof | 🔧 | Draft | [`plans/network-audit/plan.md`](network-audit/plan.md) | — | 2026-04-19 | — |
 | M18 | **LoRA fine-tuning (stretch)** — companion weights adapt to user data | 🌱 | Draft needed | *(to be created: `plans/lora-stretch/plan.md`)* | — | — | M13 |
 | M19 | **Mobile companion (stretch)** — Tauri Mobile or PWA, read-only | 🌌 | Draft needed | *(to be created: `plans/mobile-stretch/plan.md`)* | — | — | M15 |
 
@@ -103,10 +103,10 @@ files, coordinate.
 - **M12** — Star catalogue UI. Coordinates with M02 (shares 2D renderer).
 - **M13** — New process (`metis_app/seedling/`?), continuous ingestion, companion
   stages. Coordinate with M09 (shared dock surface).
-- **M14** — New UI surface (`apps/metis-web/app/forge/`?), skill marketplace hooks.
+- **M14** — Thin UI surface over already-thick technique infrastructure at `apps/metis-web/app/forge/`. Gallery (not a settings page) per principle #4; one star per active technique per principle #9. arXiv-paste produces proposals + skill drafts, not executable code. Harvest: every named technique already exists in the engine with a settings toggle.
 - **M15** — Tauri installer signing, paywall gate, marketing site.
-- **M16** — Evals harness, per-user benchmark store.
-- **M17** — Network panel in settings, per-provider kill switch.
+- **M16** — Evals harness, per-user benchmark store. Load-bearing for M18 (LoRA gate: only promote weights that pass eval). Harvest: ~40-50% of capture infrastructure already in place (`trace_feedback`, `message_feedback`, `BehaviorProfile`, `ArtifactConverter.export_as_eval`).
+- **M17** — Network panel in settings, per-provider kill switch. Operational note: should land *before* M13 (M13 massively increases outbound traffic). Backend uses stdlib `urllib` only — one wrapper covers 100% of in-process outbound. `metis_app/audit.py` is a pytest parity runner, unrelated; new package at `metis_app/network_audit/`.
 - **M18** — LoRA training loop, eval gate, weight swap.
 - **M19** — Read-only mobile client, sync protocol.
 
