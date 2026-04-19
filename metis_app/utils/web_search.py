@@ -9,6 +9,15 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from metis_app.network_audit import (
+    NetworkBlockedError,
+    TRIGGER_WEB_SEARCH_DUCKDUCKGO,
+    TRIGGER_WEB_SEARCH_JINA_READER,
+    audited_urlopen,
+    get_default_settings,
+    get_default_store,
+)
+
 _log = logging.getLogger(__name__)
 
 
@@ -69,8 +78,21 @@ def _ddg_search(query: str, *, n_results: int = 5) -> list[WebSearchResult]:
     url = f"https://api.duckduckgo.com/?q={encoded}&format=json&no_html=1&skip_disambig=1"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "MetisAI/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        # user_initiated=False: most calls come from the autonomous-research
+        # pipeline. A future pass can thread real user-vs-agent context from
+        # the caller (see plans/network-audit/plan.md Phase 4 note).
+        with audited_urlopen(
+            req,
+            trigger_feature=TRIGGER_WEB_SEARCH_DUCKDUCKGO,
+            user_initiated=False,
+            timeout=10,
+            store=get_default_store(),
+            settings=get_default_settings(),
+        ) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+    except NetworkBlockedError as exc:
+        _log.warning("DuckDuckGo search blocked by audit: %s", exc)
+        return []
     except Exception as exc:
         _log.warning("DuckDuckGo search failed: %s", exc)
         return []
@@ -114,8 +136,20 @@ def fetch_page_content(url: str, max_chars: int = 2000) -> str:
             jina_url,
             headers={"User-Agent": "MetisAI/1.0", "Accept": "text/plain"},
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
+        # user_initiated=False by default — Jina Reader is primarily called
+        # from the autonomous-research pipeline's page-content fetcher.
+        with audited_urlopen(
+            req,
+            trigger_feature=TRIGGER_WEB_SEARCH_JINA_READER,
+            user_initiated=False,
+            timeout=15,
+            store=get_default_store(),
+            settings=get_default_settings(),
+        ) as resp:
             return resp.read().decode("utf-8", errors="replace")[:max_chars]
+    except NetworkBlockedError as exc:
+        _log.debug("Jina Reader fetch blocked by audit for %s: %s", url, exc)
+        return ""
     except Exception as exc:  # noqa: BLE001
         _log.debug("Jina Reader fetch failed for %s: %s", url, exc)
         return ""
