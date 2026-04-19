@@ -3,9 +3,14 @@
 Phase 1 landed the declarative pieces: the known-provider registry and
 the classification helper. Phase 2 added the audit event model
 (``events.py``) and the SQLite-backed rolling store (``store.py``).
-Phase 3a (this landing) adds the interception wrapper (``client.py``)
-and the kill-switch layer (``kill_switches.py``). Later phases add the
-API routes and the call-site migration.
+Phase 3a added the interception wrapper (``client.py``) and the
+kill-switch layer (``kill_switches.py``). Phase 3b (this landing)
+adds the lazy-singleton runtime bindings (``runtime.py``), the named
+trigger-feature constants (``trigger_features.py``), and migrates the
+six stdlib ``urlopen`` call sites plus the ``huggingface_hub``
+snapshot path onto the wrapper. Later phases add the Litestar routes
+and the vendor-SDK invocation-layer events (Phase 4), plus the
+privacy panel UI (Phase 5).
 
 See ``docs/adr/0010-network-audit-interception.md``,
 ``docs/adr/0011-network-audit-retention.md``, and
@@ -29,8 +34,23 @@ from metis_app.network_audit.providers import (
     ProviderSpec,
     classify_host,
 )
+from metis_app.network_audit.runtime import (
+    get_default_settings,
+    get_default_store,
+)
 from metis_app.network_audit.store import (
     NetworkAuditStore,
+)
+from metis_app.network_audit.trigger_features import (
+    TRIGGER_GGUF_DOWNLOAD,
+    TRIGGER_HF_CATALOG,
+    TRIGGER_NEWS_COMET_HACKERNEWS,
+    TRIGGER_NEWS_COMET_REDDIT,
+    TRIGGER_NEWS_COMET_RSS,
+    TRIGGER_NYX_REGISTRY,
+    TRIGGER_TRIBEV2_SNAPSHOT,
+    TRIGGER_WEB_SEARCH_DUCKDUCKGO,
+    TRIGGER_WEB_SEARCH_JINA_READER,
 )
 
 __all__ = [
@@ -40,8 +60,19 @@ __all__ = [
     "NetworkBlockedError",
     "ProviderCategory",
     "ProviderSpec",
+    "TRIGGER_GGUF_DOWNLOAD",
+    "TRIGGER_HF_CATALOG",
+    "TRIGGER_NEWS_COMET_HACKERNEWS",
+    "TRIGGER_NEWS_COMET_REDDIT",
+    "TRIGGER_NEWS_COMET_RSS",
+    "TRIGGER_NYX_REGISTRY",
+    "TRIGGER_TRIBEV2_SNAPSHOT",
+    "TRIGGER_WEB_SEARCH_DUCKDUCKGO",
+    "TRIGGER_WEB_SEARCH_JINA_READER",
     "audited_urlopen",
     "classify_host",
+    "get_default_settings",
+    "get_default_store",
     "is_provider_blocked",
     "sanitize_url",
 ]
