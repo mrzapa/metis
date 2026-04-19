@@ -7,7 +7,7 @@ This is the **single source of truth for what is being worked on in METIS and
 what comes next.** Every row is a milestone from `VISION.md`. Agents claim rows,
 do the work, update the row when they stop.
 
-**Last reviewed:** 2026-04-18
+**Last reviewed:** 2026-04-19
 
 ## Quick start for a fresh agent
 
@@ -54,7 +54,7 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 | # | Milestone | Pillar | Status | Plan doc | Claim | Last updated | Depends on |
 |---|---|---|---|---|---|---|---|
 | M01 | **Preserve & productise** — audit, surface, cut dead paths | 🔧 | Rolling | [`docs/preserve-and-productize-plan.md`](../docs/preserve-and-productize-plan.md) | — | 2026-04-18 | — |
-| M02 | **Constellation 2D refactor** — retire 3D sphere, 2D archetype dive (ADR 0006) | 🌌 | In progress | [`plans/constellation-2d-refactor/plan.md`](constellation-2d-refactor/plan.md) | `claude/metis-vision-strategy-Bj7jJ` — Phases 0/1/2/3/4/5/6/7 landed, Phase 8 (verification) next | 2026-04-19 | — |
+| M02 | **Constellation 2D refactor** — retire 3D sphere, 2D archetype dive (ADR 0006) | 🌌 | Landed | [`plans/constellation-2d-refactor/plan.md`](constellation-2d-refactor/plan.md) | Phases 0-8 landed (merge `0449c2e`, 2026-04-19) | 2026-04-19 | — |
 | M03 | **IterRAG convergence** — agentic loop with convergence detection | 🧠 | Ready | [`docs/plans/2026-04-01-hermes-sotaku-implementation.md`](../docs/plans/2026-04-01-hermes-sotaku-implementation.md) (Phase 1) | — | 2026-04-04 | — |
 | M04 | **Reverse curriculum** — faculty hardness scoring drives research order | 🧠 | Ready | [`docs/plans/2026-04-04-reverse-curriculum-implementation.md`](../docs/plans/2026-04-04-reverse-curriculum-implementation.md) | — | 2026-04-04 | M03 |
 | M05 | **Parallel research** — concurrent faculty workers + batch fixes | 🧠 | Ready | [`docs/plans/2026-04-04-parallel-research-implementation.md`](../docs/plans/2026-04-04-parallel-research-implementation.md) | — | 2026-04-04 | — |

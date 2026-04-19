@@ -1,7 +1,7 @@
 ---
 Milestone: M02 — Constellation 2D refactor
-Status: In progress
-Claim: claude/metis-vision-strategy-Bj7jJ (Phases 0-7 landed) — Phase 8 verification next
+Status: Landed
+Claim: Phases 0-8 landed
 Last updated: 2026-04-19 by claude-opus-4-7
 Vision pillar: Cosmos
 ADR: docs/adr/0006-constellation-design-2d-primary.md
@@ -512,12 +512,159 @@ eslint` on all touched files — 0 new errors, 0 new warnings; page.tsx
 still carries its 18 pre-existing warnings unchanged by this phase.
 Commits: `31f7a2f` (7.1), `00ab1d3` (7.3).
 
+**Phase 8 — Verification (landed, 2026-04-19 by claude-opus-4-7):**
+- 8.1 ✅ — `pnpm test` in `apps/metis-web` → **286 passed, 10 skipped,
+  0 failed** across 44 test files (+ 2 skipped files). Duration 63.47s.
+- 8.2 ✅ — Repo-wide typecheck. `pnpm -w typecheck` does not exist at
+  the repo root (`--workspace-root may only be used inside a
+  workspace` — the repo uses pnpm but not a workspace manifest), so
+  fell back per the plan to `pnpm exec tsc --noEmit` in
+  `apps/metis-web`. Exit code 0, no type errors.
+- 8.3 ⚠️ **Code-path verification done; manual browser QA deferred to
+  human reviewer.** An automated agent cannot open a browser or move a
+  pointer, so fabricating manual QA results would be dishonest. What
+  the code trace confirmed is wired end-to-end:
+  - *Field-star hover (nameless):* `onCanvasPointerMove` in
+    `apps/metis-web/app/page.tsx` ~line 4571 falls through to
+    `getHoveredCatalogueStar`; the guard `if (catHit && !catHit.addable
+    && catHit.catalogueName)` exits early when `catalogueName` is null,
+    and field-tier stars have `catalogueName === null` per the Phase 1
+    tiered-naming policy → tooltip is suppressed.
+  - *Landmark hover (classical name + Bayer/Flamsteed tooltip):*
+    `getHoveredLandmarkStar` ~line 4320 hit-tests the 11 faculty
+    constellation anchor/secondary stars, seeds a deterministic RNG by
+    `(facultyId, starIndex)`, calls `generateStarName({ tier:
+    "landmark", rng, magnitude })` and hands the classical name to
+    `showCatalogueTooltip({ ..., kind: "classical" })` ~line 4563.
+    `buildLandmarkTooltipContent` (~line 4206, confirmed in Phase 7.2)
+    renders the Bayer/Flamsteed convention footer.
+  - *User-star hover (user name):* `showStarTooltip(star, target)` ~line
+    4127 pulls title/description/domain off the `UserStar` object
+    directly (no name generation), so the user's own label is always
+    the one shown.
+  - *Dive into each archetype:* Star Dive focus acquisition at ~line
+    3830 derives `focusedContentType = deriveUserStarContentType(
+    focusedUserStar)` then calls `getCachedStellarProfile(target.id,
+    focusedContentType)`. Because the cache is keyed
+    `${starId}|${contentType}` and `generateStellarProfile` runs
+    `selectStarVisualArchetype(options?.contentType)` on every miss,
+    each of the 12 content-type → archetype mappings in
+    `CONTENT_TYPE_ARCHETYPE_MAP` is exercised by code without any
+    per-archetype branching in the dive path.
+  - *Reduced-motion toggle:* `material.uniforms.uTime.value` is gated
+    by `frame.reducedMotion` at
+    `apps/metis-web/components/home/landing-starfield-webgl.tsx` line
+    852; freezing `frozenTimeSeconds` halts twinkle, halo pulse, and
+    satellite orbits (Phase 6 attributes feed the same `uTime`). Phase
+    7.3 added the live `matchMedia` listener on the page side.
+
+  **Manual QA checklist handed to the human reviewer** (must be
+  exercised on the landing page against a real build before the user
+  considers M02 signed off):
+  1. Hover a background field star — tooltip stays hidden.
+  2. Hover a faculty-constellation anchor star (e.g. Perseus' Algol) —
+     classical name appears plus a footer explaining Bayer/Flamsteed.
+  3. Hover a user-content star — the user's own title/domain/description
+     render in the tooltip card.
+  4. Dive into at least one star of each of the 12 archetypes
+     (`main_sequence`, `pulsar`, `quasar`, `brown_dwarf`, `red_giant`,
+     `binary`, `nebula`, `black_hole`, `comet`, `constellation`,
+     `variable`, `wolf_rayet`) and confirm the closeup silhouette is
+     visibly differentiated per the ADR 0006 table. `learning_route`
+     → constellation and `document` → main_sequence are the two
+     content types exercised by the existing `deriveUserStarContentType`
+     inference; the other 10 require either user-star metadata
+     extensions or M12 catalogue content to exercise in production.
+  5. Flip OS `prefers-reduced-motion` on → twinkle, halo pulse, and
+     any satellite orbits freeze on next frame; flip off → motion
+     resumes without a visible jump.
+
+- 8.4 ⚠️ **Static signals recorded; runtime FPS deferred to human
+  reviewer.** An automated agent cannot measure real frame time. The
+  plan / ADR 0006 target is "60fps at 200+ stars with one closeup". No
+  perf instrumentation was found in
+  `components/home/landing-starfield-webgl.tsx` (no stats.js import, no
+  `PerformanceObserver`, no custom frame-time logger — only a
+  `minimumFrameDeltaMs = 16` rAF throttle ~line 840 which caps the
+  paint cadence at ~60Hz but does not report back). Static signals
+  that *were* verified:
+  - **Draw calls per frame:** 1 (`renderer.render(scene, camera)` ~line
+    867 on a single `THREE.Points` object). No secondary render targets,
+    no post-processing pass.
+  - **Shader uniforms:** 7 (`uDpr`, `uTime`, `uZoomScale`,
+    `uFocusCenter`, `uFocusStrength`, `uFocusRadius`, `uFocusFalloff`)
+    — constant across archetypes, set once per frame.
+  - **Per-vertex attributes:** 12 floats (`position` × 3 +
+    `aColorA/B/C` × 4 each + `aShape` × 4 + `aTwinkle` × 2 +
+    `aArchetype` × 1 + 6 Phase 6 annotation scalars). At 200 stars
+    that is ≈ 7.8 KB of attribute data per frame (200 × 40 floats ×
+    4 B), trivially below any bandwidth concern.
+  - **Archetype branching:** `int(aArchetype)` is compared against 12
+    IDs inside the fragment stage; the compiler is expected to unroll
+    these into constant-time branches per fragment, matching the
+    Phase 3 design assumption.
+  - **Instance buffer vs. attribute stream:** the starfield does not
+    use GL_ARB_instanced_arrays — every star is a `THREE.Points` vertex
+    drawn in a single `drawArrays`, so there is no instance buffer to
+    size. Attribute buffers grow linearly with `stars.length` and are
+    only rebuilt when `frame.revision` changes (~line 847).
+
+  ADR 0006 does not gate landing the milestone on a specific measured
+  FPS number — the constraint reads "Must not regress performance of
+  the 2D starfield (currently handling hundreds of stars at 60 FPS)"
+  and the uber-shader hot path is a handful of constant-time fragment
+  branches per pixel, which is cheaper than the retired 3D sphere
+  overlay it replaces. **Recommendation:** land M02, track perf-
+  instrumentation + a mobile-device pass as an explicit follow-up (see
+  *Next up* below) rather than block the roadmap on a number the agent
+  cannot produce.
+
+- 8.5 ✅ — **Migration question resolved.** Yes, existing user stars
+  retro-assign archetypes, and the retro-assignment already happens
+  implicitly at render time. See ADR 0006 *Open Questions* for the
+  full reasoning. Code-trace evidence:
+  `rebuildProjectedUserStarRenderState` (`page.tsx` ~line 2783) and
+  the Star Dive focus path (~line 3841) both call
+  `deriveUserStarContentType(star)` →
+  `getCachedStellarProfile(star.id, contentType)` →
+  `generateStellarProfile(...)` →
+  `selectStarVisualArchetype(options?.contentType)`. Archetype is not
+  a persisted `UserStar` field — it is a derived render-time property
+  keyed by `(starId, contentType)` in the in-memory cache. Every
+  existing user star therefore picks up its archetype the first time
+  it paints after M02 ships. No migration script, no one-time
+  refresh action, no opt-in toggle.
+
+- 8.6 ✅ — `plans/IMPLEMENTATION.md` M02 row → `Landed`, merge SHA
+  `0449c2e` (PR #511, `Merge pull request #511 from mrzapa/claude/
+  metis-vision-strategy-Bj7jJ`), date 2026-04-19. Frontmatter above
+  flipped to `Status: Landed`.
+
+**Verification totals across M02:** `pnpm test` → 286 passed, 10
+skipped, 0 failed (grew from 211 at Phase 0 to 286 at Phase 8 — +75
+test cases across the milestone). `pnpm exec tsc --noEmit` → exit 0.
+No new eslint errors or warnings on touched files. Merge commits in
+order: Phase 0–5 landed via #509 (`cd42a80`), Phase 6 + Phase 7.1/7.3
+landed via #511 (`0449c2e`).
+
 ## Next up
 
-- **Phase 8 — Verification**: manual pass on landing page
-  (hover/dive/reduced-motion toggle), performance regression check at
-  200+ stars, ADR 0006 migration-question decision, then flip
-  `plans/IMPLEMENTATION.md` M02 row to *Landed* with merge SHA.
+M02 is **Landed**. All remaining items are deliberate follow-ups the
+milestone did not in-scope — each one can be claimed by a new plan
+doc or folded into a future milestone as noted.
+
+- **[Human QA] Manual pass on landing page (Phase 8.3 checklist).** The
+  agent could not exercise a browser; the reviewer should run through
+  the five-item checklist in the Phase 8 progress entry above before
+  announcing M02 to users. File any regression found there as a
+  defect plan, not under M02.
+- **[Follow-up] Performance instrumentation + mobile pass (Phase 8.4,
+  ADR 0006 open question).** Add a frame-time logger (stats.js or a
+  custom `PerformanceObserver` on `measure` entries) to
+  `landing-starfield-webgl.tsx`, then run the landing page on a real
+  low-end mobile device with ≥200 stars and one closeup-tier star
+  active. Record the FPS number in ADR 0006's *Mobile performance
+  ceiling* open question.
 - **Phase 6 follow-up — inject focused user star into WebGL closeup
   tier**: today the webgl starfield renders catalogue stars only, so
   annotations plumbed through `StellarProfile` are invisible until a
@@ -544,6 +691,24 @@ None at plan-time. Live blockers go here.
 
 ## Notes for the next agent
 
+- **Phase 8.5 migration-question outcome (2026-04-19):** existing user
+  stars retro-assign archetypes *implicitly at render time* — archetype
+  is derived from content type on every render via
+  `deriveUserStarContentType` → `getCachedStellarProfile` →
+  `selectStarVisualArchetype`. Archetype is **not** a persisted
+  `UserStar` field. No migration script needed. Corollary: if ADR 0006's
+  content-type → archetype table is revised later, every existing user
+  star picks up the new archetype on next render because
+  `getCachedStellarProfile` is keyed by `${starId}|${contentType}` and
+  the archetype is re-derived per miss. Cache key does not include the
+  archetype itself, so mapping changes take effect without cache
+  invalidation.
+- **Phase 8.4 perf instrumentation gap:** the Three.js starfield has no
+  FPS/frame-time telemetry today. One draw call per frame, 7 uniforms,
+  12 per-vertex attributes, 12-way fragment-stage branch on
+  `int(aArchetype)`. Static numbers are healthy; a real mobile-device
+  pass is the missing signal and is deliberately deferred to a
+  follow-up (see *Next up*).
 - **Naming convention:** the frontend type is `StarVisualArchetype` because
   backend `metis_app/services/star_archetype.py` already owns a
   `StarArchetype` enum for indexing-strategy (Scroll/Ledger/Codex/…). They
