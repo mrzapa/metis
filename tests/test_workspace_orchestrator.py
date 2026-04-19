@@ -2133,6 +2133,47 @@ def test_run_autonomous_research_concurrent_dispatches_multiple_faculties(tmp_pa
     )
 
 
+def test_run_autonomous_research_toggles_running_flag(tmp_path):
+    """run_autonomous_research exposes a true running flag while the pipeline is active."""
+    import unittest.mock as um
+    from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
+
+    settings = {
+        "assistant_policy": {"autonomous_research_enabled": True},
+        "llm_provider": "mock",
+    }
+    observed: list[bool] = []
+
+    orc = WorkspaceOrchestrator(
+        improvement_repo=ImprovementRepository(db_path=":memory:", improvements_root=tmp_path),
+    )
+
+    def capture_running_flag(event):  # noqa: ANN001, ANN202
+        observed.append(orc._autonomous_research_running)
+
+    def fake_run(**kwargs):  # noqa: ANN202
+        kwargs["progress_cb"]({"phase": "scanning", "faculty_id": None, "detail": "Scanning..."})
+        return None
+
+    mock_svc_instance = um.MagicMock()
+    mock_svc_instance.run.side_effect = fake_run
+    MockSvcClass = um.MagicMock(return_value=mock_svc_instance)
+
+    assert orc._autonomous_research_running is False
+
+    with um.patch(
+        "metis_app.services.autonomous_research_service.AutonomousResearchService",
+        MockSvcClass,
+    ), um.patch(
+        "metis_app.utils.web_search.create_web_search",
+        return_value=um.MagicMock(),
+    ), um.patch.object(orc, "list_indexes", return_value=[]):
+        orc.run_autonomous_research(settings, progress_cb=capture_running_flag)
+
+    assert observed == [True]
+    assert orc._autonomous_research_running is False
+
+
 # ---------------------------------------------------------------------------
 # API integration — brain graph uses orchestrator
 # ---------------------------------------------------------------------------

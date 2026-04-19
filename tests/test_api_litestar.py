@@ -238,3 +238,65 @@ def test_gguf_validate_parity_with_fastapi(tmp_path):
         assert fastapi_response.status_code == 200
         assert litestar_response.status_code == 200
         assert fastapi_response.json() == litestar_response.json()
+
+
+def test_autonomous_research_stream_litestar_contract(monkeypatch) -> None:
+    """Litestar autonomous research SSE uses the normalized research_phase envelope."""
+    from metis_app.api_litestar.routes import autonomous as _autonomous_module
+    from metis_app.api_litestar import create_app
+
+    monkeypatch.setattr(
+        _autonomous_module._settings_store,
+        "load_settings",
+        lambda: {},
+    )
+
+    class _FakeOrchestrator:
+        def run_autonomous_research(self, settings, progress_cb=None) -> dict:
+            if progress_cb is not None:
+                progress_cb({"phase": "scanning", "faculty_id": None, "detail": "Scanning..."})
+            return {"cycles": 0}
+
+    monkeypatch.setattr(
+        _autonomous_module,
+        "WorkspaceOrchestrator",
+        lambda: _FakeOrchestrator(),
+    )
+
+    with TestClient(app=create_app()) as client:
+        response = client.post("/v1/autonomous/research/stream")
+
+    assert response.status_code == 201
+    text = response.text
+    assert "research_started" in text
+    assert '"type": "research_phase"' in text
+    assert '"phase": "scanning"' in text
+    assert "research_complete" in text
+
+
+def test_autonomous_status_litestar_reports_is_running(monkeypatch) -> None:
+    """Litestar autonomous status exposes is_running."""
+    from metis_app.api_litestar.routes import autonomous as _autonomous_module
+    from metis_app.api_litestar import create_app
+
+    monkeypatch.setattr(
+        _autonomous_module._settings_store,
+        "load_settings",
+        lambda: {"assistant_policy": {"autonomous_research_enabled": True}},
+    )
+
+    class _FakeOrchestrator:
+        def __init__(self) -> None:
+            self._autonomous_research_running = True
+
+    monkeypatch.setattr(
+        _autonomous_module,
+        "WorkspaceOrchestrator",
+        lambda: _FakeOrchestrator(),
+    )
+
+    with TestClient(app=create_app()) as client:
+        response = client.get("/v1/autonomous/status")
+
+    assert response.status_code == 200
+    assert response.json()["is_running"] is True

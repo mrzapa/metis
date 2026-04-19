@@ -23,12 +23,14 @@ def get_autonomous_status() -> dict[str, Any]:
     """Return current autonomous research configuration."""
     settings = _settings_store.load_settings()
     policy = settings.get("assistant_policy") or {}
+    orchestrator = WorkspaceOrchestrator()
     return {
         "enabled": bool(policy.get("autonomous_research_enabled", False)),
         "provider": str(policy.get("autonomous_research_provider") or "tavily"),
         "web_search_api_key_set": bool(
             str(settings.get("web_search_api_key") or "").strip()
         ),
+        "is_running": bool(getattr(orchestrator, "_autonomous_research_running", False)),
     }
 
 
@@ -66,7 +68,15 @@ async def trigger_autonomous_research_stream() -> StreamingResponse:
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
     def _progress_cb(event: dict[str, Any]) -> None:
-        loop.call_soon_threadsafe(queue.put_nowait, event)
+        loop.call_soon_threadsafe(
+            queue.put_nowait,
+            {
+                "type": "research_phase",
+                "phase": str(event.get("phase") or ""),
+                "faculty_id": event.get("faculty_id"),
+                "detail": str(event.get("detail") or ""),
+            },
+        )
 
     future = loop.run_in_executor(
         None,

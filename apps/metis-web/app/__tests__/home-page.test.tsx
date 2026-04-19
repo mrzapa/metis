@@ -276,6 +276,23 @@ describe("Home page", () => {
     expect(screen.getByRole("link", { name: "Open AI companion" })).toHaveAttribute("href", "/chat");
   });
 
+  it("refreshes indexed sources when autonomous research completes", async () => {
+    let activityListener: ((event: { source: string; state: string }) => void) | null = null;
+    vi.mocked(subscribeCompanionActivity).mockImplementation((cb) => {
+      activityListener = cb as typeof activityListener;
+      return vi.fn();
+    });
+
+    await renderHomePage();
+
+    const initialCalls = vi.mocked(fetchIndexes).mock.calls.length;
+    activityListener?.({ source: "autonomous_research", state: "completed" });
+
+    await waitFor(() => {
+      expect(vi.mocked(fetchIndexes).mock.calls.length).toBeGreaterThan(initialCalls);
+    });
+  });
+
 
 
   it("starts the focus flow when an existing star is selected", async () => {

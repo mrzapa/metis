@@ -2052,7 +2052,8 @@ def test_autonomous_research_stream_returns_sse_events(monkeypatch) -> None:
     assert "text/event-stream" in response.headers.get("content-type", "")
     text = response.text
     assert "research_started" in text
-    assert "scanning" in text
+    assert '"type": "research_phase"' in text
+    assert '"phase": "scanning"' in text
     assert "research_complete" in text
 
 
@@ -2081,6 +2082,33 @@ def test_autonomous_research_stream_emits_error_event_on_failure(monkeypatch) ->
 
     assert response.status_code == 200
     assert "research_error" in response.text
+
+
+def test_autonomous_status_reports_is_running(monkeypatch) -> None:
+    """GET /v1/autonomous/status returns the in-process running flag."""
+    from metis_app.api import autonomous as _autonomous_module
+
+    monkeypatch.setattr(
+        _autonomous_module._settings_store,
+        "load_settings",
+        lambda: {"assistant_policy": {"autonomous_research_enabled": True}},
+    )
+
+    class _FakeOrchestrator:
+        def __init__(self) -> None:
+            self._autonomous_research_running = True
+
+    monkeypatch.setattr(
+        _autonomous_module,
+        "WorkspaceOrchestrator",
+        lambda: _FakeOrchestrator(),
+    )
+    client = TestClient(api_app_module.create_app())
+
+    response = client.get("/v1/autonomous/status")
+
+    assert response.status_code == 200
+    assert response.json()["is_running"] is True
 
 
 # ---------------------------------------------------------------------------

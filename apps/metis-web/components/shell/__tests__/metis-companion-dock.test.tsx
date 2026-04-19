@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 import { MetisCompanionDock } from "../metis-companion-dock";
-import type { AssistantSnapshot } from "@/lib/api";
+import type { AssistantSnapshot, CompanionActivityEvent } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({
   fetchAssistant: vi.fn(),
@@ -29,6 +29,7 @@ const {
   fetchAtlasCandidate,
   saveAtlasEntry,
   decideAtlasCandidate,
+  subscribeCompanionActivity,
 } = await import("@/lib/api");
 
 function buildSnapshot(overrides: Partial<AssistantSnapshot> = {}): AssistantSnapshot {
@@ -245,5 +246,80 @@ describe("MetisCompanionDock", () => {
     await waitFor(() => {
       expect(screen.queryByText("Atlas Suggestion")).not.toBeInTheDocument();
     });
+  });
+
+  it("renders recent activity when companion events are published", async () => {
+    let listener: ((event: CompanionActivityEvent) => void) | null = null;
+    vi.mocked(subscribeCompanionActivity).mockImplementation((cb) => {
+      listener = cb;
+      return () => {};
+    });
+    vi.mocked(fetchAssistant).mockResolvedValueOnce(
+      buildSnapshot({
+        identity: {
+          minimized: false,
+        },
+      }),
+    );
+    vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
+
+    render(<MetisCompanionDock />);
+
+    await waitFor(() => {
+      expect(fetchAssistant).toHaveBeenCalledTimes(1);
+    });
+
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+
+    await act(async () => {
+      listener?.({
+        source: "reflection",
+        state: "completed",
+        trigger: "manual",
+        summary: "Reflection complete",
+        timestamp: 999_000,
+      });
+      listener?.({
+        source: "autonomous_research",
+        state: "running",
+        trigger: "manual",
+        summary: "Searching the web…",
+        timestamp: 999_500,
+      });
+      listener?.({
+        source: "index_build",
+        state: "error",
+        trigger: "manual",
+        summary: "Index build failed",
+        timestamp: 995_000,
+      });
+    });
+
+    const thoughtLog = await screen.findByLabelText("Thought log");
+    thoughtLog.scrollTop = 120;
+
+    await act(async () => {
+      listener?.({
+        source: "rag_stream",
+        state: "completed",
+        trigger: "manual",
+        summary: "RAG answer grounded",
+        timestamp: 999_800,
+      });
+    });
+
+    expect(await screen.findByText("Thoughts")).toBeInTheDocument();
+    expect(screen.getByText("Reflection complete")).toBeInTheDocument();
+    expect(screen.getByText("Searching the web…")).toBeInTheDocument();
+    expect(screen.getByText("Index build failed")).toBeInTheDocument();
+    expect(screen.getByText("RAG")).toBeInTheDocument();
+    expect(screen.getByText("Reflect")).toBeInTheDocument();
+    expect(screen.getByText("Research")).toBeInTheDocument();
+    expect(screen.getByText("Index")).toBeInTheDocument();
+    expect(screen.getByText("5s ago")).toBeInTheDocument();
+    expect(screen.getAllByText("just now").length).toBeGreaterThan(0);
+    expect(thoughtLog.scrollTop).toBe(0);
+
+    nowSpy.mockRestore();
   });
 });

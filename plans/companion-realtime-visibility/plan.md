@@ -1,3 +1,31 @@
+---
+Milestone: Companion Real-Time Visibility
+Status: In progress
+Claim: codex-ultrawork-2026-04-19
+Last updated: 2026-04-19 by Codex
+Vision pillar: Companion
+---
+
+## Progress
+- Added normalized autonomous research SSE envelopes (`type: "research_phase"`) in both FastAPI and Litestar routes so frontend consumers no longer depend on raw backend phase dicts.
+- Added orchestrator-backed `is_running` status exposure for `/v1/autonomous/status` and protected the flag with a `try/finally` in `WorkspaceOrchestrator.run_autonomous_research()`.
+- Aligned the web client and dock with the normalized research stream contract so phase updates continue to render after the backend contract cleanup.
+- Added backend verification for FastAPI and Litestar autonomous status/stream contracts plus an orchestrator test that proves the running flag is true while research is active.
+- Added frontend regression coverage for companion activity rendering in the dock and constellation refresh after autonomous research completion.
+- Polished the dock thought log with explicit status icons, source badges, relative timestamps, and deterministic scroll-to-newest behavior while keeping the existing newest-first event order.
+
+## Next up
+- Decide whether the dock should keep its current newest-first ordering or switch to chronological append order in a future UX pass; the current implementation now intentionally scrolls to the top because newest items are prepended.
+- If the milestone is being landed soon, update or create the missing master plan index entry so this work is visible from the top-level planning surface.
+
+## Blockers
+- No `plans/IMPLEMENTATION.md` master index exists in the current repo layout, so the milestone could only be claimed in the plan doc itself during this pass.
+
+## Notes for the next agent
+- This plan predated the standardized frontmatter sections; they were added during this implementation pass.
+- The original code mixed two SSE contracts: raw `phase` payloads and `research_phase` envelopes. The current code now follows the normalized envelope path end-to-end.
+- The old idea of passing per-call `settings` into `triggerAutonomousResearchStream()` does not match the current persisted-settings architecture. Treat that as a separate backend feature if it ever becomes desirable.
+
 # Companion Real-Time Visibility
 
 **Branch:** `feat/companion-realtime-visibility`

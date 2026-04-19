@@ -4,14 +4,14 @@
   "skill": "ultrawork",
   "keyword": "$ultrawork",
   "phase": "reviewing",
-  "activated_at": "2026-04-19T19:50:24.864Z",
-  "updated_at": "2026-04-19T19:50:24.878Z",
+  "activated_at": "2026-04-19T21:07:12.202Z",
+  "updated_at": "2026-04-19T21:16:33.771Z",
   "source": "keyword-detector",
   "input_lock": {
     "active": false,
     "scope": "deep-interview-auto-approval",
     "acquired_at": "2026-04-04T23:54:28.334Z",
-    "released_at": "2026-04-19T19:50:24.864Z",
+    "released_at": "2026-04-19T21:16:33.768Z",
     "blocked_inputs": [
       "yes",
       "y",

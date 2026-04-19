@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ProgressIndicator } from "@/components/ui/progress-indicator";
 import { cn } from "@/lib/utils";
 import {
+  Check,
   Bot,
   Search,
   Zap,
@@ -65,6 +66,7 @@ export function MetisCompanionDock({
   const previousContextRef = useRef<{ sessionId?: string | null; runId?: string | null } | null>(null);
   const atlasPromptedRunIdRef = useRef("");
   const researchAbortRef = useRef<AbortController | null>(null);
+  const thoughtsListRef = useRef<HTMLUListElement | null>(null);
 
   // WebGPU companion – shared instance from context, so the chat pane and dock
   // can drive the same model without loading a second 2 GB worker.
@@ -196,6 +198,12 @@ export function MetisCompanionDock({
     return () => window.clearTimeout(id);
   }, [toastMessage]);
 
+  useEffect(() => {
+    const list = thoughtsListRef.current;
+    if (!list) return;
+    list.scrollTop = 0;
+  }, [thoughts]);
+
   // Load autonomous status once on mount
   useEffect(() => {
     fetchAutonomousStatus()
@@ -214,6 +222,7 @@ export function MetisCompanionDock({
     () => snapshot?.memory?.[0] ?? null,
     [snapshot],
   );
+  const renderTimestamp = Date.now();
 
   // True when no dedicated runtime is wired up on the server side.
   // WebGPU fills this gap with a fully in-browser model.
@@ -372,7 +381,9 @@ export function MetisCompanionDock({
             complete: "done",
             skipped: "up to date",
           };
-          if (ev.type in label) setResearchPhase(label[ev.type]);
+          if (ev.type === "research_phase" && ev.phase && ev.phase in label) {
+            setResearchPhase(label[ev.phase]);
+          }
         },
       });
     } catch (err) {
@@ -582,28 +593,57 @@ export function MetisCompanionDock({
                 {thoughts.length > 0 && (
                   <div className="rounded-[1.15rem] border border-white/8 bg-white/4 px-3 py-2.5 backdrop-blur-sm">
                     <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                      Recent activity
+                      Thoughts
                     </p>
-                    <ul className="max-h-40 space-y-1.5 overflow-y-auto">
+                    <ul
+                      aria-label="Thought log"
+                      ref={thoughtsListRef}
+                      className="max-h-40 space-y-2 overflow-y-auto pr-1"
+                    >
                       {thoughts.map((t, i) => {
-                        const sourceColors: Record<string, string> = {
-                          rag_stream: "text-blue-400",
-                          index_build: "text-green-400",
-                          autonomous_research: "text-violet-400",
-                          reflection: "text-amber-400",
+                        const sourceLabels: Record<CompanionActivityEvent["source"], string> = {
+                          rag_stream: "RAG",
+                          index_build: "Index",
+                          autonomous_research: "Research",
+                          reflection: "Reflect",
                         };
-                        const stateIcon =
-                          t.state === "running"
-                            ? "▸"
-                            : t.state === "completed"
-                              ? "✓"
-                              : "⚠";
+                        const sourceBadgeStyles: Record<CompanionActivityEvent["source"], string> = {
+                          rag_stream: "border-sky-400/25 bg-sky-500/10 text-sky-200",
+                          index_build: "border-emerald-400/25 bg-emerald-500/10 text-emerald-200",
+                          autonomous_research: "border-violet-400/25 bg-violet-500/10 text-violet-200",
+                          reflection: "border-amber-400/25 bg-amber-500/10 text-amber-200",
+                        };
+                        const relativeTimestamp = formatRelativeTimestamp(t.timestamp, renderTimestamp);
                         return (
-                          <li key={i} className="flex items-start gap-2 text-xs leading-5">
-                            <span className={cn("mt-0.5 shrink-0 text-[10px]", sourceColors[t.source] ?? "text-muted-foreground")}>
-                              {stateIcon}
+                          <li
+                            key={`${t.timestamp}-${t.source}-${i}`}
+                            className="flex items-start gap-2 rounded-[0.95rem] border border-white/6 bg-black/10 px-2.5 py-2 text-xs leading-5"
+                          >
+                            <span className="mt-0.5 shrink-0 text-muted-foreground">
+                              {t.state === "running" ? (
+                                <Loader2 aria-label="running" className="size-3.5 animate-spin" />
+                              ) : t.state === "completed" ? (
+                                <Check aria-label="completed" className="size-3.5 text-emerald-300" />
+                              ) : (
+                                <AlertTriangle aria-label="error" className="size-3.5 text-amber-300" />
+                              )}
                             </span>
-                            <span className="min-w-0 text-foreground/80">{t.summary}</span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={cn(
+                                    "rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em]",
+                                    sourceBadgeStyles[t.source],
+                                  )}
+                                >
+                                  {sourceLabels[t.source]}
+                                </span>
+                                <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                                  {relativeTimestamp}
+                                </span>
+                              </div>
+                              <p className="truncate text-foreground/80">{t.summary}</p>
+                            </div>
                           </li>
                         );
                       })}
@@ -1004,4 +1044,17 @@ function formatAtlasPath(value: string): string {
     return tokens.join("/");
   }
   return tokens.slice(-2).join("/");
+}
+
+function formatRelativeTimestamp(timestamp: number, referenceTime: number): string {
+  const deltaMs = Math.max(0, referenceTime - timestamp);
+  const deltaSeconds = Math.round(deltaMs / 1000);
+  if (deltaSeconds < 5) return "just now";
+  if (deltaSeconds < 60) return `${deltaSeconds}s ago`;
+  const deltaMinutes = Math.round(deltaSeconds / 60);
+  if (deltaMinutes < 60) return deltaMinutes === 1 ? "1m ago" : `${deltaMinutes}m ago`;
+  const deltaHours = Math.round(deltaMinutes / 60);
+  if (deltaHours < 24) return deltaHours === 1 ? "1h ago" : `${deltaHours}h ago`;
+  const deltaDays = Math.round(deltaHours / 24);
+  return deltaDays === 1 ? "1d ago" : `${deltaDays}d ago`;
 }

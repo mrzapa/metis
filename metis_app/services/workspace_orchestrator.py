@@ -126,6 +126,7 @@ class WorkspaceOrchestrator:
             trace_store=self._trace_store,
         )
         self._nyx_catalog = nyx_catalog or get_default_nyx_catalog_broker()
+        self._autonomous_research_running = False
 
     # ------------------------------------------------------------------
     # Ingestion / Organisation
@@ -962,57 +963,61 @@ class WorkspaceOrchestrator:
         if not policy.autonomous_research_enabled:
             return None
 
-        # Resolve LLM/embedding settings for the research service
-        resolved = self._resolve_query_settings(settings)
+        self._autonomous_research_running = True
+        try:
+            # Resolve LLM/embedding settings for the research service
+            resolved = self._resolve_query_settings(settings)
 
-        index_dicts = self.list_indexes()
-        index_list = [
-            {"index_id": idx.get("index_id", ""), "document_count": idx.get("document_count", 0)}
-            for idx in index_dicts
-        ]
-        concurrency = max(1, int(raw_policy.get("autonomous_research_concurrency", 1) or 1))
-        delay_ms = max(0, int(raw_policy.get("autonomous_research_request_delay_ms", 500) or 500))
+            index_dicts = self.list_indexes()
+            index_list = [
+                {"index_id": idx.get("index_id", ""), "document_count": idx.get("document_count", 0)}
+                for idx in index_dicts
+            ]
+            concurrency = max(1, int(raw_policy.get("autonomous_research_concurrency", 1) or 1))
+            delay_ms = max(0, int(raw_policy.get("autonomous_research_request_delay_ms", 500) or 500))
 
-        svc = AutonomousResearchService(web_search=create_web_search(resolved))
+            svc = AutonomousResearchService(web_search=create_web_search(resolved))
 
-        if concurrency <= 1:
-            # Original single-gap behaviour — backwards compatible
-            result = svc.run(
-                settings=resolved,
-                indexes=index_list,
-                orchestrator=self,
-                progress_cb=progress_cb,
+            if concurrency <= 1:
+                # Original single-gap behaviour — backwards compatible
+                result = svc.run(
+                    settings=resolved,
+                    indexes=index_list,
+                    orchestrator=self,
+                    progress_cb=progress_cb,
+                )
+                self._capture_improvement_sources_from_autonomous_result(result)
+                return result
+
+            # Collect all sparse faculty gaps
+            import asyncio
+            faculty_ids: list[str] = []
+            temp_indexes = list(index_list)
+            for _ in range(concurrency * 2):  # cap scan to avoid infinite loop
+                fid = svc.scan_faculty_gaps(temp_indexes)
+                if fid is None or fid in faculty_ids:
+                    break
+                faculty_ids.append(fid)
+                # Temporarily mark as covered so scan finds the next gap
+                temp_indexes = temp_indexes + [{"index_id": f"auto_{fid}_placeholder"}]
+
+            if not faculty_ids:
+                return None
+
+            results = asyncio.run(
+                svc.run_batch(
+                    faculty_ids=faculty_ids,
+                    settings=resolved,
+                    orchestrator=self,
+                    concurrency=concurrency,
+                    request_delay_ms=delay_ms,
+                    progress_cb=progress_cb,
+                )
             )
-            self._capture_improvement_sources_from_autonomous_result(result)
-            return result
-
-        # Collect all sparse faculty gaps
-        import asyncio
-        faculty_ids: list[str] = []
-        temp_indexes = list(index_list)
-        for _ in range(concurrency * 2):  # cap scan to avoid infinite loop
-            fid = svc.scan_faculty_gaps(temp_indexes)
-            if fid is None or fid in faculty_ids:
-                break
-            faculty_ids.append(fid)
-            # Temporarily mark as covered so scan finds the next gap
-            temp_indexes = temp_indexes + [{"index_id": f"auto_{fid}_placeholder"}]
-
-        if not faculty_ids:
-            return None
-
-        results = asyncio.run(
-            svc.run_batch(
-                faculty_ids=faculty_ids,
-                settings=resolved,
-                orchestrator=self,
-                concurrency=concurrency,
-                request_delay_ms=delay_ms,
-                progress_cb=progress_cb,
-            )
-        )
-        self._capture_improvement_sources_from_autonomous_result(results)
-        return results[0] if results else None
+            self._capture_improvement_sources_from_autonomous_result(results)
+            return results[0] if results else None
+        finally:
+            self._autonomous_research_running = False
 
     def list_improvement_entries(
         self,

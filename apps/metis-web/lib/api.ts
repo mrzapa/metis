@@ -983,14 +983,7 @@ export interface AutoResearchStreamEvent {
     | "research_started"
     | "research_phase"
     | "research_complete"
-    | "research_error"
-    | "scanning"
-    | "formulating"
-    | "searching"
-    | "synthesizing"
-    | "indexing"
-    | "complete"
-    | "skipped";
+    | "research_error";
   phase?: string;
   faculty_id?: string;
   detail?: string;
@@ -2770,14 +2763,14 @@ export async function triggerAutonomousResearchStream({
             complete: event.detail ?? "New star added to constellation",
             skipped: "Constellation fully covered — nothing to research",
           };
-          if (event.type in phaseLabels) {
+          if (event.type === "research_phase" && event.phase && event.phase in phaseLabels) {
             emitCompanionActivity({
               source: "autonomous_research",
-              state: "running",
+              state: event.phase === "complete" || event.phase === "skipped" ? "completed" : "running",
               trigger: "manual",
-              summary: phaseLabels[event.type],
+              summary: phaseLabels[event.phase],
               timestamp: Date.now(),
-              payload: { phase: event.type, faculty_id: event.faculty_id },
+              payload: { phase: event.phase, faculty_id: event.faculty_id },
             });
           } else if (event.type === "research_complete") {
             emitCompanionActivity({
@@ -2940,6 +2933,7 @@ export interface AutonomousStatus {
   enabled: boolean;
   provider: string;
   web_search_api_key_set: boolean;
+  is_running: boolean;
 }
 
 export async function fetchAutonomousStatus(): Promise<AutonomousStatus> {
