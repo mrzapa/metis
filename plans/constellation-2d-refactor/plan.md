@@ -1,7 +1,7 @@
 ---
 Milestone: M02 — Constellation 2D refactor
 Status: Landed
-Claim: Phases 0-8 landed
+Claim: Phases 0-8 landed + Phase 6 follow-up
 Last updated: 2026-04-19 by claude-opus-4-7
 Vision pillar: Cosmos
 ADR: docs/adr/0006-constellation-design-2d-primary.md
@@ -415,18 +415,16 @@ pages generated. DoD greps: `rg star-surface-shader apps/ metis_app/`
 and `rg star-dive-overlay apps/ metis_app/` still return empty.
 
 **Notes for the next agent (Phase 6):**
-- Annotations are plumbed end-to-end for user stars, but user stars do
-  not yet flow through the WebGL starfield batch. The webgl stream
-  today is catalogue-only (`landingRenderableStars` is built from
-  `visibleWorldStars` in `page.tsx`). The CPU-side derive + attach is
-  ready (`rebuildProjectedUserStarRenderState` and the Star Dive focus
-  path both attach annotations to the stellar profile they emit); the
-  day a user star makes it into `landingStarfieldFrameRef.current.stars`,
-  halos / rings / satellites will render automatically. Until then the
-  visible effect of Phase 6 is zero because no catalogue star has
-  annotations today. Follow-up: inject the focused user star into the
-  closeup tier of the WebGL batch so the dive silhouette carries its
-  annotations.
+- ~~Annotations are plumbed end-to-end for user stars, but user stars do
+  not yet flow through the WebGL starfield batch. ... Follow-up:
+  inject the focused user star into the closeup tier of the WebGL
+  batch so the dive silhouette carries its annotations.~~ **RESOLVED
+  2026-04-19** — see *Phase 6 follow-up — Focused user star in WebGL
+  closeup* below. `injectFocusedUserStarIntoWebglBatch` in
+  `apps/metis-web/lib/landing-stars/star-webgl-injection.ts` now
+  carries the focused user star (with its annotations) into
+  `landingStarfieldFrameRef.current.stars` whenever a dive is active;
+  halos / rings / satellites render on the real WebGL sprite.
 - The fragment shader remaps `uv` / `dist` by `satelliteSpriteBoost`
   only when satellites are present. The original star silhouette stays
   visually the same size; ring and halo annotations reuse the remapped
@@ -646,6 +644,81 @@ test cases across the milestone). `pnpm exec tsc --noEmit` → exit 0.
 No new eslint errors or warnings on touched files. Merge commits in
 order: Phase 0–5 landed via #509 (`cd42a80`), Phase 6 + Phase 7.1/7.3
 landed via #511 (`0449c2e`).
+
+**Phase 6 follow-up — Focused user star in WebGL closeup (landed, 2026-04-19 by claude-opus-4-7):**
+- **What shipped.** The focused user star is now injected into
+  `landingStarfieldFrameRef.current.stars` at the closeup tier, so the
+  Phase 6 annotation shader code (halo / ring / satellites) finally
+  paints against a real WebGL sprite. Before this follow-up, Phase 6
+  shipped as dark code because the WebGL starfield batch was
+  catalogue-only and catalogue stars have no annotations.
+- **New helper.** `injectFocusedUserStarIntoWebglBatch` lives in
+  `apps/metis-web/lib/landing-stars/star-webgl-injection.ts` and is
+  pure — given the existing catalogue-derived batch and an optional
+  focused user-star entry, it returns an owned, non-mutated copy with
+  the focused star injected at the closeup tier. If the id collides
+  with an existing batch member (the catalogue-twin case), the
+  existing entry is replaced in place rather than duplicated. If the
+  focused entry is null, the batch is returned as a fresh copy (safe
+  frame-over-frame no-op).
+- **Wire-up.** `refreshVisibleStars` in `apps/metis-web/app/page.tsx`
+  now builds a `FocusedUserStarWebglEntry` from the fresh dive-focus
+  refs (`starDiveFocusedStarIdRef`, `starDiveFocusProfileRef`,
+  `starDiveFocusViewRef`) — which are all populated earlier in the
+  render tick, before `refreshVisibleStars` runs — and passes it
+  through the injector on each refresh. The apparent-size boost
+  mirrors the focused-catalogue-star path so closeup-tier scaling is
+  symmetric regardless of target kind. `shouldRefreshVisibleStars`
+  gained a focused-user-star-id transition check so acquire / release
+  / switch always triggers a geometry rebuild, even when the camera
+  is otherwise settled.
+- **Design constraints kept.**
+  - *No duplication:* same-id twins are replaced, not rendered twice.
+  - *Field / landmark tiers untouched:* non-focused catalogue stars
+    keep their order, tier, and profile references across the
+    injection step.
+  - *Contract reuse:* the focused profile already carries
+    `annotations` — the renderer consumes it as-is, no re-derivation.
+    Annotation decay signals stay sourced from
+    `star-annotations.ts`'s `deriveStarAnnotations`.
+  - *Determinism:* injector is pure and referentially transparent for
+    a given `(batch, focusedEntry)` pair.
+  - *Reduced motion:* no new gate. Halo pulse / satellite orbits
+    continue to ride on `uTime`, which Phase 7.3 already freezes via
+    `frame.reducedMotion`.
+  - *Performance:* at most one extra entry per frame — never every
+    user star. Field-tier stream stays procedural.
+- **Tests.** +7 unit tests in
+  `apps/metis-web/lib/landing-stars/__tests__/star-webgl-injection.test.ts`
+  covering the no-op case, append, annotation preservation,
+  catalogue-twin replacement, input immutability, frame-over-frame
+  determinism, and tier override.
+
+**Verification:** `pnpm test` → **293 passed**, 10 skipped, 0 failed
+(up from 286 by 7 new tests). `pnpm exec tsc --noEmit` → exit 0.
+`pnpm exec eslint` on touched files (`page.tsx`, `index.ts`,
+`star-webgl-injection.ts`, new test) → 0 new errors, 0 new warnings.
+`page.tsx` still carries its 17 pre-existing warnings unchanged by
+this follow-up.
+
+**Reviewer manual-QA checklist (human eyeball required):** Dive into a
+user-content star (zoom past the focus threshold so a Star Dive
+acquires) and confirm the following render against the real WebGL
+sprite, not a CSS stand-in:
+1. A soft **halo glow** around the star silhouette — warm-white-tinted,
+   strongest for recently-touched content (decays with a ~7-day
+   half-life).
+2. **Concentric thin rings** around the disc if the star has linked
+   document(s) — 1 / 2 / 3 rings for single / small series / full
+   corpus (clamped).
+3. **Orbiting satellite discs** (1–4) if the star has
+   `connectedUserStarIds` — should rotate slowly around the silhouette
+   with a ~8s period by default.
+4. Toggle OS **prefers-reduced-motion → reduce** while diving: satellite
+   orbits and halo pulse freeze on the next frame. Toggle back off:
+   motion resumes.
+5. Confirm **no visible regressions** on field / landmark hover and
+   non-user-star dives (catalogue-star closeup).
 
 ## Next up
 
