@@ -1,6 +1,6 @@
 # 0006 - Constellation Design: 2D Primary, Knowledge-First Dive
 
-- **Status:** Draft
+- **Status:** Accepted (M02 landed 2026-04-19)
 - **Date:** 2026-04-18
 
 ## Context
@@ -214,6 +214,22 @@ policy is replaced:
 - **Migration of existing user content.** Do existing user stars get
   retroactively assigned archetypes based on content type, or is the
   new archetype system opt-in for new content only?
+  - **Resolved 2026-04-19 (M02 Phase 8.5):** *Yes, retro-assigned — and
+    it already happens implicitly.* Archetypes are not persisted on
+    `UserStar`; they are derived at render time. Both user-star call
+    sites in `apps/metis-web/app/page.tsx`
+    (`rebuildProjectedUserStarRenderState` ~line 2783 and the Star Dive
+    focus acquisition path ~line 3841) call
+    `deriveUserStarContentType(star)` →
+    `getCachedStellarProfile(star.id, contentType)` →
+    `generateStellarProfile(...)` →
+    `selectStarVisualArchetype(options?.contentType)`. Every existing
+    user star therefore picks up its archetype the first time it
+    renders after the M02 code ships — no DB migration, no one-time
+    refresh action, no opt-in toggle required. If the ADR 0006 content-
+    type → archetype table is revised post-launch, existing stars will
+    automatically reflect the new mapping on next render because the
+    cache is keyed by `${starId}|${contentType}` (not by archetype).
 - **Accessibility.** Animated pulsation, variable brightness, rotating
   corona — need a reduced-motion fallback (already partly implemented
   in the current 3D overlay; must carry across).
