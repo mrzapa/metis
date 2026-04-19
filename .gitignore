@@ -34,6 +34,8 @@ assistant_state.json
 rag_sessions.db
 app_state.db
 skill_candidates.db
+network_audit.db
+network_audit.db-*
 agentic_rag_runs.jsonl
 trace_store/
 indexes/

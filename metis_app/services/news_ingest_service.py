@@ -20,6 +20,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from metis_app.models.comet_event import CometEvent, NewsItem
+from metis_app.network_audit import (
+    NetworkBlockedError,
+    TRIGGER_NEWS_COMET_HACKERNEWS,
+    TRIGGER_NEWS_COMET_REDDIT,
+    audited_urlopen,
+    get_default_settings,
+    get_default_store,
+)
 
 log = logging.getLogger(__name__)
 
@@ -45,20 +53,48 @@ except ImportError:
 # Safe HTTP helper (ClawFeed-inspired: timeout + size cap + error handling)
 # ---------------------------------------------------------------------------
 
-def _safe_get(url: str, *, timeout: float = _HTTP_TIMEOUT) -> bytes | None:
-    """Fetch *url* with timeout and response-size cap.  Returns None on error."""
+def _safe_get(
+    url: str, *, trigger: str, timeout: float = _HTTP_TIMEOUT
+) -> bytes | None:
+    """Fetch *url* with timeout and response-size cap.  Returns None on error.
+
+    Routes through :func:`audited_urlopen` so the M17 privacy panel
+    sees the call. The caller declares which feature triggered the
+    fetch via ``trigger`` — HN and Reddit callers pass different
+    values so the panel's per-feature filter is honest. News ingestion
+    is always background work; ``user_initiated=False`` is hard-coded.
+
+    If the audit layer's kill switch blocks the call
+    (:class:`NetworkBlockedError`), we degrade like any other fetch
+    error: log at warning level and return ``None``. The worker loop
+    will skip this tick and retry on the next scheduled run.
+    """
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "METIS/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        with audited_urlopen(
+            req,
+            trigger_feature=trigger,
+            user_initiated=False,
+            timeout=timeout,
+            store=get_default_store(),
+            settings=get_default_settings(),
+        ) as resp:
             return resp.read(_MAX_BODY_BYTES)
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except (urllib.error.URLError, NetworkBlockedError, OSError, ValueError) as exc:
         log.warning("HTTP fetch failed for %s: %s", url, exc)
         return None
 
 
-def _safe_get_json(url: str, *, timeout: float = _HTTP_TIMEOUT) -> Any | None:
-    """Fetch *url* and parse as JSON.  Returns None on any error."""
-    body = _safe_get(url, timeout=timeout)
+def _safe_get_json(
+    url: str, *, trigger: str, timeout: float = _HTTP_TIMEOUT
+) -> Any | None:
+    """Fetch *url* and parse as JSON.  Returns None on any error.
+
+    ``trigger`` is threaded through to :func:`_safe_get` so the audit
+    event reflects the calling fetcher (HN vs Reddit), not the URL
+    pattern.
+    """
+    body = _safe_get(url, trigger=trigger, timeout=timeout)
     if body is None:
         return None
     try:
@@ -139,13 +175,15 @@ _HN_ITEM_URL = "https://hacker-news.firebaseio.com/v0/item/{}.json"
 
 def _fetch_hackernews(*, limit: int = 15) -> list[dict[str, Any]]:
     """Fetch top HackerNews stories via the public Firebase API."""
-    story_ids = _safe_get_json(_HN_TOP_URL)
+    story_ids = _safe_get_json(_HN_TOP_URL, trigger=TRIGGER_NEWS_COMET_HACKERNEWS)
     if not isinstance(story_ids, list):
         return []
 
     items: list[dict[str, Any]] = []
     for sid in story_ids[:limit]:
-        story = _safe_get_json(_HN_ITEM_URL.format(sid))
+        story = _safe_get_json(
+            _HN_ITEM_URL.format(sid), trigger=TRIGGER_NEWS_COMET_HACKERNEWS
+        )
         if not isinstance(story, dict) or story.get("type") != "story":
             continue
         title = story.get("title", "")
@@ -180,7 +218,7 @@ def _fetch_reddit(subreddits: list[str], *, limit_per_sub: int = 10) -> list[dic
         if not sub:
             continue
         url = _REDDIT_HOT_URL.format(sub, limit_per_sub)
-        data = _safe_get_json(url)
+        data = _safe_get_json(url, trigger=TRIGGER_NEWS_COMET_REDDIT)
         if not isinstance(data, dict):
             continue
         children = data.get("data", {}).get("children", [])

@@ -14,6 +14,14 @@ from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+from metis_app.network_audit import (
+    NetworkBlockedError,
+    TRIGGER_NYX_REGISTRY,
+    audited_urlopen,
+    get_default_settings,
+    get_default_store,
+)
+
 NYX_SOURCE = "nyx_registry"
 NYX_SOURCE_REPO = "https://github.com/MihirJaiswal/nyxui"
 NYX_REGISTRY_URL_TEMPLATE = "https://nyxui.com/r/{name}.json"
@@ -254,12 +262,29 @@ def normalize_component_name(component_name: str) -> str:
 
 
 def _default_fetch_json(url: str) -> dict[str, Any]:
+    """Fetch ``url`` via the audited wrapper and parse the JSON body.
+
+    Routes through :func:`audited_urlopen` with
+    :data:`TRIGGER_NYX_REGISTRY` so the privacy panel records every
+    catalog browse. ``user_initiated=True`` because the catalog is
+    opened on explicit user navigation (the Nyx browser panel). A
+    kill-switch block surfaces to the UI via the existing
+    ``RuntimeError`` path so the browser shows a matching failure
+    message.
+    """
     request = urllib_request.Request(
         url,
         headers={"accept": "application/json", "user-agent": "metis-nyx-broker/1.0"},
     )
     try:
-        with urllib_request.urlopen(request, timeout=10) as response:
+        with audited_urlopen(
+            request,
+            trigger_feature=TRIGGER_NYX_REGISTRY,
+            user_initiated=True,
+            timeout=10,
+            store=get_default_store(),
+            settings=get_default_settings(),
+        ) as response:
             payload = json.load(response)
     except urllib_error.HTTPError as exc:
         raise RuntimeError(
@@ -267,6 +292,10 @@ def _default_fetch_json(url: str) -> dict[str, Any]:
         ) from exc
     except urllib_error.URLError as exc:
         raise RuntimeError(f"Nyx registry request failed: {url} ({exc.reason})") from exc
+    except NetworkBlockedError as exc:
+        raise RuntimeError(
+            f"Nyx registry request blocked by audit: {url} ({exc.reason})"
+        ) from exc
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Nyx registry returned invalid JSON: {url}") from exc
 

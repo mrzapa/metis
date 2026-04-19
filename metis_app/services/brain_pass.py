@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from functools import lru_cache
 import hashlib
 import io
@@ -25,12 +26,28 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any, Callable
 import warnings
 
+from metis_app.network_audit import (
+    NetworkAuditEvent,
+    NetworkBlockedError,
+    TRIGGER_TRIBEV2_SNAPSHOT,
+    classify_host,
+    get_default_settings,
+    get_default_store,
+    is_provider_blocked,
+    sanitize_url,
+)
+from metis_app.network_audit.store import new_ulid
 from metis_app.utils.document_loader import load_document
 
 _LOG = logging.getLogger(__name__)
+
+# Provider key for the TRIBE v2 snapshot download path -- matches the
+# ``huggingface_hub`` entry in ``metis_app/network_audit/providers.py``.
+_HF_HUB_PROVIDER_KEY = "huggingface_hub"
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
@@ -231,21 +248,171 @@ def _write_text_proxy(source_path: pathlib.Path, text: str) -> str:
     return str(target)
 
 
+def _build_snapshot_event(
+    *,
+    host: str,
+    path_prefix: str,
+    latency_ms: int | None,
+    blocked: bool,
+    status_code: int | None,
+) -> NetworkAuditEvent:
+    """Assemble a :class:`NetworkAuditEvent` for a snapshot_download call.
+
+    Shared by the pre-call, post-call, and blocked branches in
+    :func:`_audited_snapshot_download` so the event-shape invariants
+    stay in one place. Size fields are ``None`` because the
+    ``huggingface_hub`` library does not surface wire-level byte
+    counts through :func:`snapshot_download` -- see Phase 3b plan,
+    option (i): "we don't intercept HF's HTTP layer".
+    """
+    return NetworkAuditEvent(
+        id=new_ulid(),
+        timestamp=datetime.now(timezone.utc),
+        method="GET",
+        url_host=host,
+        url_path_prefix=path_prefix,
+        query_params_stored=False,
+        provider_key=_HF_HUB_PROVIDER_KEY,
+        trigger_feature=TRIGGER_TRIBEV2_SNAPSHOT,
+        size_bytes_in=None,
+        size_bytes_out=None,
+        latency_ms=latency_ms,
+        status_code=status_code,
+        user_initiated=True,
+        blocked=blocked,
+    )
+
+
+def _audited_snapshot_download(**snapshot_kwargs: Any) -> str:
+    """Audit-wrapped :func:`huggingface_hub.snapshot_download`.
+
+    Implements option (i) from ``plans/network-audit/plan.md`` Phase
+    3: we do NOT intercept the library's HTTP layer (``httpx``-based
+    and not drop-in replaceable). Instead we emit two events per call:
+
+    1. A pre-call event recording intent to fetch. ``latency_ms`` and
+       ``status_code`` are ``None`` because the call has not started.
+    2. A post-call event recording completion. ``latency_ms`` holds
+       wall-clock duration; ``status_code`` is ``200`` on success and
+       ``None`` on library-level failure (the wrapper does not crack
+       open HF's exception hierarchy to synthesise a status line).
+
+    The pair lets the panel correlate "intent to call" with "actual
+    completion" -- useful for debugging a hanging download -- without
+    requiring deep SDK interception. If the ``huggingface_hub``
+    provider is kill-switched (or airplane mode is active), the
+    library is NEVER called: we emit a single blocked event and raise
+    :class:`NetworkBlockedError`.
+
+    URL format: synthesised as ``https://huggingface.co/<repo_id>``.
+    The real wire traffic hits multiple endpoints under that host
+    (resolve, CAS, CDN mirror) which the audit layer does not see;
+    the synthesised URL is the honest "intent" representation and
+    matches how the panel groups the call under the repo.
+    """
+    from huggingface_hub import snapshot_download
+
+    store = get_default_store()
+    settings = get_default_settings()
+
+    repo_id = str(snapshot_kwargs.get("repo_id") or "")
+    # Host+path_prefix are produced by sanitize_url to honour the same
+    # privacy invariants as audited_urlopen (no query strings stored,
+    # no userinfo, no path beyond first segment).
+    host, path_prefix = sanitize_url(f"https://huggingface.co/{repo_id}")
+
+    # --- Kill-switch path ------------------------------------------------
+    # classify_host lands on the huggingface_hub provider for huggingface.co
+    # hosts; is_provider_blocked is the single source of truth so a
+    # future airplane-mode toggle applies here too.
+    spec = classify_host(host)
+    if is_provider_blocked(spec.key, settings):
+        # store may be None if runtime.get_default_store() caught a SQLite
+        # construction error (read-only FS, invalid path). Silently skip
+        # event recording; the NetworkBlockedError still surfaces the
+        # block to the caller.
+        if store is not None:
+            try:
+                store.append(
+                    _build_snapshot_event(
+                        host=host,
+                        path_prefix=path_prefix,
+                        latency_ms=None,
+                        blocked=True,
+                        status_code=None,
+                    ),
+                )
+            except Exception:  # noqa: BLE001 -- audit must never crash caller
+                _LOG.warning(
+                    "network_audit: failed to append blocked snapshot event for %s",
+                    repo_id,
+                    exc_info=True,
+                )
+        raise NetworkBlockedError(
+            _HF_HUB_PROVIDER_KEY,
+            "huggingface_hub blocked by audit kill switch",
+        )
+
+    # --- Pre-call event --------------------------------------------------
+    if store is not None:
+        try:
+            store.append(
+                _build_snapshot_event(
+                    host=host,
+                    path_prefix=path_prefix,
+                    latency_ms=None,
+                    blocked=False,
+                    status_code=None,
+                ),
+            )
+        except Exception:  # noqa: BLE001 -- audit must never crash caller
+            _LOG.warning(
+                "network_audit: failed to append pre-call snapshot event for %s",
+                repo_id,
+                exc_info=True,
+            )
+
+    # --- Library call + post-call event ---------------------------------
+    start = time.perf_counter()
+    status_code: int | None = None
+    try:
+        with _quiet_tribev2_runtime():
+            result = str(snapshot_download(**snapshot_kwargs))
+        status_code = 200
+        return result
+    finally:
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        if store is not None:
+            try:
+                store.append(
+                    _build_snapshot_event(
+                        host=host,
+                        path_prefix=path_prefix,
+                        latency_ms=latency_ms,
+                        blocked=False,
+                        status_code=status_code,
+                    ),
+                )
+            except Exception:  # noqa: BLE001 -- audit must never crash caller
+                _LOG.warning(
+                    "network_audit: failed to append post-call snapshot event for %s",
+                    repo_id,
+                    exc_info=True,
+                )
+
+
 def _download_tribev2_snapshot(
     repo_id: str,
     cache_folder: str,
     checkpoint_name: str = "best.ckpt",
 ) -> str:
-    from huggingface_hub import snapshot_download
-
     snapshot_kwargs: dict[str, Any] = {
         "repo_id": repo_id,
         "allow_patterns": ["config.yaml", checkpoint_name],
     }
     if cache_folder:
         snapshot_kwargs["cache_dir"] = str(pathlib.Path(cache_folder).expanduser())
-    with _quiet_tribev2_runtime():
-        return str(snapshot_download(**snapshot_kwargs))
+    return _audited_snapshot_download(**snapshot_kwargs)
 
 
 def _looks_like_remote_tribev2_model(model_id: str) -> bool:

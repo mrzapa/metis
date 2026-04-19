@@ -69,7 +69,7 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 | M14 | **The Forge** — technique gallery UI, togglable frontier modules | 🌱🧠 | Draft | [`plans/the-forge/plan.md`](the-forge/plan.md) | — | 2026-04-19 | M02, M06, M12 |
 | M15 | **Pro tier + public launch** — paywall, skill pack, HN/r/LocalLLaMA launch | 🔧 | Draft needed | [`plans/pro-tier-launch/plan.md`](pro-tier-launch/plan.md) (harvest stub) | — | 2026-04-18 | M13, M14 |
 | M16 | **Personal evals** — track companion improvement on user's specific tasks | 🌱 | Draft | [`plans/personal-evals/plan.md`](personal-evals/plan.md) | — | 2026-04-19 | M13 |
-| M17 | **Network audit** — outbound call panel, per-provider block, offline proof | 🔧 | In progress | [`plans/network-audit/plan.md`](network-audit/plan.md) | Phases 1+2 landed (PR #516, `d147f87`); `claude/m17-phase3a-wrapper` working Phase 3a — `audited_urlopen` + kill switches (call-site migration + CI guard follow in Phase 3b) | 2026-04-19 | — |
+| M17 | **Network audit** — outbound call panel, per-provider block, offline proof | 🔧 | In progress | [`plans/network-audit/plan.md`](network-audit/plan.md) | Phases 1+2+3a landed (`fe2d038`); `claude/m17-phase3b-migration` working Phase 3b — call-site migration + CI guard | 2026-04-19 | — |
 | M18 | **LoRA fine-tuning (stretch)** — companion weights adapt to user data | 🌱 | Draft needed | *(to be created: `plans/lora-stretch/plan.md`)* | — | — | M13 |
 | M19 | **Mobile companion (stretch)** — Tauri Mobile or PWA, read-only | 🌌 | Draft needed | *(to be created: `plans/mobile-stretch/plan.md`)* | — | — | M15 |
 
