@@ -1,3 +1,4 @@
+import type { StarAnnotations } from "./star-annotations";
 import type { StarVisualArchetype } from "./star-visual-archetype";
 
 export type SeedInput = string | number;
@@ -56,4 +57,11 @@ export interface StellarProfile {
   temperatureK: number;
   visual: StellarVisualProfile;
   visualArchetype: StarVisualArchetype;
+  /**
+   * Optional Phase 6 annotations (halo / ring / satellites) layered onto
+   * the closeup-tier shader. Content-driven — `generateStellarProfile`
+   * leaves this `undefined` and callers attach it when they have the
+   * signal (today: user-star producers call `deriveStarAnnotations`).
+   */
+  annotations?: StarAnnotations;
 }

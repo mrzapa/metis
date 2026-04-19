@@ -1,3 +1,4 @@
+import type { StarAnnotations } from "./star-annotations";
 import type { StarVisualArchetype } from "./star-visual-archetype";
 
 export type LandingStarRenderTier = "point" | "sprite" | "hero" | "closeup";
@@ -14,6 +15,12 @@ export interface LandingProjectedStar {
    * stars) can omit it; omitted = `main_sequence` at render time.
    */
   visualArchetype?: StarVisualArchetype;
+  /**
+   * Optional Phase 6 annotations (halo / ring / satellites). Omitted by
+   * field-star and landmark paths; user-star producers populate it via
+   * `deriveStarAnnotations`. Undefined = no annotations rendered.
+   */
+  annotations?: StarAnnotations;
 }
 
 export interface LandingStarHitTarget extends LandingProjectedStar {

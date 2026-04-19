@@ -54,12 +54,6 @@ import type {
   UserStarStage,
 } from "@/lib/constellation-types";
 import { cn } from "@/lib/utils";
-import {
-  STAR_VERT,
-  STAR_FRAG,
-  compileShader,
-  createStarProgram,
-} from "@/lib/landing-stars/star-surface-shader";
 
 type BuildStep = "idle" | "active" | "done";
 type EntryMode = "new" | "existing";
@@ -231,23 +225,20 @@ function useReducedMotionPreference(): boolean {
   return reduced;
 }
 
-
-function domainSeed(id?: string, id2?: string): number {
-  const combined = (id ?? "") + "\x00" + (id2 ?? "");
-  if (!combined.replace(/\x00/g, "")) return 0.42;
-  let h = 0;
-  for (let i = 0; i < combined.length; i++) {
-    h = ((h << 5) - h + combined.charCodeAt(i)) | 0;
-  }
-  return (((h >>> 0) % 10000) / 10000);
-}
-
+/**
+ * Static 2D disc preview for the Observatory dialog header.
+ *
+ * M02 Phase 5 retired the 3D procedural-surface shader that used to render
+ * this thumbnail; the dialog keeps the disc as a small faculty-tinted marker
+ * so the header layout still has a visual anchor. Stage gets a faint ring
+ * band instead of the old procedural stage gating. The `size` and `starId`
+ * props are preserved for caller-site compatibility but no longer drive
+ * shader uniforms.
+ */
 function StarMiniPreview({
   primaryDomainId,
   relatedDomainIds,
   stage,
-  size,
-  starId,
 }: {
   primaryDomainId?: string;
   relatedDomainIds?: string[];
@@ -255,95 +246,29 @@ function StarMiniPreview({
   size?: number;
   starId?: string;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number>(0);
-  const glRef = useRef<{ gl: WebGL2RenderingContext; prog: WebGLProgram } | null>(null);
+  const PX = 160;
+  const [r, g, b] = getFacultyColor(primaryDomainId);
+  const [r2, g2, b2] = (relatedDomainIds ?? [])[0]
+    ? getFacultyColor(relatedDomainIds![0])
+    : [208, 216, 232];
+  const core = `rgb(${r}, ${g}, ${b})`;
+  const halo = `rgba(${r2}, ${g2}, ${b2}, 0.55)`;
+  const hasRing = stage === "integrated" || stage === "growing";
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const DPR = Math.min(typeof window !== "undefined" ? (window.devicePixelRatio ?? 1) : 1, 3);
-    const PX = 160;
-    canvas.width = PX * DPR;
-    canvas.height = PX * DPR;
-    canvas.style.width = `${PX}px`;
-    canvas.style.height = `${PX}px`;
-
-    /* ── init WebGL2 ────────────────────────────────────────────────── */
-    let cached = glRef.current;
-    if (!cached) {
-      const gl = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: false, antialias: true });
-      if (!gl) return;                // fallback: just show dark circle
-      const prog = createStarProgram(gl);
-      if (!prog) return;
-
-      /* fullscreen quad */
-      const buf = gl.createBuffer()!;
-      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
-      const loc = gl.getAttribLocation(prog, "a_pos");
-      gl.enableVertexAttribArray(loc);
-      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-
-      cached = { gl, prog };
-      glRef.current = cached;
-    }
-
-    const { gl, prog } = cached;
-    gl.useProgram(prog);
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.clearColor(8 / 255, 11 / 255, 20 / 255, 1);
-
-    /* ── uniforms ───────────────────────────────────────────────────── */
-    const uTime  = gl.getUniformLocation(prog, "u_time");
-    const uSeed  = gl.getUniformLocation(prog, "u_seed");
-    const uColor = gl.getUniformLocation(prog, "u_color");
-    const uColor2 = gl.getUniformLocation(prog, "u_color2");
-    const uColor3 = gl.getUniformLocation(prog, "u_color3");
-    const uHasC2 = gl.getUniformLocation(prog, "u_hasColor2");
-    const uHasC3 = gl.getUniformLocation(prog, "u_hasColor3");
-    const uDiffraction = gl.getUniformLocation(prog, "u_hasDiffraction");
-    const uStage = gl.getUniformLocation(prog, "u_stage");
-    const uRes = gl.getUniformLocation(prog, "u_res");
-
-    const [r, g, b] = getFacultyColor(primaryDomainId);
-    const related = (relatedDomainIds ?? []).slice(0, 2).map((id) => getFacultyColor(id));
-    const hasDiffraction = stage === "integrated" || stage === "growing";
-    const stageVal = stage === "integrated" ? 2 : stage === "growing" ? 1 : 0;
-    const seed = domainSeed(primaryDomainId, starId);
-
-    gl.uniform3f(uColor, r, g, b);
-    gl.uniform3f(uColor2, ...(related[0] ?? [208, 216, 232]) as [number, number, number]);
-    gl.uniform3f(uColor3, ...(related[1] ?? [208, 216, 232]) as [number, number, number]);
-    gl.uniform1f(uHasC2, related.length >= 1 ? 1 : 0);
-    gl.uniform1f(uHasC3, related.length >= 2 ? 1 : 0);
-    gl.uniform1f(uDiffraction, hasDiffraction ? 1 : 0);
-    gl.uniform1f(uStage, stageVal);
-    gl.uniform1f(uSeed, seed);
-    gl.uniform2f(uRes, canvas.width, canvas.height);
-
-    let startTime: number | null = null;
-
-    function draw(ts: number) {
-      if (!startTime) startTime = ts;
-      const elapsed = (ts - startTime) / 1000;    // seconds
-      gl.uniform1f(uTime, elapsed);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      rafRef.current = requestAnimationFrame(draw);
-    }
-
-    rafRef.current = requestAnimationFrame(draw);
-    return () => {
-      cancelAnimationFrame(rafRef.current);
-      glRef.current = null;
-    };
-  }, [primaryDomainId, relatedDomainIds, stage, size, starId]);
-
-  return <canvas ref={canvasRef} style={{ display: "block", borderRadius: "50%" }} />;
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        width: PX,
+        height: PX,
+        borderRadius: "50%",
+        background: `radial-gradient(circle at 50% 45%, ${core} 0%, ${core} 18%, ${halo} 52%, rgba(8, 11, 20, 0.95) 78%, rgba(8, 11, 20, 1) 100%)`,
+        boxShadow: hasRing
+          ? `0 0 0 1px ${halo}, 0 0 24px -4px ${halo}`
+          : "0 0 18px -6px rgba(255,255,255,0.22)",
+      }}
+    />
+  );
 }
 
 export function StarDetailsPanel({

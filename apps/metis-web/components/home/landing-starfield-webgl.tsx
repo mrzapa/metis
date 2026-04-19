@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import type { MutableRefObject } from "react";
+import { getStarAnnotationAttributeValues } from "@/lib/landing-stars/star-annotations";
 import { getStarVisualArchetypeId } from "@/lib/landing-stars/star-visual-archetype";
 import type { LandingWebglStar, LandingStarfieldFrame, LandingStarRenderTier } from "./landing-starfield-webgl.types";
 
@@ -20,6 +21,15 @@ attribute vec4 aColorC;
 attribute vec4 aShape;
 attribute vec2 aTwinkle;
 attribute float aArchetype;
+// Phase 6 annotation attributes — closeup-tier-only metadata decorations.
+// Absent annotations = 0, which degenerates to a no-op in the fragment
+// stage so field / landmark rendering is untouched.
+attribute float aHaloStrength;
+attribute float aRingCount;
+attribute float aRingOpacity;
+attribute float aSatelliteCount;
+attribute float aSatelliteRadius;
+attribute float aSatellitePeriod;
 
 uniform float uDpr;
 uniform float uTime;
@@ -43,6 +53,12 @@ varying float vArchetypePulse;
 varying vec3 vAccentColor;
 varying vec3 vCoreColor;
 varying vec3 vHaloColor;
+varying float vHaloStrength;
+varying float vRingCount;
+varying float vRingOpacity;
+varying float vSatelliteCount;
+varying float vSatelliteRadius;
+varying float vSatellitePeriod;
 
 void main() {
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
@@ -128,7 +144,15 @@ void main() {
     }
   }
 
-  gl_PointSize = max(1.0, aShape.z * uDpr * tierBoost * heroGlow * twinkle * zoomSizeScale * blur * archetypePulse * archetypeSizeScale);
+  // Phase 6: when satellites annotate the focused star, widen the sprite
+  // so the orbit at aSatelliteRadius stays inside gl_PointCoord.
+  // Guarded on closeup tier so non-focused stars never pay the cost.
+  float satelliteSizeBoost = 1.0;
+  if (isFocused > 0.5 && aSatelliteCount > 0.5) {
+    satelliteSizeBoost = max(1.0, aSatelliteRadius + 1.0);
+  }
+
+  gl_PointSize = max(1.0, aShape.z * uDpr * tierBoost * heroGlow * twinkle * zoomSizeScale * blur * archetypePulse * archetypeSizeScale * satelliteSizeBoost);
 
   vAddable = aColorA.w;
   vBloom = aColorC.w;
@@ -144,6 +168,12 @@ void main() {
   vAccentColor = aColorA.rgb;
   vCoreColor = aColorB.rgb;
   vHaloColor = aColorC.rgb;
+  vHaloStrength = aHaloStrength;
+  vRingCount = aRingCount;
+  vRingOpacity = aRingOpacity;
+  vSatelliteCount = aSatelliteCount;
+  vSatelliteRadius = aSatelliteRadius;
+  vSatellitePeriod = aSatellitePeriod;
 }
 `;
 
@@ -164,6 +194,12 @@ varying float vArchetypePulse;
 varying vec3 vAccentColor;
 varying vec3 vCoreColor;
 varying vec3 vHaloColor;
+varying float vHaloStrength;
+varying float vRingCount;
+varying float vRingOpacity;
+varying float vSatelliteCount;
+varying float vSatelliteRadius;
+varying float vSatellitePeriod;
 
 float safeSmoothstep(float edge0, float edge1, float x) {
   if (edge0 == edge1) {
@@ -173,10 +209,28 @@ float safeSmoothstep(float edge0, float edge1, float x) {
 }
 
 void main() {
-  vec2 uv = gl_PointCoord * 2.0 - 1.0;
+  // Raw point-sprite UV in [-1, 1] squared. When Phase 6 satellites
+  // are on and the vertex stage boosted gl_PointSize, the original
+  // star disc shrinks inside this canvas — we keep a rawUv for
+  // satellite / ring math (which reach outward past the original disc
+  // edge) and remap uv / dist so the star itself stays visually the
+  // same size.
+  vec2 rawUv = gl_PointCoord * 2.0 - 1.0;
+  float satelliteSpriteBoost = 1.0;
+  if (vTier > 2.5 && vSatelliteCount > 0.5) {
+    satelliteSpriteBoost = max(1.0, vSatelliteRadius + 1.0);
+  }
+  vec2 uv = rawUv * satelliteSpriteBoost;
   float dist = length(uv);
-  if (dist > 1.0) {
+  float rawDist = length(rawUv);
+  if (rawDist > 1.0) {
     discard;
+  }
+  if (dist > 1.0) {
+    // Outside the original disc radius but still inside the boosted
+    // sprite. Let ring / satellite passes paint here; skip the default
+    // disc stack by zeroing dist-driven masks below. We keep going
+    // rather than discard so those annotations can write pixels.
   }
 
   // Archetype flags. Only fire on closeup tier. Ids come from
@@ -453,6 +507,93 @@ void main() {
   }
   alpha = clamp(alpha * (0.9 + vBloom * 0.12) * pulseAlpha, 0.0, 1.0);
 
+  // Phase 6 annotations — closeup-tier only, layered on top of the
+  // archetype output. Absent annotations (all attributes zero) short-
+  // circuit to no-op so field / landmark / non-focused rendering is
+  // unchanged. See
+  // apps/metis-web/lib/landing-stars/star-annotations.ts for the CPU
+  // side and plans/constellation-2d-refactor/plan.md (Phase 6).
+  if (isCloseup) {
+    // Halo (recency). Widen and warm-white-tint the existing halo
+    // proportional to strength. Capped so the annotated halo never
+    // exceeds 1.5× the archetype's own halo contribution.
+    if (vHaloStrength > 0.001) {
+      float haloAnnotationMask = safeSmoothstep(1.0, 0.05, dist);
+      vec3 haloTint = mix(vAccentColor, vec3(1.0, 0.95, 0.85), 0.55);
+      color += haloTint * haloAnnotationMask * vHaloStrength * 0.3;
+      float annotatedHaloAlpha = haloMask * alphaBase * haloScale * (1.0 + vHaloStrength * 0.5);
+      annotatedHaloAlpha = min(annotatedHaloAlpha, haloMask * alphaBase * haloScale * 1.5 + 0.0001);
+      alpha = clamp(alpha + annotatedHaloAlpha * vHaloStrength * 0.35, 0.0, 1.0);
+    }
+
+    // Document-series rings — concentric thin rings at normalized radii
+    // 0.78, 0.88, 0.98. vRingCount selects how many are drawn.
+    if (vRingCount > 0.5) {
+      vec3 ringTint = mix(vAccentColor, vec3(1.0, 0.95, 0.85), 0.55) * 0.6;
+      float ringAlpha = 0.0;
+      float ringThickness = 0.015;
+      // Ring 1 at radius 0.78 — always on when count >= 1.
+      float r1 = safeSmoothstep(0.78 - ringThickness, 0.78, dist)
+        * (1.0 - safeSmoothstep(0.78, 0.78 + ringThickness, dist));
+      ringAlpha += r1;
+      // Ring 2 at radius 0.88 — when count >= 2.
+      if (vRingCount > 1.5) {
+        float r2 = safeSmoothstep(0.88 - ringThickness, 0.88, dist)
+          * (1.0 - safeSmoothstep(0.88, 0.88 + ringThickness, dist));
+        ringAlpha += r2;
+      }
+      // Ring 3 at radius 0.98 — when count >= 3.
+      if (vRingCount > 2.5) {
+        float r3 = safeSmoothstep(0.98 - ringThickness, 0.98, dist)
+          * (1.0 - safeSmoothstep(0.98, 0.98 + ringThickness, dist));
+        ringAlpha += r3;
+      }
+      color += ringTint * ringAlpha * vRingOpacity;
+      alpha = clamp(alpha + ringAlpha * vRingOpacity, 0.0, 1.0);
+    }
+
+    // Orbiting satellites — up to 4 tiny discs at vSatelliteRadius in
+    // the original-disc UV frame (i.e. 2.4 = 2.4x the disc radius).
+    // The vertex stage widened the sprite so uv already covers
+    // [-boost, boost]; these positions land inside it.
+    //
+    // uTime drives the orbit; reduced motion gates come through the
+    // existing uTime path (shared with archetype pulsation). The
+    // per-satellite phase is (i / count) * TAU so 1/2/3/4 satellites
+    // all distribute evenly.
+    if (vSatelliteCount > 0.5) {
+      float TAU = 6.28318;
+      float periodSafe = max(vSatellitePeriod, 0.01);
+      float baseAngle = (uTime / periodSafe) * TAU;
+      float phaseStep = TAU / max(vSatelliteCount, 1.0);
+      float satDiscRadius = 0.15;
+      float satelliteAlpha = 0.0;
+      // Unrolled 4-branch loop — shader compiler inlines the guards.
+      if (vSatelliteCount > 0.5) {
+        float a = baseAngle;
+        vec2 p = vec2(cos(a), sin(a)) * vSatelliteRadius;
+        satelliteAlpha += safeSmoothstep(satDiscRadius, 0.0, length(uv - p));
+      }
+      if (vSatelliteCount > 1.5) {
+        float a = baseAngle + phaseStep;
+        vec2 p = vec2(cos(a), sin(a)) * vSatelliteRadius;
+        satelliteAlpha += safeSmoothstep(satDiscRadius, 0.0, length(uv - p));
+      }
+      if (vSatelliteCount > 2.5) {
+        float a = baseAngle + phaseStep * 2.0;
+        vec2 p = vec2(cos(a), sin(a)) * vSatelliteRadius;
+        satelliteAlpha += safeSmoothstep(satDiscRadius, 0.0, length(uv - p));
+      }
+      if (vSatelliteCount > 3.5) {
+        float a = baseAngle + phaseStep * 3.0;
+        vec2 p = vec2(cos(a), sin(a)) * vSatelliteRadius;
+        satelliteAlpha += safeSmoothstep(satDiscRadius, 0.0, length(uv - p));
+      }
+      color += vAccentColor * satelliteAlpha;
+      alpha = clamp(alpha + satelliteAlpha, 0.0, 1.0);
+    }
+  }
+
   // Depth-of-field: ambient stars dim and soften outside the focus radius.
   // vFocusBlur ∈ [0,1]; larger values shift alpha away from the core toward the halo.
   if (vFocusBlur > 0.001) {
@@ -523,14 +664,21 @@ function fillStarAttributes(frame: LandingStarfieldFrame) {
   const shape = new Float32Array(starCount * 4);
   const twinkle = new Float32Array(starCount * 2);
   const archetype = new Float32Array(starCount);
+  const haloStrength = new Float32Array(starCount);
+  const ringCount = new Float32Array(starCount);
+  const ringOpacity = new Float32Array(starCount);
+  const satelliteCount = new Float32Array(starCount);
+  const satelliteRadius = new Float32Array(starCount);
+  const satellitePeriod = new Float32Array(starCount);
 
   for (let index = 0; index < starCount; index += 1) {
     const star = stars[index];
-    const { palette, stellarType, visual, visualArchetype } = star.profile;
+    const { annotations, palette, stellarType, visual, visualArchetype } = star.profile;
     const pointSize = getPointSize(star);
     const normalizedAccent = normalizeRgb(palette.accent);
     const normalizedCore = normalizeRgb(palette.core);
     const normalizedHalo = normalizeRgb(palette.halo);
+    const annotationAttrs = getStarAnnotationAttributeValues(annotations);
     const attributeIndex = index * 3;
     const packedIndex = index * 4;
     const twinkleIndex = index * 2;
@@ -558,6 +706,12 @@ function fillStarAttributes(frame: LandingStarfieldFrame) {
     twinkle[twinkleIndex] = visual.twinklePhase;
     twinkle[twinkleIndex + 1] = visual.twinkleSpeed * 500;
     archetype[index] = getStarVisualArchetypeId(visualArchetype);
+    haloStrength[index] = annotationAttrs.haloStrength;
+    ringCount[index] = annotationAttrs.ringCount;
+    ringOpacity[index] = annotationAttrs.ringOpacity;
+    satelliteCount[index] = annotationAttrs.satelliteCount;
+    satelliteRadius[index] = annotationAttrs.satelliteRadius;
+    satellitePeriod[index] = annotationAttrs.satellitePeriod;
   }
 
   return {
@@ -565,7 +719,13 @@ function fillStarAttributes(frame: LandingStarfieldFrame) {
     colorA,
     colorB,
     colorC,
+    haloStrength,
     positions,
+    ringCount,
+    ringOpacity,
+    satelliteCount,
+    satelliteRadius,
+    satellitePeriod,
     shape,
     twinkle,
   };
@@ -655,6 +815,12 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
       geometry.setAttribute("aShape", new THREE.BufferAttribute(attributes.shape, 4));
       geometry.setAttribute("aTwinkle", new THREE.BufferAttribute(attributes.twinkle, 2));
       geometry.setAttribute("aArchetype", new THREE.BufferAttribute(attributes.archetype, 1));
+      geometry.setAttribute("aHaloStrength", new THREE.BufferAttribute(attributes.haloStrength, 1));
+      geometry.setAttribute("aRingCount", new THREE.BufferAttribute(attributes.ringCount, 1));
+      geometry.setAttribute("aRingOpacity", new THREE.BufferAttribute(attributes.ringOpacity, 1));
+      geometry.setAttribute("aSatelliteCount", new THREE.BufferAttribute(attributes.satelliteCount, 1));
+      geometry.setAttribute("aSatelliteRadius", new THREE.BufferAttribute(attributes.satelliteRadius, 1));
+      geometry.setAttribute("aSatellitePeriod", new THREE.BufferAttribute(attributes.satellitePeriod, 1));
       geometry.computeBoundingSphere();
     };
 

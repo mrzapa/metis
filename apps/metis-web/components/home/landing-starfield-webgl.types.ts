@@ -29,8 +29,9 @@ export interface LandingStarfieldFrame {
   width: number;
   zoomScale: number;
   /**
-   * Dive focus centre in screen-space pixels (matches the star-dive overlay).
-   * When `focusStrength === 0`, the values are ignored by the shader.
+   * Dive focus centre in screen-space pixels — the projected location of the
+   * focused star, used to drive depth-of-field falloff around it. When
+   * `focusStrength === 0`, the values are ignored by the shader.
    */
   focusCenterX?: number;
   focusCenterY?: number;

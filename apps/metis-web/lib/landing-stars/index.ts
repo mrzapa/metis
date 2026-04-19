@@ -17,6 +17,24 @@ export {
   getStarVisualArchetypeId,
   selectStarVisualArchetype,
 } from "./star-visual-archetype";
+export type {
+  DeriveStarAnnotationsOptions,
+  StarAnnotationAttributeValues,
+  StarAnnotationHalo,
+  StarAnnotationRing,
+  StarAnnotationSatellites,
+  StarAnnotations,
+} from "./star-annotations";
+export {
+  DEFAULT_RING_OPACITY,
+  DEFAULT_SATELLITE_PERIOD_SECONDS,
+  DEFAULT_SATELLITE_RADIUS,
+  HALO_RECENCY_HALF_LIFE_SECONDS,
+  HALO_STRENGTH_THRESHOLD,
+  deriveStarAnnotations,
+  getStarAnnotationAttributeValues,
+  haloStrengthFromAge,
+} from "./star-annotations";
 export type { GenerateStellarProfileOptions } from "./stellar-profile";
 export {
   createStellarPaletteFromTemperature,
