@@ -121,3 +121,16 @@ files, coordinate.
   date. Move entry to a `## Landed` section if the main table gets long.
 - **When a new milestone appears** (promoted from `IDEAS.md`): add a row with
   `Status: Draft needed` and create a plan doc stub.
+
+---
+
+## Decision log
+
+Repowise MCP isn't always wired in sub-agent environments, so milestone-level
+decisions are recorded here. One line per decision. Link the ADR if there is
+one; otherwise link the plan doc or PR.
+
+| Date | Milestone | Decision | Source |
+|---|---|---|---|
+| 2026-04-19 | M02 | User-star archetype migration is implicit — archetype is derived at render time from content type (`deriveUserStarContentType` → `getCachedStellarProfile` → `selectStarVisualArchetype`), never persisted on `UserStar`. No migration script needed. | [ADR 0006](../docs/adr/0006-constellation-design-2d-primary.md) (Accepted) |
+| 2026-04-19 | M02 | Reduced-motion freezes WebGL `uTime` at its last real-time value (not zero) to avoid phase-jumping the archetype twinkle when the user toggles the OS setting mid-session. | `plans/constellation-2d-refactor/plan.md` Phase 7.3 |
