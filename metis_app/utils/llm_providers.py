@@ -5,6 +5,13 @@ method (LangChain ``BaseChatModel`` protocol).  All heavy dependencies are
 lazily imported so the module itself stays lightweight.
 
 No Tk objects, no UI — purely driven by a plain settings dict.
+
+M17 Phase 4 note: every concrete chat-model construction path below
+(``_create_openai``, ``_create_anthropic``, etc. — rows A-E in the
+plan's call-site inventory) is wrapped in a ``_ProviderAuditWrapper``
+proxy so every ``invoke`` / ``stream`` call emits a
+``source="sdk_invocation"`` audit event and consults the kill switch.
+See ``metis_app/network_audit/sdk_events.py`` and ADR 0010.
 """
 
 from __future__ import annotations
@@ -13,12 +20,111 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from metis_app.network_audit.sdk_events import audit_sdk_call
+from metis_app.network_audit.trigger_features import (
+    TRIGGER_LLM_INVOKE,
+    TRIGGER_LLM_STREAM,
+)
 from metis_app.utils.model_caps import get_capped_output_tokens
 from metis_app.utils.credential_pool import CredentialPool as _CredentialPool
 
 _log = logging.getLogger(__name__)
 
 _llm_cache: dict[tuple, Any] = {}
+
+
+# ---------------------------------------------------------------------------
+# Provider → (url_host, provider_key) map for SDK-invocation audit events
+# ---------------------------------------------------------------------------
+# ``url_host`` is the provider's *declared* primary API host — not an
+# observed wire host. See ADR 0010: these events are labelled
+# ``source="sdk_invocation"`` precisely so the panel can caveat them
+# as intent-level (we don't wrap LangChain's httpx client). The
+# ``provider_key`` matches the entry in
+# ``metis_app/network_audit/providers.py:KNOWN_PROVIDERS``.
+_SDK_HOST_MAP: dict[str, tuple[str, str]] = {
+    "openai": ("openai", "api.openai.com"),
+    "anthropic": ("anthropic", "api.anthropic.com"),
+    "google": ("google", "generativelanguage.googleapis.com"),
+    "xai": ("xai", "api.x.ai"),
+    "local_lm_studio": ("local_lm_studio", "localhost"),
+}
+
+
+class _ProviderAuditWrapper:
+    """Thin invoke/stream proxy that emits SDK-invocation audit events.
+
+    Wraps any object with ``invoke(messages)`` and ``stream(messages)``
+    methods (a LangChain ``BaseChatModel`` or the matching interface).
+    Each call opens an :func:`audit_sdk_call` context with the
+    provider-specific ``url_host`` and ``/chat`` or ``/stream`` path
+    prefix. If the provider's kill switch is active (airplane mode in
+    Phase 4 — per-LLM-provider switches are Phase 5), the call raises
+    :class:`NetworkBlockedError` instead of touching the wrapped model.
+
+    The wrapper is intentionally dumb: it does not reimplement the
+    retry / pool-rotate behaviour from ``PooledLLM`` — that wrapper
+    composes *around* this one (``PooledLLM`` calls ``factory(key)``
+    which returns a wrapped model, so every retry attempt is also
+    audited).
+    """
+
+    __slots__ = ("_inner", "_provider_key", "_url_host", "_user_initiated")
+
+    def __init__(
+        self,
+        inner: Any,
+        *,
+        provider_key: str,
+        url_host: str,
+        user_initiated: bool = False,
+    ) -> None:
+        self._inner = inner
+        self._provider_key = provider_key
+        self._url_host = url_host
+        # TODO(Phase 4b): thread real user-vs-agent context from the
+        # call site. For now every SDK invocation is recorded with
+        # ``user_initiated=False``; the Phase 7 coordination hooks
+        # (M06 / M09) re-audit this.
+        self._user_initiated = user_initiated
+
+    def invoke(self, messages: list[Any]) -> Any:
+        with audit_sdk_call(
+            provider_key=self._provider_key,
+            trigger_feature=TRIGGER_LLM_INVOKE,
+            url_host=self._url_host,
+            url_path_prefix="/chat",
+            method="POST",
+            user_initiated=self._user_initiated,
+        ):
+            return self._inner.invoke(messages)
+
+    def stream(self, messages: list[Any]) -> Any:
+        with audit_sdk_call(
+            provider_key=self._provider_key,
+            trigger_feature=TRIGGER_LLM_STREAM,
+            url_host=self._url_host,
+            url_path_prefix="/stream",
+            method="POST",
+            user_initiated=self._user_initiated,
+        ):
+            # The wrapped model's ``stream`` is itself a generator.
+            # Delegating with ``yield from`` would hold the context
+            # manager open across the whole stream (OK in practice,
+            # but we want a single latency measurement bracketing
+            # just the call-dispatch, not the full-body transfer).
+            # Materialise into a list so the context exits before
+            # the caller consumes tokens. The interface contract
+            # here is "iterable of tokens"; LangChain consumers
+            # iterate regardless of whether it's a lazy generator
+            # or an eager list.
+            return list(self._inner.stream(messages))
+
+    def __getattr__(self, item: str) -> Any:
+        # Transparent forwarding for any non-audited attribute (e.g.
+        # ``batch``, configuration properties) so existing integrations
+        # that poke at the underlying model still work.
+        return getattr(self._inner, item)
 
 
 # ---------------------------------------------------------------------------
@@ -376,18 +482,35 @@ def create_smart_llm(settings: dict[str, Any]) -> Any:
 # Private per-provider constructors
 # ---------------------------------------------------------------------------
 
+def _wrap_for_audit(llm: Any, provider_key_label: str) -> Any:
+    """Wrap a concrete LangChain LLM in the SDK-audit proxy.
+
+    ``provider_key_label`` is the internal llm_providers.py routing
+    label (``"openai"`` / ``"anthropic"`` / ``"google"`` / ``"xai"`` /
+    ``"local_lm_studio"``). It indexes :data:`_SDK_HOST_MAP` to produce
+    the ``(provider_key, url_host)`` pair for the audit event.
+    """
+    provider_key, url_host = _SDK_HOST_MAP[provider_key_label]
+    return _ProviderAuditWrapper(
+        llm,
+        provider_key=provider_key,
+        url_host=url_host,
+    )
+
+
 def _create_openai(
     settings: dict[str, Any], model: str, temperature: float, max_tokens: int,
 ) -> Any:
     from langchain_openai import ChatOpenAI  # type: ignore[import-untyped]
 
     api_key = _require_key(settings, "api_key_openai", "OpenAI")
-    return ChatOpenAI(
+    llm = ChatOpenAI(
         api_key=api_key,
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    return _wrap_for_audit(llm, "openai")
 
 
 def _create_anthropic(
@@ -396,12 +519,13 @@ def _create_anthropic(
     from langchain_anthropic import ChatAnthropic  # type: ignore[import-untyped]
 
     api_key = _require_key(settings, "api_key_anthropic", "Anthropic")
-    return ChatAnthropic(
+    llm = ChatAnthropic(
         api_key=api_key,
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    return _wrap_for_audit(llm, "anthropic")
 
 
 def _create_google(
@@ -410,12 +534,13 @@ def _create_google(
     from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore[import-untyped]
 
     api_key = _require_key(settings, "api_key_google", "Google")
-    return ChatGoogleGenerativeAI(
+    llm = ChatGoogleGenerativeAI(
         google_api_key=api_key,
         model=model,
         temperature=temperature,
         max_output_tokens=max_tokens,
     )
+    return _wrap_for_audit(llm, "google")
 
 
 def _create_xai(
@@ -424,13 +549,14 @@ def _create_xai(
     from langchain_openai import ChatOpenAI  # type: ignore[import-untyped]
 
     api_key = _require_key(settings, "api_key_xai", "xAI")
-    return ChatOpenAI(
+    llm = ChatOpenAI(
         base_url="https://api.x.ai/v1",
         api_key=api_key,
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    return _wrap_for_audit(llm, "xai")
 
 
 def _create_lm_studio(
@@ -440,13 +566,14 @@ def _create_lm_studio(
 
     url = str(settings.get("local_llm_url", "http://localhost:1234/v1") or "").strip()
     _log.info("Connecting to Local LLM at %s", url)
-    return ChatOpenAI(
+    llm = ChatOpenAI(
         base_url=url,
         api_key="lm-studio",
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    return _wrap_for_audit(llm, "local_lm_studio")
 
 
 def _create_local_gguf(
