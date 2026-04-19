@@ -7,7 +7,7 @@ This is the **single source of truth for what is being worked on in METIS and
 what comes next.** Every row is a milestone from `VISION.md`. Agents claim rows,
 do the work, update the row when they stop.
 
-**Last reviewed:** 2026-04-19
+**Last reviewed:** 2026-04-19 (M03–M06 status reconciled — see Decision log)
 
 ## Quick start for a fresh agent
 
@@ -55,10 +55,10 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 |---|---|---|---|---|---|---|---|
 | M01 | **Preserve & productise** — audit, surface, cut dead paths | 🔧 | Rolling | [`docs/preserve-and-productize-plan.md`](../docs/preserve-and-productize-plan.md) | — | 2026-04-18 | — |
 | M02 | **Constellation 2D refactor** — retire 3D sphere, 2D archetype dive (ADR 0006) | 🌌 | Landed | [`plans/constellation-2d-refactor/plan.md`](constellation-2d-refactor/plan.md) | Phases 0-8 landed (merge `0449c2e`, 2026-04-19) | 2026-04-19 | — |
-| M03 | **IterRAG convergence** — agentic loop with convergence detection | 🧠 | Ready | [`docs/plans/2026-04-01-hermes-sotaku-implementation.md`](../docs/plans/2026-04-01-hermes-sotaku-implementation.md) (Phase 1) | — | 2026-04-04 | — |
-| M04 | **Reverse curriculum** — faculty hardness scoring drives research order | 🧠 | Ready | [`docs/plans/2026-04-04-reverse-curriculum-implementation.md`](../docs/plans/2026-04-04-reverse-curriculum-implementation.md) | — | 2026-04-04 | M03 |
-| M05 | **Parallel research** — concurrent faculty workers + batch fixes | 🧠 | Ready | [`docs/plans/2026-04-04-parallel-research-implementation.md`](../docs/plans/2026-04-04-parallel-research-implementation.md) | — | 2026-04-04 | — |
-| M06 | **Skill self-evolution** — candidate capture from high-convergence traces | 🧠🌱 | Ready | [`docs/plans/2026-04-01-hermes-sotaku-implementation.md`](../docs/plans/2026-04-01-hermes-sotaku-implementation.md) (Phase 3) | — | 2026-04-04 | M03 |
+| M03 | **IterRAG convergence** — agentic loop with convergence detection | 🧠 | Landed | [`docs/plans/2026-04-01-hermes-sotaku-implementation.md`](../docs/plans/2026-04-01-hermes-sotaku-implementation.md) (Phase 1) | Landed (merge `ea75561`, PR #501) | 2026-04-19 | — |
+| M04 | **Reverse curriculum** — faculty hardness scoring drives research order | 🧠 | Landed | [`docs/plans/2026-04-04-reverse-curriculum-implementation.md`](../docs/plans/2026-04-04-reverse-curriculum-implementation.md) | Landed (merge `46cd2e4`, PR #465) | 2026-04-19 | M03 |
+| M05 | **Parallel research** — concurrent faculty workers + batch fixes | 🧠 | Landed | [`docs/plans/2026-04-04-parallel-research-implementation.md`](../docs/plans/2026-04-04-parallel-research-implementation.md) | Landed (merge `5327e84`, PR #466) | 2026-04-19 | — |
+| M06 | **Skill self-evolution** — candidate capture from high-convergence traces | 🧠🌱 | Landed | [`docs/plans/2026-04-01-hermes-sotaku-implementation.md`](../docs/plans/2026-04-01-hermes-sotaku-implementation.md) (Phase 3) | Landed (merge `4517b77`, PR #461) | 2026-04-19 | M03 |
 | M07 | **Hermes v0.7.0 patterns** — context compression, skill index, credential pool | 🔧 | Ready | [`docs/plans/2026-04-04-hermes-v070-implementation.md`](../docs/plans/2026-04-04-hermes-v070-implementation.md) | — | 2026-04-04 | — |
 | M08 | **Hybrid search** — BM25 + vector alpha-blend retrieval | 🧠 | Ready | [`docs/plans/2026-04-04-hybrid-search-design.md`](../docs/plans/2026-04-04-hybrid-search-design.md) | — | 2026-04-04 | — |
 | M09 | **Companion realtime visibility** — SSE thought log + constellation auto-refresh | 🌱 | In progress | [`plans/companion-realtime-visibility/plan.md`](companion-realtime-visibility/plan.md) | `claude/parallel-task-development-hBZgg` | 2026-04-18 | — |
@@ -134,3 +134,7 @@ one; otherwise link the plan doc or PR.
 |---|---|---|---|
 | 2026-04-19 | M02 | User-star archetype migration is implicit — archetype is derived at render time from content type (`deriveUserStarContentType` → `getCachedStellarProfile` → `selectStarVisualArchetype`), never persisted on `UserStar`. No migration script needed. | [ADR 0006](../docs/adr/0006-constellation-design-2d-primary.md) (Accepted) |
 | 2026-04-19 | M02 | Reduced-motion freezes WebGL `uTime` at its last real-time value (not zero) to avoid phase-jumping the archetype twinkle when the user toggles the OS setting mid-session. | `plans/constellation-2d-refactor/plan.md` Phase 7.3 |
+| 2026-04-19 | M03 | IterRAG convergence status flipped to Landed (retroactive). Cosine-similarity early-stop on agentic loop drafts is wired in `metis_app/engine/streaming.py`; tests in `tests/test_iterrag_convergence.py` pass locally (5/5). | PR [#501](https://github.com/mrzapa/metis/pull/501), merge `ea75561` |
+| 2026-04-19 | M04 | Reverse-curriculum status flipped to Landed (retroactive). Demand-weighted hardness ordering in `scan_faculty_gaps` + `compute_demand_scores` in `metis_app/services/autonomous_research_service.py`; tests in `tests/test_autonomous_research_service.py` pass locally. | PR [#465](https://github.com/mrzapa/metis/pull/465), merge `46cd2e4` |
+| 2026-04-19 | M05 | Parallel research status flipped to Landed (retroactive). `run_batch` dispatches multiple faculty workers concurrently via `asyncio.gather`; `WorkspaceOrchestrator` uses it; tests in `tests/test_workspace_orchestrator.py` pass locally (97/98 — one unrelated `litestar` env gap). | PR [#466](https://github.com/mrzapa/metis/pull/466), merge `5327e84` |
+| 2026-04-19 | M06 | Skill self-evolution status flipped to Landed (retroactive). `skill_candidates` SQLite table in `skill_repository.py`; `_promote_skill_candidates` LLM-gated promotion in `assistant_companion.py` wired into reflect() on completed_run; tests in `tests/test_skill_evolution.py` pass locally. | PR [#461](https://github.com/mrzapa/metis/pull/461), merge `4517b77` |

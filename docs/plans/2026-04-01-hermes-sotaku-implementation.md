@@ -1,5 +1,14 @@
 # Hermes + Sotaku Roadmap Implementation Plan
 
+> **Status: Landed (2026-04-19).** All four phases shipped. See
+> `plans/IMPLEMENTATION.md` M03/M04/M05/M06 rows for merge SHAs and PR
+> links. This spec is retained for historical reference.
+>
+> - Phase 1 → M03 (PR #501, merge `ea75561`)
+> - Phase 2 → M04 (PR #465, merge `46cd2e4`)
+> - Phase 3 → M06 (PR #461, merge `4517b77`)
+> - Phase 4 → M05 (PR #466, merge `5327e84`)
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Implement 4 independent improvements to Metis inspired by Sotaku's looped convergence and Hermes Agent's learning loop.
