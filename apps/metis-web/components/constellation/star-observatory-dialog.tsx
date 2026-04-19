@@ -31,6 +31,15 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  formatLuminositySolar,
+  formatSpectralClassLabel,
+  formatTemperatureK,
+  formatVisualArchetypeLabel,
+  generateStellarProfile,
+} from "@/lib/landing-stars";
+import type { StellarPalette, StellarProfile } from "@/lib/landing-stars";
+import { deriveUserStarContentType } from "@/lib/user-star-content-type";
 import { buildIndexStream, fetchSettings, suggestStarArchetypes, uploadFiles } from "@/lib/api";
 import type { IndexBuildResult, IndexSummary, StarArchetypeSuggestion } from "@/lib/api";
 import { StarArchetypePicker } from "@/components/constellation/star-archetype-picker";
@@ -268,6 +277,107 @@ function StarMiniPreview({
           : "0 0 18px -6px rgba(255,255,255,0.22)",
       }}
     />
+  );
+}
+
+/**
+ * M02 Phase 7.1 — Observatory character sheet.
+ *
+ * Renders the procedural `StellarProfile` identity fields (spectral class,
+ * temperature, luminosity, archetype, palette swatches) as a textual/numeric
+ * block sitting alongside the dialog's visual `StarMiniPreview`. The profile
+ * is derived from the star's id + content type through the same
+ * `generateStellarProfile` function the starfield uses, so the panel and the
+ * rendered star always agree.
+ */
+function paletteSwatchCss([r, g, b]: readonly [number, number, number]) {
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+interface StarIdentityPanelProps {
+  profile: StellarProfile;
+  className?: string;
+}
+
+function StarIdentityPanel({ profile, className }: StarIdentityPanelProps) {
+  const spectralLabel = formatSpectralClassLabel(profile);
+  const temperatureLabel = formatTemperatureK(profile.temperatureK);
+  const luminosityLabel = formatLuminositySolar(profile.luminositySolar);
+  const archetypeLabel = formatVisualArchetypeLabel(profile.visualArchetype);
+  const palette: StellarPalette = profile.palette;
+
+  return (
+    <section
+      aria-label="Stellar identity"
+      data-testid="star-identity-panel"
+      className={cn(
+        "rounded-[1.4rem] border border-white/10 bg-black/18 p-4 sm:p-5",
+        className,
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.28em] text-slate-400">Stellar identity</div>
+          <div className="mt-2 text-sm text-slate-300">
+            Procedural character sheet derived from the star&rsquo;s seed and content type.
+          </div>
+        </div>
+        <Badge
+          variant="outline"
+          className="border-white/12 bg-white/6 text-slate-200"
+          data-field="archetype"
+        >
+          {archetypeLabel}
+        </Badge>
+      </div>
+
+      <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+          <dt className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Spectral class</dt>
+          <dd className="mt-2 text-base font-medium text-white" data-field="spectral-class">
+            {spectralLabel}
+          </dd>
+        </div>
+        <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+          <dt className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Temperature</dt>
+          <dd className="mt-2 text-base font-medium text-white" data-field="temperature">
+            {temperatureLabel}
+            <span className="ml-1 text-xs font-normal tracking-wide text-slate-400">K</span>
+          </dd>
+        </div>
+        <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+          <dt className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Luminosity</dt>
+          <dd className="mt-2 text-base font-medium text-white" data-field="luminosity">
+            {luminosityLabel}
+            <span className="ml-1 text-xs font-normal tracking-wide text-slate-400">L☉</span>
+          </dd>
+        </div>
+      </dl>
+
+      <div className="mt-4">
+        <div className="text-[11px] uppercase tracking-[0.24em] text-slate-400">Palette</div>
+        <ul
+          className="mt-2 flex flex-wrap items-center gap-2"
+          aria-label="Stellar palette"
+          data-field="palette"
+        >
+          {(["core", "halo", "accent", "rim", "surface"] as const).map((key) => (
+            <li
+              key={key}
+              className="flex items-center gap-2 rounded-full border border-white/8 bg-white/4 px-2.5 py-1 text-xs text-slate-200"
+              data-palette-key={key}
+            >
+              <span
+                aria-hidden="true"
+                className="inline-block size-3 rounded-full ring-1 ring-white/15"
+                style={{ background: paletteSwatchCss(palette[key]) }}
+              />
+              {key}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
   );
 }
 
@@ -514,6 +624,18 @@ export function StarDetailsPanel({
   // of Hooks.
   const isOrbital = useIsOrbitalViewport();
   const prefersReducedMotion = useReducedMotionPreference();
+
+  // Phase 7.1: derive the star's procedural StellarProfile the same way the
+  // starfield renderer does (seed = star id, content type inferred from the
+  // user star's shape). Memoised on id + attached manifest paths + learning
+  // route presence so the archetype stays in sync with the content type.
+  const stellarProfile = useMemo<StellarProfile | null>(() => {
+    if (!star) {
+      return null;
+    }
+    const contentType = deriveUserStarContentType(star);
+    return generateStellarProfile(star.id, { contentType });
+  }, [star]);
 
   if (!star) {
     return null;
@@ -943,6 +1065,9 @@ export function StarDetailsPanel({
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="px-5 py-5 sm:px-6 sm:py-6">
+            {stellarProfile ? (
+              <StarIdentityPanel profile={stellarProfile} className="mb-6" />
+            ) : null}
             {view === "build" ? (
               <div className="space-y-6">
                 <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">

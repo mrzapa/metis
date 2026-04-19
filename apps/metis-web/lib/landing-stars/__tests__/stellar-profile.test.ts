@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   createStellarPaletteFromTemperature,
+  formatLuminositySolar,
+  formatSpectralClassLabel,
+  formatTemperatureK,
+  formatVisualArchetypeLabel,
   generateStellarProfile,
   getStellarBaseColor,
 } from "../stellar-profile";
+import type { StellarProfile } from "../types";
 
 function expectRgbChannelRange(color: readonly number[]) {
   color.forEach((channel) => {
@@ -137,5 +142,97 @@ describe("generateStellarProfile", () => {
     expect(rest).toEqual(baseline);
     expect(annotated.annotations?.halo?.strength).toBeCloseTo(0.7, 5);
     expect(annotated.annotations?.ring?.count).toBe(2);
+  });
+});
+
+describe("Observatory identity-panel formatters (M02 Phase 7.1)", () => {
+  describe("formatTemperatureK", () => {
+    it("rounds to a whole Kelvin and thousands-separates", () => {
+      expect(formatTemperatureK(5_778)).toBe("5,778");
+      expect(formatTemperatureK(12_345.6)).toBe("12,346");
+      expect(formatTemperatureK(900)).toBe("900");
+    });
+
+    it("returns an em dash for non-finite values", () => {
+      expect(formatTemperatureK(Number.NaN)).toBe("—");
+      expect(formatTemperatureK(Number.POSITIVE_INFINITY)).toBe("—");
+    });
+  });
+
+  describe("formatLuminositySolar", () => {
+    it("uses scientific notation past 10,000 L☉", () => {
+      expect(formatLuminositySolar(250_000)).toMatch(/e\+/i);
+      expect(formatLuminositySolar(15_000)).toMatch(/e\+/i);
+    });
+
+    it("fixes 100+ L☉ to whole numbers", () => {
+      expect(formatLuminositySolar(340)).toBe("340");
+      expect(formatLuminositySolar(100)).toBe("100");
+    });
+
+    it("keeps 10-99 L☉ at one decimal", () => {
+      expect(formatLuminositySolar(12.345)).toBe("12.3");
+      expect(formatLuminositySolar(99)).toBe("99.0");
+    });
+
+    it("keeps 0.01-9.99 L☉ at two decimals", () => {
+      expect(formatLuminositySolar(1)).toBe("1.00");
+      expect(formatLuminositySolar(0.04)).toBe("0.04");
+    });
+
+    it("uses scientific notation below 0.01 L☉", () => {
+      expect(formatLuminositySolar(0.0001)).toMatch(/e-/i);
+    });
+
+    it("returns an em dash for non-positive or non-finite values", () => {
+      expect(formatLuminositySolar(0)).toBe("—");
+      expect(formatLuminositySolar(-5)).toBe("—");
+      expect(formatLuminositySolar(Number.NaN)).toBe("—");
+    });
+  });
+
+  describe("formatSpectralClassLabel", () => {
+    it("joins family, subclass, and luminosity class into the classical compact form", () => {
+      const profile = generateStellarProfile("vega");
+      const label = formatSpectralClassLabel(profile);
+
+      if (profile.spectralSubclass != null && profile.luminosityClass) {
+        expect(label).toBe(`${profile.spectralFamily}${profile.spectralSubclass} ${profile.luminosityClass}`);
+      } else if (profile.spectralSubclass != null) {
+        expect(label).toBe(`${profile.spectralFamily}${profile.spectralSubclass}`);
+      } else {
+        expect(label).toContain(profile.spectralFamily);
+      }
+    });
+
+    it("falls back to spectralClass when the parts are missing", () => {
+      const profile: StellarProfile = {
+        ...generateStellarProfile("rigel"),
+        spectralFamily: "",
+        spectralSubclass: null,
+        luminosityClass: null,
+        spectralClass: "O9Ia",
+      };
+      expect(formatSpectralClassLabel(profile)).toBe("O9Ia");
+    });
+  });
+
+  describe("formatVisualArchetypeLabel", () => {
+    it("returns pretty labels for known archetypes", () => {
+      expect(formatVisualArchetypeLabel("main_sequence")).toBe("Main sequence");
+      expect(formatVisualArchetypeLabel("wolf_rayet")).toBe("Wolf-Rayet");
+      expect(formatVisualArchetypeLabel("black_hole")).toBe("Black hole");
+      expect(formatVisualArchetypeLabel("pulsar")).toBe("Pulsar");
+    });
+
+    it("falls back to a spaced snake_case → words conversion for unknown archetypes", () => {
+      expect(formatVisualArchetypeLabel("something_new")).toBe("something new");
+    });
+
+    it("returns the default label when the archetype is nullish", () => {
+      expect(formatVisualArchetypeLabel(null)).toBe("Main sequence");
+      expect(formatVisualArchetypeLabel(undefined)).toBe("Main sequence");
+      expect(formatVisualArchetypeLabel("")).toBe("Main sequence");
+    });
   });
 });

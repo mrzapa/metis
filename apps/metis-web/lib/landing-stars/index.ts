@@ -39,6 +39,10 @@ export type { GenerateStellarProfileOptions } from "./stellar-profile";
 export {
   createStellarPaletteFromTemperature,
   createStellarSeededRandom,
+  formatLuminositySolar,
+  formatSpectralClassLabel,
+  formatTemperatureK,
+  formatVisualArchetypeLabel,
   generateStellarProfile,
   getStellarBaseColor,
 } from "./stellar-profile";

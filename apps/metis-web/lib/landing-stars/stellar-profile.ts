@@ -610,3 +610,85 @@ export function createStellarSeededRandom(seed: SeedInput): () => number {
 export function getStellarBaseColor(temperatureK: number): RgbColor {
   return temperatureToRgb(temperatureK);
 }
+
+/**
+ * Identity-panel formatters (M02 Phase 7.1).
+ *
+ * These turn raw `StellarProfile` numeric fields into human-readable strings
+ * for the Observatory character sheet. They stay in `stellar-profile.ts` so
+ * the unit tests don't have to cross into DOM-rendered component territory.
+ *
+ * Each formatter returns a plain string with no trailing unit markup — the
+ * caller owns layout (e.g. rendering "K" or "L☉" as a subscript-style suffix).
+ */
+export function formatTemperatureK(temperatureK: number): string {
+  if (!Number.isFinite(temperatureK)) {
+    return "—";
+  }
+  const rounded = Math.round(temperatureK);
+  // Thousands separator keeps 12,000 K readable. No fractional K — surface
+  // temperature precision under 1 K is noise at this scale.
+  return rounded.toLocaleString("en-US");
+}
+
+export function formatLuminositySolar(luminositySolar: number): string {
+  if (!Number.isFinite(luminositySolar) || luminositySolar <= 0) {
+    return "—";
+  }
+  // L☉ spans ~10⁻⁵ (brown dwarfs) to ~10⁶ (hypergiants). Scientific notation
+  // past 10,000 and below 0.01 keeps the panel from showing "1e-5" as
+  // "0.00001". Otherwise fixed-point with enough significance.
+  if (luminositySolar >= 10000 || luminositySolar < 0.01) {
+    return luminositySolar.toExponential(2);
+  }
+  if (luminositySolar >= 100) {
+    return luminositySolar.toFixed(0);
+  }
+  if (luminositySolar >= 10) {
+    return luminositySolar.toFixed(1);
+  }
+  return luminositySolar.toFixed(2);
+}
+
+/**
+ * Convert the canonical spectral family + subclass + luminosity class into the
+ * classical compact form — e.g. "G2 V", "M5 III", "O9 Ia". Falls back to the
+ * spectralClass field if the composite parts are missing.
+ */
+export function formatSpectralClassLabel(profile: StellarProfile): string {
+  const subclassText = profile.spectralSubclass != null
+    ? String(profile.spectralSubclass)
+    : "";
+  const head = `${profile.spectralFamily}${subclassText}`.trim();
+  const tail = profile.luminosityClass ?? "";
+  if (head && tail) {
+    return `${head} ${tail}`;
+  }
+  return head || profile.spectralClass || "—";
+}
+
+const VISUAL_ARCHETYPE_LABELS: Record<string, string> = {
+  main_sequence: "Main sequence",
+  pulsar: "Pulsar",
+  quasar: "Quasar",
+  brown_dwarf: "Brown dwarf",
+  red_giant: "Red giant",
+  binary: "Binary",
+  nebula: "Nebula",
+  black_hole: "Black hole",
+  comet: "Comet",
+  constellation: "Constellation",
+  variable: "Variable",
+  wolf_rayet: "Wolf-Rayet",
+};
+
+/**
+ * Pretty label for a {@link StarVisualArchetype}. The snake_case ids are fine
+ * as an ABI / internal enum but look noisy in a user-facing panel.
+ */
+export function formatVisualArchetypeLabel(archetype: string | null | undefined): string {
+  if (!archetype) {
+    return "Main sequence";
+  }
+  return VISUAL_ARCHETYPE_LABELS[archetype] ?? archetype.replace(/_/g, " ");
+}

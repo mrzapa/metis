@@ -610,4 +610,97 @@ describe("StarDetailsPanel", () => {
       });
     });
   });
+
+  describe("Stellar identity panel (M02 Phase 7.1)", () => {
+    it("renders the procedural character sheet with spectral class, temperature, luminosity, archetype, and palette", () => {
+      renderPanel({ star: makeStar({ id: "identity-panel-star" }) });
+
+      const panel = screen.getByTestId("star-identity-panel");
+      expect(panel).toBeTruthy();
+      expect(within(panel).getByText("Stellar identity")).toBeTruthy();
+
+      // Each numeric field is populated (value is derived from the seed so
+      // we only assert the field exists and is non-empty).
+      const spectralClass = within(panel).getByText((_, node) =>
+        node?.getAttribute("data-field") === "spectral-class",
+      );
+      expect(spectralClass.textContent?.trim().length).toBeGreaterThan(0);
+
+      const temperature = within(panel).getByText((_, node) =>
+        node?.getAttribute("data-field") === "temperature",
+      );
+      expect(temperature.textContent).toMatch(/K$/);
+
+      const luminosity = within(panel).getByText((_, node) =>
+        node?.getAttribute("data-field") === "luminosity",
+      );
+      expect(luminosity.textContent).toMatch(/L☉$/);
+
+      const archetype = within(panel).getByText((_, node) =>
+        node?.getAttribute("data-field") === "archetype",
+      );
+      expect(archetype.textContent?.trim().length).toBeGreaterThan(0);
+
+      const palette = within(panel).getByLabelText("Stellar palette");
+      const swatchKeys = Array.from(palette.querySelectorAll("[data-palette-key]")).map(
+        (node) => node.getAttribute("data-palette-key"),
+      );
+      expect(swatchKeys).toEqual(["core", "halo", "accent", "rim", "surface"]);
+    });
+
+    it("derives a deterministic identity from the star id so two renders of the same star agree", () => {
+      const first = renderWithReturn({ star: makeStar({ id: "identity-determinism" }) });
+      const firstSpectral = within(first.panel).getByText((_, node) =>
+        node?.getAttribute("data-field") === "spectral-class",
+      ).textContent;
+      const firstTemp = within(first.panel).getByText((_, node) =>
+        node?.getAttribute("data-field") === "temperature",
+      ).textContent;
+      first.unmount();
+
+      const second = renderWithReturn({ star: makeStar({ id: "identity-determinism" }) });
+      const secondSpectral = within(second.panel).getByText((_, node) =>
+        node?.getAttribute("data-field") === "spectral-class",
+      ).textContent;
+      const secondTemp = within(second.panel).getByText((_, node) =>
+        node?.getAttribute("data-field") === "temperature",
+      ).textContent;
+      expect(secondSpectral).toBe(firstSpectral);
+      expect(secondTemp).toBe(firstTemp);
+      second.unmount();
+    });
+  });
 });
+
+// Minimal helper for the identity-panel determinism test — mirrors renderPanel
+// but returns the cleanup hook so two renders can share the same id and assert
+// on both panels in sequence.
+function renderWithReturn(
+  props: Partial<React.ComponentProps<typeof StarDetailsPanel>> & { star?: UserStar } = {},
+) {
+  const result = render(
+    <StarDetailsPanel
+      open
+      onOpenChange={vi.fn()}
+      star={props.star ?? { id: "star-1", x: 0.2, y: 0.3, size: 0.95, createdAt: 1 }}
+      entryMode={props.entryMode ?? "existing"}
+      closeLockedUntil={0}
+      availableIndexes={props.availableIndexes ?? []}
+      indexesLoading={props.indexesLoading ?? false}
+      onIndexBuilt={props.onIndexBuilt ?? vi.fn()}
+      onUpdateStar={props.onUpdateStar ?? vi.fn().mockResolvedValue(true)}
+      onRemoveStar={props.onRemoveStar ?? vi.fn().mockResolvedValue(undefined)}
+      onOpenChat={props.onOpenChat ?? vi.fn()}
+      learningRoutePreview={props.learningRoutePreview ?? null}
+      learningRouteLoading={props.learningRouteLoading ?? false}
+      learningRouteError={props.learningRouteError ?? null}
+      onStartCourse={props.onStartCourse ?? vi.fn()}
+      onSaveLearningRoutePreview={props.onSaveLearningRoutePreview ?? vi.fn()}
+      onDiscardLearningRoutePreview={props.onDiscardLearningRoutePreview ?? vi.fn()}
+      onRegenerateLearningRoute={props.onRegenerateLearningRoute ?? vi.fn()}
+      onLaunchLearningRouteStep={props.onLaunchLearningRouteStep ?? vi.fn()}
+      onSetLearningRouteStepStatus={props.onSetLearningRouteStepStatus ?? vi.fn()}
+    />,
+  );
+  return { panel: screen.getByTestId("star-identity-panel"), unmount: result.unmount };
+}
