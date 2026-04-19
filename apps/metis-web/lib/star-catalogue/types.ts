@@ -44,6 +44,26 @@ export interface StarCatalogueConfig {
   armWindingRate: number;
 }
 
+/**
+ * A CatalogueStar that has been promoted to the user's constellation.
+ *
+ * Naming note: the existing `UserStar` in `lib/constellation-types.ts` is the
+ * legacy 2D-only shape (x, y, size, label, …). Phase 5 of the Interactive
+ * Star Catalogue plan (`docs/plans/2026-04-05-interactive-star-catalogue.md`)
+ * unifies the two so user stars are just CatalogueStars with extra metadata.
+ * Until that migration happens we expose this new shape as `CatalogueUserStar`
+ * so consumers that import from `constellation-types` keep compiling.
+ */
+export interface CatalogueUserStar extends CatalogueStar {
+  label: string;
+  primaryDomainId: string | null;
+  relatedDomainIds: string[];
+  stage: "seed" | "sprout" | "bloom" | "nova";
+  notes: string;
+  connectedUserStarIds: string[];
+  learningRoute: string | null;
+}
+
 export const DEFAULT_CATALOGUE_CONFIG: StarCatalogueConfig = {
   galaxySeed: "metis-prime",
   sectorSize: 960,
