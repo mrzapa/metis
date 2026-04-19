@@ -145,7 +145,7 @@ _REGISTRY: dict[str, ProviderSpec] = {
         url_host_patterns=_host(
             r"^localhost$",
             r"^127\.0\.0\.1$",
-            r"^\[::1\]$",
+            r"^::1$",
         ),
         kill_switch_setting_key=None,
         category="llm",
@@ -191,7 +191,7 @@ _REGISTRY: dict[str, ProviderSpec] = {
         url_host_patterns=_host(
             r"^localhost$",
             r"^127\.0\.0\.1$",
-            r"^\[::1\]$",
+            r"^::1$",
         ),
         kill_switch_setting_key=None,
         category="embeddings",

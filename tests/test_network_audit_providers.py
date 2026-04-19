@@ -165,6 +165,10 @@ def test_classify_loopback_is_lm_studio() -> None:
     # the correct provider at the call site (Phase 3+).
     assert classify_host("127.0.0.1").key == "local_lm_studio"
     assert classify_host("localhost").key == "local_lm_studio"
+    # IPv6 loopback: ``sanitize_url`` returns ``::1`` without brackets
+    # (``urlsplit().hostname`` strips them), so the regex must match
+    # the unbracketed form. Codex review on PR #516 caught this.
+    assert classify_host("::1").key == "local_lm_studio"
 
 
 def test_classify_unknown_host() -> None:
