@@ -1,6 +1,7 @@
 export type {
   CatalogueStar,
   CatalogueSector,
+  CatalogueUserStar,
   SectorKey,
   StarCatalogueConfig,
 } from "./types";

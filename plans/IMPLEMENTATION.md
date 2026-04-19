@@ -7,7 +7,7 @@ This is the **single source of truth for what is being worked on in METIS and
 what comes next.** Every row is a milestone from `VISION.md`. Agents claim rows,
 do the work, update the row when they stop.
 
-**Last reviewed:** 2026-04-19
+**Last reviewed:** 2026-04-19 (reconciled M07/M08/M09/M11 → Landed; M12 Phase 1 landed; M13 plan drafted)
 
 ## Quick start for a fresh agent
 
@@ -59,13 +59,13 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 | M04 | **Reverse curriculum** — faculty hardness scoring drives research order | 🧠 | Ready | [`docs/plans/2026-04-04-reverse-curriculum-implementation.md`](../docs/plans/2026-04-04-reverse-curriculum-implementation.md) | — | 2026-04-04 | M03 |
 | M05 | **Parallel research** — concurrent faculty workers + batch fixes | 🧠 | Ready | [`docs/plans/2026-04-04-parallel-research-implementation.md`](../docs/plans/2026-04-04-parallel-research-implementation.md) | — | 2026-04-04 | — |
 | M06 | **Skill self-evolution** — candidate capture from high-convergence traces | 🧠🌱 | Ready | [`docs/plans/2026-04-01-hermes-sotaku-implementation.md`](../docs/plans/2026-04-01-hermes-sotaku-implementation.md) (Phase 3) | — | 2026-04-04 | M03 |
-| M07 | **Hermes v0.7.0 patterns** — context compression, skill index, credential pool | 🔧 | Ready | [`docs/plans/2026-04-04-hermes-v070-implementation.md`](../docs/plans/2026-04-04-hermes-v070-implementation.md) | — | 2026-04-04 | — |
-| M08 | **Hybrid search** — BM25 + vector alpha-blend retrieval | 🧠 | Ready | [`docs/plans/2026-04-04-hybrid-search-design.md`](../docs/plans/2026-04-04-hybrid-search-design.md) | — | 2026-04-04 | — |
-| M09 | **Companion realtime visibility** — SSE thought log + constellation auto-refresh | 🌱 | In progress | [`plans/companion-realtime-visibility/plan.md`](companion-realtime-visibility/plan.md) | `claude/parallel-task-development-hBZgg` | 2026-04-18 | — |
+| M07 | **Hermes v0.7.0 patterns** — context compression, skill index, credential pool | 🔧 | Landed | [`docs/plans/2026-04-04-hermes-v070-implementation.md`](../docs/plans/2026-04-04-hermes-v070-implementation.md) | Landed via PR #464 (`551d01b`, 2026-04-04) | 2026-04-04 | — |
+| M08 | **Hybrid search** — BM25 + vector alpha-blend retrieval | 🧠 | Landed | [`docs/plans/2026-04-04-hybrid-search-design.md`](../docs/plans/2026-04-04-hybrid-search-design.md) | Landed (`8d6ed98`, 2026-04-04) | 2026-04-04 | — |
+| M09 | **Companion realtime visibility** — SSE thought log + constellation auto-refresh | 🌱 | Landed | [`plans/companion-realtime-visibility/plan.md`](companion-realtime-visibility/plan.md) | Landed (`68634ba`, 2026-04-18) | 2026-04-18 | — |
 | M10 | **Tribev2 homological scaffold** — persistent homology over BrainGraph | 🌱🌌 | Draft | [`plans/trive-v2-homological-scaffold/plan.md`](trive-v2-homological-scaffold/plan.md) | — | — | — |
-| M11 | **Agent-native state + polling** — KV store, structured chat bridge | 🔧 | Ready | [`docs/plan/agent-native-impl-20260402/plan.yaml`](../docs/plan/agent-native-impl-20260402/plan.yaml) | — | 2026-04-02 | — |
-| M12 | **Interactive star catalogue** — searchable, filterable star explorer | 🌌 | Ready | [`docs/plans/2026-04-05-interactive-star-catalogue.md`](../docs/plans/2026-04-05-interactive-star-catalogue.md) | — | 2026-04-05 | M02 (share renderer) |
-| M13 | **Seedling + Feed** — always-on quantized local model, news-comet ingestion, growth stages | 🌱 | Draft needed | *(to be created: `plans/seedling-and-feed/plan.md`)* | — | — | M01 |
+| M11 | **Agent-native state + polling** — KV store, structured chat bridge | 🔧 | Landed | [`docs/plan/agent-native-impl-20260402/plan.yaml`](../docs/plan/agent-native-impl-20260402/plan.yaml) | Landed via PR #459 (`5fd0a3f`, 2026-04-03) | 2026-04-03 | — |
+| M12 | **Interactive star catalogue** — searchable, filterable star explorer | 🌌 | Ready | [`docs/plans/2026-04-05-interactive-star-catalogue.md`](../docs/plans/2026-04-05-interactive-star-catalogue.md) | Phase 1 data layer landed 2026-04-19 (rng, name gen, galaxy distribution, `StarCatalogue` + 48 vitest assertions); Phase 2 renderer pending | 2026-04-19 | M02 (share renderer) |
+| M13 | **Seedling + Feed** — always-on quantized local model, news-comet ingestion, growth stages | 🌱 | Draft | [`plans/seedling-and-feed/plan.md`](seedling-and-feed/plan.md) | — | 2026-04-19 | M01 |
 | M14 | **The Forge** — technique gallery UI, togglable frontier modules | 🌱🧠 | Draft needed | *(to be created: `plans/the-forge/plan.md`)* | — | — | M02, M06 |
 | M15 | **Pro tier + public launch** — paywall, skill pack, HN/r/LocalLLaMA launch | 🔧 | Draft needed | [`plans/pro-tier-launch/plan.md`](pro-tier-launch/plan.md) (harvest stub) | — | 2026-04-18 | M13, M14 |
 | M16 | **Personal evals** — track companion improvement on user's specific tasks | 🌱 | Draft needed | *(to be created: `plans/personal-evals/plan.md`)* | — | — | M13 |
