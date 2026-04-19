@@ -13,6 +13,14 @@ from importlib import resources
 from typing import Any, Callable
 from urllib import parse, request
 
+from metis_app.network_audit import (
+    TRIGGER_GGUF_DOWNLOAD,
+    TRIGGER_HF_CATALOG,
+    audited_urlopen,
+    get_default_settings,
+    get_default_store,
+)
+
 try:
     import psutil
 except Exception:  # pragma: no cover - optional runtime dependency
@@ -574,7 +582,17 @@ class LocalLlmRecommenderService:
         downloaded = 0
         total_bytes = int(plan.expected_size_bytes) if plan.expected_size_bytes is not None else None
         try:
-            with request.urlopen(req, timeout=120) as response, part_path.open("wb") as handle:
+            # GGUF download is always triggered by an explicit user "install"
+            # action; let NetworkBlockedError propagate so the UI surfaces it
+            # rather than silently leaving the .part file and exiting success.
+            with audited_urlopen(
+                req,
+                trigger_feature=TRIGGER_GGUF_DOWNLOAD,
+                user_initiated=True,
+                timeout=120,
+                store=get_default_store(),
+                settings=get_default_settings(),
+            ) as response, part_path.open("wb") as handle:
                 if total_bytes is None:
                     header_total = str(response.headers.get("Content-Length") or "").strip()
                     if header_total.isdigit():
@@ -721,8 +739,24 @@ class LocalLlmRecommenderService:
 
     @staticmethod
     def _read_json(url: str) -> Any:
+        """Fetch ``url`` and decode the JSON body.
+
+        Routes through :func:`audited_urlopen` with
+        :data:`TRIGGER_HF_CATALOG`: this helper backs the Hugging Face
+        catalog browse step (``_read_json`` is only called with HF API
+        URLs). ``user_initiated=True`` because the catalog is opened
+        on an explicit user action. Kill-switch blocks propagate as
+        :class:`NetworkBlockedError` so the UI can display the reason.
+        """
         req = request.Request(url, headers={"User-Agent": "METIS/1.0"})
-        with request.urlopen(req, timeout=30) as response:
+        with audited_urlopen(
+            req,
+            trigger_feature=TRIGGER_HF_CATALOG,
+            user_initiated=True,
+            timeout=30,
+            store=get_default_store(),
+            settings=get_default_settings(),
+        ) as response:
             return json.loads(response.read().decode("utf-8"))
 
 

@@ -284,8 +284,11 @@ def test_download_import_skips_existing_matching_file(monkeypatch, tmp_path) -> 
         registry_metadata={},
         expected_size_bytes=len(b"existing"),
     )
+    # Patch the audited wrapper imported into the module under test.
+    # Post-M17 Phase 3b the download routes through audited_urlopen,
+    # so we intercept there rather than at urllib.request.urlopen.
     monkeypatch.setattr(
-        "metis_app.services.local_llm_recommender.request.urlopen",
+        "metis_app.services.local_llm_recommender.audited_urlopen",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("network should not be used")),
     )
 
@@ -308,7 +311,7 @@ def test_download_import_is_atomic_and_cleans_partial_on_failure(monkeypatch, tm
         expected_size_bytes=10,
     )
     monkeypatch.setattr(
-        "metis_app.services.local_llm_recommender.request.urlopen",
+        "metis_app.services.local_llm_recommender.audited_urlopen",
         lambda *_args, **_kwargs: _FakeResponse(b"short", content_length=10),
     )
 
@@ -331,7 +334,7 @@ def test_download_import_cleans_partial_on_cancel(monkeypatch, tmp_path) -> None
         expected_size_bytes=8,
     )
     monkeypatch.setattr(
-        "metis_app.services.local_llm_recommender.request.urlopen",
+        "metis_app.services.local_llm_recommender.audited_urlopen",
         lambda *_args, **_kwargs: _FakeResponse(b"abcdefgh", content_length=8),
     )
 
