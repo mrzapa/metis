@@ -153,9 +153,14 @@ _REGISTRY: dict[str, ProviderSpec] = {
     # ------------------------------------------------------------------
     # Embedding providers (rows F-I in the plan)
     # ------------------------------------------------------------------
-    # Shares api.openai.com with the chat ``openai`` entry. Host-only
-    # classification returns ``openai`` first; SDK-invocation events
-    # attach ``openai_embeddings`` directly in Phase 4. See ADR 0010.
+    # INVARIANT: ``openai_embeddings`` MUST stay after ``openai`` above
+    # (and ``google_embeddings`` MUST stay after ``google``). Host-only
+    # classification returns first-insertion-order match; alphabetising
+    # this dict silently flips classification. Pinned by
+    # tests/test_network_audit_providers.py::test_classify_openai_api
+    # and ::test_classify_google_genai. SDK-invocation events attach
+    # ``openai_embeddings`` / ``google_embeddings`` directly in Phase 4.
+    # See ADR 0010.
     "openai_embeddings": ProviderSpec(
         key="openai_embeddings",
         display_name="OpenAI Embeddings",
