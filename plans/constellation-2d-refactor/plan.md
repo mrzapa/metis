@@ -1,8 +1,8 @@
 ---
 Milestone: M02 — Constellation 2D refactor
 Status: In progress
-Claim: claude/metis-vision-strategy-Bj7jJ (Phase 6 landed) — Phase 7 Observatory polish next
-Last updated: 2026-04-18 by claude-opus-4-7
+Claim: claude/metis-vision-strategy-Bj7jJ (Phases 0-7 landed) — Phase 8 verification next
+Last updated: 2026-04-19 by claude-opus-4-7
 Vision pillar: Cosmos
 ADR: docs/adr/0006-constellation-design-2d-primary.md
 ---
@@ -464,13 +464,60 @@ and `rg star-dive-overlay apps/ metis_app/` still return empty.
   is flagged for the next agent only if they find a star path that
   builds a profile without going through `generateStellarProfile`.
 
+**Phase 7 — Naming + Observatory polish (landed, 2026-04-19 by claude-opus-4-7):**
+- 7.1 ✅ — New **Stellar identity panel** at the top of the Observatory
+  scrollable content area in
+  `apps/metis-web/components/constellation/star-observatory-dialog.tsx`.
+  Surfaces the three `StellarProfile` scalars (spectral class via
+  `formatSpectralClassLabel`, temperature K via `formatTemperatureK`,
+  luminosity L☉ via `formatLuminositySolar`) as a semantic `<dl>` three-
+  column grid, the archetype (`formatVisualArchetypeLabel`) as a Badge,
+  and all five palette colours (core / halo / accent / rim / surface)
+  as inline swatches. The profile is derived in-dialog via
+  `generateStellarProfile(star.id, { contentType: deriveUserStarContentType(star) })`
+  so it stays deterministic and matches the starfield renderer's profile
+  rather than threading a duplicate prop through every dialog caller.
+  New formatter helpers live in
+  `apps/metis-web/lib/landing-stars/stellar-profile.ts` and are re-
+  exported from `lib/landing-stars/index.ts`.
+- 7.2 ✅ — **Confirmation, no code change.** The classical Bayer/Flamsteed
+  tooltip shipped in the Phase 1.4 follow-up already covers this
+  requirement end-to-end: `buildLandmarkTooltipContent` (`page.tsx`
+  ~4206) emits the convention explainer; `getHoveredLandmarkStar`
+  (`page.tsx` ~4290) exposes it on pointer hover; CSS lives at
+  `page.tsx` ~5982. No gaps found during trace.
+- 7.3 ✅ — **Reduced-motion gate threaded through to the WebGL uber-shader.**
+  The page effect previously sampled
+  `window.matchMedia("(prefers-reduced-motion: reduce)")` once at setup
+  and fed it only into hover-motion logic, so twinkle, archetype
+  pulsation, Phase 6 satellite orbits, and halo pulse all kept running
+  even with the OS preference on. Now `reducedMotion` is a `let`
+  binding with a live `change` listener (with addListener fallback for
+  older Safari) and paired cleanup in the effect's teardown, and it is
+  threaded through `LandingStarfieldFrame.reducedMotion` (new optional
+  field in `landing-starfield-webgl.types.ts`). The shader render loop
+  freezes `material.uniforms.uTime.value` at its last real-time value
+  (not zero — zero would jump the twinkle/pulse phase to a visibly
+  different still) whenever the flag is true, and releases it back to
+  `timestampMs * 0.001` when the flag flips off. This completes the
+  reduced-motion story: Phase 2.2 camera easing, Phase 4 orbital
+  entrance/exit, Phase 6 satellite/ring/halo animations, and the
+  archetype twinkle all halt together. Ring rendering is unaffected
+  because rings' geometry does not depend on `uTime`.
+
+**Verification:** `pnpm test` → **284 passed**, 10 skipped, 0 failed
+(up from 269 by 15 new stellar-profile formatter tests and 2 new
+identity-panel tests). `pnpm exec tsc --noEmit` → exit 0. `pnpm exec
+eslint` on all touched files — 0 new errors, 0 new warnings; page.tsx
+still carries its 18 pre-existing warnings unchanged by this phase.
+Commits: `31f7a2f` (7.1), `00ab1d3` (7.3).
+
 ## Next up
 
-- **Phase 7 — Naming + Observatory polish**: surface
-  `StellarProfile` identity fields in the Observatory character sheet;
-  landmark-tooltip Bayer/Flamsteed footer (already shipped in Phase 1.4
-  follow-up — confirm coverage); end-to-end reduced-motion pass now
-  that Phase 6 annotations also ride `uTime`.
+- **Phase 8 — Verification**: manual pass on landing page
+  (hover/dive/reduced-motion toggle), performance regression check at
+  200+ stars, ADR 0006 migration-question decision, then flip
+  `plans/IMPLEMENTATION.md` M02 row to *Landed* with merge SHA.
 - **Phase 6 follow-up — inject focused user star into WebGL closeup
   tier**: today the webgl starfield renders catalogue stars only, so
   annotations plumbed through `StellarProfile` are invisible until a
