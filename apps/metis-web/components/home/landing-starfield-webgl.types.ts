@@ -41,4 +41,12 @@ export interface LandingStarfieldFrame {
   focusRadius?: number;
   /** Pixel width over which DoF ramps in from `focusRadius` outward. */
   focusFalloff?: number;
+  /**
+   * M02 Phase 7.3 — respect `prefers-reduced-motion: reduce`. When true, the
+   * WebGL shader freezes its `uTime` uniform so twinkle, archetype pulsation,
+   * and Phase 6 satellite orbits all halt. Callers update this flag in sync
+   * with the OS media query (see `app/page.tsx`). Defaults to `false` so
+   * existing callers keep their motion.
+   */
+  reducedMotion?: boolean;
 }

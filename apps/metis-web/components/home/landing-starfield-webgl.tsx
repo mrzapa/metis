@@ -824,6 +824,12 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
       geometry.computeBoundingSphere();
     };
 
+    // Phase 7.3: when `prefers-reduced-motion` flips on mid-session we keep
+    // feeding uTime in step with real time until the flip, then freeze it at
+    // its last value. Freezing to 0 would jump the twinkle/pulse phase; the
+    // held value keeps the shader at a stable still frame.
+    let frozenTimeSeconds: number | null = null;
+
     const render = (timestampMs: number) => {
       frameHandle = window.requestAnimationFrame(render);
       const frame = frameRef.current;
@@ -843,7 +849,15 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
         lastRevision = frame.revision;
       }
 
-      material.uniforms.uTime.value = timestampMs * 0.001;
+      if (frame.reducedMotion) {
+        if (frozenTimeSeconds === null) {
+          frozenTimeSeconds = timestampMs * 0.001;
+        }
+        material.uniforms.uTime.value = frozenTimeSeconds;
+      } else {
+        frozenTimeSeconds = null;
+        material.uniforms.uTime.value = timestampMs * 0.001;
+      }
       material.uniforms.uZoomScale.value = frame.zoomScale ?? 1;
       const focusCenter = material.uniforms.uFocusCenter.value as THREE.Vector2;
       focusCenter.set(frame.focusCenterX ?? 0, frame.focusCenterY ?? 0);

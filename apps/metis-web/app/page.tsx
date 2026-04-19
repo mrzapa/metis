@@ -2095,9 +2095,23 @@ export default function Home() {
     const catalogue = new StarCatalogue(DEFAULT_CATALOGUE_CONFIG, generateStellarProfile);
 
     const motionPreviewEnabled = document.documentElement.dataset.uiVariant === "motion";
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const enhancedHoverMotion = motionPreviewEnabled && !reducedMotion;
+    // Phase 7.3: track `prefers-reduced-motion` live so a user toggling the OS
+    // preference mid-session halts the ongoing pulses without a reload. All
+    // per-frame reads below close over these `let` bindings; the mediaquery
+    // change handler below mutates them in place.
+    let reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let enhancedHoverMotion = motionPreviewEnabled && !reducedMotion;
     coarsePointerRef.current = window.matchMedia("(pointer: coarse)").matches;
+    const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const handleReducedMotionChange = (event: MediaQueryListEvent) => {
+      reducedMotion = event.matches;
+      enhancedHoverMotion = motionPreviewEnabled && !reducedMotion;
+    };
+    if (typeof reducedMotionQuery.addEventListener === "function") {
+      reducedMotionQuery.addEventListener("change", handleReducedMotionChange);
+    } else {
+      reducedMotionQuery.addListener(handleReducedMotionChange);
+    }
 
     function syncHoveredCandidate(candidate: StarData | null) {
       const nextId = candidate?.id ?? null;
@@ -2691,6 +2705,7 @@ export default function Home() {
         focusStrength: focusStrengthForFrame,
         focusRadius,
         focusFalloff,
+        reducedMotion,
       };
       lastVisibleStarfieldWidth = W;
       lastVisibleStarfieldHeight = H;
@@ -4920,6 +4935,11 @@ export default function Home() {
       window.removeEventListener("wheel", onWheel);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("blur", onBlur);
+      if (typeof reducedMotionQuery.removeEventListener === "function") {
+        reducedMotionQuery.removeEventListener("change", handleReducedMotionChange);
+      } else {
+        reducedMotionQuery.removeListener(handleReducedMotionChange);
+      }
     };
   }, [
     activeCanvasTool,
