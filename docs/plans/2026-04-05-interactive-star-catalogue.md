@@ -1,8 +1,29 @@
 # Interactive Star Catalogue — Implementation Plan
 
+> **⚠️ SUPERSEDED — 2026-04-19.** This doc predates the M02 Constellation
+> 2D refactor (landed 2026-04-15, PR #511/#512). M02 already shipped the
+> WebGL2 instanced star rendering path via `LandingStarfieldWebgl` with
+> LOD tiers, DOF, Star Dive integration, and interaction targets —
+> features the Phase 2 renderer described here did not plan for. The
+> `ConstellationFieldStar` removal, painted galaxy overlay cleanup, and
+> `StarCatalogue` wiring have also already landed.
+>
+> **What's still real about M12:** the *interactive* layer — click-to-inspect
+> catalogue stars, search by name, filter by spectral class / magnitude,
+> promote-to-user-constellation flow. That scope needs a fresh plan
+> grounded in the post-M02 reality. See the M12 row in
+> [`plans/IMPLEMENTATION.md`](../../plans/IMPLEMENTATION.md) (status:
+> `Draft needed`).
+>
+> Kept on disk for reference per `plans/README.md` ("Superseded plans
+> stay on disk with Status: Superseded and a pointer to what replaced
+> them"). Do not implement against this document.
+
+---
+
 **Project:** Metis (`mrzapa/metis`) · `apps/metis-web`  
 **Date:** 2026-04-05  
-**Status:** Draft v1.0  
+**Status:** Superseded (2026-04-19) — renderer path landed via M02; interactive layer needs new plan
 **Audience:** Developer (mrzapa) + coding agents (Claude Code / similar)
 
 ---

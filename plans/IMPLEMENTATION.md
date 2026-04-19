@@ -7,7 +7,7 @@ This is the **single source of truth for what is being worked on in METIS and
 what comes next.** Every row is a milestone from `VISION.md`. Agents claim rows,
 do the work, update the row when they stop.
 
-**Last reviewed:** 2026-04-19 (reconciled M07/M08/M09/M11 → Landed; M12 Phase 1 landed; M13 plan drafted)
+**Last reviewed:** 2026-04-19 (reconciled M07/M08/M09/M11 → Landed; M12 Phase 1 landed; M13 plan drafted; M12 Phase 2 design doc superseded — M02 already shipped the renderer path)
 
 ## Quick start for a fresh agent
 
@@ -64,7 +64,7 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 | M09 | **Companion realtime visibility** — SSE thought log + constellation auto-refresh | 🌱 | Landed | [`plans/companion-realtime-visibility/plan.md`](companion-realtime-visibility/plan.md) | Landed (`68634ba`, 2026-04-18) | 2026-04-18 | — |
 | M10 | **Tribev2 homological scaffold** — persistent homology over BrainGraph | 🌱🌌 | Draft | [`plans/trive-v2-homological-scaffold/plan.md`](trive-v2-homological-scaffold/plan.md) | — | — | — |
 | M11 | **Agent-native state + polling** — KV store, structured chat bridge | 🔧 | Landed | [`docs/plan/agent-native-impl-20260402/plan.yaml`](../docs/plan/agent-native-impl-20260402/plan.yaml) | Landed via PR #459 (`5fd0a3f`, 2026-04-03) | 2026-04-03 | — |
-| M12 | **Interactive star catalogue** — searchable, filterable star explorer | 🌌 | Ready | [`docs/plans/2026-04-05-interactive-star-catalogue.md`](../docs/plans/2026-04-05-interactive-star-catalogue.md) | Phase 1 data layer landed 2026-04-19 (rng, name gen, galaxy distribution, `StarCatalogue` + 48 vitest assertions); Phase 2 renderer pending | 2026-04-19 | M02 (share renderer) |
+| M12 | **Interactive star catalogue** — searchable, filterable star explorer | 🌌 | Draft needed | *(to be created: `plans/interactive-star-catalogue/plan.md`)* — [old design doc superseded](../docs/plans/2026-04-05-interactive-star-catalogue.md) | Phase 1 data layer landed (`StarCatalogue` consumed via `DEFAULT_CATALOGUE_CONFIG` in `page.tsx`); WebGL renderer landed via M02 (`LandingStarfieldWebgl`); interactive explorer layer (search / filter / click-to-inspect) still unshipped | 2026-04-19 | — |
 | M13 | **Seedling + Feed** — always-on quantized local model, news-comet ingestion, growth stages | 🌱 | Draft | [`plans/seedling-and-feed/plan.md`](seedling-and-feed/plan.md) | — | 2026-04-19 | M01 |
 | M14 | **The Forge** — technique gallery UI, togglable frontier modules | 🌱🧠 | Draft needed | *(to be created: `plans/the-forge/plan.md`)* | — | — | M02, M06 |
 | M15 | **Pro tier + public launch** — paywall, skill pack, HN/r/LocalLLaMA launch | 🔧 | Draft needed | [`plans/pro-tier-launch/plan.md`](pro-tier-launch/plan.md) (harvest stub) | — | 2026-04-18 | M13, M14 |
@@ -80,6 +80,7 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 | — | `2026-04-04-star-dive-sphere-design.md` (3D sphere dive) | ADR 0006 + M02 |
 | — | `2026-04-04-star-dive-sphere-overhaul.md` (3D sphere impl) | ADR 0006 + M02 |
 | — | `2026-04-04-star-closeup-aspect-ratio-fix.md` (fullscreen shader fix) | ADR 0006 + M02 (partially) |
+| — | `2026-04-05-interactive-star-catalogue.md` (Phase 2 WebGL renderer) | M02 landed renderer + data wiring; interactive explorer layer needs a fresh plan (see M12 row above) |
 | — | ADR 0001, 0002, 0003 | ADR 0004 |
 
 ---
@@ -100,7 +101,7 @@ files, coordinate.
 - **M09** — Autonomous research service + dock UI. Parallel-safe.
 - **M10** — BrainGraph topology. Parallel-safe unless M02 touches brain view.
 - **M11** — App state KV + SSE. Foundational; unblocks several UX flows.
-- **M12** — Star catalogue UI. Coordinates with M02 (shares 2D renderer).
+- **M12** — Interactive explorer UI on top of the already-landed M02 renderer + Phase 1 data layer. Touches `apps/metis-web/app/page.tsx` (hotspot), `components/home/*`, and whatever click/inspect/search surfaces get added. Old design doc (`2026-04-05-interactive-star-catalogue.md`) is Superseded; needs a fresh plan.
 - **M13** — New process (`metis_app/seedling/`?), continuous ingestion, companion
   stages. Coordinate with M09 (shared dock surface).
 - **M14** — New UI surface (`apps/metis-web/app/forge/`?), skill marketplace hooks.
