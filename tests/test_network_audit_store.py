@@ -175,7 +175,14 @@ def test_retention_caps_event_count(tmp_db: Path) -> None:
         # The eviction check fires every 100 appends, so we may be at
         # max_rows + up-to-99 pending. Force a vacuum for a crisp bound.
         store.vacuum()
-        assert len(store.recent(limit=1000)) <= 100
+        assert len(store.recent(limit=1000)) == 100
+        # Now append more and confirm the cap holds after a second vacuum —
+        # a bug where eviction trimmed once then let the store grow unbounded
+        # would be caught here.
+        for _ in range(200):
+            store.append(make_synthetic_event(event_id=new_ulid()))
+        store.vacuum()
+        assert len(store.recent(limit=1000)) == 100
 
 
 def test_retention_vacuum_removes_over_age(tmp_db: Path) -> None:

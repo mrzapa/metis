@@ -194,6 +194,11 @@ full migration framework.
   in the expected-usage case.
 - No external dependency — SQLite is stdlib; ULID helper is stdlib.
 
+The default DB path (`<repo_root>/network_audit.db`) is overridable at
+runtime via the `METIS_NETWORK_AUDIT_DB_PATH` environment variable,
+which is the supported configuration hook for the desktop app where
+`<repo_root>` would otherwise resolve under site-packages.
+
 **Negative / honest deficiencies of v0:**
 - Aggregating across a longer window than 30 days is not possible
   from the store alone. If a future privacy-audit feature needs a

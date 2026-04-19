@@ -18,6 +18,7 @@ the Phase 5 panel are O(log n) rather than O(n).
 
 from __future__ import annotations
 
+import os
 import pathlib
 import secrets
 import sqlite3
@@ -198,7 +199,11 @@ class NetworkAuditStore:
         max_rows: int = DEFAULT_MAX_ROWS,
         max_age_seconds: int = DEFAULT_MAX_AGE_SECONDS,
     ) -> None:
-        self.db_path = pathlib.Path(db_path) if db_path is not None else DEFAULT_DB_PATH
+        if db_path is not None:
+            self.db_path = pathlib.Path(db_path)
+        else:
+            env_override = os.environ.get("METIS_NETWORK_AUDIT_DB_PATH")
+            self.db_path = pathlib.Path(env_override) if env_override else DEFAULT_DB_PATH
         self.max_rows = int(max_rows)
         self.max_age_seconds = int(max_age_seconds)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -208,12 +213,14 @@ class NetworkAuditStore:
             str(self.db_path),
             check_same_thread=False,
             isolation_level=None,  # autocommit; we wrap multi-statement in explicit tx
+            timeout=30.0,
         )
         self._appends_since_eviction = 0
         self._closed = False
 
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("PRAGMA busy_timeout=30000")
         self._conn.execute(_SCHEMA)
         for statement in _INDEXES:
             self._conn.execute(statement)
