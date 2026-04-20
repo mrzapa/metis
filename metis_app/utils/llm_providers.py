@@ -490,15 +490,29 @@ def create_smart_llm(settings: dict[str, Any]) -> Any:
 # Private per-provider constructors
 # ---------------------------------------------------------------------------
 
-def _wrap_for_audit(llm: Any, provider_key_label: str) -> Any:
+def _wrap_for_audit(
+    llm: Any,
+    provider_key_label: str,
+    url_host_override: str | None = None,
+) -> Any:
     """Wrap a concrete LangChain LLM in the SDK-audit proxy.
 
     ``provider_key_label`` is the internal llm_providers.py routing
     label (``"openai"`` / ``"anthropic"`` / ``"google"`` / ``"xai"`` /
     ``"local_lm_studio"``). It indexes :data:`_SDK_HOST_MAP` to produce
     the ``(provider_key, url_host)`` pair for the audit event.
+
+    ``url_host_override`` — when non-``None``, replaces the map's
+    default host. LM Studio passes this so the audit trail reflects
+    the user's ``local_llm_url`` setting (which can point at a remote
+    endpoint, not just loopback). Without the override the panel
+    would silently report ``localhost`` for every LM Studio call,
+    even when the wire traffic is going to a different machine — a
+    misleading audit trail is exactly what this milestone exists to
+    prevent.
     """
-    provider_key, url_host = _SDK_HOST_MAP[provider_key_label]
+    provider_key, default_url_host = _SDK_HOST_MAP[provider_key_label]
+    url_host = url_host_override if url_host_override else default_url_host
     return _ProviderAuditWrapper(
         llm,
         provider_key=provider_key,
@@ -572,8 +586,23 @@ def _create_lm_studio(
 ) -> Any:
     from langchain_openai import ChatOpenAI  # type: ignore[import-untyped]
 
+    from metis_app.network_audit.events import sanitize_url
+
     url = str(settings.get("local_llm_url", "http://localhost:1234/v1") or "").strip()
     _log.info("Connecting to Local LLM at %s", url)
+
+    # Derive the audit host from the configured URL so remote-LM-Studio
+    # deployments surface honestly in the panel instead of silently
+    # logging as "localhost". sanitize_url handles userinfo/port/query
+    # stripping and returns ("unknown", "/") on a malformed URL — fall
+    # back to the map default in that case.
+    if url:
+        audit_host, _path_prefix = sanitize_url(url)
+        if audit_host == "unknown":
+            audit_host = None  # use map default
+    else:
+        audit_host = None
+
     llm = ChatOpenAI(
         base_url=url,
         api_key="lm-studio",
@@ -581,7 +610,7 @@ def _create_lm_studio(
         temperature=temperature,
         max_tokens=max_tokens,
     )
-    return _wrap_for_audit(llm, "local_lm_studio")
+    return _wrap_for_audit(llm, "local_lm_studio", url_host_override=audit_host)
 
 
 def _create_local_gguf(

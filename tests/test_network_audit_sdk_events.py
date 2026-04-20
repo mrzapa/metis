@@ -523,6 +523,122 @@ def test_llm_wrapper_forwards_other_attributes(isolated_store: NetworkAuditStore
     assert wrapper.model_name == "gpt-4o-mini"
 
 
+def test_wrap_for_audit_honours_url_host_override() -> None:
+    """Caller-supplied url_host_override replaces the map default.
+
+    Caught by Codex review on PR #519: the _SDK_HOST_MAP hardcodes
+    ``local_lm_studio -> localhost``, but a user-configured
+    ``local_llm_url`` can point at a remote endpoint. The audit trail
+    must reflect the real host, not silently log ``localhost``.
+    """
+    from metis_app.utils.llm_providers import _wrap_for_audit
+
+    class _Noop:
+        def invoke(self, _messages: list[Any]) -> str:
+            return "ok"
+
+    wrapped_default = _wrap_for_audit(_Noop(), "local_lm_studio")
+    assert wrapped_default._url_host == "localhost"
+
+    wrapped_remote = _wrap_for_audit(
+        _Noop(), "local_lm_studio", url_host_override="192.168.1.5"
+    )
+    assert wrapped_remote._url_host == "192.168.1.5"
+
+    # Empty / None override falls back to the map default (truthy
+    # check — empty string should NOT silently override to "").
+    wrapped_empty = _wrap_for_audit(_Noop(), "local_lm_studio", url_host_override="")
+    assert wrapped_empty._url_host == "localhost"
+
+
+def test_create_lm_studio_records_configured_remote_host(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store: NetworkAuditStore,
+) -> None:
+    """A remote-configured LM Studio surfaces the real host in the event.
+
+    Regression for the PR #519 Codex finding. Previously the audit
+    event always said ``localhost`` regardless of ``local_llm_url``.
+    """
+    # Stub the LangChain ChatOpenAI import so we don't need the real
+    # library installed for this test path.
+    import sys
+    import types
+
+    captured_base_url: list[str] = []
+
+    class _StubChatOpenAI:
+        def __init__(self, **kwargs: Any) -> None:
+            captured_base_url.append(kwargs.get("base_url", ""))
+
+        def invoke(self, _messages: list[Any]) -> str:
+            return "stub-response"
+
+    stub_module = types.ModuleType("langchain_openai")
+    stub_module.ChatOpenAI = _StubChatOpenAI  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "langchain_openai", stub_module)
+
+    from metis_app.utils.llm_providers import _create_lm_studio
+
+    wrapped = _create_lm_studio(
+        settings={"local_llm_url": "http://192.168.1.5:1234/v1"},
+        model="llama-3",
+        temperature=0.5,
+        max_tokens=128,
+    )
+    assert captured_base_url == ["http://192.168.1.5:1234/v1"]
+
+    wrapped.invoke([{"type": "human", "content": "hi"}])
+
+    events = isolated_store.recent(limit=10)
+    assert len(events) == 1
+    event = events[0]
+    assert event.provider_key == "local_lm_studio"
+    # The audit panel must report the REAL host, not a hardcoded localhost.
+    assert event.url_host == "192.168.1.5"
+
+
+def test_create_lm_studio_falls_back_to_localhost_on_malformed_url(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store: NetworkAuditStore,
+) -> None:
+    """A malformed ``local_llm_url`` falls back to the map default.
+
+    Belt-and-braces: sanitize_url returns ``("unknown", "/")`` for
+    inputs that urlsplit can't parse meaningfully; rather than
+    surfacing ``unknown`` in the panel (confusing for the user), we
+    fall back to the map default for that provider.
+    """
+    import sys
+    import types
+
+    class _StubChatOpenAI:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def invoke(self, _messages: list[Any]) -> str:
+            return "stub"
+
+    stub_module = types.ModuleType("langchain_openai")
+    stub_module.ChatOpenAI = _StubChatOpenAI  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "langchain_openai", stub_module)
+
+    from metis_app.utils.llm_providers import _create_lm_studio
+
+    # urlsplit tolerates most things; use an obviously hostless string.
+    wrapped = _create_lm_studio(
+        settings={"local_llm_url": "not a url at all"},
+        model="llama-3",
+        temperature=0.5,
+        max_tokens=128,
+    )
+    wrapped.invoke([{"type": "human", "content": "hi"}])
+
+    events = isolated_store.recent(limit=10)
+    assert len(events) == 1
+    assert events[0].url_host == "localhost"
+
+
 # ---------------------------------------------------------------------------
 # _EmbeddingsAuditWrapper — embed_documents + embed_query
 # ---------------------------------------------------------------------------
