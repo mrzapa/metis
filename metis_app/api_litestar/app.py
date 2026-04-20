@@ -14,6 +14,11 @@ from litestar.exceptions import HTTPException as LitestarHTTPException
 from litestar.exceptions import ValidationException
 from litestar.openapi.config import OpenAPIConfig
 
+from metis_app.network_audit.runtime import (
+    close_default_store,
+    get_default_store,
+)
+
 from .common import (
     cors_origins_from_env,
     handle_http_exception,
@@ -36,6 +41,7 @@ from .routes import (
     improvements,
     index,
     logs,
+    network_audit,
     observe,
     query,
     sessions,
@@ -45,6 +51,29 @@ from .routes import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def _warm_network_audit_store() -> None:
+    """Startup hook: warm the network-audit store singleton.
+
+    Building the SQLite connection up-front means the first real
+    request does not pay the open-and-migrate cost on its hot path,
+    and — more importantly — any construction failure (bad DB path,
+    read-only install dir) is logged at startup where it will be
+    noticed, not deferred to the first user-triggered wrapped call.
+    The warning is emitted by :func:`get_default_store` itself.
+    """
+    get_default_store()
+
+
+def _close_network_audit_store() -> None:
+    """Shutdown hook: flush and close the network-audit store singleton.
+
+    Idempotent; safe to call even if the store was never constructed
+    (e.g. the process was killed before the startup hook ran to
+    completion, or construction failed).
+    """
+    close_default_store()
 
 
 def create_app() -> Litestar:
@@ -78,6 +107,7 @@ def create_app() -> Litestar:
             improvements.router,
             index.router,
             logs.router,
+            network_audit.router,
             observe.router,
             query.router,
             sessions.router,
@@ -101,6 +131,8 @@ def create_app() -> Litestar:
             version.api_version,
             protected_routes,
         ],
+        on_startup=[_warm_network_audit_store],
+        on_shutdown=[_close_network_audit_store],
     )
 
     return app
