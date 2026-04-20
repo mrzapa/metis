@@ -66,7 +66,10 @@ _RECENT_COUNT_MAX_WINDOW = 7 * 24 * 60 * 60  # 7 days
 _PROVIDER_WINDOW_7D_SECONDS = 7 * 24 * 60 * 60
 _SSE_POLL_INTERVAL_SECONDS = 0.5
 _SSE_MAX_DURATION_SECONDS = 25 * 60
-_SSE_BATCH_LIMIT = 50
+# Max rows drained per SELECT. If a burst produces more than this
+# between two polls, the loop immediately re-queries (no sleep) to
+# keep draining. So this is a memory/throughput knob, not a lossy cap.
+_SSE_DRAIN_LIMIT = 500
 
 
 # ---------------------------------------------------------------------------
@@ -292,9 +295,13 @@ async def stream_events() -> Stream:
 
     Emits events in chronological order (oldest-first within each
     batch) so the frontend can append them to a scrolling log without
-    reordering. Polls :meth:`NetworkAuditStore.recent` every 500 ms
-    and diffs against the last-seen event ID. Hard cap of 25 minutes
-    per connection — clients are expected to reconnect.
+    reordering. Uses SQLite's monotonic ``rowid`` as the stream
+    cursor (see :meth:`NetworkAuditStore.events_after`). Polls every
+    500 ms; if a poll returns a full batch of ``_SSE_DRAIN_LIMIT``
+    rows, immediately polls again without sleeping to drain any
+    remaining backlog — so a burst of >limit events between two polls
+    cannot silently drop any. Hard cap of 25 minutes per connection
+    — clients are expected to reconnect.
 
     When the store is unavailable, emits a single
     ``{"type": "no_store"}`` frame and closes so the panel can show
@@ -313,23 +320,16 @@ async def stream_events() -> Stream:
             ).encode()
             return
 
-        # Track (timestamp_ms, id) rather than id alone. Pure-id equality
-        # is insufficient under millisecond-collision bursts: ULIDs are
-        # lex-ordered by time PLUS 80 bits of randomness, so two events
-        # with the same timestamp_ms can have non-monotonic id order.
-        # A watermark tuple with strict-greater comparison guarantees
-        # no same-ms event is silently skipped.
-        last_seen_ms: int = 0
-        last_seen_id: str = ""
-        # Prime the watermark to the current tail so we only emit
-        # events observed AFTER the client connects. Clients that
-        # want historical events should use ``/events`` first and
-        # then subscribe to the stream.
+        # Watermark = last emitted rowid. SQLite's implicit rowid
+        # strictly increments on every INSERT, so this is immune to
+        # ULID tie-ordering within a single millisecond (the 80-bit
+        # random suffix on new_ulid() is not monotonic).
+        last_rowid: int = 0
+        # Prime to the current max so we only emit events observed
+        # AFTER connect. Clients that want historical events hit
+        # /events first.
         try:
-            tail = store.recent(limit=1)
-            if tail:
-                last_seen_ms = int(tail[0].timestamp.timestamp() * 1000)
-                last_seen_id = tail[0].id
+            last_rowid = store.max_rowid()
         except Exception as exc:  # noqa: BLE001 — audit infra must not crash
             log.debug("network_audit stream prime failed: %s", exc)
 
@@ -341,7 +341,7 @@ async def stream_events() -> Stream:
                 ):
                     break
                 try:
-                    batch = store.recent(limit=_SSE_BATCH_LIMIT)
+                    batch = store.events_after(last_rowid, _SSE_DRAIN_LIMIT)
                 except RuntimeError:
                     # Store was closed mid-stream (e.g. shutdown during
                     # long-lived connection). Exit rather than burn CPU
@@ -354,35 +354,28 @@ async def stream_events() -> Stream:
                     await asyncio.sleep(_SSE_POLL_INTERVAL_SECONDS)
                     continue
 
-                # ``recent`` returns newest-first. Collect events
-                # strictly newer than the (ms, id) watermark, then
-                # reverse so the client sees them oldest-first.
-                new_events: list[Any] = []
-                for event in batch:
-                    ev_ms = int(event.timestamp.timestamp() * 1000)
-                    # Strict-greater on (ms, id) tuple. Events that tie
-                    # on ms but have id > last_seen_id are still newer.
-                    if (ev_ms, event.id) <= (last_seen_ms, last_seen_id):
-                        break
-                    new_events.append(event)
-                if new_events:
-                    # Update watermark to the newest one we saw this
-                    # tick BEFORE emitting, so a cancellation mid-emit
-                    # does not cause a replay on reconnect within the
-                    # same generator lifetime.
-                    newest = new_events[0]
-                    last_seen_ms = int(newest.timestamp.timestamp() * 1000)
-                    last_seen_id = newest.id
-                    for event in reversed(new_events):
-                        payload = _event_to_response(event).model_dump(
-                            mode="json"
-                        )
-                        payload["type"] = "audit_event"
-                        yield (
-                            "data: "
-                            + json.dumps(payload, default=str)
-                            + "\n\n"
-                        ).encode()
+                # Batch is chronological (oldest-first) per
+                # events_after's contract — emit in order, advancing
+                # the watermark per-event so a partial cancel doesn't
+                # replay already-delivered events on reconnect.
+                for rowid, event in batch:
+                    payload = _event_to_response(event).model_dump(
+                        mode="json"
+                    )
+                    payload["type"] = "audit_event"
+                    yield (
+                        "data: "
+                        + json.dumps(payload, default=str)
+                        + "\n\n"
+                    ).encode()
+                    last_rowid = rowid
+
+                # If we drained a full batch, more events may still be
+                # queued — loop without sleeping to continue draining.
+                # This is what prevents silent drops when a burst of
+                # >_SSE_DRAIN_LIMIT events arrives between two polls.
+                if len(batch) >= _SSE_DRAIN_LIMIT:
+                    continue
                 await asyncio.sleep(_SSE_POLL_INTERVAL_SECONDS)
         except asyncio.CancelledError:
             # Litestar cancels the generator on client disconnect.

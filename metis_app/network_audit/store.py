@@ -381,6 +381,58 @@ class NetworkAuditStore:
         )
         return int(cursor.fetchone()[0])
 
+    def max_rowid(self) -> int:
+        """Return the current maximum ``rowid`` in the events table.
+
+        Used by the SSE stream to prime its watermark so clients that
+        connect to the live stream skip events that were inserted
+        before the connection. A value of ``0`` is returned for an
+        empty table — any subsequent insert will produce a rowid ≥ 1.
+
+        SQLite's implicit ``rowid`` is guaranteed to strictly increase
+        on every INSERT against a ROWID table (our table has a TEXT
+        primary key, so it keeps the implicit rowid). This gives us a
+        monotonic stream cursor that does not depend on ULID ordering
+        — the 80-bit random suffix on :func:`new_ulid` is not
+        monotonic within a millisecond, so an id-based watermark can
+        silently skip same-ms events. See :meth:`events_after`.
+        """
+        conn = self._require_conn()
+        cursor = conn.execute(
+            "SELECT COALESCE(MAX(rowid), 0) FROM network_audit_events"
+        )
+        return int(cursor.fetchone()[0])
+
+    def events_after(
+        self, after_rowid: int, limit: int
+    ) -> list[tuple[int, NetworkAuditEvent]]:
+        """Return events with ``rowid > after_rowid``, chronological (oldest-first).
+
+        Returns a list of ``(rowid, event)`` pairs so the caller can
+        advance its watermark per-event without re-reading the row's
+        metadata. Ordering is by ``rowid`` ASC, which is a monotonic
+        SQLite-internal counter — immune to ULID tie-ordering issues
+        within a single millisecond.
+
+        The SSE stream uses this as its primary cursor. It polls
+        periodically with ``after_rowid = last_emitted_rowid`` and
+        drains in chunks of ``limit`` rows; if the returned batch
+        equals ``limit``, more events may still be queued and the
+        caller should loop without sleeping until the batch is
+        partial. This guarantees no silent drops under bursty traffic
+        (>limit events between two polls).
+        """
+        conn = self._require_conn()
+        cursor = conn.execute(
+            "SELECT rowid, id, timestamp_ms, method, url_host, url_path_prefix, "
+            "provider_key, trigger_feature, size_bytes_in, size_bytes_out, "
+            "latency_ms, status_code, user_initiated, blocked, source "
+            "FROM network_audit_events "
+            "WHERE rowid > ? ORDER BY rowid ASC LIMIT ?",
+            (int(after_rowid), int(limit)),
+        )
+        return [(int(row[0]), _row_to_event(row[1:])) for row in cursor.fetchall()]
+
     # ------------------------------------------------------------------
     # Retention
     # ------------------------------------------------------------------

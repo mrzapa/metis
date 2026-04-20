@@ -157,6 +157,127 @@ def test_count_recent_window(tmp_db: Path) -> None:
         assert store.count_recent(window_seconds=60) == 6
 
 
+def test_max_rowid_tracks_inserts(tmp_db: Path) -> None:
+    """``max_rowid`` returns 0 for an empty table and rises with inserts.
+
+    Used by the SSE stream to prime its watermark past pre-connect
+    history so clients only see events inserted after the connection.
+    """
+    now = datetime.now(timezone.utc)
+    with NetworkAuditStore(tmp_db) as store:
+        assert store.max_rowid() == 0
+        store.append(make_synthetic_event(timestamp=now, event_id=new_ulid()))
+        r1 = store.max_rowid()
+        assert r1 >= 1
+        store.append(make_synthetic_event(timestamp=now, event_id=new_ulid()))
+        r2 = store.max_rowid()
+        assert r2 > r1
+
+
+def test_events_after_drains_in_chronological_order(tmp_db: Path) -> None:
+    """``events_after`` returns events with rowid > cursor, oldest-first.
+
+    This is the stream cursor primitive. It must (a) exclude events at
+    or before the cursor, (b) return strictly-monotonic rowids, (c)
+    order oldest-first so the frontend sees a chronological log.
+    """
+    now = datetime.now(timezone.utc)
+    with NetworkAuditStore(tmp_db) as store:
+        # Insert 4 events; capture the rowid after the 2nd.
+        for _ in range(2):
+            store.append(make_synthetic_event(timestamp=now, event_id=new_ulid()))
+        cursor_rowid = store.max_rowid()
+        for _ in range(2):
+            store.append(make_synthetic_event(timestamp=now, event_id=new_ulid()))
+
+        drained = store.events_after(cursor_rowid, limit=100)
+        assert len(drained) == 2
+        # Strictly monotonic rowids, oldest first.
+        assert drained[0][0] < drained[1][0]
+        assert drained[0][0] > cursor_rowid
+
+
+def test_events_after_never_loses_burst_events_beyond_drain_limit(
+    tmp_db: Path,
+) -> None:
+    """Regression for PR #520 Codex P1: a burst of >limit events between
+    two polls must not silently drop events beyond the limit.
+
+    Simulates: client connects at rowid=0 (empty store). Then 120
+    events arrive before the next poll. A single SELECT with
+    ``limit=50`` would return the 50 oldest; if the SSE loop advanced
+    its watermark to the newest of those 50 and queried with that
+    cursor next tick, events 51..120 would be silently dropped. The
+    fix is to loop-drain: keep querying while the batch is full. This
+    test asserts that the drain-all pattern reaches every event.
+    """
+    now = datetime.now(timezone.utc)
+    with NetworkAuditStore(tmp_db) as store:
+        total = 120
+        for _ in range(total):
+            store.append(make_synthetic_event(timestamp=now, event_id=new_ulid()))
+
+        # Simulate the SSE loop: start at rowid 0, drain in chunks of
+        # 50 until partial.
+        drain_limit = 50
+        cursor = 0
+        drained_ids: list[str] = []
+        while True:
+            batch = store.events_after(cursor, limit=drain_limit)
+            if not batch:
+                break
+            drained_ids.extend(event.id for _rowid, event in batch)
+            cursor = batch[-1][0]
+            if len(batch) < drain_limit:
+                break
+
+        assert len(drained_ids) == total, (
+            "Drain-all pattern must reach every event past the initial "
+            "cursor, not just the first _SSE_DRAIN_LIMIT"
+        )
+        assert len(set(drained_ids)) == total, "No duplicates"
+
+
+def test_events_after_monotonic_rowid_immune_to_ulid_tie_disorder(
+    tmp_db: Path,
+) -> None:
+    """Regression for PR #520 Codex P2: same-millisecond events with
+    lexicographically disordered IDs must still all appear in
+    ``events_after`` strictly after a cursor that includes some of them.
+
+    Constructs three events at the exact same timestamp_ms with IDs
+    chosen so that the lex order is NOT the insert order. An id-based
+    watermark would classify the second-inserted (lex-smallest) event
+    as "already seen" when the cursor = max(ids). The rowid-based
+    watermark does not have this problem because rowid is assigned
+    monotonically per INSERT regardless of id lex order.
+    """
+    now = datetime.now(timezone.utc)
+    with NetworkAuditStore(tmp_db) as store:
+        # Fixed timestamp so all three share the same timestamp_ms.
+        ts = now.replace(microsecond=0)
+        # Insert events whose IDs are deliberately NOT monotonic:
+        # the middle insert has the smallest id lex-wise.
+        ids_in_insert_order = [
+            "ZZZZZZZZZZZZZZZZZZZZZZZZZZ",  # largest lex
+            "00000000000000000000000000",  # smallest lex, inserted 2nd
+            "MMMMMMMMMMMMMMMMMMMMMMMMMM",  # middle lex
+        ]
+        for event_id in ids_in_insert_order:
+            store.append(make_synthetic_event(timestamp=ts, event_id=event_id))
+
+        # Cursor = after the first insert's rowid. events_after must
+        # return the LAST TWO inserts in insert order, even though the
+        # 2nd insert has a lex-smaller id than the cursor's id.
+        first_rowid = 1  # SQLite rowid starts at 1 on empty table
+        drained = store.events_after(first_rowid, limit=100)
+        drained_ids = [event.id for _rowid, event in drained]
+        assert drained_ids == [
+            "00000000000000000000000000",
+            "MMMMMMMMMMMMMMMMMMMMMMMMMM",
+        ], "Must return events in INSERT order (rowid), not lex order"
+
+
 def test_count_recent_by_provider_filters_correctly(tmp_db: Path) -> None:
     """``count_recent_by_provider`` sums only the named provider's events.
 
