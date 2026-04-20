@@ -163,6 +163,14 @@ workflow for implementation requests from external sources*.
 row with `Status: Ready` or `Status: Next up` and a blank `Claim`, then
 run the trust-but-verify pass above before committing.
 
+**Plan freshness and code-vs-plan alignment are two different audits.**
+The 2026-04-20 plan-doc sweep (PR #522) refreshed M17's plan doc and
+fixed stale frontmatter elsewhere, but left M03-M06 advertised as
+`Ready` even though their code had already shipped. The follow-up
+reconciliation (PR #524) caught that. Lesson: a periodic sweep should
+always include both — read the plans AND grep for the artefacts they
+promise on `main`.
+
 An earlier version of this file duplicated the table inline. That copy
 went stale within 24 hours and contributed to a wasted session
 (M03 looked unclaimed here but had already shipped). The table is
@@ -202,6 +210,11 @@ the right row and read the plan." Without a paste-ready prompt, every
 session rediscovers the conventions (branch naming, CI guards, intake
 workflow) from scratch. This file collapses that discovery into a single
 copy-paste.
+
+One lesson from the April 2026 plan sweeps: **plan-doc freshness and
+code-vs-plan alignment are different audits**. A table row can look current
+while still pointing agents at work that already shipped. The pre-claim grep
+rule above exists to catch that class of drift before it burns a full session.
 
 Update it when the process changes, not when individual tasks change.
 Task-level state lives in the milestone plan docs.

@@ -7,7 +7,7 @@ This is the **single source of truth for what is being worked on in METIS and
 what comes next.** Every row is a milestone from `VISION.md`. Agents claim rows,
 do the work, update the row when they stop.
 
-**Last reviewed:** 2026-04-20 (M17 Phases 1-5 all landed via PRs #516-#521; no agents currently working; plan docs swept for freshness). See [`Prompt agents.md`](Prompt%20agents.md) for the onboarding prompt to give a fresh agent.
+**Last reviewed:** 2026-04-20 (reconciled stale-ready M03/M04/M05/M06 rows to Landed after a code-vs-plan audit; M17 Phases 1-5 all landed via PRs #516-#521; no agents currently working). See [`Prompt agents.md`](Prompt%20agents.md) for the onboarding prompt to give a fresh agent.
 
 ## Quick start for a fresh agent
 
@@ -55,10 +55,10 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 |---|---|---|---|---|---|---|---|
 | M01 | **Preserve & productise** — audit, surface, cut dead paths | 🔧 | Rolling | [`docs/preserve-and-productize-plan.md`](../docs/preserve-and-productize-plan.md) | — | 2026-04-18 | — |
 | M02 | **Constellation 2D refactor** — retire 3D sphere, 2D archetype dive (ADR 0006) | 🌌 | Landed | [`plans/constellation-2d-refactor/plan.md`](constellation-2d-refactor/plan.md) | Phases 0-8 landed (merge `0449c2e`, 2026-04-19) | 2026-04-19 | — |
-| M03 | **IterRAG convergence** — agentic loop with convergence detection | 🧠 | Ready | [`docs/plans/2026-04-01-hermes-sotaku-implementation.md`](../docs/plans/2026-04-01-hermes-sotaku-implementation.md) (Phase 1) | — | 2026-04-04 | — |
-| M04 | **Reverse curriculum** — faculty hardness scoring drives research order | 🧠 | Ready | [`docs/plans/2026-04-04-reverse-curriculum-implementation.md`](../docs/plans/2026-04-04-reverse-curriculum-implementation.md) | — | 2026-04-04 | M03 |
-| M05 | **Parallel research** — concurrent faculty workers + batch fixes | 🧠 | Ready | [`docs/plans/2026-04-04-parallel-research-implementation.md`](../docs/plans/2026-04-04-parallel-research-implementation.md) | — | 2026-04-04 | — |
-| M06 | **Skill self-evolution** — candidate capture from high-convergence traces | 🧠🌱 | Ready | [`docs/plans/2026-04-01-hermes-sotaku-implementation.md`](../docs/plans/2026-04-01-hermes-sotaku-implementation.md) (Phase 3) | — | 2026-04-04 | M03 |
+| M03 | **IterRAG convergence** — agentic loop with convergence detection | 🧠 | Landed | [`docs/plans/2026-04-01-hermes-sotaku-implementation.md`](../docs/plans/2026-04-01-hermes-sotaku-implementation.md) (Phase 1) | Landed via PR #501 (`ea75561`, 2026-04-18) | 2026-04-20 | — |
+| M04 | **Reverse curriculum** — faculty hardness scoring drives research order | 🧠 | Landed | [`docs/plans/2026-04-04-reverse-curriculum-implementation.md`](../docs/plans/2026-04-04-reverse-curriculum-implementation.md) | Landed via PR #465 (`46cd2e4`, 2026-04-04) | 2026-04-20 | M03 |
+| M05 | **Parallel research** — concurrent faculty workers + batch fixes | 🧠 | Landed | [`docs/plans/2026-04-04-parallel-research-implementation.md`](../docs/plans/2026-04-04-parallel-research-implementation.md) | Landed via PR #466 (`5327e84`, 2026-04-04) | 2026-04-20 | — |
+| M06 | **Skill self-evolution** — candidate capture from high-convergence traces | 🧠🌱 | Landed | [`docs/plans/2026-04-01-hermes-sotaku-implementation.md`](../docs/plans/2026-04-01-hermes-sotaku-implementation.md) (Phase 3) | Landed via PR #461 (`4517b77`, 2026-04-03); quality-gate follow-up `2cb29be` | 2026-04-20 | M03 |
 | M07 | **Hermes v0.7.0 patterns** — context compression, skill index, credential pool | 🔧 | Landed | [`docs/plans/2026-04-04-hermes-v070-implementation.md`](../docs/plans/2026-04-04-hermes-v070-implementation.md) | Landed via PR #464 (`551d01b`, 2026-04-04) | 2026-04-04 | — |
 | M08 | **Hybrid search** — BM25 + vector alpha-blend retrieval | 🧠 | Landed | [`docs/plans/2026-04-04-hybrid-search-design.md`](../docs/plans/2026-04-04-hybrid-search-design.md) | Landed (`8d6ed98`, 2026-04-04) | 2026-04-04 | — |
 | M09 | **Companion realtime visibility** — SSE thought log + constellation auto-refresh | 🌱 | Landed | [`plans/companion-realtime-visibility/plan.md`](companion-realtime-visibility/plan.md) | Landed (`68634ba`, 2026-04-18) | 2026-04-18 | — |
