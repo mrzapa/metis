@@ -13,6 +13,8 @@ from metis_app.network_audit import (
     NetworkBlockedError,
     TRIGGER_WEB_SEARCH_DUCKDUCKGO,
     TRIGGER_WEB_SEARCH_JINA_READER,
+    TRIGGER_WEB_SEARCH_TAVILY,
+    audit_sdk_call,
     audited_urlopen,
     get_default_settings,
     get_default_store,
@@ -52,9 +54,26 @@ def _tavily_search(query: str, *, n_results: int, api_key: str) -> list[WebSearc
         _log.warning("tavily-python not installed; falling back to DuckDuckGo: %s", exc)
         return _ddg_search(query, n_results=n_results)
 
+    # Audit the Tavily call as an SDK invocation — we route through
+    # ``TavilyClient`` which owns its HTTP transport, so like the
+    # LangChain LLM/embedding wrappers this is an intent-level event
+    # (``source="sdk_invocation"``). Airplane mode (Phase 4) raises
+    # NetworkBlockedError here, and we degrade to the DuckDuckGo
+    # fallback rather than surfacing an error to the autonomous-research
+    # loop — callers of ``create_web_search`` expect a list.
     try:
         client = TavilyClient(api_key=api_key)
-        response = client.search(query, max_results=n_results, include_raw_content=False)
+        with audit_sdk_call(
+            provider_key="tavily",
+            trigger_feature=TRIGGER_WEB_SEARCH_TAVILY,
+            url_host="api.tavily.com",
+            url_path_prefix="/search",
+            method="POST",
+            user_initiated=False,
+        ):
+            response = client.search(
+                query, max_results=n_results, include_raw_content=False
+            )
         results = []
         for item in response.get("results", []):
             full_content = str(item.get("content") or "")
@@ -67,6 +86,9 @@ def _tavily_search(query: str, *, n_results: int, api_key: str) -> list[WebSearc
                 )
             )
         return results
+    except NetworkBlockedError as exc:
+        _log.warning("Tavily search blocked by audit: %s", exc)
+        return _ddg_search(query, n_results=n_results)
     except Exception as exc:
         _log.warning("Tavily search failed; falling back to DuckDuckGo: %s", exc)
         return _ddg_search(query, n_results=n_results)

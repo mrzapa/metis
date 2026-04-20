@@ -38,12 +38,20 @@ from metis_app.network_audit.runtime import (
     get_default_settings,
     get_default_store,
 )
+from metis_app.network_audit.sdk_events import (
+    audit_sdk_call,
+    emit_sdk_invocation,
+)
 from metis_app.network_audit.store import (
     NetworkAuditStore,
 )
 from metis_app.network_audit.trigger_features import (
+    TRIGGER_EMBEDDING_DOCUMENTS,
+    TRIGGER_EMBEDDING_QUERY,
     TRIGGER_GGUF_DOWNLOAD,
     TRIGGER_HF_CATALOG,
+    TRIGGER_LLM_INVOKE,
+    TRIGGER_LLM_STREAM,
     TRIGGER_NEWS_COMET_HACKERNEWS,
     TRIGGER_NEWS_COMET_REDDIT,
     TRIGGER_NEWS_COMET_RSS,
@@ -51,6 +59,7 @@ from metis_app.network_audit.trigger_features import (
     TRIGGER_TRIBEV2_SNAPSHOT,
     TRIGGER_WEB_SEARCH_DUCKDUCKGO,
     TRIGGER_WEB_SEARCH_JINA_READER,
+    TRIGGER_WEB_SEARCH_TAVILY,
 )
 
 __all__ = [
@@ -60,8 +69,12 @@ __all__ = [
     "NetworkBlockedError",
     "ProviderCategory",
     "ProviderSpec",
+    "TRIGGER_EMBEDDING_DOCUMENTS",
+    "TRIGGER_EMBEDDING_QUERY",
     "TRIGGER_GGUF_DOWNLOAD",
     "TRIGGER_HF_CATALOG",
+    "TRIGGER_LLM_INVOKE",
+    "TRIGGER_LLM_STREAM",
     "TRIGGER_NEWS_COMET_HACKERNEWS",
     "TRIGGER_NEWS_COMET_REDDIT",
     "TRIGGER_NEWS_COMET_RSS",
@@ -69,8 +82,11 @@ __all__ = [
     "TRIGGER_TRIBEV2_SNAPSHOT",
     "TRIGGER_WEB_SEARCH_DUCKDUCKGO",
     "TRIGGER_WEB_SEARCH_JINA_READER",
+    "TRIGGER_WEB_SEARCH_TAVILY",
+    "audit_sdk_call",
     "audited_urlopen",
     "classify_host",
+    "emit_sdk_invocation",
     "get_default_settings",
     "get_default_store",
     "is_provider_blocked",

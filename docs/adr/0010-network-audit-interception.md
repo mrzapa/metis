@@ -126,7 +126,39 @@ setting will be introduced in a later phase (notably
 invent a parallel kill-switch namespace; it is a user-friendly lens over
 the settings that already block these providers today.
 
-### 5. Tauri-layer enforcement is a Phase 8 stretch, not a promise
+### 5. Phase 4 — SDK-invocation events are an explicit discriminator, not a flag buried in trigger_feature
+
+Phase 4 lands the vendor-SDK audit surface (LangChain LLM + embedding
+factories, plus Tavily via :class:`TavilyClient`). Two small schema
+choices worth recording so the next agent does not re-litigate them:
+
+- **``source`` is a Literal column, not a string convention.** The
+  ``NetworkAuditEvent`` gains a ``source: Literal["stdlib_urlopen",
+  "sdk_invocation"]`` field (default ``"stdlib_urlopen"`` for backwards
+  compatibility with Phase 3b call sites). Runtime validation in
+  ``__post_init__`` pins the set. The Phase 5 panel reads this field
+  and labels the row — users see the honest distinction between
+  observed wire traffic and declared intent (see `Consequences` below).
+- **Schema migration uses `ALTER TABLE ... ADD COLUMN ... DEFAULT
+  'stdlib_urlopen'`.** SQLite applies the default to pre-existing
+  rows in a single DDL call, so a user upgrading from a 13-column DB
+  lands on the 14-column schema without data loss. The migration is
+  guarded by a ``PRAGMA table_info`` check and is idempotent. A
+  ``_MIGRATIONS`` tuple in ``store.py`` is the canonical list of
+  column-adds; future phases extend it in place rather than bypassing
+  it with a one-off migration script.
+- **Kill-switch scope for Phase 4 is airplane mode only.** The
+  per-LLM-provider ``provider_block_llm`` map flagged in the plan
+  (line 557) is a Phase 5 concern — it needs the settings UI to ship
+  simultaneously. Phase 4's SDK wrappers call
+  :func:`is_provider_blocked` with the LLM/embedding provider key;
+  the existing predicate short-circuits on
+  ``network_audit_airplane_mode=True``, which is sufficient to make
+  the "prove offline" synthetic pass work. When Phase 5 lands the
+  ``provider_block_llm`` map it plugs into the same predicate with
+  no changes to the SDK wrapper shape.
+
+### 6. Tauri-layer enforcement is a Phase 8 stretch, not a promise
 
 For the privacy-purist user who wants enforcement rather than a
 microscope, Phase 8 explores hooking the Tauri sidecar or OS-level

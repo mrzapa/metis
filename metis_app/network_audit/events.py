@@ -20,7 +20,20 @@ allowed to remember: the hostname and the first path segment.
   ``tests/test_network_audit_events.py``. Do not loosen these
   invariants without first updating the ADR.
 
-See ``plans/network-audit/plan.md`` (Phase 2) and
+**Phase 4 extension — the ``source`` field**:
+
+The ``source`` discriminator (``"stdlib_urlopen"`` vs ``"sdk_invocation"``)
+names *how* the event reached the audit layer. Phase 3's
+:func:`audited_urlopen` wrapper observes the wire directly and emits
+``source="stdlib_urlopen"``. Phase 4's vendor-SDK wrappers (LangChain
+LLM + embedding factories, Tavily) cannot see the wire — they emit
+``source="sdk_invocation"`` to declare that this is an *intent-level*
+record, not a wire capture. The panel (Phase 5) labels the row
+accordingly so the user is never misled into thinking the wrapper
+observed the exact bytes. See ADR 0010 (*"Vendor SDKs: classify-not-wrap"*)
+and ``plans/network-audit/plan.md`` Phase 4 for the rationale.
+
+See ``plans/network-audit/plan.md`` (Phase 2, Phase 4) and
 ``docs/adr/0011-network-audit-retention.md`` for the full rationale.
 """
 
@@ -77,6 +90,15 @@ class NetworkAuditEvent:
         blocked: ``True`` iff the kill-switch layer intercepted this
             call. Blocked calls are still recorded — the panel's
             promise is "show everything, including what we stopped".
+        source: How this event reached the audit layer. One of
+            ``"stdlib_urlopen"`` (the :func:`audited_urlopen` wrapper
+            observed the wire directly) or ``"sdk_invocation"`` (a
+            vendor-SDK entry point emitted an intent-level record —
+            the wire traffic is inside the SDK and not observable
+            here). Defaults to ``"stdlib_urlopen"`` so pre-existing
+            call sites (Phase 3b migrations) keep their semantics
+            without needing edits. Phase 4 SDK wrappers must set it
+            explicitly. See ADR 0010 and this module's docstring.
     """
 
     id: str
@@ -93,6 +115,7 @@ class NetworkAuditEvent:
     status_code: int | None
     user_initiated: bool
     blocked: bool
+    source: Literal["stdlib_urlopen", "sdk_invocation"] = "stdlib_urlopen"
 
     def __post_init__(self) -> None:
         # The type annotation is ``Literal[False]`` which mypy catches
@@ -108,6 +131,16 @@ class NetworkAuditEvent:
         if self.timestamp.tzinfo is None:
             raise ValueError(
                 "NetworkAuditEvent.timestamp MUST be timezone-aware (UTC).",
+            )
+        # ``source`` is a ``Literal[...]`` — enforce at runtime the
+        # same way ``query_params_stored`` is pinned. A typo or a
+        # new source surface landing without an explicit schema bump
+        # should fail fast, not silently write an unparseable column.
+        if self.source not in ("stdlib_urlopen", "sdk_invocation"):
+            raise ValueError(
+                "NetworkAuditEvent.source MUST be one of "
+                "{'stdlib_urlopen', 'sdk_invocation'}; got "
+                f"{self.source!r}.",
             )
 
 

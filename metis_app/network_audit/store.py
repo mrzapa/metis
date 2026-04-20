@@ -113,13 +113,19 @@ def make_synthetic_event(
     user_initiated: bool = False,
     blocked: bool = False,
     event_id: str | None = None,
+    source: str = "stdlib_urlopen",
 ) -> NetworkAuditEvent:
     """Construct a :class:`NetworkAuditEvent` with sensible defaults.
 
     Useful in tests and for the Phase 6 "prove offline" synthetic
     pass. Every field is overridable; the defaults produce a valid
-    event without any argument.
+    event without any argument. ``source`` defaults to
+    ``"stdlib_urlopen"`` to match the pre-Phase-4 semantics; pass
+    ``source="sdk_invocation"`` to construct an SDK-layer event.
     """
+    # The Literal-typed param is narrowed inside NetworkAuditEvent;
+    # we accept a bare ``str`` here so callers can build synthetic
+    # invalid events in tests without fighting mypy.
     return NetworkAuditEvent(
         id=event_id or new_ulid(),
         timestamp=timestamp or datetime.now(timezone.utc),
@@ -135,6 +141,7 @@ def make_synthetic_event(
         status_code=status_code,
         user_initiated=user_initiated,
         blocked=blocked,
+        source=source,  # type: ignore[arg-type]
     )
 
 
@@ -157,9 +164,25 @@ CREATE TABLE IF NOT EXISTS network_audit_events (
     latency_ms       INTEGER,
     status_code      INTEGER,
     user_initiated   INTEGER NOT NULL,
-    blocked          INTEGER NOT NULL
+    blocked          INTEGER NOT NULL,
+    source           TEXT NOT NULL DEFAULT 'stdlib_urlopen'
 )
 """
+
+# Phase 4 migration: columns that may need to be added to a pre-existing
+# ``network_audit_events`` table. The tuple format is
+# ``(column_name, column_sql_fragment)``. ``_ensure_columns`` iterates in
+# order, adding any column that is not already present via
+# ``ALTER TABLE ... ADD COLUMN`` with a literal default so existing rows
+# are backfilled atomically. SQLite supports this in a single DDL call.
+#
+# Keep this list minimal; once a field has been added and shipped for a
+# release cycle, it should remain here for the benefit of rolling
+# installs (the entry is a no-op on schemas that already carry the
+# column). Removal requires a separate migration.
+_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    ("source", "source TEXT NOT NULL DEFAULT 'stdlib_urlopen'"),
+)
 
 _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON network_audit_events (timestamp_ms)",
@@ -224,6 +247,35 @@ class NetworkAuditStore:
         self._conn.execute(_SCHEMA)
         for statement in _INDEXES:
             self._conn.execute(statement)
+        # Apply pending column migrations. Fresh installs land on the
+        # current ``_SCHEMA`` directly; this step is only meaningful for
+        # DBs that pre-date a later column addition (e.g. pre-Phase-4
+        # tables without ``source``). See ``_MIGRATIONS``.
+        self._apply_column_migrations()
+
+    def _apply_column_migrations(self) -> None:
+        """Add any missing columns from ``_MIGRATIONS`` via ``ALTER TABLE``.
+
+        SQLite's ``ALTER TABLE ... ADD COLUMN ... DEFAULT <value>`` fills
+        all existing rows with the literal default in a single DDL call.
+        That matches the Phase 4 requirement: a rolling install with a
+        13-column DB gets the 14th column seamlessly and pre-existing
+        rows report ``source='stdlib_urlopen'`` (the pre-Phase-4
+        semantic default). Idempotent — entries whose column already
+        exists are skipped.
+        """
+        assert self._conn is not None
+        existing = {
+            row[1]
+            for row in self._conn.execute(
+                "PRAGMA table_info(network_audit_events)"
+            )
+        }
+        for column_name, column_sql in _MIGRATIONS:
+            if column_name not in existing:
+                self._conn.execute(
+                    f"ALTER TABLE network_audit_events ADD COLUMN {column_sql}"
+                )
 
     # ------------------------------------------------------------------
     # Write path
@@ -246,14 +298,15 @@ class NetworkAuditStore:
             event.status_code,
             1 if event.user_initiated else 0,
             1 if event.blocked else 0,
+            event.source,
         )
         with self._lock:
             conn.execute(
                 "INSERT OR REPLACE INTO network_audit_events "
                 "(id, timestamp_ms, method, url_host, url_path_prefix, "
                 "provider_key, trigger_feature, size_bytes_in, size_bytes_out, "
-                "latency_ms, status_code, user_initiated, blocked) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "latency_ms, status_code, user_initiated, blocked, source) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 row,
             )
             self._appends_since_eviction += 1
@@ -271,7 +324,7 @@ class NetworkAuditStore:
         cursor = conn.execute(
             "SELECT id, timestamp_ms, method, url_host, url_path_prefix, "
             "provider_key, trigger_feature, size_bytes_in, size_bytes_out, "
-            "latency_ms, status_code, user_initiated, blocked "
+            "latency_ms, status_code, user_initiated, blocked, source "
             "FROM network_audit_events "
             "ORDER BY timestamp_ms DESC, id DESC LIMIT ?",
             (int(limit),),
@@ -286,7 +339,7 @@ class NetworkAuditStore:
         cursor = conn.execute(
             "SELECT id, timestamp_ms, method, url_host, url_path_prefix, "
             "provider_key, trigger_feature, size_bytes_in, size_bytes_out, "
-            "latency_ms, status_code, user_initiated, blocked "
+            "latency_ms, status_code, user_initiated, blocked, source "
             "FROM network_audit_events "
             "WHERE provider_key = ? "
             "ORDER BY timestamp_ms DESC, id DESC LIMIT ?",
@@ -393,7 +446,12 @@ def _row_to_event(row: tuple) -> NetworkAuditEvent:  # pragma: no cover - trivia
         status_code,
         user_initiated,
         blocked,
+        source,
     ) = row
+    # ``source`` is a Literal-typed Python field but comes back as a
+    # bare string from SQLite. The Literal validator in ``__post_init__``
+    # will reject an unknown value, so a corrupted row fails loudly
+    # rather than propagating a garbled label into the UI.
     return NetworkAuditEvent(
         id=id_,
         timestamp=_timestamp_from_ms(int(timestamp_ms)),
@@ -409,6 +467,7 @@ def _row_to_event(row: tuple) -> NetworkAuditEvent:  # pragma: no cover - trivia
         status_code=status_code,
         user_initiated=bool(user_initiated),
         blocked=bool(blocked),
+        source=source,
     )
 
 

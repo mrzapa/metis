@@ -44,11 +44,31 @@ TRIGGER_TRIBEV2_SNAPSHOT = "tribev2_snapshot"
 # ---------------------------------------------------------------------------
 TRIGGER_WEB_SEARCH_DUCKDUCKGO = "web_search_duckduckgo"
 TRIGGER_WEB_SEARCH_JINA_READER = "web_search_jina_reader"
+# Tavily is a vendor SDK call (see _tavily_search in utils/web_search.py);
+# wrapped by Phase 4 at the invocation layer, same shape as the LangChain
+# LLM/embedding triggers below.
+TRIGGER_WEB_SEARCH_TAVILY = "web_search_tavily"
+
+# ---------------------------------------------------------------------------
+# Vendor-SDK invocations (Phase 4)
+# ---------------------------------------------------------------------------
+# These flow through ``metis_app/network_audit/sdk_events.py`` with
+# ``source="sdk_invocation"``. Unlike the stdlib triggers above, these
+# record *intent* to call a vendor library — the exact wire traffic is
+# inside LangChain / Tavily SDKs and not observable from our layer.
+TRIGGER_LLM_INVOKE = "llm_invoke"
+TRIGGER_LLM_STREAM = "llm_stream"
+TRIGGER_EMBEDDING_DOCUMENTS = "embedding_documents"
+TRIGGER_EMBEDDING_QUERY = "embedding_query"
 
 
 __all__ = [
+    "TRIGGER_EMBEDDING_DOCUMENTS",
+    "TRIGGER_EMBEDDING_QUERY",
     "TRIGGER_GGUF_DOWNLOAD",
     "TRIGGER_HF_CATALOG",
+    "TRIGGER_LLM_INVOKE",
+    "TRIGGER_LLM_STREAM",
     "TRIGGER_NEWS_COMET_HACKERNEWS",
     "TRIGGER_NEWS_COMET_REDDIT",
     "TRIGGER_NEWS_COMET_RSS",
@@ -56,4 +76,5 @@ __all__ = [
     "TRIGGER_TRIBEV2_SNAPSHOT",
     "TRIGGER_WEB_SEARCH_DUCKDUCKGO",
     "TRIGGER_WEB_SEARCH_JINA_READER",
+    "TRIGGER_WEB_SEARCH_TAVILY",
 ]
