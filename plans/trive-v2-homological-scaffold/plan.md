@@ -1,3 +1,11 @@
+---
+Milestone: Tribev2 homological scaffold (M10)
+Status: Draft
+Claim: unclaimed
+Last updated: 2026-04-20 by claude/m17-phase5b-privacy-ui (plan-sweep pass — added frontmatter; content untouched)
+Vision pillar: Companion + Cosmos
+---
+
 # TriveV2 — Homological Scaffold: The Living Brain
 
 **Branch:** `feature/trive-v2-homological-scaffold`

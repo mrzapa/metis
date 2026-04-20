@@ -1,8 +1,8 @@
 ---
 Milestone: M09 — Companion realtime visibility
-Status: In progress
-Claim: claude/parallel-task-development-hBZgg (Steps 1–5 landed; is_running flag + tests added in this slice)
-Last updated: 2026-04-18 by claude-opus-4-7
+Status: Landed
+Claim: Landed (`68634ba`, 2026-04-18)
+Last updated: 2026-04-20 by claude/m17-phase5b-privacy-ui (plan-sweep pass)
 Vision pillar: Companion
 ---
 

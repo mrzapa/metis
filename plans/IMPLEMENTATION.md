@@ -7,7 +7,7 @@ This is the **single source of truth for what is being worked on in METIS and
 what comes next.** Every row is a milestone from `VISION.md`. Agents claim rows,
 do the work, update the row when they stop.
 
-**Last reviewed:** 2026-04-19 (reconciled M07/M08/M09/M11 → Landed; M12 Phase 1 landed; M13/M14/M16/M17 plans drafted; M12 Phase 2 design doc superseded — M02 already shipped the renderer path)
+**Last reviewed:** 2026-04-20 (M17 Phases 1-5 all landed via PRs #516-#521; no agents currently working; plan docs swept for freshness). See [`Prompt agents.md`](Prompt%20agents.md) for the onboarding prompt to give a fresh agent.
 
 ## Quick start for a fresh agent
 
@@ -69,7 +69,7 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 | M14 | **The Forge** — technique gallery UI, togglable frontier modules | 🌱🧠 | Draft | [`plans/the-forge/plan.md`](the-forge/plan.md) | — | 2026-04-19 | M02, M06, M12 |
 | M15 | **Pro tier + public launch** — paywall, skill pack, HN/r/LocalLLaMA launch | 🔧 | Draft needed | [`plans/pro-tier-launch/plan.md`](pro-tier-launch/plan.md) (harvest stub) | — | 2026-04-18 | M13, M14 |
 | M16 | **Personal evals** — track companion improvement on user's specific tasks | 🌱 | Draft | [`plans/personal-evals/plan.md`](personal-evals/plan.md) | — | 2026-04-19 | M13 |
-| M17 | **Network audit** — outbound call panel, per-provider block, offline proof | 🔧 | In progress | [`plans/network-audit/plan.md`](network-audit/plan.md) | Phases 1-5a landed (`ed99582`); `claude/m17-phase5b-privacy-ui` working Phase 5b — read-only /settings/privacy page (toggles + export + synthetic-pass in 5c) | 2026-04-20 | — |
+| M17 | **Network audit** — outbound call panel, per-provider block, offline proof | 🔧 | In progress | [`plans/network-audit/plan.md`](network-audit/plan.md) | Phases 1-5 landed (PRs #516-#521, last merge `1b1995b`); Phase 6 next — functional airplane toggle + per-provider kill-switch UI + "prove offline" synthetic-pass endpoint + modal | 2026-04-20 | — |
 | M18 | **LoRA fine-tuning (stretch)** — companion weights adapt to user data | 🌱 | Draft needed | *(to be created: `plans/lora-stretch/plan.md`)* | — | — | M13 |
 | M19 | **Mobile companion (stretch)** — Tauri Mobile or PWA, read-only | 🌌 | Draft needed | *(to be created: `plans/mobile-stretch/plan.md`)* | — | — | M15 |
 
