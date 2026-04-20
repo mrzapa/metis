@@ -16,6 +16,8 @@ import pytest
 
 from metis_app.network_audit import runtime
 from metis_app.network_audit.runtime import (
+    close_default_store,
+    get_default_settings,
     get_default_store,
     reset_default_store_for_tests,
 )
@@ -120,3 +122,125 @@ def test_reset_default_store_clears_failure_flag(
     store = get_default_store()
     assert store is not None
     assert len(attempts) == 2
+
+
+# ---------------------------------------------------------------------------
+# Phase 5a — real get_default_settings reader
+# ---------------------------------------------------------------------------
+
+
+def test_get_default_settings_reads_live_settings_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``get_default_settings`` delegates to ``settings_store.load_settings``.
+
+    The reader is re-evaluated on every call (no caching in the
+    runtime module) so a settings flip takes effect on the next
+    audited call. This test pins that behaviour by changing the
+    fake ``load_settings`` return between two calls.
+    """
+    import metis_app.settings_store as settings_store
+
+    stub_settings: dict[str, object] = {"network_audit_airplane_mode": False}
+
+    def _fake_load_settings() -> dict[str, object]:
+        return dict(stub_settings)
+
+    monkeypatch.setattr(settings_store, "load_settings", _fake_load_settings)
+
+    first = get_default_settings()
+    assert first.get("network_audit_airplane_mode") is False
+
+    # Flip the stub and confirm the next call sees the new value.
+    stub_settings["network_audit_airplane_mode"] = True
+    second = get_default_settings()
+    assert second.get("network_audit_airplane_mode") is True
+
+
+def test_get_default_settings_returns_empty_on_load_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A raising ``load_settings`` degrades to ``{}``, not an exception.
+
+    The invariant is "audit infra must not crash the wrapped call".
+    A corrupted ``settings.json`` or a loader validation error must
+    therefore resolve to "no kill switches active" (return ``{}``)
+    with a single-line warning in the log.
+    """
+    import metis_app.settings_store as settings_store
+
+    def _explode() -> dict[str, object]:
+        raise RuntimeError("settings.json parse failure")
+
+    monkeypatch.setattr(settings_store, "load_settings", _explode)
+
+    with caplog.at_level(
+        logging.WARNING, logger="metis_app.network_audit.runtime"
+    ):
+        result = get_default_settings()
+
+    assert result == {}
+    assert any(
+        "failed to load settings" in record.message
+        for record in caplog.records
+    ), "Expected a warning log line on load failure"
+
+
+# ---------------------------------------------------------------------------
+# Phase 5a — close_default_store (production semantics)
+# ---------------------------------------------------------------------------
+
+
+def test_close_default_store_releases_singleton() -> None:
+    """``close_default_store`` closes the live singleton and nulls it.
+
+    A subsequent ``get_default_store`` call constructs a fresh store.
+    This is the production hook wired into the Litestar
+    ``on_shutdown`` callback.
+    """
+    first = get_default_store()
+    assert first is not None
+
+    close_default_store()
+    assert runtime._store is None
+
+    second = get_default_store()
+    assert second is not None
+    assert second is not first
+
+
+def test_close_default_store_is_idempotent() -> None:
+    """Calling ``close_default_store`` twice is a no-op on the second call."""
+    get_default_store()
+    close_default_store()
+    # Second call must not raise even though the store is already None.
+    close_default_store()
+
+
+def test_close_default_store_preserves_init_failed_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``close_default_store`` does NOT clear the init-failed sentinel.
+
+    This is the key difference from ``reset_default_store_for_tests``:
+    if the startup hook's warm-up failed, a subsequent shutdown hook
+    must not accidentally retry construction via the flag reset. Only
+    the test helper clears the flag.
+    """
+
+    def _explode(*_args: object, **_kwargs: object) -> None:
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(runtime, "NetworkAuditStore", _explode)
+    reset_default_store_for_tests()  # clean slate
+
+    assert get_default_store() is None
+    assert runtime._store_init_failed is True
+
+    close_default_store()
+
+    # Flag must survive close_default_store.
+    assert runtime._store_init_failed is True
+    # get_default_store still returns None without retrying construction.
+    assert get_default_store() is None
