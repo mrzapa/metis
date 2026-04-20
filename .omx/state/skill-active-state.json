@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "active": true,
+  "active": false,
   "skill": "ultrawork",
   "keyword": "$ultrawork",
-  "phase": "reviewing",
+  "phase": "completing",
   "activated_at": "2026-04-19T21:07:12.202Z",
-  "updated_at": "2026-04-19T21:16:33.771Z",
+  "updated_at": "2026-04-19T21:20:55.139Z",
   "source": "keyword-detector",
   "input_lock": {
     "active": false,
