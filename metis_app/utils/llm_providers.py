@@ -100,6 +100,15 @@ class _ProviderAuditWrapper:
             return self._inner.invoke(messages)
 
     def stream(self, messages: list[Any]) -> Any:
+        # Keep lazy streaming intact: yield chunks as they arrive rather
+        # than materialising the full response before the caller sees
+        # the first token. ``engine/streaming.py`` iterates this output
+        # chunk-by-chunk to render incremental tokens to the UI;
+        # collecting into a list would buffer the whole response first
+        # (regression). The ``audit_sdk_call`` context manager stays
+        # open for the whole stream, so the recorded ``latency_ms``
+        # reflects end-to-end stream time — matches wall-clock
+        # experience, which is what the panel should show.
         with audit_sdk_call(
             provider_key=self._provider_key,
             trigger_feature=TRIGGER_LLM_STREAM,
@@ -108,22 +117,21 @@ class _ProviderAuditWrapper:
             method="POST",
             user_initiated=self._user_initiated,
         ):
-            # The wrapped model's ``stream`` is itself a generator.
-            # Delegating with ``yield from`` would hold the context
-            # manager open across the whole stream (OK in practice,
-            # but we want a single latency measurement bracketing
-            # just the call-dispatch, not the full-body transfer).
-            # Materialise into a list so the context exits before
-            # the caller consumes tokens. The interface contract
-            # here is "iterable of tokens"; LangChain consumers
-            # iterate regardless of whether it's a lazy generator
-            # or an eager list.
-            return list(self._inner.stream(messages))
+            yield from self._inner.stream(messages)
 
     def __getattr__(self, item: str) -> Any:
         # Transparent forwarding for any non-audited attribute (e.g.
         # ``batch``, configuration properties) so existing integrations
         # that poke at the underlying model still work.
+        #
+        # Known audit gap: LangChain's ``with_structured_output``,
+        # ``bind_tools``, ``with_retry``, and ``with_fallbacks`` each
+        # return a NEW model instance; invoking that new model
+        # BYPASSES this wrapper. No production call site in metis_app
+        # uses those methods today (grep-verified on 2026-04-20);
+        # Phase 4b or 5 should either override them to re-wrap the
+        # return value or migrate to LangChain callback handlers,
+        # which hook the model lifecycle more cleanly.
         return getattr(self._inner, item)
 
 

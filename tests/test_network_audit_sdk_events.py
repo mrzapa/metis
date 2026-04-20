@@ -414,6 +414,74 @@ def test_llm_wrapper_stream_emits_sdk_event(isolated_store: NetworkAuditStore) -
     assert event.url_path_prefix == "/stream"
 
 
+def test_llm_wrapper_stream_is_lazy_generator(
+    isolated_store: NetworkAuditStore,
+) -> None:
+    """stream() must preserve the lazy-generator contract.
+
+    engine/streaming.py iterates ``synthesis_llm.stream(...)``
+    chunk-by-chunk to render tokens to the UI incrementally. An
+    earlier Phase 4 draft materialised the inner generator into a
+    list so the audit context manager could close before the caller
+    consumed chunks; that regressed streaming UX (no tokens until
+    full response arrived) and OOM'd on long completions. This test
+    pins the lazy behaviour so a future refactor cannot re-introduce
+    the bug.
+    """
+    from metis_app.utils.llm_providers import _ProviderAuditWrapper
+
+    consumed: list[str] = []
+
+    class _LazyFakeLLM:
+        def stream(self, _messages: list[Any]) -> Any:
+            # A generator that TRACKS when each chunk is pulled, so we
+            # can assert caller iteration is driving the source.
+            consumed.append("yielding-first")
+            yield "chunk-1"
+            consumed.append("yielding-second")
+            yield "chunk-2"
+            consumed.append("yielding-third")
+            yield "chunk-3"
+
+    wrapper = _ProviderAuditWrapper(
+        _LazyFakeLLM(), provider_key="openai", url_host="api.openai.com"
+    )
+    stream = wrapper.stream([{"type": "human", "content": "hi"}])
+
+    # Contract: stream() returns an iterator/generator, not a
+    # pre-materialised list.
+    import types
+
+    assert isinstance(stream, types.GeneratorType), (
+        "stream() must be a generator — regression if this fails"
+    )
+
+    # Consume one chunk; assert only the first source-side yield ran.
+    # If the wrapper had materialised the inner generator into a list
+    # before returning, consumed would already equal all three
+    # "yielding-*" markers before we asked for the first chunk.
+    first = next(stream)
+    assert first == "chunk-1"
+    assert consumed == ["yielding-first"], (
+        "stream() materialised eagerly — regression on lazy-streaming contract"
+    )
+
+    # Consume the rest; the audit event should fire when the stream
+    # exhausts (context manager exits normally).
+    rest = list(stream)
+    assert rest == ["chunk-2", "chunk-3"]
+    assert consumed == [
+        "yielding-first",
+        "yielding-second",
+        "yielding-third",
+    ]
+
+    events = isolated_store.recent(limit=10)
+    assert len(events) == 1
+    assert events[0].trigger_feature == TRIGGER_LLM_STREAM
+    assert events[0].blocked is False
+
+
 def test_llm_wrapper_blocks_when_airplane_mode_on(
     isolated_store: NetworkAuditStore,
     monkeypatch: pytest.MonkeyPatch,
