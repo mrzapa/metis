@@ -125,7 +125,7 @@ const DOCUMENT_LOADERS = [
   { value: "plain", label: "Plain text" },
   { value: "opendataloader", label: "opendataloader-pdf (highest PDF accuracy)" },
 ] as const;
-type SettingsTabValue = "core" | "retrieval" | "graph" | "memory" | "provider" | "companion" | "models";
+type SettingsTabValue = "core" | "retrieval" | "graph" | "memory" | "provider" | "companion" | "models" | "privacy";
 
 const ASSISTANT_DEFAULT_VALUES: AssistantFormValues = {
   assistant_identity: {
@@ -784,6 +784,7 @@ export default function SettingsPage() {
               <TabsTrigger value="provider" className="glass-tab-pill">Provider</TabsTrigger>
               <TabsTrigger value="companion" className="glass-tab-pill">Companion</TabsTrigger>
               <TabsTrigger value="models" className="glass-tab-pill">Models</TabsTrigger>
+              <TabsTrigger value="privacy" className="glass-tab-pill">Privacy &amp; network</TabsTrigger>
             </TabsList>
 
           <form onSubmit={handleSubmit(onSubmit)} className="settings-glass-form space-y-6">
@@ -1985,6 +1986,34 @@ export default function SettingsPage() {
                 initialModelsTab={initialModelsTab}
                 initialHereticModelId={initialHereticModelId}
               />
+            </TabsContent>
+
+            {/* ── Privacy & network audit ────────────────────────────── */}
+            <TabsContent value="privacy" className="glass-settings-pane mt-6 space-y-4">
+              <section className="space-y-3">
+                <div>
+                  <h2 className="text-base font-semibold">Privacy &amp; network audit</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Every outbound call METIS makes is recorded in a local
+                    audit store. The privacy panel shows the live feed,
+                    per-provider matrix, and airplane-mode indicator.
+                  </p>
+                </div>
+                <Separator />
+                <p className="text-sm text-muted-foreground">
+                  Read-only in this build. Kill-switch toggles, CSV export,
+                  and the &ldquo;prove offline&rdquo; button land in the next update
+                  (Phase 5c).
+                </p>
+                <div>
+                  <a
+                    href="/settings/privacy"
+                    className="inline-flex items-center gap-2 rounded-lg border border-border/50 bg-card/40 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/40"
+                  >
+                    Open privacy panel →
+                  </a>
+                </div>
+              </section>
             </TabsContent>
           </Tabs>
         )}
