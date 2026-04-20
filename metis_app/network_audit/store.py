@@ -24,6 +24,7 @@ import secrets
 import sqlite3
 import threading
 import time
+from collections.abc import Iterator
 from datetime import datetime, timezone
 
 from metis_app.network_audit.events import NetworkAuditEvent
@@ -402,6 +403,57 @@ class NetworkAuditStore:
             "SELECT COALESCE(MAX(rowid), 0) FROM network_audit_events"
         )
         return int(cursor.fetchone()[0])
+
+    def iter_events_since(
+        self, cutoff_ms: int, *, chunk_size: int = 1000
+    ) -> Iterator[NetworkAuditEvent]:
+        """Yield events with ``timestamp_ms >= cutoff_ms`` in chronological order.
+
+        Walks the table in ``chunk_size`` batches using the implicit
+        ``rowid`` as the cursor. The rowid walk is stable under
+        concurrent inserts (new rows get higher rowids, so they land
+        after the current cursor position) and avoids buffering the
+        full 30-day / 50k-row retention window in memory — the Phase 7
+        CSV export streams rows directly from this generator into the
+        response body.
+
+        Ordering is by ``rowid ASC``, which for a given retention
+        window is effectively ``timestamp_ms ASC`` plus per-millisecond
+        insert order — good enough for a chronological CSV. Switching
+        to an explicit ``ORDER BY timestamp_ms ASC`` here would force a
+        temp-table sort for no practical gain at the store's size cap.
+
+        Args:
+            cutoff_ms: Lower bound (inclusive) on ``timestamp_ms``.
+                Events older than this are filtered out at the SQL
+                layer so we never yield them.
+            chunk_size: SELECT page size. Must be >= 1. Defaults to
+                1000.
+
+        Raises:
+            RuntimeError: If the store has been closed.
+        """
+        conn = self._require_conn()
+        if chunk_size < 1:
+            chunk_size = 1
+        cursor_rowid = 0
+        while True:
+            rows = conn.execute(
+                "SELECT rowid, id, timestamp_ms, method, url_host, url_path_prefix, "
+                "provider_key, trigger_feature, size_bytes_in, size_bytes_out, "
+                "latency_ms, status_code, user_initiated, blocked, source "
+                "FROM network_audit_events "
+                "WHERE rowid > ? AND timestamp_ms >= ? "
+                "ORDER BY rowid ASC LIMIT ?",
+                (int(cursor_rowid), int(cutoff_ms), int(chunk_size)),
+            ).fetchall()
+            if not rows:
+                return
+            for row in rows:
+                cursor_rowid = int(row[0])
+                yield _row_to_event(row[1:])
+            if len(rows) < chunk_size:
+                return
 
     def events_after(
         self, after_rowid: int, limit: int

@@ -520,3 +520,94 @@ def test_store_accepts_string_path() -> None:
             assert len(store.recent(limit=1)) == 1
         finally:
             store.close()
+
+
+# ---------------------------------------------------------------------------
+# iter_events_since — Phase 7 CSV export helper
+# ---------------------------------------------------------------------------
+
+
+def test_iter_events_since_filters_by_cutoff(tmp_db: Path) -> None:
+    """Events older than ``cutoff_ms`` are filtered out at the SQL layer."""
+    now = datetime.now(timezone.utc)
+    old = make_synthetic_event(
+        provider_key="rss_feed",
+        timestamp=now - timedelta(days=10),
+    )
+    recent = make_synthetic_event(
+        provider_key="openai",
+        timestamp=now - timedelta(hours=1),
+    )
+    with NetworkAuditStore(tmp_db) as store:
+        store.append(old)
+        store.append(recent)
+        cutoff_ms = int((now - timedelta(days=5)).timestamp() * 1000)
+        rows = list(store.iter_events_since(cutoff_ms))
+        keys = {ev.provider_key for ev in rows}
+        assert keys == {"openai"}
+
+
+def test_iter_events_since_chronological_order(tmp_db: Path) -> None:
+    """Yielded events come back in chronological (rowid ascending) order."""
+    now = datetime.now(timezone.utc)
+    events = [
+        make_synthetic_event(
+            provider_key=f"prov-{i}",
+            timestamp=now - timedelta(minutes=10 - i),
+        )
+        for i in range(5)
+    ]
+    with NetworkAuditStore(tmp_db) as store:
+        for ev in events:
+            store.append(ev)
+        cutoff_ms = int((now - timedelta(hours=1)).timestamp() * 1000)
+        rows = list(store.iter_events_since(cutoff_ms))
+        assert len(rows) == 5
+        timestamps = [row.timestamp for row in rows]
+        assert timestamps == sorted(timestamps)
+
+
+def test_iter_events_since_chunk_boundary_has_no_gap(tmp_db: Path) -> None:
+    """Walker keeps going across chunk boundaries; total count equals insert count."""
+    now = datetime.now(timezone.utc)
+    with NetworkAuditStore(tmp_db) as store:
+        total = 25
+        for i in range(total):
+            store.append(
+                make_synthetic_event(
+                    provider_key="openai",
+                    timestamp=now - timedelta(seconds=total - i),
+                )
+            )
+        cutoff_ms = int((now - timedelta(hours=1)).timestamp() * 1000)
+        # Use a tiny chunk_size to force several SELECT round-trips.
+        rows = list(store.iter_events_since(cutoff_ms, chunk_size=4))
+        assert len(rows) == total
+
+
+def test_iter_events_since_empty_window_returns_nothing(tmp_db: Path) -> None:
+    """A cutoff in the future yields zero events — the generator terminates cleanly."""
+    now = datetime.now(timezone.utc)
+    with NetworkAuditStore(tmp_db) as store:
+        store.append(make_synthetic_event(provider_key="openai", timestamp=now))
+        future_cutoff_ms = int((now + timedelta(days=1)).timestamp() * 1000)
+        assert list(store.iter_events_since(future_cutoff_ms)) == []
+
+
+def test_iter_events_since_rejects_zero_or_negative_chunk_size(tmp_db: Path) -> None:
+    """``chunk_size`` below 1 is clamped to 1 (defensive, not a hard error)."""
+    now = datetime.now(timezone.utc)
+    with NetworkAuditStore(tmp_db) as store:
+        store.append(make_synthetic_event(provider_key="openai", timestamp=now))
+        cutoff_ms = int((now - timedelta(hours=1)).timestamp() * 1000)
+        rows = list(store.iter_events_since(cutoff_ms, chunk_size=0))
+        assert len(rows) == 1
+
+
+def test_iter_events_since_raises_after_close(tmp_db: Path) -> None:
+    """Closed store refuses to yield further events rather than hang."""
+    store = NetworkAuditStore(tmp_db)
+    store.append(make_synthetic_event(provider_key="openai"))
+    store.close()
+    with pytest.raises(RuntimeError):
+        list(store.iter_events_since(0))

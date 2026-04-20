@@ -1,6 +1,6 @@
-"""Litestar routes for the M17 Network Audit panel (Phases 5a + 6).
+"""Litestar routes for the M17 Network Audit panel (Phases 5a + 6 + 7).
 
-Exposes four read-only GET endpoints and one write endpoint under
+Exposes five read-only GET endpoints and one write endpoint under
 ``/v1/network-audit/``:
 
 - ``/events`` — paginated tail of recorded audit events (newest-first).
@@ -11,12 +11,13 @@ Exposes four read-only GET endpoints and one write endpoint under
   "N outbound calls in last 5 minutes" indicator at the top of the
   panel).
 - ``/stream`` — SSE stream of new events for the live feed.
+- ``/export`` — Phase 7 CSV export of the last ``days`` (default 30,
+  clamped 1..90) of audit events. Streamed row-by-row; served
+  locally; never uploads anywhere.
 - ``POST /synthetic-pass`` — Phase 6 "prove offline" litmus test.
   Exercises each registered provider once (synthetically — no real
   network) and returns per-provider call counts. With airplane mode
   on every count is zero.
-
-CSV export is Phase 7 — not in this module yet.
 
 Design notes:
 
@@ -38,10 +39,12 @@ See ``plans/network-audit/plan.md`` (Phase 5) and
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import logging
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
 from datetime import datetime, timezone
 from typing import Any
 
@@ -79,6 +82,35 @@ _SSE_MAX_DURATION_SECONDS = 25 * 60
 # between two polls, the loop immediately re-queries (no sleep) to
 # keep draining. So this is a memory/throughput knob, not a lossy cap.
 _SSE_DRAIN_LIMIT = 500
+
+# Phase 7 /export — inclusive day range. The store's rolling retention
+# caps physical history at 30 days by default, so ``days > 30`` returns
+# whatever survives (usually 30). The upper bound is still 90 so a
+# future retention-policy bump doesn't silently cap exports, and it
+# bounds the cutoff-ms math without a surprise overflow.
+_EXPORT_DAYS_DEFAULT = 30
+_EXPORT_DAYS_MIN = 1
+_EXPORT_DAYS_MAX = 90
+# CSV column order — mirrors the store columns, skipping ``id`` and the
+# hard-coded ``query_params_stored`` invariant (always ``False``;
+# carrying it into the export would add noise without information).
+# Keep this list in sync with ``_csv_row_for_event`` below if either
+# changes.
+_EXPORT_COLUMNS: tuple[str, ...] = (
+    "timestamp",
+    "method",
+    "url_host",
+    "url_path_prefix",
+    "provider_key",
+    "trigger_feature",
+    "size_bytes_in",
+    "size_bytes_out",
+    "latency_ms",
+    "status_code",
+    "user_initiated",
+    "blocked",
+    "source",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +463,138 @@ async def stream_events() -> Stream:
 
 
 # ---------------------------------------------------------------------------
+# CSV export (Phase 7 — disclosure / portability)
+# ---------------------------------------------------------------------------
+
+
+def _csv_row_for_event(event: Any) -> tuple[Any, ...]:
+    """Project a :class:`NetworkAuditEvent` into a CSV row tuple.
+
+    Column order matches :data:`_EXPORT_COLUMNS`. Timestamps are
+    emitted as ISO-8601 with timezone (UTC) so the CSV is
+    round-trippable back through ``datetime.fromisoformat``. Booleans
+    are serialised as ``"true"``/``"false"`` for readability in
+    spreadsheets (Python's default ``True``/``False`` also works but
+    is inconsistent with most vendor CSV exports).
+
+    Keep in sync with :data:`_EXPORT_COLUMNS` — any reorder or addition
+    must touch both.
+    """
+    return (
+        event.timestamp.isoformat(),
+        event.method,
+        event.url_host,
+        event.url_path_prefix,
+        event.provider_key,
+        event.trigger_feature,
+        "" if event.size_bytes_in is None else event.size_bytes_in,
+        "" if event.size_bytes_out is None else event.size_bytes_out,
+        "" if event.latency_ms is None else event.latency_ms,
+        "" if event.status_code is None else event.status_code,
+        "true" if event.user_initiated else "false",
+        "true" if event.blocked else "false",
+        event.source,
+    )
+
+
+def _iter_csv_rows(store: Any, cutoff_ms: int) -> Iterator[bytes]:
+    """Yield CSV-encoded bytes chunks for every event since ``cutoff_ms``.
+
+    Writes the header row first, then streams event rows out of the
+    store's chunked generator. Encoding is UTF-8; row separator is
+    ``\\r\\n`` (CSV standard — Excel and Google Sheets both prefer it
+    and LibreOffice accepts it). No BOM — modern tools handle UTF-8
+    without one, and emitting a BOM confuses some Unix pipelines.
+
+    Each yield flushes one CSV row, so the HTTP response streams
+    incrementally even for the worst-case ~50k-row retention cap.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\r\n")
+    writer.writerow(_EXPORT_COLUMNS)
+    yield buffer.getvalue().encode("utf-8")
+    buffer.seek(0)
+    buffer.truncate(0)
+
+    # ``iter_events_since`` raises RuntimeError if the store is closed
+    # mid-iteration; we let that propagate — the Litestar Stream will
+    # terminate and the client sees a truncated CSV, which is the
+    # honest signal that something went wrong. Partial CSV is better
+    # than a silent zero-byte download.
+    for event in store.iter_events_since(cutoff_ms):
+        writer.writerow(_csv_row_for_event(event))
+        yield buffer.getvalue().encode("utf-8")
+        buffer.seek(0)
+        buffer.truncate(0)
+
+
+@get("/v1/network-audit/export", sync_to_thread=True)
+def export_csv(days: int = _EXPORT_DAYS_DEFAULT) -> Stream:
+    """Stream the last ``days`` days of audit events as CSV.
+
+    Query params:
+      - ``days``: clamped to ``[1, 90]``. Default 30. Values outside
+        the range are clamped silently (no 400 — the privacy panel
+        has a "never error" posture and the user just gets a sensible
+        export).
+
+    Response headers set ``Content-Type: text/csv; charset=utf-8``
+    and a ``Content-Disposition`` attachment so the browser triggers a
+    download. The filename embeds the effective day count and a UTC
+    timestamp so repeated exports don't overwrite each other in the
+    Downloads folder.
+
+    Graceful degradation: if the audit store is unavailable the
+    endpoint still returns 200 OK with a header-only CSV (single row
+    of column names, no data). A 500 would break the panel's "never
+    errors" contract.
+
+    This endpoint intentionally streams row-by-row rather than
+    buffering — the store's 30-day / 50k-event rolling cap is small
+    enough to fit in memory, but streaming costs nothing extra and
+    keeps peak RSS flat if the cap is ever raised.
+    """
+    effective_days = _clamp(int(days), _EXPORT_DAYS_MIN, _EXPORT_DAYS_MAX)
+    cutoff_ms = int(
+        (time.time() - float(effective_days) * 86400.0) * 1000
+    )
+
+    store = get_default_store()
+    generated_at = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    filename = f"metis-network-audit-{effective_days}d-{generated_at}.csv"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        # Cache-busting: the export is a live query result, never
+        # suitable for a stale cache hit.
+        "Cache-Control": "no-store",
+    }
+
+    if store is None:
+        # Header-only CSV — gives the browser a valid download that
+        # documents the columns even when the audit store isn't
+        # available. The panel never 500s.
+        header_buffer = io.StringIO()
+        csv.writer(header_buffer, lineterminator="\r\n").writerow(
+            _EXPORT_COLUMNS
+        )
+
+        def _header_only() -> Iterator[bytes]:
+            yield header_buffer.getvalue().encode("utf-8")
+
+        return Stream(
+            _header_only(),
+            media_type="text/csv; charset=utf-8",
+            headers=headers,
+        )
+
+    return Stream(
+        _iter_csv_rows(store, cutoff_ms),
+        media_type="text/csv; charset=utf-8",
+        headers=headers,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Synthetic-pass probe (Phase 6 — prove offline)
 # ---------------------------------------------------------------------------
 
@@ -682,6 +846,7 @@ router = Router(
         list_providers,
         recent_count,
         stream_events,
+        export_csv,
         synthetic_pass,
     ],
     tags=["network-audit"],

@@ -612,3 +612,150 @@ def test_app_startup_warms_default_store(
         pass
 
     assert call_count >= 1, "Startup hook should warm the store at least once"
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/network-audit/export (Phase 7)
+# ---------------------------------------------------------------------------
+
+
+def _parse_csv_text(raw: str) -> list[list[str]]:
+    """Split a CSV payload into rows using ``csv.reader``."""
+    import csv
+    import io
+
+    return list(csv.reader(io.StringIO(raw)))
+
+
+def test_export_returns_csv_with_header_and_rows(
+    client: TestClient, fresh_store: NetworkAuditStore
+) -> None:
+    """Seeded events produce a CSV with the declared header + one row each."""
+    now = datetime.now(timezone.utc)
+    _seed(
+        fresh_store,
+        "openai",
+        count=2,
+        timestamp=now - timedelta(hours=1),
+    )
+
+    resp = client.get("/v1/network-audit/export")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    # The response triggers a download, not an inline render.
+    cd = resp.headers["content-disposition"]
+    assert cd.startswith("attachment; filename=")
+    assert "metis-network-audit-30d-" in cd
+    assert cd.endswith('.csv"')
+
+    rows = _parse_csv_text(resp.text)
+    assert len(rows) == 3  # header + 2 events
+    header = rows[0]
+    assert header[0] == "timestamp"
+    assert "provider_key" in header
+    assert "source" in header
+    # Both event rows are for openai and carry a tz-aware ISO timestamp.
+    for body_row in rows[1:]:
+        assert body_row[header.index("provider_key")] == "openai"
+        # ``datetime.fromisoformat`` round-trips the Phase 7 isoformat output.
+        datetime.fromisoformat(body_row[header.index("timestamp")])
+
+
+def test_export_respects_days_clamp(
+    client: TestClient, fresh_store: NetworkAuditStore
+) -> None:
+    """A ``days=1`` export drops events older than 24 hours."""
+    now = datetime.now(timezone.utc)
+    _seed(
+        fresh_store,
+        "openai",
+        count=1,
+        timestamp=now - timedelta(hours=2),
+    )
+    _seed(
+        fresh_store,
+        "anthropic",
+        count=1,
+        timestamp=now - timedelta(days=5),
+    )
+
+    resp = client.get("/v1/network-audit/export?days=1")
+    assert resp.status_code == 200
+    assert "metis-network-audit-1d-" in resp.headers["content-disposition"]
+    rows = _parse_csv_text(resp.text)
+    # Header + only the 2-hour-old openai event; the 5-day-old one is out.
+    assert len(rows) == 2
+    assert rows[1][rows[0].index("provider_key")] == "openai"
+
+
+def test_export_clamps_days_above_ceiling(
+    client: TestClient, fresh_store: NetworkAuditStore
+) -> None:
+    """``days`` values above 90 are clamped silently (no 400)."""
+    resp = client.get("/v1/network-audit/export?days=9999")
+    assert resp.status_code == 200
+    # Filename carries the clamped effective value, not the raw input.
+    assert "metis-network-audit-90d-" in resp.headers["content-disposition"]
+
+
+def test_export_clamps_days_below_floor(
+    client: TestClient, fresh_store: NetworkAuditStore
+) -> None:
+    """``days`` values below 1 are clamped silently to 1."""
+    resp = client.get("/v1/network-audit/export?days=0")
+    assert resp.status_code == 200
+    assert "metis-network-audit-1d-" in resp.headers["content-disposition"]
+
+
+def test_export_emits_header_only_when_store_unavailable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With ``get_default_store`` returning ``None`` the export still 200s."""
+    import metis_app.api_litestar.routes.network_audit as nar
+
+    monkeypatch.setattr(nar, "get_default_store", lambda: None)
+
+    resp = client.get("/v1/network-audit/export?days=7")
+    assert resp.status_code == 200
+    rows = _parse_csv_text(resp.text)
+    # Header only, no data rows. The panel gets a valid download that
+    # documents the columns even when the backend is degraded.
+    assert len(rows) == 1
+    assert "timestamp" in rows[0]
+    assert "source" in rows[0]
+
+
+def test_export_never_leaks_query_params_or_ids(
+    client: TestClient, fresh_store: NetworkAuditStore
+) -> None:
+    """The CSV carries no ``id`` column and no ``query_params_stored`` field.
+
+    The audit store invariant forbids query-string persistence and the
+    CSV must not re-introduce either. This guards the privacy contract
+    from a refactor that forgets to re-remove these columns.
+    """
+    _seed(fresh_store, "openai", count=1)
+    resp = client.get("/v1/network-audit/export?days=30")
+    assert resp.status_code == 200
+    header = _parse_csv_text(resp.text)[0]
+    assert "id" not in header
+    assert "query_params_stored" not in header
+
+
+def test_export_blocked_events_are_included(
+    client: TestClient, fresh_store: NetworkAuditStore
+) -> None:
+    """Blocked events round-trip into the CSV — the panel shows what we stopped."""
+    fresh_store.append(
+        make_synthetic_event(
+            provider_key="openai",
+            blocked=True,
+            event_id=new_ulid(),
+        )
+    )
+    resp = client.get("/v1/network-audit/export?days=30")
+    assert resp.status_code == 200
+    rows = _parse_csv_text(resp.text)
+    header = rows[0]
+    blocked_col = header.index("blocked")
+    assert rows[1][blocked_col] == "true"
