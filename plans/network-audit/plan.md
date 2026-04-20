@@ -1,8 +1,8 @@
 ---
 Milestone: Network audit (M17)
 Status: In progress
-Claim: unclaimed (Phases 1-6 landed; Phase 7 next)
-Last updated: 2026-04-20 by claude/gracious-hertz-70fd28 (reconciliation)
+Claim: claude/m17-phase7-export-discoverability (Phase 7: CSV export + first-run card + coordination-hooks docs)
+Last updated: 2026-04-20 by claude/m17-phase7-export-discoverability
 Vision pillar: Cross-cutting
 ---
 
