@@ -645,7 +645,24 @@ export default function PrivacySettingsPage() {
         // Backend returns newest-first; the feed renders newest-at-the-bottom,
         // so reverse into chronological order before seeding.
         const chronological = [...rows].reverse();
-        setEvents(chronological.slice(-EVENT_BUFFER_CAP));
+        // Merge-and-dedupe rather than replace. The SSE subscribe effect
+        // fires alongside this hydrate; if audit_event frames arrive
+        // before the snapshot resolves, appendEvent() has already added
+        // them to the buffer. A replace-style assignment here would
+        // silently drop those — an active outbound call disappearing
+        // from the live audit log is exactly the kind of silent
+        // dishonesty this panel exists to prevent. Dedupe by event.id,
+        // prefer the streamed copy on conflict (both should be
+        // identical; the safety is cheap), sort by timestamp, cap.
+        setEvents((prev) => {
+          const byId = new Map<string, NetworkAuditEvent>();
+          for (const ev of chronological) byId.set(ev.id, ev);
+          for (const ev of prev) byId.set(ev.id, ev);
+          const merged = Array.from(byId.values()).sort((a, b) =>
+            a.timestamp.localeCompare(b.timestamp),
+          );
+          return merged.slice(-EVENT_BUFFER_CAP);
+        });
         initialHydratedRef.current = true;
       } catch (err) {
         if (cancelled) return;

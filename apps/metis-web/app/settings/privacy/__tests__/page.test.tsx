@@ -335,6 +335,107 @@ describe("PrivacySettingsPage — Section 3 (live event feed)", () => {
     expect(await screen.findByText("news.fetch")).toBeInTheDocument();
   });
 
+  it("preserves streamed events when the initial hydrate resolves", async () => {
+    // Regression for PR #521 Codex P1: mount races two effects —
+    // fetchNetworkAuditEvents and subscribeNetworkAuditStream. If an
+    // audit_event frame arrives before the hydrate snapshot resolves,
+    // a replace-style setEvents(snapshot) would silently drop it. The
+    // merge-and-dedupe hydrate path keeps the streamed row visible.
+    let resolveHydrate: (rows: NetworkAuditEvent[]) => void = () => undefined;
+    fetchNetworkAuditEvents.mockImplementation(
+      () =>
+        new Promise<NetworkAuditEvent[]>((resolve) => {
+          resolveHydrate = resolve;
+        }),
+    );
+
+    render(<PrivacySettingsPage />);
+
+    // SSE subscribe fires synchronously on mount — wait for the listener
+    // to register before firing a frame through it.
+    await waitFor(() => expect(streamListeners.length).toBeGreaterThan(0));
+
+    // A live event arrives before the hydrate resolves. appendEvent()
+    // puts it in the buffer.
+    act(() => {
+      streamListeners[0]!({
+        type: "audit_event",
+        event: makeEvent({
+          id: "ev-live-race",
+          trigger_feature: "live.before.hydrate",
+          timestamp: "2026-04-19T13:00:00Z",
+        }),
+      });
+    });
+    expect(
+      await screen.findByText("live.before.hydrate"),
+    ).toBeInTheDocument();
+
+    // Now the hydrate resolves with a historical snapshot.
+    await act(async () => {
+      resolveHydrate([
+        makeEvent({
+          id: "ev-hydrate-1",
+          trigger_feature: "historical.one",
+          timestamp: "2026-04-19T12:30:00Z",
+        }),
+      ]);
+    });
+
+    // Both the historical row AND the pre-hydrate streamed row must
+    // render. A replace-style assignment would have dropped the
+    // streamed row.
+    expect(
+      await screen.findByText("historical.one"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("live.before.hydrate"),
+    ).toBeInTheDocument();
+  });
+
+  it("dedupes by id when hydrate overlaps with streamed events", async () => {
+    // If the backend's snapshot happens to include an event that was
+    // also delivered via SSE (common when stream and snapshot overlap),
+    // the id-based dedupe keeps only one copy.
+    let resolveHydrate: (rows: NetworkAuditEvent[]) => void = () => undefined;
+    fetchNetworkAuditEvents.mockImplementation(
+      () =>
+        new Promise<NetworkAuditEvent[]>((resolve) => {
+          resolveHydrate = resolve;
+        }),
+    );
+
+    render(<PrivacySettingsPage />);
+    await waitFor(() => expect(streamListeners.length).toBeGreaterThan(0));
+
+    act(() => {
+      streamListeners[0]!({
+        type: "audit_event",
+        event: makeEvent({
+          id: "ev-overlap",
+          trigger_feature: "overlap.event",
+          timestamp: "2026-04-19T13:00:00Z",
+        }),
+      });
+    });
+    await screen.findByText("overlap.event");
+
+    // Hydrate also contains the same id.
+    await act(async () => {
+      resolveHydrate([
+        makeEvent({
+          id: "ev-overlap",
+          trigger_feature: "overlap.event",
+          timestamp: "2026-04-19T13:00:00Z",
+        }),
+      ]);
+    });
+
+    // Still exactly one row for this trigger — not two.
+    const cells = screen.getAllByText("overlap.event");
+    expect(cells.length).toBe(1);
+  });
+
   it("shows 'Audit store unavailable' banner on a no_store frame", async () => {
     render(<PrivacySettingsPage />);
 
