@@ -3283,6 +3283,11 @@ export function subscribeNetworkAuditStream(
   const MAX_BACKOFF_MS = 30_000;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let currentStatus: NetworkAuditStreamStatus = "connecting";
+  // Latch that prevents reconnect loops when the backend explicitly
+  // told us the store is unavailable. The backend emits {no_store}
+  // once and closes; without this, the subscriber would reconnect
+  // at 1 s intervals forever (server keeps closing immediately).
+  let noStoreLatched = false;
 
   const emitStatus = (next: NetworkAuditStreamStatus): void => {
     if (currentStatus === next) return;
@@ -3296,6 +3301,7 @@ export function subscribeNetworkAuditStream(
 
   const scheduleReconnect = (): void => {
     if (closed) return;
+    if (noStoreLatched) return; // no point reconnecting to a broken store
     if (reconnectTimer !== null) return;
     emitStatus("reconnecting");
     const delay = backoffMs;
@@ -3306,6 +3312,32 @@ export function subscribeNetworkAuditStream(
     }, delay);
   };
 
+  const isValidAuditEvent = (obj: Record<string, unknown>): obj is Record<string, unknown> => {
+    // Minimal runtime guard for the privacy-panel trust invariant:
+    // drop frames that are missing required fields rather than
+    // silently casting to NetworkAuditEvent and crashing downstream.
+    const requiredStrings = [
+      "id",
+      "timestamp",
+      "method",
+      "url_host",
+      "url_path_prefix",
+      "provider_key",
+      "trigger_feature",
+      "source",
+    ] as const;
+    for (const key of requiredStrings) {
+      if (typeof obj[key] !== "string") return false;
+    }
+    if (typeof obj.user_initiated !== "boolean") return false;
+    if (typeof obj.blocked !== "boolean") return false;
+    // query_params_stored is the privacy invariant — must be false.
+    // Accept either boolean false or missing (legacy frames) rather
+    // than accepting a truthy value that would violate the contract.
+    if (obj.query_params_stored === true) return false;
+    return true;
+  };
+
   const parseFrame = (raw: unknown): NetworkAuditStreamFrame | null => {
     if (!raw || typeof raw !== "object") return null;
     const record = raw as { type?: unknown };
@@ -3313,9 +3345,13 @@ export function subscribeNetworkAuditStream(
       return { type: "no_store" };
     }
     if (record.type === "audit_event") {
-      // Strip the "type" discriminator before casting — the rest of the
-      // payload matches NetworkAuditEvent 1:1.
+      // Strip the "type" discriminator, validate the remaining shape,
+      // then wrap as the nested NetworkAuditStreamFrame. Backend emits
+      // flat {type, ...fields}; this converts to nested {type, event}
+      // which matches the NetworkAuditStreamFrame type declaration and
+      // what page.tsx consumes as frame.event.
       const { type: _type, ...rest } = record as { type: string } & Record<string, unknown>;
+      if (!isValidAuditEvent(rest)) return null;
       return {
         type: "audit_event",
         event: rest as unknown as NetworkAuditEvent,
@@ -3338,14 +3374,16 @@ export function subscribeNetworkAuditStream(
         scheduleReconnect();
         return;
       }
-      // Connection successful — reset backoff so the next error starts
-      // from 1 s rather than the previous exponential value.
-      backoffMs = 1000;
       emitStatus("open");
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      // Reset backoff only after the first frame with actual data
+      // arrives, not on bare connection-open. A server that accepts
+      // 200 then immediately closes would otherwise reset and trap
+      // us in a 1-second reconnect loop. See review I2.
+      let backoffResetPending = true;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -3359,15 +3397,28 @@ export function subscribeNetworkAuditStream(
           try {
             const payload = JSON.parse(dataLine.slice(5).trimStart()) as unknown;
             const frame = parseFrame(payload);
-            if (frame) {
-              onEvent(frame);
+            if (!frame) continue;
+            if (backoffResetPending) {
+              backoffMs = 1000;
+              backoffResetPending = false;
             }
+            if (frame.type === "no_store") {
+              // Backend emits no_store once and closes. Latch so the
+              // subscriber stops reconnecting in the background; the
+              // page UI is already showing the "store unavailable"
+              // banner, no value in churning against a broken store.
+              noStoreLatched = true;
+            }
+            onEvent(frame);
           } catch {
-            // Malformed frame — skip, keep the stream alive.
+            // Malformed JSON or parse guard rejected it — skip,
+            // keep the stream alive.
           }
         }
       }
-      // Server closed the stream (e.g. 25-minute hard cap). Reconnect.
+      // Server closed the stream (e.g. 25-minute hard cap, or a
+      // no_store frame which intentionally closes). scheduleReconnect
+      // self-suppresses when noStoreLatched is true.
       if (!closed) scheduleReconnect();
     } catch (err) {
       if (closed) return;

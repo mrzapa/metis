@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock the Tauri detection so getApiBase() falls back to env/default
 vi.stubGlobal("window", { ...globalThis.window });
@@ -1040,5 +1040,150 @@ describe("fetchNetworkAuditRecentCount", () => {
     const result = await fetchNetworkAuditRecentCount(300);
     expect(result.count).toBe(0);
     expect(result.window_seconds).toBe(300);
+  });
+});
+
+describe("subscribeNetworkAuditStream — parser + reconnect semantics", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Build a ReadableStream that yields the given utf-8 string chunks. */
+  const streamOf = (...chunks: string[]): ReadableStream<Uint8Array> => {
+    const encoder = new TextEncoder();
+    let i = 0;
+    return new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (i >= chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(encoder.encode(chunks[i]));
+        i += 1;
+      },
+    });
+  };
+
+  it("validates audit_event shape and drops malformed frames", async () => {
+    const { subscribeNetworkAuditStream } = await import("@/lib/api");
+
+    // First frame: missing required "provider_key" — guard must drop it.
+    // Second frame: valid — guard must admit it.
+    const malformed = JSON.stringify({ type: "audit_event", id: "01ABC", timestamp: "2026-04-20T00:00:00Z" });
+    const good = JSON.stringify({
+      type: "audit_event",
+      id: "01DEF",
+      timestamp: "2026-04-20T00:00:01Z",
+      method: "GET",
+      url_host: "api.openai.com",
+      url_path_prefix: "/v1",
+      query_params_stored: false,
+      provider_key: "openai",
+      trigger_feature: "llm_invoke",
+      size_bytes_in: null,
+      size_bytes_out: null,
+      latency_ms: 12,
+      status_code: 200,
+      user_initiated: false,
+      blocked: false,
+      source: "sdk_invocation",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: streamOf(`data: ${malformed}\n\n`, `data: ${good}\n\n`),
+      }),
+    );
+
+    const frames: unknown[] = [];
+    const unsubscribe = subscribeNetworkAuditStream((frame) => frames.push(frame));
+    // Drain microtasks so the reader loop runs.
+    await vi.runOnlyPendingTimersAsync();
+    // Let the async fetch + stream drain.
+    for (let i = 0; i < 5; i += 1) {
+      await Promise.resolve();
+    }
+
+    expect(frames).toHaveLength(1);
+    expect((frames[0] as { type: string }).type).toBe("audit_event");
+    expect(((frames[0] as { event: { provider_key: string } }).event).provider_key).toBe("openai");
+    unsubscribe();
+  });
+
+  it("rejects frames that claim query_params_stored=true (privacy invariant)", async () => {
+    const { subscribeNetworkAuditStream } = await import("@/lib/api");
+
+    const invariantViolation = JSON.stringify({
+      type: "audit_event",
+      id: "01XYZ",
+      timestamp: "2026-04-20T00:00:00Z",
+      method: "GET",
+      url_host: "api.openai.com",
+      url_path_prefix: "/v1",
+      query_params_stored: true, // must be rejected
+      provider_key: "openai",
+      trigger_feature: "llm_invoke",
+      size_bytes_in: null,
+      size_bytes_out: null,
+      latency_ms: 12,
+      status_code: 200,
+      user_initiated: false,
+      blocked: false,
+      source: "sdk_invocation",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: streamOf(`data: ${invariantViolation}\n\n`),
+      }),
+    );
+
+    const frames: unknown[] = [];
+    const unsubscribe = subscribeNetworkAuditStream((frame) => frames.push(frame));
+    await vi.runOnlyPendingTimersAsync();
+    for (let i = 0; i < 5; i += 1) {
+      await Promise.resolve();
+    }
+
+    expect(frames).toHaveLength(0);
+    unsubscribe();
+  });
+
+  it("no_store frame latches — no further reconnects scheduled", async () => {
+    const { subscribeNetworkAuditStream } = await import("@/lib/api");
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: streamOf('data: {"type":"no_store"}\n\n'),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const frames: unknown[] = [];
+    const unsubscribe = subscribeNetworkAuditStream((frame) => frames.push(frame));
+
+    // Let the first connection drain (one no_store frame, then stream ends).
+    await vi.runOnlyPendingTimersAsync();
+    for (let i = 0; i < 5; i += 1) {
+      await Promise.resolve();
+    }
+
+    expect(frames).toHaveLength(1);
+    expect((frames[0] as { type: string }).type).toBe("no_store");
+
+    // Advance time past any possible backoff — if the latch is broken,
+    // the subscriber would have scheduled a reconnect and called
+    // fetch again. It must NOT.
+    const initialCalls = fetchMock.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock.mock.calls.length).toBe(initialCalls);
+
+    unsubscribe();
   });
 });
