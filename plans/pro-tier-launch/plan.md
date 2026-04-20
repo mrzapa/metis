@@ -2,9 +2,15 @@
 Milestone: Pro tier + public launch (M15)
 Status: Draft
 Claim: unclaimed
-Last updated: 2026-04-18 by claude/review-metis-strategy-EiscA
+Last updated: 2026-04-21 by claude/m17-phase7-export-discoverability (coordination link)
 Vision pillar: Cross-cutting
 ---
+
+> **Coordinates with M17 (Network audit).** The audit panel stays
+> Free; Pro-only outbound features must register their own provider
+> entries and `trigger_feature` tags; marketing-site analytics is
+> out of M17 scope. Full contract:
+> [`plans/network-audit/plan.md` → Coordination hooks (Phase 7)](../network-audit/plan.md#coordination-hooks-phase-7).
 
 ## Progress
 

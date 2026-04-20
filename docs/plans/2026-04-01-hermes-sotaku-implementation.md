@@ -1,5 +1,11 @@
 # Hermes + Sotaku Roadmap Implementation Plan
 
+> **Phase 3 (M06) coordinates with M17 (Network audit).** Autonomous
+> LLM calls emitted by the skill-self-evolution loop must keep
+> `user_initiated=False` and must propagate `NetworkBlockedError` as
+> a skip (no retry, no fallback). Full contract:
+> [`plans/network-audit/plan.md` → Coordination hooks (Phase 7)](../../plans/network-audit/plan.md#coordination-hooks-phase-7).
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Implement 4 independent improvements to Metis inspired by Sotaku's looped convergence and Hermes Agent's learning loop.

@@ -2,9 +2,14 @@
 Milestone: M09 — Companion realtime visibility
 Status: Landed
 Claim: Landed (`68634ba`, 2026-04-18)
-Last updated: 2026-04-20 by claude/m17-phase5b-privacy-ui (plan-sweep pass)
+Last updated: 2026-04-21 by claude/m17-phase7-export-discoverability (coordination link)
 Vision pillar: Companion
 ---
+
+> **Coordinates with M17 (Network audit).** The activity bus and the
+> audit bus are separate by design — do not merge
+> `/v1/companion/activity/stream` with `/v1/network-audit/stream`.
+> Full contract: [`plans/network-audit/plan.md` → Coordination hooks (Phase 7)](../network-audit/plan.md#coordination-hooks-phase-7).
 
 # Companion Real-Time Visibility
 

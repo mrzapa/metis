@@ -2,9 +2,14 @@
 Milestone: Seedling + Feed (M13)
 Status: Draft
 Claim: unclaimed
-Last updated: 2026-04-19 by claude/laughing-brahmagupta-d9f4c2
+Last updated: 2026-04-21 by claude/m17-phase7-export-discoverability (coordination link)
 Vision pillar: Companion
 ---
+
+> **Coordinates with M17 (Network audit).** Every new stdlib outbound
+> must go through `audited_urlopen` with a `trigger_feature` tag and
+> `user_initiated=False`; new vendors register in `KNOWN_PROVIDERS`.
+> Full contract: [`plans/network-audit/plan.md` → Coordination hooks (Phase 7)](../network-audit/plan.md#coordination-hooks-phase-7).
 
 ## Progress
 

@@ -8,23 +8,27 @@ Vision pillar: Cross-cutting
 
 ## Progress
 
-**Phases 1 through 6 are landed.** The audit module, the stdlib
-call-site migration, the CI guard, the LangChain SDK wrappers, the
-Litestar routes, the read-only `/settings/privacy` panel, **and the
-enforcement + prove-offline surface** are all in production on
-`main`. Every outbound HTTP call originating in `metis_app/` now
-flows through either `audited_urlopen` (stdlib path) or
-`audit_sdk_call` (vendor-SDK path) and is recorded in the rolling
-SQLite store. The user can open the panel today and see a live
-feed of calls, provider-scoped counts, the current airplane-mode
-state, **flip airplane-mode / per-provider kill switches from the
-UI**, and **press "Prove offline" to run a synthetic pass** that
+**Phases 1 through 6 are landed, and Phase 7 is in flight on
+`claude/m17-phase7-export-discoverability`.** The audit module,
+the stdlib call-site migration, the CI guard, the LangChain SDK
+wrappers, the Litestar routes, the read-only `/settings/privacy`
+panel, and the enforcement + prove-offline surface are all in
+production on `main`. Every outbound HTTP call originating in
+`metis_app/` now flows through either `audited_urlopen` (stdlib
+path) or `audit_sdk_call` (vendor-SDK path) and is recorded in the
+rolling SQLite store. The user can open the panel today and see a
+live feed of calls, provider-scoped counts, the current airplane-
+mode state, flip airplane-mode / per-provider kill switches from
+the UI, and press "Prove offline" to run a synthetic pass that
 reports zero outbound calls when airplane mode is on.
 
-What's **not yet** landed: Phase 7 — `GET
-/v1/network-audit/export?days=30` CSV download, the first-run
-home-page discoverability card, and the M13/M06/M09/M15
-coordination-hooks documentation.
+**Phase 7 scope** (in this PR): `GET
+/v1/network-audit/export?days=30` CSV download + "Export last 30
+days (CSV)" button on `/settings/privacy` + first-run home-page
+discoverability card (`components/network-audit/first-run-card.tsx`)
++ `network_audit_discoverability_dismissed` default setting + the
+coordination-hooks section below. Phase 8 (Tauri-layer
+enforcement) remains a v2 stretch.
 
 ### Landed phases
 
@@ -39,11 +43,11 @@ coordination-hooks documentation.
 | 5b — Read-only `/settings/privacy` panel | [#521](https://github.com/mrzapa/metis/pull/521) | `1b1995b` (in release) | 3 sections (airplane / matrix / live feed), SSE subscriber, tab link from main settings |
 | 6 — Enforcement + prove-offline | [#525](https://github.com/mrzapa/metis/pull/525) | `3969170` | `provider_block_llm` settings map + airplane-mode default, functional airplane + per-provider kill-switch toggles on `/settings/privacy`, `POST /v1/network-audit/synthetic-pass` endpoint, `runNetworkAuditSyntheticPass` fetcher + modal, race-proof provider-block writes, modal a11y, blocked-row highlight |
 
-### Remaining phases (unclaimed)
+### Remaining phases
 
 | Phase | Ships |
 |---|---|
-| **7 — Export + discoverability** | `GET /v1/network-audit/export?days=30` CSV download, first-run home-page card, coordination hooks docs (M13/M06/M09/M15 callouts). |
+| **7 — Export + discoverability** | In flight (`claude/m17-phase7-export-discoverability`): `GET /v1/network-audit/export?days=30` CSV + Export button + first-run card + coordination hooks docs. |
 | 8 (stretch) — Tauri-layer enforcement | Deferred; v2 concern. |
 
 What's in place today that M17 will lean on (or wrap):
@@ -105,40 +109,34 @@ What's in place today that M17 will lean on (or wrap):
 
 ## Next up
 
-The next agent claims **Phase 7** (export + discoverability).
-Concrete first actions:
+Phase 7 is claimed by `claude/m17-phase7-export-discoverability`
+and ships the four Phase 7 deliverables in one PR:
 
-1. **`GET /v1/network-audit/export?days=30` CSV endpoint.** Add a
-   new route in `metis_app/api_litestar/routes/network_audit.py`
-   that reads from `NetworkAuditStore` and streams a CSV. Columns
-   mirror the stored fields: `timestamp, method, url_host,
-   url_path_prefix, provider_key, trigger_feature, size_bytes_in,
-   size_bytes_out, latency_ms, status_code, user_initiated,
-   blocked, source`. No query params beyond `days` (bounded
-   1..90). Served locally; no upload.
-
-2. **"Export CSV" button on `/settings/privacy`.** Sits above the
-   live-event-feed section (per the Phase 5 layout). Triggers a
-   download via the new endpoint; no modal. Label "Export last
-   30 days (CSV)". Include tests in
+1. **`GET /v1/network-audit/export?days=30` CSV endpoint.** Route in
+   `metis_app/api_litestar/routes/network_audit.py`; rowid-cursor
+   walk via the new `NetworkAuditStore.iter_events_since`. Columns
+   mirror the stored fields (without `id` / `query_params_stored`):
+   `timestamp, method, url_host, url_path_prefix, provider_key,
+   trigger_feature, size_bytes_in, size_bytes_out, latency_ms,
+   status_code, user_initiated, blocked, source`. Days parameter
+   is silently clamped to `[1, 90]`. Served locally; no upload.
+2. **"Export last 30 days (CSV)" button on `/settings/privacy`.**
+   Sits in the live-feed header alongside Prove offline. Self-
+   disabling while download is in flight; inline error on failure.
+   Vitest coverage in
    `app/settings/privacy/__tests__/page.test.tsx`.
+3. **First-run discoverability card.**
+   `components/network-audit/first-run-card.tsx` — fixed top-right
+   on `app/page.tsx`. Copy: *"METIS shows you every outbound call.
+   Open the network audit to see what's leaving your machine — and
+   switch any provider off."* Dismissal writes
+   `network_audit_discoverability_dismissed: true`. Vitest
+   coverage in `components/network-audit/__tests__/first-run-card.test.tsx`.
+4. **Coordination-hooks docs.** See the "Coordination hooks
+   (Phase 7)" section at the bottom of this doc.
 
-3. **First-run discoverability card.** A one-shot card on
-   `apps/metis-web/app/page.tsx` empty-state surface when the
-   user has never opened `/settings/privacy`. Copy suggestion:
-   *"METIS shows you every outbound call. Open the network
-   audit."* Dismissible, not gated, never re-shown. Persistence
-   via a new settings flag (e.g.
-   `network_audit_discoverability_dismissed: false` default).
-
-4. **Coordination-hooks docs.** A short section at the bottom of
-   this plan doc (or a sibling `docs/` entry) calling out what
-   M13, M06, M09, and M15 must do to stay compatible — per the
-   Phase 7 spec under *Notes for the next agent* below. Add a
-   link-out from each neighbouring plan doc.
-
-See the full Phase 7 breakdown under *Notes for the next agent*.
-Phase 8 (Tauri-layer enforcement) remains a stretch / v2 concern.
+After this PR merges, M17 rows to `Landed` and Phase 8 remains the
+only open v2 stretch.
 
 ## Blockers
 
@@ -700,3 +698,85 @@ intent — is exactly why M17 is *writeable* now instead of being
 a months-long excavation. The work is naming what is already
 happening, giving the user controls over it, and proving the
 controls work.
+
+---
+
+## Coordination hooks (Phase 7)
+
+Phase 7 locks in the coordination contract between M17 and its
+neighbouring milestones. Each bullet below is the *minimum* a
+neighbour plan must do to remain compatible with the audit panel;
+everything stricter is a nice-to-have. The format is deliberately
+short so each neighbour's plan doc can link to a single anchor and
+follow a one-line rule.
+
+### M13 — Seedling + Feed (`plans/seedling-and-feed/plan.md`)
+
+- **Every new stdlib outbound goes through `audited_urlopen`.** The
+  Phase 3b CI guard (`tests/test_network_audit_no_raw_urlopen.py`)
+  enforces this mechanically; the Seedling worker and news-comet
+  ingestion loops must pass `trigger_feature="news_comet_*"` or
+  `trigger_feature="seedling_*"` and `user_initiated=False`.
+- **Worker heartbeats are NOT audit events.** The per-tick breathing
+  indicator on the dock is a M09 activity event, not a
+  `NetworkAuditEvent`. Do not conflate the two buses.
+- **New providers register in `KNOWN_PROVIDERS`.** Any vendor the
+  Seedling reaches (local or remote) that is not already in
+  `providers.py` gets a new `ProviderSpec` entry with a sensible
+  default kill-switch setting key (use `news_comets_enabled` where
+  the feature is covered by the existing master kill switch).
+
+### M06 — Skill self-evolution (`docs/plans/2026-04-01-hermes-sotaku-implementation.md`, Phase 3)
+
+- **Autonomous LLM / embedding calls set `user_initiated=False`.**
+  This is already the Phase 4 SDK-wrapper default; M06's skill
+  promotion loop must not override it to `True`. The feed's
+  "autonomous" tag relies on this being honest.
+- **Candidate promotion workflows pick up the kill-switch side-effect
+  for free.** `create_llm` already raises `NetworkBlockedError` when
+  a provider is blocked; M06's graceful-degrade path should catch it
+  and skip the promotion (no retry), then resume on the next cycle.
+  Swallowing the error and synthesising a fallback is wrong — the
+  user explicitly turned the provider off.
+
+### M09 — Companion realtime visibility (`plans/companion-realtime-visibility/plan.md`)
+
+- **No shared bus.** Audit events use `/v1/network-audit/stream`; M09
+  uses `/v1/companion/activity/stream`. Do not merge them. Retention,
+  audience, and verbosity all differ.
+- **Blocked-call events are visible to the user on the audit panel,
+  not on the dock.** The dock is an activity surface, not a privacy
+  surface. If the user cares "why is the news comet quiet", they'll
+  follow the link from the dock to the audit panel to see the
+  `blocked=True` rows.
+- **Activity events never borrow `user_initiated`.** `CompanionActivityEvent`
+  has its own schema; the audit boolean is audit-specific.
+
+### M15 — Pro tier + public launch (`plans/pro-tier-launch/plan.md`)
+
+- **The audit panel stays Free.** It is a trust feature, not a paid
+  differentiator. Gating any part of `/settings/privacy` behind Pro
+  breaks the Lifetime-tier pitch.
+- **Pro-only outbound features register their own provider entries.**
+  If Pro expands autonomous research quotas or adds a new search
+  vendor, the new vendor needs a `ProviderSpec` in
+  `providers.py` and its own `trigger_feature` tag (e.g.
+  `pro_research_*`). No feature flag should bypass the audit layer.
+- **Marketing-site analytics is out of scope.** Plausible / Pirsch /
+  Simple Analytics / Fathom requests originate from the marketing
+  site domain, not from `metis_app`. M17 does not attempt to
+  enumerate them. `pro-tier-launch/plan.md` documents the privacy
+  posture for that separately.
+
+### Phase 7 landed (2026-04-20)
+
+| Deliverable | Where |
+|---|---|
+| `GET /v1/network-audit/export?days=30` CSV | `metis_app/api_litestar/routes/network_audit.py`; streams row-by-row from `NetworkAuditStore.iter_events_since` |
+| `NetworkAuditStore.iter_events_since(cutoff_ms, chunk_size=1000)` | `metis_app/network_audit/store.py`; rowid-cursor walk |
+| "Export last 30 days (CSV)" button + fetcher | `apps/metis-web/app/settings/privacy/page.tsx`; `downloadNetworkAuditExport` in `lib/api.ts` |
+| First-run discoverability card | `apps/metis-web/components/network-audit/first-run-card.tsx`; wired from `app/page.tsx` |
+| `network_audit_discoverability_dismissed: false` default | `metis_app/default_settings.json` |
+| Coordination-hooks section (this one) | You're reading it. |
+
+Phase 8 (Tauri-layer enforcement) remains a v2 stretch.
