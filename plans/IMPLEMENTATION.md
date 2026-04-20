@@ -7,7 +7,7 @@ This is the **single source of truth for what is being worked on in METIS and
 what comes next.** Every row is a milestone from `VISION.md`. Agents claim rows,
 do the work, update the row when they stop.
 
-**Last reviewed:** 2026-04-20 (reconciled stale-ready M03/M04/M05/M06 rows to Landed after a code-vs-plan audit; M17 Phases 1-5 all landed via PRs #516-#521; no agents currently working). See [`Prompt agents.md`](Prompt%20agents.md) for the onboarding prompt to give a fresh agent.
+**Last reviewed:** 2026-04-20 (reconciled stale-ready M03/M04/M05/M06 rows to Landed after a code-vs-plan audit; M17 Phase 6 landed via PR #525 — row reconciled from `In progress (Phase 6 claimed)` to `In progress (Phase 7 remaining, unclaimed)`; Phases 1-5 landed via PRs #516-#521; no agents currently working). See [`Prompt agents.md`](Prompt%20agents.md) for the onboarding prompt to give a fresh agent.
 
 ## Quick start for a fresh agent
 
@@ -69,7 +69,7 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 | M14 | **The Forge** — technique gallery UI, togglable frontier modules | 🌱🧠 | Draft | [`plans/the-forge/plan.md`](the-forge/plan.md) | — | 2026-04-19 | M02, M06, M12 |
 | M15 | **Pro tier + public launch** — paywall, skill pack, HN/r/LocalLLaMA launch | 🔧 | Draft needed | [`plans/pro-tier-launch/plan.md`](pro-tier-launch/plan.md) (harvest stub) | — | 2026-04-18 | M13, M14 |
 | M16 | **Personal evals** — track companion improvement on user's specific tasks | 🌱 | Draft | [`plans/personal-evals/plan.md`](personal-evals/plan.md) | — | 2026-04-19 | M13 |
-| M17 | **Network audit** — outbound call panel, per-provider block, offline proof | 🔧 | In progress | [`plans/network-audit/plan.md`](network-audit/plan.md) | Phases 1-5 landed (PRs #516-#521); `claude/m17-phase6-enforcement` working Phase 6 — functional airplane toggle + per-provider kill-switch UI + "prove offline" synthetic-pass endpoint + modal | 2026-04-20 | — |
+| M17 | **Network audit** — outbound call panel, per-provider block, offline proof | 🔧 | In progress | [`plans/network-audit/plan.md`](network-audit/plan.md) | Phases 1-6 landed (PRs #516-#521, #525 merge `3969170`); Phase 7 (CSV export + first-run card + coordination hooks docs) remaining — unclaimed | 2026-04-20 | — |
 | M18 | **LoRA fine-tuning (stretch)** — companion weights adapt to user data | 🌱 | Draft needed | *(to be created: `plans/lora-stretch/plan.md`)* | — | — | M13 |
 | M19 | **Mobile companion (stretch)** — Tauri Mobile or PWA, read-only | 🌌 | Draft needed | *(to be created: `plans/mobile-stretch/plan.md`)* | — | — | M15 |
 

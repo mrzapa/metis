@@ -1,28 +1,30 @@
 ---
 Milestone: Network audit (M17)
 Status: In progress
-Claim: unclaimed (Phases 1-5 landed; Phase 6 next)
-Last updated: 2026-04-20 by claude/m17-phase5b-privacy-ui
+Claim: unclaimed (Phases 1-6 landed; Phase 7 next)
+Last updated: 2026-04-20 by claude/gracious-hertz-70fd28 (reconciliation)
 Vision pillar: Cross-cutting
 ---
 
 ## Progress
 
-**Phases 1 through 5 are landed.** The audit module, the stdlib
+**Phases 1 through 6 are landed.** The audit module, the stdlib
 call-site migration, the CI guard, the LangChain SDK wrappers, the
-Litestar routes, and the read-only `/settings/privacy` panel are all
-in production on `main`. Every outbound HTTP call originating in
-`metis_app/` now flows through either `audited_urlopen` (stdlib
-path) or `audit_sdk_call` (vendor-SDK path) and is recorded in the
-rolling SQLite store. The user can open the panel today and see a
-live feed of calls, provider-scoped counts, and the current
-airplane-mode state.
+Litestar routes, the read-only `/settings/privacy` panel, **and the
+enforcement + prove-offline surface** are all in production on
+`main`. Every outbound HTTP call originating in `metis_app/` now
+flows through either `audited_urlopen` (stdlib path) or
+`audit_sdk_call` (vendor-SDK path) and is recorded in the rolling
+SQLite store. The user can open the panel today and see a live
+feed of calls, provider-scoped counts, the current airplane-mode
+state, **flip airplane-mode / per-provider kill switches from the
+UI**, and **press "Prove offline" to run a synthetic pass** that
+reports zero outbound calls when airplane mode is on.
 
-What's **not yet** landed: the write-side — airplane-mode toggle is
-displayed but disabled, per-LLM-provider kill switches have no UI,
-and the "prove offline" synthetic-pass button doesn't exist yet.
-Those are Phase 6. Phase 7 adds CSV export + a first-run
-discoverability card.
+What's **not yet** landed: Phase 7 — `GET
+/v1/network-audit/export?days=30` CSV download, the first-run
+home-page discoverability card, and the M13/M06/M09/M15
+coordination-hooks documentation.
 
 ### Landed phases
 
@@ -35,12 +37,12 @@ discoverability card.
 | 4 — LangChain SDK invocation events | [#519](https://github.com/mrzapa/metis/pull/519) | `6aeee97` | `source` field, schema migration, `sdk_events.py`, `_ProviderAuditWrapper`, `_EmbeddingsAuditWrapper`, Tavily wrap |
 | 5a — Litestar routes + real settings reader | [#520](https://github.com/mrzapa/metis/pull/520) | `ed99582` | 4 routes under `/v1/network-audit/*`, lifecycle hooks, live `get_default_settings()` |
 | 5b — Read-only `/settings/privacy` panel | [#521](https://github.com/mrzapa/metis/pull/521) | `1b1995b` (in release) | 3 sections (airplane / matrix / live feed), SSE subscriber, tab link from main settings |
+| 6 — Enforcement + prove-offline | [#525](https://github.com/mrzapa/metis/pull/525) | `3969170` | `provider_block_llm` settings map + airplane-mode default, functional airplane + per-provider kill-switch toggles on `/settings/privacy`, `POST /v1/network-audit/synthetic-pass` endpoint, `runNetworkAuditSyntheticPass` fetcher + modal, race-proof provider-block writes, modal a11y, blocked-row highlight |
 
 ### Remaining phases (unclaimed)
 
 | Phase | Ships |
 |---|---|
-| **6 — Enforcement + prove-offline** | Functional airplane-mode toggle, per-LLM-provider kill-switch UI (`provider_block_llm` settings map), `POST /v1/network-audit/synthetic-pass` endpoint + modal, graceful degradation confirmed end-to-end. |
 | **7 — Export + discoverability** | `GET /v1/network-audit/export?days=30` CSV download, first-run home-page card, coordination hooks docs (M13/M06/M09/M15 callouts). |
 | 8 (stretch) — Tauri-layer enforcement | Deferred; v2 concern. |
 
@@ -103,65 +105,58 @@ What's in place today that M17 will lean on (or wrap):
 
 ## Next up
 
-The next agent claims **Phase 6** (enforcement + prove-offline).
+The next agent claims **Phase 7** (export + discoverability).
 Concrete first actions:
 
-1. **Wire the airplane-mode toggle on `/settings/privacy`.** The
-   backend already honours `network_audit_airplane_mode=True` via
-   `is_provider_blocked`. Phase 5b rendered the toggle visible but
-   disabled with a "Phase 5c" note (now read "Phase 6" after this
-   plan-doc sweep). Two pieces: (a) frontend writes a `PATCH`
-   against the existing settings endpoint (`POST /v1/settings` or
-   equivalent — check `apps/metis-web/lib/api.ts:updateSettings`)
-   with the new boolean; (b) optimistic UI update + live-count
-   badge that shows "0 outbound calls" when the switch is on and
-   the synthetic-pass button hasn't been pressed yet.
+1. **`GET /v1/network-audit/export?days=30` CSV endpoint.** Add a
+   new route in `metis_app/api_litestar/routes/network_audit.py`
+   that reads from `NetworkAuditStore` and streams a CSV. Columns
+   mirror the stored fields: `timestamp, method, url_host,
+   url_path_prefix, provider_key, trigger_feature, size_bytes_in,
+   size_bytes_out, latency_ms, status_code, user_initiated,
+   blocked, source`. No query params beyond `days` (bounded
+   1..90). Served locally; no upload.
 
-2. **Add `provider_block_llm: dict[str, bool]` to settings +
-   per-LLM-provider kill switches.** Update `is_provider_blocked`
-   to consult `settings.get("provider_block_llm", {}).get(key,
-   False)` for the LLM + embedding providers (those with
-   `kill_switch_setting_key=None` in the Phase 1 registry). Add a
-   default entry in `metis_app/default_settings.json`. Frontend:
-   the per-provider matrix row's "Blocked" column becomes a
-   write-enabled checkbox that PATCHes the map.
+2. **"Export CSV" button on `/settings/privacy`.** Sits above the
+   live-event-feed section (per the Phase 5 layout). Triggers a
+   download via the new endpoint; no modal. Label "Export last
+   30 days (CSV)". Include tests in
+   `app/settings/privacy/__tests__/page.test.tsx`.
 
-3. **`POST /v1/network-audit/synthetic-pass` endpoint.** A
-   30-second scripted probe that exercises each registered
-   trigger once (RSS poll, LLM no-op via `create_llm('mock' path)`
-   fallback, embedding no-op, autonomous research tick) and
-   returns the per-provider call count. With airplane mode on
-   every count is zero — that's the "prove offline" litmus test.
-   Frontend: "Prove offline" button that opens a modal showing
-   the per-provider breakdown.
+3. **First-run discoverability card.** A one-shot card on
+   `apps/metis-web/app/page.tsx` empty-state surface when the
+   user has never opened `/settings/privacy`. Copy suggestion:
+   *"METIS shows you every outbound call. Open the network
+   audit."* Dismissible, not gated, never re-shown. Persistence
+   via a new settings flag (e.g.
+   `network_audit_discoverability_dismissed: false` default).
 
-4. **Graceful-degradation pass.** Confirm that when a kill switch
-   fires, dependent features degrade cleanly rather than crash.
-   See the existing block-error policy per call site in the Phase
-   3b commit log (news-comet workers log-and-skip, `create_llm`
-   mocks, `snapshot_download` propagates to the install UI).
-   Write end-to-end integration tests against the airplane-mode
-   path.
+4. **Coordination-hooks docs.** A short section at the bottom of
+   this plan doc (or a sibling `docs/` entry) calling out what
+   M13, M06, M09, and M15 must do to stay compatible — per the
+   Phase 7 spec under *Notes for the next agent* below. Add a
+   link-out from each neighbouring plan doc.
 
-See the full Phase 6 breakdown under *Notes for the next agent*
-below. Phase 7 (export + discoverability) is a separate PR after
-Phase 6 merges.
+See the full Phase 7 breakdown under *Notes for the next agent*.
+Phase 8 (Tauri-layer enforcement) remains a stretch / v2 concern.
 
 ## Blockers
 
-- **No hard dependency blockers.** The milestone is 5/7 phases
-  complete and unblocked. The original ordering risks below have
-  been resolved by landing M17 first.
+- **No hard dependency blockers.** The milestone is 6/7 phases
+  complete (Phase 8 is a post-v1 stretch and not counted toward
+  v1 shipping scope) and unblocked. The original ordering risks
+  below have been resolved by landing M17 first.
 - **Resolved: M13 ordering.** M17 landed before M13 per the
   original recommendation. M13 (Seedling + Feed) will need to
   adopt `audited_urlopen` for any new stdlib call sites it adds
   — the CI guard (`tests/test_network_audit_no_raw_urlopen.py`)
   will force this mechanically.
-- **M15 (Pro tier launch) gating.** Still holds: Phase 6
-  (functional kill-switch enforcement + prove-offline button) is
+- **Resolved: M15 (Pro tier launch) gating.** Phase 6
+  (functional kill-switch enforcement + prove-offline button) —
   the feature that backs the Lifetime pitch "never being held
-  hostage". M15 cannot ship until Phase 6 lands. Phase 7
-  (discoverability card) sharpens but doesn't gate it.
+  hostage" — landed via PR #525. M15 is no longer gated on M17.
+  Phase 7 (discoverability card) sharpens the pitch but doesn't
+  gate it.
 - **Phase 4 already flagged autonomous calls as
   `user_initiated=False`.** The coordination concern with M06 /
   M09 / M18 is satisfied at the event-emission layer; the remaining
@@ -410,7 +405,18 @@ per-provider kill switches + airplane-mode master.
 **Not this phase:** the "prove offline" synthetic pass (Phase 6);
 export (Phase 7).
 
-#### Phase 6 🔜 Next — Enforcement + "prove offline" affordance
+#### Phase 6 ✅ Landed (PR #525) — Enforcement + "prove offline" affordance
+
+**Shipped via merge `3969170` on 2026-04-20.** `provider_block_llm`
+settings map + airplane-mode default; functional airplane toggle
+and per-provider kill-switch toggles on `/settings/privacy`;
+`POST /v1/network-audit/synthetic-pass` endpoint that exercises a
+scripted probe and reports per-provider counts; `runNetworkAudit
+SyntheticPass` fetcher + modal with per-provider breakdown and
+blocked-row highlight; race-proof provider-block writes and modal
+a11y polish in the follow-up fixes (`5456613`, `35c6da3`).
+
+**Original Phase 6 spec (preserved for reference):**
 
 **Goal:** kill switches actually block, and the user can push a
 button to see it.
@@ -441,7 +447,7 @@ button to see it.
 **Not this phase:** deep SDK-HTTP interception (v2), or a global
 firewall.
 
-#### Phase 7 🔜 Pending — Export, coordination hooks, onboarding callout
+#### Phase 7 🔜 Next — Export, coordination hooks, onboarding callout
 
 **Goal:** the audit panel is discoverable, exportable, and
 coordinated with neighbouring milestones.
