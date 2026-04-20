@@ -46,14 +46,28 @@ the task is open-ended, say so: "scan the table for the highest-priority
 
 **Ground rules:**
 
+- **Verify the row is genuinely open before you claim.** The table lags
+  reality. Before committing a claim, grep the codebase for the key
+  artefacts the milestone's plan doc promises. Look at the plan's
+  *Progress* / *Next up* / *Notes for the next agent* sections, pull out
+  the named files, functions, settings keys, or endpoints that are
+  supposed to be delivered, and check they aren't **already** present on
+  `main`. If they are — run the milestone's tests to confirm — the row
+  is stale. **Turn your branch into a docs-only reconciliation PR** that
+  flips the row to `Landed` with the real merge SHA + date (use
+  `git log --grep="<milestone keyword>"` and `git log --oneline --all
+  <file>` to find it), and mention any sibling rows from the same era
+  that smell similarly stale (often a whole batch shipped without the
+  table being updated). Then start fresh work on a different branch
+  against a genuinely open row. This happened with M12 Phase 1 (PR #513)
+  and M03 Phase 1 (caught 2026-04-20 on `codex/m03-phase1-iterrag-convergence`) —
+  both were marked `Ready` with shipped code. The claim-commit rule
+  below still applies to the reconciliation PR: small, standalone,
+  docs-only.
 - **Claim before you code.** Set the `Claim` column in `plans/IMPLEMENTATION.md`
   to your branch name and `Last updated` to today's date. Commit that row
   update as a standalone `docs(m##): claim …` commit on a fresh branch off
   `main`. This is how other agents know the row is taken.
-- **Grep before you claim a `Ready` row.** Before claiming a `Ready` row,
-  grep the codebase for the key artefacts the plan promises. If they already
-  exist and work, the row is stale — flip it to `Landed` in a docs-only
-  reconciliation PR before starting fresh work.
 - **Respect the plan's phase boundaries.** The plan doc's phases are usually
   shippable slices. Don't try to land the entire milestone in one PR — land
   one phase, open the PR, let it merge, then start the next phase on a new
@@ -142,39 +156,48 @@ workflow for implementation requests from external sources*.
 
 ---
 
-## Current state (2026-04-20)
+## Where to find current state
 
-- **Active agents:** none. The last in-flight branch was
-  `claude/m17-phase5b-privacy-ui` → merged via PR #521.
-- **Code-vs-plan reconciliation note:** M03, M04, M05, and M06 all looked
-  `Ready` after the 2026-04-20 plan-doc sweep, but a follow-up grep + test
-  audit showed they were already shipped. Treat "plan doc fresh" and
-  "code matches plan status" as two separate checks.
-- **Ready / unclaimed rows** on `IMPLEMENTATION.md`: none. The next practical
-  pick is the unclaimed Phase 6 slice inside **M17** (`Status: In progress`).
-- **Draft rows (plan written, pick up when prioritised):**
-  - **M10** Tribev2 homological scaffold (`plans/trive-v2-homological-scaffold/plan.md`)
-  - **M13** Seedling + Feed (`plans/seedling-and-feed/plan.md`) — roadmap position #2; depends on M01
-  - **M14** The Forge (`plans/the-forge/plan.md`) — depends on M02, M06, M12
-  - **M16** Personal evals (`plans/personal-evals/plan.md`) — depends on M13
-- **In progress (claimed but resumable):**
-  - **M17** Network audit, Phase 6 next. Audit panel is live read-only; functional toggles + prove-offline button is the next slice.
-- **Draft needed (no plan doc yet):**
-  - **M12** Interactive star catalogue — needs a post-M02 fresh plan
-  - **M15** Pro tier + public launch — harvest stub exists at `plans/pro-tier-launch/plan.md`
-  - **M18** LoRA fine-tuning stretch
-  - **M19** Mobile companion stretch
-- **Rolling:**
-  - **M01** Preserve & productise — `docs/preserve-and-productize-plan.md`; anyone can chip at it.
+**Do not cache state in this file.** The source of truth is
+[`plans/IMPLEMENTATION.md`](IMPLEMENTATION.md) — scan the table, find a
+row with `Status: Ready` or `Status: Next up` and a blank `Claim`, then
+run the trust-but-verify pass above before committing.
 
-### What a fresh agent should probably pick
+**Plan freshness and code-vs-plan alignment are two different audits.**
+The 2026-04-20 plan-doc sweep (PR #522) refreshed M17's plan doc and
+fixed stale frontmatter elsewhere, but left M03-M06 advertised as
+`Ready` even though their code had already shipped. The follow-up
+reconciliation (PR #524) caught that. Lesson: a periodic sweep should
+always include both — read the plans AND grep for the artefacts they
+promise on `main`.
 
-If no task is assigned, the most defensible picks right now are, in order:
+An earlier version of this file duplicated the table inline. That copy
+went stale within 24 hours and contributed to a wasted session
+(M03 looked unclaimed here but had already shipped). The table is
+reviewed periodically — the `Last reviewed:` banner at the top of
+`IMPLEMENTATION.md` tells you how fresh it is — but the authoritative
+"is the work done" answer always lives in the code, not the table.
 
-1. **M17 Phase 6** — finish what's ~80% done. Functional toggles + prove-offline = the feature that backs the VISION.md "never held hostage" pitch. Small (~1 PR).
-2. **M13 Seedling + Feed** — roadmap-next strategic item. Big (multi-PR). Depends on M01 being "far enough along", which it is (Rolling).
-3. **M12 Interactive star catalogue** — needs a fresh plan doc first (draft pass), then Phase-by-Phase execution.
-4. **M14 The Forge** — now that M06 is landed, the remaining blocker is M12's fresh explorer plan.
+### Heuristic: which unfinished row to pick if none is assigned
+
+These heuristics are process, not state. They should age better than
+the table did:
+
+- **Prefer "finishing" to "starting".** If there's an `In progress`
+  milestone with one phase left, it's almost always higher-leverage
+  than opening a new multi-week milestone. Check the milestone's plan
+  doc — phases tagged `🔜 Next` are what's actually shippable.
+- **After that, follow the VISION.md roadmap order.** The roadmap
+  section in `IMPLEMENTATION.md` (starting "The vision's ordered
+  roadmap is…") numbers the strategic order 1–8. Items earlier in
+  the list are the ones that unblock later launches.
+- **`Draft needed` rows need a plan first.** If you pick one, your
+  first PR is the plan doc draft — not code. See how `plans/seedling-and-feed/plan.md`
+  and `plans/the-forge/plan.md` were structured by earlier
+  plan-drafting passes for the template.
+- **`Rolling` rows are anyone-anytime.** M01 preserve-and-productise
+  is the canonical example — chip at it whenever you have a spare
+  slot and see dead code or stale docs.
 
 ---
 
