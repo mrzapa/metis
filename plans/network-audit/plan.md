@@ -142,19 +142,21 @@ Phase 8 (Tauri-layer enforcement) remains a stretch / v2 concern.
 
 ## Blockers
 
-- **No hard dependency blockers.** The milestone is 5/7 phases
-  complete and unblocked. The original ordering risks below have
-  been resolved by landing M17 first.
+- **No hard dependency blockers.** The milestone is 6/7 phases
+  complete (Phase 8 is a post-v1 stretch and not counted toward
+  v1 shipping scope) and unblocked. The original ordering risks
+  below have been resolved by landing M17 first.
 - **Resolved: M13 ordering.** M17 landed before M13 per the
   original recommendation. M13 (Seedling + Feed) will need to
   adopt `audited_urlopen` for any new stdlib call sites it adds
   — the CI guard (`tests/test_network_audit_no_raw_urlopen.py`)
   will force this mechanically.
-- **M15 (Pro tier launch) gating.** Still holds: Phase 6
-  (functional kill-switch enforcement + prove-offline button) is
+- **Resolved: M15 (Pro tier launch) gating.** Phase 6
+  (functional kill-switch enforcement + prove-offline button) —
   the feature that backs the Lifetime pitch "never being held
-  hostage". M15 cannot ship until Phase 6 lands. Phase 7
-  (discoverability card) sharpens but doesn't gate it.
+  hostage" — landed via PR #525. M15 is no longer gated on M17.
+  Phase 7 (discoverability card) sharpens the pitch but doesn't
+  gate it.
 - **Phase 4 already flagged autonomous calls as
   `user_initiated=False`.** The coordination concern with M06 /
   M09 / M18 is satisfied at the event-emission layer; the remaining
