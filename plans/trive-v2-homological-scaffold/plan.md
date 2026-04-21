@@ -1,12 +1,34 @@
 ---
 Milestone: Tribev2 homological scaffold (M10)
-Status: Draft
-Claim: unclaimed
-Last updated: 2026-04-20 by claude/m17-phase5b-privacy-ui (plan-sweep pass — added frontmatter; content untouched)
+Status: Landed
+Claim: Landed (`cc3923f` + `6fa1ff2`, 2026-04-05)
+Last updated: 2026-04-22 by claude/reconcile-trive-v2-homological-scaffold (audit pass — all 6 steps shipped)
 Vision pillar: Companion + Cosmos
 ---
 
 # TriveV2 — Homological Scaffold: The Living Brain
+
+> **Status: Landed — all 6 steps shipped across two commits.**
+> The sections below are kept as the historical design spec; see the pointer
+> table for the canonical live code.
+>
+> | Step | Landed at | Shipped in |
+> |---|---|---|
+> | 1 — Edge weight foundation | `metis_app/models/brain_graph.py` (`BrainEdge.weight`, `compute_edge_weights()` called at end of `build_from_indexes_and_sessions`) | `cc3923f` (2026-03-28) |
+> | 2 — Topological scaffold service | `metis_app/services/topo_scaffold.py` (`ScaffoldResult` dataclass with `betti_0/1`, `h1_pairs`, `scaffold_edges`, `summary`; `compute_scaffold()`; `scaffold_to_payload()`) | `cc3923f` (2026-03-28) |
+> | 3 — `GET /v1/brain/scaffold` | `metis_app/api/app.py` (FastAPI) and `metis_app/api_litestar/routes/core.py` (Litestar) | `6fa1ff2` (2026-04-05) |
+> | 4 — Frontend visual encoding | `apps/metis-web/lib/api.ts::fetchBrainScaffold`; `components/brain/brain-graph-view-model.ts` (`isScaffoldEdge`, `persistenceWeight`); `components/brain/brain-graph-3d.tsx` (`THREE.TorusGeometry` H₁ rings + scaffold-edge glow) | `6fa1ff2` (2026-04-05) |
+> | 5 — Companion topology awareness | `metis_app/utils/feature_flags.py::FeatureFlag.TOPO_SCAFFOLD_ENABLED` (default True); `metis_app/services/assistant_companion.py` (scaffold lines in both reflection paths) | `6fa1ff2` (2026-04-05) |
+> | 6 — 2D constellation scaffold links | `apps/metis-web/app/page.tsx` (`scaffoldEdgesRef` fetched from `/v1/brain/scaffold`, scaffold-driven star-to-star rendering); `apps/metis-web/lib/constellation-types.ts` (`scaffoldWeights` on `UserStar`) | `6fa1ff2` (2026-04-05) |
+>
+> Follow-on topology work has continued organically beyond this plan — e.g.
+> `b05181a` added topology-aware nourishment events that integrate the
+> scaffold signal into a broader nourishment state.
+>
+> Note: `USER_STAR_LINK_MAX_DISTANCE` remains in `app/page.tsx` but now drives
+> only the interactive drag-to-link anchor proximity check
+> (`getSelectedLinkAnchor`), not the automatic star-to-star rendering the
+> plan targeted — those are now scaffold-driven.
 
 **Branch:** `feature/trive-v2-homological-scaffold`
 **Description:** Apply persistent homology (Petri et al. 2014) to the METIS knowledge graph so the companion can perceive and reason about the topological structure of its own mind.
