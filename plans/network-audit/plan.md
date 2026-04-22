@@ -1,34 +1,28 @@
 ---
 Milestone: Network audit (M17)
-Status: In progress
-Claim: claude/m17-phase7-export-discoverability (Phase 7: CSV export + first-run card + coordination-hooks docs)
-Last updated: 2026-04-20 by claude/m17-phase7-export-discoverability
+Status: Landed
+Claim: unclaimed (Phase 8 Tauri-layer enforcement deferred as v2 stretch)
+Last updated: 2026-04-22 by claude/vigorous-chaum-5a0bf3
 Vision pillar: Cross-cutting
 ---
 
 ## Progress
 
-**Phases 1 through 6 are landed, and Phase 7 is in flight on
-`claude/m17-phase7-export-discoverability`.** The audit module,
+**Phases 1 through 7 are landed. Phase 8 (Tauri-layer
+enforcement) remains a declared v2 stretch.** The audit module,
 the stdlib call-site migration, the CI guard, the LangChain SDK
-wrappers, the Litestar routes, the read-only `/settings/privacy`
-panel, and the enforcement + prove-offline surface are all in
-production on `main`. Every outbound HTTP call originating in
+wrappers, the Litestar routes, the `/settings/privacy` panel, the
+enforcement + prove-offline surface, the CSV export endpoint and
+button, and the first-run home-page discoverability card are all
+in production on `main`. Every outbound HTTP call originating in
 `metis_app/` now flows through either `audited_urlopen` (stdlib
 path) or `audit_sdk_call` (vendor-SDK path) and is recorded in the
 rolling SQLite store. The user can open the panel today and see a
 live feed of calls, provider-scoped counts, the current airplane-
 mode state, flip airplane-mode / per-provider kill switches from
-the UI, and press "Prove offline" to run a synthetic pass that
-reports zero outbound calls when airplane mode is on.
-
-**Phase 7 scope** (in this PR): `GET
-/v1/network-audit/export?days=30` CSV download + "Export last 30
-days (CSV)" button on `/settings/privacy` + first-run home-page
-discoverability card (`components/network-audit/first-run-card.tsx`)
-+ `network_audit_discoverability_dismissed` default setting + the
-coordination-hooks section below. Phase 8 (Tauri-layer
-enforcement) remains a v2 stretch.
+the UI, press "Prove offline" to run a synthetic pass that reports
+zero outbound calls when airplane mode is on, and export the last
+30 days of events as CSV.
 
 ### Landed phases
 
@@ -42,12 +36,12 @@ enforcement) remains a v2 stretch.
 | 5a — Litestar routes + real settings reader | [#520](https://github.com/mrzapa/metis/pull/520) | `ed99582` | 4 routes under `/v1/network-audit/*`, lifecycle hooks, live `get_default_settings()` |
 | 5b — Read-only `/settings/privacy` panel | [#521](https://github.com/mrzapa/metis/pull/521) | `1b1995b` (in release) | 3 sections (airplane / matrix / live feed), SSE subscriber, tab link from main settings |
 | 6 — Enforcement + prove-offline | [#525](https://github.com/mrzapa/metis/pull/525) | `3969170` | `provider_block_llm` settings map + airplane-mode default, functional airplane + per-provider kill-switch toggles on `/settings/privacy`, `POST /v1/network-audit/synthetic-pass` endpoint, `runNetworkAuditSyntheticPass` fetcher + modal, race-proof provider-block writes, modal a11y, blocked-row highlight |
+| 7 — Export + discoverability | [#527](https://github.com/mrzapa/metis/pull/527) | `3cde870` | `GET /v1/network-audit/export?days=30` CSV endpoint + "Export last 30 days (CSV)" button on `/settings/privacy`, first-run home-page discoverability card (`components/network-audit/first-run-card.tsx`), `network_audit_discoverability_dismissed` default setting, coordination-hooks section (below) |
 
 ### Remaining phases
 
 | Phase | Ships |
 |---|---|
-| **7 — Export + discoverability** | In flight (`claude/m17-phase7-export-discoverability`): `GET /v1/network-audit/export?days=30` CSV + Export button + first-run card + coordination hooks docs. |
 | 8 (stretch) — Tauri-layer enforcement | Deferred; v2 concern. |
 
 What's in place today that M17 will lean on (or wrap):
@@ -109,40 +103,20 @@ What's in place today that M17 will lean on (or wrap):
 
 ## Next up
 
-Phase 7 is claimed by `claude/m17-phase7-export-discoverability`
-and ships the four Phase 7 deliverables in one PR:
-
-1. **`GET /v1/network-audit/export?days=30` CSV endpoint.** Route in
-   `metis_app/api_litestar/routes/network_audit.py`; rowid-cursor
-   walk via the new `NetworkAuditStore.iter_events_since`. Columns
-   mirror the stored fields (without `id` / `query_params_stored`):
-   `timestamp, method, url_host, url_path_prefix, provider_key,
-   trigger_feature, size_bytes_in, size_bytes_out, latency_ms,
-   status_code, user_initiated, blocked, source`. Days parameter
-   is silently clamped to `[1, 90]`. Served locally; no upload.
-2. **"Export last 30 days (CSV)" button on `/settings/privacy`.**
-   Sits in the live-feed header alongside Prove offline. Self-
-   disabling while download is in flight; inline error on failure.
-   Vitest coverage in
-   `app/settings/privacy/__tests__/page.test.tsx`.
-3. **First-run discoverability card.**
-   `components/network-audit/first-run-card.tsx` — fixed top-right
-   on `app/page.tsx`. Copy: *"METIS shows you every outbound call.
-   Open the network audit to see what's leaving your machine — and
-   switch any provider off."* Dismissal writes
-   `network_audit_discoverability_dismissed: true`. Vitest
-   coverage in `components/network-audit/__tests__/first-run-card.test.tsx`.
-4. **Coordination-hooks docs.** See the "Coordination hooks
-   (Phase 7)" section at the bottom of this doc.
-
-After this PR merges, M17 rows to `Landed` and Phase 8 remains the
-only open v2 stretch.
+M17 is Landed — all Phase 1–7 work is shipped on `main`. Phase 8
+(Tauri-layer enforcement) remains a declared v2 stretch; no agent
+is currently claiming it. Any follow-up work (dashboards, richer
+exports, per-provider latency graphs, SDK-HTTP deep interception,
+Tauri-layer enforcement) should be filed to
+[`plans/IDEAS.md`](../IDEAS.md) first rather than appended here,
+so the v1 scope stays frozen and triage decides whether any of
+those items become their own milestone row.
 
 ## Blockers
 
-- **No hard dependency blockers.** The milestone is 6/7 phases
+- **No hard dependency blockers.** The milestone is 7/7 v1 phases
   complete (Phase 8 is a post-v1 stretch and not counted toward
-  v1 shipping scope) and unblocked. The original ordering risks
+  v1 shipping scope) and Landed. The original ordering risks
   below have been resolved by landing M17 first.
 - **Resolved: M13 ordering.** M17 landed before M13 per the
   original recommendation. M13 (Seedling + Feed) will need to
@@ -445,7 +419,7 @@ button to see it.
 **Not this phase:** deep SDK-HTTP interception (v2), or a global
 firewall.
 
-#### Phase 7 🔜 Next — Export, coordination hooks, onboarding callout
+#### Phase 7 ✅ Landed (PR #527) — Export, coordination hooks, onboarding callout
 
 **Goal:** the audit panel is discoverable, exportable, and
 coordinated with neighbouring milestones.
@@ -768,7 +742,7 @@ follow a one-line rule.
   enumerate them. `pro-tier-launch/plan.md` documents the privacy
   posture for that separately.
 
-### Phase 7 landed (2026-04-20)
+### Phase 7 landed (2026-04-21, PR #527, merge `3cde870`)
 
 | Deliverable | Where |
 |---|---|
