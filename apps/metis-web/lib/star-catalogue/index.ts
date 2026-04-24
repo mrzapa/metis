@@ -22,3 +22,18 @@ export type { GalaxyDistributionConfig } from "./galaxy-distribution";
 export { StarCatalogue } from "./star-catalogue";
 export type { CatalogueSearchEntry, CatalogueSearchKind } from "./catalogue-search";
 export { searchCatalogueIndex } from "./catalogue-search";
+export type {
+  CatalogueFilterState,
+  CatalogueSpectralFamily,
+  FilterableStar,
+} from "./catalogue-filter";
+export {
+  CATALOGUE_FILTER_DEFAULT,
+  CATALOGUE_FILTER_DIM_BRIGHTNESS,
+  CATALOGUE_FILTER_MAX_MAGNITUDE,
+  CATALOGUE_SPECTRAL_FAMILIES,
+  decodeFilterFromHash,
+  encodeFilterToHash,
+  isCatalogueFilterActive,
+  matchesCatalogueFilter,
+} from "./catalogue-filter";
