@@ -1,8 +1,8 @@
 ---
 Milestone: Interactive star catalogue (M12)
-Status: Ready
-Claim: claude/m12-plan-and-claim
-Last updated: 2026-04-24 by claude/m12-plan-and-claim
+Status: Landed (Phases 0–4 shipped; Phase 4c storage migration deferred per ADR 0012)
+Claim: unclaimed
+Last updated: 2026-04-24 by claude/m12-phase4b-unified-shape
 Vision pillar: Cosmos
 Supersedes: docs/plans/2026-04-05-interactive-star-catalogue.md
 ---
@@ -45,8 +45,24 @@ anchor.
 
 ## Progress
 
-*(Plan drafted 2026-04-24 — no implementation phases have landed yet.
-Phase 0 below is this plan-and-claim pass itself.)*
+| Phase | PR | Merge SHA | Ships |
+|---|---|---|---|
+| 0 — Plan + claim | [#533](https://github.com/mrzapa/metis/pull/533) | `4f964bc` (2026-04-24) | This plan doc + flipped row Ready in `IMPLEMENTATION.md`. |
+| 1 — Catalogue Star Inspector | [#534](https://github.com/mrzapa/metis/pull/534) | `c1f01d5` (2026-04-24) | `CatalogueStarInspector` (right-edge side pane) + click handler on non-addable stars in `page.tsx`; `WorldStarData.apparentMagnitude` field. 10 unit tests. |
+| 2 — Catalogue Search Overlay | [#535](https://github.com/mrzapa/metis/pull/535) (with #535 Codex follow-up) | `69da4a2` (2026-04-24) | `CatalogueSearchOverlay` (✧ pill, top-right) + `searchCatalogueIndex` helper + `CATALOGUE_LANDMARK_INDEX` (11 faculties × anchor/secondary stars, classical names). `focusConstellationPoint` factored out of `focusExistingStar`. 21 unit tests + accessibility-fix follow-up. |
+| 3 — Spectral / magnitude filter | [#536](https://github.com/mrzapa/metis/pull/536) (+ Codex hash-preserve fix [#538](https://github.com/mrzapa/metis/pull/538)) | `6be7c0a` (2026-04-24) + `fcb9928` (2026-04-24) | `CatalogueFilterPanel` (chips + slider) + `catalogue-filter` helpers (predicate, codec). `mergeFilterIntoHash` preserves anchors and unrelated fragments. Render plan dims non-matching stars to 20% brightness; URL-hash persistence. 44 unit tests. |
+| 4a — Relax promote gate, first-star-anywhere | [#539](https://github.com/mrzapa/metis/pull/539) | `b7173ed` (2026-04-24) | `catalogue-promote.ts` helpers + `handlePromoteCatalogueStar` callback in `page.tsx`. Inspector flipped to `addable={true}` always. World-space → constellation-space coordinate bridge. 9 unit tests. |
+| 4b — Unified read-shape adapter | *this PR* | *(pending)* | `userStarToCatalogueUserStar(user, options)` adapter in `lib/star-catalogue/user-star-adapter.ts`; `CatalogueUserStar` reshaped to use legacy `UserStarStage` and `LearningRoute` (no production consumers prior to this change). [ADR 0012](../../docs/adr/0012-user-star-storage-vs-unified-read-shape.md) explains why storage stays as `UserStar` and the unified shape is a read-view. 14 unit tests. |
+
+### Deferred — Phase 4c (post-v1)
+
+The full storage migration (`UserStar.x/y` → `wx/wy`, stage-vocabulary
+backfill, learning-route shape collapse) is **not** part of M12. Per
+ADR 0012, the cost-benefit doesn't pay off at v1 — no production
+consumer requires the unified storage shape, and the adapter delivers
+the unified-read contract that M14 / M16 actually need. Revisit when
+mobile sync, multi-galaxy support, or LoRA fine-tuning's per-star
+contexts demand a single canonical shape on disk.
 
 ### What's already in place (harvest inventory)
 
@@ -87,11 +103,17 @@ are present on `main`:
 
 ## Next up
 
-The first concrete actions for whoever picks up Phase 1:
+M12 is **Landed** as of Phase 4b. Future work on the catalogue surface
+should either:
 
-1. **Read this plan end-to-end**, then read `docs/adr/0006-constellation-design-2d-primary.md` (ADR 0006 — the "stars are knowledge, not astronomy" contract that the inspector surface must honour) and scan `app/page.tsx:4200–4580` (the current catalogue hover + addable-click code paths).
-2. **Phase 1 — Catalogue Star Inspector (lightweight detail pane).** A new React component that opens on click of *any* catalogue star (addable or not), showing name (or "unnamed field star"), spectral class + subclass, apparent magnitude, world coordinates, and the same `StellarProfile` mini-preview already used inside `StarDetailsPanel`. Two CTAs: "Close" and "Promote to my constellation…" (the latter hands off to the existing user-star creation flow with the catalogue star's position + profile pre-filled, but sits behind the adjacency gate unless Phase 4 relaxes it).
-3. **Push the Phase 1 PR and stop.** Do not roll Phase 2 into the same PR. Let the human review the inspector surface — its shape shapes the rest.
+- File a fresh idea in [`plans/IDEAS.md`](../IDEAS.md) for triage (e.g.
+  user-star search inside the same `✧` overlay; per-faculty filter
+  chips; a Phase 4c storage migration when the cost-benefit flips), or
+- Land directly under M14 (The Forge), which consumes the
+  `userStarToCatalogueUserStar` adapter shipped here.
+
+No agent is actively claiming further M12 work. The `Claim` field in
+`plans/IMPLEMENTATION.md` was reset to blank when this PR landed.
 
 ## Blockers
 

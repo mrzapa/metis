@@ -1,4 +1,5 @@
 import type { StellarProfile } from "@/lib/landing-stars/types";
+import type { LearningRoute, UserStarStage } from "@/lib/constellation-types";
 
 export interface SectorKey {
   sx: number;
@@ -45,23 +46,30 @@ export interface StarCatalogueConfig {
 }
 
 /**
- * A CatalogueStar that has been promoted to the user's constellation.
+ * **Unified read-view of a user star** — a `CatalogueStar` with the user-
+ * facing metadata (label, faculty assignment, stage, manifest links, etc.)
+ * layered on top.
  *
- * Naming note: the existing `UserStar` in `lib/constellation-types.ts` is the
- * legacy 2D-only shape (x, y, size, label, …). Phase 5 of the Interactive
- * Star Catalogue plan (`docs/plans/2026-04-05-interactive-star-catalogue.md`)
- * unifies the two so user stars are just CatalogueStars with extra metadata.
- * Until that migration happens we expose this new shape as `CatalogueUserStar`
- * so consumers that import from `constellation-types` keep compiling.
+ * **Storage contract (ADR 0012):** the persisted shape is still the legacy
+ * `UserStar` from `lib/constellation-types.ts`. `CatalogueUserStar` is the
+ * shape downstream consumers (M14 Forge, M16 evals, future marketplace)
+ * read user stars *through* — derived on the fly via
+ * `userStarToCatalogueUserStar` from `lib/star-catalogue/user-star-adapter`.
+ * Storage migration (replacing `UserStar.x/y` with `wx/wy`, etc.) is
+ * deliberately deferred — see ADR 0012 for the rationale.
+ *
+ * Stage and learning-route fields use the legacy `UserStarStage` /
+ * `LearningRoute` types so adapter projection is mechanical, not a lossy
+ * conversion.
  */
 export interface CatalogueUserStar extends CatalogueStar {
   label: string;
   primaryDomainId: string | null;
   relatedDomainIds: string[];
-  stage: "seed" | "sprout" | "bloom" | "nova";
+  stage: UserStarStage;
   notes: string;
   connectedUserStarIds: string[];
-  learningRoute: string | null;
+  learningRoute: LearningRoute | null;
 }
 
 export const DEFAULT_CATALOGUE_CONFIG: StarCatalogueConfig = {

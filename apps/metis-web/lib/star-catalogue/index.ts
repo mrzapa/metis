@@ -48,3 +48,5 @@ export {
   buildPromotedUserStarPayload,
   catalogueStarToConstellationPoint,
 } from "./catalogue-promote";
+export type { UserStarAdapterOptions } from "./user-star-adapter";
+export { userStarToCatalogueUserStar } from "./user-star-adapter";

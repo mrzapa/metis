@@ -42,3 +42,6 @@ Use one of these statuses:
 - [0005-product-vision-living-ai-workspace.md](0005-product-vision-living-ai-workspace.md) - Draft
 - [0006-constellation-design-2d-primary.md](0006-constellation-design-2d-primary.md) - Draft
 - [0007-seedling-model-and-runtime.md](0007-seedling-model-and-runtime.md) - Accepted
+- [0010-network-audit-interception.md](0010-network-audit-interception.md) - Accepted
+- [0011-network-audit-retention.md](0011-network-audit-retention.md) - Accepted
+- [0012-user-star-storage-vs-unified-read-shape.md](0012-user-star-storage-vs-unified-read-shape.md) - Accepted
