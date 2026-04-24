@@ -20,7 +20,16 @@ import {
   type CatalogueStarInspectorStar,
 } from "@/components/constellation/catalogue-star-inspector";
 import { CatalogueSearchOverlay } from "@/components/constellation/catalogue-search-overlay";
-import type { CatalogueSearchEntry } from "@/lib/star-catalogue";
+import { CatalogueFilterPanel } from "@/components/constellation/catalogue-filter-panel";
+import type { CatalogueSearchEntry, CatalogueFilterState } from "@/lib/star-catalogue";
+import {
+  CATALOGUE_FILTER_DEFAULT,
+  CATALOGUE_FILTER_DIM_BRIGHTNESS,
+  decodeFilterFromHash,
+  encodeFilterToHash,
+  isCatalogueFilterActive,
+  matchesCatalogueFilter,
+} from "@/lib/star-catalogue";
 import { BorderBeam } from "@/components/ui/border-beam";
 import { useConstellationCamera } from "@/hooks/use-constellation-camera";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
@@ -860,6 +869,9 @@ export default function Home() {
   const [semanticSearchExpanded, setSemanticSearchExpanded] = useState(false);
   const [catalogueSearchExpanded, setCatalogueSearchExpanded] = useState(false);
   const [catalogueSearchQuery, setCatalogueSearchQuery] = useState("");
+  const [catalogueFilterState, setCatalogueFilterState] = useState<CatalogueFilterState>(
+    () => CATALOGUE_FILTER_DEFAULT,
+  );
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const semanticSearchInputRef = useRef<HTMLInputElement>(null);
   const starTooltipCardRef = useRef<HTMLDivElement>(null);
@@ -878,6 +890,10 @@ export default function Home() {
   const hoveredAddCandidateRef = useRef<StarData | null>(null);
   const armedAddCandidateIdRef = useRef<string | null>(null);
   const availableIndexesRef = useRef<IndexSummary[]>(availableIndexes);
+  // M12 Phase 3 — current filter state, mirrored into a ref so the render
+  // loop (which lives inside a single long-lived effect) can read the latest
+  // value without remounting on every state update.
+  const catalogueFilterStateRef = useRef<CatalogueFilterState>(catalogueFilterState);
   const scaffoldEdgesRef = useRef<BrainScaffoldEdge[]>([]);
   const scaffoldResponseRef = useRef<BrainScaffoldResponse | null>(null);
   // Smooth animated topology strength — GSAP tweens this from old→new value
@@ -968,6 +984,35 @@ export default function Home() {
   useEffect(() => {
     selectedUserStarIdRef.current = selectedUserStarId;
   }, [selectedUserStarId]);
+
+  // M12 Phase 3 — read URL hash on mount, restore filter state if present.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const decoded = decodeFilterFromHash(window.location.hash);
+    if (isCatalogueFilterActive(decoded)) {
+      setCatalogueFilterState(decoded);
+    }
+    // Mount-only — explicit empty deps; URL is the initial source of truth.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // M12 Phase 3 — sync filter state into the render-loop ref + URL hash.
+  // Triggers a starfield revision bump so the next frame re-runs the dim pass.
+  useEffect(() => {
+    catalogueFilterStateRef.current = catalogueFilterState;
+    starfieldRevisionRef.current += 1;
+    if (typeof window === "undefined") return;
+    const encoded = encodeFilterToHash(catalogueFilterState);
+    const nextHash = encoded.length > 0 ? `#${encoded}` : "";
+    if (window.location.hash !== nextHash) {
+      // Use replaceState to avoid polluting browser history per slider tick.
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${window.location.search}${nextHash}`,
+      );
+    }
+  }, [catalogueFilterState]);
 
   const clearToast = useCallback(() => {
     if (toastDismissTimeoutRef.current !== null) {
@@ -2603,6 +2648,9 @@ export default function Home() {
       const nextVisibleStars = visibleStarsRef.current;
       let visibleStarCount = 0;
       const visibleStarProfiles = new Map<string, StellarProfile>();
+      // M12 Phase 3 — id → { profile, apparentMagnitude } for the filter pass.
+      // Built alongside the existing visibleStarProfiles map below.
+      const visibleStarFilterMap = new Map<string, { profile: StellarProfile; apparentMagnitude: number }>();
 
       visibleWorldStars.forEach((worldStar) => {
         const screenX = (worldStar.worldX - backgroundCamera.x) * scale + W / 2;
@@ -2699,12 +2747,23 @@ export default function Home() {
         );
         nextVisibleStars[visibleStarCount] = star;
         visibleStarProfiles.set(worldStar.id, worldStar.profile);
+        visibleStarFilterMap.set(worldStar.id, {
+          profile: worldStar.profile,
+          apparentMagnitude: worldStar.apparentMagnitude,
+        });
         visibleStarNameMap.set(worldStar.id, worldStar.catalogueName);
         visibleStarCount += 1;
       });
 
       nextVisibleStars.length = visibleStarCount;
       projectedCandidateById.clear();
+
+      // M12 Phase 3 — read latest filter state into a per-frame snapshot.
+      // Dim factor is multiplicative with the existing star-dive focus dim;
+      // stars failing the filter get scaled to CATALOGUE_FILTER_DIM_BRIGHTNESS,
+      // matching ones stay at their natural brightness.
+      const filterStateForFrame = catalogueFilterStateRef.current;
+      const filterActiveForFrame = isCatalogueFilterActive(filterStateForFrame);
 
       const landingRenderableStars: LandingWorldStarRenderState[] = nextVisibleStars.map((star) => {
         const profile = visibleStarProfiles.get(star.id) ?? getCachedStellarProfile(star.id);
@@ -2716,10 +2775,19 @@ export default function Home() {
         const focusedSizeBoost = isFocused && focusStr > 0
           ? star.baseSize + (H * 0.6 - star.baseSize) * focusStr
           : star.baseSize;
+
+        let filterDimFactor = 1;
+        if (filterActiveForFrame && !isFocused) {
+          const worldData = visibleStarFilterMap.get(star.id);
+          if (worldData && !matchesCatalogueFilter(worldData, filterStateForFrame)) {
+            filterDimFactor = CATALOGUE_FILTER_DIM_BRIGHTNESS;
+          }
+        }
+
         const projectedStar: LandingWorldStarRenderState = {
           addable: star.isAddable,
           apparentSize: isFocused ? focusedSizeBoost : star.baseSize,
-          brightness: star.brightness * dimFactor,
+          brightness: star.brightness * dimFactor * filterDimFactor,
           catalogueName: visibleStarNameMap.get(star.id),
           hitRadius: star.hitRadius,
           id: star.id,
@@ -5218,6 +5286,16 @@ export default function Home() {
         onSelect={handleCatalogueSearchSelect}
       />
 
+      {/* M12 Phase 3 — Catalogue filter (spectral class chips + magnitude
+          slider). Lives directly below the search overlay. Active filter
+          dims (does not hide) non-matching stars to 20% so the galactic
+          structure stays visible per the plan doc's contract. State is
+          URL-hash-persisted (transient view state — not in settings). */}
+      <CatalogueFilterPanel
+        state={catalogueFilterState}
+        onStateChange={setCatalogueFilterState}
+      />
+
       {(detailsStar || addMessage) && (
         <section id="build-map" className="metis-build-section">
           <div className="metis-build-studio-shell">
@@ -5956,6 +6034,84 @@ body {
   font-size: 12px;
   color: rgba(200, 210, 240, 0.6);
   text-align: left;
+}
+
+/* M12 Phase 3 — CATALOGUE FILTER PANEL.
+   Sits directly below the catalogue-search pill, top-right. Spectral
+   class chip row + magnitude slider + reset link. */
+.metis-catalogue-filter {
+  position: fixed;
+  top: 84px;
+  right: 24px;
+  z-index: 145;
+  width: min(320px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(196, 149, 58, 0.16);
+  background: linear-gradient(180deg, rgba(14, 19, 32, 0.86), rgba(8, 12, 22, 0.92));
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-size: 12px;
+  color: rgba(220, 228, 246, 0.92);
+}
+.metis-catalogue-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.metis-catalogue-filter-chip {
+  min-width: 28px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(196, 149, 58, 0.22);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(220, 228, 246, 0.85);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.metis-catalogue-filter-chip:hover {
+  background: rgba(196, 149, 58, 0.1);
+  border-color: rgba(196, 149, 58, 0.36);
+}
+.metis-catalogue-filter-chip[aria-pressed="true"] {
+  background: rgba(232, 184, 74, 0.18);
+  border-color: rgba(232, 184, 74, 0.62);
+  color: rgba(245, 240, 220, 1);
+}
+.metis-catalogue-filter-slider-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.metis-catalogue-filter-slider-text {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: rgba(200, 210, 240, 0.7);
+}
+.metis-catalogue-filter-slider-label input[type="range"] {
+  width: 100%;
+  accent-color: rgba(232, 184, 74, 0.95);
+}
+.metis-catalogue-filter-reset {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
+  color: rgba(220, 228, 246, 0.78);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.metis-catalogue-filter-reset:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(245, 240, 220, 0.98);
 }
 
 .metis-hero-kicker {
