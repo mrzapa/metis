@@ -38,14 +38,37 @@ function hashToUnit(hash: number): number {
 }
 
 function deriveApparentMagnitude(seedHash: number): number {
-  // Spread the magnitude across the visible band; biased toward dimmer end
-  // so promoted user stars feel like points, not central blazars.
+  // Uniform spread across the visible band [0, 6.5]. Deterministic in the
+  // star id so a given star always projects to the same magnitude across
+  // renders and sessions.
   const u = hashToUnit(seedHash);
   return APPARENT_MAGNITUDE_MIN + u * (APPARENT_MAGNITUDE_MAX - APPARENT_MAGNITUDE_MIN);
 }
 
 function deriveDepthLayer(seedHash: number): number {
   return hashToUnit(seedHash ^ 0x9e3779b9);
+}
+
+/**
+ * Treat empty / whitespace-only labels as "no name". The
+ * `CatalogueStar.name` contract is `null` for nameless field stars; an
+ * empty string would slip through as a "real" name and render a blank
+ * title in `CatalogueStarInspector` (which uses `star.name ?? fallback`).
+ */
+function normaliseDisplayName(label: string | undefined): string | null {
+  if (!label) return null;
+  const trimmed = label.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function cloneLearningRoute(
+  route: UserStar["learningRoute"],
+): CatalogueUserStar["learningRoute"] {
+  if (!route) return null;
+  return {
+    ...route,
+    steps: route.steps.map((step) => ({ ...step })),
+  };
 }
 
 export function userStarToCatalogueUserStar(
@@ -62,20 +85,26 @@ export function userStarToCatalogueUserStar(
   const profile = profileOverride ?? generateProfile(user.id);
   const seedHash = fnv1a32(user.id);
 
+  // Defensive copies: the adapter is documented as a pure read-view, so the
+  // returned object must not share mutable references with the source
+  // `UserStar`. A caller mutating `relatedDomainIds.push(...)` on the view
+  // would otherwise silently corrupt the in-memory store.
   return {
     id: user.id,
     wx: world.x,
     wy: world.y,
     profile,
-    name: user.label ?? null,
+    name: normaliseDisplayName(user.label),
     apparentMagnitude: deriveApparentMagnitude(seedHash),
     depthLayer: deriveDepthLayer(seedHash),
     label: user.label ?? "",
     primaryDomainId: user.primaryDomainId ?? null,
-    relatedDomainIds: user.relatedDomainIds ?? [],
+    relatedDomainIds: user.relatedDomainIds ? [...user.relatedDomainIds] : [],
     stage: user.stage ?? "seed",
     notes: user.notes ?? "",
-    connectedUserStarIds: user.connectedUserStarIds ?? [],
-    learningRoute: user.learningRoute ?? null,
+    connectedUserStarIds: user.connectedUserStarIds
+      ? [...user.connectedUserStarIds]
+      : [],
+    learningRoute: cloneLearningRoute(user.learningRoute),
   };
 }

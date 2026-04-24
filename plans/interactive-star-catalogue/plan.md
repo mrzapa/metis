@@ -110,7 +110,7 @@ should either:
   user-star search inside the same `✧` overlay; per-faculty filter
   chips; a Phase 4c storage migration when the cost-benefit flips), or
 - Land directly under M14 (The Forge), which consumes the
-  `userStorToCatalogueUserStar` adapter shipped here.
+  `userStarToCatalogueUserStar` adapter shipped here.
 
 No agent is actively claiming further M12 work. The `Claim` field in
 `plans/IMPLEMENTATION.md` was reset to blank when this PR landed.

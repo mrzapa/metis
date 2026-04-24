@@ -61,6 +61,26 @@ describe("userStarToCatalogueUserStar", () => {
     expect(unlabelled.label).toBe("");
   });
 
+  it("treats empty / whitespace-only labels as no-name (null)", () => {
+    const empty = userStarToCatalogueUserStar(
+      makeUserStar({ label: "" }),
+      { viewport: VIEWPORT, generateProfile: generateStellarProfile },
+    );
+    expect(empty.name).toBeNull();
+
+    const spaces = userStarToCatalogueUserStar(
+      makeUserStar({ label: "   " }),
+      { viewport: VIEWPORT, generateProfile: generateStellarProfile },
+    );
+    expect(spaces.name).toBeNull();
+
+    const padded = userStarToCatalogueUserStar(
+      makeUserStar({ label: "  Vega  " }),
+      { viewport: VIEWPORT, generateProfile: generateStellarProfile },
+    );
+    expect(padded.name).toBe("Vega");
+  });
+
   it("preserves the stage when present, falls back to 'seed'", () => {
     const growing = userStarToCatalogueUserStar(
       makeUserStar({ stage: "growing" }),
@@ -164,6 +184,60 @@ describe("userStarToCatalogueUserStar", () => {
     );
     expect(out.depthLayer).toBeGreaterThanOrEqual(0);
     expect(out.depthLayer).toBeLessThanOrEqual(1);
+  });
+
+  it("output arrays are isolated from the source UserStar (mutation safety)", () => {
+    const source = makeUserStar({
+      relatedDomainIds: ["knowledge"],
+      connectedUserStarIds: ["other-1", "other-2"],
+    });
+    const out = userStarToCatalogueUserStar(source, {
+      viewport: VIEWPORT,
+      generateProfile: generateStellarProfile,
+    });
+    out.relatedDomainIds.push("memory");
+    out.connectedUserStarIds.push("other-3");
+    expect(source.relatedDomainIds).toEqual(["knowledge"]);
+    expect(source.connectedUserStarIds).toEqual(["other-1", "other-2"]);
+  });
+
+  it("output learningRoute is isolated from the source UserStar (deep clone)", () => {
+    const route: LearningRoute = {
+      id: "route-1",
+      title: "Vectors",
+      originStarId: "star-1",
+      createdAt: "2026-04-25T00:00:00.000Z",
+      updatedAt: "2026-04-25T00:00:00.000Z",
+      steps: [
+        {
+          id: "step-1",
+          kind: "orient",
+          title: "Intro",
+          objective: "warm up",
+          rationale: "establish context",
+          manifestPath: "/x.json",
+          tutorPrompt: "go",
+          estimatedMinutes: 5,
+          status: "todo",
+        },
+      ],
+    };
+    const source = makeUserStar({ learningRoute: route });
+    const out = userStarToCatalogueUserStar(source, {
+      viewport: VIEWPORT,
+      generateProfile: generateStellarProfile,
+    });
+    expect(out.learningRoute).not.toBe(source.learningRoute);
+    expect(out.learningRoute?.steps[0]).not.toBe(route.steps[0]);
+    out.learningRoute!.title = "Mutated";
+    out.learningRoute!.steps[0].status = "done";
+    out.learningRoute!.steps.push({
+      ...route.steps[0],
+      id: "step-2",
+    });
+    expect(source.learningRoute?.title).toBe("Vectors");
+    expect(source.learningRoute?.steps[0].status).toBe("todo");
+    expect(source.learningRoute?.steps).toHaveLength(1);
   });
 
   it("output is structurally a CatalogueUserStar (every field present)", () => {
