@@ -41,3 +41,4 @@ Use one of these statuses:
 - [0004-one-interface-tauri-next-fastapi.md](0004-one-interface-tauri-next-fastapi.md)
 - [0005-product-vision-living-ai-workspace.md](0005-product-vision-living-ai-workspace.md) - Draft
 - [0006-constellation-design-2d-primary.md](0006-constellation-design-2d-primary.md) - Draft
+- [0007-seedling-model-and-runtime.md](0007-seedling-model-and-runtime.md) - Accepted
