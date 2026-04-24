@@ -34,5 +34,9 @@
       "Bash(\"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\\\\apps\\\\metis-web\\\\node_modules/.bin/tsc\" --noEmit -p \"C:\\\\Users\\\\samwe\\\\Documents\\\\metis\\\\.claude\\\\worktrees\\\\admiring-goodall\\\\apps\\\\metis-web\\\\tsconfig.json\")",
       "Bash(xargs grep:*)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "repowise"
+  ],
+  "enableAllProjectMcpServers": true
 }

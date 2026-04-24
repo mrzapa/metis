@@ -1,0 +1,11 @@
+{
+  "active": true,
+  "mode": "ralph",
+  "current_phase": "starting",
+  "started_at": "2026-04-24T15:48:37.112Z",
+  "updated_at": "2026-04-24T15:48:37.112Z",
+  "thread_id": "019dc02d-a02b-78b0-968a-5a514a67d947",
+  "turn_id": "019dc02d-a22e-7ee1-aa0c-1f854dab61c1",
+  "iteration": 1,
+  "max_iterations": 50
+}
