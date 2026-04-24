@@ -1,8 +1,8 @@
 ---
 Milestone: Seedling + Feed (M13)
-Status: Draft
-Claim: unclaimed
-Last updated: 2026-04-21 by claude/m17-phase7-export-discoverability (coordination link)
+Status: In progress
+Claim: claude/m13-seedling-runtime
+Last updated: 2026-04-24 by Codex
 Vision pillar: Companion
 ---
 
@@ -58,26 +58,32 @@ What's in place today that M13 will lean on:
   `list_candidates`, `mark_candidate_promoted` on a `skill_candidates.db`
   SQLite store (lines 326–381). The reflection cycle in M13 is the
   source that writes to this table.
+- **2026-04-24 — Phase 1 complete.** ADR 0007
+  (`docs/adr/0007-seedling-model-and-runtime.md`) selects
+  Llama-3.2-1B-Instruct Q4_K_M as the default Seedling model, Qwen2.5-0.5B
+  Q4_K_M as the low-memory fallback, and the existing in-process
+  llama-cpp/GGUF path under Litestar lifecycle as the runtime. It rejects
+  Phi-3.5-mini as the always-on default because it misses the <=2 GB resident
+  target.
 
 ## Next up
 
-The first concrete actions for whoever claims M13:
+The next concrete actions:
 
-1. **Write ADR 0007 — Seedling model selection & runtime.** Compare
-   Phi-3.5-mini-instruct, Llama-3.2-1B-Instruct, and Qwen2.5-0.5B-Instruct
-   on: GGUF Q4_K_M memory footprint, token/sec on CPU-only and on a
-   modest GPU (RTX 3060 8GB class), instruct-following quality for the
-   reflection/classification workload, and license. Decide whether the
-   worker uses the existing `LocalGGUFBackend` (llama-cpp in-process),
-   Ollama (daemon + HTTP), or a separate subprocess. GPU-vs-CPU posture.
-   Memory budget ceiling (recommend ≤2 GB RAM resident).
-2. **Prototype the background-worker lifecycle.** Decide where
+1. **Prototype the background-worker lifecycle.** Use ADR 0007's runtime
+   decision: in-process Litestar lifecycle, existing llama-cpp/GGUF stack,
+   Llama-3.2-1B default, Qwen2.5-0.5B fallback, and <=2 GB resident target.
+   Decide where
    `metis_app/seedling/` lives (probably a sibling package to
    `metis_app/services/`). Write a throwaway spike that starts the
    worker on `Litestar` app startup, exposes a `GET /v1/seedling/status`
    heartbeat, and tears down cleanly on SIGTERM. Confirm the worker
    survives a frontend reload and coexists with the autonomous research
    pipeline (no double-indexing).
+2. **Add the selected Seedling default to model recommendation/import
+   scaffolding.** ADR 0007 found the local GGUF catalog already has Phi
+   and Qwen entries, but not Llama-3.2-1B-Instruct. Add the selected
+   Llama GGUF source before the lifecycle prototype tries to activate it.
 3. **Write ADR 0008 — Feed-storage format.** Today, news-comet events
    are in-memory only (`_active_comets` in `routes/comets.py`).
    M13 needs durable feed memory: OPML import, per-source cursors,
@@ -342,8 +348,8 @@ consume, without shipping fine-tuning in M13.
 
 ### Open decisions requiring ADRs
 
-1. **ADR 0007 — Seedling model + runtime** (Phase 1 above). Blocker
-   for Phase 2.
+1. **ADR 0007 — Seedling model + runtime** (Phase 1 above). Completed
+   2026-04-24; see `docs/adr/0007-seedling-model-and-runtime.md`.
 2. **ADR 0008 — Feed-storage format** (new table vs Atlas extension,
    per-source cursors, OPML serialisation). Blocker for Phase 3.
 3. **ADR 0009 — Growth-stage signal** (exact thresholds, whether
