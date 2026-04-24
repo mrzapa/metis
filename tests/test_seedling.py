@@ -52,6 +52,13 @@ def test_status_cache_round_trips(tmp_path) -> None:
     assert cache.read() == expected
 
 
+def test_status_cache_falls_back_when_file_is_not_utf8(tmp_path) -> None:
+    path = tmp_path / "seedling_status.json"
+    path.write_bytes(b"\xff\xfe\xfdnot valid utf-8")
+
+    assert SeedlingStatusCache(path).read() == SeedlingStatus()
+
+
 def test_activity_bridge_records_companion_activity_payload() -> None:
     clear_seedling_activity_events()
 

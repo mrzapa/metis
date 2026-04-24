@@ -75,7 +75,9 @@ class SeedlingStatusCache:
         try:
             raw = self.path.read_text(encoding="utf-8")
             payload = json.loads(raw)
-        except (OSError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            # Cache is observational; a corrupt or unreadable file must not
+            # block worker startup.
             return SeedlingStatus()
         return SeedlingStatus.from_dict(payload)
 
