@@ -15,6 +15,13 @@ vi.mock("@/lib/api", () => ({
   bootstrapAssistant: vi.fn(),
   clearAssistantMemory: vi.fn(),
   fetchAutonomousStatus: vi.fn().mockResolvedValue({ enabled: false }),
+  fetchSeedlingStatus: vi.fn().mockResolvedValue({
+    running: false,
+    last_tick_at: null,
+    current_stage: "seedling",
+    next_action_at: null,
+    queue_depth: 0,
+  }),
   updateSettings: vi.fn().mockResolvedValue({}),
   triggerAutonomousResearchStream: vi.fn().mockResolvedValue(undefined),
   subscribeCompanionActivity: vi.fn().mockReturnValue(() => {}),
@@ -29,6 +36,7 @@ const {
   fetchAtlasCandidate,
   saveAtlasEntry,
   decideAtlasCandidate,
+  fetchSeedlingStatus,
   subscribeCompanionActivity,
 } = await import("@/lib/api");
 
@@ -101,6 +109,18 @@ function buildSnapshot(overrides: Partial<AssistantSnapshot> = {}): AssistantSna
 describe("MetisCompanionDock", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(fetchAtlasCandidate).mockReset();
+    vi.mocked(fetchAtlasCandidate).mockResolvedValue(null);
+    vi.mocked(fetchSeedlingStatus).mockReset();
+    vi.mocked(fetchSeedlingStatus).mockResolvedValue({
+      running: false,
+      last_tick_at: null,
+      current_stage: "seedling",
+      next_action_at: null,
+      queue_depth: 0,
+    });
+    vi.mocked(subscribeCompanionActivity).mockReset();
+    vi.mocked(subscribeCompanionActivity).mockReturnValue(() => {});
   });
 
   it("renders the minimized companion state from the assistant snapshot", async () => {
@@ -120,6 +140,22 @@ describe("MetisCompanionDock", () => {
     // Subtitle and summary are hidden in the compact minimized pill
     expect(screen.queryByText("Dedicated local companion")).not.toBeInTheDocument();
     expect(screen.queryByText("The companion stays minimized but persistent.")).not.toBeInTheDocument();
+  });
+
+  it("shows the Seedling liveness indicator when the worker is running", async () => {
+    vi.mocked(fetchAssistant).mockResolvedValueOnce(buildSnapshot());
+    vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
+    vi.mocked(fetchSeedlingStatus).mockResolvedValueOnce({
+      running: true,
+      last_tick_at: "2026-04-24T20:00:00+00:00",
+      current_stage: "seedling",
+      next_action_at: "2026-04-24T20:01:00+00:00",
+      queue_depth: 0,
+    });
+
+    render(<MetisCompanionDock />);
+
+    expect(await screen.findByLabelText("Seedling awake")).toBeInTheDocument();
   });
 
   it("shows the Atlas popup and lets the user save or dismiss it", async () => {

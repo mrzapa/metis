@@ -1,7 +1,7 @@
 ---
 Milestone: Seedling + Feed (M13)
 Status: In progress
-Claim: claude/m13-seedling-runtime
+Claim: claude/m13-phase2-seedling-lifecycle
 Last updated: 2026-04-24 by Codex
 Vision pillar: Companion
 ---
@@ -65,30 +65,33 @@ What's in place today that M13 will lean on:
   llama-cpp/GGUF path under Litestar lifecycle as the runtime. It rejects
   Phi-3.5-mini as the always-on default because it misses the <=2 GB resident
   target.
+- **2026-04-24 — Phase 2 complete.** `metis_app/seedling/` now contains the
+  lifecycle shell: a fixed-interval worker, status cache, startup/shutdown
+  hooks, and a small in-process activity bridge. Litestar starts the worker
+  on app startup, stops it on shutdown, and exposes `GET /v1/seedling/status`
+  for liveness. The companion dock polls that heartbeat, shows the subtle
+  Seedling indicator, and reuses the existing companion activity bus for
+  Seedling lifecycle events. This phase is deliberately a no-op heartbeat:
+  it does not load the GGUF model, ingest feeds, schedule research, or advance
+  growth stages yet.
 
 ## Next up
 
 The next concrete actions:
 
-1. **Prototype the background-worker lifecycle.** Use ADR 0007's runtime
-   decision: in-process Litestar lifecycle, existing llama-cpp/GGUF stack,
-   Llama-3.2-1B default, Qwen2.5-0.5B fallback, and <=2 GB resident target.
-   Decide where
-   `metis_app/seedling/` lives (probably a sibling package to
-   `metis_app/services/`). Write a throwaway spike that starts the
-   worker on `Litestar` app startup, exposes a `GET /v1/seedling/status`
-   heartbeat, and tears down cleanly on SIGTERM. Confirm the worker
-   survives a frontend reload and coexists with the autonomous research
-   pipeline (no double-indexing).
-2. **Add the selected Seedling default to model recommendation/import
+1. **Add the selected Seedling default to model recommendation/import
    scaffolding.** ADR 0007 found the local GGUF catalog already has Phi
    and Qwen entries, but not Llama-3.2-1B-Instruct. Add the selected
-   Llama GGUF source before the lifecycle prototype tries to activate it.
-3. **Write ADR 0008 — Feed-storage format.** Today, news-comet events
+   Llama GGUF source before later phases try to activate it.
+2. **Write ADR 0008 — Feed-storage format.** Today, news-comet events
    are in-memory only (`_active_comets` in `routes/comets.py`).
    M13 needs durable feed memory: OPML import, per-source cursors,
    dedup across restarts, a `news_items.db` or Atlas-backed table.
-   Pick the storage shape before writing worker code.
+   Pick the storage shape before turning the worker into an ingest loop.
+3. **Start Phase 3 continuous ingestion only after ADR 0008.** Extend the
+   Phase 2 heartbeat worker into a scheduler that owns feed polling and
+   research/reflection cadence, while still avoiding double-indexing with
+   `AutonomousResearchService`.
 
 ## Blockers
 

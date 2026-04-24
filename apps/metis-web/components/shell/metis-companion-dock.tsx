@@ -11,6 +11,7 @@ import {
   fetchAssistant,
   fetchAtlasCandidate,
   fetchAutonomousStatus,
+  fetchSeedlingStatus,
   reflectAssistant,
   saveAtlasEntry,
   subscribeCompanionActivity,
@@ -18,7 +19,7 @@ import {
   updateAssistant,
   updateSettings,
 } from "@/lib/api";
-import type { AssistantSnapshot, AtlasEntry, CompanionActivityEvent } from "@/lib/api";
+import type { AssistantSnapshot, AtlasEntry, CompanionActivityEvent, SeedlingStatus } from "@/lib/api";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -87,6 +88,7 @@ export function MetisCompanionDock({
     }
   });
   const [autonomousEnabled, setAutonomousEnabled] = useState<boolean | null>(null);
+  const [seedlingStatus, setSeedlingStatus] = useState<SeedlingStatus | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [researchPhase, setResearchPhase] = useState("");
   const [unseenCount, setUnseenCount] = useState(0);
@@ -138,6 +140,13 @@ export function MetisCompanionDock({
 
   const minimized = Boolean(snapshot?.identity.minimized);
   const showAtlasToast = Boolean(toastMessage?.startsWith("Saved to Atlas"));
+  const seedlingAwake = seedlingStatus?.running === true;
+  const seedlingStatusLabel =
+    seedlingStatus === null
+      ? "Seedling status unknown"
+      : seedlingAwake
+        ? "Seedling awake"
+        : "Seedling resting";
 
   const load = useCallback(async (autoBootstrap: boolean) => {
     const requestId = ++requestIdRef.current;
@@ -274,6 +283,26 @@ export function MetisCompanionDock({
     fetchAutonomousStatus()
       .then((s) => setAutonomousEnabled(s.enabled))
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSeedlingStatus() {
+      try {
+        const status = await fetchSeedlingStatus();
+        if (!cancelled) setSeedlingStatus(status);
+      } catch {
+        if (!cancelled) setSeedlingStatus(null);
+      }
+    }
+    void loadSeedlingStatus();
+    const intervalId = window.setInterval(() => {
+      void loadSeedlingStatus();
+    }, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   // Keep refs mirrored so the (stable) subscribeCompanionActivity callback
@@ -612,10 +641,32 @@ export function MetisCompanionDock({
           minimized ? "gap-2 px-2.5 py-1.5" : "gap-3 border-b border-white/8 px-4 py-3",
         )}>
           <span className={cn(
-            "flex items-center justify-center rounded-full bg-primary/15 text-primary",
+            "relative flex items-center justify-center rounded-full bg-primary/15 text-primary",
             minimized ? "size-7" : "size-9",
           )}>
             <Bot className={minimized ? "size-3.5" : "size-4"} />
+            <span
+              role="status"
+              aria-label={seedlingStatusLabel}
+              title={seedlingStatusLabel}
+              className={cn(
+                "absolute -bottom-0.5 -right-0.5 flex size-2.5 items-center justify-center rounded-full border border-background",
+                seedlingAwake ? "bg-emerald-400" : "bg-muted-foreground/70",
+              )}
+            >
+              <motion.span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  seedlingAwake ? "bg-emerald-100" : "bg-muted",
+                )}
+                animate={
+                  seedlingAwake && !prefersReducedMotion
+                    ? { scale: [0.85, 1.25, 0.85], opacity: [0.65, 1, 0.65] }
+                    : undefined
+                }
+                transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+              />
+            </span>
           </span>
           {!minimized && (
             <div className="min-w-0">
@@ -718,6 +769,7 @@ export function MetisCompanionDock({
                           index_build: "text-green-400",
                           autonomous_research: "text-violet-400",
                           reflection: "text-amber-400",
+                          seedling: "text-emerald-400",
                         };
                         const stateIcon =
                           t.state === "running"

@@ -970,12 +970,21 @@ export interface TraceEvent {
 }
 
 export interface CompanionActivityEvent {
-  source: "rag_stream" | "index_build" | "autonomous_research" | "reflection";
+  source: "rag_stream" | "index_build" | "autonomous_research" | "reflection" | "seedling";
   state: "running" | "completed" | "error";
   trigger: string;
   summary: string;
   timestamp: number;
   payload?: Record<string, unknown>;
+}
+
+export interface SeedlingStatus {
+  running: boolean;
+  last_tick_at: string | null;
+  current_stage: "seedling" | "sapling" | "bloom" | "elder";
+  next_action_at: string | null;
+  queue_depth: number;
+  activity_events?: CompanionActivityEvent[];
 }
 
 export interface AutoResearchStreamEvent {
@@ -1001,6 +1010,7 @@ export interface AutoResearchStreamEvent {
 type CompanionActivityListener = (event: CompanionActivityEvent) => void;
 
 const companionActivityListeners = new Set<CompanionActivityListener>();
+const seenSeedlingActivityEventIds = new Set<string>();
 
 export function subscribeCompanionActivity(listener: CompanionActivityListener): () => void {
   companionActivityListeners.add(listener);
@@ -2673,6 +2683,41 @@ export async function fetchAssistantStatus(): Promise<AssistantStatus> {
     throw new Error(`Failed to fetch assistant status (${res.status}): ${detail}`);
   }
   return res.json();
+}
+
+function emitSeedlingActivityEvents(status: SeedlingStatus): void {
+  for (const event of status.activity_events ?? []) {
+    const rawId = event.payload?.event_id;
+    const eventId =
+      typeof rawId === "string" && rawId
+        ? rawId
+        : `${event.timestamp}:${event.state}:${event.summary}`;
+    if (seenSeedlingActivityEventIds.has(eventId)) continue;
+    seenSeedlingActivityEventIds.add(eventId);
+    emitCompanionActivity({
+      ...event,
+      source: "seedling",
+      state: event.state,
+      trigger: event.trigger || "lifecycle",
+      summary: event.summary || "Seedling heartbeat",
+    });
+  }
+  if (seenSeedlingActivityEventIds.size > 100) {
+    const newest = Array.from(seenSeedlingActivityEventIds).slice(-50);
+    seenSeedlingActivityEventIds.clear();
+    for (const eventId of newest) seenSeedlingActivityEventIds.add(eventId);
+  }
+}
+
+export async function fetchSeedlingStatus(): Promise<SeedlingStatus> {
+  const res = await apiFetch(`${await getApiBase()}/v1/seedling/status`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch seedling status (${res.status}): ${detail}`);
+  }
+  const status = (await res.json()) as SeedlingStatus;
+  emitSeedlingActivityEvents(status);
+  return status;
 }
 
 export async function reflectAssistant(payload: {

@@ -25,6 +25,8 @@ const {
   fetchNetworkAuditEvents,
   fetchNetworkAuditProviders,
   fetchNetworkAuditRecentCount,
+  fetchSeedlingStatus,
+  subscribeCompanionActivity,
   runNetworkAuditSyntheticPass,
 } = await import(
   "../api"
@@ -83,6 +85,53 @@ describe("fetchSettings", () => {
 
     const result = await fetchSettings();
     expect(result).toEqual(mockSettings);
+  });
+});
+
+describe("fetchSeedlingStatus", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("emits buffered Seedling activity through the companion bus once", async () => {
+    const events: unknown[] = [];
+    const unsubscribe = subscribeCompanionActivity((event) => events.push(event));
+    const payload = {
+      running: true,
+      last_tick_at: "2026-04-24T20:00:00+00:00",
+      current_stage: "seedling",
+      next_action_at: "2026-04-24T20:01:00+00:00",
+      queue_depth: 0,
+      activity_events: [
+        {
+          source: "seedling",
+          state: "running",
+          trigger: "lifecycle",
+          summary: "Seedling heartbeat",
+          timestamp: 1770000000000,
+          payload: { event_id: "seedling-1" },
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(payload),
+      }),
+    );
+
+    await fetchSeedlingStatus();
+    await fetchSeedlingStatus();
+    unsubscribe();
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        source: "seedling",
+        state: "running",
+        summary: "Seedling heartbeat",
+      }),
+    ]);
   });
 });
 

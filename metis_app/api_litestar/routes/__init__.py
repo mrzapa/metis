@@ -16,6 +16,7 @@ from . import index
 from . import logs
 from . import observe
 from . import query
+from . import seedling
 from . import sessions
 from . import settings
 
@@ -35,6 +36,7 @@ __all__ = [
 	"logs",
 	"observe",
 	"query",
+	"seedling",
 	"sessions",
 	"settings",
 	"version",

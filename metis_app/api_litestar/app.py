@@ -18,6 +18,7 @@ from metis_app.network_audit.runtime import (
     close_default_store,
     get_default_store,
 )
+from metis_app.seedling import start_seedling_worker, stop_seedling_worker
 
 from .common import (
     cors_origins_from_env,
@@ -44,6 +45,7 @@ from .routes import (
     network_audit,
     observe,
     query,
+    seedling,
     sessions,
     settings,
     version,
@@ -110,6 +112,7 @@ def create_app() -> Litestar:
             network_audit.router,
             observe.router,
             query.router,
+            seedling.router,
             sessions.router,
             settings.router,
             web_graph.router,
@@ -131,8 +134,8 @@ def create_app() -> Litestar:
             version.api_version,
             protected_routes,
         ],
-        on_startup=[_warm_network_audit_store],
-        on_shutdown=[_close_network_audit_store],
+        on_startup=[_warm_network_audit_store, start_seedling_worker],
+        on_shutdown=[stop_seedling_worker, _close_network_audit_store],
     )
 
     return app
