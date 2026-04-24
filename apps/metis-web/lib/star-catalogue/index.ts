@@ -36,4 +36,5 @@ export {
   encodeFilterToHash,
   isCatalogueFilterActive,
   matchesCatalogueFilter,
+  mergeFilterIntoHash,
 } from "./catalogue-filter";

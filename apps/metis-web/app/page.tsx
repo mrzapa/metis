@@ -26,9 +26,9 @@ import {
   CATALOGUE_FILTER_DEFAULT,
   CATALOGUE_FILTER_DIM_BRIGHTNESS,
   decodeFilterFromHash,
-  encodeFilterToHash,
   isCatalogueFilterActive,
   matchesCatalogueFilter,
+  mergeFilterIntoHash,
 } from "@/lib/star-catalogue";
 import { BorderBeam } from "@/components/ui/border-beam";
 import { useConstellationCamera } from "@/hooks/use-constellation-camera";
@@ -998,12 +998,15 @@ export default function Home() {
 
   // M12 Phase 3 — sync filter state into the render-loop ref + URL hash.
   // Triggers a starfield revision bump so the next frame re-runs the dim pass.
+  // `mergeFilterIntoHash` preserves unrelated hash segments (anchors like
+  // `#build-map`, other persisted query keys) — only the `fams=`/`mag=`
+  // pieces are owned by the filter.
   useEffect(() => {
     catalogueFilterStateRef.current = catalogueFilterState;
     starfieldRevisionRef.current += 1;
     if (typeof window === "undefined") return;
-    const encoded = encodeFilterToHash(catalogueFilterState);
-    const nextHash = encoded.length > 0 ? `#${encoded}` : "";
+    const merged = mergeFilterIntoHash(window.location.hash, catalogueFilterState);
+    const nextHash = merged.length > 0 ? `#${merged}` : "";
     if (window.location.hash !== nextHash) {
       // Use replaceState to avoid polluting browser history per slider tick.
       window.history.replaceState(

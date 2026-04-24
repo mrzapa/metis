@@ -131,3 +131,29 @@ export function decodeFilterFromHash(rawHash: string): CatalogueFilterState {
 
   return { families, maxMagnitude };
 }
+
+/**
+ * Merge an active filter state into a raw hash string while preserving
+ * unrelated segments — anchors (`#build-map`), other persisted query keys,
+ * etc. The hash is split on `&`; segments starting with `fams=` or `mag=`
+ * are owned by this filter and get replaced. Everything else is left
+ * untouched and restored in its original position.
+ *
+ * Returns the merged hash content WITHOUT a leading `#` so callers can
+ * choose whether to write `""` (empty fragment) or `"#" + result`.
+ */
+export function mergeFilterIntoHash(
+  rawHash: string,
+  state: CatalogueFilterState,
+): string {
+  const stripped = stripHashPrefix(rawHash);
+  const existingSegments = stripped.length > 0 ? stripped.split("&") : [];
+  const otherSegments = existingSegments.filter(
+    (seg) => !seg.startsWith("fams=") && !seg.startsWith("mag="),
+  );
+
+  const encoded = encodeFilterToHash(state);
+  const ourSegments = encoded.length > 0 ? encoded.split("&") : [];
+
+  return [...otherSegments, ...ourSegments].join("&");
+}

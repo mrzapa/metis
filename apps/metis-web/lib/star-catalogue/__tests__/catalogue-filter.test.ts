@@ -9,6 +9,7 @@ import {
   encodeFilterToHash,
   isCatalogueFilterActive,
   matchesCatalogueFilter,
+  mergeFilterIntoHash,
 } from "../catalogue-filter";
 import type { CatalogueFilterState } from "../catalogue-filter";
 
@@ -182,6 +183,96 @@ describe("catalogue-filter", () => {
   describe("CATALOGUE_SPECTRAL_FAMILIES", () => {
     it("is exactly O B A F G K M in classical hot-to-cool order", () => {
       expect(CATALOGUE_SPECTRAL_FAMILIES).toEqual(["O", "B", "A", "F", "G", "K", "M"]);
+    });
+  });
+
+  describe("mergeFilterIntoHash", () => {
+    it("returns empty string for empty hash + default state", () => {
+      expect(mergeFilterIntoHash("", CATALOGUE_FILTER_DEFAULT)).toBe("");
+      expect(mergeFilterIntoHash("#", CATALOGUE_FILTER_DEFAULT)).toBe("");
+    });
+
+    it("encodes filter into empty hash when state is active", () => {
+      const state: CatalogueFilterState = {
+        families: new Set(["G"]),
+        maxMagnitude: 4.5,
+      };
+      expect(mergeFilterIntoHash("", state)).toBe("fams=G&mag=4.5");
+    });
+
+    it("preserves an unrelated anchor when filter is at default state", () => {
+      expect(mergeFilterIntoHash("#build-map", CATALOGUE_FILTER_DEFAULT)).toBe("build-map");
+    });
+
+    it("preserves an unrelated anchor when filter is active", () => {
+      const state: CatalogueFilterState = {
+        families: new Set(["G"]),
+        maxMagnitude: CATALOGUE_FILTER_MAX_MAGNITUDE,
+      };
+      expect(mergeFilterIntoHash("#build-map", state)).toBe("build-map&fams=G");
+    });
+
+    it("replaces existing fams= without duplicating it", () => {
+      const state: CatalogueFilterState = {
+        families: new Set(["K"]),
+        maxMagnitude: CATALOGUE_FILTER_MAX_MAGNITUDE,
+      };
+      expect(mergeFilterIntoHash("fams=G", state)).toBe("fams=K");
+    });
+
+    it("replaces existing mag= without duplicating it", () => {
+      const state: CatalogueFilterState = {
+        families: new Set(),
+        maxMagnitude: 2.5,
+      };
+      expect(mergeFilterIntoHash("mag=5.0", state)).toBe("mag=2.5");
+    });
+
+    it("preserves anchor + replaces existing filter when active state changes", () => {
+      const state: CatalogueFilterState = {
+        families: new Set(["K"]),
+        maxMagnitude: 3.0,
+      };
+      expect(mergeFilterIntoHash("#build-map&fams=G&mag=5.0", state)).toBe(
+        "build-map&fams=K&mag=3",
+      );
+    });
+
+    it("strips the filter portion when state returns to default, keeps anchor", () => {
+      expect(
+        mergeFilterIntoHash("#build-map&fams=G&mag=5.0", CATALOGUE_FILTER_DEFAULT),
+      ).toBe("build-map");
+    });
+
+    it("returns just the encoded filter when there are no other segments", () => {
+      const state: CatalogueFilterState = {
+        families: new Set(["G", "K"]),
+        maxMagnitude: 4,
+      };
+      expect(mergeFilterIntoHash("fams=O&mag=2", state)).toBe("fams=G,K&mag=4");
+    });
+
+    it("tolerates leading # and #!", () => {
+      const state: CatalogueFilterState = {
+        families: new Set(["G"]),
+        maxMagnitude: CATALOGUE_FILTER_MAX_MAGNITUDE,
+      };
+      expect(mergeFilterIntoHash("#!build-map", state)).toBe("build-map&fams=G");
+    });
+
+    it("preserves multiple unrelated segments", () => {
+      const state: CatalogueFilterState = {
+        families: new Set(["G"]),
+        maxMagnitude: CATALOGUE_FILTER_MAX_MAGNITUDE,
+      };
+      expect(mergeFilterIntoHash("ref=hn&campaign=launch", state)).toBe(
+        "ref=hn&campaign=launch&fams=G",
+      );
+    });
+
+    it("does not strip anchor-only fragment when default state replaces no-op", () => {
+      // No prior filter, default state, anchor preserved as-is.
+      expect(mergeFilterIntoHash("#section", CATALOGUE_FILTER_DEFAULT)).toBe("section");
     });
   });
 });
