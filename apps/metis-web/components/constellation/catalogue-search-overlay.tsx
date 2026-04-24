@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import {
   searchCatalogueIndex,
   type CatalogueSearchEntry,
@@ -44,6 +44,55 @@ export function CatalogueSearchOverlay({
   const showEmptyState = expanded && hasQuery && results.length === 0;
   const showResults = expanded && hasQuery && results.length > 0;
 
+  const inputRef = useRef<HTMLInputElement>(null);
+  const resultRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const focusResult = useCallback((index: number) => {
+    const node = resultRefs.current[index];
+    if (node) node.focus();
+  }, []);
+
+  const handleInputKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === "Escape") {
+        onQueryChange("");
+        onExpandedChange(false);
+        return;
+      }
+      if (event.key === "ArrowDown" && results.length > 0) {
+        event.preventDefault();
+        focusResult(0);
+      }
+    },
+    [focusResult, onExpandedChange, onQueryChange, results.length],
+  );
+
+  const handleResultKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>, position: number) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        if (position < results.length - 1) {
+          focusResult(position + 1);
+        }
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (position === 0) {
+          inputRef.current?.focus();
+        } else {
+          focusResult(position - 1);
+        }
+        return;
+      }
+      if (event.key === "Escape") {
+        onQueryChange("");
+        onExpandedChange(false);
+      }
+    },
+    [focusResult, onExpandedChange, onQueryChange, results.length],
+  );
+
   return (
     <div
       className={`metis-catalogue-search ${expanded ? "is-expanded" : ""}`}
@@ -59,54 +108,53 @@ export function CatalogueSearchOverlay({
         ✧
       </button>
       <input
+        ref={inputRef}
         className="metis-catalogue-search-input"
         type="search"
         value={query}
         placeholder="Search the star catalogue by name…"
         aria-label="Catalogue search"
         onChange={(event) => onQueryChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            onQueryChange("");
-            onExpandedChange(false);
-          }
-        }}
+        onKeyDown={handleInputKeyDown}
       />
       {showResults && (
         <ul
           className="metis-catalogue-search-results"
-          role="listbox"
           aria-label="Catalogue search results"
         >
-          {results.map((entry) => {
+          {results.map((entry, position) => {
             const magnitudeLabel = formatMagnitude(entry.magnitude);
             return (
-              <li
-                key={entry.id}
-                role="option"
-                aria-selected="false"
-                className="metis-catalogue-search-result"
-                onClick={() => onSelect(entry)}
-              >
-                <span className="metis-catalogue-search-result-name">{entry.name}</span>
-                <span className="metis-catalogue-search-result-meta">
-                  <span
-                    className="metis-catalogue-search-result-kind"
-                    data-kind={entry.kind}
-                  >
-                    {KIND_CHIP_LABEL[entry.kind]}
+              <li key={entry.id} className="metis-catalogue-search-result-row">
+                <button
+                  type="button"
+                  ref={(node) => {
+                    resultRefs.current[position] = node;
+                  }}
+                  className="metis-catalogue-search-result"
+                  onClick={() => onSelect(entry)}
+                  onKeyDown={(event) => handleResultKeyDown(event, position)}
+                >
+                  <span className="metis-catalogue-search-result-name">{entry.name}</span>
+                  <span className="metis-catalogue-search-result-meta">
+                    <span
+                      className="metis-catalogue-search-result-kind"
+                      data-kind={entry.kind}
+                    >
+                      {KIND_CHIP_LABEL[entry.kind]}
+                    </span>
+                    {entry.spectralClass && (
+                      <span className="metis-catalogue-search-result-class">
+                        {entry.spectralClass}
+                      </span>
+                    )}
+                    {magnitudeLabel && (
+                      <span className="metis-catalogue-search-result-mag">
+                        {magnitudeLabel}
+                      </span>
+                    )}
                   </span>
-                  {entry.spectralClass && (
-                    <span className="metis-catalogue-search-result-class">
-                      {entry.spectralClass}
-                    </span>
-                  )}
-                  {magnitudeLabel && (
-                    <span className="metis-catalogue-search-result-mag">
-                      {magnitudeLabel}
-                    </span>
-                  )}
-                </span>
+                </button>
               </li>
             );
           })}

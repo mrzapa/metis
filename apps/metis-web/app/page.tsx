@@ -5894,18 +5894,30 @@ body {
   max-height: min(60vh, 420px);
   overflow-y: auto;
 }
+.metis-catalogue-search-result-row {
+  list-style: none;
+}
 .metis-catalogue-search-result {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  width: 100%;
   padding: 8px 10px;
   border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: inherit;
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
-.metis-catalogue-search-result:hover {
-  background: rgba(196, 149, 58, 0.1);
+.metis-catalogue-search-result:hover,
+.metis-catalogue-search-result:focus-visible {
+  background: rgba(196, 149, 58, 0.12);
+  border-color: rgba(196, 149, 58, 0.4);
+  outline: none;
 }
 .metis-catalogue-search-result-name {
   color: rgba(245, 240, 220, 0.98);
