@@ -15,6 +15,10 @@ const LandingStarfieldWebgl = dynamic(
   { ssr: false, loading: () => null },
 );
 import { StarDetailsPanel } from "@/components/constellation/star-observatory-dialog";
+import {
+  CatalogueStarInspector,
+  type CatalogueStarInspectorStar,
+} from "@/components/constellation/catalogue-star-inspector";
 import { BorderBeam } from "@/components/ui/border-beam";
 import { useConstellationCamera } from "@/hooks/use-constellation-camera";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
@@ -221,6 +225,7 @@ interface WorldStarData {
   revealZoomFactor: number;
   profile: StellarProfile;
   catalogueName: string | null;
+  apparentMagnitude: number;
 }
 
 interface HomeRagPulseState {
@@ -799,6 +804,8 @@ export default function Home() {
   const [indexLoadError, setIndexLoadError] = useState<string | null>(null);
   const [hoveredAddCandidateId, setHoveredAddCandidateId] = useState<string | null>(null);
   const [hoveredUserStarId, setHoveredUserStarId] = useState<string | null>(null);
+  const [inspectedCatalogueStar, setInspectedCatalogueStar] =
+    useState<CatalogueStarInspectorStar | null>(null);
   const [dragMessage, setDragMessage] = useState<string | null>(null);
   const [toastState, setToastState] = useState<HomeToastState | null>(null);
   const [activeCanvasTool, setActiveCanvasTool] = useState<CanvasTool>("select");
@@ -2488,6 +2495,7 @@ export default function Home() {
             revealZoomFactor,
             profile: cat.profile,
             catalogueName: cat.name,
+            apparentMagnitude: mag,
           });
         }
 
@@ -4784,6 +4792,34 @@ export default function Home() {
         return;
       }
 
+      // M12 Phase 1: no add-candidate + no node hit = check for a catalogue-
+      // star hit (any star, addable or not). If present, open the Catalogue
+      // Star Inspector. The addable path above is untouched — addable stars
+      // preserve the existing immediate-promote / armed-tap UX; the inspector
+      // only lights up clicks that are currently no-ops.
+      const catalogueHit = getHoveredCatalogueStar(e.clientX, e.clientY);
+      if (catalogueHit) {
+        const worldData = visibleWorldStars.find((ws) => ws.id === catalogueHit.id);
+        if (worldData) {
+          setInspectedCatalogueStar({
+            id: worldData.id,
+            name: worldData.catalogueName,
+            profile: worldData.profile,
+            apparentMagnitude: worldData.apparentMagnitude,
+            worldX: worldData.worldX,
+            worldY: worldData.worldY,
+          });
+          armedAddCandidateIdRef.current = null;
+          if (currentSelectedStarId) {
+            setSelectedUserStarId(null);
+            setPendingDetailStar(null);
+          }
+          closeConcept();
+          hideCatalogueTooltip();
+          return;
+        }
+      }
+
       armedAddCandidateIdRef.current = null;
       if (currentSelectedStarId) {
         setSelectedUserStarId(null);
@@ -5235,6 +5271,21 @@ export default function Home() {
         onRegenerateLearningRoute={handleRegenerateLearningRoute}
         onLaunchLearningRouteStep={handleLaunchLearningRouteStep}
         onSetLearningRouteStepStatus={handleSetLearningRouteStepStatus}
+      />
+
+      {/* M12 Phase 1 — Catalogue Star Inspector.
+          Opens on click of any catalogue star that is not an add candidate
+          (i.e. field stars out of adjacency, or any catalogue star when the
+          user has no indexed content yet). Addable stars keep the existing
+          instant-promote UX untouched. Promote CTA is disabled in Phase 1
+          (reason: adjacency / no content); Phase 4 unifies the paths and
+          lights it up. */}
+      <CatalogueStarInspector
+        open={inspectedCatalogueStar !== null}
+        star={inspectedCatalogueStar}
+        addable={false}
+        onClose={() => setInspectedCatalogueStar(null)}
+        onPromote={() => setInspectedCatalogueStar(null)}
       />
 
 
@@ -6107,6 +6158,129 @@ body {
 }
 .metis-catalogue-tooltip[data-kind="classical"][data-footer="true"] [data-field="footer"] {
   display: inline;
+}
+
+/* M12 Phase 1 — CATALOGUE STAR INSPECTOR.
+   Edge-anchored side pane, non-modal (constellation stays pannable
+   behind). Right-anchored on desktop; slides up from the bottom on
+   narrow viewports. Lightweight counterpart to StarDetailsPanel. */
+.metis-catalogue-inspector {
+  position: fixed;
+  top: 50%;
+  right: 24px;
+  transform: translateY(-50%);
+  width: min(360px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  z-index: 45;
+  padding: 20px 22px 22px;
+  border-radius: 18px;
+  background: rgba(12, 18, 35, 0.92);
+  border: 1px solid rgba(196, 149, 58, 0.22);
+  box-shadow: 0 18px 48px -16px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(14px);
+  color: rgba(220, 228, 246, 0.95);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.metis-catalogue-inspector-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.metis-catalogue-inspector-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: rgba(245, 240, 220, 1);
+  font-family: "Space Grotesk", sans-serif;
+}
+.metis-catalogue-inspector-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(220, 228, 246, 0.85);
+  font-size: 18px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.metis-catalogue-inspector-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(196, 149, 58, 0.3);
+}
+.metis-catalogue-inspector-preview {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+.metis-catalogue-inspector-preview-disc {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  box-shadow: 0 0 24px -6px rgba(255, 255, 255, 0.22);
+}
+.metis-catalogue-inspector-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+.metis-catalogue-inspector-field {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.metis-catalogue-inspector-field dt {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(200, 210, 240, 0.62);
+}
+.metis-catalogue-inspector-field dd {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: rgba(230, 236, 250, 0.98);
+  font-variant-numeric: tabular-nums;
+}
+.metis-catalogue-inspector-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.metis-catalogue-inspector-promote {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(196, 149, 58, 0.28);
+  background: rgba(196, 149, 58, 0.12);
+  color: rgba(245, 240, 220, 1);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.metis-catalogue-inspector-promote:hover:not(:disabled) {
+  background: rgba(196, 149, 58, 0.2);
+  border-color: rgba(196, 149, 58, 0.5);
+}
+.metis-catalogue-inspector-promote:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.metis-catalogue-inspector-reason {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(200, 210, 240, 0.6);
 }
 
 /* CHAT BUBBLE */
