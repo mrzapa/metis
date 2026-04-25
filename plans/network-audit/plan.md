@@ -211,7 +211,7 @@ rather than wrapper in v1):**
 | # | File : line | Resource | Note |
 |---|---|---|---|
 | L | `apps/metis-web/app/page.tsx:5309` | `@import url('https://fonts.googleapis.com/css2?family=...')` | Google Fonts. Arguably phones home on first load. **Should be inlined or flagged** as part of M17 delivery. |
-| M | `apps/metis-web/components/webgpu-companion/worker.ts:38` | Comment references `huggingface.co/spaces/webml-community/bonsai-webgpu` | WebGPU model fetch; verify whether the model actually downloads from HF or is bundled. |
+| M | `apps/metis-web/lib/webgpu-companion/worker.ts:39` | `MODEL_ID = "onnx-community/Bonsai-1.7B-ONNX"` (comment links the reference space at `huggingface.co/spaces/webml-community/bonsai-webgpu`) | **Confirmed**: `@huggingface/transformers` fetches ~500 MB of ONNX weights from `huggingface.co/onnx-community/Bonsai-1.7B-ONNX/resolve/main/...` on first load via the Web Worker's own `fetch()` (browser-side, **not** Python `audited_urlopen` territory). IndexedDB-cached on success so subsequent loads are offline. Elevated to a load-bearing default by [ADR 0013](../../docs/adr/0013-seedling-runtime-frontend-default.md); Phase 4 of M13 should expose first-load vs. cached state in the dock. Needs follow-up classification under "browser-side egress" once that taxonomy lands. |
 
 **What the audit panel must cover in v1** (numbered 1–11 + L + M
 above). Paid-tier-specific outbounds (M15) added when M15 ships,

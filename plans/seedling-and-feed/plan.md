@@ -324,7 +324,13 @@ when no backend GGUF is configured.
   `SkillRepository.save_candidate()` — this is the **feed into M06's
   skill self-evolution**; do not let M06 duplicate this writer,
   (c) emits a `"reflection"` `CompanionActivityEvent` with
-  `kind: "while_you_work"`.
+  `kind: "while_you_work"`. The `kind` field is an **additive type
+  extension** to `CompanionActivityEvent` in `apps/metis-web/lib/api.ts`
+  (`kind?: "while_you_work" | "overnight"` on top of the existing
+  `source | state | trigger | summary | timestamp | payload?` shape);
+  existing fields keep their meaning. This is the same posture as
+  Phase 3's planned `'news_comet'` addition to the `source` union —
+  extend, do not duplicate.
 - WebGPU-unavailable browsers: no reflection happens. The dock shows
   the existing `caniuse.com/webgpu` link plus the ADR 0013 fallback
   copy. Phase 4 does not silently degrade to a placeholder.

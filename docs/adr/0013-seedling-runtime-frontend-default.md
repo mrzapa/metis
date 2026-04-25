@@ -103,11 +103,28 @@ becomes opt-in — a power-user upgrade, not the baseline.**
   the existing recommender.
 - `GET /v1/seedling/status` reports a `model_status` field with
   values:
-  - `"frontend_only"` (default; Bonsai is the only path),
+  - `"frontend_only"` (no GGUF registered),
   - `"backend_configured"` (a GGUF is registered and the toggle is on),
   - `"backend_disabled"` (a GGUF is registered but the toggle is off),
   - `"backend_unavailable"` (the toggle is on but the configured
     GGUF cannot load — file missing, OOM, llama-cpp init failure).
+  `model_status` describes **only the backend reflection path.**
+  WebGPU/Bonsai availability is reported separately on the
+  frontend via `useWebGPUCompanion().status` (existing
+  `unsupported|idle|loading|ready|generating|oom|error` enum).
+  The two statuses are independent — a user can have
+  `frontend_only` + WebGPU `ready` (the default happy path),
+  `backend_configured` + WebGPU `unsupported` (backend power user
+  on a no-WebGPU browser), and so on. The dock renders copy off
+  the combination of the two; neither subsumes the other.
+- **Runtime priority when both are available.** Bonsai owns
+  while-you-work reflection (event-driven, browser-side); the
+  backend GGUF owns overnight reflection (time-driven, backend).
+  They coexist by default — a user with both Bonsai-ready and
+  `backend_configured` gets Bonsai while the dock is open and
+  backend overnight when the laptop is awake. Phase 4 should
+  not expose a "which runtime to use right now" toggle in v0; the
+  cadence boundary already disambiguates.
 - A user with no GGUF and no WebGPU support gets a Seedling that
   ingests, classifies, and tracks growth — but cannot reflect.
   That state is honest and surfaced in the dock; it is not a crash.
@@ -158,12 +175,25 @@ reflection:
   learning). This pivot does not change the M13 deliverable; it
   changes which runtime carries it.
 - Preserve ADR 0011's privacy posture. Bonsai runs entirely in the
-  user's browser via WebGPU; no prompt or completion text leaves the
-  device. The first-load model download from
-  `huggingface.co/onnx-community/Bonsai-1.7B-ONNX` is already
-  recorded as `M | apps/metis-web/components/webgpu-companion/worker.ts:38`
-  in `plans/network-audit/plan.md`'s asset audit; no new outbound
-  call site is introduced.
+  user's browser via WebGPU; **inference traffic stays on-device** —
+  no prompt or completion text leaves the user's machine. The
+  first-load model download from
+  `huggingface.co/onnx-community/Bonsai-1.7B-ONNX` is a one-time
+  outbound that **must be visible in the network-audit panel.** That
+  download is currently flagged as an **open M17 audit item**
+  (`plans/network-audit/plan.md` row M, pointing at
+  `apps/metis-web/lib/webgpu-companion/worker.ts:39`) for
+  classification — *"verify whether the model actually downloads
+  from HF or is bundled"*. ADR 0013 does not introduce a new call
+  site; it elevates an already-shipping fetch to a load-bearing
+  default. **M17 should resolve row M before Phase 4 ships** so the
+  dock can honestly tell users when the download hits the network
+  versus when it is served from IndexedDB cache. Note also that the
+  `@huggingface/transformers` library issues this fetch from the Web
+  Worker via the browser's own `fetch()`, which is outside M17's
+  stdlib `audited_urlopen` interception (M17 is backend-only); the
+  classification needs to record this as browser-side egress, not
+  Python-side.
 - Do not silently start the Bonsai download. The opt-in posture from
   `useWebGPUCompanion.load()` is preserved — Phase 4 wires the toggle,
   it does not bypass it.
@@ -224,9 +254,14 @@ Accepted implementation follow-ups:
   the opt-in.
 - **`/v1/seedling/status` gains `model_status`.** Phase 3 or Phase 4
   (whichever lands first) extends the existing
-  `SeedlingStatus` dataclass and the matching frontend type with
-  the four-value enum above. Tests cover all four values plus the
-  default `"frontend_only"`.
+  `SeedlingStatus` dataclass (`metis_app/seedling/status.py`) and
+  the matching frontend type (`apps/metis-web/lib/api.ts`
+  `SeedlingStatus`) with the four-value enum above. **Additive only:**
+  the dataclass adds the field with `default = "frontend_only"`,
+  existing required fields keep their semantics; the frontend type
+  adds `model_status?:` as optional (clients default it to
+  `"frontend_only"` until the backend payload is observed). Tests
+  cover all four values plus the default.
 - **New settings.** Add to `metis_app/default_settings.json`:
   - `seedling_backend_reflection_enabled` (default `false`).
   - `seedling_reflection_cadence_hours` (default 24, used only when
@@ -264,5 +299,33 @@ Accepted implementation follow-ups:
   does not pre-empt the UX call.
 - Browser-private-mode behaviour. IndexedDB caching is the load-bearing
   reason Bonsai is fast on second load; in private mode the
-  user re-downloads on every session. Worth a one-line dock note in
-  Phase 4; not an ADR-level decision.
+  user re-downloads on every session. Phase 4 should detect private
+  mode at `useWebGPUCompanion()` init and warn the user before they
+  pay 500 MB. Worth a one-line dock note; not an ADR-level decision.
+- **Phase 4 must surface first-load progress.** The hook exposes
+  `progress: { loadedBytes, totalBytes, pct }` but the dock today
+  only shows the bar in the Bonsai settings card. When a user
+  toggles always-on for the first time, Phase 4 should render a
+  "Bonsai downloading…" progress card in the dock thought log; do
+  not silently drop reflection requests until `status === "ready"`.
+- **Tab-close lifecycle.** The hook terminates the worker on
+  unmount, so an in-flight Bonsai generation is dropped when the
+  user closes the tab. For a single completed
+  `CompanionActivityEvent`, that is by design and matches §3's
+  *"the natural moment is 'while the user is in the app'"*. Phase 4
+  copy should reflect this — Bonsai cannot deliver
+  "I'll reflect on the last 30 minutes when you sit down tomorrow",
+  only the backend GGUF can. Track in Phase 4 retro.
+- **Phase 5 / ADR 0009 cross-concern.** Phase 5's proposed
+  Seedling → Sapling threshold is *"≥10 stars AND ≥1 completed
+  overnight reflection"*. As written, that permanently locks
+  no-WebGPU + no-GGUF users at Seedling. ADR 0009 (or the
+  growth-stage decision section that replaces it) should decide
+  whether *while-you-work* reflections also count toward stage
+  transitions. Not pre-empted here; flagged so it does not get lost.
+- **Marketing-copy guard test.** Phase 4 should land a tiny pytest
+  in `tests/test_seedling_marketing_copy.py` that fails CI if a
+  forbidden phrase like *"reflects while you sleep"* (without the
+  ADR 0013 §3 qualifier) appears anywhere under `apps/metis-web/`.
+  Mechanical enforcement keeps the §3 guardrail honest without
+  relying on reviewer vigilance.
