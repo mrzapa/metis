@@ -975,6 +975,13 @@ export interface CompanionActivityEvent {
   trigger: string;
   summary: string;
   timestamp: number;
+  /**
+   * Phase-4 reflection sub-kind. Additive on top of the existing event
+   * shape — earlier producers and consumers ignore it. Phase 4a emits
+   * `"while_you_work"` from the Bonsai-driven dock callback; Phase 4b
+   * will add `"overnight"` from the backend-GGUF reflection cycle.
+   */
+  kind?: "while_you_work" | "overnight";
   payload?: Record<string, unknown>;
 }
 
@@ -2819,6 +2826,68 @@ export async function reflectAssistant(payload: {
     summary: "Reflection complete",
     timestamp: Date.now(),
   });
+  return result;
+}
+
+export interface RecordCompanionReflectionPayload {
+  summary: string;
+  why?: string;
+  trigger?: string;
+  kind?: "while_you_work" | "overnight";
+  confidence?: number;
+  source_event?: Record<string, unknown> | null;
+  tags?: string[];
+}
+
+/**
+ * Persist a Bonsai- or backend-GGUF-generated reflection.
+ *
+ * The frontend Phase 4a path calls this from the dock's always-on
+ * Bonsai callback whenever Bonsai finishes a `generate` cycle. The
+ * cooldown gate lives on the backend (see
+ * ``seedling_external_reflection_cooldown_seconds``); a server-side
+ * "cooldown" reason is treated as a soft skip, not an error.
+ */
+export async function recordCompanionReflection(
+  payload: RecordCompanionReflectionPayload,
+): Promise<{
+  ok: boolean;
+  reason?: string;
+  status?: Record<string, unknown>;
+  memory_entry?: Record<string, unknown>;
+  snapshot?: Record<string, unknown>;
+}> {
+  const trigger = payload.trigger ?? "while_you_work";
+  const kind = payload.kind ?? "while_you_work";
+  const res = await apiFetch(`${await getApiBase()}/v1/assistant/record-reflection`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      summary: payload.summary,
+      why: payload.why ?? "",
+      trigger,
+      kind,
+      confidence: typeof payload.confidence === "number" ? payload.confidence : 0.55,
+      source_event: payload.source_event ?? null,
+      tags: payload.tags ?? [],
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to record reflection (${res.status}): ${detail}`);
+  }
+  const result = await res.json();
+  if (result?.ok) {
+    emitCompanionActivity({
+      source: "reflection",
+      state: "completed",
+      trigger,
+      kind,
+      summary: payload.summary.slice(0, 280),
+      timestamp: Date.now(),
+      payload: payload.source_event ?? undefined,
+    });
+  }
   return result;
 }
 

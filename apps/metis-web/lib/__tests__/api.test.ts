@@ -26,6 +26,7 @@ const {
   fetchNetworkAuditProviders,
   fetchNetworkAuditRecentCount,
   fetchSeedlingStatus,
+  recordCompanionReflection,
   subscribeCompanionActivity,
   runNetworkAuditSyntheticPass,
 } = await import(
@@ -1355,5 +1356,101 @@ describe("runNetworkAuditSyntheticPass", () => {
       }),
     );
     await expect(runNetworkAuditSyntheticPass()).rejects.toThrow(/boom/);
+  });
+});
+
+describe("recordCompanionReflection (M13 Phase 4a)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("posts the Bonsai reflection with kind, source_event, and defaults", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          ok: true,
+          kind: "while_you_work",
+          status: { latest_summary: "ok" },
+          memory_entry: { summary: "ok" },
+        }),
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await recordCompanionReflection({
+      summary: "Lead with the next step.",
+      trigger: "news_comet",
+      source_event: { source: "news_comet", comet_id: "comet_abc" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const call = fetchSpy.mock.calls[0];
+    const url = call[0] as string;
+    expect(url.endsWith("/v1/assistant/record-reflection")).toBe(true);
+    const body = JSON.parse((call[1] as RequestInit).body as string);
+    expect(body.summary).toBe("Lead with the next step.");
+    expect(body.trigger).toBe("news_comet");
+    expect(body.kind).toBe("while_you_work");
+    // Default confidence still threaded through.
+    expect(body.confidence).toBeCloseTo(0.55);
+    expect(body.source_event).toEqual({ source: "news_comet", comet_id: "comet_abc" });
+  });
+
+  it("emits a CompanionActivityEvent with kind=while_you_work on success", async () => {
+    const events: unknown[] = [];
+    const unsubscribe = subscribeCompanionActivity((event) => events.push(event));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ ok: true }),
+      }),
+    );
+
+    await recordCompanionReflection({ summary: "Persisted." });
+    unsubscribe();
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        source: "reflection",
+        state: "completed",
+        kind: "while_you_work",
+        summary: "Persisted.",
+      }),
+    ]);
+  });
+
+  it("does NOT emit a CompanionActivityEvent when the backend returns ok=false", async () => {
+    const events: unknown[] = [];
+    const unsubscribe = subscribeCompanionActivity((event) => events.push(event));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ ok: false, reason: "cooldown" }),
+      }),
+    );
+
+    const result = await recordCompanionReflection({ summary: "Skipped." });
+    unsubscribe();
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("cooldown");
+    expect(events).toEqual([]);
+  });
+
+  it("throws on HTTP error so the caller can decide whether to surface", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: () => Promise.resolve("boom"),
+      }),
+    );
+    await expect(
+      recordCompanionReflection({ summary: "irrelevant" }),
+    ).rejects.toThrow(/boom/);
   });
 });

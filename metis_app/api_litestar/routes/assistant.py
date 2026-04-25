@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from metis_app.api_litestar.models import (
     AssistantBootstrapRequestModel,
+    AssistantRecordReflectionRequestModel,
     AssistantReflectRequestModel,
     AssistantUpdateRequestModel,
 )
@@ -45,6 +46,28 @@ def reflect_assistant(data: AssistantReflectRequestModel) -> dict:
     if data.context_id:
         kwargs["context_id"] = data.context_id
     return WorkspaceOrchestrator().reflect_assistant(**kwargs)
+
+
+@post("/v1/assistant/record-reflection", status_code=200)
+def record_companion_reflection(data: AssistantRecordReflectionRequestModel) -> dict:
+    """Persist an externally-generated reflection (Bonsai or backend GGUF).
+
+    Phase 4a (M13) routes Bonsai's WebGPU output through here so the
+    reflection is durably attached to the companion memory list and
+    surfaced via :class:`AssistantStatus`. The ``kind`` literal also
+    feeds the ``CompanionActivityEvent.kind`` field on the frontend
+    bus so the dock can distinguish *while-you-work* from *overnight*
+    notes.
+    """
+    return WorkspaceOrchestrator().record_companion_reflection(
+        summary=data.summary,
+        why=data.why,
+        trigger=data.trigger,
+        kind=data.kind,
+        confidence=data.confidence,
+        source_event=data.source_event,
+        tags=list(data.tags or []),
+    )
 
 
 @post("/v1/assistant/bootstrap", status_code=200)
@@ -174,6 +197,7 @@ router = Router(
         update_assistant,
         get_assistant_status,
         reflect_assistant,
+        record_companion_reflection,
         bootstrap_assistant,
         list_assistant_memory,
         clear_assistant_memory,

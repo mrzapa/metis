@@ -381,6 +381,138 @@ class AssistantCompanionService:
             "snapshot": self.get_snapshot(active_settings),
         }
 
+    def record_external_reflection(
+        self,
+        *,
+        summary: str,
+        why: str = "",
+        trigger: str = "while_you_work",
+        kind: str = "while_you_work",
+        confidence: float = 0.55,
+        source_event: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
+        settings: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Record a reflection whose text was generated outside the backend.
+
+        Phase 4a (M13) uses this to persist Bonsai-1.7B WebGPU
+        reflections — short, event-driven notes the in-browser
+        companion produces while the user works. The Bonsai pipeline
+        owns generation; this method owns persistence, the cooldown
+        guard, and the status update.
+
+        Phase 4b will reuse this entry point with ``kind="overnight"``
+        once the backend GGUF reflection toggle ships.
+
+        Returns a payload with the same outer shape as
+        :meth:`reflect` (``ok``, ``status``, ``memory_entry``,
+        ``snapshot``) plus a ``reason`` field on the failure path.
+        """
+        active_settings = dict(settings or settings_store.load_settings())
+        identity = resolve_assistant_identity(active_settings)
+        policy = resolve_assistant_policy(active_settings)
+        if not identity.companion_enabled or not policy.reflection_enabled:
+            return {
+                "ok": False,
+                "status": self.repository.get_status().to_payload(),
+                "reason": "assistant_disabled",
+            }
+
+        text = (summary or "").strip()
+        if not text:
+            return {
+                "ok": False,
+                "status": self.repository.get_status().to_payload(),
+                "reason": "empty_summary",
+            }
+        # Bound the persisted text. Bonsai's max_new_tokens is 512 but
+        # the dock prompt asks for one or two sentences; an over-long
+        # response usually means the model rambled — keep it readable
+        # in the memory list and don't bloat the SQLite row.
+        if len(text) > 800:
+            text = text[:800].rstrip() + "…"
+        reason_text = (why or "").strip()
+        if len(reason_text) > 800:
+            reason_text = reason_text[:800].rstrip() + "…"
+
+        runtime = resolve_assistant_runtime(active_settings)
+        status = self._ensure_status(active_settings, identity=identity, runtime=runtime)
+        if status.paused:
+            return {
+                "ok": False,
+                "status": status.to_payload(),
+                "reason": "assistant_paused",
+            }
+
+        # Per-kind cooldown distinct from the generic reflection
+        # cooldown. ADR 0013 §Open Questions calls for a target of
+        # ~30s between Bonsai reflections so a busy session does not
+        # stamp a memory entry per event. Setting key allows tuning
+        # without rebuilding.
+        cooldown_seconds = float(
+            active_settings.get(
+                "seedling_external_reflection_cooldown_seconds",
+                30.0,
+            )
+        )
+        if cooldown_seconds > 0:
+            recent = self.repository.list_memory(limit=8)
+            cutoff = datetime.now(timezone.utc).timestamp() - cooldown_seconds
+            for item in recent:
+                if item.kind != "bonsai_reflection":
+                    continue
+                if item.trigger != trigger:
+                    continue
+                created = _parse_iso(item.created_at)
+                if created is None:
+                    continue
+                if created.timestamp() >= cutoff:
+                    return {
+                        "ok": False,
+                        "status": status.to_payload(),
+                        "reason": "cooldown",
+                    }
+
+        source_payload = source_event if isinstance(source_event, dict) else {}
+        related_node_ids: list[str] = []
+        if isinstance(source_payload.get("comet_id"), str) and source_payload["comet_id"]:
+            related_node_ids.append(f"comet:{source_payload['comet_id']}")
+        if isinstance(source_payload.get("source"), str) and source_payload["source"]:
+            related_node_ids.append(f"source:{source_payload['source']}")
+
+        title = "Bonsai reflection"
+        bullet = text.splitlines()[0] if text else ""
+        if bullet and len(bullet) < 120:
+            title = bullet
+
+        memory_entry = AssistantMemoryEntry.create(
+            kind="bonsai_reflection",
+            title=title,
+            summary=text,
+            details=text,
+            why=reason_text,
+            confidence=max(0.0, min(1.0, float(confidence))),
+            trigger=trigger,
+            tags=list(tags or []) + [kind],
+            related_node_ids=related_node_ids,
+        )
+        self.repository.add_memory_entry(memory_entry, max_entries=policy.max_memory_entries)
+
+        status.state = "reflected"
+        status.last_reflection_at = memory_entry.created_at
+        status.last_reflection_trigger = trigger
+        status.latest_summary = memory_entry.summary
+        status.latest_why = memory_entry.why
+        self.repository.update_status(status)
+
+        return {
+            "ok": True,
+            "kind": kind,
+            "status": status.to_payload(),
+            "memory_entry": memory_entry.to_payload(),
+            "snapshot": self.get_snapshot(active_settings),
+        }
+
     def _trigger_enabled(self, policy: AssistantPolicy, trigger: str) -> bool:
         normalized = str(trigger or "").strip().lower()
         if normalized in {"", "manual"}:
