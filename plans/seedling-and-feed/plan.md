@@ -1,8 +1,8 @@
 ---
 Milestone: Seedling + Feed (M13)
 Status: In progress
-Claim: claude/m13-phase2-seedling-lifecycle
-Last updated: 2026-04-24 by Codex
+Claim: claude/m13-phase3-adr-0008
+Last updated: 2026-04-25 by Claude
 Vision pillar: Companion
 ---
 
@@ -74,6 +74,19 @@ What's in place today that M13 will lean on:
   Seedling lifecycle events. This phase is deliberately a no-op heartbeat:
   it does not load the GGUF model, ingest feeds, schedule research, or advance
   growth stages yet.
+- **2026-04-25 — Phase 3 prep complete (ADR 0008).** ADR 0008
+  (`docs/adr/0008-feed-storage-format.md`) locks the durable storage
+  shape Phase 3 needs: a per-feature SQLite file at
+  `<repo_root>/news_items.db` accessed through a new
+  `metis_app/services/news_feed_repository.py`, with three tables
+  (`news_items`, `comet_events`, `feed_cursors`), a 14-day rolling
+  retention window over fetched items, terminal-comet eviction at 7
+  days, persistent dedup keyed by the existing
+  `NewsIngestService._item_hash`, and an OPML-import endpoint
+  (`POST /v1/comets/opml/import`) that appends to the existing
+  `news_comet_rss_feeds` setting. The ADR rejects extending
+  `rag_sessions.db` or the Atlas store, and notes the shared lock /
+  WAL posture so Phase 3 implementation does not re-litigate it.
 
 ## Next up
 
@@ -82,16 +95,18 @@ The next concrete actions:
 1. **Add the selected Seedling default to model recommendation/import
    scaffolding.** ADR 0007 found the local GGUF catalog already has Phi
    and Qwen entries, but not Llama-3.2-1B-Instruct. Add the selected
-   Llama GGUF source before later phases try to activate it.
-2. **Write ADR 0008 — Feed-storage format.** Today, news-comet events
-   are in-memory only (`_active_comets` in `routes/comets.py`).
-   M13 needs durable feed memory: OPML import, per-source cursors,
-   dedup across restarts, a `news_items.db` or Atlas-backed table.
-   Pick the storage shape before turning the worker into an ingest loop.
-3. **Start Phase 3 continuous ingestion only after ADR 0008.** Extend the
-   Phase 2 heartbeat worker into a scheduler that owns feed polling and
-   research/reflection cadence, while still avoiding double-indexing with
-   `AutonomousResearchService`.
+   Llama GGUF source before later phases try to activate it. This can
+   land alongside Phase 3 since neither blocks the other.
+2. **Phase 3 continuous ingestion (now unblocked).** Build
+   `metis_app/services/news_feed_repository.py` against the schema in
+   ADR 0008, then refactor `routes/comets.py` so `_active_comets` /
+   `_last_poll` / `_gc_terminal_comets` become thin wrappers over the
+   repository. Wire the existing `NewsIngestService` so its
+   `_seen_hashes` is a read-through LRU on top of the repo. Drive
+   the loop from the Phase 2 Seedling worker tick (no second
+   scheduler). Add the OPML-import endpoint as part of the same PR
+   so feed onboarding lands with the storage. Continue avoiding
+   double-indexing with `AutonomousResearchService`.
 
 ## Blockers
 
@@ -354,7 +369,8 @@ consume, without shipping fine-tuning in M13.
 1. **ADR 0007 — Seedling model + runtime** (Phase 1 above). Completed
    2026-04-24; see `docs/adr/0007-seedling-model-and-runtime.md`.
 2. **ADR 0008 — Feed-storage format** (new table vs Atlas extension,
-   per-source cursors, OPML serialisation). Blocker for Phase 3.
+   per-source cursors, OPML serialisation). Completed 2026-04-25; see
+   `docs/adr/0008-feed-storage-format.md`.
 3. **ADR 0009 — Growth-stage signal** (exact thresholds, whether
    stages can regress, manual override for testing). Blocker for
    Phase 5. Arguably record as a plan-doc decision section rather
