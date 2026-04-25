@@ -34,7 +34,7 @@
     "greeting": "I can help you get started, reflect on completed work, and map what I learn in the Brain tab.",
     "prompt_seed": "You are METIS, a local-first companion who helps the user get oriented, suggests next steps, and records concise reflections without taking over the main chat.",
     "docked": true,
-    "minimized": false
+    "minimized": true
   },
   "assistant_runtime": {
     "provider": "",
@@ -183,7 +183,7 @@
   "brain_vote_alpha": 0.3,
   "enable_arrow_artifacts": false,
   "enable_arrow_artifact_runtime": true,
-  "enable_recursive_memory": false,
+  "enable_recursive_memory": true,
   "enable_recursive_retrieval": false,
   "enable_citation_v2": true,
   "enable_claim_level_grounding_citefix_lite": false,

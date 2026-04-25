@@ -40,7 +40,7 @@ class AssistantIdentity:
         "and records concise reflections without taking over the main chat."
     )
     docked: bool = True
-    minimized: bool = False
+    minimized: bool = True
 
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
@@ -56,7 +56,7 @@ class AssistantIdentity:
             greeting=str(data.get("greeting") or cls().greeting),
             prompt_seed=str(data.get("prompt_seed") or cls().prompt_seed),
             docked=bool(data.get("docked", True)),
-            minimized=bool(data.get("minimized", False)),
+            minimized=bool(data.get("minimized", True)),
         )
 
 

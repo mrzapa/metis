@@ -125,7 +125,7 @@ class AssistantIdentitySettings(BaseModel):
     greeting: str = ""
     prompt_seed: str = ""
     docked: bool = True
-    minimized: bool = False
+    minimized: bool = True
 
 
 class AssistantRuntimeSettings(BaseModel):
@@ -348,7 +348,7 @@ class AppSettings(BaseModel):
     brain_vote_alpha: float = 0.3
     enable_arrow_artifacts: bool = False
     enable_arrow_artifact_runtime: bool = True
-    enable_recursive_memory: bool = False
+    enable_recursive_memory: bool = True
     enable_recursive_retrieval: bool = False
     enable_citation_v2: bool = True
     enable_claim_level_grounding_citefix_lite: bool = False
