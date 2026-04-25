@@ -24,7 +24,9 @@ import {
   ArrowRight,
   BetweenHorizontalEnd,
   CheckCircle2,
+  Cpu,
   Database,
+  Settings2,
   Sparkles,
 } from "lucide-react";
 import { BrainIcon } from "@/components/icons";
@@ -63,6 +65,16 @@ const STARTER_PROMPTS_DIRECT = [
 
 export default function SetupPage() {
   const router = useRouter();
+  // Wizard fork — `null` shows the binary "instant vs configure" picker;
+  // `"configure"` runs the full 5-step wizard. The "instant" branch
+  // commits a webgpu/Bonsai default and routes to /chat without ever
+  // entering the step machine, so it has no `forkChoice` value of its
+  // own.
+  const [forkChoice, setForkChoice] = useArrowState<"configure" | null>(null);
+  const [webgpuSupported, setWebgpuSupported] = useArrowState<boolean | null>(
+    null,
+  );
+  const [instantLaunching, setInstantLaunching] = useArrowState(false);
   const [step, setStep] = useArrowState(0);
   const [llmProvider, setLlmProvider] =
     useArrowState<(typeof LLM_PROVIDERS)[number]["value"]>("anthropic");
@@ -78,6 +90,14 @@ export default function SetupPage() {
   const [selectedPrompt, setSelectedPrompt] = useArrowState<string>("");
   const [saving, setSaving] = useArrowState(false);
   const [error, setError] = useArrowState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof navigator === "undefined") {
+      setWebgpuSupported(false);
+      return;
+    }
+    setWebgpuSupported("gpu" in navigator);
+  }, [setWebgpuSupported]);
 
   useEffect(() => {
     fetchSettings()
@@ -179,6 +199,24 @@ export default function SetupPage() {
       llmProvider;
     return { ready: false as const, providerLabel };
   }, [apiKey, baselineSettings, llmProvider]);
+
+  async function handleInstantLaunch() {
+    setInstantLaunching(true);
+    setError(null);
+    try {
+      await updateSettings({
+        llm_provider: "webgpu",
+        llm_model: "Bonsai 1.7B",
+        basic_wizard_completed: true,
+      });
+      router.push("/chat");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to launch in-browser model",
+      );
+      setInstantLaunching(false);
+    }
+  }
 
   async function handleFinish() {
     setSaving(true);
@@ -470,10 +508,12 @@ export default function SetupPage() {
           </div>
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            <StatusPill
-              label={`Step ${step + 1} of ${steps.length}`}
-              tone="checking"
-            />
+            {forkChoice === "configure" ? (
+              <StatusPill
+                label={`Step ${step + 1} of ${steps.length}`}
+                tone="checking"
+              />
+            ) : null}
             <Link href="/">
               <Button variant="outline" size="sm">
                 Back to home
@@ -482,6 +522,85 @@ export default function SetupPage() {
           </div>
         </header>
 
+        {forkChoice === null ? (
+          <main className="flex flex-1 items-center justify-center py-8">
+            <section className="grid w-full max-w-4xl gap-4 md:grid-cols-2">
+              <button
+                type="button"
+                onClick={handleInstantLaunch}
+                disabled={!webgpuSupported || instantLaunching}
+                className={cn(
+                  "glass-panel-strong group flex cursor-pointer flex-col gap-4 rounded-[1.75rem] p-6 text-left transition-all duration-200 sm:p-8",
+                  webgpuSupported && !instantLaunching
+                    ? "border border-primary/24 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10"
+                    : "border border-white/8 opacity-60",
+                )}
+                aria-label="Try METIS instantly with browser-only model"
+              >
+                <div className="flex size-11 items-center justify-center rounded-2xl bg-primary/15 text-primary">
+                  <Sparkles className="size-5" />
+                </div>
+                <div>
+                  <h2 className="font-display text-2xl font-semibold tracking-[-0.03em] text-foreground">
+                    Try it instantly
+                  </h2>
+                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                    {webgpuSupported === false
+                      ? "WebGPU not detected in this browser. Try Chrome or Edge 113+."
+                      : "Browser-only model. No setup, no API key."}
+                  </p>
+                </div>
+                <div className="mt-auto inline-flex items-center gap-1.5 rounded-full bg-primary/12 px-3 py-1.5 text-xs font-medium text-primary group-disabled:opacity-50">
+                  {instantLaunching ? (
+                    <>
+                      <AnimatedLucideIcon
+                        icon={Cpu}
+                        mode="idlePulse"
+                        className="size-3.5"
+                      />
+                      Loading…
+                    </>
+                  ) : (
+                    <>
+                      Get started
+                      <ArrowRight className="size-3.5" />
+                    </>
+                  )}
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setForkChoice("configure")}
+                disabled={instantLaunching}
+                className="glass-panel group flex cursor-pointer flex-col gap-4 rounded-[1.75rem] border border-white/8 p-6 text-left transition-all duration-200 hover:border-white/16 hover:bg-white/4 sm:p-8"
+                aria-label="Configure your own model provider"
+              >
+                <div className="flex size-11 items-center justify-center rounded-2xl bg-white/8 text-foreground">
+                  <Settings2 className="size-5" />
+                </div>
+                <div>
+                  <h2 className="font-display text-2xl font-semibold tracking-[-0.03em] text-foreground">
+                    Use my own model
+                  </h2>
+                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                    Anthropic, OpenAI, or local GGUF.
+                  </p>
+                </div>
+                <div className="mt-auto inline-flex items-center gap-1.5 rounded-full bg-white/8 px-3 py-1.5 text-xs font-medium text-foreground">
+                  Configure
+                  <ArrowRight className="size-3.5" />
+                </div>
+              </button>
+
+              {error ? (
+                <div className="md:col-span-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                  {error}
+                </div>
+              ) : null}
+            </section>
+          </main>
+        ) : (
         <main className="flex-1 py-8">
           <section className="mb-6">
             <div className="glass-panel rounded-2xl px-5 py-5 sm:px-6">
@@ -535,8 +654,13 @@ export default function SetupPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setStep((current) => Math.max(0, current - 1))}
-                  disabled={step === 0}
+                  onClick={() => {
+                    if (step === 0) {
+                      setForkChoice(null);
+                    } else {
+                      setStep((current) => Math.max(0, current - 1));
+                    }
+                  }}
                   className="gap-2"
                 >
                   <ArrowLeft className="size-4" />
@@ -588,6 +712,7 @@ export default function SetupPage() {
             </div>
           </OnboardingStep>
         </main>
+        )}
       </div>
 
       <MetisCompanionDock className="bottom-24 md:bottom-4" />
