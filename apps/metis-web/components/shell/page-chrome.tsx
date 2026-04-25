@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import {
   Activity,
   Home,
@@ -63,6 +63,7 @@ export function PageChrome({
 }: PageChromeProps) {
   const pathname = usePathname();
   const isStarscape = tone === "starscape";
+  const reducedMotion = useReducedMotion();
 
   const content = (
     <div
@@ -76,7 +77,7 @@ export function PageChrome({
         <div className="flex min-w-0 flex-1 flex-col p-3 sm:p-4">
           {/* Topbar */}
           <motion.header
-            initial={{ opacity: 0, y: -8 }}
+            initial={reducedMotion ? false : { opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.35, ease: "easeOut" }}
             className={cn(
@@ -120,7 +121,7 @@ export function PageChrome({
           {/* Page content */}
           <main className="flex-1 py-4 sm:py-5">
             <motion.div
-              initial={{ opacity: 0, y: 14 }}
+              initial={reducedMotion ? false : { opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, ease: "easeOut" }}
               className="mx-auto w-full max-w-384"

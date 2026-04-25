@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 
 interface OnboardingStepProps {
@@ -23,9 +23,10 @@ export function OnboardingStep({
   hint,
   className,
 }: OnboardingStepProps) {
+  const reducedMotion = useReducedMotion();
   return (
     <motion.section
-      initial={{ opacity: 0, y: 18 }}
+      initial={reducedMotion ? false : { opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.52, ease: "easeOut" }}
       className={cn("glass-panel-strong rounded-[1.8rem] p-5 sm:p-7", className)}
