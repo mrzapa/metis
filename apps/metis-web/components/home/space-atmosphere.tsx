@@ -236,7 +236,7 @@ export function SpaceAtmosphere({ className }: SpaceAtmosphereProps) {
                   width: 96,
                 } as CSSProperties
               }
-              initial={{ opacity: 0, x: 0, y: 0, scaleX: 0.12 }}
+              initial={reduceMotion ? false : { opacity: 0, x: 0, y: 0, scaleX: 0.12 }}
               animate={{
                 opacity: [0, 1, 0],
                 x: [0, star.dx],

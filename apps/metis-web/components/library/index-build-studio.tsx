@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
@@ -64,6 +64,7 @@ export function IndexBuildStudio({
   className,
 }: IndexBuildStudioProps) {
   const router = useRouter();
+  const reducedMotion = useReducedMotion();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDesktop, setIsDesktop] = useArrowState(false);
   const [tab, setTab] = useArrowState<"upload" | "paths" | "desktop" | "web-graph">("upload");
@@ -589,7 +590,7 @@ export function IndexBuildStudio({
                           <motion.span
                             key="done"
                             className="flex"
-                            initial={{ scale: 0.6, opacity: 0 }}
+                            initial={reducedMotion ? false : { scale: 0.6, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.6, opacity: 0 }}
                             transition={{ duration: 0.18, ease: "easeOut" }}
@@ -600,7 +601,7 @@ export function IndexBuildStudio({
                           <motion.span
                             key="active"
                             className="flex"
-                            initial={{ scale: 0.6, opacity: 0 }}
+                            initial={reducedMotion ? false : { scale: 0.6, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.6, opacity: 0 }}
                             transition={{ duration: 0.18, ease: "easeOut" }}
@@ -611,7 +612,7 @@ export function IndexBuildStudio({
                           <motion.span
                             key="idle"
                             className="flex"
-                            initial={{ scale: 0.6, opacity: 0 }}
+                            initial={reducedMotion ? false : { scale: 0.6, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.6, opacity: 0 }}
                             transition={{ duration: 0.18, ease: "easeOut" }}

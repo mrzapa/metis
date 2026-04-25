@@ -26,7 +26,7 @@ export function AmbientBackdrop({ className, dense = false }: AmbientBackdropPro
       aria-hidden="true"
     >
       <motion.div
-        initial={{ opacity: 0, scale: 0.98 }}
+        initial={shouldAnimate ? { opacity: 0, scale: 0.98 } : false}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
         className="absolute inset-0"

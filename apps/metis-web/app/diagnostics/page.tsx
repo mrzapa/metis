@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { AlertCircle, CheckCircle2, ClipboardCopy, Loader2, RotateCcw, ShieldAlert, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -300,10 +300,11 @@ function StatCard({
   caption: string;
   delay?: number;
 }) {
+  const reducedMotion = useReducedMotion();
   return (
     <motion.div
       className="home-liquid-glass rounded-[1.2rem] px-4 py-3"
-      initial={{ opacity: 0, y: 8 }}
+      initial={reducedMotion ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay, ease: [0.22, 1, 0.36, 1] }}
     >

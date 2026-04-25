@@ -12,7 +12,7 @@
  * - Hover state feedback with subtle scale transitions
  */
 
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
 import BrainGraph3D, { type BrainGraph3DProps } from "./brain-graph-3d";
 
@@ -30,16 +30,17 @@ export function BrainGraphAnimatedWrapper({
   children,
   ...brainGraphProps
 }: BrainGraphAnimatedWrapperProps) {
+  const reducedMotion = useReducedMotion();
   return (
     <motion.div
-      initial={{ opacity: 0 }}
+      initial={reducedMotion ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.6, ease: "easeOut" }}
       className="relative h-full w-full"
     >
       {/* Brain graph with slight scale-in animation */}
       <motion.div
-        initial={{ scale: 0.98, opacity: 0 }}
+        initial={reducedMotion ? false : { scale: 0.98, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{
           duration: 0.5,
@@ -56,7 +57,7 @@ export function BrainGraphAnimatedWrapper({
         {isResearchMode && (
           <motion.div
             key="research-mode-indicator"
-            initial={{ opacity: 0, y: -10 }}
+            initial={reducedMotion ? false : { opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.3 }}
@@ -77,7 +78,7 @@ export function BrainGraphAnimatedWrapper({
         {isExpanding && (
           <motion.div
             key="query-expanding"
-            initial={{ opacity: 0 }}
+            initial={reducedMotion ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.4 }}

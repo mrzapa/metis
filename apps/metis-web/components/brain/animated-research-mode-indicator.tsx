@@ -5,7 +5,7 @@
  * sub-query cascades and iterative refinement feedback.
  */
 
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import {
   subQueryVariants,
   staggerConfig,
@@ -36,9 +36,10 @@ export function AnimatedResearchModeIndicator({
   onSubQueryClick,
   className = "",
 }: AnimatedResearchModeIndicatorProps) {
+  const reducedMotion = useReducedMotion();
   return (
     <motion.div
-      initial={{ opacity: 0, y: -10 }}
+      initial={reducedMotion ? false : { opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.3 }}
@@ -96,7 +97,7 @@ export function AnimatedResearchModeIndicator({
         >
           <motion.div
             className="h-full bg-gradient-to-r from-amber-400 to-amber-500"
-            initial={{ scaleX: 0 }}
+            initial={reducedMotion ? false : { scaleX: 0 }}
             animate={{ scaleX: iteration / maxIterations }}
             transition={{ type: "spring", stiffness: 60, damping: 15 }}
             style={{ transformOrigin: "left" }}
@@ -169,7 +170,7 @@ export function AnimatedResearchModeIndicator({
                           fill="none"
                           stroke="currentColor"
                           strokeWidth={2}
-                          initial={{ scale: 0 }}
+                          initial={reducedMotion ? false : { scale: 0 }}
                           animate={{ scale: 1 }}
                           transition={{ type: "spring", stiffness: 200, damping: 15 }}
                         >
@@ -189,7 +190,7 @@ export function AnimatedResearchModeIndicator({
                     {sq.status === "complete" && sq.confidence != null && (
                       <motion.span
                         className="flex-shrink-0 text-[10px] font-medium text-amber-200/70"
-                        initial={{ scale: 0 }}
+                        initial={reducedMotion ? false : { scale: 0 }}
                         animate={{ scale: 1 }}
                         transition={{ delay: 0.3 }}
                       >

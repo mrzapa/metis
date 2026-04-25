@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import {
   BookOpen,
   CheckCircle2,
@@ -153,10 +153,11 @@ function TypeChip({
 
 function EntryCard({ entry }: { entry: ImprovementEntry }) {
   const Icon = ARTIFACT_ICONS[entry.artifact_type];
+  const reducedMotion = useReducedMotion();
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: 12 }}
+      initial={reducedMotion ? false : { opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.25, ease: "easeOut" }}
@@ -360,6 +361,7 @@ export default function ImprovementsPage() {
   const [error, setError] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<ArtifactType | null>(null);
   const [filterStatus, setFilterStatus] = useState<ImprovementStatus | null>(null);
+  const reducedMotion = useReducedMotion();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -400,7 +402,7 @@ export default function ImprovementsPage() {
       <div className="mx-auto max-w-5xl space-y-6 py-2">
         {/* ── Filters ── */}
         <motion.div
-          initial={{ opacity: 0, y: 8 }}
+          initial={reducedMotion ? false : { opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
           className="flex flex-wrap items-center gap-2"

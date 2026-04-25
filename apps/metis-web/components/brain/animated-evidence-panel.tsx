@@ -5,7 +5,7 @@
  * for smoother reveals, highlights, and interactive feedback during research mode.
  */
 
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { ReactNode } from "react";
 import {
   evidencePanelVariants,
@@ -39,10 +39,11 @@ export function AnimatedEvidencePanel({
   title = "Evidence",
   className = "",
 }: AnimatedEvidencePanelProps) {
+  const reducedMotion = useReducedMotion();
   return (
     <motion.div
       className={`rounded-lg border border-white/20 bg-white/8 backdrop-blur-md ${className}`}
-      initial={{ opacity: 0, y: 20 }}
+      initial={reducedMotion ? false : { opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 20 }}
       transition={standardTransition}
@@ -94,7 +95,7 @@ export function AnimatedEvidencePanel({
                 {/* Confidence bar */}
                 <motion.div
                   className="absolute inset-0 rounded-lg bg-blue-500/20"
-                  initial={{ scaleX: 0 }}
+                  initial={reducedMotion ? false : { scaleX: 0 }}
                   animate={{ scaleX: item.confidence }}
                   transition={{ duration: 0.5, delay: 0.1 }}
                   style={{ transformOrigin: "left", zIndex: -1 }}
@@ -109,7 +110,7 @@ export function AnimatedEvidencePanel({
                   </div>
                   <motion.div
                     className="mt-0.5 flex-shrink-0"
-                    initial={{ scale: 0 }}
+                    initial={reducedMotion ? false : { scale: 0 }}
                     animate={{ scale: 1 }}
                     transition={{ duration: 0.3, delay: 0.1 }}
                   >
@@ -122,7 +123,7 @@ export function AnimatedEvidencePanel({
                 {item.excerpt && (
                   <motion.p
                     className="mt-2 text-[11px] text-white/50 line-clamp-2"
-                    initial={{ opacity: 0, height: 0 }}
+                    initial={reducedMotion ? false : { opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
                     transition={{ duration: 0.2, delay: 0.05 }}

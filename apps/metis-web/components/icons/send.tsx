@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, useAnimation } from "motion/react";
+import { motion, useAnimation, useReducedMotion } from "motion/react";
 import type { HTMLAttributes } from "react";
 import { forwardRef, useCallback, useImperativeHandle, useRef } from "react";
 
@@ -19,6 +19,7 @@ const SendIcon = forwardRef<SendIconHandle, SendIconProps>(
   ({ onMouseEnter, onMouseLeave, className, size = 28, ...props }, ref) => {
     const controls = useAnimation();
     const isControlledRef = useRef(false);
+    const reducedMotion = useReducedMotion();
 
     useImperativeHandle(ref, () => {
       isControlledRef.current = true;
@@ -90,7 +91,7 @@ const SendIcon = forwardRef<SendIconHandle, SendIconProps>(
             animate={controls}
             d="M -3 28 C -0.5 26.8 1.6 24.6 3.3 22 C 4.8 19.7 5.2 17.6 4.2 16.1 C 3.2 14.7 1.4 14.5 0.3 15.8 C -0.9 17.2 -0.6 19.4 1.2 20.4 C 3.4 21.5 6.4 19.4 9 15.8"
             fill="none"
-            initial={{ opacity: 0, pathLength: 0 }}
+            initial={reducedMotion ? false : { opacity: 0, pathLength: 0 }}
             stroke="currentColor"
             strokeDasharray="2 2"
             strokeWidth="1"

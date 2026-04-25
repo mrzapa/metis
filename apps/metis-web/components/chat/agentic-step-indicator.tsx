@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { TraceEvent } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +51,7 @@ export function AgenticStepIndicator({
     className?: string;
 }) {
   const { steps: states, iterationLabel, converged } = deriveSteps(liveTraceEvents, isStreaming);
+  const reducedMotion = useReducedMotion();
 
   return (
      <div className={cn("mt-2 flex items-center gap-1 text-[10px]", className)}>
@@ -77,7 +78,7 @@ export function AgenticStepIndicator({
               <AnimatePresence mode="wait" initial={false}>
                 <motion.span
                   key={`${step.label}-${state}`}
-                  initial={{ opacity: 0, y: 2 }}
+                  initial={reducedMotion ? false : { opacity: 0, y: 2 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -2 }}
                   transition={{ duration: 0.18, ease: "easeOut" }}

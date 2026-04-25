@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 
 interface WelcomeHeroStat {
   label: string;
@@ -25,10 +25,11 @@ export function WelcomeHero({
   stats = [],
   preview,
 }: WelcomeHeroProps) {
+  const reducedMotion = useReducedMotion();
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1.08fr)_minmax(320px,0.92fr)] lg:items-end">
       <motion.div
-        initial={{ opacity: 0, y: 16 }}
+        initial={reducedMotion ? false : { opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.55, ease: "easeOut" }}
         className="space-y-8"
@@ -62,7 +63,7 @@ export function WelcomeHero({
       </motion.div>
 
       <motion.div
-        initial={{ opacity: 0, y: 22 }}
+        initial={reducedMotion ? false : { opacity: 0, y: 22 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.65, ease: "easeOut", delay: 0.08 }}
         className="glass-panel-strong rounded-[2rem] p-5 sm:p-6"

@@ -1,6 +1,6 @@
 "use client";
 
-import { animate, motion, useMotionValue, useTransform } from "motion/react";
+import { animate, motion, useMotionValue, useReducedMotion, useTransform } from "motion/react";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { BorderBeam } from "@/components/ui/border-beam";
@@ -27,6 +27,7 @@ function AnimatedValue({ value }: { value: string | number }) {
   const target = isNumericValue(value) ? Number(value) : null;
   const count = useMotionValue(0);
   const rounded = useTransform(count, (latest) => Math.round(latest));
+  const reducedMotion = useReducedMotion();
 
   useEffect(() => {
     if (target === null) {
@@ -42,7 +43,7 @@ function AnimatedValue({ value }: { value: string | number }) {
   if (target === null) {
     return (
       <motion.span
-        initial={{ opacity: 0, y: 4 }}
+        initial={reducedMotion ? false : { opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.24, ease: "easeOut" }}
       >

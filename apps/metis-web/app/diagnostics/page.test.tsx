@@ -6,6 +6,7 @@ vi.mock("motion/react", () => ({
   motion: {
     div: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => <div {...props}>{children}</div>,
   },
+  useReducedMotion: () => false,
 }));
 
 vi.mock("@/components/shell/page-chrome", () => ({

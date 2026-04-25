@@ -11,7 +11,7 @@ import {
   Loader2,
   MessageSquare,
 } from "lucide-react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { suggestStarArchetypes } from "@/lib/api";
 import type { StarArchetypeSuggestion } from "@/lib/api";
@@ -146,11 +146,12 @@ function ArchetypeCard({
   const chunk = chunkLabel(suggestion.settings_overrides);
   const special = specialBadge(suggestion.settings_overrides);
   const mode = retrievalModeLabel(suggestion.settings_overrides.retrieval_mode);
+  const reducedMotion = useReducedMotion();
 
   return (
     <motion.button
       type="button"
-      initial={{ opacity: 0, y: 10 }}
+      initial={reducedMotion ? false : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.22, delay: index * 0.06, ease: [0.22, 1, 0.36, 1] }}
       onClick={onSelect}
