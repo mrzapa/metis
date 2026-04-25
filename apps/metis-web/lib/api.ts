@@ -970,7 +970,7 @@ export interface TraceEvent {
 }
 
 export interface CompanionActivityEvent {
-  source: "rag_stream" | "index_build" | "autonomous_research" | "reflection" | "seedling";
+  source: "rag_stream" | "index_build" | "autonomous_research" | "reflection" | "seedling" | "news_comet";
   state: "running" | "completed" | "error";
   trigger: string;
   summary: string;

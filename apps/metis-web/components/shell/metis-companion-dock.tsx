@@ -770,6 +770,7 @@ export function MetisCompanionDock({
                           autonomous_research: "text-violet-400",
                           reflection: "text-amber-400",
                           seedling: "text-emerald-400",
+                          news_comet: "text-orange-400",
                         };
                         const stateIcon =
                           t.state === "running"

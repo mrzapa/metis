@@ -17,7 +17,7 @@ import urllib.request
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from metis_app.models.comet_event import CometEvent, NewsItem
 from metis_app.network_audit import (
@@ -28,6 +28,9 @@ from metis_app.network_audit import (
     get_default_settings,
     get_default_store,
 )
+
+if TYPE_CHECKING:  # pragma: no cover — imported only for type hints
+    from metis_app.services.news_feed_repository import NewsFeedRepository
 
 log = logging.getLogger(__name__)
 
@@ -246,12 +249,38 @@ def _fetch_reddit(subreddits: list[str], *, limit_per_sub: int = 10) -> list[dic
 
 
 class NewsIngestService:
-    """Poll configured news sources and produce deduplicated NewsItem objects."""
+    """Poll configured news sources and produce deduplicated NewsItem objects.
 
-    def __init__(self) -> None:
+    The dedup strategy has two layers (ADR 0008 §2):
+
+    1. **In-process LRU** (``_seen_hashes``) — fast-path filter so the
+       common case of "this poll returns the same RSS items as last
+       poll" doesn't round-trip the database per item.
+    2. **Persistent ``news_items.db``** via :class:`NewsFeedRepository`
+       — the source of truth. Survives process restart so the user
+       does not see the same comet re-emerge after a Litestar reload.
+
+    When a repository is injected, the LRU is warmed once on first
+    use from the repo's most recent hashes. ``_dedup`` filters
+    against the LRU, then asks the repo to insert; the repo's
+    ``ON CONFLICT DO NOTHING`` is the second-line dedup. Items the
+    repo accepts (i.e. genuinely new) are then added to the LRU.
+
+    Without a repository the service falls back to in-memory-only
+    dedup, which keeps ``NewsIngestService`` test-friendly in
+    isolation (`tests/test_news_ingest_service.py`).
+    """
+
+    def __init__(
+        self,
+        *,
+        repository: "NewsFeedRepository | None" = None,
+    ) -> None:
         self._seen_hashes: OrderedDict[str, None] = OrderedDict()
         self._max_seen: int = 2000
         self._source_health: dict[str, _SourceHealth] = {}
+        self._repository = repository
+        self._lru_warmed = False
 
     def _health(self, channel: str) -> _SourceHealth:
         """Get or create per-source health tracker."""
@@ -264,17 +293,48 @@ class NewsIngestService:
         raw = f"{title.strip().lower()}|{url.strip().lower()}"
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
+    def _warm_lru(self) -> None:
+        if self._repository is None or self._lru_warmed:
+            return
+        try:
+            recent = self._repository.list_known_hashes(limit=self._max_seen)
+        except Exception:  # noqa: BLE001
+            log.debug("Warming LRU from feed repository failed", exc_info=True)
+            self._lru_warmed = True
+            return
+        # ``recent`` is newest-first; the LRU is FIFO with oldest first
+        # so we insert in reverse to keep the newest as MRU.
+        for h in reversed(recent):
+            self._seen_hashes[h] = None
+        self._lru_warmed = True
+
     def _dedup(self, items: list[NewsItem]) -> list[NewsItem]:
-        unique: list[NewsItem] = []
+        self._warm_lru()
+        candidates: list[NewsItem] = []
+        seen_now: set[str] = set()
         for item in items:
             h = self._item_hash(item.title, item.url)
-            if h not in self._seen_hashes:
-                self._seen_hashes[h] = None
-                unique.append(item)
+            if h in self._seen_hashes or h in seen_now:
+                continue
+            seen_now.add(h)
+            candidates.append(item)
+
+        if self._repository is not None and candidates:
+            try:
+                candidates = self._repository.add_news_items(candidates)
+            except Exception:  # noqa: BLE001
+                log.warning(
+                    "Persistent dedup write failed; falling back to in-memory cache",
+                    exc_info=True,
+                )
+
+        for item in candidates:
+            h = self._item_hash(item.title, item.url)
+            self._seen_hashes[h] = None
         # Evict oldest hashes (FIFO) if cache grows too large
         while len(self._seen_hashes) > self._max_seen:
             self._seen_hashes.popitem(last=False)
-        return unique
+        return candidates
 
     def fetch_rss(self, feed_urls: list[str]) -> list[NewsItem]:
         """Fetch news items from a list of RSS feed URLs."""

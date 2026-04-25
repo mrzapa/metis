@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable
 from datetime import datetime
 import logging
+from typing import Any
 
 from .scheduler import SeedlingSchedule
 from .status import SeedlingStatus, SeedlingStatusCache, isoformat_utc, utc_now
@@ -14,10 +15,18 @@ log = logging.getLogger(__name__)
 
 Clock = Callable[[], datetime]
 ProgressCallback = Callable[[dict[str, object]], None]
+TickWorkFn = Callable[[], dict[str, Any] | None]
 
 
 class SeedlingWorker:
-    """Owns the future companion schedule without doing Phase 3+ work yet."""
+    """Owns the always-on schedule.
+
+    Phase 2 (PR #541) shipped this as a tickless heartbeat. Phase 3
+    extends each tick with a feed-ingestion + cleanup pass when
+    ``news_comets_enabled`` is set in settings, via an injectable
+    ``tick_work`` callable. Per ADR 0013, no model loading happens
+    here — the tick stays plumbing, decisioning, and storage only.
+    """
 
     def __init__(
         self,
@@ -26,11 +35,13 @@ class SeedlingWorker:
         status_cache: SeedlingStatusCache | None = None,
         clock: Clock | None = None,
         progress_cb: ProgressCallback | None = None,
+        tick_work: TickWorkFn | None = None,
     ) -> None:
         self._schedule = schedule or SeedlingSchedule()
         self._status_cache = status_cache or SeedlingStatusCache()
         self._clock = clock or utc_now
         self._progress_cb = progress_cb
+        self._tick_work = tick_work
         self._status = self._status_cache.read()
         self._task: asyncio.Task[None] | None = None
         self._stop_event: asyncio.Event | None = None
@@ -107,9 +118,27 @@ class SeedlingWorker:
                     )
                 except asyncio.TimeoutError:
                     self.tick()
+                    await self._run_tick_work()
         except asyncio.CancelledError:
             log.debug("Seedling worker task cancelled")
             raise
+
+    async def _run_tick_work(self) -> None:
+        """Drive Phase 3 ingestion + cleanup off the main event loop.
+
+        Wrapped in ``asyncio.to_thread`` because the underlying
+        ``run_poll_cycle`` issues blocking HTTP fetches via
+        ``audited_urlopen`` and SQLite writes via the feed repository.
+        Exceptions are logged and swallowed so a single bad tick does
+        not kill the worker.
+        """
+        if self._tick_work is None:
+            return
+        try:
+            await asyncio.to_thread(self._tick_work)
+        except Exception:  # noqa: BLE001
+            log.warning("Seedling tick work failed", exc_info=True)
+            self._emit("error", "Seedling tick work failed")
 
     def _emit(self, state: str, summary: str) -> None:
         if self._progress_cb is None:

@@ -27,7 +27,17 @@ classifiers = [
 # Runtime dependencies are intentionally minimal; heavy ML libs (LangChain,
 # sentence-transformers, llama-cpp-python) are optional/user-installed unless
 # the installer opts into the pinned runtime-all bundle.
-dependencies = ["psutil>=6", "PyYAML>=6", "pydantic>=2.0", "numpy>=1.26,<3"]
+dependencies = [
+    "psutil>=6",
+    "PyYAML>=6",
+    "pydantic>=2.0",
+    "numpy>=1.26,<3",
+    # defusedxml: hardened wrapper around stdlib xml.etree for OPML
+    # imports under POST /v1/comets/opml/import (M13 ADR 0008 §5).
+    # Pure-Python; the security-load-bearing posture justifies adding
+    # the dep over the bare stdlib parser.
+    "defusedxml>=0.7",
+]
 
 [project.optional-dependencies]
 api = [
