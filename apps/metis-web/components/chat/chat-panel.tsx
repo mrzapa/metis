@@ -461,6 +461,7 @@ export function ChatPanel({
                   type="button"
                   onClick={() => setBuildStudioOpen(true)}
                   className="text-muted-foreground hover:text-foreground"
+                  title="Build a new index from documents"
                 >
                   + New
                 </button>
@@ -468,6 +469,7 @@ export function ChatPanel({
                   type="button"
                   onClick={() => setPickerOpen(true)}
                   className="text-primary hover:underline"
+                  title="Switch to a different index"
                 >
                   Change
                 </button>
@@ -481,6 +483,7 @@ export function ChatPanel({
                   type="button"
                   onClick={() => setBuildStudioOpen(true)}
                   className="text-muted-foreground hover:text-foreground"
+                  title="Build a new index from documents"
                 >
                   + New
                 </button>
@@ -638,6 +641,7 @@ export function ChatPanel({
                                 !isDynamic && !isStatic ? "border-white/20 bg-white/10 text-foreground" : "text-muted-foreground",
                               )}
                               onClick={() => setForecastCovariateMode(column.name, "ignore")}
+                              title="Ignore this column when forecasting"
                             >
                               Ignore
                             </button>
@@ -648,6 +652,7 @@ export function ChatPanel({
                                 isDynamic ? "border-sky-400/25 bg-sky-500/15 text-sky-100" : "text-muted-foreground",
                               )}
                               onClick={() => setForecastCovariateMode(column.name, "dynamic")}
+                              title="Dynamic covariate — past values known, future unknown (the model will project them too)"
                             >
                               Dynamic
                             </button>
@@ -658,6 +663,7 @@ export function ChatPanel({
                                 isStatic ? "border-amber-400/25 bg-amber-500/15 text-amber-100" : "text-muted-foreground",
                               )}
                               onClick={() => setForecastCovariateMode(column.name, "static")}
+                              title="Static covariate — fixed metadata (e.g. category, region) that helps the model contextualize"
                             >
                               Static
                             </button>

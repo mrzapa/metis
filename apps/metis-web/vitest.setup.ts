@@ -331,6 +331,7 @@ vi.mock("lucide-react", () => {
     Settings: Icon,
     Settings2: Icon,
     ShieldAlert: Icon,
+    SlidersHorizontal: Icon,
     Sparkles: Icon,
     Square: Icon,
     Tag: Icon,
