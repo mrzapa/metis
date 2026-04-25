@@ -25,43 +25,20 @@ import {
   BetweenHorizontalEnd,
   CheckCircle2,
   Database,
-  KeyRound,
   Sparkles,
 } from "lucide-react";
 import { BrainIcon } from "@/components/icons";
 import { useArrowState } from "@/hooks/use-arrow-state";
 
 const LLM_PROVIDERS = [
-  {
-    value: "anthropic",
-    label: "Anthropic",
-    description:
-      "Strong writing quality and research synthesis out of the box.",
-  },
-  {
-    value: "openai",
-    label: "OpenAI",
-    description: "Balanced reasoning, tool use, and a broad model lineup.",
-  },
-  {
-    value: "local",
-    label: "Local model",
-    description:
-      "Keep inference on-device when you prefer a fully local stack.",
-  },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "openai", label: "OpenAI" },
+  { value: "local", label: "Local model" },
 ] as const;
 
 const EMBEDDING_PROVIDERS = [
-  {
-    value: "openai",
-    label: "OpenAI embeddings",
-    description: "A fast default for most hosted setups.",
-  },
-  {
-    value: "local",
-    label: "Local embeddings",
-    description: "Good when you want indexing to stay on your machine.",
-  },
+  { value: "openai", label: "OpenAI embeddings" },
+  { value: "local", label: "Local embeddings" },
 ] as const;
 
 const STEP_LABELS = [
@@ -283,9 +260,6 @@ export default function SetupPage() {
                     <CheckCircle2 className="size-5 text-primary" />
                   ) : null}
                 </div>
-                <p className="mt-3 text-sm leading-7 text-muted-foreground">
-                  {provider.description}
-                </p>
               </button>
             );
           })}
@@ -299,48 +273,29 @@ export default function SetupPage() {
           ? "Local model mode does not require a hosted API key. You can continue immediately or add one later if you switch providers."
           : "Paste the API key for the selected provider. You can also add it later in settings.",
       content: (
-        <div className="space-y-5">
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
-            <div className="space-y-3">
-              <label
-                htmlFor="api_key"
-                className="text-sm font-medium text-foreground"
-              >
-                {llmProvider === "anthropic"
-                  ? "Anthropic API key"
-                  : llmProvider === "openai"
-                    ? "OpenAI API key"
-                    : "Optional API key"}
-              </label>
-              <Input
-                id="api_key"
-                type="password"
-                placeholder={llmProvider === "local" ? "Optional" : "sk-..."}
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-              />
-              <p className="text-sm leading-7 text-muted-foreground">
-                {llmProvider === "local"
-                  ? "Leave this blank if you’re staying fully local."
-                  : "If you skip this now, you can still add it later in your settings file."}
-              </p>
-            </div>
-
-            <div className="rounded-[1.45rem] border border-white/8 bg-black/10 p-4">
-              <AnimatedLucideIcon
-                icon={KeyRound}
-                mode="hoverLift"
-                className="size-5 text-primary"
-              />
-              <p className="mt-3 font-medium text-foreground">
-                Credential posture
-              </p>
-              <p className="mt-2 text-sm leading-7 text-muted-foreground">
-                Keys are not echoed back in the UI. They are only forwarded to
-                the backend settings update when you finish onboarding.
-              </p>
-            </div>
-          </div>
+        <div className="space-y-3">
+          <label
+            htmlFor="api_key"
+            className="text-sm font-medium text-foreground"
+          >
+            {llmProvider === "anthropic"
+              ? "Anthropic API key"
+              : llmProvider === "openai"
+                ? "OpenAI API key"
+                : "Optional API key"}
+          </label>
+          <Input
+            id="api_key"
+            type="password"
+            placeholder={llmProvider === "local" ? "Optional" : "sk-..."}
+            value={apiKey}
+            onChange={(event) => setApiKey(event.target.value)}
+          />
+          <p className="text-sm leading-7 text-muted-foreground">
+            {llmProvider === "local"
+              ? "Leave this blank if you’re staying fully local."
+              : "If you skip this now, you can still add it later in your settings file."}
+          </p>
         </div>
       ),
     },
@@ -383,9 +338,6 @@ export default function SetupPage() {
                     <CheckCircle2 className="size-5 text-primary" />
                   ) : null}
                 </div>
-                <p className="mt-3 text-sm leading-7 text-muted-foreground">
-                  {provider.description}
-                </p>
               </button>
             );
           })}
@@ -394,8 +346,7 @@ export default function SetupPage() {
     },
     {
       title: "Build the first knowledge base",
-      description:
-        "Indexing a small set of documents here makes the app feel useful immediately. You can skip this and import more later, but a quick first index is the smoothest path into chat.",
+      description: "Optional. Index a few files now for grounded chat.",
       content: (
         <IndexBuildStudio
           settingsOverrides={buildSettings}
