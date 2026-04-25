@@ -415,3 +415,66 @@ Even if the Reflex app is kept as an archive, `metis_reflex.py` contains a comme
 | `apps/metis-web-lite/` (Astro) | Cleanup | Evaluate + README |
 | `heretic_service.py` | Cleanup | Move to scripts/ or flag-gate |
 | `engine/runs.py` `RunEvent` duplicate | Cleanup | Remove or consolidate |
+
+---
+
+## Web UI new-user audit (2026-04-25)
+
+Filed from a live new-user click-through of `apps/metis-web` at localhost:3000 (Claude-in-Chrome MCP + DOM/network instrumentation). Full original entry with verification details: [`plans/IDEAS.md`](../plans/IDEAS.md) — *Web UI new-user walkthrough — P0–P3 punch list*. Items 5/18/19 are parked there; 10/11/12/13 went to M12; 31 went to M13. Everything below is M01 work.
+
+Attack in the order **P0 → P1 visual → P1 perf → P2 IA → P2 copy → P3**. Each numbered item is intended to be a self-contained PR.
+
+### Phase 1 — P0 first-run blockers (1–2 days)
+
+1. **Reduced-motion reveal bug.** Elements get `style="opacity: 0; transform: translateY(…)"` as the initial state; under `prefers-reduced-motion: reduce` the reveal animation never fires (transition is `1e-06s` but the trigger is gated). Verified on Pipeline (`<h3>No entries yet</h3>` + empty-state copy at computed opacity 0) and on Chat right after the wizard's *Finish and open chat*. Fix: audit every `whileInView` / motion-style reveal in `apps/metis-web` and ensure the final state is unconditionally applied when `useReducedMotion()` is true (no opacity-0 starting state). This is the dominant source of "lag in many places" the user reported.
+2. **First-run banner on `/`.** A fresh user with `basic_wizard_completed=false` lands on the constellation home with no hint setup is needed — `/` is exempted in [`components/setup-guard.tsx`](../apps/metis-web/components/setup-guard.tsx) (see `allowedBeforeSetup`). Add a dismissible banner on `app/page.tsx` when `basic_wizard_completed` is false, linking to `/setup`. Don't drop `/` from the guard — that would trap the user from exploring.
+3. **"DIRECT CHAT READY" badge.** The wizard Step 5 launch summary shows the green badge even when no API key was provided. Gate the badge on (provider has a credential) AND (provider !== `mock`).
+4. **Mock fallback masquerades as a real reply.** `[Mock/Test Backend] / Short answer: Local mock backend executed successfully…` is rendered styled like an answer in the chat bubble. Either (a) when provider is `mock` or no key configured, return a structured client-side error card ("No model provider is configured — set one up in Settings") instead of a mock-answer, or (b) keep mock for dev but gate it behind a dev flag so production never hits it. Likely touches `metis_app/api_litestar/routes/query.py` and the chat client renderer.
+
+### Phase 2 — P1 visual / sprite (~1 day)
+
+5. **Lens-flare ring on the gold "+" New Chat button** (bottom-right of `/`). Hard blue-white circular halo around a warm-gold star — clashes with everything else. Replace with a soft glow.
+6. **METIS sprite anchor misalignment.** At max in-app zoom (2000×) the inner core dot is offset down-and-right of the outer halo ring; rays emanate from yet a third center. Make all three layers share one anchor in the renderer.
+7. **Canvas DPR mismatch.** 1920×855 internal canvas CSS-stretched larger → aliased rays/connector lines at every zoom. `canvas.width = clientWidth * devicePixelRatio` with proper `ctx.scale`.
+8. **Three sparkle/star icons on home** with totally different actions (purple "+" = thread search, gold "+" bottom-right = New Chat, gold sparkle top-right = spectral filter toggle). Different shapes (magnifier / plus-bubble / sliders) + `aria-label` + tooltip on each.
+9. **Magnitude slider overflow.** Bounding rect reported at x=1591 in a 1568-wide viewport (default Chrome window). Fix the panel flex/overflow so it stays inside the viewport.
+
+### Phase 3 — P1 perf / network (~1 day)
+
+10. **Per-mount API fan-out dedupe.** A single chat send fires `/v1/assistant` x3, `/v1/seedling/status` x3, `/v1/settings` x4, `/v1/sessions` x2 within seconds. Almost certainly multiple React effects / hooks racing on mount. Coalesce at the hook layer.
+11. **31.5-second long-poll connections** held open by `/v1/comets/active` (two parallel) and `/v1/comets/events?poll_seconds=10`. Verify intentional; if so, debounce/coalesce so we don't have two parallel poll loops; if not, kill.
+12. **Blocked URL with query-string data.** A 404 was blocked by Chrome with `[BLOCKED: Cookie/query string data]` during a chat send — possible PII in URL params. Reproduce, identify the call, move data to body / scrub. If confirmed PII-in-URL: also flag in the M17 plan doc as a network-audit item.
+
+### Phase 4 — P2 information architecture (~half-day)
+
+13. **Nav inconsistency.** Home renders `Chat / Settings`; every other page renders `Home / Chat / Settings / Diagnostics / Pipeline`. Unify: same items on every page.
+14. **Diagnostics in primary nav.** It's a dev/ops surface; move into a footer or a Settings sub-section.
+15. **Forecast feature is implicit.** Settings has `Forecast (TimesFM)` defaults but Chat's path toggle only shows `Direct / RAG`. Either expose Forecast in the path toggle or remove the orphan settings.
+16. **Companion overlay default state.** Currently opens by default on every page and covers the right pane on Chat (Sources panel). Default to collapsed pill; user opens on demand.
+
+### Phase 5 — P2 onboarding / copy (multi-day)
+
+17. **Setup wizard copy compression.** Each step has hero card + eyebrow + H1 + body + step tabs + step number + step heading + step subhead + body + card descriptions + `WHAT THIS UNLOCKS` sidebar that often duplicates the body. Cut to: one short paragraph per step. Drop the `WHAT THIS UNLOCKS` sidebar (or move into a per-step tooltip).
+18. **Step tabs truncated** ("1. Choose the primary model …", "2. Add credentials only if l…"). Either give each step a 2–3 word label or expand the tab strip's width.
+19. **Wizard heading voice.** "Choose how I should embed documents", "Add credentials only if I need them" — first-person from the AI. Neutralize: "Choose your embedding provider", "Provide an API key (optional)".
+20. **Default selections in the wizard cause silent mismatches.** Anthropic preselected at step 1, OpenAI preselected at step 3 for embeddings — combo requires both keys but neither is required to proceed. Either pre-select once consistently (Anthropic LLM + Voyage/local embeddings, or OpenAI both) or surface the mismatch at Step 5 with a warning.
+21. **Chat toolbar jargon.** `Agentic off`, `Heretic`, `mock / mock`, `Evidence Pack`, `local_gguf` need `title=` tooltips at minimum. Optional small "?" glossary popover.
+22. **Astronomy metaphor untranslated.** Faculty Sigil, Stellar Identity, Spectral Class M7 V, Magnitude ≤ 6.5, halo/rim/core/accent palette, "Main sequence" — add tooltip + glossary. The metaphor is a vision pillar (Cosmos), not optional, but it needs translation for non-astronomers.
+23. **"Discover everything"** hero copy currently only paints after a click. Make it visible on first paint.
+
+### Phase 6 — P3 minor (patch)
+
+24. **"Export PPTX"** button is visible on Chat → Sources panel even when "No sources yet." Gate the button on `sources.length > 0`.
+
+### How to attack this
+
+- One agent claims the M01 row when starting the audit work; otherwise it stays Rolling.
+- Land Phase 1 as 4 small PRs (one per item) — these unblock first-time users and should ship before anything else.
+- Phase 2 / 3 / 4 / 6 are visual / perf / IA / patch and can land in parallel small PRs.
+- Phase 5 is the largest by line-count; consider landing 17–22 (copy/wizard) in one PR and 23 in a separate PR.
+
+### What's *not* in this audit
+
+- Item 5 from the IDEAS entry (UI-editable API keys) is **parked** — it's a posture decision (settings.json-only credentials) that should be made alongside the parked telemetry posture decision (2026-04-18) and M17 Phase 8.
+- Item 19 from the IDEAS entry (home FCP 696ms) is **parked** — not user-blocking.
+- Item 18 from the IDEAS entry (the blocked URL with query-string data) is in this list as Phase 3 item 12, but is **also flagged for M17** if a real PII leak is confirmed.

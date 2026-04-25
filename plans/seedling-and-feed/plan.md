@@ -134,6 +134,14 @@ The next concrete actions:
 
 ## Notes for the next agent
 
+### Web UI new-user audit finding (2026-04-25)
+
+Filed from a live new-user click-through (full entry: [`plans/IDEAS.md`](../IDEAS.md) — *Web UI new-user walkthrough*). One item is M13:
+
+- **Companion overlay's *Recent Activity* surfaces "Seedling heartbeat" × 6** as the visible activity log to a brand-new user. To anyone outside the codebase this reads like an opaque developer log, not a "watch your companion grow" moment. Translate the heartbeat event into something a first-time user actually understands — e.g. "Background research tick", "Companion checked the feed", or whatever maps to the actual signal — and consider showing only the *latest* event by default with the full list behind a disclosure. The metaphor (heartbeat) is fine internally; the user-facing label is what needs to land the *intelligence grown, not bought* promise that this milestone owns.
+
+### Original notes
+
 This milestone is the centre of the vision (*"Next — the Seedling and
 the Feed"* in `VISION.md`). Everything in the pitch — "intelligence
 grown, not bought", "watch it grow", the morning-after reflection — is

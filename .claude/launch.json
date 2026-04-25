@@ -11,7 +11,8 @@
       "name": "Metis Web UI",
       "runtimeExecutable": "cmd",
       "runtimeArgs": ["/c", "cd /d C:\\Users\\samwe\\Documents\\metis\\apps\\metis-web && npm run dev"],
-      "port": 3000
+      "port": 3000,
+      "autoPort": true
     }
   ]
 }

@@ -121,6 +121,17 @@ No agent is actively claiming further M12 work. The `Claim` field in
 
 ## Notes for the next agent
 
+### Web UI new-user audit findings (2026-04-25)
+
+Filed from a live new-user click-through (full entry: [`plans/IDEAS.md`](../IDEAS.md) — *Web UI new-user walkthrough*). Four items concern the M12 interactive surface:
+
+1. **Detail-panel overlap when a star is selected.** The "FACULTY SIGIL / Perception" card overlaps the "…561 is aligned with Perception and holds 0 attached sources" sentence. z-index / layout audit on the click-to-inspect surface (Phase 1 in this plan).
+2. **Translucent cards bleed background star labels through.** Behind the Stellar Identity card the words "onomy" (from Autonomy) / "detection" / "observation" are visible. Either give the card an opaque-enough background or scrim under it.
+3. **"Type to thread stars by meaning…" semantic search is dead.** Typing + Enter fires zero network requests (verified via fetch hook); typing "memory" with the Memory star visible on screen does nothing. Either wire it to `/v1/search/knowledge` (or whichever backend serves semantic search) or hide the affordance until the feature lands.
+4. **Spectral-class filter and magnitude slider don't visibly filter the canvas.** Click "K" → URL becomes `#fams=K`. Drag magnitude → URL becomes `#fams=K&mag=2`. The canvas renders identically and zero network calls fire — pure URL theater. Either implement the filter on the rendered set or hide the controls.
+
+These are scope-adjacent to Phase 1 (Catalogue Star Inspector) and Phase 2/3 (catalogue search overlay + filter chips). When you pick up M12, consider rolling them into the next phase rather than spinning off separate PRs.
+
 ### Phased plan (each phase = one PR)
 
 **Phase 0 — Plan doc + claim (this PR).** Plan written, row flipped
