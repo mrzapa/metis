@@ -478,3 +478,112 @@ Attack in the order **P0 → P1 visual → P1 perf → P2 IA → P2 copy → P3*
 - Item 5 from the IDEAS entry (UI-editable API keys) is **parked** — it's a posture decision (settings.json-only credentials) that should be made alongside the parked telemetry posture decision (2026-04-18) and M17 Phase 8.
 - Item 19 from the IDEAS entry (home FCP 696ms) is **parked** — not user-blocking.
 - Item 18 from the IDEAS entry (the blocked URL with query-string data) is in this list as Phase 3 item 12, but is **also flagged for M17** if a real PII leak is confirmed.
+
+---
+
+## 2026-04-25 — UI/UX skill-pass refinements
+
+A second walkthrough was run with the `ui-ux-pro-max` skill applied and the user's design constraints (noob-friendly plug-and-play, no whitespace expansion — the cosmos backdrop *is* the negative space, retain functional toggles but reorganize/hide for default users, simplify the three home-page sparkle icons preferring the gold bottom-right styling, de-emphasize Diagnostics, replace text-heavy "Seedling heartbeat" with GSAP-driven visual signal, clarify or remove Pipeline, kill filler copy, restore procedurally-generated prompt suggestions). The recommendations below either **refine** existing audit items or **add net-new** ones.
+
+Recommended design system (from `ui-ux-pro-max --design-system`): **Minimal Single Column / Single CTA focus** pattern, **Exaggerated Minimalism** style (bold contrast, oversized type, negative space supplied by the cosmos backdrop — *not* literal padding). Adopt `#22C55E` as the active/CTA accent (replacing the cyan/teal currently used) for "go / ready" semantics. Typography stays compatible with current Fira-family pairing.
+
+### Refinement of audit item 8 (three-sparkle disambiguation) → unified gold FAB
+
+Subsume the purple "+" (semantic search), gold "+" bottom-right (new chat), and gold sparkle top-right (filter panel toggle) into **one gold FAB** styled like the current bottom-right button (user feedback: "looks the best") with the lens-flare ring removed (already audit item 5). On click, GSAP `stagger`-animates 3 satellite buttons outward in a short arc (~200ms total): magnifier (search), sliders (filters), paper-plane (new chat). Outside-click `reverse`-animates the collapse. Satellites overlay the canvas — no layout shift. This subsumes audit items 5 (lens flare) and 8 (three icons) into a single PR.
+
+### Refinement of audit item 23 (chat empty state) → procedural prompt chips + restored generator
+
+`STARTER_PROMPTS_DIRECT` / `STARTER_PROMPTS_WITH_INDEX` in [`apps/metis-web/app/setup/page.tsx:133`](../apps/metis-web/app/setup/page.tsx) are hardcoded. The chat empty state at [`apps/metis-web/components/chat/chat-panel.tsx:681`](../apps/metis-web/components/chat/chat-panel.tsx) shows a static H3 + paragraph. Replace both with **procedurally-generated prompt chips** (4–6) that float just above the composer when message list is empty. Generator inputs in priority order:
+
+1. Indexed-doc titles (if any) — e.g. "Summarize the key claims in $title".
+2. Recent comet topics from `/v1/comets/active`.
+3. Time-of-day / first-session vs returning-user templated openers.
+4. Fallback to the current 3 static prompts if nothing else available.
+
+Click chip → stages prompt in composer (no auto-send). The chip strip *is* the empty state — no separate H3 needed. Kills the filler copy "Start with a question that feels specific" entirely.
+
+### Refinement of audit item 14 (Diagnostics) + new Pipeline decision
+
+- **Diagnostics**: out of primary nav. Reachable via `Settings → Diagnostics & logs` or `Cmd+Shift+D` shortcut. Redesign even the advanced view to a single status card with progressive disclosure:
+  ```
+  🟢 All systems healthy · 3 versions matched · 0 errors in last 100 lines
+  [ Show details ▾ ]
+  ```
+  Don't open as the version cards + JSON dump + log tail it currently is.
+- **Pipeline**: user noted purpose is unclear. Two options:
+  1. **Recommended:** rename to `Research log` and tie content to seedling/comet activity ("watch what your companion has been working on") — gives clear value prop tied to a vision pillar.
+  2. Remove from primary nav; surface inside Settings → "Improvement log" only.
+
+### Refinement of M13 jargon item → ambient seedling widget (GSAP)
+
+`/v1/seedling/status` returns `{ running, last_tick_at, next_action_at, current_stage, queue_depth, activity_events[] }` — currently the UI throws all of this away as 6× repeated text "Seedling heartbeat". Replace with a small (~80×80px) ambient widget anchored top-right of home (or as a faint orbiting satellite around the central METIS sprite):
+
+- **Pulse ring**: `gsap.to(ring, { scale: 1.2, opacity: 0, duration: tickPeriod, repeat: -1, yoyo: true })` synced to `next_action_at - last_tick_at`. The user *sees* the heartbeat instead of reading the word.
+- **Stage indicator**: outer arc fills as `seedling → sapling → bloom → elder`. Single visual conveys lifecycle.
+- **Queue depth**: 1 small orbiting dot per queued item; empty when idle.
+- **Activity event**: brief comet-streak GSAP tween from off-screen edge → seedling, ending in a flash on absorption.
+- **Hover**: tooltip "Last check 2 min ago · Next in 58s · 0 in queue".
+- **Click**: opens the existing detailed Companion overlay (advanced surface preserved for power users).
+
+The 6 unlabeled action buttons (Pause / Reflect Now / Clear Recent / Refresh / Research Now / Auto-research) move into a `⋯` more-menu inside the expanded overlay. **Auto-research defaults OFF** (currently silently ON without consent — privacy/expectation issue).
+
+This subsumes the M13 plan's jargon-translation item; refine the M13 plan note to reference this design.
+
+### NEW — Net-new findings from this pass
+
+35. **`anthropic / mock` toolbar pill is a non-clickable label** disguised as a button (no `onclick`/`href`, identical styling to clickable pills around it). Either make it open the Change-Model modal or restyle as plain text so it stops looking interactive.
+36. **Change-Model modal: Provider and Model are free-text inputs**, no curated dropdown, no validation. Replace with a select/combobox of supported providers; model dropdown should be filtered by selected provider.
+37. **`Use Browser (WebGPU) — Runs Bonsai 1.7B entirely in your browser — no API key needed`** is buried inside the "Change Model" modal. This is the literal **plug-and-play** path. Promote it to the wizard's **Step 1 first option** as a binary fork:
+    ```
+    Welcome to METIS
+
+    ┌────────────────────────┐  ┌────────────────────────┐
+    │  ✨ Try it instantly   │  │  ⚙  Use my own model   │
+    │  Browser-only model    │  │  Anthropic / OpenAI    │
+    │  No setup, no key      │  │  or local GGUF         │
+    │  [ Get started ]       │  │  [ Configure ]         │
+    └────────────────────────┘  └────────────────────────┘
+    ```
+    Left card → straight into chat with WebGPU/Bonsai loaded. **Zero further wizard steps for the default user**. Right card → the existing 5-step flow (which still gets the copy compression + voice neutralization from Phase 5). This is the single highest-leverage change for "noob friendly" — most users land in chat in one click with a working model.
+38. **Heretic = "Uncensored mode"** (user clarification: it *is* a key feature, don't bury it). Don't move to deep settings; instead **rename in chat-toolbar UI** from `Heretic` (implementation/CLI tool name) to a user-facing label like **Uncensored mode** or icon + tooltip. Keep visible since it's a core differentiator.
+39. **Clicking empty space on the constellation canvas silently creates a new star** (toast: *"Star added and linked into the selected constellation branch"*). Irreversible content modification from a casual click — surprise factor for any new user clicking around to explore. Wire star-creation to its own dedicated mode: the SELECT/HAND bottom toolbar already exists; add a third "+ Add star" mode and only allow canvas-click creation when that mode is active.
+40. **File-attachment icon is misleading.** Generic-looking icon next to send button only accepts `.csv,.tsv` for forecasting (`accept=".csv,.tsv"`, aria-label *"Attach time series data"*, title *"Attach CSV/TSV to forecast"*). New users will assume general document upload. Either: (a) change the icon to a chart-line/sparkline glyph, (b) replace the placeholder hint to be more specific than "Ask anything, or attach a CSV/TSV to forecast", (c) split into two affordances if document upload becomes a feature.
+41. **Auto-research defaults ON** in Companion overlay. METIS does background research without explicit user consent on first run. Privacy/expectation issue. Default OFF and prompt user post-onboarding ("Want METIS to keep researching topics it sees in your activity?").
+42. **Outline tab is empty placeholder** ("Outline will show the structure of the current conversation."). Either implement or hide until ready.
+43. **Trace tab shows raw dev events** (`Synthesis / final / artifact_boundary_flag_state / artifact_render_fallback_markdown`). Hide for first-run; reveal only after `Developer mode` toggle in Settings.
+44. **Companion overlay copy uses third-person voice** ("METIS welcomed the user and prepared a lightweight local companion flow"). Switch to first-person ("I've prepared a lightweight local flow — you can chat as soon as you're ready") or fully neutral.
+45. **Toolbar progressive disclosure**. Default chat toolbar collapses to: `[Direct▸RAG] · Bonsai 1.7B (browser) · ⋯` — behind the `⋯` menu: Change model, Agentic mode, Uncensored mode (Heretic, renamed), System instructions, Conversation settings. Power users pin items back to toolbar via menu setting if desired.
+46. **The Heretic toolbar pill's `href` triggers a `[BLOCKED: Cookie/query string data]` block** in Chrome — second confirmation of the PII-in-URL issue from existing audit item 12. The pill links to `/settings/?tab=models&modelsTab=heretic` which Chrome's tracking protection flags. Move state to body / scrub.
+
+### Phase mapping for these refinements
+
+| New/refined | Phase in this plan |
+|---|---|
+| 35 (anthropic/mock label) | Phase 1 (P0 — directly visible chat affordance lying about being clickable) |
+| 36 (free-text provider/model inputs) | Phase 1 (P0 — first-time-user trap) |
+| 37 (WebGPU wizard fork) | Phase 1 (P0 — biggest single noob-friendly win) |
+| 38 (Heretic → Uncensored rename) | Phase 2 (visual/copy) |
+| 39 (canvas-click creates star) | Phase 1 (P0 — surprise content modification) |
+| 40 (CSV-only attach icon) | Phase 2 |
+| 41 (Auto-research defaults OFF) | Phase 1 (P0 — privacy expectation) |
+| 42 (Outline tab) | Phase 4 (IA — hide until implemented) |
+| 43 (Trace tab developer mode) | Phase 4 |
+| 44 (overlay third-person voice) | Phase 5 (copy) |
+| 45 (toolbar progressive disclosure) | Phase 4 |
+| 46 (Heretic href PII block) | Phase 3 (already item 12 — same investigation) |
+| Refinement of item 8 → unified FAB | Phase 2 (replaces existing item 8 spec) |
+| Refinement of item 23 → procedural chips | Phase 5 (replaces existing item 23 spec) |
+| Refinement of item 14 → Diagnostics tucked behind shortcut + Pipeline rename | Phase 4 (replaces existing item 14 spec, adds Pipeline decision) |
+| Refinement of M13 item → GSAP seedling widget | M13 plan note (already merged; update to reference this design) |
+
+### NEW — Settings deep-dive findings
+
+47. **Memory tab — Recursive memory defaults OFF.** "Persist and recall prior conversation context across sessions" — this is a flagship "your AI grows with you" feature and is **directly contradicted by being off by default**. Default ON, or surface in the wizard as part of the WebGPU plug-and-play fork.
+48. **Companion tab — Archetype defaults to "Clippy-style research companion".** Self-deprecating joke serialized into the assistant's prompt seed. Replace with on-brand default ("Local-first research companion" / "Companion").
+49. **Privacy & network audit is buried 3 clicks deep** but is the strongest local-first selling point in the product (live outbound-call audit, airplane mode toggle, per-provider allow/block matrix, 0-call counter). Promote: small status pill in the home/chat header — `🟢 0 outbound calls · airplane off` — clickable to open the panel. Aligns with M17 Network Audit milestone work.
+50. **Privacy panel cross-references settings by raw key name** ("Controlled by `autonomous_research_enabled` in other settings"). Replace with a clickable link that deep-links to that setting; never expose raw keys to the user.
+51. **`?tab=retrieval` query param doesn't deep-link to the Retrieval tab** — page loads with Core selected. Tab state is local-only, not URL-synced. Breaks bookmarking and sharing of specific tabs.
+52. **"Save settings" button is at the top of the form**, between the tab strip and the field grid. Users scroll through dozens of fields, modify, then have to scroll back up to save. Move to bottom (or make it sticky on a footer bar).
+53. **Companion overlay covers the right pane on every page** including Privacy & network audit. Same persistence problem as Chat. Default-collapsed across the whole app would solve it. (Already implied by audit item 16 — flagging the cross-page recurrence.)
+
+Phase mapping: items 47, 48, 49 are **Phase 1 / 2** (high-impact noob-friendly + brand-aligned). Items 50, 51, 52 are **Phase 4** (IA polish). Item 53 is already covered by audit item 16.

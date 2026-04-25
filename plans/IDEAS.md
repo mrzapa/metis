@@ -126,7 +126,7 @@ Template for agent-filed intake:
     - **M12 merges**: ≈ 1–2 days inside the existing claim window.
     - **M13 merge**: patch.
 - **Decision:** **Merged + Parked** 2026-04-25.
-  - **Merged into [M01](../docs/preserve-and-productize-plan.md)** — items 1–4, 6–9, 14–17, 19–30, 32–33 captured under *Web UI new-user audit (2026-04-25)* with a 6-phase implementation plan.
+  - **Merged into [M01](../docs/preserve-and-productize-plan.md)** — items 1–4, 6–9, 14–17, 19–30, 32–33 captured under *Web UI new-user audit (2026-04-25)* with a 6-phase implementation plan. **Refined + extended later that same day** under *2026-04-25 — UI/UX skill-pass refinements* with 12 new findings (items 35–46) and 4 refinement specs (unified gold FAB, procedural prompt chips, Diagnostics behind shortcut + Pipeline rename, GSAP seedling widget) — see that section in the M01 plan.
   - **Merged into [M12](interactive-star-catalogue/plan.md)** — items 10, 11, 12, 13 captured under *Notes for the next agent → Web UI new-user audit findings*.
   - **Merged into [M13](seedling-and-feed/plan.md)** — item 31 captured under *Notes for the next agent → Web UI new-user audit finding*.
   - **Parked in *Iced* below** — items 5 (UI-editable API keys), 18 (blocked-URL/PII), 19 (home FCP).
