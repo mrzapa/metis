@@ -164,6 +164,96 @@ def test_record_external_reflection_cooldown_buckets_by_trigger(tmp_path) -> Non
     assert other["ok"] is True
 
 
+def test_record_external_reflection_cooldown_buckets_by_kind(tmp_path) -> None:
+    """*while_you_work* and *overnight* are independent cooldown buckets so a
+    Bonsai burst does not block an overnight cycle."""
+    svc = _service(tmp_path)
+    settings = _bonsai_settings(cooldown=120.0)
+
+    while_you_work = svc.record_external_reflection(
+        summary="Bonsai note.",
+        trigger="news_comet",
+        kind="while_you_work",
+        settings=settings,
+    )
+    assert while_you_work["ok"] is True
+    assert while_you_work["memory_entry"]["kind"] == "bonsai_reflection"
+
+    # Same trigger, different kind — different bucket — should fire.
+    overnight = svc.record_external_reflection(
+        summary="Overnight note.",
+        trigger="news_comet",
+        kind="overnight",
+        settings=settings,
+    )
+    assert overnight["ok"] is True
+    assert overnight["memory_entry"]["kind"] == "overnight_reflection"
+    assert overnight["memory_entry"]["title"].startswith("Overnight ") or (
+        overnight["memory_entry"]["title"] == "Overnight note."
+    )
+
+
+def test_record_external_reflection_cooldown_lookback_survives_unrelated_writes(
+    tmp_path,
+) -> None:
+    """Unrelated memory writes between two same-bucket Bonsai reflections must
+    not push the prior bucket entry out of the cooldown lookback window."""
+    from metis_app.models.assistant_types import AssistantMemoryEntry as _Memory
+
+    svc = _service(tmp_path)
+    settings = _bonsai_settings(cooldown=120.0)
+
+    first = svc.record_external_reflection(
+        summary="First Bonsai note.",
+        trigger="news_comet",
+        settings=settings,
+    )
+    assert first["ok"] is True
+
+    # Inject 32 unrelated memory rows between the two cooldown checks.
+    for i in range(32):
+        svc.repository.add_memory_entry(
+            _Memory.create(
+                kind="reflection",
+                title=f"Filler {i}",
+                summary=f"Filler {i}",
+                trigger="manual",
+            ),
+            max_entries=200,
+        )
+
+    second = svc.record_external_reflection(
+        summary="Second Bonsai note.",
+        trigger="news_comet",
+        settings=settings,
+    )
+    # Cooldown still trips even with 32 unrelated rows in between.
+    assert second["ok"] is False
+    assert second["reason"] == "cooldown"
+
+
+def test_record_external_reflection_normalises_trigger_whitespace(tmp_path) -> None:
+    """Trigger ``"news_comet "`` should be considered the same bucket as
+    ``"news_comet"`` so a stray trailing space cannot bypass the cooldown."""
+    svc = _service(tmp_path)
+    settings = _bonsai_settings(cooldown=120.0)
+
+    first = svc.record_external_reflection(
+        summary="First.",
+        trigger="news_comet",
+        settings=settings,
+    )
+    assert first["ok"] is True
+
+    second = svc.record_external_reflection(
+        summary="Second.",
+        trigger="news_comet ",  # trailing space
+        settings=settings,
+    )
+    assert second["ok"] is False
+    assert second["reason"] == "cooldown"
+
+
 def test_record_external_reflection_zero_cooldown_disables_gate(tmp_path) -> None:
     svc = _service(tmp_path)
     settings = _bonsai_settings(cooldown=0.0)
