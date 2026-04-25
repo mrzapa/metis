@@ -82,7 +82,7 @@ CREATE INDEX idx_news_items_source  ON news_items (source_channel, source_url, f
 
 CREATE TABLE comet_events (
     comet_id              TEXT PRIMARY KEY,
-    item_hash             TEXT NOT NULL REFERENCES news_items(item_hash) ON DELETE CASCADE,
+    item_hash             TEXT NOT NULL REFERENCES news_items(item_hash),
     faculty_id            TEXT NOT NULL DEFAULT '',
     secondary_faculty_id  TEXT NOT NULL DEFAULT '',
     classification_score  REAL NOT NULL DEFAULT 0.0,
@@ -93,11 +93,14 @@ CREATE TABLE comet_events (
     created_at            REAL NOT NULL,
     decided_at            REAL NOT NULL DEFAULT 0.0,
     absorbed_at           REAL NOT NULL DEFAULT 0.0,
-    notes                 TEXT NOT NULL DEFAULT ''  -- absorb/dismiss notes
+    atlas_entry_id        TEXT NOT NULL DEFAULT '',  -- set by Phase 3+ when an absorb completes
+    notes                 TEXT NOT NULL DEFAULT ''   -- absorb/dismiss notes
 );
 CREATE INDEX idx_comet_events_phase   ON comet_events (phase, created_at DESC);
 CREATE INDEX idx_comet_events_active  ON comet_events (created_at DESC)
     WHERE phase NOT IN ('absorbed','dismissed','fading');
+CREATE INDEX idx_comet_events_atlas   ON comet_events (atlas_entry_id)
+    WHERE atlas_entry_id != '';
 
 CREATE TABLE feed_cursors (
     source_channel        TEXT NOT NULL,        -- "rss" / "hn" / "reddit" / ...
@@ -116,6 +119,32 @@ the SSE comet stream can read while the worker writes. All writes go
 through a single `threading.Lock` per `NewsFeedRepository` instance —
 matching the `atlas_repository` posture and the
 `network_audit.runtime` pattern.
+
+Note that `comet_events.item_hash` is a plain reference, not
+`ON DELETE CASCADE`. The cleaner in §4 is responsible for protecting
+active comets explicitly; an unconditional cascade would silently
+erase a `drifting`/`approaching`/`absorbing` comet whose parent
+`news_items` row aged out of the rolling window. The retention path
+must always pass through the phase guard described below.
+
+Schema posture follows ADR 0011 §6: this is **v0**, additive
+`CREATE … IF NOT EXISTS` is used for compatible changes (extra
+columns with defaults, new indexes), and a one-shot migration is
+committed in the same PR for any incompatible change. There is no
+migration framework. `init_db` is idempotent and is invoked from
+`NewsFeedRepository`'s first `_transaction`, matching how
+`atlas_repository.init_db` is gated on `_schema_ready`. No app-startup
+hook is needed.
+
+`NewsFeedRepository` accepts `db_path=":memory:"` for tests; the
+shared in-process connection pattern from `atlas_repository._shared_conn`
+applies, so memory-mode tests do not lose state between transactions.
+
+`raw_metadata_json` extends the stored shape beyond the existing
+`CometEvent.to_dict()` wire shape — `to_dict()` does not include
+`NewsItem.raw_metadata`. The repository hydrates the column back into
+`NewsItem.raw_metadata` on read so the dataclass round-trip is
+faithful even though the HTTP response shape is unchanged.
 
 ### 2. Dedup hash — keep the existing algorithm, persist it
 
@@ -147,24 +176,41 @@ back off" signal.
 
 ### 4. Retention policy
 
-Two writers, one cleaner.
+Two writers, one cleaner. The cleaner is the only deleter; ad-hoc
+`DELETE` from outside `news_feed_repository.cleanup(...)` is a bug.
 
 - **`news_items`:** rolling 14-day window, evict oldest by
-  `fetched_at`. Hard cap of 50 000 rows, whichever hits first. This
-  is enough to keep dedup honest without turning the DB into a
-  permanent reading history.
+  `fetched_at`. Hard cap of 50 000 rows, whichever hits first. The
+  cleaner **must** guard against orphaning live comets:
+
+  ```sql
+  DELETE FROM news_items
+   WHERE fetched_at < :cutoff
+     AND item_hash NOT IN (
+       SELECT item_hash FROM comet_events
+        WHERE phase IN ('entering','drifting','approaching','absorbing')
+           OR (phase = 'absorbed' AND atlas_entry_id != '')
+     );
+  ```
+
+  The 50 000-row cap uses the same `NOT IN` exclusion against the
+  bottom-N-by-`fetched_at`. This is the load-bearing reason
+  `comet_events.item_hash` is **not** declared `ON DELETE CASCADE`:
+  an unguarded cascade would silently delete an active comet whose
+  parent item aged out, contradicting the next bullet.
 - **`comet_events`:**
   - Active phases (`entering`, `drifting`, `approaching`,
     `absorbing`) survive eviction regardless of age — losing those
     contradicts decision (1) of the *Context* above.
   - `dismissed` and `fading` evicted after 7 days.
-  - `absorbed` evicted only after the linked star is itself
-    promoted into Atlas / removed (Phase 3+ ties this to
-    `atlas_repository`); until then the absorbed comet stays as
-    provenance.
-  - `ON DELETE CASCADE` on `news_items.item_hash` keeps things in
-    sync; the cleaner deletes from `news_items` and SQLite reaps
-    the comet rows.
+  - `absorbed` rows with a non-empty `atlas_entry_id` are retained
+    until the linked Atlas entry is removed; the cleaner does
+    `DELETE FROM comet_events WHERE phase = 'absorbed' AND atlas_entry_id != '' AND atlas_entry_id NOT IN (SELECT entry_id FROM atlas_entries)`
+    against `rag_sessions.db.atlas_entries` once per cycle.
+  - `absorbed` rows whose `atlas_entry_id` is still empty (no link
+    written yet) are evicted on the same 7-day window as
+    `dismissed`/`fading`; this prevents an unbounded build-up if the
+    Phase 3 absorb path stops linking.
 - **`feed_cursors`:** never auto-evicted. A cursor row is the size of
   a settings entry; if the user removes the feed from
   `news_comet_rss_feeds`, the worker leaves the cursor row in place
@@ -184,10 +230,20 @@ outer `<outline text="Subscriptions">`. Phase 3 v1 supports import
 only.
 
 - New endpoint: `POST /v1/comets/opml/import` accepting
-  `multipart/form-data` with a single OPML file (≤1 MB).
-- Parser: stdlib `xml.etree.ElementTree` with `defusedxml` if already
-  available, otherwise `ElementTree.fromstring(..., parser=ET.XMLParser())`
-  configured to disable DTD loading. **No external XML libraries.**
+  `multipart/form-data` with a single OPML file (≤
+  `seedling_opml_import_max_bytes`, default 1 MiB).
+- Parser: **`defusedxml.ElementTree.fromstring`** is the only sanctioned
+  parser. `defusedxml` is the standard hardened wrapper for stdlib
+  `xml.etree`; bare stdlib `xml.etree.ElementTree.XMLParser` does not
+  expose a clean knob to disable DTD/external-entity expansion in
+  every supported Python version, and inheriting `defusedxml`
+  transitively through `langchain-core` is a coin flip on environment
+  resolution. Adding `defusedxml` as a real declared dependency is
+  the one accepted exception to *Constraints*' "do not add a new
+  dependency" rule, justified by the security-load-bearing nature of
+  XML parsing on user-supplied input. `defusedxml` is pure-Python,
+  has no native build, and ships in the same wheels universe as the
+  rest of the project.
 - Behaviour: the parser walks the tree, collects every `xmlUrl`
   attribute on outlines whose `type` attribute is `rss` (or absent),
   validates each as a URL through the same SSRF gate that
@@ -196,7 +252,12 @@ only.
   For each new feed it writes a `feed_cursors` row with
   `last_polled_at = 0` so the next worker tick treats it as a cold
   feed.
-- The endpoint returns `{added: int, skipped_duplicate: int,
+- HTTP error contract: `400` for malformed XML or non-OPML root,
+  `413` for payloads above
+  `seedling_opml_import_max_bytes`, `422` for OPML that parses but
+  contains zero `xmlUrl` attributes (treated as caller error so a
+  bad upload doesn't silently succeed). On success the endpoint
+  returns `200` with `{added: int, skipped_duplicate: int,
   skipped_invalid: int, errors: [...]}`. It does **not** start a
   poll synchronously — the next worker tick picks up the new feeds.
 - Export deferred to a follow-up. Tracked in `plans/IDEAS.md` as
@@ -207,12 +268,18 @@ only.
 - Preserve ADR 0004: single Litestar process, no second daemon. The
   store is a SQLite file the worker opens; no service mesh, no
   network DB.
-- Preserve ADR 0011's privacy posture for feed *content*. URLs and
-  titles of items the user fetches *are* recorded — that is by design
-  for dedup and for "show me the comets I dismissed" — but they live
-  on the user's disk and are never exfiltrated. The `news_items.db`
-  retention windows above are the explicit honest answer to "what
-  exactly are you keeping about my reading habits?".
+- Preserve ADR 0011's privacy posture, but understand its scope.
+  ADR 0011's "never persist the full URL" rule applies to the
+  **outbound network audit log** of *what METIS fetched on the user's
+  behalf*. ADR 0008 stores the **content the user explicitly opted
+  in to ingesting** — the feeds they configured, the items those
+  feeds returned. URLs and titles of those items *are* recorded —
+  by design, for dedup and for "show me the comets I dismissed" —
+  and live on the user's disk only. The two ADRs are not in
+  conflict: 0011 governs the audit log of egress, 0008 governs
+  user-curated reading material. The `news_items.db` retention
+  windows above are the explicit honest answer to "what exactly
+  are you keeping about my reading habits?".
 - Coordinate with M17 (Network audit). Every outbound fetch the
   worker triggers — RSS fetch, HN fetch, Reddit fetch, OPML feed
   validation — must already be going through `audited_urlopen` with
@@ -223,9 +290,11 @@ only.
   decision engine. The repository owns serialization; the decision
   engine continues to own scoring. No business logic moves into
   `news_feed_repository`.
-- Do **not** add a new dependency. SQLite ships with stdlib;
-  `xml.etree.ElementTree` ships with stdlib; both already pass the
-  existing dependency policy.
+- One accepted dependency exception: `defusedxml` for OPML parsing
+  (see §5). All other persistence and parsing concerns stay on
+  stdlib (`sqlite3`, `xml.etree`). The exception is justified by
+  the security-load-bearing nature of parsing user-supplied XML,
+  and `defusedxml` is the textbook answer.
 
 ## Alternatives Considered
 
@@ -286,16 +355,25 @@ Accepted implementation follow-ups (Phase 3+):
   `<repo_root>/news_items.db`) so packaged deployments and tests can
   override the location through the same path the existing
   `local_gguf_*` overrides use.
-- Add `seedling_feed_retention_days` (default 14) and
-  `seedling_feed_max_rows` (default 50 000) to
-  `metis_app/default_settings.json` with the same caveat that they
-  are advisory; the cleaner clamps both.
-- The Phase 3 ingestion loop is the **only** writer to
-  `comet_events.phase = "absorbing" → "absorbed"`. Front-end absorb
-  / dismiss endpoints (`/v1/comets/{id}/absorb` and `/dismiss`) call
-  through `news_feed_repository.update_phase`; they do not mutate
-  the repository directly from the route handler so tests can
-  assert against a single seam.
+- Add `seedling_feed_retention_days` (default 14),
+  `seedling_feed_max_rows` (default 50 000), and
+  `seedling_opml_import_max_bytes` (default 1048576) to
+  `metis_app/default_settings.json`. The first two are advisory;
+  the cleaner clamps both. The third is a hard reject limit for
+  the OPML import endpoint.
+- All `phase` mutations go through `news_feed_repository.update_phase`.
+  The Seedling worker tick is the only caller for engine-driven
+  transitions (`entering` → `drifting` → `approaching` → `absorbing`
+  → `absorbed`/`fading`). The user-driven `/v1/comets/{id}/absorb`
+  and `/dismiss` route handlers also call `update_phase` — they do
+  not mutate the repository directly — so tests can assert against
+  a single seam and the cleaner's phase-guard query (§4) only has
+  to consider one source of truth.
+- `list_active` returns at most `news_comet_max_active` (already in
+  `default_settings.json`) rows ordered by `created_at DESC`. The
+  active set is bounded by that setting; `news_items.db` does not
+  add its own pagination layer in v0. If a future setting raises
+  the cap above ~100, revisit and add explicit `LIMIT/OFFSET`.
 - The OPML import endpoint registers under
   `routes/comets.py::router` — there is no new "feeds" router.
   Authorisation uses the same `require_token_guard` as the rest of
