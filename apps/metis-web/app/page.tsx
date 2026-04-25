@@ -5345,31 +5345,38 @@ export default function Home() {
         </div>
       </div>
 
-      <div className={`metis-semantic-search ${semanticSearchExpanded ? "is-expanded" : ""}`}>
-        <button
-          type="button"
-          className="metis-semantic-search-toggle"
-          aria-label="Toggle semantic link search"
-          aria-expanded={semanticSearchExpanded}
-          onClick={() => setSemanticSearchExpanded((open) => !open)}
-        >
-          ✦
-        </button>
-        <input
-          ref={semanticSearchInputRef}
-          className="metis-semantic-search-input"
-          value={semanticQuery}
-          onChange={(event) => setSemanticQuery(event.target.value)}
-          placeholder="Type to thread stars by meaning…"
-          aria-label="Semantic star search"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              setSemanticQuery("");
-              setSemanticSearchExpanded(false);
-            }
-          }}
-        />
-      </div>
+      {/* Semantic-link search across the user's own added stars. Hidden
+          when the user hasn't added any stars yet — the affordance was
+          previously misleading (placeholder hinted "thread stars by
+          meaning" but the search has nothing to index until user stars
+          exist). Reappears the moment the user adds their first star. */}
+      {userStars.length > 0 && (
+        <div className={`metis-semantic-search ${semanticSearchExpanded ? "is-expanded" : ""}`}>
+          <button
+            type="button"
+            className="metis-semantic-search-toggle"
+            aria-label="Toggle semantic link search"
+            aria-expanded={semanticSearchExpanded}
+            onClick={() => setSemanticSearchExpanded((open) => !open)}
+          >
+            ✦
+          </button>
+          <input
+            ref={semanticSearchInputRef}
+            className="metis-semantic-search-input"
+            value={semanticQuery}
+            onChange={(event) => setSemanticQuery(event.target.value)}
+            placeholder="Type to thread your stars by meaning…"
+            aria-label="Semantic star search"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setSemanticQuery("");
+                setSemanticSearchExpanded(false);
+              }
+            }}
+          />
+        </div>
+      )}
 
       {/* M12 Phase 2 — Catalogue Search Overlay.
           Sits beside the semantic-search HUD. Searches the landmark index
