@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useEffect, useLayoutEffect, useState, type KeyboardEvent, type RefObject } from "react";
+import { useMemo, useRef, useEffect, useLayoutEffect, useState, type KeyboardEvent, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -77,6 +77,35 @@ interface ChatPanelProps {
 }
 
 const RAG_MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack", "Knowledge Search"] as const;
+
+const PROMPT_SUGGESTIONS_DIRECT = [
+  "Pick a complex idea and break it down for me",
+  "Help me plan a research session for the next hour",
+  "What's a useful question I haven't thought to ask?",
+  "Explain a recent topic I've been curious about",
+  "Sketch a workflow I could try this week",
+];
+
+const PROMPT_SUGGESTIONS_RAG_GROUNDED = [
+  "Summarize the key claims across my indexed sources",
+  "What are the strongest arguments in my material?",
+  "Find passages about a specific concept",
+  "Compare how different sources handle the same idea",
+  "Pick the most surprising finding in my docs",
+];
+
+const PROMPT_SUGGESTIONS_RAG_NO_INDEX = [
+  "Help me pick which documents to index first",
+  "What kinds of questions are RAG mode best for?",
+  "Explain the difference between RAG and direct chat",
+];
+
+const PROMPT_SUGGESTIONS_FORECAST = [
+  "Forecast the next 30 days from my time series",
+  "Show p10/p50/p90 quantile bands for the projection",
+  "Project where this trend lands in 3 months",
+  "Compare two horizons side by side",
+];
 const DEFAULT_RAG_MODE = "Q&A";
 
 export function ChatPanel({
@@ -134,6 +163,15 @@ export function ChatPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const forecastFileInputRef = useRef<HTMLInputElement>(null);
   const isKnowledgeSearchMode = queryMode === "rag" && selectedMode === "Knowledge Search";
+  const promptSuggestions = useMemo(() => {
+    if (queryMode === "forecast") return PROMPT_SUGGESTIONS_FORECAST;
+    if (queryMode === "rag") {
+      return activeIndexPath
+        ? PROMPT_SUGGESTIONS_RAG_GROUNDED
+        : PROMPT_SUGGESTIONS_RAG_NO_INDEX;
+    }
+    return PROMPT_SUGGESTIONS_DIRECT;
+  }, [queryMode, activeIndexPath]);
   const forecastColumns = forecastSchema?.columns ?? [];
   const forecastSelectedMapping = forecastMapping ?? forecastSchema?.suggested_mapping ?? null;
   const forecastCovariateColumns = forecastColumns.filter((column) => (
@@ -681,21 +719,17 @@ export function ChatPanel({
           )}
 
           {!loading && !error && messages.length === 0 && (
-            <div className="chat-empty-state glass-panel mx-auto flex max-w-3xl flex-col items-center justify-center rounded-[1.8rem] px-8 py-16 text-center text-muted-foreground">
-              <p className="font-display text-3xl font-semibold tracking-[-0.04em] text-foreground">
-                Start with a question that feels specific.
-              </p>
-              <p className="mt-3 max-w-xl text-sm leading-7">
-                {queryMode === "rag"
-                  ? activeIndexPath
-                    ? isKnowledgeSearchMode
-                      ? "Search the indexed material first and inspect the strongest evidence without running a full synthesis pass."
-                      : "Ask about the material you indexed, compare documents, or request a high-confidence overview grounded in sources."
-                    : "Choose an index to unlock grounded RAG answers and evidence-backed synthesis."
-                  : queryMode === "forecast"
-                    ? "Upload a time-series file, map the timestamp and target columns, and run a structured forecast with quantile bands."
-                  : "Use direct mode for fast ideation, planning, or questions that do not need document grounding yet."}
-              </p>
+            <div className="chat-empty-state mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2 px-6 py-12">
+              {promptSuggestions.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => setDraft(prompt)}
+                  className="cursor-pointer rounded-full border border-white/8 bg-white/4 px-4 py-2 text-sm leading-5 text-foreground/80 transition-colors hover:border-primary/30 hover:bg-primary/8 hover:text-foreground"
+                >
+                  {prompt}
+                </button>
+              ))}
             </div>
           )}
 
