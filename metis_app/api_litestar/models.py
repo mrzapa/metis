@@ -1307,6 +1307,28 @@ class AssistantReflectRequestModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class AssistantRecordReflectionRequestModel(BaseModel):
+    """Body shape for ``POST /v1/assistant/record-reflection``.
+
+    Used by the Phase 4a Bonsai-driven *while-you-work* path and the
+    Phase 4b backend GGUF *overnight* path. ``kind`` distinguishes the
+    two so the frontend can render differently and the cooldown
+    bucketing is independent. ``source_event`` carries the
+    :class:`CompanionActivityEvent` payload that triggered the
+    reflection so the persisted memory entry has provenance.
+    """
+
+    summary: Annotated[str, StringConstraints(min_length=1, max_length=4000)]
+    why: str = ""
+    trigger: str = "while_you_work"
+    kind: Literal["while_you_work", "overnight"] = "while_you_work"
+    confidence: float = Field(default=0.55, ge=0.0, le=1.0)
+    source_event: dict[str, Any] | None = None
+    tags: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class AssistantBootstrapRequestModel(BaseModel):
     install_local_model: bool = False
 

@@ -100,28 +100,47 @@ What's in place today that M13 will lean on:
   opt-in stretch tied to the backend toggle; the default Phase 4
   experience is *while-you-work* reflection driven by Bonsai. The
   Phase 2 lifecycle shell stays untouched.
+- **2026-04-25 — Phase 4a complete (Bonsai while-you-work reflection).**
+  `AssistantCompanionService.record_external_reflection` writes
+  short-form Bonsai-generated notes into the companion memory list,
+  bumps `AssistantStatus.latest_summary` / `latest_why`, and applies
+  a per-trigger cooldown (`seedling_external_reflection_cooldown_seconds`,
+  default 30s). New route `POST /v1/assistant/record-reflection`
+  exposes it. The companion dock's existing always-on Bonsai
+  callback (`metis:bonsai-always-on`) now POSTs the response on the
+  generating→ready edge with the originating
+  `CompanionActivityEvent` carried as `source_event` provenance.
+  `CompanionActivityEvent.kind?: "while_you_work" | "overnight"` is
+  added as an additive type extension. A copy-guard test
+  (`tests/test_seedling_marketing_copy.py`) fails CI if "reflects
+  while you sleep" appears unqualified anywhere under
+  `apps/metis-web/`. No backend model loading; reflection only fires
+  while the user has METIS open. Phase 4b will reuse the same writer
+  with `kind="overnight"` once the backend GGUF toggle ships.
 
 ## Next up
 
 The next concrete actions:
 
-1. **Phase 3 continuous ingestion (now unblocked).** Build
-   `metis_app/services/news_feed_repository.py` against the schema in
-   ADR 0008, then refactor `routes/comets.py` so `_active_comets` /
-   `_last_poll` / `_gc_terminal_comets` become thin wrappers over the
-   repository. Wire the existing `NewsIngestService` so its
-   `_seen_hashes` is a read-through LRU on top of the repo. Drive
-   the loop from the Phase 2 Seedling worker tick (no second
-   scheduler). Add the OPML-import endpoint as part of the same PR
-   so feed onboarding lands with the storage. Continue avoiding
-   double-indexing with `AutonomousResearchService`. **No model
-   loading in this phase** — ADR 0013 keeps reflection out of
-   Phase 3 entirely.
+1. **Phase 4b — overnight reflection (opt-in, backend GGUF).** Reuse
+   the Phase 4a `record_external_reflection` writer with
+   `kind="overnight"`. Wire the Seedling worker tick to schedule
+   one cycle per `seedling_reflection_cadence_hours` (default 24)
+   when both `seedling_backend_reflection_enabled = true` and
+   `model_status == "backend_configured"`. The backend GGUF path
+   produces the longer-form text; the writer is shared. Marketing
+   copy must remain qualified per ADR 0013 §3.
 2. **Extend `/v1/seedling/status` with `model_status`.** Add the
    four-value enum from ADR 0013 §2 (`frontend_only` /
    `backend_configured` / `backend_disabled` / `backend_unavailable`)
-   to `SeedlingStatus` and the matching frontend type. Either
-   alongside Phase 3 or as a tiny standalone PR before Phase 4.
+   to `SeedlingStatus` and the matching frontend type. Phase 4b
+   needs this to gate the overnight cycle. Either alongside Phase 4b
+   or as a tiny standalone PR right before it.
+3. **Phase 5 — growth stages.** Once Phase 4 ships and skill
+   candidates are flowing, ADR 0009 (or a plan-doc decision section)
+   pins the Seedling → Sapling → Bloom → Elder thresholds. Then
+   the dock surfaces the stage and the transition emits a one-time
+   `kind: "stage_transition"` event.
 
 ## Blockers
 

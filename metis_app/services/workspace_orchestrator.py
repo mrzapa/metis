@@ -954,6 +954,37 @@ class WorkspaceOrchestrator:
         self._capture_improvement_idea_from_reflection(result)
         return result
 
+    def record_companion_reflection(
+        self,
+        *,
+        summary: str,
+        why: str = "",
+        trigger: str = "while_you_work",
+        kind: str = "while_you_work",
+        confidence: float = 0.55,
+        source_event: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
+        settings: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Persist a Bonsai (Phase 4a) or backend (Phase 4b) reflection.
+
+        Thin wrapper around
+        :meth:`AssistantCompanionService.record_external_reflection`
+        so HTTP routes do not have to know the assistant-service API
+        directly. Settings resolution mirrors :meth:`reflect_assistant`.
+        """
+        resolved_settings = self._resolve_query_settings(settings or {})
+        return self._assistant_service.record_external_reflection(
+            summary=summary,
+            why=why,
+            trigger=trigger,
+            kind=kind,
+            confidence=confidence,
+            source_event=source_event,
+            tags=tags,
+            settings=resolved_settings,
+        )
+
     def run_autonomous_research(
         self,
         settings: dict[str, Any],

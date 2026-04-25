@@ -381,6 +381,205 @@ class AssistantCompanionService:
             "snapshot": self.get_snapshot(active_settings),
         }
 
+    # Map the public ``kind`` argument onto the persisted memory-entry
+    # ``kind`` field. Splitting the storage kinds (rather than tagging a
+    # single one) so Phase 4b's overnight reflections are distinguishable
+    # from while-you-work ones via a real column, not a tag-list lookup.
+    # Adding a new ``kind`` literal here is the only place to wire it.
+    _EXTERNAL_REFLECTION_KIND_MAP: dict[str, str] = {
+        "while_you_work": "bonsai_reflection",
+        "overnight": "overnight_reflection",
+    }
+    _EXTERNAL_REFLECTION_KINDS: frozenset[str] = frozenset(
+        _EXTERNAL_REFLECTION_KIND_MAP.values()
+    )
+
+    def record_external_reflection(
+        self,
+        *,
+        summary: str,
+        why: str = "",
+        trigger: str = "while_you_work",
+        kind: str = "while_you_work",
+        confidence: float = 0.55,
+        source_event: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
+        settings: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Record a reflection whose text was generated outside the backend.
+
+        Phase 4a (M13) uses this to persist Bonsai-1.7B WebGPU
+        reflections — short, event-driven notes the in-browser
+        companion produces while the user works. The Bonsai pipeline
+        owns generation; this method owns persistence, the cooldown
+        guard, and the status update.
+
+        Phase 4b reuses this entry point with ``kind="overnight"``
+        when the backend GGUF reflection toggle ships. Each
+        public ``kind`` literal maps to a distinct memory-entry
+        ``kind`` field via :attr:`_EXTERNAL_REFLECTION_KIND_MAP`,
+        so downstream filtering is by column not by tag.
+
+        Behaviour notes:
+
+        - The persisted ``summary``/``why`` are truncated at 800
+          characters with an ellipsis. The Pydantic route accepts up
+          to 4000 characters at the boundary so legitimate prompt
+          stuffing is not rejected outright; the service trims at
+          read-time before write.
+        - The cooldown gates on (kind, trigger) so a *while_you_work*
+          reflection and an *overnight* reflection do not block each
+          other, but two *while_you_work* reflections with the same
+          trigger inside the cooldown window do. The trigger string
+          is normalised with ``.strip()``; an empty trigger is its
+          own valid bucket.
+        - ``status.latest_summary``/``status.latest_why`` follow
+          last-writer-wins across all reflection kinds. Phase 4b may
+          revisit (per-kind summaries) once usage data exists.
+
+        Returns a payload with the same outer shape as
+        :meth:`reflect` (``ok``, ``status``, ``memory_entry``,
+        ``snapshot``) plus a ``reason`` field on the failure path.
+        """
+        active_settings = dict(settings or settings_store.load_settings())
+        identity = resolve_assistant_identity(active_settings)
+        policy = resolve_assistant_policy(active_settings)
+        if not identity.companion_enabled or not policy.reflection_enabled:
+            return {
+                "ok": False,
+                "status": self.repository.get_status().to_payload(),
+                "reason": "assistant_disabled",
+            }
+        # Mirror the ``reflect()`` write gate. Bonsai's always-on dock
+        # callback (and Phase 4b's overnight cycle) fires automatically
+        # without explicit user confirmation, so the same
+        # ``allow_automatic_writes`` policy that governs auto-reflect
+        # must also gate this writer. Manual triggers — e.g. a future
+        # "save this thought" button — bypass the gate.
+        if trigger != "manual" and not policy.allow_automatic_writes:
+            return {
+                "ok": False,
+                "status": self.repository.get_status().to_payload(),
+                "reason": "writes_disabled",
+            }
+
+        text = (summary or "").strip()
+        if not text:
+            return {
+                "ok": False,
+                "status": self.repository.get_status().to_payload(),
+                "reason": "empty_summary",
+            }
+        # Bound the persisted text. Bonsai's max_new_tokens is 512 but
+        # the dock prompt asks for one or two sentences; an over-long
+        # response usually means the model rambled — keep it readable
+        # in the memory list and don't bloat the SQLite row.
+        if len(text) > 800:
+            text = text[:800].rstrip() + "…"
+        reason_text = (why or "").strip()
+        if len(reason_text) > 800:
+            reason_text = reason_text[:800].rstrip() + "…"
+
+        runtime = resolve_assistant_runtime(active_settings)
+        status = self._ensure_status(active_settings, identity=identity, runtime=runtime)
+        if status.paused:
+            return {
+                "ok": False,
+                "status": status.to_payload(),
+                "reason": "assistant_paused",
+            }
+
+        normalized_trigger = (trigger or "").strip()
+        memory_kind = self._EXTERNAL_REFLECTION_KIND_MAP.get(
+            kind, "bonsai_reflection"
+        )
+
+        # Per-(kind, trigger) cooldown. ADR 0013 §Open Questions calls
+        # for ~30s between Bonsai reflections so a busy session does
+        # not stamp a memory entry per event. The lookback is sized
+        # generously so unrelated entries between two same-bucket
+        # reflections do not push the previous one out of view.
+        cooldown_seconds = float(
+            active_settings.get(
+                "seedling_external_reflection_cooldown_seconds",
+                30.0,
+            )
+        )
+        if cooldown_seconds > 0:
+            cooldown_lookback = max(
+                64,
+                int(active_settings.get(
+                    "seedling_external_reflection_cooldown_lookback",
+                    64,
+                )),
+            )
+            recent = self.repository.list_memory(limit=cooldown_lookback)
+            cutoff = datetime.now(timezone.utc).timestamp() - cooldown_seconds
+            for item in recent:
+                if item.kind != memory_kind:
+                    continue
+                if item.trigger != normalized_trigger:
+                    continue
+                created = _parse_iso(item.created_at)
+                if created is None:
+                    continue
+                if created.timestamp() >= cutoff:
+                    return {
+                        "ok": False,
+                        "status": status.to_payload(),
+                        "reason": "cooldown",
+                    }
+
+        source_payload = source_event if isinstance(source_event, dict) else {}
+        related_node_ids: list[str] = []
+        if isinstance(source_payload.get("comet_id"), str) and source_payload["comet_id"]:
+            related_node_ids.append(f"comet:{source_payload['comet_id']}")
+        if isinstance(source_payload.get("source"), str) and source_payload["source"]:
+            related_node_ids.append(f"source:{source_payload['source']}")
+
+        default_title = (
+            "Overnight reflection"
+            if memory_kind == "overnight_reflection"
+            else "Bonsai reflection"
+        )
+        title = default_title
+        bullet = text.splitlines()[0] if text else ""
+        if bullet and len(bullet) < 120:
+            title = bullet
+
+        memory_entry = AssistantMemoryEntry.create(
+            kind=memory_kind,
+            title=title,
+            summary=text,
+            details=text,
+            why=reason_text,
+            confidence=max(0.0, min(1.0, float(confidence))),
+            trigger=normalized_trigger,
+            tags=list(tags or []) + [kind],
+            related_node_ids=related_node_ids,
+        )
+        self.repository.add_memory_entry(memory_entry, max_entries=policy.max_memory_entries)
+
+        status.state = "reflected"
+        status.last_reflection_at = memory_entry.created_at
+        status.last_reflection_trigger = normalized_trigger
+        # Last-writer-wins across reflection kinds: a Bonsai burst will
+        # overwrite a prior full ``reflect()`` summary, and Phase 4b's
+        # overnight write will likewise overwrite this one. The dock's
+        # behaviour is "show the most recent reflection of any kind"
+        # — see :meth:`record_external_reflection` docstring.
+        status.latest_summary = memory_entry.summary
+        status.latest_why = memory_entry.why
+        self.repository.update_status(status)
+
+        return {
+            "ok": True,
+            "kind": kind,
+            "status": status.to_payload(),
+            "memory_entry": memory_entry.to_payload(),
+            "snapshot": self.get_snapshot(active_settings),
+        }
+
     def _trigger_enabled(self, policy: AssistantPolicy, trigger: str) -> bool:
         normalized = str(trigger or "").strip().lower()
         if normalized in {"", "manual"}:

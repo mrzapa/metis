@@ -22,13 +22,34 @@ vi.mock("@/lib/api", () => ({
     next_action_at: null,
     queue_depth: 0,
   }),
+  recordCompanionReflection: vi.fn().mockResolvedValue({ ok: true }),
   updateSettings: vi.fn().mockResolvedValue({}),
   triggerAutonomousResearchStream: vi.fn().mockResolvedValue(undefined),
   subscribeCompanionActivity: vi.fn().mockReturnValue(() => {}),
 }));
 
+// Mutable WebGPU stub so individual tests can drive status/output edges
+// — Phase 4a's POST wiring fires on the "generating" → "ready" edge.
+const webgpuStub = {
+  status: "idle" as
+    | "idle"
+    | "loading"
+    | "ready"
+    | "generating"
+    | "unsupported"
+    | "oom"
+    | "error",
+  output: "",
+  progress: null as null | { loadedBytes: number; totalBytes: number; pct: number },
+  error: null as string | null,
+  load: vi.fn(),
+  send: vi.fn(),
+  stop: vi.fn(),
+  reset: vi.fn(),
+};
+
 vi.mock("@/lib/webgpu-companion/webgpu-companion-context", () => ({
-  useWebGPUCompanionContext: () => ({ status: "idle", load: vi.fn(), send: vi.fn(), stop: vi.fn(), reset: vi.fn(), output: null, progress: null, error: null }),
+  useWebGPUCompanionContext: () => webgpuStub,
 }));
 
 const {
@@ -37,6 +58,7 @@ const {
   saveAtlasEntry,
   decideAtlasCandidate,
   fetchSeedlingStatus,
+  recordCompanionReflection,
   subscribeCompanionActivity,
 } = await import("@/lib/api");
 
@@ -119,8 +141,20 @@ describe("MetisCompanionDock", () => {
       next_action_at: null,
       queue_depth: 0,
     });
+    vi.mocked(recordCompanionReflection).mockReset();
+    vi.mocked(recordCompanionReflection).mockResolvedValue({ ok: true });
     vi.mocked(subscribeCompanionActivity).mockReset();
     vi.mocked(subscribeCompanionActivity).mockReturnValue(() => {});
+    // Reset WebGPU stub between tests.
+    webgpuStub.status = "idle";
+    webgpuStub.output = "";
+    webgpuStub.send.mockReset();
+    webgpuStub.load.mockReset();
+    webgpuStub.stop.mockReset();
+    webgpuStub.reset.mockReset();
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("metis:bonsai-always-on");
+    }
   });
 
   it("renders the minimized companion state from the assistant snapshot", async () => {
@@ -331,5 +365,146 @@ describe("MetisCompanionDock", () => {
     expect(
       screen.getAllByText("New star added to constellation").length,
     ).toBeGreaterThan(0);
+  });
+
+  it("posts Bonsai's response to record-reflection on the generating→ready edge (Phase 4a)", async () => {
+    // Capture the listener the dock registers so we can fire a completed
+    // CompanionActivityEvent into it deterministically.
+    const listeners: Array<(event: CompanionActivityEvent) => void> = [];
+    vi.mocked(subscribeCompanionActivity).mockImplementation((listener) => {
+      listeners.push(listener);
+      return () => {
+        const idx = listeners.indexOf(listener);
+        if (idx >= 0) listeners.splice(idx, 1);
+      };
+    });
+
+    // User has opted into always-on Bonsai reflection AND Bonsai is loaded.
+    window.localStorage.setItem("metis:bonsai-always-on", "1");
+    webgpuStub.status = "ready";
+    webgpuStub.output = "";
+
+    vi.mocked(fetchAssistant).mockResolvedValueOnce(
+      buildSnapshot({ identity: { minimized: false } as AssistantSnapshot["identity"] }),
+    );
+    vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
+
+    const { rerender } = render(<MetisCompanionDock />);
+    await waitFor(() => expect(listeners.length).toBeGreaterThan(0));
+
+    // Fire the trigger event. The dock asks Bonsai to generate and parks
+    // the source-event in alwaysOnPendingRef while it waits.
+    act(() => {
+      for (const listener of listeners) {
+        listener({
+          source: "news_comet",
+          state: "completed",
+          trigger: "absorb",
+          summary: "User absorbed comet ABC",
+          timestamp: 1_700_000_000_000,
+          payload: { comet_id: "comet_abc" },
+        });
+      }
+    });
+    expect(webgpuStub.send).toHaveBeenCalledOnce();
+
+    // Bonsai finishes — drive the status edge generating → ready with the
+    // generated text on the stub. The dock effect runs on the next render.
+    webgpuStub.status = "generating";
+    rerender(<MetisCompanionDock />);
+    webgpuStub.status = "ready";
+    webgpuStub.output = "Skim the abstract before bed.";
+    rerender(<MetisCompanionDock />);
+
+    await waitFor(() => {
+      expect(recordCompanionReflection).toHaveBeenCalledOnce();
+    });
+    const arg = vi.mocked(recordCompanionReflection).mock.calls[0][0];
+    expect(arg.summary).toBe("Skim the abstract before bed.");
+    expect(arg.kind).toBe("while_you_work");
+    expect(arg.trigger).toBe("news_comet");
+    expect(arg.source_event).toEqual(
+      expect.objectContaining({
+        source: "news_comet",
+        state: "completed",
+        comet_id: "comet_abc",
+      }),
+    );
+  });
+
+  it("does not POST when always-on is off, even if Bonsai is ready", async () => {
+    const listeners: Array<(event: CompanionActivityEvent) => void> = [];
+    vi.mocked(subscribeCompanionActivity).mockImplementation((listener) => {
+      listeners.push(listener);
+      return () => {
+        const idx = listeners.indexOf(listener);
+        if (idx >= 0) listeners.splice(idx, 1);
+      };
+    });
+
+    // Bonsai is ready but the user has not opted in.
+    webgpuStub.status = "ready";
+    webgpuStub.output = "";
+
+    vi.mocked(fetchAssistant).mockResolvedValueOnce(
+      buildSnapshot({ identity: { minimized: false } as AssistantSnapshot["identity"] }),
+    );
+    vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
+
+    render(<MetisCompanionDock />);
+    await waitFor(() => expect(listeners.length).toBeGreaterThan(0));
+
+    act(() => {
+      for (const listener of listeners) {
+        listener({
+          source: "news_comet",
+          state: "completed",
+          trigger: "absorb",
+          summary: "another comet",
+          timestamp: 1,
+        });
+      }
+    });
+
+    expect(webgpuStub.send).not.toHaveBeenCalled();
+    expect(recordCompanionReflection).not.toHaveBeenCalled();
+  });
+
+  it("ignores reflection-source events to prevent self-triggering loops", async () => {
+    const listeners: Array<(event: CompanionActivityEvent) => void> = [];
+    vi.mocked(subscribeCompanionActivity).mockImplementation((listener) => {
+      listeners.push(listener);
+      return () => {
+        const idx = listeners.indexOf(listener);
+        if (idx >= 0) listeners.splice(idx, 1);
+      };
+    });
+
+    window.localStorage.setItem("metis:bonsai-always-on", "1");
+    webgpuStub.status = "ready";
+
+    vi.mocked(fetchAssistant).mockResolvedValueOnce(
+      buildSnapshot({ identity: { minimized: false } as AssistantSnapshot["identity"] }),
+    );
+    vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
+
+    render(<MetisCompanionDock />);
+    await waitFor(() => expect(listeners.length).toBeGreaterThan(0));
+
+    // A reflection-completed event must NOT trigger another reflection.
+    act(() => {
+      for (const listener of listeners) {
+        listener({
+          source: "reflection",
+          state: "completed",
+          trigger: "while_you_work",
+          summary: "Persisted note.",
+          timestamp: 2,
+          kind: "while_you_work",
+        });
+      }
+    });
+
+    expect(webgpuStub.send).not.toHaveBeenCalled();
   });
 });

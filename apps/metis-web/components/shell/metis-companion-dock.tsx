@@ -12,6 +12,7 @@ import {
   fetchAtlasCandidate,
   fetchAutonomousStatus,
   fetchSeedlingStatus,
+  recordCompanionReflection,
   reflectAssistant,
   saveAtlasEntry,
   subscribeCompanionActivity,
@@ -106,7 +107,10 @@ export function MetisCompanionDock({
   >([]);
   const alwaysOnRef = useRef(alwaysOn);
   const webgpuRef = useRef(webgpu);
-  const alwaysOnPendingRef = useRef<string | null>(null);
+  // Phase 4a: hold the originating CompanionActivityEvent (not just its
+  // summary string) so when the Bonsai response arrives we can attach
+  // provenance to the persisted reflection — see capture effect below.
+  const alwaysOnPendingRef = useRef<CompanionActivityEvent | null>(null);
   const prevWebgpuStatusRef = useRef(webgpu.status);
   const prevAlwaysOnRef = useRef(alwaysOn);
   const browserCompanionScopeRef = useRef<HTMLDivElement | null>(null);
@@ -252,11 +256,14 @@ export function MetisCompanionDock({
       // stream or queue runaway work.
       if (!alwaysOnRef.current) return;
       if (event.state !== "completed") return;
+      // Don't reflect on our own completed reflections — would create a
+      // self-triggering loop where every persisted reflection causes
+      // the next one.
+      if (event.source === "reflection") return;
       if (alwaysOnPendingRef.current) return;
       const g = webgpuRef.current;
       if (g.status !== "ready") return;
-      const trigger = event.summary || event.source;
-      alwaysOnPendingRef.current = trigger;
+      alwaysOnPendingRef.current = event;
       g.send([
         {
           role: "system",
@@ -330,19 +337,42 @@ export function MetisCompanionDock({
 
   // Capture the finished Bonsai response when an always-on reflection finishes.
   // Runs on every status change; only commits on the "generating" → "ready"
-  // edge while a reflection is pending.
+  // edge while a reflection is pending. Phase 4a also POSTs the response to
+  // the backend so the reflection lands in the companion memory list and
+  // updates `AssistantStatus.latest_summary`. Backend cooldown is the source
+  // of truth — a 4xx-style "cooldown" reason is treated as a soft skip.
   useEffect(() => {
     const prev = prevWebgpuStatusRef.current;
     prevWebgpuStatusRef.current = webgpu.status;
     if (prev !== "generating" || webgpu.status !== "ready") return;
-    const trigger = alwaysOnPendingRef.current;
-    if (!trigger) return;
+    const sourceEvent = alwaysOnPendingRef.current;
+    if (!sourceEvent) return;
     alwaysOnPendingRef.current = null;
     const response = webgpu.output.trim();
     if (!response) return;
+    const triggerLabel = sourceEvent.summary || sourceEvent.source;
     setInsights((list) =>
-      [{ timestamp: Date.now(), trigger, response }, ...list].slice(0, 5),
+      [{ timestamp: Date.now(), trigger: triggerLabel, response }, ...list].slice(0, 5),
     );
+    // Persist to the backend. Don't await — UX should not block on the
+    // round-trip. Surface failures only at debug level so a transient
+    // network blip doesn't flash an error toast for an opt-in feature.
+    void recordCompanionReflection({
+      summary: response,
+      trigger: sourceEvent.source,
+      kind: "while_you_work",
+      source_event: {
+        source: sourceEvent.source,
+        state: sourceEvent.state,
+        summary: sourceEvent.summary,
+        timestamp: sourceEvent.timestamp,
+        ...(sourceEvent.payload ?? {}),
+      },
+    }).catch((err) => {
+      if (typeof console !== "undefined") {
+        console.debug("Phase 4a reflection POST failed", err);
+      }
+    });
   }, [webgpu.status, webgpu.output]);
 
   // Abort any in-flight research stream on unmount
