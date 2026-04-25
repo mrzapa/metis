@@ -206,10 +206,15 @@ class NewsFeedRepository:
                     created_at            REAL NOT NULL,
                     decided_at            REAL NOT NULL DEFAULT 0.0,
                     absorbed_at           REAL NOT NULL DEFAULT 0.0,
+                    phase_changed_at      REAL NOT NULL DEFAULT 0.0,
                     atlas_entry_id        TEXT NOT NULL DEFAULT '',
                     notes                 TEXT NOT NULL DEFAULT ''
                 )
                 """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_comet_events_phase_changed "
+                "ON comet_events (phase, phase_changed_at DESC)"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_comet_events_phase "
@@ -357,14 +362,20 @@ class NewsFeedRepository:
                     _json_dumps(item.raw_metadata or {}),
                 ),
             )
+            # ``phase_changed_at`` defaults to ``created_at`` so a comet
+            # inserted directly into a non-default phase (e.g. tests
+            # building "dismissed_old" fixtures) still pivots terminal
+            # retention off when the comet entered that phase, not off
+            # when it was originally fetched. ``update_phase`` later
+            # bumps this on every transition.
             cursor = conn.execute(
                 """
                 INSERT INTO comet_events (
                     comet_id, item_hash, faculty_id, secondary_faculty_id,
                     classification_score, decision, relevance_score, gap_score,
                     phase, created_at, decided_at, absorbed_at,
-                    atlas_entry_id, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '')
+                    phase_changed_at, atlas_entry_id, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '')
                 ON CONFLICT(comet_id) DO NOTHING
                 """,
                 (
@@ -380,6 +391,7 @@ class NewsFeedRepository:
                     float(event.created_at),
                     float(event.decided_at),
                     float(event.absorbed_at),
+                    float(event.created_at),
                 ),
             )
             return cursor.rowcount > 0
@@ -392,27 +404,38 @@ class NewsFeedRepository:
         notes: str | None = None,
         absorbed_at: float | None = None,
         atlas_entry_id: str | None = None,
+        phase_changed_at: float | None = None,
     ) -> CometEvent | None:
         """Mutate ``phase`` (and optionally ``notes`` / ``absorbed_at``
         / ``atlas_entry_id``) for *comet_id*.
+
+        ``phase_changed_at`` is bumped on every call (defaults to
+        ``time.time()``). Terminal retention in :meth:`cleanup` pivots
+        on this column, not ``created_at`` — Codex P2 from PR #545.
+        Without it, a comet that drifted for 14 days then got dismissed
+        yesterday would be evicted on the next cleanup pass even though
+        the dismissal happened well inside the retention window.
 
         All ``phase`` mutations from route handlers and the worker tick
         funnel through this method (ADR 0008 §Consequences) so the
         cleaner only has one source of truth to guard against.
         """
+        sets = ["phase = ?", "phase_changed_at = ?"]
+        params: list[Any] = [
+            phase,
+            float(phase_changed_at if phase_changed_at is not None else time.time()),
+        ]
+        if notes is not None:
+            sets.append("notes = ?")
+            params.append(notes)
+        if absorbed_at is not None:
+            sets.append("absorbed_at = ?")
+            params.append(float(absorbed_at))
+        if atlas_entry_id is not None:
+            sets.append("atlas_entry_id = ?")
+            params.append(atlas_entry_id)
+        params.append(comet_id)
         with self._transaction() as conn:
-            sets = ["phase = ?"]
-            params: list[Any] = [phase]
-            if notes is not None:
-                sets.append("notes = ?")
-                params.append(notes)
-            if absorbed_at is not None:
-                sets.append("absorbed_at = ?")
-                params.append(float(absorbed_at))
-            if atlas_entry_id is not None:
-                sets.append("atlas_entry_id = ?")
-                params.append(atlas_entry_id)
-            params.append(comet_id)
             conn.execute(
                 f"UPDATE comet_events SET {', '.join(sets)} WHERE comet_id = ?",
                 params,
@@ -578,11 +601,17 @@ class NewsFeedRepository:
         with self._transaction() as conn:
             # 1) Sweep terminal comets first so the news_items guard
             #    sees the latest set of "still alive" rows.
+            #
+            # Both queries pivot on ``phase_changed_at`` (set on every
+            # ``update_phase`` call) so retention measures time-in-
+            # terminal-phase, not time-since-creation. Without this,
+            # an old drifting comet that got dismissed yesterday would
+            # be evicted today.
             cursor = conn.execute(
                 """
                 DELETE FROM comet_events
                  WHERE phase IN ('dismissed','fading')
-                   AND created_at < ?
+                   AND phase_changed_at < ?
                 """,
                 (terminal_cutoff,),
             )
@@ -593,7 +622,7 @@ class NewsFeedRepository:
                 DELETE FROM comet_events
                  WHERE phase = 'absorbed'
                    AND atlas_entry_id = ''
-                   AND COALESCE(absorbed_at, decided_at, created_at) < ?
+                   AND phase_changed_at < ?
                 """,
                 (terminal_cutoff,),
             )

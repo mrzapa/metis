@@ -14,27 +14,6 @@ log = logging.getLogger(__name__)
 _worker: SeedlingWorker | None = None
 
 
-def _resolve_feed_repository() -> "Any":
-    """Return the feed repository at the configured ``seedling_feed_db_path``.
-
-    Honors the setting (ADR 0008 §Consequences). The first call after a
-    process start binds the singleton to whatever path is configured;
-    subsequent calls are idempotent. If the user later changes the
-    setting at runtime, this function quietly keeps the existing
-    singleton — runtime path swaps would invalidate in-flight cursors,
-    so the override only takes effect on next process start.
-    """
-    import metis_app.settings_store as _settings_store  # noqa: WPS433
-    from metis_app.services.news_feed_repository import (  # noqa: WPS433
-        get_default_repository,
-    )
-
-    configured_path = _settings_store.load_settings().get("seedling_feed_db_path", "")
-    if configured_path:
-        return get_default_repository(configured_path)
-    return get_default_repository()
-
-
 def _default_tick_work() -> dict[str, Any] | None:
     """Phase 3 ingestion + retention sweep, run from inside each tick.
 
@@ -43,7 +22,10 @@ def _default_tick_work() -> dict[str, Any] | None:
     """
     try:
         import metis_app.settings_store as _settings_store  # noqa: WPS433
-        from metis_app.services.comet_pipeline import run_poll_cycle  # noqa: WPS433
+        from metis_app.services.comet_pipeline import (  # noqa: WPS433
+            resolve_feed_repository,
+            run_poll_cycle,
+        )
     except Exception:  # noqa: BLE001
         log.debug("Seedling tick work imports failed", exc_info=True)
         return None
@@ -52,7 +34,7 @@ def _default_tick_work() -> dict[str, Any] | None:
     if not settings.get("news_comets_enabled", False):
         return None
 
-    repo = _resolve_feed_repository()
+    repo = resolve_feed_repository()
     try:
         result = run_poll_cycle(settings, repository=repo)
     except Exception:  # noqa: BLE001

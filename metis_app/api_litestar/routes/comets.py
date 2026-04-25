@@ -20,12 +20,10 @@ import metis_app.settings_store as _settings_store
 from metis_app.services.comet_pipeline import (
     get_default_engine,
     get_default_ingest_service,
+    resolve_feed_repository,
     run_poll_cycle,
 )
-from metis_app.services.news_feed_repository import (
-    NewsFeedRepository,
-    get_default_repository,
-)
+from metis_app.services.news_feed_repository import NewsFeedRepository
 from metis_app.services.opml_import import (
     OpmlImportError,
     merge_feed_urls,
@@ -45,7 +43,13 @@ _LIST_ACTIVE_LIMIT = 100  # parity with the previous in-memory module-state cap
 
 
 def _get_repo() -> NewsFeedRepository:
-    return get_default_repository()
+    """Resolve the feed repository through the shared accessor.
+
+    Routes share :func:`resolve_feed_repository` with the Seedling
+    worker tick so the very first access (HTTP or worker) honours
+    the configured ``seedling_feed_db_path`` — Codex P1 from PR #545.
+    """
+    return resolve_feed_repository()
 
 
 # Keep the legacy accessors alive for any existing test fixtures that

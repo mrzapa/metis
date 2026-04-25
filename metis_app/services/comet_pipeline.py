@@ -29,6 +29,36 @@ from metis_app.services.news_ingest_service import NewsIngestService
 log = logging.getLogger(__name__)
 
 
+def resolve_feed_repository() -> NewsFeedRepository:
+    """Return the feed repository bound to the configured DB path.
+
+    Both the HTTP route handlers in ``routes/comets.py`` and the
+    Seedling worker tick in ``seedling/lifecycle.py`` call into this
+    helper so the configured ``seedling_feed_db_path`` reaches the
+    singleton on **first access**, regardless of which surface fires
+    first. Without it, an early API hit (e.g.
+    ``GET /v1/comets/active``) would bind the singleton to
+    ``<repo_root>/news_items.db`` and silently ignore the override
+    forever — Codex P1 from PR #545.
+
+    The override is captured on first call only; runtime swaps are
+    intentionally a no-op (would invalidate in-flight cursors). Tests
+    that need an isolated repo install one via
+    ``reset_default_repository(NewsFeedRepository(":memory:"))``.
+    """
+    try:
+        import metis_app.settings_store as _settings_store
+
+        configured_path = _settings_store.load_settings().get(
+            "seedling_feed_db_path", ""
+        )
+    except Exception:  # noqa: BLE001
+        configured_path = ""
+    if configured_path:
+        return get_default_repository(configured_path)
+    return get_default_repository()
+
+
 # Module-level singletons used by the HTTP route. Tests can replace
 # them via the public reset helpers below.
 _default_ingest: NewsIngestService | None = None
@@ -38,7 +68,7 @@ _default_engine: CometDecisionEngine | None = None
 def get_default_ingest_service() -> NewsIngestService:
     global _default_ingest
     if _default_ingest is None:
-        _default_ingest = NewsIngestService(repository=get_default_repository())
+        _default_ingest = NewsIngestService(repository=resolve_feed_repository())
     return _default_ingest
 
 
@@ -83,7 +113,7 @@ def run_poll_cycle(
 
     ingest_service = ingest or get_default_ingest_service()
     decision_engine = engine or get_default_engine()
-    repo = repository or get_default_repository()
+    repo = repository or resolve_feed_repository()
 
     if indexes is None:
         # Lazy import to avoid circular references at module load time.

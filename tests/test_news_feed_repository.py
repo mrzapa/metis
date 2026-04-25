@@ -409,6 +409,54 @@ def test_cleanup_evicts_absorbed_comets_whose_atlas_entry_is_gone() -> None:
     assert repo.get_comet("c_orphan") is None
 
 
+def test_cleanup_terminal_retention_pivots_on_phase_changed_at() -> None:
+    """Recently-dismissed comets must survive even if they were
+    originally created long ago — Codex P2 from PR #545.
+
+    Previously the cleaner used ``created_at < cutoff`` which would
+    evict a long-lived comet the moment it transitioned to terminal,
+    because its ``created_at`` was already well past the retention
+    window.
+    """
+    repo = NewsFeedRepository(":memory:")
+    now = time.time()
+
+    # An old comet that drifted for 14 days, then dismissed yesterday.
+    repo.record_comet(
+        _make_event(
+            _make_item(
+                title="long_drifter",
+                url="https://example.com/long",
+                fetched_at=now,
+            ),
+            comet_id="c_long_drifter",
+            phase="drifting",
+            created_at=now - 14 * 86_400,
+        )
+    )
+    yesterday = now - 1 * 86_400
+    repo.update_phase(
+        "c_long_drifter",
+        "dismissed",
+        notes="user dismissed",
+        phase_changed_at=yesterday,
+    )
+
+    report = repo.cleanup(now=now, terminal_retention_days=7)
+    assert report.comet_events_evicted == 0
+    assert repo.get_comet("c_long_drifter") is not None
+
+    # Re-dismiss with an old phase_changed_at — should now evict.
+    repo.update_phase(
+        "c_long_drifter",
+        "dismissed",
+        phase_changed_at=now - 30 * 86_400,
+    )
+    report = repo.cleanup(now=now, terminal_retention_days=7)
+    assert report.comet_events_evicted == 1
+    assert repo.get_comet("c_long_drifter") is None
+
+
 def test_cleanup_evicts_unlinked_absorbed_comet_after_terminal_window() -> None:
     repo = NewsFeedRepository(":memory:")
     now = time.time()
@@ -420,7 +468,14 @@ def test_cleanup_evicts_unlinked_absorbed_comet_after_terminal_window() -> None:
             created_at=now - 30 * 86_400,
         )
     )
-    repo.update_phase("c_unlinked", "absorbed", absorbed_at=now - 29 * 86_400)
+    # Bump phase_changed_at to 29 days ago so the orphan-absorbed
+    # sweep sees a comet outside the 7-day terminal window.
+    repo.update_phase(
+        "c_unlinked",
+        "absorbed",
+        absorbed_at=now - 29 * 86_400,
+        phase_changed_at=now - 29 * 86_400,
+    )
 
     report = repo.cleanup(now=now, terminal_retention_days=7)
     assert report.comet_events_evicted == 1
