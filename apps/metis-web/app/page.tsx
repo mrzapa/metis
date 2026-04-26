@@ -20,9 +20,9 @@ import {
   CatalogueStarInspector,
   type CatalogueStarInspectorStar,
 } from "@/components/constellation/catalogue-star-inspector";
-import { CatalogueSearchOverlay } from "@/components/constellation/catalogue-search-overlay";
 import { CatalogueFilterPanel } from "@/components/constellation/catalogue-filter-panel";
-import type { CatalogueSearchEntry, CatalogueFilterState } from "@/lib/star-catalogue";
+import { HomeActionFab } from "@/components/home/home-action-fab";
+import type { CatalogueFilterState } from "@/lib/star-catalogue";
 import {
   CATALOGUE_FILTER_DEFAULT,
   CATALOGUE_FILTER_DIM_BRIGHTNESS,
@@ -158,43 +158,12 @@ const FACULTY_CONCEPTS = CONSTELLATION_FACULTIES.map((faculty, index) => ({
   desc: faculty.description,
 }));
 
-/**
- * M12 Phase 2 — Landmark search index.
- *
- * One entry per anchor+secondary star across the 11 faculty constellations.
- * Classical names are generated deterministically from `(facultyId, starIndex)`
- * via the same `generateStarName({ tier: "landmark" })` path that the hover
- * tooltip uses, so hover name and search result always agree.
- *
- * Positions are in normalised constellation-point space (same coord system
- * as `UserStar.x/y`), so `buildStarFocusCamera` handles fly-to directly.
- */
-const CATALOGUE_LANDMARK_INDEX: CatalogueSearchEntry[] = (() => {
-  const entries: CatalogueSearchEntry[] = [];
-  CONSTELLATION_FACULTIES.forEach((faculty) => {
-    const stars = faculty.shape.stars;
-    for (let starIndex = 0; starIndex < stars.length; starIndex += 1) {
-      const shapeStar = stars[starIndex];
-      const seedKey = `landmark|${faculty.id}|${starIndex}`;
-      const rng = new SeededRNG(fnv1a32(seedKey));
-      const magnitude = starIndex === 0 ? 2 : 3.5;
-      const generated = generateStarName({ tier: "landmark", rng, magnitude });
-      const name = generated.name;
-      if (!name) continue;
-      entries.push({
-        id: `landmark:${faculty.id}:${starIndex}`,
-        name,
-        kind: "landmark",
-        x: faculty.x + shapeStar.dx,
-        y: faculty.y + shapeStar.dy,
-        facultyId: faculty.id,
-        starIndex,
-        magnitude,
-      });
-    }
-  });
-  return entries;
-})();
+// Audit item 8 (2026-04-25) consolidated three floating affordances on the
+// home page into a single gold FAB (`HomeActionFab`). The catalogue-search
+// overlay (top-right gold sparkle) was folded conceptually into Threads
+// search; its landmark-name index lived here and has been removed alongside
+// the overlay component itself. Reinstate from git history if you bring
+// catalogue-search back as its own affordance.
 const BACKGROUND_BUTTON_ZOOM_STEP = 1.8;
 const BACKGROUND_TILE_PADDING_PX = 220;
 const HOVER_EXPAND_DELAY_MS = 600;
@@ -870,8 +839,16 @@ export default function Home() {
   const [learningRouteError, setLearningRouteError] = useState<string | null>(null);
   const [semanticQuery, setSemanticQuery] = useState("");
   const [semanticSearchExpanded, setSemanticSearchExpanded] = useState(false);
-  const [catalogueSearchExpanded, setCatalogueSearchExpanded] = useState(false);
-  const [catalogueSearchQuery, setCatalogueSearchQuery] = useState("");
+  // Audit item 8 (2026-04-25): the three previously-separate floating
+  // affordances on the home page (chat bubble, semantic-search toggle,
+  // catalogue-search sparkle) are consolidated into a single gold FAB
+  // (`HomeActionFab`) with a radial menu. `fabOpen` controls the menu
+  // visibility; `filterPanelOpen` gates the catalogue filter panel which
+  // used to render unconditionally. `catalogueSearchExpanded`/`Query`
+  // and `handleCatalogueSearchSelect` were dropped in the same pass —
+  // catalogue search is no longer a separate affordance.
+  const [fabOpen, setFabOpen] = useState(false);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [catalogueFilterState, setCatalogueFilterState] = useState<CatalogueFilterState>(
     () => CATALOGUE_FILTER_DEFAULT,
   );
@@ -1574,33 +1551,6 @@ export default function Home() {
     setBackgroundZoomTarget,
     setStarFocusPhaseValue,
   ]);
-
-  /**
-   * M12 Phase 2 — camera pan to a normalised constellation-space point
-   * (same coordinate system as `UserStar.x/y` and `faculty.x/y`).
-   * Used by the Catalogue Search overlay to fly to landmark stars.
-   */
-  const focusConstellationPoint = useCallback((point: { x: number; y: number }) => {
-    const viewportWidth = canvasBoundsRef.current.width || window.innerWidth;
-    const viewportHeight = canvasBoundsRef.current.height || window.innerHeight;
-    const focusTarget = buildStarFocusCamera(
-      { x: point.x, y: point.y, size: 1 },
-      viewportWidth,
-      viewportHeight,
-    );
-    if (prefersReducedMotion()) {
-      jumpToBackgroundCamera(focusTarget);
-      return;
-    }
-    backgroundCameraTargetOriginRef.current = { x: focusTarget.x, y: focusTarget.y };
-    setBackgroundZoomTarget(focusTarget.zoomFactor, { registerInteraction: false });
-  }, [jumpToBackgroundCamera, setBackgroundZoomTarget]);
-
-  const handleCatalogueSearchSelect = useCallback((entry: CatalogueSearchEntry) => {
-    focusConstellationPoint({ x: entry.x, y: entry.y });
-    setCatalogueSearchQuery("");
-    setCatalogueSearchExpanded(false);
-  }, [focusConstellationPoint]);
 
   /**
    * M12 Phase 4a — promote a catalogue star into the user's constellation.
@@ -5388,15 +5338,9 @@ export default function Home() {
           exist). Reappears the moment the user adds their first star. */}
       {userStars.length > 0 && (
         <div className={`metis-semantic-search ${semanticSearchExpanded ? "is-expanded" : ""}`}>
-          <button
-            type="button"
-            className="metis-semantic-search-toggle"
-            aria-label="Toggle semantic link search"
-            aria-expanded={semanticSearchExpanded}
-            onClick={() => setSemanticSearchExpanded((open) => !open)}
-          >
-            ✦
-          </button>
+          {/* Toggle button removed — the FAB radial menu is now the sole
+              entry point for expanding the semantic-search pill. The pill
+              itself still animates width via `is-expanded`. */}
           <input
             ref={semanticSearchInputRef}
             className="metis-semantic-search-input"
@@ -5414,31 +5358,18 @@ export default function Home() {
         </div>
       )}
 
-      {/* M12 Phase 2 — Catalogue Search Overlay.
-          Sits beside the semantic-search HUD. Searches the landmark index
-          (classical Bayer/Flamsteed names across the 11 faculty
-          constellations) by substring; click a result to fly the camera to
-          that star. Scope: landmark-tier names only for v1 (catalogue field
-          stars are nameless per ADR 0006; semantic-search already covers
-          user stars by meaning). */}
-      <CatalogueSearchOverlay
-        expanded={catalogueSearchExpanded}
-        query={catalogueSearchQuery}
-        index={CATALOGUE_LANDMARK_INDEX}
-        onExpandedChange={setCatalogueSearchExpanded}
-        onQueryChange={setCatalogueSearchQuery}
-        onSelect={handleCatalogueSearchSelect}
-      />
-
       {/* M12 Phase 3 — Catalogue filter (spectral class chips + magnitude
-          slider). Lives directly below the search overlay. Active filter
-          dims (does not hide) non-matching stars to 20% so the galactic
-          structure stays visible per the plan doc's contract. State is
-          URL-hash-persisted (transient view state — not in settings). */}
-      <CatalogueFilterPanel
-        state={catalogueFilterState}
-        onStateChange={setCatalogueFilterState}
-      />
+          slider). Active filter dims (does not hide) non-matching stars to
+          20% so the galactic structure stays visible per the plan doc's
+          contract. State is URL-hash-persisted (transient view state — not
+          in settings). Audit item 8 (2026-04-25) — render gated on the
+          FAB's Filters satellite; previously rendered unconditionally. */}
+      {filterPanelOpen && (
+        <CatalogueFilterPanel
+          state={catalogueFilterState}
+          onStateChange={setCatalogueFilterState}
+        />
+      )}
 
       {(detailsStar || addMessage) && (
         <section id="build-map" className="metis-build-section">
@@ -5645,30 +5576,20 @@ export default function Home() {
         <span data-field="footer" />
       </div>
 
-      {/* Chat bubble */}
-      <Link href="/chat" className="metis-chat-bubble" aria-label="Open chat">
-        <svg className="metis-celestial-star-svg" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <radialGradient id="starGlow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#fff5dc" stopOpacity={0.95} />
-              <stop offset="35%" stopColor="#e8c882" stopOpacity={0.6} />
-              <stop offset="100%" stopColor="#c4953a" stopOpacity={0} />
-            </radialGradient>
-            <radialGradient id="outerHalo" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#c4953a" stopOpacity={0.12} />
-              <stop offset="100%" stopColor="#c4953a" stopOpacity={0} />
-            </radialGradient>
-          </defs>
-          <circle cx="22" cy="22" r="20" fill="url(#outerHalo)" />
-          <polygon points="22,2 23.5,18 42,22 23.5,26 22,42 20.5,26 2,22 20.5,18" fill="url(#starGlow)" opacity={0.55} />
-          <polygon points="22,8 24,18.5 36,10 25.5,20 36,34 24,25.5 22,36 20,25.5 8,34 18.5,20 8,10 20,18.5" fill="url(#starGlow)" opacity={0.3} />
-          <circle cx="22" cy="22" r="3" fill="#fff5dc" opacity={0.9} />
-          <circle cx="22" cy="22" r="1.5" fill="#ffffff" opacity={0.95} />
-          <circle cx="22" cy="10" r="0.7" fill="#d4c3a0" opacity={0.45} />
-          <circle cx="32" cy="28" r="0.5" fill="#d4c3a0" opacity={0.35} />
-          <circle cx="13" cy="30" r="0.6" fill="#d4c3a0" opacity={0.4} />
-        </svg>
-      </Link>
+      {/* Audit item 8 (2026-04-25) — single gold FAB consolidating the
+          previous chat-bubble link, the purple semantic-search toggle, and
+          the top-right catalogue-search sparkle into one radial menu. The
+          Threads-search satellite is gated on the user having added at
+          least one star, matching commit 607d802. */}
+      <HomeActionFab
+        open={fabOpen}
+        onOpenChange={setFabOpen}
+        filtersOpen={filterPanelOpen}
+        onFiltersOpenChange={setFilterPanelOpen}
+        searchOpen={semanticSearchExpanded}
+        onSearchOpenChange={setSemanticSearchExpanded}
+        showSearchSatellite={userStars.length > 0}
+      />
     </>
   );
 }
@@ -6842,6 +6763,70 @@ body {
 }
 @keyframes metis-celestialSpin { from { rotate: 0deg; } to { rotate: 360deg; } }
 @keyframes metis-fadeUp { to { opacity: 1; transform: translateY(0); } }
+
+/* HOME-PAGE ACTION FAB — audit item 8 (2026-04-25).
+   Container is positioned where the chat-bubble used to live; satellites
+   are absolutely-positioned children whose offsets are driven by GSAP at
+   runtime. Initial state is opacity:0 + scale(0.4) so they don't flash
+   visible on mount before the GSAP effect lands. */
+.metis-home-fab-root {
+  position: fixed;
+  bottom: 32px;
+  right: 32px;
+  z-index: 150;
+  width: 48px;
+  height: 48px;
+}
+.metis-home-fab-trigger.metis-chat-bubble {
+  /* Anchor the FAB at 0,0 of the root rather than the chat bubble's own
+     fixed positioning. The .metis-chat-bubble class already sets
+     position:fixed, so we override with absolute inside the container. */
+  position: absolute;
+  inset: 0;
+  bottom: auto;
+  right: auto;
+}
+.metis-home-fab-trigger.is-open .metis-celestial-star-svg {
+  /* Subtle "open" cue — pause the slow spin so the visual settles while
+     the menu is up. */
+  animation-play-state: paused;
+}
+.metis-home-fab-satellite {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid rgba(196, 149, 58, 0.34);
+  background: radial-gradient(circle at 30% 30%, rgba(232, 184, 74, 0.32), rgba(156, 108, 40, 0.62));
+  color: rgba(245, 240, 220, 0.96);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  /* Hidden until GSAP animates them in. pointer-events:none keeps them
+     non-clickable while collapsed. transform-origin matches the FAB
+     centre so the spawn/collapse motion looks anchored. */
+  opacity: 0;
+  transform: scale(0.4);
+  pointer-events: none;
+  text-decoration: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+  transition: background 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+}
+.metis-home-fab-satellite:hover,
+.metis-home-fab-satellite:focus-visible {
+  background: radial-gradient(circle at 30% 30%, rgba(232, 184, 74, 0.5), rgba(196, 149, 58, 0.78));
+  border-color: rgba(232, 184, 74, 0.6);
+  box-shadow: 0 8px 22px rgba(196, 149, 58, 0.34);
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .metis-home-fab-satellite {
+    transition: none;
+  }
+}
 
 @media (max-width: 1100px) {
   .metis-star-editor-grid,

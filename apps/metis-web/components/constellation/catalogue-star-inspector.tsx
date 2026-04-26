@@ -106,6 +106,7 @@ export function CatalogueStarInspector({
           type="button"
           className="metis-catalogue-inspector-close"
           aria-label="Close"
+          title="Close inspector"
           onClick={onClose}
         >
           ×
