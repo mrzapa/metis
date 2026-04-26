@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import { NetworkAuditFirstRunCard } from "@/components/network-audit/first-run-card";
 import { FirstRunBanner } from "@/components/home/first-run-banner";
 import { ShootingStarLayer } from "@/components/home/shooting-star-layer";
+import { CosmicAtmosphere } from "@/components/home/cosmic-atmosphere";
 import type { LandingStarfieldFrame, LandingWebglStar } from "@/components/home/landing-starfield-webgl.types";
 
 const LandingStarfieldWebgl = dynamic(
@@ -5476,6 +5477,8 @@ export default function Home() {
       />
 
       <ShootingStarLayer className="z-[1]" />
+
+      <CosmicAtmosphere zoomFactor={backgroundZoomFactor} />
 
       <canvas
         ref={canvasRef}
