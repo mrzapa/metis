@@ -305,3 +305,146 @@ def test_brain_graph_carries_faculty_metadata_from_brain_pass() -> None:
     assert node.metadata["faculty_id"] == "knowledge"
     assert node.metadata["secondary_faculty_id"] == "reasoning"
     assert node.metadata["brain_pass"]["placement"]["faculty_id"] == "knowledge"
+
+
+# ---------------------------------------------------------------------------
+# M13 Phase 6 — assistant-scope density signal
+# ---------------------------------------------------------------------------
+
+
+def test_compute_assistant_density_returns_zero_for_empty_graph() -> None:
+    graph = BrainGraph()
+    assert graph.compute_assistant_density() == 0.0
+
+
+def test_compute_assistant_density_returns_zero_when_only_workspace_nodes() -> None:
+    """With no companion enabled, the graph still has root + index +
+    session categories but no assistant subgraph. Density must be 0."""
+    graph = BrainGraph().build_from_indexes_and_sessions(
+        [{"index_id": "books"}],
+        [],
+        assistant_payload={"identity": {"companion_enabled": False}},
+    )
+    assert graph.compute_assistant_density() == 0.0
+
+
+def test_compute_assistant_density_zero_without_learned_edges() -> None:
+    """Reflections alone don't move density — what matters is
+    *learned* cross-link edges. A companion that has produced 8
+    memories but never linked any of them to a session/index sits at
+    0.0 density."""
+    graph = BrainGraph().build_from_indexes_and_sessions(
+        [],
+        [],
+        assistant_payload={
+            "identity": {"companion_enabled": True, "name": "Guide"},
+            "memory": [
+                {
+                    "entry_id": f"memory-{i}",
+                    "title": f"Reflection {i}",
+                    "summary": "ok",
+                    "kind": "reflection",
+                }
+                for i in range(8)
+            ],
+            "playbooks": [],
+            "brain_links": [],
+        },
+    )
+    assert graph.compute_assistant_density() == 0.0
+
+
+def test_compute_assistant_density_grows_with_learned_cross_links() -> None:
+    """Adding ``assistant_learned``-scope brain links between memories
+    and the assistant raises density toward 1.0."""
+    memory_payload = [
+        {"entry_id": f"m{i}", "title": f"M{i}", "summary": "x", "kind": "reflection"}
+        for i in range(4)
+    ]
+    # Sparse: 1 learned edge total over 4 artefacts → 1 / (2 * 4) = 0.125.
+    sparse_links = [
+        {
+            "source_node_id": "memory:m0",
+            "target_node_id": "assistant:metis",
+            "relation": "learned_from_session",
+            "summary": "first link",
+            "metadata": {"scope": "assistant_learned"},
+        },
+    ]
+    sparse = BrainGraph().build_from_indexes_and_sessions(
+        [],
+        [],
+        assistant_payload={
+            "identity": {"companion_enabled": True, "name": "Guide"},
+            "memory": memory_payload,
+            "playbooks": [],
+            "brain_links": sparse_links,
+        },
+    )
+    sparse_density = sparse.compute_assistant_density()
+    assert sparse_density > 0.0
+    assert sparse_density < 0.5
+
+    # Dense: 2 learned edges per memory → 8 / (2 * 4) = 1.0 (cap).
+    dense_links: list[dict] = []
+    for i in range(4):
+        dense_links.append(
+            {
+                "source_node_id": f"memory:m{i}",
+                "target_node_id": "assistant:metis",
+                "relation": "learned_from_session",
+                "summary": f"link out {i}",
+                "metadata": {"scope": "assistant_learned"},
+            }
+        )
+        dense_links.append(
+            {
+                "source_node_id": "assistant:metis",
+                "target_node_id": f"memory:m{i}",
+                "relation": "remembers",
+                "summary": f"link back {i}",
+                "metadata": {"scope": "assistant_learned"},
+            }
+        )
+    dense = BrainGraph().build_from_indexes_and_sessions(
+        [],
+        [],
+        assistant_payload={
+            "identity": {"companion_enabled": True, "name": "Guide"},
+            "memory": memory_payload,
+            "playbooks": [],
+            "brain_links": dense_links,
+        },
+    )
+    dense_density = dense.compute_assistant_density()
+    assert dense_density > sparse_density
+    assert dense_density == 1.0
+
+
+def test_compute_assistant_density_ignores_assistant_self_edges() -> None:
+    """Structural ``assistant_self``-scope edges (the
+    ``category_member`` ones the subgraph builder always emits) must
+    NOT count toward density. Otherwise every memory inflates the
+    metric without representing real learning."""
+    graph = BrainGraph().build_from_indexes_and_sessions(
+        [],
+        [],
+        assistant_payload={
+            "identity": {"companion_enabled": True, "name": "Guide"},
+            "memory": [
+                {"entry_id": "m0", "title": "M0", "summary": "x", "kind": "reflection"},
+            ],
+            "playbooks": [],
+            # ``assistant_self``-scope cross-link must be ignored.
+            "brain_links": [
+                {
+                    "source_node_id": "memory:m0",
+                    "target_node_id": "assistant:metis",
+                    "relation": "belongs_to",
+                    "summary": "self-scope link",
+                    "metadata": {"scope": "assistant_self"},
+                }
+            ],
+        },
+    )
+    assert graph.compute_assistant_density() == 0.0

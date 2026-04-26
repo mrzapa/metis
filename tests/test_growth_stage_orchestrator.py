@@ -72,6 +72,7 @@ class _StubOrchestrator:
         skill_total: int,
         skill_promoted: int,
         settings: dict | None = None,
+        brain_graph_density: float = 0.0,
     ) -> None:
         self._indexes = indexes
         self._assistant_service = _FakeAssistantService()
@@ -80,9 +81,24 @@ class _StubOrchestrator:
             total=skill_total, promoted=skill_promoted
         )
         self._settings = dict(settings or {})
+        self._brain_graph_density = float(brain_graph_density)
 
     def list_indexes(self) -> list[dict]:
         return list(self._indexes)
+
+    def get_workspace_graph(self, *, skip_layout: bool = False):  # noqa: ARG002
+        """Stub the BrainGraph build so density tests don't depend on
+        the full assistant subgraph construction. Returns an object
+        whose ``compute_assistant_density`` returns the configured
+        value — Phase 6 ``_collect_growth_counts`` only calls that
+        method on the result."""
+        density_value = self._brain_graph_density
+
+        class _DensityStub:
+            def compute_assistant_density(self) -> float:
+                return density_value
+
+        return _DensityStub()
 
     def _resolve_query_settings(self, override: dict) -> dict:
         merged = dict(self._settings)
@@ -258,3 +274,64 @@ def test_count_growth_signals_includes_all_reflection_kinds() -> None:
     counts = orch._collect_growth_counts()
     assert counts["reflections_total"] == 9  # 3 + 4 + 2
     assert counts["overnight_reflections"] == 2
+
+
+# ---------------------------------------------------------------------------
+# M13 Phase 6 — brain-graph density signal + Elder gate
+# ---------------------------------------------------------------------------
+
+
+def test_collect_growth_counts_pulls_density_from_brain_graph() -> None:
+    """Phase 6 integration: the orchestrator's ``_collect_growth_counts``
+    forwards ``BrainGraph.compute_assistant_density`` into the signal
+    payload."""
+    orch = _StubOrchestrator(
+        indexes=[],
+        memory=_memory_entries({"reflection": 5}),
+        skill_total=0,
+        skill_promoted=0,
+        brain_graph_density=0.42,
+    )
+    counts = orch._collect_growth_counts()
+    assert counts["brain_graph_density"] == 0.42
+
+
+def test_recompute_growth_stage_blocks_elder_when_density_low(tmp_path) -> None:
+    """Phase 6 regression: structural Elder counts met but density
+    below 0.5 → held at Bloom. The user has all the right counters
+    but the brain graph hasn't fattened enough."""
+    indexes = [
+        {"index_id": f"idx-{i}", "faculty_id": f"f{i % 8}"} for i in range(220)
+    ]
+    orch = _StubOrchestrator(
+        indexes=indexes,
+        memory=_memory_entries({"reflection": 35}),
+        skill_total=10,
+        skill_promoted=4,
+        brain_graph_density=0.30,  # below 0.5 default
+    )
+    # Set current_stage to bloom so we're testing the bloom→elder gate.
+    orch._assistant_service.repository.get_status().growth_stage = "bloom"
+    result = orch.recompute_growth_stage()
+    assert result["stage"] == "bloom"
+    assert result["advanced_from"] is None  # held — density gate blocks
+
+
+def test_recompute_growth_stage_advances_to_elder_when_density_high(tmp_path) -> None:
+    """Phase 6 happy-path: structural counts AND density both above
+    threshold → Elder advance."""
+    indexes = [
+        {"index_id": f"idx-{i}", "faculty_id": f"f{i % 8}"} for i in range(220)
+    ]
+    orch = _StubOrchestrator(
+        indexes=indexes,
+        memory=_memory_entries({"reflection": 35}),
+        skill_total=10,
+        skill_promoted=4,
+        brain_graph_density=0.85,
+    )
+    orch._assistant_service.repository.get_status().growth_stage = "bloom"
+    result = orch.recompute_growth_stage()
+    assert result["stage"] == "elder"
+    assert result["advanced_from"] == "bloom"
+    assert result["signals"]["brain_graph_density"] == 0.85

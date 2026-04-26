@@ -97,6 +97,9 @@ def test_does_not_advance_to_bloom_when_faculties_thin() -> None:
 
 
 def test_advances_to_elder_when_full_threshold_met() -> None:
+    """Phase 6: ``elder_brain_graph_density`` is now active (v0=0.5),
+    so the structural counts alone are no longer enough — the test
+    supplies a density value above the threshold."""
     decision = compute_growth_stage(
         signals=GrowthSignals(
             indexed_stars=200,
@@ -104,11 +107,29 @@ def test_advances_to_elder_when_full_threshold_met() -> None:
             skill_candidates=5,
             reflections_total=30,
             promoted_skills=3,
+            brain_graph_density=0.6,
         ),
         current_stage="bloom",
     )
     assert decision.stage == "elder"
     assert decision.advanced_from == "bloom"
+
+
+def test_elder_blocked_when_density_below_threshold() -> None:
+    """Phase 6 regression: structural counts met but density too low →
+    held at Bloom until the brain graph fattens."""
+    decision = compute_growth_stage(
+        signals=GrowthSignals(
+            indexed_stars=200,
+            indexed_faculties=8,
+            skill_candidates=5,
+            reflections_total=30,
+            promoted_skills=3,
+            brain_graph_density=0.4,  # below 0.5 default
+        ),
+        current_stage="bloom",
+    )
+    assert decision.stage == "bloom"
 
 
 def test_elder_blocked_when_promoted_skills_thin() -> None:
@@ -125,10 +146,17 @@ def test_elder_blocked_when_promoted_skills_thin() -> None:
     assert decision.stage == "bloom"
 
 
-def test_elder_blocked_when_brain_graph_density_threshold_set_and_too_low() -> None:
-    """Phase 6 will set ``elder_brain_graph_density`` to a positive
-    number; until then the gate is open. Verify both branches."""
-    signals = GrowthSignals(
+def test_elder_density_gate_branches() -> None:
+    """The density gate has three branches:
+
+    1. Threshold ``0.0`` (off) — density is ignored; structural counts
+       win on their own. Useful for back-compat tests and regression
+       cases that don't care about graph activity.
+    2. Threshold positive, density below — blocked even with full
+       structural counts.
+    3. Threshold positive, density above — advances.
+    """
+    structurally_met = GrowthSignals(
         indexed_stars=300,
         indexed_faculties=8,
         skill_candidates=10,
@@ -136,18 +164,46 @@ def test_elder_blocked_when_brain_graph_density_threshold_set_and_too_low() -> N
         promoted_skills=5,
         brain_graph_density=0.10,
     )
-    # v0: threshold is 0 → density gate ignored → advances.
-    decision_v0 = compute_growth_stage(signals=signals, current_stage="bloom")
-    assert decision_v0.stage == "elder"
 
-    # Phase 6 hypothetical: threshold 0.25, density 0.10 → blocked.
-    phase6 = StageThresholds(elder_brain_graph_density=0.25)
-    decision_phase6 = compute_growth_stage(
-        signals=signals,
-        current_stage="bloom",
-        thresholds=phase6,
+    # Branch 1: threshold off → advance regardless of density.
+    threshold_off = StageThresholds(elder_brain_graph_density=0.0)
+    assert (
+        compute_growth_stage(
+            signals=structurally_met,
+            current_stage="bloom",
+            thresholds=threshold_off,
+        ).stage
+        == "elder"
     )
-    assert decision_phase6.stage == "bloom"
+
+    # Branch 2: threshold 0.25, density 0.10 → blocked.
+    high_threshold = StageThresholds(elder_brain_graph_density=0.25)
+    assert (
+        compute_growth_stage(
+            signals=structurally_met,
+            current_stage="bloom",
+            thresholds=high_threshold,
+        ).stage
+        == "bloom"
+    )
+
+    # Branch 3: density 0.30 above 0.25 → advance.
+    structurally_met_with_density = GrowthSignals(
+        indexed_stars=300,
+        indexed_faculties=8,
+        skill_candidates=10,
+        reflections_total=40,
+        promoted_skills=5,
+        brain_graph_density=0.30,
+    )
+    assert (
+        compute_growth_stage(
+            signals=structurally_met_with_density,
+            current_stage="bloom",
+            thresholds=high_threshold,
+        ).stage
+        == "elder"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +276,7 @@ def test_override_advance_ignores_thresholds() -> None:
         ("elder_stars", 200),
         ("elder_promoted_skills", 3),
         ("elder_reflections", 30),
-        ("elder_brain_graph_density", 0.0),
+        ("elder_brain_graph_density", 0.5),
     ],
 )
 def test_default_thresholds_match_plan_doc(field: str, expected: float) -> None:
