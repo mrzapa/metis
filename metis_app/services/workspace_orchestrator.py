@@ -1142,8 +1142,20 @@ class WorkspaceOrchestrator:
         counts["skill_candidates"] = int(skill_counts.get("unpromoted", 0))
         counts["promoted_skills"] = int(skill_counts.get("promoted", 0))
 
-        # Brain-graph density — Phase 6 will populate this. v0 stays at 0.0.
+        # Phase 6 — brain-graph density. Build the workspace graph
+        # without the force-layout pass (cheap; layout iterations
+        # would be wasted for a numeric signal) and ask it for the
+        # assistant-scope density ratio. Skip if the graph fails to
+        # build; the Elder gate falls back to 0.0 (no advance).
         counts["brain_graph_density"] = 0.0
+        try:
+            graph = self.get_workspace_graph(skip_layout=True)
+            counts["brain_graph_density"] = float(graph.compute_assistant_density())
+        except Exception:
+            # Defensive: a half-initialised session repo or empty
+            # workspace shouldn't crash the tick — Phase 5 already
+            # treats missing counters as zero.
+            counts["brain_graph_density"] = 0.0
         return counts
 
     def run_autonomous_research(

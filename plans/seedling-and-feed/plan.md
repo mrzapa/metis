@@ -117,6 +117,22 @@ What's in place today that M13 will lean on:
   `apps/metis-web/`. No backend model loading; reflection only fires
   while the user has METIS open. Phase 4b will reuse the same writer
   with `kind="overnight"` once the backend GGUF toggle ships.
+- **2026-04-26 — Phase 6 complete (brain-graph densification).**
+  ``BrainGraph.compute_assistant_density()`` returns a normalised
+  ``[0.0, 1.0]`` density of ``assistant_learned``-scope cross-link
+  edges per memory + playbook node (target 2 edges per artefact).
+  ``WorkspaceOrchestrator._collect_growth_counts`` reads this on
+  every Seedling tick via ``get_workspace_graph(skip_layout=True)``
+  and feeds it into the Phase 5 ``GrowthSignals`` payload. The Elder
+  gate Phase 5 left structurally in place is now active —
+  ``StageThresholds.elder_brain_graph_density`` flips from 0.0 to
+  0.5, so the structural counts (≥200 stars, ≥3 promoted skills,
+  ≥30 reflections) are no longer enough on their own; Elder also
+  requires the brain graph to have visibly fattened. The threshold
+  rationale and tuning notes live in the *Phase 6 brain-graph
+  density — v0 decision* section above. The optional edge-pulse
+  visual in ``brain-graph-3d.tsx`` is deferred — the structural
+  gate was the load-bearing piece for "earned" Elder.
 - **2026-04-26 — Phase 5 complete (visible growth stages).**
   ``AssistantStatus`` now carries ``growth_stage: GrowthStage``
   (``seedling`` | ``sapling`` | ``bloom`` | ``elder``) and a
@@ -177,22 +193,27 @@ What's in place today that M13 will lean on:
 
 The next concrete actions:
 
-1. **Phase 6 — brain-graph densification.** Now that M10 is Landed
-   *and* Phase 5's stage machine is live, set
-   `StageThresholds.elder_brain_graph_density` to a positive value
-   so Elder is gated on real graph activity. Feed Seedling-produced
-   `AssistantBrainLink` records into
-   `BrainGraph.compute_edge_weights()` so scaffold edges carry the
-   companion's recent activity. Optional: pulse the edge when the
-   Seedling creates it (coord with M02 / `brain-graph-3d.tsx`).
-2. **Phase 7 (stretch) — LoRA training log.** Capture the overnight
+1. **Phase 7 (stretch) — LoRA training log.** Capture the overnight
    reflection's prompt + retrieved context + completion as JSONL so
    M18 has stable training data without M13 actually shipping
    fine-tuning code.
-3. **Phase 5 retro — threshold tuning.** The v0 thresholds in
-   `metis_app/seedling/growth.py::DEFAULT_THRESHOLDS` are first
-   estimates; once real usage produces stage-distribution data, tune
-   them and update the plan-doc decision section accordingly.
+2. **Phase 5 / Phase 6 retro — threshold tuning.** The v0 thresholds
+   in `metis_app/seedling/growth.py::DEFAULT_THRESHOLDS` (including
+   the new `elder_brain_graph_density=0.5`) and
+   `BrainGraph.compute_assistant_density`'s
+   `target_edges_per_artefact=2` are first estimates. Once real usage
+   produces stage-distribution data, tune them and update the
+   plan-doc decision sections accordingly.
+3. **Phase 6 follow-up — edge-pulse visual.** Land a one-time GSAP
+   pulse in `apps/metis-web/components/visualizations/brain-graph-3d.tsx`
+   (or its equivalent) when a Seedling-produced
+   `AssistantBrainLink` first appears. The frontend already carries
+   the right shape via `subscribeCompanionActivity`; the work is
+   the visual treatment + a `kind="brain_link_created"` marker on
+   the activity event.
+4. **M13 close-out.** Once Phase 7 lands (or is explicitly deferred
+   to M18), flip the M13 row in `plans/IMPLEMENTATION.md` to
+   `Landed` and capture the milestone retrospective.
 
 ## Blockers
 
@@ -509,21 +530,64 @@ kind, fires a one-time GSAP pulse on the badge (skipped under
 ``prefers-reduced-motion``), and refetches the assistant snapshot so
 the badge label updates.
 
-#### Phase 6 — Brain-graph densification (deferred, coordinates with M10)
+#### Phase 6 — Brain-graph densification (coordinates with M10)
 
-**Goal:** the brain graph should visibly fatten as the Seedling grows.
+**Goal:** the brain graph should visibly fatten as the Seedling
+grows, and the Elder gate should be earned by real graph activity.
 
-- **Deferred unless M10 (TriveV2 homological scaffold) has landed or
-  is in progress.** M10 is Draft; if still Draft when M13 is
-  claimed, mark this phase **Deferred — fold into M10's Step 6** and
-  move on.
-- If M10 is further along: feed Seedling-produced
-  `AssistantBrainLink` records into `BrainGraph.compute_edge_weights()`
-  so scaffold edges carry the companion's recent activity.
-- Visual: pulse the edge when the Seedling creates it
-  (coord with M02 / `brain-graph-3d.tsx`).
+M10 (TriveV2 homological scaffold) is Landed, so the deferral is
+lifted. Phase 6 wires the existing brain-graph subsystem into the
+Phase 5 stage machine without re-implementing persistent homology.
 
-**Not this phase:** re-implementing persistent homology. That's M10.
+- New ``BrainGraph.compute_assistant_density()`` returns a normalised
+  ``[0.0, 1.0]`` density of cross-reference (``assistant_learned``)
+  edges per learned artefact (memory + playbook nodes). Structural
+  ``assistant_self``-scope edges are excluded so the metric reflects
+  real cross-referencing, not the count of memories alone.
+- ``WorkspaceOrchestrator._collect_growth_counts`` calls
+  ``get_workspace_graph(skip_layout=True).compute_assistant_density()``
+  every Seedling tick (cheap; no force-layout iterations).
+- ``StageThresholds.elder_brain_graph_density`` activates at v0=0.5.
+  See *Phase 6 brain-graph density — v0 decision* below.
+
+**Not this phase:** the optional edge-pulse animation in
+``brain-graph-3d.tsx`` when the Seedling creates a new link. That
+work coordinates with M02 and lands as a follow-up; the structural
+density gate is the load-bearing piece for M13's "earned" promise.
+
+##### Phase 6 brain-graph density — v0 decision
+
+The threshold values land in
+``metis_app/seedling/growth.py::DEFAULT_THRESHOLDS`` (now
+``elder_brain_graph_density=0.5``) and
+``metis_app/models/brain_graph.py::compute_assistant_density``
+(``target_edges_per_artefact=2``). Both will tune during early usage;
+this section is the v0 decision record.
+
+- **What density measures.** ``learned_edges / (2 * artefacts)``
+  capped at 1.0 — i.e. how many ``assistant_learned``-scope brain
+  links exist per memory + playbook node. A user with 30 reflections
+  but no cross-links sits at 0.0; a user whose every reflection
+  links back to its session AND a relevant index hits 1.0.
+- **Why ``target_edges_per_artefact=2``.** ``AssistantCompanionService.reflect``
+  emits two ``learned_from_session`` brain links per reflection
+  (one out, one back), so a fully-cross-linked workspace naturally
+  approaches 1.0. The v0 calibration matches what the existing
+  reflection writer produces.
+- **Why threshold ``0.5``.** A user at the structural Elder
+  thresholds (≥200 stars, ≥3 promoted skills, ≥30 reflections)
+  typically has ~30+ reflections × 2 learned edges ≈ 60 edges
+  spread over ~30+ memories → density ≈ 1.0. Setting the gate at
+  0.5 means roughly half the reflections need to cross-link before
+  Elder unlocks, so the gate is meaningful but not punitive.
+- **Phase 6 retro.** Once usage data flows, tune both
+  ``target_edges_per_artefact`` and the Elder threshold. The
+  expected first adjustments are: density 0.4 (looser if too few
+  users cross-link enough) or 0.6 (tighter if Elder felt too easy).
+- **Edge-pulse visual.** Out of scope for this phase but tracked in
+  the *Next up* list. The frontend bus already carries the right
+  shape; the work is implementing the GSAP animation in
+  ``brain-graph-3d.tsx``.
 
 #### Phase 7 (stretch) — LoRA on-deck
 

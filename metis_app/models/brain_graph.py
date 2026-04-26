@@ -296,6 +296,58 @@ class BrainGraph:
             self.apply_force_layout()
         return self
 
+    def compute_assistant_density(self) -> float:
+        """M13 Phase 6 — assistant-scope density signal.
+
+        Returns a normalised float in ``[0.0, 1.0]`` describing how
+        densely the companion's *learned artefacts* (memory entries
+        and playbooks) are cross-referenced to the rest of the
+        workspace. The value powers
+        :class:`metis_app.seedling.growth.StageThresholds.elder_brain_graph_density`:
+        Elder is gated on this growing past the configured threshold.
+
+        Density is computed as
+        ``min(1.0, learned_edges / (target_edges_per_artefact * artefacts))``
+        where:
+
+        - ``artefacts`` counts ``memory:*`` and ``playbook:*`` nodes —
+          the things the companion has actually produced. Structural
+          ``category:*`` and the singleton ``assistant:metis`` node
+          are excluded because they do not "grow" with activity.
+        - ``learned_edges`` counts edges whose metadata ``scope`` is
+          ``assistant_learned``. The structural ``category_member``
+          edges with ``scope=assistant_self`` do not count — they
+          appear once per artefact regardless of cross-referencing.
+        - ``target_edges_per_artefact = 2`` calibrates "fully grown":
+          a companion that connects each reflection back to its
+          session AND to a related index hits ~2 learned edges per
+          memory and saturates at 1.0.
+
+        Returns ``0.0`` when no learned artefacts exist (i.e., the
+        companion has not produced any reflections or playbooks yet),
+        or when the workspace has no assistant subgraph at all.
+        """
+        target_edges_per_artefact = 2
+
+        artefact_count = 0
+        for node in self.nodes.values():
+            if node.node_id.startswith(("memory:", "playbook:")):
+                artefact_count += 1
+        if artefact_count <= 0:
+            return 0.0
+
+        learned_edge_count = 0
+        for edge in self.edges:
+            metadata = edge.metadata if isinstance(edge.metadata, dict) else {}
+            scope = str(metadata.get("scope") or "")
+            if scope == "assistant_learned":
+                learned_edge_count += 1
+
+        ratio = learned_edge_count / float(
+            target_edges_per_artefact * artefact_count
+        )
+        return max(0.0, min(1.0, ratio))
+
     def compute_edge_weights(self) -> None:
         """Derive edge weights from usage frequency and confidence metadata."""
         index_session_counts: dict[str, set[str]] = {}

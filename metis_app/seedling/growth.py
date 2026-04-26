@@ -75,10 +75,15 @@ class StageThresholds:
     elder_stars: int = 200
     elder_promoted_skills: int = 3
     elder_reflections: int = 30
-    # Brain-graph density gate is reserved for Phase 6 — defaults to 0
-    # so the v0 stage machine ignores it. Setting it to a positive
-    # value once Phase 6 wires the signal will gate Elder behind it.
-    elder_brain_graph_density: float = 0.0
+    # Phase 6 activates this gate. Values are normalised to [0.0, 1.0]
+    # by ``BrainGraph.compute_assistant_density``. The 0.5 threshold is
+    # a v0 estimate calibrated against the doc-locked Elder counts:
+    # 30 reflections + 3 promoted skills + 200 indexed stars typically
+    # produce ~3 edges per assistant-scope node (i.e., density ≈ 0.75)
+    # in real workspaces, so 0.5 is a comfortable but non-trivial gate.
+    # See ``plans/seedling-and-feed/plan.md`` *Phase 6 brain-graph
+    # density — v0 decision* for the calibration math.
+    elder_brain_graph_density: float = 0.5
 
 
 DEFAULT_THRESHOLDS = StageThresholds()
