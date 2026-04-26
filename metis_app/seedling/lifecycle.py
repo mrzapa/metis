@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import logging
 from typing import Any
 
@@ -15,10 +16,17 @@ _worker: SeedlingWorker | None = None
 
 
 def _default_tick_work() -> dict[str, Any] | None:
-    """Phase 3 ingestion + retention sweep, run from inside each tick.
+    """Phase 3 ingestion + retention + Phase 4b overnight reflection.
 
     Imports happen lazily so test fixtures can construct a Seedling
-    worker without paying the comet/feed import surface.
+    worker without paying the comet/feed/companion import surface.
+
+    The function always recomputes ``model_status`` (cheap, pure
+    function over settings) so the dock's status pill flips quickly
+    when the user toggles the backend reflection setting on or off.
+    The overnight reflection cycle itself is gated on
+    ``model_status == "backend_configured"`` plus the cadence and
+    quiet-window checks in :mod:`metis_app.seedling.overnight`.
     """
     try:
         import metis_app.settings_store as _settings_store  # noqa: WPS433
@@ -26,13 +34,29 @@ def _default_tick_work() -> dict[str, Any] | None:
             resolve_feed_repository,
             run_poll_cycle,
         )
+        from .overnight import compute_model_status  # noqa: WPS433
     except Exception:  # noqa: BLE001
         log.debug("Seedling tick work imports failed", exc_info=True)
         return None
 
     settings = _settings_store.load_settings()
+
+    # Recompute model_status every tick — cheap and means the dock
+    # surfaces the user's setting changes within one tick.
+    worker = _worker
+    if worker is not None:
+        try:
+            worker.set_overnight_status(model_status=compute_model_status(settings))
+        except Exception:  # noqa: BLE001
+            log.debug("Worker model_status update failed", exc_info=True)
+
+    # Phase 4b — overnight reflection. Independent of news ingestion;
+    # a user might run the backend reflection without any news comets
+    # configured.
+    overnight_payload = _maybe_run_overnight(settings)
+
     if not settings.get("news_comets_enabled", False):
-        return None
+        return overnight_payload
 
     repo = resolve_feed_repository()
     try:
@@ -53,7 +77,101 @@ def _default_tick_work() -> dict[str, Any] | None:
     except Exception:  # noqa: BLE001
         log.warning("Seedling cleanup pass raised", exc_info=True)
 
+    if overnight_payload is not None and isinstance(result, dict):
+        result["overnight"] = overnight_payload
     return result
+
+
+def _maybe_run_overnight(settings: dict[str, Any]) -> dict[str, Any] | None:
+    """Run the Phase 4b overnight cycle if the gates allow.
+
+    Imports happen lazily so the rest of Phase 3's tick work doesn't
+    depend on the assistant-companion service being importable.
+    """
+    try:
+        from metis_app.services.workspace_orchestrator import (  # noqa: WPS433
+            WorkspaceOrchestrator,
+        )
+        from .overnight import (  # noqa: WPS433
+            compute_model_status,
+            maybe_run_overnight_reflection,
+        )
+    except Exception:  # noqa: BLE001
+        log.debug("Overnight reflection imports failed", exc_info=True)
+        return None
+
+    model_status = compute_model_status(settings)
+    if model_status != "backend_configured":
+        return {"ran": False, "reason": f"model_status={model_status}"}
+
+    worker = _worker
+    last_overnight: datetime | None = None
+    if worker is not None and worker.status.last_overnight_reflection_at:
+        try:
+            last_overnight = datetime.fromisoformat(
+                worker.status.last_overnight_reflection_at.replace("Z", "+00:00")
+            )
+        except ValueError:
+            last_overnight = None
+
+    orchestrator = WorkspaceOrchestrator()
+    activity = _collect_overnight_activity(orchestrator)
+    last_user_activity_at = _resolve_last_user_activity(orchestrator)
+
+    payload = maybe_run_overnight_reflection(
+        settings=settings,
+        record_external_reflection=orchestrator.record_companion_reflection,
+        last_overnight_reflection_at=last_overnight,
+        last_user_activity_at=last_user_activity_at,
+        activity=activity,
+    )
+    if payload.get("ran"):
+        try:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            if worker is not None:
+                worker.set_overnight_status(last_overnight_reflection_at=now_iso)
+        except Exception:  # noqa: BLE001
+            log.debug("Failed to bump last_overnight_reflection_at", exc_info=True)
+    return payload
+
+
+def _collect_overnight_activity(orchestrator: Any) -> dict[str, Any]:
+    """Gather the prior day's reflections / comets / stars for the prompt.
+
+    Failures here are non-fatal — the prompt builder happily handles an
+    empty activity dict ("no recorded activity in the prior day").
+    """
+    activity: dict[str, Any] = {}
+    try:
+        memory = orchestrator.list_assistant_memory(limit=6)
+        if isinstance(memory, list):
+            activity["recent_reflections"] = memory
+    except Exception:  # noqa: BLE001
+        log.debug("Could not list recent reflections for overnight prompt", exc_info=True)
+    return activity
+
+
+def _resolve_last_user_activity(orchestrator: Any) -> datetime | None:
+    """Look up the most recent user activity timestamp.
+
+    For Phase 4b v0 we rely on the assistant snapshot's
+    ``last_reflection_at`` as a proxy — every manual chat reflection
+    bumps it, and so does the automatic reflection on completed runs.
+    Phase 4b retro can refine this with a dedicated
+    ``last_user_input_at`` field if the proxy proves too coarse.
+    """
+    try:
+        snapshot = orchestrator.get_assistant_snapshot()
+    except Exception:  # noqa: BLE001
+        return None
+    status = (snapshot or {}).get("status") or {}
+    raw = status.get("last_reflection_at")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def get_seedling_worker() -> SeedlingWorker:

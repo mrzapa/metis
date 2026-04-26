@@ -189,7 +189,48 @@ describe("MetisCompanionDock", () => {
 
     render(<MetisCompanionDock />);
 
-    expect(await screen.findByLabelText("Seedling awake")).toBeInTheDocument();
+    // Default frontend-only label.
+    expect(
+      await screen.findByLabelText(/Seedling awake · while-you-work/i),
+    ).toBeInTheDocument();
+  });
+
+  it("surfaces backend_configured model_status in the indicator tooltip (Phase 4b)", async () => {
+    vi.mocked(fetchAssistant).mockResolvedValueOnce(buildSnapshot());
+    vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
+    vi.mocked(fetchSeedlingStatus).mockResolvedValueOnce({
+      running: true,
+      last_tick_at: "2026-04-25T20:00:00+00:00",
+      current_stage: "seedling",
+      next_action_at: "2026-04-25T20:01:00+00:00",
+      queue_depth: 0,
+      model_status: "backend_configured",
+    });
+
+    render(<MetisCompanionDock />);
+
+    expect(
+      await screen.findByLabelText(/backend reflection configured/i),
+    ).toBeInTheDocument();
+  });
+
+  it("surfaces backend_unavailable model_status in the indicator tooltip", async () => {
+    vi.mocked(fetchAssistant).mockResolvedValueOnce(buildSnapshot());
+    vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
+    vi.mocked(fetchSeedlingStatus).mockResolvedValueOnce({
+      running: true,
+      last_tick_at: "2026-04-25T20:00:00+00:00",
+      current_stage: "seedling",
+      next_action_at: "2026-04-25T20:01:00+00:00",
+      queue_depth: 0,
+      model_status: "backend_unavailable",
+    });
+
+    render(<MetisCompanionDock />);
+
+    expect(
+      await screen.findByLabelText(/cannot load/i),
+    ).toBeInTheDocument();
   });
 
   it("shows the Atlas popup and lets the user save or dismiss it", async () => {

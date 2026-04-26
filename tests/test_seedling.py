@@ -26,6 +26,7 @@ def test_status_payload_sanitizes_stage_and_queue_depth() -> None:
             "current_stage": "unknown",
             "next_action_at": "",
             "queue_depth": -4,
+            "model_status": "ridiculous-status",  # invalid → falls back to default
         }
     )
 
@@ -35,7 +36,25 @@ def test_status_payload_sanitizes_stage_and_queue_depth() -> None:
         "current_stage": "seedling",
         "next_action_at": None,
         "queue_depth": 0,
+        "model_status": "frontend_only",
+        "last_overnight_reflection_at": None,
     }
+
+
+def test_status_payload_round_trips_phase4b_fields() -> None:
+    payload = {
+        "running": True,
+        "last_tick_at": "2026-04-25T08:00:00+00:00",
+        "current_stage": "seedling",
+        "next_action_at": None,
+        "queue_depth": 0,
+        "model_status": "backend_configured",
+        "last_overnight_reflection_at": "2026-04-25T06:00:00+00:00",
+    }
+    status = SeedlingStatus.from_dict(payload)
+    assert status.model_status == "backend_configured"
+    assert status.last_overnight_reflection_at == "2026-04-25T06:00:00+00:00"
+    assert status.to_dict() == payload
 
 
 def test_status_cache_round_trips(tmp_path) -> None:

@@ -985,12 +985,30 @@ export interface CompanionActivityEvent {
   payload?: Record<string, unknown>;
 }
 
+/**
+ * Phase 4b ADR 0013 §2 enum. Describes only the optional backend
+ * reflection path. WebGPU/Bonsai availability is reported separately
+ * via `useWebGPUCompanion().status`. The two are independent.
+ */
+export type SeedlingModelStatus =
+  | "frontend_only"
+  | "backend_configured"
+  | "backend_disabled"
+  | "backend_unavailable";
+
 export interface SeedlingStatus {
   running: boolean;
   last_tick_at: string | null;
   current_stage: "seedling" | "sapling" | "bloom" | "elder";
   next_action_at: string | null;
   queue_depth: number;
+  /**
+   * Phase 4b additive fields. Older clients ignore them; the dock
+   * defaults `model_status` to `"frontend_only"` until a payload
+   * surfaces a different value.
+   */
+  model_status?: SeedlingModelStatus;
+  last_overnight_reflection_at?: string | null;
   activity_events?: CompanionActivityEvent[];
 }
 

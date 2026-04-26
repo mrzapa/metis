@@ -12,7 +12,23 @@ from typing import Any, Literal, cast
 
 SeedlingStage = Literal["seedling", "sapling", "bloom", "elder"]
 
+# ADR 0013 §2 model_status enum. Describes only the optional backend
+# reflection path; WebGPU/Bonsai availability is reported separately via
+# `useWebGPUCompanion().status` on the frontend. The two are independent.
+SeedlingModelStatus = Literal[
+    "frontend_only",       # no GGUF registered (default)
+    "backend_configured",  # GGUF registered + toggle on + load attempted clean
+    "backend_disabled",    # GGUF registered + toggle off
+    "backend_unavailable", # toggle on but the configured GGUF cannot load
+]
+
 _STAGES: set[str] = {"seedling", "sapling", "bloom", "elder"}
+_MODEL_STATUSES: set[str] = {
+    "frontend_only",
+    "backend_configured",
+    "backend_disabled",
+    "backend_unavailable",
+}
 
 
 def utc_now() -> datetime:
@@ -36,6 +52,13 @@ class SeedlingStatus:
     current_stage: SeedlingStage = "seedling"
     next_action_at: str | None = None
     queue_depth: int = 0
+    # ADR 0013 §2 — additive in v0; clients that don't know the field
+    # default it to "frontend_only" client-side until a backend payload
+    # is observed. ``last_overnight_reflection_at`` is the most recent
+    # successful overnight cycle; the dock pivots its "morning-after"
+    # copy off this value plus ``model_status``.
+    model_status: SeedlingModelStatus = "frontend_only"
+    last_overnight_reflection_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -44,6 +67,8 @@ class SeedlingStatus:
             "current_stage": self.current_stage,
             "next_action_at": self.next_action_at,
             "queue_depth": max(0, int(self.queue_depth)),
+            "model_status": self.model_status,
+            "last_overnight_reflection_at": self.last_overnight_reflection_at,
         }
 
     @classmethod
@@ -52,6 +77,12 @@ class SeedlingStatus:
             return cls()
         raw_stage = str(payload.get("current_stage") or "seedling")
         stage = cast(SeedlingStage, raw_stage) if raw_stage in _STAGES else "seedling"
+        raw_model_status = str(payload.get("model_status") or "frontend_only")
+        model_status = (
+            cast(SeedlingModelStatus, raw_model_status)
+            if raw_model_status in _MODEL_STATUSES
+            else "frontend_only"
+        )
         try:
             queue_depth = max(0, int(payload.get("queue_depth") or 0))
         except (TypeError, ValueError):
@@ -62,6 +93,10 @@ class SeedlingStatus:
             current_stage=stage,
             next_action_at=_optional_text(payload.get("next_action_at")),
             queue_depth=queue_depth,
+            model_status=model_status,
+            last_overnight_reflection_at=_optional_text(
+                payload.get("last_overnight_reflection_at")
+            ),
         )
 
 

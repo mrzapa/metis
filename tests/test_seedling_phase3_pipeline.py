@@ -156,10 +156,17 @@ def test_run_poll_cycle_persists_decided_comets_up_to_max_active() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_default_tick_work_returns_none_when_disabled() -> None:
+def test_default_tick_work_returns_overnight_skip_when_disabled() -> None:
+    """With news comets off and no backend reflection configured, the tick
+    work returns the overnight runner's skip payload (Phase 4b)."""
     fake_settings = {"news_comets_enabled": False}
     with patch("metis_app.settings_store.load_settings", return_value=fake_settings):
-        assert _default_tick_work() is None
+        result = _default_tick_work()
+    # With nothing configured the overnight runner reports a skipped
+    # cycle rather than ``None`` so the dock can show a status pill.
+    assert isinstance(result, dict)
+    assert result.get("ran") is False
+    assert "model_status" in (result.get("reason") or "")
 
 
 def test_default_tick_work_runs_pipeline_and_cleanup_when_enabled() -> None:

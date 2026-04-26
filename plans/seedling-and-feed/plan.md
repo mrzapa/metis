@@ -117,30 +117,46 @@ What's in place today that M13 will lean on:
   `apps/metis-web/`. No backend model loading; reflection only fires
   while the user has METIS open. Phase 4b will reuse the same writer
   with `kind="overnight"` once the backend GGUF toggle ships.
+- **2026-04-25 — Phase 4b complete (overnight backend reflection,
+  opt-in).** New module `metis_app/seedling/overnight.py` adds the
+  cadence / quiet-window / `model_status` gate logic plus a runner
+  that calls an injectable generator (production: lazy-loaded
+  `LocalLlamaCppChatModel`; tests stub it). Settings:
+  `seedling_backend_reflection_enabled` (default `false`),
+  `seedling_reflection_cadence_hours` (24),
+  `seedling_reflection_quiet_window_minutes` (30),
+  `seedling_overnight_max_new_tokens` (256). `SeedlingStatus` gains
+  `model_status` (the four-value enum from ADR 0013 §2) and
+  `last_overnight_reflection_at` — both additive on the dataclass and
+  the frontend type so older clients ignore them.
+  `GET /v1/seedling/status` recomputes `model_status` on every read
+  so the dock pill flips when the user toggles the setting. The
+  lifecycle tick runs the overnight runner before the Phase 3
+  ingestion + cleanup pass; persistence reuses the Phase 4a
+  `record_external_reflection` writer with `kind="overnight"`, which
+  lands as `AssistantMemoryEntry.kind="overnight_reflection"` per the
+  Phase 4a architect-fix split. The dock indicator's tooltip carries
+  qualified ADR 0013 §3 copy; the marketing-copy guard test still
+  passes.
 
 ## Next up
 
 The next concrete actions:
 
-1. **Phase 4b — overnight reflection (opt-in, backend GGUF).** Reuse
-   the Phase 4a `record_external_reflection` writer with
-   `kind="overnight"`. Wire the Seedling worker tick to schedule
-   one cycle per `seedling_reflection_cadence_hours` (default 24)
-   when both `seedling_backend_reflection_enabled = true` and
-   `model_status == "backend_configured"`. The backend GGUF path
-   produces the longer-form text; the writer is shared. Marketing
-   copy must remain qualified per ADR 0013 §3.
-2. **Extend `/v1/seedling/status` with `model_status`.** Add the
-   four-value enum from ADR 0013 §2 (`frontend_only` /
-   `backend_configured` / `backend_disabled` / `backend_unavailable`)
-   to `SeedlingStatus` and the matching frontend type. Phase 4b
-   needs this to gate the overnight cycle. Either alongside Phase 4b
-   or as a tiny standalone PR right before it.
-3. **Phase 5 — growth stages.** Once Phase 4 ships and skill
-   candidates are flowing, ADR 0009 (or a plan-doc decision section)
-   pins the Seedling → Sapling → Bloom → Elder thresholds. Then
-   the dock surfaces the stage and the transition emits a one-time
-   `kind: "stage_transition"` event.
+1. **Phase 5 — growth stages.** ADR 0009 (or a plan-doc decision
+   section) pins the Seedling → Sapling → Bloom → Elder thresholds.
+   The dock surfaces the stage badge and a stage-transition emits a
+   one-time `kind: "stage_transition"` `CompanionActivityEvent` so
+   the constellation can render the magic moment.
+2. **Phase 6 — brain-graph densification.** Now that M10 is Landed,
+   the Phase 6 deferral lifts. Feed Seedling-produced
+   `AssistantBrainLink` records into
+   `BrainGraph.compute_edge_weights()` so scaffold edges carry the
+   companion's recent activity.
+3. **Phase 7 (stretch) — LoRA training log.** Capture the overnight
+   reflection's prompt + retrieved context + completion as JSONL so
+   M18 has stable training data without M13 actually shipping
+   fine-tuning code.
 
 ## Blockers
 

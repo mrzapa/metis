@@ -49,3 +49,25 @@ def test_seedling_status_endpoint_includes_worker_activity_events(tmp_path) -> N
         assert events[1]["summary"] == "Seedling lifecycle started"
 
     reset_seedling_worker()
+
+
+def test_seedling_status_endpoint_returns_model_status_field(tmp_path) -> None:
+    """Phase 4b: ``model_status`` lands as a top-level field on every
+    status read so the dock can render the right copy without a
+    second round-trip."""
+    clear_seedling_activity_events()
+    worker = SeedlingWorker(
+        status_cache=SeedlingStatusCache(tmp_path / "status.json"),
+    )
+    reset_seedling_worker(worker)
+
+    with TestClient(app=create_app()) as client:
+        resp = client.get("/v1/seedling/status")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert "model_status" in payload
+        # Default install: no GGUF configured → frontend_only.
+        assert payload["model_status"] == "frontend_only"
+        assert "last_overnight_reflection_at" in payload
+
+    reset_seedling_worker()

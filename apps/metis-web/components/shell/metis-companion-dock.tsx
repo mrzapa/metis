@@ -145,12 +145,25 @@ export function MetisCompanionDock({
   const minimized = Boolean(snapshot?.identity.minimized);
   const showAtlasToast = Boolean(toastMessage?.startsWith("Saved to Atlas"));
   const seedlingAwake = seedlingStatus?.running === true;
-  const seedlingStatusLabel =
-    seedlingStatus === null
-      ? "Seedling status unknown"
-      : seedlingAwake
-        ? "Seedling awake"
-        : "Seedling resting";
+  // Phase 4b: surface the model_status enum in the indicator tooltip so
+  // the user knows whether overnight reflection is set up. The label is
+  // qualified (no unqualified "while you sleep" copy — see ADR 0013 §3
+  // and the marketing-copy-guard test).
+  const seedlingModelStatus = seedlingStatus?.model_status ?? "frontend_only";
+  const seedlingStatusLabel = (() => {
+    if (seedlingStatus === null) return "Seedling status unknown";
+    const base = seedlingAwake ? "Seedling awake" : "Seedling resting";
+    if (seedlingModelStatus === "backend_configured") {
+      return `${base} · backend reflection configured (opt-in, runs while your laptop is awake)`;
+    }
+    if (seedlingModelStatus === "backend_disabled") {
+      return `${base} · backend reflection available but disabled in settings`;
+    }
+    if (seedlingModelStatus === "backend_unavailable") {
+      return `${base} · backend reflection enabled but the configured GGUF cannot load`;
+    }
+    return `${base} · while-you-work reflection only (configure a GGUF for backend reflection)`;
+  })();
 
   const load = useCallback(async (autoBootstrap: boolean) => {
     const requestId = ++requestIdRef.current;

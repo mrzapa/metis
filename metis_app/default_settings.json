@@ -210,6 +210,10 @@
   "seedling_feed_max_rows": 50000,
   "seedling_feed_terminal_retention_days": 7,
   "seedling_opml_import_max_bytes": 1048576,
+  "seedling_backend_reflection_enabled": false,
+  "seedling_reflection_cadence_hours": 24,
+  "seedling_reflection_quiet_window_minutes": 30,
+  "seedling_overnight_max_new_tokens": 256,
   "network_audit_airplane_mode": false,
   "provider_block_llm": {},
   "network_audit_discoverability_dismissed": false
