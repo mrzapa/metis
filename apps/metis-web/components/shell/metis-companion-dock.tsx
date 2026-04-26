@@ -20,7 +20,7 @@ import {
   updateAssistant,
   updateSettings,
 } from "@/lib/api";
-import type { AssistantSnapshot, AtlasEntry, CompanionActivityEvent, SeedlingStatus } from "@/lib/api";
+import type { AssistantSnapshot, AtlasEntry, CompanionActivityEvent, GrowthStage, SeedlingStatus } from "@/lib/api";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -145,6 +145,45 @@ export function MetisCompanionDock({
 
   const minimized = Boolean(snapshot?.identity.minimized);
   const showAtlasToast = Boolean(toastMessage?.startsWith("Saved to Atlas"));
+  // Phase 5 — visible growth stage. Defaults to "seedling" client-side
+  // until the additive backend payload is observed. The dock badge,
+  // tooltip copy, and the stage_transition pulse all key off this.
+  const growthStage: GrowthStage = snapshot?.status?.growth_stage ?? "seedling";
+  const growthStageLabel =
+    growthStage === "seedling"
+      ? "Seedling"
+      : growthStage === "sapling"
+        ? "Sapling"
+        : growthStage === "bloom"
+          ? "Bloom"
+          : "Elder";
+  const growthStageStyle = (() => {
+    switch (growthStage) {
+      case "sapling":
+        return "border-emerald-400/40 bg-emerald-400/10 text-emerald-200";
+      case "bloom":
+        return "border-violet-400/40 bg-violet-400/10 text-violet-200";
+      case "elder":
+        return "border-amber-400/40 bg-amber-400/10 text-amber-200";
+      case "seedling":
+      default:
+        return "border-muted-foreground/40 bg-muted-foreground/10 text-muted-foreground";
+    }
+  })();
+  const growthStageTooltip = (() => {
+    switch (growthStage) {
+      case "sapling":
+        return "Sapling — you've fed the companion enough material that it has shape.";
+      case "bloom":
+        return "Bloom — the companion now spans many faculties and has captured skills you can promote.";
+      case "elder":
+        return "Elder — the companion has accumulated significant promoted skills and reflections.";
+      case "seedling":
+      default:
+        return "Seedling — feed the companion stars and reflections to help it grow.";
+    }
+  })();
+  const stageBadgeRef = useRef<HTMLSpanElement | null>(null);
   const seedlingAwake = seedlingStatus?.running === true;
   // Phase 4b: surface the model_status enum in the indicator tooltip so
   // the user knows whether overnight reflection is set up. The label is
@@ -265,6 +304,39 @@ export function MetisCompanionDock({
       if (event.source === "autonomous_research" && event.state === "completed") {
         setToastMessage("New star added to constellation");
       }
+      // Phase 5 — one-time stage-transition magic moment. The
+      // backend has already persisted the new stage; we surface a
+      // toast, fire a GSAP pulse on the badge, and refetch the
+      // assistant snapshot so the badge label reflects the new
+      // stage without waiting for the next manual reload.
+      if (event.kind === "stage_transition" && event.state === "completed") {
+        const stagePayload = event.payload as
+          | { advanced_from?: string; stage?: string }
+          | undefined;
+        const newStage = stagePayload?.stage
+          ? String(stagePayload.stage).slice(0, 1).toUpperCase() +
+            String(stagePayload.stage).slice(1)
+          : "next stage";
+        setToastMessage(`Companion advanced to ${newStage}`);
+        // Refresh the snapshot so the badge updates.
+        void load(false);
+        // GSAP pulse on the badge — honours prefers-reduced-motion.
+        if (!prefersReducedMotion && stageBadgeRef.current) {
+          gsap.fromTo(
+            stageBadgeRef.current,
+            { scale: 1, boxShadow: "0 0 0 0 rgba(139,92,246,0)" },
+            {
+              scale: 1.18,
+              boxShadow: "0 0 24px 4px rgba(139,92,246,0.55)",
+              duration: 0.5,
+              ease: "power2.out",
+              yoyo: true,
+              repeat: 1,
+              clearProps: "boxShadow,scale",
+            },
+          );
+        }
+      }
       // Always-on: reflect locally on each completed event.  Skip if a
       // reflection is already in flight so we don't stomp the user's chat
       // stream or queue runaway work.
@@ -290,7 +362,7 @@ export function MetisCompanionDock({
         },
       ]);
     });
-  }, [minimized]);
+  }, [minimized, load, prefersReducedMotion]);
 
   // Dismiss toast after 3 seconds
   useEffect(() => {
@@ -714,8 +786,23 @@ export function MetisCompanionDock({
           </span>
           {!minimized && (
             <div className="min-w-0">
-              <p className="truncate font-display text-lg font-semibold tracking-[-0.03em] text-foreground">
-                {snapshot?.identity.name ?? "METIS"}
+              <p className="flex min-w-0 items-center gap-2 truncate font-display text-lg font-semibold tracking-[-0.03em] text-foreground">
+                <span className="truncate">{snapshot?.identity.name ?? "METIS"}</span>
+                {/* Phase 5 — visible growth-stage badge. Defaults to
+                    Seedling on first render; bumps when the backend
+                    decision lands or a stage_transition event fires. */}
+                <span
+                  ref={stageBadgeRef}
+                  data-testid="companion-stage-badge"
+                  aria-label={`Growth stage: ${growthStageLabel}`}
+                  title={growthStageTooltip}
+                  className={cn(
+                    "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em]",
+                    growthStageStyle,
+                  )}
+                >
+                  {growthStageLabel}
+                </span>
               </p>
               <p className="truncate text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                 {snapshot?.status.runtime_source === "dedicated_local"

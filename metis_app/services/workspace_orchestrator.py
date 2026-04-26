@@ -19,6 +19,7 @@ Subsystems composed here
 from __future__ import annotations
 
 import json
+import logging
 import os
 import pathlib
 import re
@@ -83,6 +84,8 @@ from metis_app.services.session_repository import SessionRepository
 from metis_app.services.skill_repository import SkillRepository, _DEFAULT_CANDIDATES_DB_PATH
 from metis_app.services.trace_store import TraceStore
 from metis_app.models.parity_types import SkillDefinition
+
+log = logging.getLogger(__name__)
 
 # Module-level in-process flag: True while any autonomous research run is
 # executing. Used by GET /v1/autonomous/status so the UI can dim the
@@ -984,6 +987,164 @@ class WorkspaceOrchestrator:
             tags=tags,
             settings=resolved_settings,
         )
+
+    def recompute_growth_stage(
+        self,
+        *,
+        settings: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Phase 5: gather counters + recompute the growth stage.
+
+        Idempotent: when the stage is unchanged, no events fire and
+        nothing is persisted. On a transition, ``AssistantStatus.growth_stage``
+        is bumped, ``growth_stage_changed_at`` is stamped, and a
+        ``CompanionActivityEvent`` with ``source="seedling"``,
+        ``state="completed"``, ``kind="stage_transition"`` is recorded
+        on the activity bridge so the dock can fire its one-time pulse.
+
+        Returns ``{stage, advanced_from, signals, transition_event?}``.
+        """
+        from datetime import datetime, timezone  # local for clarity
+
+        from metis_app.seedling.activity import record_seedling_activity
+        from metis_app.seedling.growth import (
+            DEFAULT_THRESHOLDS,
+            compute_growth_stage,
+            signals_from_counts,
+        )
+
+        active_settings = self._resolve_query_settings(settings or {})
+        counts = self._collect_growth_counts()
+        signals = signals_from_counts(counts)
+
+        identity = self._assistant_service.repository.get_status()
+        current_stage = identity.growth_stage
+
+        override_raw = str(
+            active_settings.get("seedling_growth_stage_override") or ""
+        ).strip().lower()
+        override = override_raw if override_raw in {
+            "seedling", "sapling", "bloom", "elder",
+        } else None
+
+        decision = compute_growth_stage(
+            signals=signals,
+            current_stage=current_stage,
+            thresholds=DEFAULT_THRESHOLDS,
+            override=override,  # type: ignore[arg-type]
+        )
+
+        result: dict[str, Any] = {
+            "stage": decision.stage,
+            "advanced_from": decision.advanced_from,
+            "reason": decision.reason,
+            "signals": {
+                "indexed_stars": signals.indexed_stars,
+                "indexed_faculties": signals.indexed_faculties,
+                "reflections_total": signals.reflections_total,
+                "overnight_reflections": signals.overnight_reflections,
+                "skill_candidates": signals.skill_candidates,
+                "promoted_skills": signals.promoted_skills,
+                "brain_graph_density": signals.brain_graph_density,
+            },
+        }
+
+        if decision.advanced_from is None and decision.stage == current_stage:
+            return result
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        identity.growth_stage = decision.stage
+        identity.growth_stage_changed_at = now_iso
+        self._assistant_service.repository.update_status(identity)
+
+        if decision.advanced_from is not None:
+            try:
+                record_seedling_activity(
+                    {
+                        "state": "completed",
+                        "kind": "stage_transition",
+                        "trigger": "growth_stage",
+                        "summary": (
+                            f"Companion advanced to {decision.stage.title()}"
+                        ),
+                        "status": {
+                            "growth_stage": decision.stage,
+                            "advanced_from": decision.advanced_from,
+                        },
+                    }
+                )
+                result["transition_event"] = {
+                    "source": "seedling",
+                    "kind": "stage_transition",
+                    "advanced_from": decision.advanced_from,
+                    "stage": decision.stage,
+                }
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "Failed to emit stage_transition activity event: %s",
+                    exc,
+                    exc_info=True,
+                )
+        return result
+
+    def _collect_growth_counts(self) -> dict[str, Any]:
+        """Gather the structural counters used by ``recompute_growth_stage``.
+
+        Failures here are non-fatal — each counter falls back to zero
+        so the recompute always yields a deterministic stage even if
+        one of the underlying repos is mid-init.
+        """
+        counts: dict[str, Any] = {}
+
+        # Indexes / faculties (stars).
+        try:
+            indexes = self.list_indexes()
+        except Exception:
+            indexes = []
+        counts["indexed_stars"] = len(indexes)
+        faculties: set[str] = set()
+        for ix in indexes:
+            faculty = str(ix.get("faculty_id") or ix.get("faculty") or "").strip()
+            if faculty:
+                faculties.add(faculty)
+        counts["indexed_faculties"] = len(faculties)
+
+        # Reflections — any kind counts (Phase 4a Bonsai, Phase 4b
+        # overnight, Phase 4 manual). The plan doc decision section
+        # documents this — see ADR 0013 §Open Questions resolution.
+        try:
+            recent = self._assistant_service.repository.list_memory(limit=1000)
+        except Exception:
+            recent = []
+        reflection_kinds = {
+            "reflection",
+            "bonsai_reflection",
+            "overnight_reflection",
+        }
+        reflections_total = 0
+        overnight_reflections = 0
+        for entry in recent:
+            kind = str(getattr(entry, "kind", "") or "")
+            if kind in reflection_kinds:
+                reflections_total += 1
+            if kind == "overnight_reflection":
+                overnight_reflections += 1
+        counts["reflections_total"] = reflections_total
+        counts["overnight_reflections"] = overnight_reflections
+
+        # Skill candidates / promoted skills.
+        try:
+            skill_counts = self._skill_repo.count_candidates(
+                db_path=_DEFAULT_CANDIDATES_DB_PATH,
+            )
+        except Exception:
+            skill_counts = {"unpromoted": 0, "promoted": 0}
+        counts["skill_candidates"] = int(skill_counts.get("unpromoted", 0))
+        counts["promoted_skills"] = int(skill_counts.get("promoted", 0))
+
+        # Brain-graph density — Phase 6 will populate this. v0 stays at 0.0.
+        counts["brain_graph_density"] = 0.0
+        return counts
 
     def run_autonomous_research(
         self,

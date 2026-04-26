@@ -55,6 +55,15 @@ def _default_tick_work() -> dict[str, Any] | None:
     # configured.
     overnight_payload = _maybe_run_overnight(settings)
 
+    # Phase 5 — recompute the growth stage every tick. Idempotent
+    # (returns the same stage when nothing changed); fires a
+    # stage_transition CompanionActivityEvent only on actual
+    # advance. Failures don't kill the rest of the tick.
+    try:
+        _maybe_recompute_growth_stage(settings)
+    except Exception:  # noqa: BLE001
+        log.debug("Growth stage recompute raised", exc_info=True)
+
     if not settings.get("news_comets_enabled", False):
         return overnight_payload
 
@@ -80,6 +89,29 @@ def _default_tick_work() -> dict[str, Any] | None:
     if overnight_payload is not None and isinstance(result, dict):
         result["overnight"] = overnight_payload
     return result
+
+
+def _maybe_recompute_growth_stage(settings: dict[str, Any]) -> dict[str, Any] | None:
+    """Phase 5 stage-machine tick.
+
+    Lazy import keeps the rest of the tick work decoupled from the
+    orchestrator import chain. Always runs (cheap counters); only
+    persists + emits when the stage actually advances.
+    """
+    try:
+        from metis_app.services.workspace_orchestrator import (  # noqa: WPS433
+            WorkspaceOrchestrator,
+        )
+    except Exception:  # noqa: BLE001
+        log.debug("Growth-stage import failed", exc_info=True)
+        return None
+
+    orchestrator = WorkspaceOrchestrator()
+    try:
+        return orchestrator.recompute_growth_stage(settings=settings)
+    except Exception:  # noqa: BLE001
+        log.debug("Growth-stage recompute failed", exc_info=True)
+        return None
 
 
 def _maybe_run_overnight(settings: dict[str, Any]) -> dict[str, Any] | None:

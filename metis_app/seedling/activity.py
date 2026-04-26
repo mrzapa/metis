@@ -10,6 +10,9 @@ from typing import Any
 
 _MAX_EVENTS = 20
 _VALID_STATES = {"running", "completed", "error"}
+# Phase 4 / Phase 5 extension. Additive on the existing event shape;
+# clients that don't know the field ignore it.
+_VALID_KINDS = {"while_you_work", "overnight", "stage_transition"}
 _events: deque[dict[str, Any]] = deque(maxlen=_MAX_EVENTS)
 _lock = threading.Lock()
 _sequence = 0
@@ -25,7 +28,13 @@ def get_seedling_activity_boot_id() -> str:
 
 
 def record_seedling_activity(event: dict[str, object]) -> None:
-    """Record a worker progress event as a CompanionActivityEvent payload."""
+    """Record a worker progress event as a CompanionActivityEvent payload.
+
+    The optional ``kind`` field surfaces Phase 4 / Phase 5 sub-types
+    (``while_you_work`` / ``overnight`` / ``stage_transition``).
+    Unknown ``kind`` values are silently dropped so the bridge stays
+    forward-compatible without poisoning the activity feed.
+    """
     global _sequence
     state = str(event.get("state") or "running")
     if state not in _VALID_STATES:
@@ -33,23 +42,26 @@ def record_seedling_activity(event: dict[str, object]) -> None:
     summary = str(event.get("summary") or "Seedling heartbeat")
     trigger = str(event.get("trigger") or "lifecycle")
     payload = event.get("status")
+    kind_raw = event.get("kind")
+    kind = str(kind_raw) if isinstance(kind_raw, str) and kind_raw in _VALID_KINDS else None
     with _lock:
         _sequence += 1
         event_id = f"seedling-{_boot_id}-{_sequence}"
-        _events.append(
-            {
-                "source": "seedling",
-                "state": state,
-                "trigger": trigger,
-                "summary": summary,
-                "timestamp": int(time.time() * 1000),
-                "payload": {
-                    "event_id": event_id,
-                    "boot_id": _boot_id,
-                    "status": payload if isinstance(payload, dict) else {},
-                },
-            }
-        )
+        record: dict[str, Any] = {
+            "source": "seedling",
+            "state": state,
+            "trigger": trigger,
+            "summary": summary,
+            "timestamp": int(time.time() * 1000),
+            "payload": {
+                "event_id": event_id,
+                "boot_id": _boot_id,
+                "status": payload if isinstance(payload, dict) else {},
+            },
+        }
+        if kind is not None:
+            record["kind"] = kind
+        _events.append(record)
 
 
 def list_seedling_activity_events(limit: int = 8) -> list[dict[str, Any]]:

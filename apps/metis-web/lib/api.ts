@@ -976,12 +976,15 @@ export interface CompanionActivityEvent {
   summary: string;
   timestamp: number;
   /**
-   * Phase-4 reflection sub-kind. Additive on top of the existing event
-   * shape — earlier producers and consumers ignore it. Phase 4a emits
-   * `"while_you_work"` from the Bonsai-driven dock callback; Phase 4b
-   * will add `"overnight"` from the backend-GGUF reflection cycle.
+   * Phase-4 reflection sub-kind / Phase-5 stage transition. Additive
+   * on top of the existing event shape — earlier producers and
+   * consumers ignore it. Phase 4a emits `"while_you_work"` from the
+   * Bonsai-driven dock callback; Phase 4b adds `"overnight"` from the
+   * backend-GGUF reflection cycle; Phase 5 adds `"stage_transition"`
+   * fired once per Seedling → Sapling → Bloom → Elder advance so the
+   * dock can render a one-time pulse / confetti.
    */
-  kind?: "while_you_work" | "overnight";
+  kind?: "while_you_work" | "overnight" | "stage_transition";
   payload?: Record<string, unknown>;
 }
 
@@ -1096,6 +1099,13 @@ export interface AssistantPolicy {
   autonomous_research_enabled?: boolean;
 }
 
+/**
+ * Phase 5 — visible Seedling growth stage. Additive on the existing
+ * payload; older clients ignore the field, newer clients default to
+ * `"seedling"` until a backend payload arrives.
+ */
+export type GrowthStage = "seedling" | "sapling" | "bloom" | "elder";
+
 export interface AssistantStatus {
   state: string;
   paused: boolean;
@@ -1112,6 +1122,10 @@ export interface AssistantStatus {
   last_reflection_trigger: string;
   latest_summary: string;
   latest_why: string;
+  /** Phase 5 additive — see GrowthStage. */
+  growth_stage?: GrowthStage;
+  /** ISO timestamp of the most recent stage advance (Phase 5). */
+  growth_stage_changed_at?: string;
 }
 
 export interface AssistantMemoryEntry {
