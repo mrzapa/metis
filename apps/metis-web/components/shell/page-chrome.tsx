@@ -3,7 +3,7 @@
 import { useEffect, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   Home,
   Lightbulb,
@@ -135,12 +135,18 @@ export function PageChrome({
             </div>
           </motion.header>
 
-          {/* Page content */}
+          {/* Page content — wrapped in AnimatePresence with the
+              pathname as key so the enter/exit motion fires on every
+              route change, not just first mount. `mode="wait"` keeps
+              the swap clean: old page fades out, then new fades in. */}
           <main className="flex-1 py-4 sm:py-5">
+            <AnimatePresence mode="wait" initial={false}>
             <motion.div
+              key={pathname}
               initial={reducedMotion ? false : { opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, ease: "easeOut" }}
+              exit={reducedMotion ? undefined : { opacity: 0, y: -10, transition: { duration: 0.18, ease: "easeIn" } }}
+              transition={{ duration: 0.42, ease: "easeOut" }}
               className="mx-auto w-full max-w-384"
             >
               {/* Page header */}
@@ -211,6 +217,7 @@ export function PageChrome({
                 {children}
               </section>
             </motion.div>
+            </AnimatePresence>
           </main>
         </div>
       </div>
