@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 
 from metis_app.models.brain_graph import BrainGraph
-from metis_app.models.session_types import SessionSummary
+from metis_app.models.session_types import SessionDetail, SessionSummary
+from metis_app.services.assistant_companion import AssistantCompanionService
+from metis_app.services.assistant_repository import AssistantRepository
 
 
 def _session(
@@ -448,3 +450,163 @@ def test_compute_assistant_density_ignores_assistant_self_edges() -> None:
         },
     )
     assert graph.compute_assistant_density() == 0.0
+
+
+# ---------------------------------------------------------------------------
+# M13 Phase 6 — end-to-end seam: ``reflect()`` → snapshot → density.
+# ---------------------------------------------------------------------------
+
+
+class _StubSessionRepo:
+    """Tiny stand-in for ``SessionRepository`` exposing only ``get_session``.
+
+    The Phase 6 density signal cares about edges sourced from the real
+    ``AssistantCompanionService.reflect`` codepath; that path consults
+    the session repo to find the session's bound ``index_id`` so it can
+    emit a ``memory→index`` ``assistant_learned`` link. We give it just
+    enough of an interface to round-trip the index_id without spinning
+    up SQLite."""
+
+    def __init__(self, sessions: dict[str, SessionSummary]) -> None:
+        self._sessions = dict(sessions)
+
+    def get_session(self, session_id: str) -> SessionDetail | None:
+        summary = self._sessions.get(session_id)
+        if summary is None:
+            return None
+        return SessionDetail(summary=summary)
+
+
+def test_brain_graph_density_crosses_threshold_after_reflect_drives(
+    tmp_path, monkeypatch
+) -> None:
+    """End-to-end Phase 6 seam: drive the *real* ``reflect()`` path
+    twice across distinct sessions, build a workspace ``BrainGraph``
+    from the resulting assistant snapshot, and verify
+    ``compute_assistant_density`` crosses the v0 Elder threshold (0.5).
+
+    Each ``reflect()`` produces:
+      - 1 memory artefact (denominator)
+      - 1 ``assistant→session`` ``assistant_learned`` link
+      - 1 ``memory→index`` ``assistant_learned`` link (because the
+        session has a bound ``index_id``)
+      - structural ``assistant_self`` links (must NOT count)
+
+    With 2 reflects → 2 artefacts and 4 ``assistant_learned`` edges, the
+    expected density is ``min(1.0, 4 / (2 * 2))`` = ``1.0``."""
+
+    sessions = {
+        "sess-1": _session(
+            "sess-1", title="First session", index_id="idx-alpha"
+        ),
+        "sess-2": _session(
+            "sess-2", title="Second session", index_id="idx-beta"
+        ),
+    }
+    indexes = [
+        {"index_id": "idx-alpha", "collection_name": "alpha"},
+        {"index_id": "idx-beta", "collection_name": "beta"},
+    ]
+
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(
+        repository=repo,
+        session_repo=_StubSessionRepo(sessions),
+    )
+
+    settings = {
+        "assistant_identity": {
+            "assistant_id": "metis-companion",
+            "name": "Guide",
+            "archetype": "Research companion",
+            "companion_enabled": True,
+        },
+        "assistant_runtime": {"provider": "", "model": ""},
+        "assistant_policy": {
+            "reflection_enabled": True,
+            "reflection_backend": "heuristic",
+            "max_memory_entries": 8,
+            "max_playbooks": 4,
+            "max_brain_links": 32,
+            "allow_automatic_writes": True,
+        },
+        "llm_provider": "mock",
+        "llm_model": "mock-v1",
+    }
+
+    # Deterministic reflection content — we only care about the edge
+    # topology, not the heuristic generator's exact wording.
+    monkeypatch.setattr(
+        service,
+        "_generate_reflection",
+        lambda *args, **kwargs: {
+            "title": "Reflection",
+            "summary": "A short next step.",
+            "details": "Keep going.",
+            "why": "A run finished.",
+            "confidence": 0.8,
+            "tags": [],
+            "related_node_ids": [],
+            "playbook_title": "",
+            "playbook_bullets": [],
+        },
+    )
+
+    first = service.reflect(
+        trigger="completed_run",
+        settings=settings,
+        session_id="sess-1",
+        run_id="run-1",
+        force=True,
+    )
+    assert first["ok"] is True
+
+    second = service.reflect(
+        trigger="completed_run",
+        settings=settings,
+        session_id="sess-2",
+        run_id="run-2",
+        force=True,
+    )
+    assert second["ok"] is True
+
+    snapshot = service.get_snapshot(settings)
+    assistant_payload = {
+        "identity": snapshot["identity"],
+        "status": snapshot["status"],
+        "memory": snapshot["memory"],
+        "playbooks": snapshot["playbooks"],
+        "brain_links": snapshot["brain_links"],
+    }
+
+    graph = BrainGraph().build_from_indexes_and_sessions(
+        indexes,
+        [sessions["sess-1"], sessions["sess-2"]],
+        assistant_payload=assistant_payload,
+    )
+
+    # Sanity-check the seam: both memory artefacts and both index nodes
+    # made it into the graph (otherwise the cross-edges would be silently
+    # dropped by the ``source/target in self.nodes`` guard in
+    # ``_add_assistant_subgraph``, and the density assertion below would
+    # be a vacuous pass).
+    memory_node_ids = [n for n in graph.nodes if n.startswith("memory:")]
+    assert len(memory_node_ids) == 2, memory_node_ids
+    assert "index:idx-alpha" in graph.nodes
+    assert "index:idx-beta" in graph.nodes
+
+    learned_edges = [
+        edge
+        for edge in graph.edges
+        if isinstance(edge.metadata, dict)
+        and edge.metadata.get("scope") == "assistant_learned"
+    ]
+    # 2 reflects × 2 learned edges each = 4 (assistant→session,
+    # memory→index for each reflect).
+    assert len(learned_edges) == 4, [
+        (e.source_id, e.target_id, e.relation) for e in learned_edges
+    ]
+
+    density = graph.compute_assistant_density()
+    assert density >= 0.5, density  # crosses the v0 Elder threshold
+    assert density == 1.0  # exact: 4 learned / (2 target * 2 artefacts)

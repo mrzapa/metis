@@ -16,6 +16,14 @@ def _as_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+# M13 Phase 6 — calibrates "fully grown" for ``compute_assistant_density``.
+# A companion that links each reflection back to its session AND to a
+# related index hits ~2 learned edges per memory artefact and saturates
+# the density metric at 1.0. Tuning knob for retro density-threshold
+# adjustments (planned 0.4/0.6 tweak alongside the Elder gate).
+_TARGET_EDGES_PER_ARTEFACT = 2
+
+
 @dataclass(slots=True)
 class BrainNode:
     node_id: str
@@ -307,7 +315,7 @@ class BrainGraph:
         Elder is gated on this growing past the configured threshold.
 
         Density is computed as
-        ``min(1.0, learned_edges / (target_edges_per_artefact * artefacts))``
+        ``min(1.0, learned_edges / (TARGET_EDGES_PER_ARTEFACT * artefacts))``
         where:
 
         - ``artefacts`` counts ``memory:*`` and ``playbook:*`` nodes —
@@ -318,17 +326,22 @@ class BrainGraph:
           ``assistant_learned``. The structural ``category_member``
           edges with ``scope=assistant_self`` do not count — they
           appear once per artefact regardless of cross-referencing.
-        - ``target_edges_per_artefact = 2`` calibrates "fully grown":
-          a companion that connects each reflection back to its
-          session AND to a related index hits ~2 learned edges per
-          memory and saturates at 1.0.
+          Note that ``_add_assistant_subgraph`` lets caller-supplied
+          ``brain_links[].metadata.scope`` override the default
+          ``assistant_learned``; emitters of new brain links should
+          set ``scope=assistant_self`` only when they intend the
+          density metric to ignore the link.
+        - ``_TARGET_EDGES_PER_ARTEFACT`` (module-level) calibrates
+          "fully grown": a companion that connects each reflection
+          back to its session AND to a related index hits ~2 learned
+          edges per memory and saturates at 1.0. The default 2 matches
+          what ``AssistantCompanionService.reflect`` already emits
+          per reflection.
 
         Returns ``0.0`` when no learned artefacts exist (i.e., the
         companion has not produced any reflections or playbooks yet),
         or when the workspace has no assistant subgraph at all.
         """
-        target_edges_per_artefact = 2
-
         artefact_count = 0
         for node in self.nodes.values():
             if node.node_id.startswith(("memory:", "playbook:")):
@@ -344,7 +357,7 @@ class BrainGraph:
                 learned_edge_count += 1
 
         ratio = learned_edge_count / float(
-            target_edges_per_artefact * artefact_count
+            _TARGET_EDGES_PER_ARTEFACT * artefact_count
         )
         return max(0.0, min(1.0, ratio))
 
