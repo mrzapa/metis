@@ -457,8 +457,8 @@ The audit is **mostly closed**. Remaining items are flagged below per phase. Clo
 - 9 🟢 PR #547 — investigated, could not reproduce at any common viewport width
 
 **Phase 3 (P1 perf / network)**:
-- 10 🟡 partially diagnosed by sweep 4 but not yet fixed (per-mount API fan-out: `/v1/assistant` ×3, `/v1/seedling/status` ×3, `/v1/settings` ×4, `/v1/sessions` ×2 within seconds)
-- 11 🟡 31.5-second long-poll connections held open by `/v1/comets/active` (×2) and `/v1/comets/events?poll_seconds=10` — flagged but not yet investigated
+- 10 🟢 *Investigated 2026-04-26.* The observed multiplier (`/v1/assistant` ×3, `/v1/seedling/status` ×3, `/v1/settings` ×4) traces to React 19 StrictMode dev-mode double-invocation of `useEffect` (Next.js defaults `reactStrictMode: true`) plus intentional fresh-state fetches before user-triggered actions in `apps/metis-web/app/chat/page.tsx` (6 `fetchSettings` callsites: 1 mount, 5 pre-action). In production builds StrictMode is off and effects run once. **Not a real prod perf bug.** Worth a follow-up only if production telemetry shows the same fan-out.
+- 11 🟢 *Investigated 2026-04-26.* The two `/v1/comets/active` calls and the `/v1/comets/events?poll_seconds=10` long-poll trace to a single consumer (`apps/metis-web/hooks/use-news-comets.ts`) using a hydrate-then-stream SSE pattern (`streamCometEvents` calls `fetchActiveComets` first then opens the SSE). The duplicate `/v1/comets/active` call is StrictMode dev-mode mount-effect-running-twice; the 31.5s SSE connection is the *intended* keepalive duration (long-poll → push). **Not a real prod perf bug.** SSE is the right choice for live comet updates.
 - 12 (audit's "blocked URL with query-string data") = item 18 in IDEAS.md, parked
 
 **Phase 4 (P2 IA)** — all ✅ closed:
@@ -503,7 +503,6 @@ The audit is **mostly closed**. Remaining items are flagged below per phase. Clo
 - 53 ✅ PR #547 (companion overlay default-collapsed via server-side flip; cross-page coverage resolved)
 
 **Items still 🟡 open and worth a future polish PR**:
-- Phase 3 items 10 + 11 (per-mount API fan-out, long-poll consolidation)
 - Item 15 (expose Forecast in chat path or remove orphan settings)
 - Item 39 (star-creation as explicit mode)
 - Item 40 (CSV attach icon — replace generic icon with sparkline glyph)
