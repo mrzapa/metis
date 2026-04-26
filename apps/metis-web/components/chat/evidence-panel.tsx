@@ -5,7 +5,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { fetchTraceEvents, type RetrievalFallback, type TraceEvent } from "@/lib/api";
 import type { EvidenceSource } from "@/lib/chat-types";
-import { FileText, List, Activity, FileDown } from "lucide-react";
+import { FileText, Activity, FileDown } from "lucide-react";
 import { EvidenceSourceCard } from "@/components/chat/evidence-source-card";
 import { TraceTimeline } from "@/components/chat/trace-timeline";
 import { cn } from "@/lib/utils";
@@ -165,10 +165,6 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
               <FileText className="size-3" />
               Sources
             </TabsTrigger>
-            <TabsTrigger value="outline" className="glass-tab-pill gap-1 text-xs">
-              <List className="size-3" />
-              Outline
-            </TabsTrigger>
             <TabsTrigger value="trace" className="glass-tab-pill gap-1 text-xs">
               <Activity className="size-3" />
               Trace
@@ -245,16 +241,11 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
           </ScrollArea>
         </TabsContent>
 
-        {/* Outline tab */}
-        <TabsContent value="outline" className="flex-1 min-h-0 overflow-hidden">
-          <ScrollArea className="h-full min-h-0">
-            <div className="p-3.5">
-              <p className="glass-micro-surface rounded-[1.2rem] px-4 py-8 text-center text-xs text-muted-foreground">
-                Outline will show the structure of the current conversation.
-              </p>
-            </div>
-          </ScrollArea>
-        </TabsContent>
+        {/* Outline tab — removed in 2026-04-26 cleanup. The previous
+            placeholder ("Outline will show the structure of the current
+            conversation.") was a M01 audit item 42 noise source. Restore
+            this TabsTrigger + TabsContent block when the outline feature
+            is actually implemented. */}
 
         {/* Trace tab */}
         <TabsContent value="trace" className="flex h-full min-h-0 flex-col overflow-hidden">
