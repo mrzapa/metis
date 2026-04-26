@@ -134,9 +134,13 @@ describe("ChatPanel", () => {
       />,
     );
 
-    // No manual Forecast path button — mode is entered by file attachment
-    expect(screen.queryByRole("button", { name: "Forecast" })).toBeNull();
-    // Attach button is always visible in the composer
+    // Forecast path pill is now exposed in the path toggle alongside
+    // Direct / RAG (audit item 15). When a forecast schema is loaded,
+    // it should be the active pill.
+    const forecastPathButton = screen.getByRole("button", { name: "Forecast" });
+    expect(forecastPathButton).toBeInTheDocument();
+    expect(forecastPathButton).toHaveAttribute("data-active", "true");
+    // Attach button is still visible in the composer for file replacement
     expect(screen.getByRole("button", { name: "Attach time series data" })).toBeInTheDocument();
     // Forecast preflight strip renders automatically when in forecast mode
     expect(screen.getByText("Forecast preflight")).toBeInTheDocument();

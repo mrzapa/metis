@@ -921,6 +921,30 @@ export function ChatPanel({
             >
               RAG
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (forecastSchema) {
+                  setQueryMode("forecast");
+                } else {
+                  forecastFileInputRef.current?.click();
+                }
+              }}
+              data-active={queryMode === "forecast" ? "true" : "false"}
+              title={
+                forecastSchema
+                  ? "Forecast mode: project a time series with quantile bands"
+                  : "Attach a CSV/TSV file to enter forecast mode"
+              }
+              className={cn(
+                "chat-control-pill rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
+                queryMode === "forecast"
+                  ? "border-primary/30 bg-primary/90 text-primary-foreground"
+                  : "text-muted-foreground hover:bg-white/10"
+              )}
+            >
+              Forecast
+            </button>
             {queryMode === "rag" && (
               <>
                 <span className="text-[11px] text-muted-foreground/50">·</span>
