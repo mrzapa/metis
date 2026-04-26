@@ -132,10 +132,12 @@ def build_overnight_prompt(
 ) -> tuple[str, str]:
     """Build a (system, user) pair from the prior day's activity.
 
-    The user prompt is intentionally compact (target <2 KB). The
-    overnight model is small (the user's configured GGUF, often
-    Phi/Qwen-class), so a long context is wasted — and the morning
-    summary should be skimmable.
+    The user prompt is intentionally compact. Per-line truncation
+    bounds it at ~6.6 KB worst case (6 reflections × 400 + 8 comets
+    × 300 + 6 stars × 300 chars), but realistic days produce well
+    under 2 KB. The overnight model is small (the user's configured
+    GGUF, often Phi/Qwen-class), so a long context is wasted — and
+    the morning summary should be skimmable.
     """
     sections: list[str] = []
     reflections = list(recent_reflections or [])[:6]

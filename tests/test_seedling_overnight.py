@@ -300,3 +300,197 @@ def test_runner_propagates_persist_skip(tmp_path) -> None:
     )
     assert result["ran"] is False
     assert result["reason"] == "persist_skipped:writes_disabled"
+
+
+# ---------------------------------------------------------------------------
+# worker.set_overnight_status — literal fallback (architect review)
+# ---------------------------------------------------------------------------
+
+
+def test_set_overnight_status_literal_fallback_keeps_existing_value(tmp_path) -> None:
+    """A typo or unknown ``model_status`` literal must not poison the cache.
+
+    The worker silently keeps the existing value rather than persist a
+    bogus enum string. Production callers always feed a valid literal
+    via ``compute_model_status``; this guard exists for future
+    refactors that pass the value across module boundaries.
+    """
+    from metis_app.seedling.scheduler import SeedlingSchedule
+    from metis_app.seedling.status import SeedlingStatusCache
+    from metis_app.seedling.worker import SeedlingWorker
+
+    cache = SeedlingStatusCache(tmp_path / "status.json")
+    worker = SeedlingWorker(
+        schedule=SeedlingSchedule(tick_interval_seconds=60),
+        status_cache=cache,
+    )
+    # Known-good literal lands.
+    worker.set_overnight_status(model_status="backend_configured")
+    assert worker.status.model_status == "backend_configured"
+
+    # Unknown literal silently ignored — existing value kept.
+    worker.set_overnight_status(model_status="BACKEND_CONFIGURED")
+    assert worker.status.model_status == "backend_configured"
+    worker.set_overnight_status(model_status="totally_made_up")
+    assert worker.status.model_status == "backend_configured"
+
+    # Also a no-op when the value is unchanged (no spurious cache write).
+    worker.set_overnight_status(model_status="backend_configured")
+    assert worker.status.model_status == "backend_configured"
+
+
+def test_set_overnight_status_bumps_last_overnight_reflection_at(tmp_path) -> None:
+    """The bump path used by the lifecycle hook on a successful cycle."""
+    from metis_app.seedling.scheduler import SeedlingSchedule
+    from metis_app.seedling.status import SeedlingStatusCache
+    from metis_app.seedling.worker import SeedlingWorker
+
+    cache = SeedlingStatusCache(tmp_path / "status.json")
+    worker = SeedlingWorker(
+        schedule=SeedlingSchedule(tick_interval_seconds=60),
+        status_cache=cache,
+    )
+    assert worker.status.last_overnight_reflection_at is None
+
+    worker.set_overnight_status(last_overnight_reflection_at="2026-04-26T06:30:00+00:00")
+    assert worker.status.last_overnight_reflection_at == "2026-04-26T06:30:00+00:00"
+
+    # Empty string clears the field.
+    worker.set_overnight_status(last_overnight_reflection_at="")
+    assert worker.status.last_overnight_reflection_at is None
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle integration — _maybe_run_overnight + worker bump (architect review)
+# ---------------------------------------------------------------------------
+
+
+def test_lifecycle_overnight_integration_persists_and_bumps_worker(
+    tmp_path, monkeypatch
+) -> None:
+    """End-to-end: a successful overnight cycle must (a) call
+    ``record_companion_reflection`` on the orchestrator and (b) bump
+    ``worker.status.last_overnight_reflection_at`` so the next tick's
+    cadence gate trips.
+    """
+    from datetime import datetime, timezone
+
+    from metis_app.seedling import lifecycle
+    from metis_app.seedling.scheduler import SeedlingSchedule
+    from metis_app.seedling.status import SeedlingStatusCache
+    from metis_app.seedling.worker import SeedlingWorker
+
+    # Install a fresh worker into the lifecycle singleton.
+    cache = SeedlingStatusCache(tmp_path / "status.json")
+    worker = SeedlingWorker(
+        schedule=SeedlingSchedule(tick_interval_seconds=60),
+        status_cache=cache,
+    )
+    lifecycle.reset_seedling_worker(worker)
+    assert worker.status.last_overnight_reflection_at is None
+
+    # Settings that satisfy compute_model_status == "backend_configured".
+    fake_settings = _gguf_settings(tmp_path=tmp_path, enabled=True)
+
+    monkeypatch.setattr(
+        "metis_app.settings_store.load_settings", lambda: dict(fake_settings)
+    )
+
+    # Stub the workspace orchestrator: we only need
+    # `record_companion_reflection`, `list_assistant_memory`, and
+    # `get_assistant_snapshot`. The Phase 4a `record_companion_reflection`
+    # path goes through `record_external_reflection` and returns
+    # ``ok=True`` only if the gate passes — bypass the gate by
+    # returning a synthetic OK payload directly.
+    persist_calls: list[dict] = []
+
+    class _FakeOrchestrator:
+        def list_assistant_memory(self, limit=6):
+            return [{"title": "earlier reflection", "summary": "did things"}]
+
+        def get_assistant_snapshot(self):
+            # last_reflection_at way in the past so quiet window passes.
+            return {"status": {"last_reflection_at": "2026-04-25T00:00:00+00:00"}}
+
+        def record_companion_reflection(self, **kwargs):
+            persist_calls.append(kwargs)
+            return {
+                "ok": True,
+                "kind": kwargs.get("kind"),
+                "memory_entry": {"summary": kwargs.get("summary")},
+            }
+
+    monkeypatch.setattr(
+        "metis_app.services.workspace_orchestrator.WorkspaceOrchestrator",
+        _FakeOrchestrator,
+    )
+    # Stub the generator so it doesn't touch llama-cpp.
+    monkeypatch.setattr(
+        "metis_app.seedling.overnight._default_generator",
+        lambda system, user, settings: "Yesterday you absorbed two items. "
+        "Follow-ups: revisit the WebGPU demo.",
+    )
+
+    # Run one tick's worth of work.
+    result = lifecycle._default_tick_work()
+
+    # The runner reported a successful cycle.
+    assert isinstance(result, dict)
+    overnight_payload = result.get("overnight") or result
+    assert overnight_payload.get("ran") is True
+    # Persistence actually fired.
+    assert len(persist_calls) == 1
+    assert persist_calls[0]["kind"] == "overnight"
+    assert "WebGPU demo" in persist_calls[0]["summary"]
+    # Worker status now carries the bump.
+    assert worker.status.last_overnight_reflection_at is not None
+    bumped = datetime.fromisoformat(
+        worker.status.last_overnight_reflection_at.replace("Z", "+00:00")
+    )
+    assert (datetime.now(timezone.utc) - bumped).total_seconds() < 5
+
+    # Cleanup.
+    lifecycle.reset_seedling_worker(None)
+
+
+def test_lifecycle_overnight_integration_skips_when_model_status_disabled(
+    tmp_path, monkeypatch
+) -> None:
+    """When ``backend_reflection_enabled=False`` the lifecycle must not
+    construct the orchestrator or bump the worker — the cycle is a clean
+    no-op."""
+    from metis_app.seedling import lifecycle
+    from metis_app.seedling.scheduler import SeedlingSchedule
+    from metis_app.seedling.status import SeedlingStatusCache
+    from metis_app.seedling.worker import SeedlingWorker
+
+    cache = SeedlingStatusCache(tmp_path / "status.json")
+    worker = SeedlingWorker(
+        schedule=SeedlingSchedule(tick_interval_seconds=60),
+        status_cache=cache,
+    )
+    lifecycle.reset_seedling_worker(worker)
+
+    fake_settings = _gguf_settings(tmp_path=tmp_path, enabled=False)
+    monkeypatch.setattr(
+        "metis_app.settings_store.load_settings", lambda: dict(fake_settings)
+    )
+
+    # If the orchestrator class is referenced, raise — proves we never
+    # reached the model-status-gated branch.
+    def _should_not_be_called(*_args, **_kwargs):
+        raise AssertionError("orchestrator should not be constructed when model_status != backend_configured")
+
+    monkeypatch.setattr(
+        "metis_app.services.workspace_orchestrator.WorkspaceOrchestrator",
+        _should_not_be_called,
+    )
+
+    result = lifecycle._default_tick_work()
+    assert isinstance(result, dict)
+    assert result.get("ran") is False
+    assert "model_status" in (result.get("reason") or "")
+    # Worker bump never fired.
+    assert worker.status.last_overnight_reflection_at is None
+
+    lifecycle.reset_seedling_worker(None)

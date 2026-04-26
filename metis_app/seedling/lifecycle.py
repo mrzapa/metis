@@ -148,6 +148,21 @@ def _collect_overnight_activity(orchestrator: Any) -> dict[str, Any]:
             activity["recent_reflections"] = memory
     except Exception:  # noqa: BLE001
         log.debug("Could not list recent reflections for overnight prompt", exc_info=True)
+
+    try:
+        from metis_app.services.comet_pipeline import (  # noqa: WPS433
+            resolve_feed_repository,
+        )
+
+        repo = resolve_feed_repository()
+        active = repo.list_active(limit=8)
+        if active:
+            activity["recent_comets"] = [c.to_dict() for c in active]
+    except Exception:  # noqa: BLE001
+        log.debug(
+            "Could not list active comets for overnight prompt", exc_info=True
+        )
+
     return activity
 
 

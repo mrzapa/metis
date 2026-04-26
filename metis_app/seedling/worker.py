@@ -9,7 +9,14 @@ import logging
 from typing import Any, cast
 
 from .scheduler import SeedlingSchedule
-from .status import SeedlingStatus, SeedlingStatusCache, isoformat_utc, utc_now
+from .status import (
+    SeedlingModelStatus,
+    SeedlingStatus,
+    SeedlingStatusCache,
+    _MODEL_STATUSES,
+    isoformat_utc,
+    utc_now,
+)
 
 log = logging.getLogger(__name__)
 
@@ -130,14 +137,14 @@ class SeedlingWorker:
         happens synchronously so the next ``GET /v1/seedling/status``
         sees the fresh values.
         """
-        from .status import SeedlingModelStatus  # local import for forward-ref
-
         next_model_status = self._status.model_status
         if model_status is not None and model_status != self._status.model_status:
-            # Validate against the literal — fall back to existing rather
-            # than persist a typo.
-            allowed = {"frontend_only", "backend_configured", "backend_disabled", "backend_unavailable"}
-            if model_status in allowed:
+            # Validate against the literal — silently fall back to the
+            # existing value rather than persist a typo. Production callers
+            # (`lifecycle._default_tick_work` -> `compute_model_status`)
+            # always feed a valid literal; the silent fallback is here so
+            # a future stray string doesn't poison the cache.
+            if model_status in _MODEL_STATUSES:
                 next_model_status = cast(SeedlingModelStatus, model_status)
 
         next_last_overnight = self._status.last_overnight_reflection_at

@@ -139,6 +139,15 @@ What's in place today that M13 will lean on:
   qualified ADR 0013 §3 copy; the marketing-copy guard test still
   passes.
 
+  **Phase 4b known limitation — user-activity proxy.** The quiet-window
+  gate uses `AssistantStatus.last_reflection_at` as a stand-in for the
+  most recent user input, since there is no dedicated
+  `last_user_input_at` field today. A user who chats actively but
+  doesn't trigger a reflection will appear "idle" to the gate. Phase
+  4b retro should add a real `last_user_input_at` if this proves too
+  coarse — the seam is `_resolve_last_user_activity` in
+  `metis_app/seedling/lifecycle.py`.
+
 ## Next up
 
 The next concrete actions:
