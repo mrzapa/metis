@@ -58,6 +58,17 @@ def resolve_training_log_path(
     1. ``settings["seedling_training_log_path"]`` if non-empty.
     2. ``<cwd>/seedling_training_log.jsonl``.
 
+    **Default-path caveat (Phase 7 v0).** The default is *cwd*-relative,
+    not a stable per-user home like ``~/.metis/...``. In dev this is
+    typically the repo root (the ``.gitignore`` entry covers that
+    case); in production it depends on the working directory the
+    Litestar app was launched from. Operators running the seedling
+    worker as a service should set ``seedling_training_log_path``
+    explicitly to avoid log fragmentation across restarts. Phase 7
+    retro should consider promoting this to a stable home if cwd
+    drift becomes a real issue — flagged in the plan-doc *Notes for
+    the next agent* section.
+
     Unlike the comet feed singleton in
     :func:`metis_app.services.comet_pipeline.resolve_feed_repository`,
     we do **not** cache the resolved path: the writer is a one-shot
@@ -78,9 +89,19 @@ def is_enabled(settings: dict[str, Any] | None = None) -> bool:
     ``{"ok": False, "reason": "training_log_disabled"}``. The overnight
     runner treats both this and write failures as non-fatal — the
     reflection itself still lands.
+
+    Coercion: an absent key resolves to True; ``False`` and known
+    string falsey values (``"false"``, ``"0"``, empty string) resolve
+    to False. Anything else (numbers, truthy strings, non-empty lists)
+    coerces via ``bool()``. Defensive against malformed JSON settings
+    where a string ``"false"`` would otherwise truthy-evaluate.
     """
     cfg = dict(settings or {})
     value = cfg.get("seedling_training_log_enabled", True)
+    if value is False:
+        return False
+    if isinstance(value, str) and value.strip().lower() in {"false", "0", ""}:
+        return False
     return bool(value)
 
 
@@ -120,6 +141,19 @@ def record_training_sample(
       this sample. For overnight, populated by the lifecycle from
       ``SessionFeedback`` rows for sessions referenced in
       ``recent_reflections``. Empty list when no feedback exists yet.
+
+      **Inner-row v1 schema** (callers must produce these keys for
+      every dict; downstream M16/M18 readers may rely on the shape):
+
+      - ``feedback_id``: ``str`` — the SessionFeedback primary key.
+      - ``session_id``: ``str`` — the session the feedback belongs to.
+      - ``run_id``: ``str`` — the run within that session, blank
+        when the feedback was attached to the session itself.
+      - ``vote``: ``int`` — typically ``-1`` / ``0`` / ``1`` for
+        thumbs-down / no-opinion / thumbs-up.
+      - ``note``: ``str`` — free-text user comment, may be empty.
+      - ``ts``: ``str`` — ISO 8601 timestamp of when the feedback
+        was recorded.
 
     **Returns** ``{"ok": bool, "reason": str | None, "path": str}``.
     Failures are non-fatal — the caller's reflection success does not

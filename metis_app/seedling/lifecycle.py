@@ -259,6 +259,13 @@ def _collect_feedback_for_reflections(
     nothing is available — the training-log schema's ``feedback``
     field is always a list, never null.
 
+    Only ``recent_reflections`` is consulted (not ``recent_comets`` /
+    ``recent_stars``) because only memory entries carry ``session_id``;
+    comets and stars are not session-bound. The ``seen_session_ids``
+    guard dedupes the case where multiple memories were produced from
+    the same session — we still only fetch the SessionDetail (and its
+    feedback) once.
+
     Failures (orchestrator missing the method, session not found,
     etc.) are silently skipped — this is auxiliary capture, not the
     primary contract.

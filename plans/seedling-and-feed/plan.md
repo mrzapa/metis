@@ -265,6 +265,30 @@ The next concrete actions:
 
 ## Notes for the next agent
 
+### Phase 7 retro flags (2026-04-26)
+
+Filed from the architect review on the Phase 7 PR. Both deferred to
+the retro pass; neither blocks the milestone.
+
+- **Training-log default path is cwd-relative.** ``resolve_training_log_path``
+  falls back to ``pathlib.Path.cwd() / "seedling_training_log.jsonl"``
+  in ``metis_app/seedling/training_log.py``. In dev this lands in the
+  repo root (``.gitignore`` covers it); in production it depends on
+  the working directory the Litestar app was launched from. If
+  operators report log fragmentation across restarts, switch the
+  default to a stable per-user home (``~/.metis/seedling_training_log.jsonl``
+  on POSIX; ``%APPDATA%\metis\seedling_training_log.jsonl`` on
+  Windows). The opt-in setting ``seedling_training_log_path`` is the
+  current escape hatch for operators who need stability today.
+- **``feedback`` inner-row schema only documented, not enforced.**
+  The training-log writer accepts ``list[dict[str, Any]]`` and the
+  lifecycle helper produces a fixed shape (``feedback_id /
+  session_id / run_id / vote / note / ts``). The docstring documents
+  the v1 inner-row schema, but if the next change to ``SessionFeedback``
+  drifts the shape, the writer will silently emit the new shape and
+  M16 readers may break. Consider a normalisation step in the writer
+  if M16 reports schema drift in practice.
+
 ### Web UI new-user audit finding (2026-04-25)
 
 Filed from a live new-user click-through (full entry: [`plans/IDEAS.md`](../IDEAS.md) — *Web UI new-user walkthrough*). One item is M13:
