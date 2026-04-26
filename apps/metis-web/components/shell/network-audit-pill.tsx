@@ -36,63 +36,60 @@ type PillState =
 export function NetworkAuditPill() {
   const [state, setState] = useState<PillState>({ kind: "loading" });
 
-  // One-shot bootstrap: read airplane mode from settings. If it errors
-  // before we ever see a value, hide the pill entirely.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const settings = await fetchSettings();
-        if (cancelled) return;
-        const airplane =
-          typeof settings.network_audit_airplane_mode === "boolean"
-            ? settings.network_audit_airplane_mode
-            : false;
-        setState((prev) =>
-          prev.kind === "ok"
-            ? { ...prev, airplane }
-            : { kind: "ok", airplane, count: 0 },
-        );
-      } catch {
-        if (cancelled) return;
-        setState((prev) => (prev.kind === "ok" ? prev : { kind: "hidden" }));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Poll the recent-count endpoint. Never flip a healthy pill back to
-  // hidden on a transient failure — keep the last good value showing.
+  // Single poll cycle reads airplane mode + recent count together so the
+  // pill reflects toggles made in /settings/privacy without waiting for
+  // a remount. Transient settings or count failures keep the last good
+  // value rather than flipping the pill off — only an unrecoverable
+  // bootstrap (no value ever observed) hides it.
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
 
     const poll = async (): Promise<void> => {
-      try {
-        const res = await fetchNetworkAuditRecentCount(
-          RECENT_COUNT_WINDOW_SECONDS,
-          { signal: controller.signal },
-        );
-        if (cancelled) return;
-        setState((prev) =>
-          prev.kind === "ok"
-            ? { ...prev, count: res.count }
-            : { kind: "ok", airplane: false, count: res.count },
-        );
-      } catch (err) {
-        if (cancelled) return;
-        if (
-          typeof err === "object" &&
-          err !== null &&
-          "name" in err &&
-          (err as { name: string }).name === "AbortError"
-        ) {
-          return;
-        }
-        setState((prev) => (prev.kind === "loading" ? { kind: "hidden" } : prev));
+      const [settingsResult, countResult] = await Promise.allSettled([
+        fetchSettings(),
+        fetchNetworkAuditRecentCount(RECENT_COUNT_WINDOW_SECONDS, {
+          signal: controller.signal,
+        }),
+      ]);
+      if (cancelled) return;
+
+      // Drop AbortError so unmount-driven aborts don't hide the pill.
+      const isAbort = (reason: unknown): boolean =>
+        typeof reason === "object" &&
+        reason !== null &&
+        "name" in reason &&
+        (reason as { name: string }).name === "AbortError";
+
+      if (
+        countResult.status === "rejected" &&
+        isAbort(countResult.reason)
+      ) {
+        return;
       }
+
+      setState((prev) => {
+        const nextAirplane =
+          settingsResult.status === "fulfilled" &&
+          typeof settingsResult.value.network_audit_airplane_mode === "boolean"
+            ? settingsResult.value.network_audit_airplane_mode
+            : prev.kind === "ok"
+              ? prev.airplane
+              : false;
+        const nextCount =
+          countResult.status === "fulfilled"
+            ? countResult.value.count
+            : prev.kind === "ok"
+              ? prev.count
+              : 0;
+        const everySourceFailed =
+          settingsResult.status === "rejected" &&
+          countResult.status === "rejected";
+        if (prev.kind !== "ok" && everySourceFailed) {
+          return { kind: "hidden" };
+        }
+        return { kind: "ok", airplane: nextAirplane, count: nextCount };
+      });
     };
 
     void poll();
