@@ -318,10 +318,16 @@ class BrainGraph:
         ``min(1.0, learned_edges / (TARGET_EDGES_PER_ARTEFACT * artefacts))``
         where:
 
-        - ``artefacts`` counts ``memory:*`` and ``playbook:*`` nodes —
-          the things the companion has actually produced. Structural
-          ``category:*`` and the singleton ``assistant:metis`` node
-          are excluded because they do not "grow" with activity.
+        - ``artefacts`` counts ``memory:*`` nodes — the unit the v0
+          calibration target tracks. ``playbook:*`` nodes are
+          deliberately excluded from the denominator: under the
+          current ``AssistantCompanionService.reflect`` codepath every
+          playbook contributes only a structural ``assistant_self``
+          ``belongs_to`` edge (no ``assistant_learned`` edge), so
+          counting them would dilute density without ever raising the
+          numerator. Structural ``category:*`` and the singleton
+          ``assistant:metis`` node are excluded for the same
+          "do-not-grow-with-activity" reason.
         - ``learned_edges`` counts edges whose metadata ``scope`` is
           ``assistant_learned``. The structural ``category_member``
           edges with ``scope=assistant_self`` do not count — they
@@ -344,7 +350,7 @@ class BrainGraph:
         """
         artefact_count = 0
         for node in self.nodes.values():
-            if node.node_id.startswith(("memory:", "playbook:")):
+            if node.node_id.startswith("memory:"):
                 artefact_count += 1
         if artefact_count <= 0:
             return 0.0
