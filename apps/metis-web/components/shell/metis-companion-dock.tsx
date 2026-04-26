@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { BrainIcon } from "@/components/icons";
 import { HermesHud } from "@/components/shell/hud";
+import { MetisSigil } from "@/components/shell/metis-sigil";
 import { SeedlingPulseWidget } from "@/components/shell/seedling-pulse-widget";
 import { useArrowState } from "@/hooks/use-arrow-state";
 import { useWebGPUCompanionContext } from "@/lib/webgpu-companion/webgpu-companion-context";
@@ -95,6 +96,10 @@ export function MetisCompanionDock({
   const [researchPhase, setResearchPhase] = useState("");
   const [unseenCount, setUnseenCount] = useState(0);
   const [dockHistory, setDockHistory] = useState<Array<{ role: string; content: string }>>([]);
+  // Pulse token for the MetisSigil identity mark. Bumped on every
+  // non-seedling activity event so the sigil flashes when something
+  // user-facing happens (RAG stream, research, reflection, news, etc.).
+  const [sigilPulseToken, setSigilPulseToken] = useState(0);
 
   // Always-on Bonsai reflection — when enabled, each completed companion
   // activity event triggers a local Bonsai reflection.  The latest few
@@ -308,6 +313,12 @@ export function MetisCompanionDock({
     return subscribeCompanionActivity((event) => {
       setThoughts((prev) => [event, ...prev].slice(0, 8));
       if (minimizedRef.current) setUnseenCount((n) => n + 1);
+      // Bump the sigil pulse token so the identity mark flashes whenever
+      // anything meaningful happens. Skip seedling ticks — those are
+      // continuous heartbeat noise, not user-facing events.
+      if (event.source !== "seedling") {
+        setSigilPulseToken((n) => n + 1);
+      }
       if (event.source === "autonomous_research" && event.state === "completed") {
         setToastMessage("New star added to constellation");
       }
@@ -770,10 +781,16 @@ export function MetisCompanionDock({
           minimized ? "gap-2 px-2.5 py-1.5" : "gap-3 border-b border-white/8 px-4 py-3",
         )}>
           <span className={cn(
-            "relative flex items-center justify-center rounded-full bg-primary/15 text-primary",
-            minimized ? "size-7" : "size-9",
+            "relative flex items-center justify-center rounded-full bg-primary/12 text-primary",
+            minimized ? "size-8" : "size-11",
           )}>
-            <Bot className={minimized ? "size-3.5" : "size-4"} />
+            <MetisSigil
+              size={minimized ? 28 : 40}
+              stage={growthStage}
+              active={seedlingAwake}
+              pulseToken={sigilPulseToken}
+              ariaLabel={`METIS companion — ${growthStageLabel} stage`}
+            />
             <span
               role="status"
               aria-label={seedlingStatusLabel}
