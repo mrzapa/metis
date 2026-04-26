@@ -2701,6 +2701,64 @@ export default function Home() {
       return nearest;
     }
 
+    /**
+     * Compute the WebGL focus uniforms (centre, strength, radius,
+     * falloff) for the current frame. Drives the depth-of-field-like
+     * dim/spotlight on the ambient star field. Star dive always wins;
+     * the hover spotlight is the fallback when no dive is active.
+     *
+     * Pulled out of `refreshVisibleStars` so it runs every frame —
+     * the spotlight tween needs to drive uniforms continuously even
+     * when the camera is settled and the visible-star rebuild gate
+     * blocks the rest of the frame work.
+     */
+    function computeFocusUniforms(viewportW: number, viewportH: number): {
+      centerX: number;
+      centerY: number;
+      strength: number;
+      radius: number;
+      falloff: number;
+    } {
+      const diveView = starDiveFocusViewRef.current;
+      let strength = diveView ? diveView.focusStrength : 0;
+      let centerX = diveView ? diveView.screenX : 0;
+      let centerY = diveView ? diveView.screenY : 0;
+      if (!diveView && hoverFocusStrengthRef.current > 0.01) {
+        const hoveredId = hoveredUserStarIdRef.current;
+        const hoveredState = hoveredId
+          ? projectedUserStarRenderState.get(hoveredId)
+          : null;
+        if (hoveredState) {
+          strength = hoverFocusStrengthRef.current;
+          centerX = hoveredState.target.x;
+          centerY = hoveredState.target.y;
+        }
+      }
+      const minViewportDim = Math.min(viewportW, viewportH);
+      // Focus sharp-zone shrinks as the strength climbs so more ambient
+      // stars drift into bokeh; widen from ~40% down to ~12%.
+      const radius = minViewportDim * (0.4 - 0.28 * strength);
+      const falloff = minViewportDim * 0.55;
+      return { centerX, centerY, strength, radius, falloff };
+    }
+
+    /**
+     * Apply the latest focus uniforms to the WebGL frame ref without
+     * rebuilding the whole frame. Cheap — does not bump revision, so
+     * the WebGL geometry pass is skipped. Runs every animation frame
+     * so the hover-spotlight tween reaches the GPU at every step.
+     */
+    function syncFocusUniformsForFrame(viewportW: number, viewportH: number) {
+      const frame = landingStarfieldFrameRef.current;
+      if (!frame) return;
+      const focus = computeFocusUniforms(viewportW, viewportH);
+      frame.focusCenterX = focus.centerX;
+      frame.focusCenterY = focus.centerY;
+      frame.focusStrength = focus.strength;
+      frame.focusRadius = focus.radius;
+      frame.focusFalloff = focus.falloff;
+    }
+
     function refreshVisibleStars(backgroundCamera: BackgroundCameraState) {
       const worldBounds = getBackgroundViewportWorldBounds(
         W,
@@ -2981,40 +3039,18 @@ export default function Home() {
         ? buildLandingStarSpatialHash(landingRenderableStars)
         : null;
       const zoomNorm = Math.log2(Math.max(0.002, backgroundCamera.zoomFactor) + 1) / Math.log2(2001);
-      const diveView = starDiveFocusViewRef.current;
-      // Hover spotlight: when the user hovers a user-star and no dive is
-      // active, dim ambient stars by a small fraction so the inspected
-      // star reads as the foreground subject. Star dive always wins.
-      let focusStrengthForFrame = diveView ? diveView.focusStrength : 0;
-      let focusCenterX = diveView ? diveView.screenX : 0;
-      let focusCenterY = diveView ? diveView.screenY : 0;
-      if (!diveView && hoverFocusStrengthRef.current > 0.01) {
-        const hoveredId = hoveredUserStarIdRef.current;
-        const hoveredState = hoveredId
-          ? projectedUserStarRenderState.get(hoveredId)
-          : null;
-        if (hoveredState) {
-          focusStrengthForFrame = hoverFocusStrengthRef.current;
-          focusCenterX = hoveredState.target.x;
-          focusCenterY = hoveredState.target.y;
-        }
-      }
-      // Focus sharp-zone shrinks as dive progresses so more ambient stars drift
-      // into bokeh; widen from ~40% of min viewport dim down to ~12%.
-      const minViewportDim = Math.min(W, H);
-      const focusRadius = minViewportDim * (0.4 - 0.28 * focusStrengthForFrame);
-      const focusFalloff = minViewportDim * 0.55;
+      const focus = computeFocusUniforms(W, H);
       landingStarfieldFrameRef.current = {
         height: H,
         revision: landingStarfieldFrameRef.current.revision + 1,
         stars: nextWebglStars,
         width: W,
         zoomScale: zoomNorm,
-        focusCenterX,
-        focusCenterY,
-        focusStrength: focusStrengthForFrame,
-        focusRadius,
-        focusFalloff,
+        focusCenterX: focus.centerX,
+        focusCenterY: focus.centerY,
+        focusStrength: focus.strength,
+        focusRadius: focus.radius,
+        focusFalloff: focus.falloff,
         reducedMotion,
       };
       lastVisibleStarfieldWidth = W;
@@ -4336,6 +4372,13 @@ export default function Home() {
         catalogue.evictDistantSectors(camSx, camSy, maxDist);
       }
       rebuildProjectedUserStarRenderState(backgroundCamera, getRenderEpochMs(ts));
+
+      // Update WebGL focus uniforms every frame — gating on
+      // `shouldRefreshVisibleStars` would freeze the hover-spotlight
+      // tween whenever the camera is settled. Cheap: just five number
+      // assignments on the frame ref; revision is intentionally not
+      // bumped so the geometry pass stays gated.
+      syncFocusUniformsForFrame(W, H);
 
       ctx!.clearRect(0, 0, W, H);
       if (!awakened && ts > 2000) {
