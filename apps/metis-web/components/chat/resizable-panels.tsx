@@ -16,6 +16,12 @@ interface PanelConfig {
   /** Minimum width in pixels */
   min: number;
   children: ReactNode;
+  /**
+   * Accessible tab label used when the layout collapses to single-panel
+   * mode on narrow viewports. Defaults if omitted, but call sites should
+   * provide one for clarity.
+   */
+  label?: string;
 }
 
 interface ResizablePanelsProps {
@@ -28,6 +34,12 @@ interface ResizablePanelsProps {
    * When resetToken changes the stored preference is overwritten with the new defaults.
    */
   storageKey?: string;
+  /**
+   * Which panel is shown by default in narrow-mode (single-panel tab
+   * layout). 0/1/2 indexes into `panels`. Defaults to the middle panel
+   * (chat surface), which is the chat page's primary content.
+   */
+  narrowDefaultIndex?: 0 | 1 | 2;
 }
 
 function loadSizes(
@@ -66,19 +78,46 @@ function saveSizes(
 
 /**
  * Three-panel resizable layout using CSS grid + pointer-drag dividers.
- * Falls back gracefully — panels can be collapsed below min width on small screens.
+ *
+ * On narrow viewports (container width < sum of panel min-widths + dividers)
+ * the layout collapses to a single-panel tab strip so the chat surface
+ * doesn't get squeezed into an unreadable sliver. The tab strip uses the
+ * `label` field on each PanelConfig.
  */
 export function ResizablePanels({
   panels,
   className,
   resetToken,
   storageKey,
+  narrowDefaultIndex = 1,
 }: ResizablePanelsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(0);
+  const [activeNarrowIndex, setActiveNarrowIndex] =
+    useState<0 | 1 | 2>(narrowDefaultIndex);
 
   const [sizes, setSizes] = useState<[number, number, number]>(() =>
     loadSizes(storageKey, [panels[0].default, panels[1].default, panels[2].default]),
   );
+
+  // Observe container width so we can fall back to the single-panel tab
+  // layout when there isn't enough room for all three panels at their
+  // minimum widths.
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setContainerWidth(entry.contentRect.width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  // 8px = 2 dividers × 4px. Add a small slack buffer so we don't oscillate.
+  const minTotal = panels[0].min + panels[1].min + panels[2].min + 8 + 24;
+  const isNarrow = containerWidth > 0 && containerWidth < minTotal;
 
   // Keep a ref that always reflects the latest sizes so we can read it
   // inside event callbacks without capturing stale closures.
@@ -164,6 +203,63 @@ export function ResizablePanels({
       document.removeEventListener("pointerup", handlePointerUp);
     };
   }, [handlePointerMove, handlePointerUp]);
+
+  if (isNarrow) {
+    const labels: [string, string, string] = [
+      panels[0].label ?? "Panel 1",
+      panels[1].label ?? "Panel 2",
+      panels[2].label ?? "Panel 3",
+    ];
+    return (
+      <div
+        ref={containerRef}
+        className={cn("flex h-full min-h-0 flex-col", className)}
+      >
+        <div
+          role="tablist"
+          aria-label="Panels"
+          className="flex shrink-0 gap-1 px-1.5 pb-1.5"
+        >
+          {labels.map((label, i) => {
+            const active = i === activeNarrowIndex;
+            return (
+              <button
+                key={label}
+                role="tab"
+                type="button"
+                aria-selected={active}
+                aria-controls={`narrow-panel-${i}`}
+                onClick={() => setActiveNarrowIndex(i as 0 | 1 | 2)}
+                className={cn(
+                  "flex-1 rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                  active
+                    ? "bg-primary/15 text-foreground"
+                    : "text-muted-foreground hover:bg-white/5 hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {panels.map((panel, i) => (
+          <div
+            key={i}
+            id={`narrow-panel-${i}`}
+            role="tabpanel"
+            aria-labelledby={`narrow-tab-${i}`}
+            hidden={i !== activeNarrowIndex}
+            className={cn(
+              "min-h-0 flex-1 overflow-hidden",
+              i !== activeNarrowIndex && "hidden",
+            )}
+          >
+            {panel.children}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div

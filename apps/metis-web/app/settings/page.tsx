@@ -817,7 +817,7 @@ export default function SettingsPage() {
           </div>
         ) : (
           <Tabs value={activeTab} onValueChange={(value) => handleTabChange(value as SettingsTabValue)}>
-            <TabsList className="glass-tab-rail h-auto w-full flex-wrap gap-1 p-1.5">
+            <TabsList className="glass-tab-rail h-auto w-full flex-wrap gap-1 p-1.5 group-data-horizontal/tabs:h-auto">
               <TabsTrigger value="core" className="glass-tab-pill">Core</TabsTrigger>
               <TabsTrigger value="retrieval" className="glass-tab-pill">Retrieval</TabsTrigger>
               <TabsTrigger value="graph" className="glass-tab-pill">Graph</TabsTrigger>

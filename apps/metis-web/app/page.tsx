@@ -867,6 +867,7 @@ export default function Home() {
   const mouseRef = useRef({ x: -1000, y: -1000 });
   const userStarsRef = useRef<UserStar[]>(userStars);
   const selectedUserStarIdRef = useRef<string | null>(selectedUserStarId);
+  const hoveredUserStarIdRef = useRef<string | null>(hoveredUserStarId);
   const hoveredAddCandidateRef = useRef<StarData | null>(null);
   const armedAddCandidateIdRef = useRef<string | null>(null);
   const availableIndexesRef = useRef<IndexSummary[]>(availableIndexes);
@@ -964,6 +965,10 @@ export default function Home() {
   useEffect(() => {
     selectedUserStarIdRef.current = selectedUserStarId;
   }, [selectedUserStarId]);
+
+  useEffect(() => {
+    hoveredUserStarIdRef.current = hoveredUserStarId;
+  }, [hoveredUserStarId]);
 
   // M12 Phase 3 — read URL hash on mount, restore filter state if present.
   useEffect(() => {
@@ -3034,29 +3039,73 @@ export default function Home() {
         return;
       }
 
+      // Lines between user stars are now *intent-driven*: they appear
+      // when the user signals interest (hover, select, semantic search,
+      // or RAG pulse) rather than rendering by default. The earlier
+      // always-on web of faculty-anchor + connection + scaffold lines
+      // read as decorative noise to new users; gating on intent makes
+      // every line carry meaning. Per ADR 0006 the faculty cluster
+      // metaphor is "nebula, no sharp core" — we lean into that by
+      // keeping ambient stars uncluttered and revealing structure on
+      // demand.
       const selectedStarId = selectedUserStarIdRef.current;
+      const hoveredStarId = hoveredUserStarIdRef.current;
+      const focusedStarId = selectedStarId ?? hoveredStarId;
       const renderTimeMs = getRenderEpochMs(ts);
       const ragPulseState = ragPulseStateRef.current;
       const ragPulseStrength = getHomeRagPulseStrength(ragPulseState, renderTimeMs);
       const edgeBreath = reducedMotion
         ? 1
         : 1 + USER_STAR_EDGE_BREATH_AMPLITUDE * Math.sin((Math.PI * 2 * ts) / USER_STAR_EDGE_BREATH_PERIOD_MS);
+      const semanticState = semanticSearchStateRef.current;
+      const semanticActive = semanticState.active && semanticState.links.length > 0;
+
+      // No focus, no search, no pulse → no connecting lines. Skip the
+      // whole pass; faculty constellation patterns are drawn elsewhere.
+      if (!focusedStarId && !semanticActive && ragPulseStrength <= 0) {
+        return;
+      }
+
+      // Build the set of "lit" star ids — these are the only stars whose
+      // edges we'll render. A user-defined edge is shown when at least
+      // one endpoint is lit; a scaffold edge follows the same rule.
+      const litStarIds = new Set<string>();
+      if (focusedStarId) {
+        litStarIds.add(focusedStarId);
+      }
+      if (semanticActive) {
+        for (const id of semanticState.matchedIds) litStarIds.add(id);
+        for (const link of semanticState.links) {
+          litStarIds.add(link.fromId);
+          litStarIds.add(link.toId);
+        }
+      }
+      if (ragPulseState && ragPulseStrength > 0) {
+        for (const id of ragPulseState.starIds) litStarIds.add(id);
+      }
 
       const renderedLinks = new Set<string>();
-      currentUserStars.forEach((star) => {
-        const from = projectedUserStarRenderState.get(star.id);
 
-        // --- Faculty connection line (drawn even for stars with no inter-star edges) ---
-        if (from && star.primaryDomainId) {
-          const facultyNode = nodes.find((n) => n.concept.faculty.id === star.primaryDomainId);
+      // --- Focused star: thin faculty-tint anchor to its faculty hub.
+      // Drawn only for the focused star (not every star) so the user
+      // can see which faculty cluster their attention belongs to.
+      if (focusedStarId) {
+        const focusedStar = currentUserStars.find((s) => s.id === focusedStarId);
+        const from = focusedStar ? projectedUserStarRenderState.get(focusedStar.id) : undefined;
+        if (focusedStar?.primaryDomainId && from) {
+          const facultyNode = nodes.find(
+            (n) => n.concept.faculty.id === focusedStar.primaryDomainId,
+          );
           if (facultyNode) {
-            const [fr, fg, fb] = getFacultyColor(star.primaryDomainId);
-            const alpha = 0.22 * Math.min(1, from.fadeIn);
-            const grad = ctx!.createLinearGradient(from.target.x, from.target.y, facultyNode.x, facultyNode.y);
+            const [fr, fg, fb] = getFacultyColor(focusedStar.primaryDomainId);
+            const alpha = 0.34 * Math.min(1, from.fadeIn);
+            const grad = ctx!.createLinearGradient(
+              from.target.x, from.target.y, facultyNode.x, facultyNode.y,
+            );
             grad.addColorStop(0, `rgba(${fr},${fg},${fb},${alpha})`);
-            grad.addColorStop(1, `rgba(${fr},${fg},${fb},${alpha * 0.4})`);
+            grad.addColorStop(1, `rgba(${fr},${fg},${fb},${alpha * 0.25})`);
             ctx!.strokeStyle = grad;
-            ctx!.lineWidth = 0.7;
+            ctx!.lineWidth = 0.75;
             ctx!.setLineDash([4, 6]);
             ctx!.beginPath();
             ctx!.moveTo(from.target.x, from.target.y);
@@ -3065,40 +3114,41 @@ export default function Home() {
             ctx!.setLineDash([]);
           }
         }
+      }
 
-        // --- Inter-star edges (existing logic, unchanged) ---
+      // --- Inter-star edges (user-defined connections) gated on lit set.
+      currentUserStars.forEach((star) => {
+        const from = projectedUserStarRenderState.get(star.id);
         if (!from || !star.connectedUserStarIds || star.connectedUserStarIds.length === 0) {
           return;
         }
 
         star.connectedUserStarIds.forEach((linkedStarId) => {
           const to = projectedUserStarRenderState.get(linkedStarId);
-          if (!to) {
-            return;
-          }
+          if (!to) return;
+
+          // Show only edges touching at least one lit star.
+          const eitherLit = litStarIds.has(star.id) || litStarIds.has(linkedStarId);
+          if (!eitherLit) return;
 
           const edgeKey = star.id < linkedStarId
             ? `${star.id}:${linkedStarId}`
             : `${linkedStarId}:${star.id}`;
-          if (renderedLinks.has(edgeKey)) {
-            return;
-          }
+          if (renderedLinks.has(edgeKey)) return;
           renderedLinks.add(edgeKey);
 
           const alphaMultiplier = Math.max(0, Math.min(1, Math.min(from.fadeIn, to.fadeIn) * edgeBreath));
           const ragHighlighted = ragPulseStrength > 0
             && (ragPulseState?.starIds.has(star.id) || ragPulseState?.starIds.has(linkedStarId));
-          const selectedEdge = selectedStarId !== null
-            && (star.id === selectedStarId || linkedStarId === selectedStarId);
+          const focusedEdge = focusedStarId !== null
+            && (star.id === focusedStarId || linkedStarId === focusedStarId);
           const ragBoost = ragHighlighted ? ragPulseStrength : 0;
-          // Always render edges so the constellation structure stays visible;
-          // boost alpha on selection to signal which branches belong to the picked star.
-          const edgeAlpha = selectedEdge ? 0.32 : ragHighlighted ? 0.21 : 0.13;
+          const edgeAlpha = focusedEdge ? 0.42 : ragHighlighted ? 0.28 : 0.22;
           const gradient = ctx!.createLinearGradient(from.target.x, from.target.y, to.target.x, to.target.y);
           gradient.addColorStop(0, `rgba(${from.mixed[0]},${from.mixed[1]},${from.mixed[2]},${(edgeAlpha + ragBoost * 0.34) * alphaMultiplier})`);
           gradient.addColorStop(1, `rgba(${to.mixed[0]},${to.mixed[1]},${to.mixed[2]},${(edgeAlpha + ragBoost * 0.34) * alphaMultiplier})`);
           ctx!.strokeStyle = gradient;
-          ctx!.lineWidth = 0.95 + ragBoost * 1.35;
+          ctx!.lineWidth = (focusedEdge ? 1.15 : 0.95) + ragBoost * 1.35;
           ctx!.beginPath();
           ctx!.moveTo(from.target.x, from.target.y);
           ctx!.lineTo(to.target.x, to.target.y);
@@ -3106,17 +3156,16 @@ export default function Home() {
         });
       });
 
-      // --- Scaffold-derived semantic edges ---
-      // Map scaffold edges (brain graph node IDs) back to user stars via manifest paths.
+      // --- Scaffold-derived semantic edges (cyan) gated on lit set.
+      // Map scaffold edges (brain graph node IDs) back to user stars via
+      // manifest paths. Same lit-set gate as inter-star edges.
       const scaffoldEdges = scaffoldEdgesRef.current;
-      if (scaffoldEdges.length > 0 && currentUserStars.length >= 2) {
-        // Build nodeId → manifest_path lookup from available indexes
+      if (scaffoldEdges.length > 0 && currentUserStars.length >= 2 && litStarIds.size > 0) {
         const nodeIdToManifest = new Map<string, string>();
         for (const idx of availableIndexesRef.current) {
           nodeIdToManifest.set(`index:${idx.index_id}`, idx.manifest_path);
         }
 
-        // Build manifest_path → star IDs lookup
         const manifestToStarIds = new Map<string, string[]>();
         for (const star of currentUserStars) {
           for (const mp of getStarManifestPaths(star)) {
@@ -3138,6 +3187,9 @@ export default function Home() {
           for (const srcStarId of srcStarIds) {
             for (const tgtStarId of tgtStarIds) {
               if (srcStarId === tgtStarId) continue;
+
+              if (!litStarIds.has(srcStarId) && !litStarIds.has(tgtStarId)) continue;
+
               const edgeKey = srcStarId < tgtStarId
                 ? `${srcStarId}:${tgtStarId}`
                 : `${tgtStarId}:${srcStarId}`;
@@ -3149,11 +3201,9 @@ export default function Home() {
               if (!fromState || !toState) continue;
 
               const alphaMultiplier = Math.max(0, Math.min(1, Math.min(fromState.fadeIn, toState.fadeIn) * edgeBreath));
-              const scaffoldAlpha = 0.12 + Math.min(edge.persistence_weight, 1.0) * 0.22;
-              const scaffoldWidth = 0.8 + Math.min(edge.persistence_weight, 1.0) * 1.2;
+              const scaffoldAlpha = 0.18 + Math.min(edge.persistence_weight, 1.0) * 0.26;
+              const scaffoldWidth = 0.85 + Math.min(edge.persistence_weight, 1.0) * 1.25;
 
-              // Scaffold edges use a distinct cyan to visually separate
-              // topological connections from user-created links.
               const gradient = ctx!.createLinearGradient(
                 fromState.target.x, fromState.target.y,
                 toState.target.x, toState.target.y,
@@ -3173,8 +3223,8 @@ export default function Home() {
         }
       }
 
-      const semanticState = semanticSearchStateRef.current;
-      if (semanticState.active && semanticState.links.length > 0) {
+      // --- Semantic-search links (purple/cyan dashed). Already explicit.
+      if (semanticActive) {
         semanticState.links.forEach((link, index) => {
           const fromState = projectedUserStarRenderState.get(link.fromId);
           const toState = projectedUserStarRenderState.get(link.toId);
@@ -3189,10 +3239,10 @@ export default function Home() {
             toState.target.x,
             toState.target.y,
           );
-          gradient.addColorStop(0, `rgba(180,112,255,${(0.2 + emphasis * 0.14) * alphaMultiplier})`);
-          gradient.addColorStop(1, `rgba(120,210,255,${(0.14 + emphasis * 0.1) * alphaMultiplier})`);
+          gradient.addColorStop(0, `rgba(180,112,255,${(0.28 + emphasis * 0.16) * alphaMultiplier})`);
+          gradient.addColorStop(1, `rgba(120,210,255,${(0.2 + emphasis * 0.12) * alphaMultiplier})`);
           ctx!.strokeStyle = gradient;
-          ctx!.lineWidth = 1.1 + emphasis * 1.3;
+          ctx!.lineWidth = 1.2 + emphasis * 1.3;
           ctx!.setLineDash([8, 8 + (index % 3)]);
           ctx!.beginPath();
           ctx!.moveTo(fromState.target.x, fromState.target.y);

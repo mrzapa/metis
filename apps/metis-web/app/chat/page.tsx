@@ -1980,6 +1980,7 @@ function ChatPageContent() {
             {
               default: 0.95,
               min: 220,
+              label: "Sessions",
               children: (
                 <SessionsPanel
                   selectedId={selectedId}
@@ -1992,6 +1993,7 @@ function ChatPageContent() {
             {
               default: traceFirstLayout ? 2.9 : 4.25,
               min: 460,
+              label: "Chat",
               children: (
                 <ChatPanel
                   key={`${queryModeOverride ?? "direct"}:${initialDraft ? "seeded" : "blank"}:${activeIndexPath ?? "no-index"}`}
@@ -2065,6 +2067,7 @@ function ChatPageContent() {
             {
               default: traceFirstLayout ? 2.1 : 1.55,
               min: 280,
+              label: "Sources",
               children: (
                 <EvidencePanel
                   sources={latestSources}

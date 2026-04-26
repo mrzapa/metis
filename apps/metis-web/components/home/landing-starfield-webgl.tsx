@@ -805,6 +805,20 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
       camera.updateProjectionMatrix();
     };
 
+    const initialRect = container.getBoundingClientRect();
+    updateRendererSize(initialRect.width, initialRect.height);
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const { width, height } = entry.contentRect;
+          updateRendererSize(width, height);
+        }
+      });
+      resizeObserver.observe(container);
+    }
+
     const updateGeometry = (frame: LandingStarfieldFrame) => {
       const attributes = fillStarAttributes(frame);
 
@@ -871,6 +885,7 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
 
     return () => {
       window.cancelAnimationFrame(frameHandle);
+      resizeObserver?.disconnect();
       geometry.dispose();
       material.dispose();
       renderer.dispose();
