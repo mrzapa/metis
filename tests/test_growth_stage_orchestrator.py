@@ -86,19 +86,13 @@ class _StubOrchestrator:
     def list_indexes(self) -> list[dict]:
         return list(self._indexes)
 
-    def get_workspace_graph(self, *, skip_layout: bool = False):  # noqa: ARG002
-        """Stub the BrainGraph build so density tests don't depend on
-        the full assistant subgraph construction. Returns an object
-        whose ``compute_assistant_density`` returns the configured
-        value — Phase 6 ``_collect_growth_counts`` only calls that
-        method on the result."""
-        density_value = self._brain_graph_density
-
-        class _DensityStub:
-            def compute_assistant_density(self) -> float:
-                return density_value
-
-        return _DensityStub()
+    def _compute_assistant_density(self) -> float:
+        """Stub the Phase 6 P1 density helper. ``_collect_growth_counts``
+        calls this directly (rather than going through the UI's
+        capped ``get_workspace_graph``), so the integration tests
+        exercise the orchestrator's wiring without hydrating a real
+        ``BrainGraph`` from an uncapped repository."""
+        return self._brain_graph_density
 
     def _resolve_query_settings(self, override: dict) -> dict:
         merged = dict(self._settings)
@@ -335,3 +329,112 @@ def test_recompute_growth_stage_advances_to_elder_when_density_high(tmp_path) ->
     assert result["stage"] == "elder"
     assert result["advanced_from"] == "bloom"
     assert result["signals"]["brain_graph_density"] == 0.85
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 P1 regression (Codex review on PR #558) — density must use the
+# *full* assistant repository, not the UI-capped snapshot.
+# ---------------------------------------------------------------------------
+
+
+def test_compute_assistant_density_reads_uncapped_repository(tmp_path) -> None:
+    """P1 regression (Codex review on PR #558):
+    ``_compute_assistant_density`` must NOT route through
+    ``AssistantCompanionService.get_snapshot`` (which caps memory at
+    8 / playbooks at 6 for the UI brain canvas). A long-running
+    companion's Elder advance must reflect *all* accumulated memories.
+
+    Distinguishing setup: 12 memories, but the cross-links are
+    anchored on the OLDEST 4 (the ones the snapshot would drop).
+
+    - Uncapped (correct): 4 learned edges / (2 × 12 artefacts) =
+      ``0.166...``
+    - Capped (buggy): the 8 newest memories are visible but they
+      have no learned edges; the 4 edges reference ``memory:*`` IDs
+      that aren't in the graph, so ``_add_assistant_subgraph``'s
+      existence guard drops them. Density = ``0.0``.
+
+    A non-zero density therefore proves the helper is reading the
+    full repository, not the capped snapshot."""
+    from metis_app.models.assistant_types import (
+        AssistantBrainLink,
+        AssistantMemoryEntry,
+    )
+    from metis_app.services.assistant_companion import (
+        AssistantCompanionService,
+    )
+    from metis_app.services.assistant_repository import AssistantRepository
+
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+
+    # 12 memories with explicit, monotonically-increasing created_at
+    # so list_memory(limit=8) returns the *newer* 8 (m04..m11) and
+    # drops the 4 oldest (m00..m03).
+    for i in range(12):
+        ts = f"2026-01-{i + 1:02d}T00:00:00Z"
+        repo.add_memory_entry(
+            AssistantMemoryEntry.from_payload(
+                {
+                    "entry_id": f"m{i:02d}",
+                    "created_at": ts,
+                    "kind": "reflection",
+                    "title": f"Reflection {i}",
+                    "summary": "x",
+                }
+            ),
+            max_entries=64,
+        )
+
+    # Anchor 4 ``assistant_learned`` cross-links on the OLDEST 4
+    # memories only. Capped snapshot (8 newest visible) wouldn't see
+    # these as ``memory:*`` nodes, so the edges would be dropped by
+    # the ``_add_assistant_subgraph`` existence guard.
+    learned_links = [
+        AssistantBrainLink.create(
+            source_node_id=f"memory:m{i:02d}",
+            target_node_id="assistant:metis",
+            relation="learned_from_session",
+            label="Learned",
+            summary="cross-link",
+            metadata={"scope": "assistant_learned"},
+        )
+        for i in range(4)  # m00..m03 — the OLDEST four
+    ]
+    repo.add_brain_links(learned_links, max_items=128)
+
+    service = AssistantCompanionService(repository=repo)
+
+    # Sanity: prove the snapshot path is genuinely capping at 8 and
+    # that the 4 oldest memories are the ones being dropped.
+    snapshot = service.get_snapshot({})
+    assert len(snapshot["memory"]) == 8
+    snapshot_ids = {item["entry_id"] for item in snapshot["memory"]}
+    assert "m00" not in snapshot_ids
+    assert "m11" in snapshot_ids
+
+    class _Stub:
+        def __init__(self) -> None:
+            self._assistant_service = service
+
+            class _Sessions:
+                def list_sessions(self_inner) -> list:  # noqa: ARG002
+                    return []
+
+            self._session_repo = _Sessions()
+
+        def list_indexes(self) -> list[dict]:
+            return []
+
+        from metis_app.services.workspace_orchestrator import (
+            WorkspaceOrchestrator as _W,
+        )
+
+        _compute_assistant_density = _W._compute_assistant_density  # type: ignore[assignment]
+
+    density = _Stub()._compute_assistant_density()
+
+    # Uncapped: 4 / (2 × 12) = 1/6.
+    assert density == pytest.approx(4.0 / 24.0)
+    # Buggy capped path would yield 0.0 (edges dropped by guard) —
+    # explicitly assert we're well clear.
+    assert density > 0.0

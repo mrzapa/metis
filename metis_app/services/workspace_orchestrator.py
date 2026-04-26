@@ -1142,21 +1142,65 @@ class WorkspaceOrchestrator:
         counts["skill_candidates"] = int(skill_counts.get("unpromoted", 0))
         counts["promoted_skills"] = int(skill_counts.get("promoted", 0))
 
-        # Phase 6 — brain-graph density. Build the workspace graph
-        # without the force-layout pass (cheap; layout iterations
-        # would be wasted for a numeric signal) and ask it for the
-        # assistant-scope density ratio. Skip if the graph fails to
-        # build; the Elder gate falls back to 0.0 (no advance).
+        # Phase 6 — brain-graph density. Pulls a dedicated, uncapped
+        # density graph (NOT the UI ``get_workspace_graph`` snapshot,
+        # which caps memory at 8 / playbooks at 6 for display reasons).
+        # Long-running companions need their Elder advance gated on
+        # accumulated history, not a recent window.
         counts["brain_graph_density"] = 0.0
         try:
-            graph = self.get_workspace_graph(skip_layout=True)
-            counts["brain_graph_density"] = float(graph.compute_assistant_density())
+            counts["brain_graph_density"] = float(
+                self._compute_assistant_density()
+            )
         except Exception:
             # Defensive: a half-initialised session repo or empty
             # workspace shouldn't crash the tick — Phase 5 already
             # treats missing counters as zero.
             counts["brain_graph_density"] = 0.0
         return counts
+
+    def _compute_assistant_density(self) -> float:
+        """Phase 6 P1 fix — assistant-scope density over full history.
+
+        The UI ``get_workspace_graph`` builds its assistant subgraph
+        from ``AssistantCompanionService.get_snapshot``, which caps
+        ``memory`` at 8 entries and ``playbooks`` at 6 — sane for the
+        Brain canvas but wrong for an Elder gate that needs to see
+        accumulated learning. We pull *uncapped* memory / playbook /
+        brain_link rows directly from the repository, hydrate a
+        density-only ``BrainGraph``, and ask it for the ratio.
+
+        ``indexes`` and ``sessions`` are still pulled (so cross-edges
+        emitted by ``reflect()`` resolve their ``index:*`` / ``session:*``
+        target nodes) but we tolerate failures — a half-initialised
+        session repo just means the index / session targets are
+        missing and the ``_add_assistant_subgraph`` existence guard
+        drops those edges, which is the correct conservative answer.
+        """
+        repo = self._assistant_service.repository
+        try:
+            indexes = self.list_indexes()
+        except Exception:
+            indexes = []
+        try:
+            sessions = self._session_repo.list_sessions()
+        except Exception:
+            sessions = []
+        assistant_payload = {
+            "identity": {"companion_enabled": True},
+            "memory": [item.to_payload() for item in repo.list_memory()],
+            "playbooks": [item.to_payload() for item in repo.list_playbooks()],
+            "brain_links": [
+                item.to_payload() for item in repo.list_brain_links()
+            ],
+        }
+        graph = BrainGraph().build_from_indexes_and_sessions(
+            indexes,
+            sessions,
+            assistant_payload,
+            skip_layout=True,
+        )
+        return float(graph.compute_assistant_density())
 
     def run_autonomous_research(
         self,

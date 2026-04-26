@@ -452,6 +452,93 @@ def test_compute_assistant_density_ignores_assistant_self_edges() -> None:
     assert graph.compute_assistant_density() == 0.0
 
 
+def test_compute_assistant_density_does_not_dilute_with_playbooks() -> None:
+    """Phase 6 P2 regression (Codex review on PR #558): the current
+    ``AssistantCompanionService.reflect`` codepath emits playbook
+    cross-links with ``scope=assistant_self`` (the structural
+    ``playbook→assistant`` belongs-to edge). If playbooks counted
+    toward the artefact denominator, every playbook would lower
+    density without ever raising the numerator — gating Bloom→Elder
+    on a metric that *gets worse* as the companion produces more
+    learning is the opposite of the intent.
+
+    Two graphs with identical memory + identical learned cross-links;
+    the second one adds 4 playbooks. Density must be unchanged."""
+    memory_payload = [
+        {"entry_id": f"m{i}", "title": f"M{i}", "summary": "x", "kind": "reflection"}
+        for i in range(2)
+    ]
+    learned_links = [
+        {
+            "source_node_id": f"memory:m{i}",
+            "target_node_id": "assistant:metis",
+            "relation": "learned_from_session",
+            "summary": f"link {i}",
+            "metadata": {"scope": "assistant_learned"},
+        }
+        for i in range(2)
+    ] + [
+        {
+            "source_node_id": "assistant:metis",
+            "target_node_id": f"memory:m{i}",
+            "relation": "remembers",
+            "summary": f"back {i}",
+            "metadata": {"scope": "assistant_learned"},
+        }
+        for i in range(2)
+    ]
+
+    without_playbooks = BrainGraph().build_from_indexes_and_sessions(
+        [],
+        [],
+        assistant_payload={
+            "identity": {"companion_enabled": True, "name": "Guide"},
+            "memory": memory_payload,
+            "playbooks": [],
+            "brain_links": learned_links,
+        },
+    )
+
+    with_playbooks = BrainGraph().build_from_indexes_and_sessions(
+        [],
+        [],
+        assistant_payload={
+            "identity": {"companion_enabled": True, "name": "Guide"},
+            "memory": memory_payload,
+            "playbooks": [
+                {
+                    "playbook_id": f"pb{i}",
+                    "title": f"PB {i}",
+                    "bullets": ["b"],
+                }
+                for i in range(4)
+            ],
+            "brain_links": learned_links
+            + [
+                # Mirror what reflect() emits today: structural
+                # playbook→assistant ``belongs_to`` with
+                # ``scope=assistant_self``. These must not contribute
+                # to either side of the ratio.
+                {
+                    "source_node_id": f"playbook:pb{i}",
+                    "target_node_id": "assistant:metis",
+                    "relation": "belongs_to",
+                    "summary": "structural",
+                    "metadata": {"scope": "assistant_self"},
+                }
+                for i in range(4)
+            ],
+        },
+    )
+
+    baseline = without_playbooks.compute_assistant_density()
+    with_pb = with_playbooks.compute_assistant_density()
+
+    # 4 learned edges / (2 target × 2 memory artefacts) = 1.0 in both.
+    assert baseline == 1.0
+    assert with_pb == baseline
+
+
 # ---------------------------------------------------------------------------
 # M13 Phase 6 — end-to-end seam: ``reflect()`` → snapshot → density.
 # ---------------------------------------------------------------------------
