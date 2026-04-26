@@ -5372,6 +5372,18 @@ export default function Home() {
     }
 
     window.addEventListener("resize", onResize);
+    // ResizeObserver covers the cases the window `resize` event misses —
+    // iframe parents that grow without firing a window resize on the
+    // inner window, devtools-driven viewport emulation, container
+    // layouts that reflow without a window-level resize, etc. Without
+    // this, the 2D canvas can stay at its initial 300×150 default
+    // backing buffer even after the page renders at full viewport,
+    // producing ~4× pixelation on everything painted to it.
+    const canvasResizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => onResize())
+        : null;
+    canvasResizeObserver?.observe(canvas);
     canvas.addEventListener("pointerdown", onCanvasPointerDown);
     canvas.addEventListener("lostpointercapture", onCanvasLostPointerCapture);
     document.addEventListener("pointermove", onPointerMove);
@@ -5391,6 +5403,7 @@ export default function Home() {
         artState.image.onerror = null;
       });
       window.removeEventListener("resize", onResize);
+      canvasResizeObserver?.disconnect();
       canvas.removeEventListener("pointerdown", onCanvasPointerDown);
       canvas.removeEventListener("lostpointercapture", onCanvasLostPointerCapture);
       document.removeEventListener("pointermove", onPointerMove);
