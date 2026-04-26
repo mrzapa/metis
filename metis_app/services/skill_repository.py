@@ -379,3 +379,32 @@ class SkillRepository:
         conn = self._init_candidates_db(db_path)
         with conn:
             conn.execute("UPDATE skill_candidates SET promoted = 1 WHERE id = ?", (candidate_id,))
+
+    def count_candidates(
+        self, *, db_path: pathlib.Path
+    ) -> dict[str, int]:
+        """Return ``{total, promoted, unpromoted}`` counts.
+
+        Used by the M13 Phase 5 growth-stage compute (see
+        ``metis_app.seedling.growth``). The Sapling/Bloom thresholds
+        require *unpromoted* candidates accumulating; the Elder
+        threshold requires *promoted* skills (i.e. candidates that
+        M06's promotion path actually shipped).
+        """
+        conn = self._init_candidates_db(db_path)
+        try:
+            total = int(
+                conn.execute("SELECT COUNT(*) FROM skill_candidates").fetchone()[0]
+            )
+            promoted = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM skill_candidates WHERE promoted = 1"
+                ).fetchone()[0]
+            )
+        except sqlite3.Error:
+            return {"total": 0, "promoted": 0, "unpromoted": 0}
+        return {
+            "total": total,
+            "promoted": promoted,
+            "unpromoted": max(0, total - promoted),
+        }

@@ -583,9 +583,15 @@ def test_status_route_keeps_backend_unavailable_sticky_over_fresh_configured(
 def test_lifecycle_overnight_integration_skips_when_model_status_disabled(
     tmp_path, monkeypatch
 ) -> None:
-    """When ``backend_reflection_enabled=False`` the lifecycle must not
-    construct the orchestrator or bump the worker — the cycle is a clean
-    no-op."""
+    """When ``backend_reflection_enabled=False`` the overnight cycle is a
+    clean no-op — ``record_companion_reflection`` is never invoked and
+    the worker's ``last_overnight_*`` anchors stay unset.
+
+    Note: the orchestrator IS constructed once per tick (Phase 5's
+    growth-stage recompute uses it), so this test no longer asserts
+    the orchestrator class isn't referenced — it asserts the
+    overnight persistence path stays cold.
+    """
     from metis_app.seedling import lifecycle
     from metis_app.seedling.scheduler import SeedlingSchedule
     from metis_app.seedling.status import SeedlingStatusCache
@@ -603,21 +609,39 @@ def test_lifecycle_overnight_integration_skips_when_model_status_disabled(
         "metis_app.settings_store.load_settings", lambda: dict(fake_settings)
     )
 
-    # If the orchestrator class is referenced, raise — proves we never
-    # reached the model-status-gated branch.
-    def _should_not_be_called(*_args, **_kwargs):
-        raise AssertionError("orchestrator should not be constructed when model_status != backend_configured")
+    persist_calls: list[dict] = []
+
+    class _Orchestrator:
+        def list_assistant_memory(self, limit=6):
+            return []
+
+        def get_assistant_snapshot(self):
+            return {"status": {"last_reflection_at": "2026-04-25T00:00:00+00:00"}}
+
+        def record_companion_reflection(self, **kwargs):
+            persist_calls.append(kwargs)
+            return {"ok": False, "reason": "should-not-fire"}
+
+        def list_indexes(self):
+            return []
+
+        def recompute_growth_stage(self, *, settings=None):
+            # Phase 5 recompute is fine to run; just no-op.
+            return {"stage": "seedling", "advanced_from": None}
 
     monkeypatch.setattr(
         "metis_app.services.workspace_orchestrator.WorkspaceOrchestrator",
-        _should_not_be_called,
+        _Orchestrator,
     )
 
     result = lifecycle._default_tick_work()
     assert isinstance(result, dict)
     assert result.get("ran") is False
     assert "model_status" in (result.get("reason") or "")
-    # Worker bump never fired.
+    # Overnight persistence path stayed cold.
+    assert persist_calls == []
+    # Worker anchors never bumped.
     assert worker.status.last_overnight_reflection_at is None
+    assert worker.status.last_overnight_attempt_at is None
 
     lifecycle.reset_seedling_worker(None)

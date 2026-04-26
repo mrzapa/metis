@@ -117,6 +117,31 @@ What's in place today that M13 will lean on:
   `apps/metis-web/`. No backend model loading; reflection only fires
   while the user has METIS open. Phase 4b will reuse the same writer
   with `kind="overnight"` once the backend GGUF toggle ships.
+- **2026-04-26 — Phase 5 complete (visible growth stages).**
+  ``AssistantStatus`` now carries ``growth_stage: GrowthStage``
+  (``seedling`` | ``sapling`` | ``bloom`` | ``elder``) and a
+  ``growth_stage_changed_at`` ISO timestamp. New
+  ``metis_app/seedling/growth.py`` exports the pure
+  ``compute_growth_stage(signals, current_stage, thresholds, override)``
+  function, ``GrowthSignals`` / ``StageThresholds`` shapes, and the
+  ``DEFAULT_THRESHOLDS`` constant locked by the *Phase 5 thresholds —
+  v0 decision* section above.
+  ``WorkspaceOrchestrator.recompute_growth_stage`` runs once per
+  Seedling worker tick: it pulls counts (indexes, distinct
+  faculties, reflection memory rows of *any* kind, skill candidates
+  promoted/unpromoted), computes the stage, persists on advance, and
+  fires a single ``CompanionActivityEvent`` with
+  ``source="seedling"`` / ``state="completed"`` /
+  ``kind="stage_transition"``. The dock surfaces the stage as a
+  small qualified-tone badge in the expanded panel header and runs
+  a one-time GSAP pulse on the transition (skipped under
+  ``prefers-reduced-motion``); a toast announces "Companion advanced
+  to Sapling/Bloom/Elder". The activity bridge accepts the new
+  ``kind`` field at the top level so the frontend bus surfaces it
+  through the existing ``subscribeCompanionActivity`` channel — no
+  second event bus. The brain-graph density gate is structurally
+  in place but defaults to off; Phase 6 turns it on by setting a
+  positive ``elder_brain_graph_density`` threshold.
 - **2026-04-25 — Phase 4b complete (overnight backend reflection,
   opt-in).** New module `metis_app/seedling/overnight.py` adds the
   cadence / quiet-window / `model_status` gate logic plus a runner
@@ -152,20 +177,22 @@ What's in place today that M13 will lean on:
 
 The next concrete actions:
 
-1. **Phase 5 — growth stages.** ADR 0009 (or a plan-doc decision
-   section) pins the Seedling → Sapling → Bloom → Elder thresholds.
-   The dock surfaces the stage badge and a stage-transition emits a
-   one-time `kind: "stage_transition"` `CompanionActivityEvent` so
-   the constellation can render the magic moment.
-2. **Phase 6 — brain-graph densification.** Now that M10 is Landed,
-   the Phase 6 deferral lifts. Feed Seedling-produced
+1. **Phase 6 — brain-graph densification.** Now that M10 is Landed
+   *and* Phase 5's stage machine is live, set
+   `StageThresholds.elder_brain_graph_density` to a positive value
+   so Elder is gated on real graph activity. Feed Seedling-produced
    `AssistantBrainLink` records into
    `BrainGraph.compute_edge_weights()` so scaffold edges carry the
-   companion's recent activity.
-3. **Phase 7 (stretch) — LoRA training log.** Capture the overnight
+   companion's recent activity. Optional: pulse the edge when the
+   Seedling creates it (coord with M02 / `brain-graph-3d.tsx`).
+2. **Phase 7 (stretch) — LoRA training log.** Capture the overnight
    reflection's prompt + retrieved context + completion as JSONL so
    M18 has stable training data without M13 actually shipping
    fine-tuning code.
+3. **Phase 5 retro — threshold tuning.** The v0 thresholds in
+   `metis_app/seedling/growth.py::DEFAULT_THRESHOLDS` are first
+   estimates; once real usage produces stage-distribution data, tune
+   them and update the plan-doc decision section accordingly.
 
 ## Blockers
 
@@ -445,6 +472,42 @@ a real signal.
 
 **Not this phase:** user-facing stage explanations copy (that's
 copywriting + onboarding work, track separately).
+
+##### Phase 5 thresholds — v0 decision
+
+The threshold values landed in
+`metis_app/seedling/growth.py::DEFAULT_THRESHOLDS`. Because these
+will tune rapidly during the first weeks of real usage, the decision
+lives here in the plan doc rather than as a full ADR 0009 — promotion
+to a real ADR is a one-paragraph migration once the numbers stabilise.
+
+- **Seedling → Sapling**: ≥10 indexed stars AND ≥1 reflection of
+  *any kind* (Phase 4a Bonsai, Phase 4b overnight backend, or
+  Phase 4 manual). The "any kind" answer resolves the open question
+  in ADR 0013 §Open Questions: a user without WebGPU and without a
+  backend GGUF can still advance once they trigger one manual
+  reflection.
+- **Sapling → Bloom**: ≥50 stars spanning ≥6 distinct faculties AND
+  ≥5 captured (unpromoted) skill candidates AND ≥7 reflections.
+- **Bloom → Elder**: ≥200 stars AND ≥3 *promoted* skills AND ≥30
+  reflections. The brain-graph-density gate published in the plan is
+  reserved for Phase 6 (`StageThresholds.elder_brain_graph_density`
+  defaults to `0.0` so the v0 ignores it; Phase 6 sets a positive
+  value to gate Elder behind real graph activity).
+
+The stage **only advances**; it never regresses. A user who deletes
+stars after reaching Sapling does not drop back to Seedling. The
+sole regression path is the
+``seedling_growth_stage_override`` setting (test/debug only).
+
+Recompute happens once per Seedling worker tick (cheap counter
+queries, no LLM work). On a transition the orchestrator fires a
+single ``CompanionActivityEvent`` with ``source="seedling"``,
+``state="completed"``, ``kind="stage_transition"`` carrying
+``{advanced_from, stage}`` in ``payload``. The dock listens on that
+kind, fires a one-time GSAP pulse on the badge (skipped under
+``prefers-reduced-motion``), and refetches the assistant snapshot so
+the badge label updates.
 
 #### Phase 6 — Brain-graph densification (deferred, coordinates with M10)
 

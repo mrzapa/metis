@@ -50,10 +50,27 @@ def _default_tick_work() -> dict[str, Any] | None:
         except Exception:  # noqa: BLE001
             log.debug("Worker model_status update failed", exc_info=True)
 
+    # Build the orchestrator once per tick so Phases 4b and 5 share
+    # the instance (each construction wires several repos together —
+    # not expensive individually but doubling was wasteful). Lazy
+    # import keeps the rest of the tick decoupled from the orchestrator
+    # import chain.
+    orchestrator = _build_orchestrator()
+
     # Phase 4b — overnight reflection. Independent of news ingestion;
     # a user might run the backend reflection without any news comets
     # configured.
-    overnight_payload = _maybe_run_overnight(settings)
+    overnight_payload = _maybe_run_overnight(settings, orchestrator=orchestrator)
+
+    # Phase 5 — recompute the growth stage every tick. Idempotent
+    # (returns the same stage when nothing changed); fires a
+    # stage_transition CompanionActivityEvent only on actual
+    # advance. Failures don't kill the rest of the tick.
+    if orchestrator is not None:
+        try:
+            orchestrator.recompute_growth_stage(settings=settings)
+        except Exception:  # noqa: BLE001
+            log.debug("Growth stage recompute raised", exc_info=True)
 
     if not settings.get("news_comets_enabled", False):
         return overnight_payload
@@ -82,16 +99,31 @@ def _default_tick_work() -> dict[str, Any] | None:
     return result
 
 
-def _maybe_run_overnight(settings: dict[str, Any]) -> dict[str, Any] | None:
-    """Run the Phase 4b overnight cycle if the gates allow.
+def _build_orchestrator() -> "Any":
+    """Construct the WorkspaceOrchestrator once per tick (architect nit).
 
-    Imports happen lazily so the rest of Phase 3's tick work doesn't
-    depend on the assistant-companion service being importable.
+    Returns ``None`` on import failure so callers can short-circuit
+    without crashing the tick.
     """
     try:
         from metis_app.services.workspace_orchestrator import (  # noqa: WPS433
             WorkspaceOrchestrator,
         )
+    except Exception:  # noqa: BLE001
+        log.debug("WorkspaceOrchestrator import failed", exc_info=True)
+        return None
+    return WorkspaceOrchestrator()
+
+
+def _maybe_run_overnight(
+    settings: dict[str, Any], *, orchestrator: "Any" = None
+) -> dict[str, Any] | None:
+    """Run the Phase 4b overnight cycle if the gates allow.
+
+    *orchestrator* is supplied by the tick caller so this helper does
+    not pay a duplicate construction cost per tick (architect nit).
+    """
+    try:
         from .overnight import (  # noqa: WPS433
             compute_model_status,
             maybe_run_overnight_reflection,
@@ -103,6 +135,11 @@ def _maybe_run_overnight(settings: dict[str, Any]) -> dict[str, Any] | None:
     model_status = compute_model_status(settings)
     if model_status != "backend_configured":
         return {"ran": False, "reason": f"model_status={model_status}"}
+
+    if orchestrator is None:
+        orchestrator = _build_orchestrator()
+        if orchestrator is None:
+            return {"ran": False, "reason": "orchestrator_unavailable"}
 
     worker = _worker
     # Cadence pivots on the *attempt* anchor (success OR failure) so a
@@ -117,7 +154,6 @@ def _maybe_run_overnight(settings: dict[str, Any]) -> dict[str, Any] | None:
         except ValueError:
             last_attempt = None
 
-    orchestrator = WorkspaceOrchestrator()
     activity = _collect_overnight_activity(orchestrator)
     last_user_activity_at = _resolve_last_user_activity(orchestrator)
 

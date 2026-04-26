@@ -548,4 +548,99 @@ describe("MetisCompanionDock", () => {
 
     expect(webgpuStub.send).not.toHaveBeenCalled();
   });
+
+  // -------------------------------------------------------------------------
+  // Phase 5 — visible growth stage badge + transition
+  // -------------------------------------------------------------------------
+
+  it("renders the Seedling badge by default in the expanded panel (Phase 5)", async () => {
+    vi.mocked(fetchAssistant).mockResolvedValueOnce(
+      buildSnapshot({ identity: { minimized: false } as AssistantSnapshot["identity"] }),
+    );
+    vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
+
+    render(<MetisCompanionDock />);
+
+    const badge = await screen.findByTestId("companion-stage-badge");
+    expect(badge).toBeInTheDocument();
+    expect(badge.textContent?.trim()).toBe("Seedling");
+    expect(badge.getAttribute("aria-label")).toMatch(/Growth stage: Seedling/i);
+  });
+
+  it("renders the Sapling badge when the snapshot reports growth_stage=sapling", async () => {
+    vi.mocked(fetchAssistant).mockResolvedValueOnce(
+      buildSnapshot({
+        identity: { minimized: false } as AssistantSnapshot["identity"],
+        status: {
+          ...buildSnapshot().status,
+          growth_stage: "sapling",
+          growth_stage_changed_at: "2026-04-26T08:00:00+00:00",
+        } as AssistantSnapshot["status"],
+      }),
+    );
+    vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
+
+    render(<MetisCompanionDock />);
+
+    const badge = await screen.findByTestId("companion-stage-badge");
+    expect(badge.textContent?.trim()).toBe("Sapling");
+  });
+
+  it("emits a toast and refetches the snapshot on a stage_transition event", async () => {
+    const listeners: Array<(event: CompanionActivityEvent) => void> = [];
+    vi.mocked(subscribeCompanionActivity).mockImplementation((listener) => {
+      listeners.push(listener);
+      return () => {
+        const idx = listeners.indexOf(listener);
+        if (idx >= 0) listeners.splice(idx, 1);
+      };
+    });
+
+    vi.mocked(fetchAssistant)
+      .mockResolvedValueOnce(
+        buildSnapshot({ identity: { minimized: false } as AssistantSnapshot["identity"] }),
+      )
+      // Refetch after the transition returns the upgraded stage.
+      .mockResolvedValueOnce(
+        buildSnapshot({
+          identity: { minimized: false } as AssistantSnapshot["identity"],
+          status: {
+            ...buildSnapshot().status,
+            growth_stage: "sapling",
+          } as AssistantSnapshot["status"],
+        }),
+      );
+    vi.mocked(fetchAtlasCandidate).mockResolvedValue(null);
+
+    render(<MetisCompanionDock />);
+    await waitFor(() => expect(listeners.length).toBeGreaterThan(0));
+    expect(fetchAssistant).toHaveBeenCalledTimes(1);
+
+    // Fire the stage_transition event the orchestrator emits.
+    act(() => {
+      for (const listener of listeners) {
+        listener({
+          source: "seedling",
+          state: "completed",
+          trigger: "growth_stage",
+          summary: "Companion advanced to Sapling",
+          timestamp: 1_700_000_000_000,
+          kind: "stage_transition",
+          payload: {
+            event_id: "seedling-transition-1",
+            status: { growth_stage: "sapling", advanced_from: "seedling" },
+            advanced_from: "seedling",
+            stage: "sapling",
+          },
+        });
+      }
+    });
+
+    // The snapshot is refetched so the badge can update.
+    await waitFor(() => {
+      expect(fetchAssistant).toHaveBeenCalledTimes(2);
+    });
+    // And a toast surfaces the magic moment.
+    expect(await screen.findByText(/Companion advanced to Sapling/i)).toBeInTheDocument();
+  });
 });

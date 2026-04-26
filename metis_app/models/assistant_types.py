@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal, cast
 import uuid
 
 
@@ -136,6 +136,13 @@ class AssistantPolicy:
         )
 
 
+# M13 Phase 5 — visible growth stages. Additive on the existing
+# AssistantStatus payload; older clients ignore ``growth_stage``,
+# newer clients default to "seedling" until a backend payload arrives.
+GrowthStage = Literal["seedling", "sapling", "bloom", "elder"]
+_GROWTH_STAGES: set[str] = {"seedling", "sapling", "bloom", "elder"}
+
+
 @dataclass(slots=True)
 class AssistantStatus:
     state: str = "idle"
@@ -153,6 +160,8 @@ class AssistantStatus:
     last_reflection_trigger: str = ""
     latest_summary: str = ""
     latest_why: str = ""
+    growth_stage: GrowthStage = "seedling"
+    growth_stage_changed_at: str = ""
 
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
@@ -160,6 +169,11 @@ class AssistantStatus:
     @classmethod
     def from_payload(cls, payload: dict[str, Any] | None) -> "AssistantStatus":
         data = dict(payload or {})
+        raw_stage = str(data.get("growth_stage") or "seedling")
+        growth_stage = cast(
+            GrowthStage,
+            raw_stage if raw_stage in _GROWTH_STAGES else "seedling",
+        )
         return cls(
             state=str(data.get("state") or "idle"),
             paused=bool(data.get("paused", False)),
@@ -176,6 +190,8 @@ class AssistantStatus:
             last_reflection_trigger=str(data.get("last_reflection_trigger") or ""),
             latest_summary=str(data.get("latest_summary") or ""),
             latest_why=str(data.get("latest_why") or ""),
+            growth_stage=growth_stage,
+            growth_stage_changed_at=str(data.get("growth_stage_changed_at") or ""),
         )
 
 
