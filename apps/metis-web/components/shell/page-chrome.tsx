@@ -11,6 +11,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { MetisCompanionDock } from "@/components/shell/metis-companion-dock";
+import { NetworkAuditPill } from "@/components/shell/network-audit-pill";
 import { WebGPUCompanionProvider } from "@/lib/webgpu-companion/webgpu-companion-context";
 import { cn } from "@/lib/utils";
 
@@ -129,6 +130,9 @@ export function PageChrome({
                 </Link>
               ))}
             </nav>
+            <div className="ml-auto flex items-center">
+              <NetworkAuditPill />
+            </div>
           </motion.header>
 
           {/* Page content */}

@@ -23,9 +23,13 @@ interface EvidencePanelProps {
   isStreaming?: boolean;
   preferredTab?: "sources" | "trace";
   postureToken?: number;
+  // Audit item 43: gate the Trace tab behind the existing `verbose_mode`
+  // setting. New users see only the Sources tab; power users debugging
+  // chat sessions can opt-in via Settings → Core → Verbose mode.
+  verboseMode?: boolean;
 }
 
-export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, latestAnswer, fallback, liveTraceEvents, isStreaming, preferredTab, postureToken }: EvidencePanelProps) {
+export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, latestAnswer, fallback, liveTraceEvents, isStreaming, preferredTab, postureToken, verboseMode }: EvidencePanelProps) {
   const [selectedRunId, setSelectedRunId] = useArrowState<string>(latestRunId ?? "");
   const [traceEvents, setTraceEvents] = useArrowState<TraceEvent[]>([]);
   const [traceLoading, setTraceLoading] = useArrowState(Boolean(latestRunId));
@@ -52,6 +56,15 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
     }
     queueMicrotask(() => setActiveTab(preferredTab));
   }, [postureToken, preferredTab, setActiveTab]);
+
+  // Audit item 43: if verbose mode flips off while the user is on the
+  // Trace tab, snap back to Sources so they don't end up looking at a
+  // hidden tab body.
+  useEffect(() => {
+    if (!verboseMode && activeTab === "trace") {
+      queueMicrotask(() => setActiveTab("sources"));
+    }
+  }, [verboseMode, activeTab, setActiveTab]);
 
   useEffect(() => {
     if (!latestRunId) {
@@ -165,10 +178,12 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
               <FileText className="size-3" />
               Sources
             </TabsTrigger>
-            <TabsTrigger value="trace" className="glass-tab-pill gap-1 text-xs">
-              <Activity className="size-3" />
-              Trace
-            </TabsTrigger>
+            {verboseMode && (
+              <TabsTrigger value="trace" className="glass-tab-pill gap-1 text-xs">
+                <Activity className="size-3" />
+                Trace
+              </TabsTrigger>
+            )}
           </TabsList>
         </div>
 
@@ -247,7 +262,8 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
             this TabsTrigger + TabsContent block when the outline feature
             is actually implemented. */}
 
-        {/* Trace tab */}
+        {/* Trace tab — gated behind verbose_mode (audit item 43) */}
+        {verboseMode && (
         <TabsContent value="trace" className="flex h-full min-h-0 flex-col overflow-hidden">
           {/* Run selector */}
           <div className="glass-strip shrink-0 border-b border-white/10 px-3 py-2">
@@ -314,6 +330,7 @@ export function EvidencePanel({ sources, runIds, latestRunId, selectedMode, late
             </ScrollArea>
           </div>
         </TabsContent>
+        )}
       </Tabs>
     </div>
   );

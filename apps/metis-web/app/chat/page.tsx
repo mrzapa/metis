@@ -298,6 +298,9 @@ function ChatPageContent() {
   const [latestFallback, setLatestFallback] = useArrowState<RetrievalFallback | null>(null);
   const [artifactsEnabled, setArtifactsEnabled] = useArrowState<boolean | undefined>(undefined);
   const [artifactRuntimeEnabled, setArtifactRuntimeEnabled] = useArrowState<boolean | undefined>(undefined);
+  // Audit item 43: hydrate from `verbose_mode` setting so the Trace tab
+  // (and any other power-user surface) stays hidden by default.
+  const [verboseMode, setVerboseMode] = useArrowState<boolean>(false);
   const [forecastPreflight, setForecastPreflight] = useArrowState<ForecastPreflightResult | null>(null);
   const [forecastSchema, setForecastSchema] = useArrowState<ForecastSchemaResult | null>(null);
   const [forecastMapping, setForecastMapping] = useArrowState<ForecastMapping | null>(null);
@@ -432,6 +435,7 @@ function ChatPageContent() {
         settingsRef.current = settings;
         setArtifactsEnabled(resolveArtifactsEnabled(settings));
         setArtifactRuntimeEnabled(resolveArtifactRuntimeEnabled(settings));
+        setVerboseMode(Boolean(settings.verbose_mode));
 
         const isAgentic = Boolean(settings.agentic_mode);
         setAgenticMode(isAgentic);
@@ -456,6 +460,7 @@ function ChatPageContent() {
     setModelProvider,
     setQueryModeOverride,
     setSelectedRagMode,
+    setVerboseMode,
   ]);
 
   const handleRagModeChange = useCallback(async (mode: string) => {
@@ -2072,6 +2077,7 @@ function ChatPageContent() {
                   isStreaming={isStreamingRag}
                   preferredTab={preferredEvidenceTab}
                   postureToken={shellPostureToken}
+                  verboseMode={verboseMode}
                 />
               ),
             },

@@ -19,7 +19,15 @@ import { AssistantCopyActions } from "@/components/chat/assistant-copy-actions";
 import { ArrowArtifactBoundary } from "@/components/chat/artifacts/arrow-artifact-boundary";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { useArrowState } from "@/hooks/use-arrow-state";
-import { AlertCircle, Bot, ChevronDown, FileSpreadsheet, Loader2, SendHorizontal, Square } from "lucide-react";
+import { AlertCircle, Bot, ChevronDown, FileSpreadsheet, Loader2, MoreHorizontal, SendHorizontal, Settings, ShieldOff, Square, Wand2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { AgenticStepIndicator } from "@/components/chat/agentic-step-indicator";
 import { IndexPickerDialog } from "@/components/chat/index-picker-dialog";
 import { ModelStatusDialog } from "@/components/chat/model-status-dialog";
@@ -154,6 +162,7 @@ export function ChatPanel({
   onForecastMappingChange,
   onForecastHorizonChange,
 }: ChatPanelProps) {
+  const router = useRouter();
   const [draft, setDraft] = useArrowState(initialDraft ?? "");
   const [queryMode, setQueryMode] = useArrowState<"direct" | "rag" | "forecast">(initialQueryMode ?? "direct");
   const [pickerOpen, setPickerOpen] = useArrowState(false);
@@ -351,59 +360,67 @@ export function ChatPanel({
             )}
           </div>
         )}
-        {/* Agentic mode toggle + settings link */}
+        {/*
+          Audit item 45 — progressive disclosure. New users were drowning
+          in toolbar pills (Agentic toggle, Settings, Heretic, Change).
+          We keep only the model-status pill in the header and tuck the
+          rest behind a single overflow menu. The path toggle below the
+          composer is unchanged.
+        */}
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => onAgenticModeChange?.(!agenticMode)}
-            disabled={agenticModeSaving}
-            aria-pressed={agenticMode}
-            title={`Agentic mode runs multi-step research with self-correction loops. Currently ${agenticMode ? "on" : "off"}.`}
-            className={cn(
-              "chat-control-pill flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium transition-colors",
-              agenticMode
-                ? "border-sky-400/25 bg-sky-500/14 text-sky-100 hover:bg-sky-500/18"
-                : "text-muted-foreground hover:bg-white/10",
-            )}
-          >
-            <AnimatedLucideIcon icon={Bot} mode="hoverLift" className="size-3" />
-            Agentic {agenticMode ? "on" : "off"}
-          </button>
-          <Link
-            href="/settings"
-            className="chat-control-pill rounded-full px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
-          >
-            Settings
-          </Link>
-          <Link
-            href="/settings?tab=models&modelsTab=heretic"
-            title="Configure local-model 'uncensored mode' (Heretic Abliteration tooling)"
-            className="chat-control-pill rounded-full px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
-          >
-            Heretic
-          </Link>
-          {/* Model status badge */}
+          {/* Model status badge — stays visible, still clickable */}
           {(modelProvider || modelName) && (
-            <>
-              <button
-                type="button"
-                onClick={() => setModelDialogOpen(true)}
-                aria-label="Change model"
-                title="Click to change model"
-                className="chat-control-pill cursor-pointer rounded-full px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
-              >
-                {[modelProvider, modelName].filter(Boolean).join(" / ")}
-              </button>
-              <button
-                type="button"
-                onClick={() => setModelDialogOpen(true)}
-                title="Change model or provider"
-                className="chat-control-pill rounded-full px-2 py-1 text-[10px] font-medium text-primary transition-colors hover:bg-primary/12"
-              >
-                Change
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={() => setModelDialogOpen(true)}
+              aria-label="Change model"
+              title="Click to change model"
+              className="chat-control-pill cursor-pointer rounded-full px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+            >
+              {[modelProvider, modelName].filter(Boolean).join(" / ")}
+            </button>
           )}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label="More options"
+              title="More options"
+              className="chat-control-pill flex items-center justify-center rounded-full px-2 py-1 text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+            >
+              <MoreHorizontal className="size-3.5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[12rem]">
+              <DropdownMenuItem
+                disabled={agenticModeSaving}
+                onClick={() => onAgenticModeChange?.(!agenticMode)}
+              >
+                <Bot className="size-3.5" />
+                <span className="flex-1">Toggle agentic mode</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {agenticMode ? "On" : "Off"}
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setModelDialogOpen(true)}
+                disabled={!modelProvider && !modelName}
+              >
+                <Wand2 className="size-3.5" />
+                <span className="flex-1">Change model</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => router.push("/settings")}>
+                <Settings className="size-3.5" />
+                <span className="flex-1">Open settings</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  router.push("/settings?tab=models&modelsTab=heretic")
+                }
+              >
+                <ShieldOff className="size-3.5" />
+                <span className="flex-1">Configure uncensored mode (Heretic)</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 

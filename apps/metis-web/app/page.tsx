@@ -181,7 +181,7 @@ const NODE_LABEL_PADDING_Y = 8;
 const NODE_LABEL_EDGE_MARGIN_PX = 14;
 const NODE_LABEL_CENTER_OFFSET_RATIO = 0.28;
 
-type CanvasTool = "select" | "grab";
+type CanvasTool = "select" | "grab" | "add";
 type StarFocusPhase = "idle" | "focusing" | "details-open" | "returning";
 
 interface CanvasBounds {
@@ -1203,6 +1203,16 @@ export default function Home() {
       return "Hand tool active. Drag the constellation to pan, then switch back to Select to claim, inspect, or reposition stars.";
     }
 
+    if (activeCanvasTool === "add") {
+      if (starLimit !== null && userStars.length >= starLimit) {
+        return "Constellation at capacity. Remove a star or reset the orbit to pull in another.";
+      }
+      if (hoveredAddCandidateId) {
+        return "Field star acquired. Click once to claim it, then name it and attach sources.";
+      }
+      return "Add mode active. Hover an empty spot in the constellation, then click to place a new star.";
+    }
+
     if (dragMessage) {
       return dragMessage;
     }
@@ -1212,7 +1222,7 @@ export default function Home() {
     }
 
     if (hoveredAddCandidateId) {
-      return "Field star acquired. Click once to claim it, then name it and attach sources.";
+      return "Field star acquired. Switch to Add mode to claim it.";
     }
 
     if (selectedUserStar && selectedStarFaculty) {
@@ -4958,7 +4968,12 @@ export default function Home() {
         return;
       }
 
-      const candidate = (starLimit === null || currentUserStars.length < starLimit)
+      // Audit fix #39: only the explicit "+Add" tool may create new user stars
+      // from a canvas click. SELECT mode now never silently materialises stars
+      // out of empty space — clicks on empty space fall through to catalogue-
+      // star inspection or selection-clear, matching what casual exploration
+      // expects.
+      const candidate = activeCanvasTool === "add" && (starLimit === null || currentUserStars.length < starLimit)
         ? getHoveredCandidate(e.clientX, e.clientY)
         : null;
 
@@ -5298,6 +5313,17 @@ export default function Home() {
             title="Hand tool for dragging the constellation"
           >
             Hand
+          </button>
+          <button
+            type="button"
+            className={`metis-zoom-pill-btn metis-zoom-pill-tool-btn ${activeCanvasTool === "add" ? "is-active" : ""}`}
+            onClick={() => setActiveCanvasTool("add")}
+            disabled={canvasInteractionsLocked}
+            aria-label="Add star tool"
+            aria-pressed={activeCanvasTool === "add"}
+            title="Add star — click an empty spot to place a new star"
+          >
+            +Add
           </button>
         </div>
         <div className="metis-zoom-pill-actions">
@@ -5731,12 +5757,16 @@ body {
   position: fixed; top: 0; left: 0;
   width: 100vw; height: 100vh; z-index: 2;
   background: transparent;
-  cursor: crosshair;
+  cursor: default;
   touch-action: none;
 }
 
 .metis-universe[data-canvas-tool="grab"] {
   cursor: grab;
+}
+
+.metis-universe[data-canvas-tool="add"] {
+  cursor: crosshair;
 }
 
 .metis-universe[data-pan-active="true"] {

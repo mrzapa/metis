@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPanel } from "../chat-panel";
@@ -15,6 +15,18 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+const mockPush = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: mockPush,
+    replace: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    refresh: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+}));
+
 vi.mock("@/components/chat/index-picker-dialog", () => ({
   IndexPickerDialog: () => null,
 }));
@@ -25,6 +37,7 @@ vi.mock("@/components/chat/model-status-dialog", () => ({
 
 describe("ChatPanel", () => {
   beforeEach(() => {
+    mockPush.mockClear();
     vi.stubGlobal(
       "IntersectionObserver",
       class {
@@ -43,11 +56,15 @@ describe("ChatPanel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows a Heretic shortcut that deep-links to models settings", () => {
+  it("exposes a Heretic shortcut via the more-options menu (audit item 45)", () => {
     render(<ChatPanel messages={[]} sessionMeta={null} />);
 
-    expect(screen.getByRole("link", { name: "Heretic" })).toHaveAttribute(
-      "href",
+    fireEvent.click(screen.getByRole("button", { name: "More options" }));
+
+    const heretic = screen.getByText(/Configure uncensored mode \(Heretic\)/i);
+    fireEvent.click(heretic);
+
+    expect(mockPush).toHaveBeenCalledWith(
       "/settings?tab=models&modelsTab=heretic",
     );
   });

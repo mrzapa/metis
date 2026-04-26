@@ -89,3 +89,4 @@ __pycache__/
 
 # repowise API keys (local)
 .repowise/.env
+.claude/scheduled_tasks.lock
