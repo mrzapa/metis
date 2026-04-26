@@ -5699,16 +5699,17 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Semantic-link search across the user's own added stars. Hidden
-          when the user hasn't added any stars yet — the affordance was
-          previously misleading (placeholder hinted "thread stars by
-          meaning" but the search has nothing to index until user stars
-          exist). Reappears the moment the user adds their first star. */}
-      {userStars.length > 0 && (
-        <div className={`metis-semantic-search ${semanticSearchExpanded ? "is-expanded" : ""}`}>
-          {/* Toggle button removed — the FAB radial menu is now the sole
-              entry point for expanding the semantic-search pill. The pill
-              itself still animates width via `is-expanded`. */}
+      {/* Semantic-link search across the user's own added stars.
+          Render gates:
+            1. At least one user star — search has nothing to index until
+               the user has added content.
+            2. Expanded via the FAB Search satellite. Previously this
+               pill rendered collapsed at 54px with the inner toggle
+               button removed, leaving a blank stub on the canvas
+               (audit item, 2026-04-26). The FAB satellite is now the
+               sole entry point and the pill mounts only when in use. */}
+      {userStars.length > 0 && semanticSearchExpanded && (
+        <div className="metis-semantic-search is-expanded">
           <input
             ref={semanticSearchInputRef}
             className="metis-semantic-search-input"
