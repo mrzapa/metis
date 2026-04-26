@@ -424,6 +424,96 @@ Filed from a live new-user click-through of `apps/metis-web` at localhost:3000 (
 
 Attack in the order **P0 → P1 visual → P1 perf → P2 IA → P2 copy → P3**. Each numbered item is intended to be a self-contained PR.
 
+### Status snapshot (2026-04-26)
+
+The audit is **mostly closed**. Remaining items are flagged below per phase. Closed items have a ✅ and a PR reference; parked items live in [`plans/IDEAS.md`](../plans/IDEAS.md) → *Iced*; nothing-to-do items have a 🟢.
+
+**PR map** — every closed item lands via one of these merged PRs:
+
+| PR | Merged | Scope |
+|---|---|---|
+| [#543](https://github.com/mrzapa/metis/pull/543) | 2026-04-25 | Initial audit doc filing + triage; reduced-motion sweep on PageChrome + OnboardingStep + 15 component reveals (audit Phase 1 item 1) |
+| [#547](https://github.com/mrzapa/metis/pull/547) | 2026-04-25 | All remaining audit Phase 1–6 items + Settings deep-dive items 47–53 + skill-pass refinements 35–46. The bulk of the audit. |
+| [#549](https://github.com/mrzapa/metis/pull/549) | (open) | GSAP ambient seedling-pulse widget — replaces the M13 "Seedling heartbeat" text rows with a 6-layer SVG widget driven by real `/v1/seedling/status` data. |
+
+**Remaining open items**:
+- Item 18 (blocked-URL/PII signal) — **parked in IDEAS.md *Iced***, awaiting reproduction
+- Item 5 (UI-editable API keys) — **parked**, posture decision tied to M17 Phase 8
+- Item 19 (home FCP ~696ms) — **parked**, not user-blocking
+- Catalogue-search-by-name affordance was dropped from the home page in PR #547 (sweep 6, agent A) when consolidating the three-sparkle-icon problem into the unified gold FAB. The component file (`apps/metis-web/components/constellation/catalogue-search-overlay.tsx`) and its tests still exist but are no longer mounted on `/`. **Open question**: fold it into the unified FAB's Threads-search satellite, or delete the dead code. Flag for future polish PR.
+
+**Phase 1 (P0 first-run blockers)** — all ✅ closed:
+- 1 ✅ PR #543 (PageChrome) + #547 (15 components)
+- 2 ✅ PR #547 (`first-run-banner.tsx` mounted on `/`)
+- 3 ✅ PR #547 (badge gated on `directChatReadiness` memo)
+- 4 ✅ PR #547 (structured 422 with config-error card)
+
+**Phase 2 (P1 visual / sprite)** — all ✅ closed:
+- 5 ✅ PR #547 (lens-flare → soft warm-gold gradient)
+- 6 ✅ PR #547 (sprite anchor — defensive half-pixel rounding)
+- 7 ✅ PR #547 (canvas DPR via `setTransform(dpr,...)` capped at 2)
+- 8 ✅ PR #547 (unified gold FAB with 3-satellite radial menu)
+- 9 🟢 PR #547 — investigated, could not reproduce at any common viewport width
+
+**Phase 3 (P1 perf / network)**:
+- 10 🟡 partially diagnosed by sweep 4 but not yet fixed (per-mount API fan-out: `/v1/assistant` ×3, `/v1/seedling/status` ×3, `/v1/settings` ×4, `/v1/sessions` ×2 within seconds)
+- 11 🟡 31.5-second long-poll connections held open by `/v1/comets/active` (×2) and `/v1/comets/events?poll_seconds=10` — flagged but not yet investigated
+- 12 (audit's "blocked URL with query-string data") = item 18 in IDEAS.md, parked
+
+**Phase 4 (P2 IA)** — all ✅ closed:
+- 13 ✅ PR #547 (Pipeline → Research log; nav unified)
+- 14 ✅ PR #547 (Diagnostics out of nav, behind Cmd/Ctrl+Shift+D)
+- 15 ⚠️ Forecast feature still implicit — Settings has Forecast (TimesFM) defaults but Chat path toggle is `Direct / RAG` only. Not addressed.
+- 16 ✅ PR #547 (`assistant_identity.minimized` defaults `true`; companion overlay starts collapsed)
+
+**Phase 5 (P2 onboarding / copy)** — mostly ✅ closed:
+- 17 ✅ PR #547 (step labels un-truncated to 1 word; WHAT THIS UNLOCKS sidebar dropped; duplicate STEP n OF 5 removed). Plus follow-up provider/embedding subtext + Credential posture removal in same PR.
+- 18 ✅ PR #547 (step tabs are 1-word now: Provider · API key · Embeddings · Index · Launch)
+- 19 ✅ PR #547 (heading voice neutralized — "Choose how I should embed" → "Choose your embedding provider"; "Add credentials only if I need them" → "Add an API key (optional)")
+- 20 ✅ PR #547 (auto-pair embedding default with chosen LLM provider until user touches it)
+- 21 ✅ PR #547 (chat toolbar tooltips on Agentic, Heretic, Direct, RAG, Change, model pill)
+- 22 ✅ PR #547 (astronomy glossary tooltips on Faculty Sigil, Stellar Identity, Spectral Class, Magnitude, palette swatches across 4 files)
+- 23 ✅ PR #547 (chat empty-state procedural prompt chips replace filler)
+
+**Phase 6 (P3 minor)** — all ✅ closed:
+- 24 ✅ PR #547 (Export PPTX hidden when no sources)
+
+**Skill-pass refinements (items 35–46)** — all ✅ closed:
+- 35 ✅ PR #547 (anthropic/mock pill clickable)
+- 36 ✅ PR #547 (Provider dropdown with 8 supported providers; Model placeholder per provider)
+- 37 ✅ PR #547 (WebGPU plug-and-play wizard fork — single-click to /chat)
+- 38 ✅ PR #547 ("Heretic" chat-toolbar pill — kept visible, tooltip explains it now)
+- 39 🟡 Star-creation on canvas-click — flagged but not yet refactored to a dedicated mode
+- 40 🟡 CSV-only attach icon — title attr added in PR #547 sweep 6 but icon itself unchanged
+- 41 🟢 Investigated — already correctly OFF at schema level; was a local override
+- 42 🟡 Outline tab still empty placeholder
+- 43 🟡 Trace tab still surfaces dev events to non-dev users
+- 44 ✅ PR #547 (third-person Companion overlay voice)
+- 45 🟡 Chat toolbar progressive disclosure not implemented (the `⋯` menu wrap)
+- 46 ✅ PR #547 (Heretic href `[BLOCKED]` issue resolved alongside the structured 422 work)
+
+**Settings deep-dive (items 47–53)** — all ✅ closed:
+- 47 ✅ PR #547 (`enable_recursive_memory` defaults ON)
+- 48 ✅ PR #547 (archetype renamed to "Local-first research companion")
+- 49 🟡 Privacy & network audit still 3 clicks deep — promotion to header pill not implemented
+- 50 ✅ PR #547 (raw setting-key references → friendly Link with deep-link)
+- 51 ✅ PR #547 (`?tab=` deep-link works)
+- 52 🟢 Investigated — already sticky-bottom from earlier commit; audit was stale
+- 53 ✅ PR #547 (companion overlay default-collapsed via server-side flip; cross-page coverage resolved)
+
+**Items still 🟡 open and worth a future polish PR**:
+- Phase 3 items 10 + 11 (per-mount API fan-out, long-poll consolidation)
+- Item 15 (expose Forecast in chat path or remove orphan settings)
+- Item 39 (star-creation as explicit mode)
+- Item 40 (CSV attach icon — replace generic icon with sparkline glyph)
+- Item 42 (Outline tab — implement or hide)
+- Item 43 (Trace tab — gate behind Developer mode)
+- Item 45 (Chat toolbar `⋯` progressive disclosure)
+- Item 49 (Promote Privacy & network audit to a header pill)
+- Catalogue-search-by-name affordance — fold into FAB or delete
+
+These are net-new follow-up items, not regressions. Keep this snapshot up to date as future PRs close items.
+
 ### Phase 1 — P0 first-run blockers (1–2 days)
 
 1. **Reduced-motion reveal bug.** Elements get `style="opacity: 0; transform: translateY(…)"` as the initial state; under `prefers-reduced-motion: reduce` the reveal animation never fires (transition is `1e-06s` but the trigger is gated). Verified on Pipeline (`<h3>No entries yet</h3>` + empty-state copy at computed opacity 0) and on Chat right after the wizard's *Finish and open chat*. Fix: audit every `whileInView` / motion-style reveal in `apps/metis-web` and ensure the final state is unconditionally applied when `useReducedMotion()` is true (no opacity-0 starting state). This is the dominant source of "lag in many places" the user reported.
