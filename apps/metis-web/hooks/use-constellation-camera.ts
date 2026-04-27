@@ -189,7 +189,17 @@ export function useConstellationCamera(
           zoomVelocityRef.current =
             zoomVelocityRef.current * zoomSpringDamping
             + zoomDelta * zoomSpringStiffness;
-          zoomRef.current = zoomRef.current + zoomVelocityRef.current;
+          const nextZoom = zoomRef.current + zoomVelocityRef.current;
+          const clampedZoom = clampBackgroundZoomFactor(nextZoom);
+          zoomRef.current = clampedZoom;
+          // If the spring would have overshot the catalogue clamp,
+          // kill the velocity so the spring doesn't keep pushing past
+          // the wall — otherwise downstream math (e.g.
+          // `Math.log2(zoomFactor + 1)`) would receive a stale velocity
+          // hint while the position is pinned.
+          if (clampedZoom !== nextZoom) {
+            zoomVelocityRef.current = 0;
+          }
         } else {
           const zoomEase = zoomRef.current > STAR_DIVE_ZOOM_THRESHOLD
             ? diveZoomEase
