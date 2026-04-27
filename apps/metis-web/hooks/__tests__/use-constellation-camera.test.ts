@@ -108,4 +108,68 @@ describe("useConstellationCamera", () => {
     // Halfway through 0.7s matches cubicOutEasing(0.5) = 0.875.
     expect(result.current.easeDive(CONSTELLATION_DIVE_DURATION_MS / 2)).toBeCloseTo(0.875, 5);
   });
+
+  describe("zoom spring (opt-in)", () => {
+    it("starts moving slowly on the first step (velocity ramps up)", () => {
+      const { result } = renderHook(() =>
+        useConstellationCamera({ zoomSpring: true }),
+      );
+      act(() => {
+        result.current.setZoomTarget(2);
+        result.current.stepCamera({ reducedMotion: false });
+      });
+      // Spring's first step delta = stiffness * delta = 0.085 * 1 = 0.085.
+      const firstStep = result.current.zoomRef.current - 1;
+      expect(firstStep).toBeGreaterThan(0);
+      expect(firstStep).toBeLessThan(0.12);
+    });
+
+    it("eventually settles at the target after many steps", () => {
+      const { result } = renderHook(() =>
+        useConstellationCamera({ zoomSpring: true }),
+      );
+      act(() => {
+        result.current.setZoomTarget(2);
+        for (let i = 0; i < 400; i++) {
+          result.current.stepCamera({ reducedMotion: false });
+        }
+      });
+      expect(result.current.zoomRef.current).toBeCloseTo(2, 3);
+    });
+
+    it("can briefly overshoot the target (felt weight)", () => {
+      const { result } = renderHook(() =>
+        useConstellationCamera({
+          zoomSpring: true,
+          zoomSpringStiffness: 0.12,
+          zoomSpringDamping: 0.78,
+        }),
+      );
+      act(() => {
+        result.current.setZoomTarget(2);
+      });
+      let peak = 1;
+      for (let i = 0; i < 80; i++) {
+        act(() => {
+          result.current.stepCamera({ reducedMotion: false });
+        });
+        peak = Math.max(peak, result.current.zoomRef.current);
+      }
+      // Loose bounds — assert overshoot exists without pinning down the
+      // exact stiffness/damping curve. Cap at 35% to catch wild tuning.
+      expect(peak).toBeGreaterThan(2);
+      expect(peak).toBeLessThan(2.7);
+    });
+
+    it("snaps under reduced motion even when spring is enabled", () => {
+      const { result } = renderHook(() =>
+        useConstellationCamera({ zoomSpring: true }),
+      );
+      act(() => {
+        result.current.setZoomTarget(5);
+        result.current.stepCamera({ reducedMotion: true });
+      });
+      expect(result.current.zoomRef.current).toBe(5);
+    });
+  });
 });
