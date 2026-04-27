@@ -3182,7 +3182,12 @@ export default function Home() {
       // Pitch in radians — controls how tight the arms wrap.
       const pitch = 0.34;
 
-      const armBaseAlpha = 0.12 * envelope;
+      // Slow ambient breath on the arms — period ~36s, ±9% amplitude.
+      // Reads as "the galaxy has a heartbeat" without ever being
+      // distracting. Galactic core gets the same modulation so the
+      // structure pulses as a unit.
+      const breath = 1 + Math.sin((tMs / 36_000) * Math.PI * 2) * 0.09;
+      const armBaseAlpha = 0.12 * envelope * breath;
 
       for (let armIdx = 0; armIdx < armCount; armIdx++) {
         const armOffset = (armIdx / armCount) * Math.PI * 2;
@@ -3230,8 +3235,9 @@ export default function Home() {
 
       // Galactic core — small bright puff anchored at the centre.
       // Drawn after the arms so the core sits cleanly on top of any
-      // arm dust that intersects the centre region.
-      const coreAlpha = 0.32 * envelope;
+      // arm dust that intersects the centre region. Same breath as
+      // the arms so the galaxy modulates as a unit.
+      const coreAlpha = 0.32 * envelope * breath;
       const coreRadius = Math.min(W, H) * 0.13;
       const coreGrad = ctx!.createRadialGradient(cx, cy, 0, cx, cy, coreRadius);
       coreGrad.addColorStop(0, `rgba(255, 226, 178, ${coreAlpha})`);
