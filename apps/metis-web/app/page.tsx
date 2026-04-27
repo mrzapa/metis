@@ -939,7 +939,12 @@ export default function Home() {
     width: 0,
     height: 0,
   });
-  const constellationCamera = useConstellationCamera();
+  // Opt into spring-eased zoom. Linear lerp felt mechanical — the spring
+  // gives the camera a small overshoot + settle so zoom changes carry
+  // weight. Tuned for ~5-8% overshoot before settling. Dive-zone arcs
+  // are unaffected (the spring branch only fires below the dive zoom
+  // threshold).
+  const constellationCamera = useConstellationCamera({ zoomSpring: true });
   const backgroundCameraOriginRef = constellationCamera.originRef;
   const backgroundCameraTargetOriginRef = constellationCamera.targetOriginRef;
   const backgroundZoomRef = constellationCamera.zoomRef;
