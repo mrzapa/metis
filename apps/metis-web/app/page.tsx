@@ -2781,6 +2781,21 @@ export default function Home() {
       reducedMotionFlag: boolean,
     ): { x: number; y: number } {
       if (reducedMotionFlag) return { x: 0, y: 0 };
+      // Sentinel guard — `mouse` is initialized to {-1000, -1000} until
+      // the first pointermove fires. Coarse / touch-only sessions and
+      // initial renders never see a real position; treating that as a
+      // valid offset would clamp the parallax to its maximum and leave
+      // the WebGL backdrop permanently shifted (Codex review on PR
+      // #568). Bail to zero parallax until we actually see the pointer
+      // inside the viewport.
+      if (
+        mouse.x < 0
+        || mouse.y < 0
+        || mouse.x > viewportW
+        || mouse.y > viewportH
+      ) {
+        return { x: 0, y: 0 };
+      }
       // Normalize the cursor offset from centre to roughly -1..1 across
       // the viewport diagonal, then scale to produce a max ~12px shift
       // on the field tier (which receives the full parallax). Sprite,

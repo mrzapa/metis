@@ -82,10 +82,15 @@ void main() {
   float heroGlow = aShape.w > 1.5 ? 1.0 + aColorC.w * 0.32 : 1.0;
   float zoomSizeScale = mix(0.15, 1.0, smoothstep(0.0, 0.4, uZoomScale));
 
-  // Depth-of-field-like falloff from the dive focus centre. The focused star
-  // (closeup tier, aShape.w > 2.5) keeps its full size; ambient stars dim and
-  // bloom outward as the viewer settles on the target.
-  float focusDist = distance(position.xy, uFocusCenter);
+  // Depth-of-field-like falloff from the dive focus centre. Computed
+  // from displacedPosition (post mouse-parallax) so the spotlight
+  // stays aligned with the rendered star positions when the cursor
+  // shifts the backdrop. Using the original position.xy would put
+  // the DoF radius out of sync with where the stars actually paint
+  // (Codex review on PR #568). The focused star (closeup tier,
+  // aShape.w > 2.5) keeps its full size; ambient stars dim and bloom
+  // outward as the viewer settles on the target.
+  float focusDist = distance(displacedPosition.xy, uFocusCenter);
   float outsideFocus = smoothstep(uFocusRadius, uFocusRadius + max(1.0, uFocusFalloff), focusDist);
   float isFocused = step(2.5, aShape.w);
   float falloff = outsideFocus * uFocusStrength * (1.0 - isFocused);
