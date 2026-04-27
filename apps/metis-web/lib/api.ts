@@ -2788,6 +2788,21 @@ function emitSeedlingActivityEvents(status: SeedlingStatus): void {
         : `${event.timestamp}:${event.state}:${event.summary}`;
     if (seenSeedlingActivityEventIds.has(eventId)) continue;
     seenSeedlingActivityEventIds.add(eventId);
+    // Drop lifecycle heartbeats. The Phase 2 worker emits one of these
+    // every tick (``state: "running"`` + ``trigger: "lifecycle"``) for
+    // boot_id tracking. They are not user-facing — the dock's
+    // sigil-pulse already skips them. Filter here at the single emit
+    // point so every subscriber (thought log, unseen-count badge,
+    // future listeners) inherits the rule. Real Seedling activity
+    // (Phase 3 comets, Phase 4 reflections, Phase 5 stage transitions,
+    // Phase 6 brain links) carries different state / trigger combos
+    // and flows through unchanged.
+    if (
+      event.state === "running" &&
+      (event.trigger || "lifecycle") === "lifecycle"
+    ) {
+      continue;
+    }
     emitCompanionActivity({
       ...event,
       source: "seedling",
