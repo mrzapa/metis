@@ -94,7 +94,12 @@ describe("fetchSeedlingStatus", () => {
     vi.restoreAllMocks();
   });
 
-  it("emits buffered Seedling activity through the companion bus once", async () => {
+  it("filters lifecycle heartbeat events from the companion bus", async () => {
+    // Phase 2's tick emits ``state: "running"`` / ``trigger: "lifecycle"``
+    // with summary "Seedling heartbeat" every cycle for boot_id tracking.
+    // These are not user-facing — the dock's sigil-pulse already skips
+    // them, and the thought log should too. Filter at the bridge so
+    // every subscriber inherits the rule.
     const events: unknown[] = [];
     const unsubscribe = subscribeCompanionActivity((event) => events.push(event));
     const payload = {
@@ -110,7 +115,44 @@ describe("fetchSeedlingStatus", () => {
           trigger: "lifecycle",
           summary: "Seedling heartbeat",
           timestamp: 1770000000000,
-          payload: { event_id: "seedling-test-emit-once-1", boot_id: "test-emit-once" },
+          payload: { event_id: "seedling-heartbeat-1", boot_id: "test-heartbeat" },
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(payload),
+      }),
+    );
+
+    await fetchSeedlingStatus();
+    unsubscribe();
+
+    expect(events).toEqual([]);
+  });
+
+  it("emits non-heartbeat Seedling activity through the companion bus once", async () => {
+    // Real activity (anything not matching the lifecycle-heartbeat
+    // signature) must still reach subscribers, and the boot_id dedup
+    // machinery must still ensure each event_id only fires once.
+    const events: unknown[] = [];
+    const unsubscribe = subscribeCompanionActivity((event) => events.push(event));
+    const payload = {
+      running: true,
+      last_tick_at: "2026-04-24T20:00:00+00:00",
+      current_stage: "seedling",
+      next_action_at: "2026-04-24T20:01:00+00:00",
+      queue_depth: 0,
+      activity_events: [
+        {
+          source: "seedling",
+          state: "completed",
+          trigger: "comet_absorbed",
+          summary: "Absorbed news comet: GPU prices drop",
+          timestamp: 1770000000000,
+          payload: { event_id: "seedling-real-1", boot_id: "test-emit-once" },
         },
       ],
     };
@@ -129,8 +171,8 @@ describe("fetchSeedlingStatus", () => {
     expect(events).toEqual([
       expect.objectContaining({
         source: "seedling",
-        state: "running",
-        summary: "Seedling heartbeat",
+        state: "completed",
+        summary: "Absorbed news comet: GPU prices drop",
       }),
     ]);
   });
