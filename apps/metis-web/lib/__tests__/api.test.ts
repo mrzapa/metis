@@ -190,9 +190,13 @@ describe("fetchSeedlingStatus", () => {
         queue_depth: 0,
         activity_events: [
           {
+            // Use a non-heartbeat shape so the heartbeat filter at the
+            // activity bridge does not drop the fixture — the dedup
+            // mechanism this test exercises is independent of state /
+            // trigger.
             source: "seedling",
-            state: "running",
-            trigger: "lifecycle",
+            state: "completed",
+            trigger: "comet_absorbed",
             summary,
             timestamp: 1770000000000,
             payload: { event_id: `seedling-${bootId}-1`, boot_id: bootId },
