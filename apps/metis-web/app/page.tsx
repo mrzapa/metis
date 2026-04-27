@@ -6226,6 +6226,26 @@ body {
   justify-content: space-between;
   gap: 14px;
   text-align: left;
+  /* Slide + fade in from above so toasts read as arriving from the
+     top frame rather than blinking into existence. */
+  animation: metis-toast-enter 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes metis-toast-enter {
+  from {
+    transform: translate(-50%, -12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(-50%);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .metis-toast {
+    animation: none;
+  }
 }
 
 .metis-toast.error {
