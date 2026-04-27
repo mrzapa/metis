@@ -179,6 +179,119 @@ def test_assistant_service_snapshot_and_reflect_updates_repository(tmp_path, mon
     assert result["snapshot"]["status"]["last_reflection_trigger"] == "completed_run"
 
 
+def test_reflect_emits_brain_link_created_activity_event(tmp_path, monkeypatch) -> None:
+    """Phase 6 follow-up: a successful ``reflect()`` that wrote brain
+    links emits exactly one ``kind="brain_link_created"`` activity
+    event with a payload listing the new links. The brain-graph view
+    subscribes to this to pulse the matching edges."""
+    from metis_app.seedling.activity import (
+        clear_seedling_activity_events,
+        list_seedling_activity_events,
+    )
+
+    clear_seedling_activity_events()
+
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+    settings = {
+        "assistant_identity": {
+            "assistant_id": "metis-companion",
+            "name": "Guide",
+            "archetype": "Research companion",
+            "companion_enabled": True,
+        },
+        "assistant_runtime": {
+            "provider": "",
+            "model": "",
+            "fallback_to_primary": False,
+        },
+        "assistant_policy": {
+            "reflection_enabled": True,
+            "reflection_backend": "heuristic",
+            "max_memory_entries": 4,
+            "max_playbooks": 2,
+            "max_brain_links": 8,
+        },
+        "llm_provider": "mock",
+        "llm_model": "mock-v1",
+    }
+
+    monkeypatch.setattr(
+        service,
+        "_generate_reflection",
+        lambda *args, **kwargs: {
+            "title": "Learned from a completed run",
+            "summary": "Captured a short next step.",
+            "details": "Keep it concise.",
+            "why": "A completed run gives useful context.",
+            "confidence": 0.9,
+            "tags": ["completed_run"],
+            "related_node_ids": ["session:sess-1"],
+            "playbook_title": "Follow-up pattern",
+            "playbook_bullets": ["Lead with the next step."],
+        },
+    )
+
+    result = service.reflect(
+        trigger="completed_run",
+        settings=settings,
+        session_id="sess-1",
+        run_id="run-1",
+    )
+    assert result["ok"] is True
+    new_links = result["brain_links"]
+    assert len(new_links) >= 1
+
+    events = list_seedling_activity_events()
+    brain_link_events = [e for e in events if e.get("kind") == "brain_link_created"]
+    assert len(brain_link_events) == 1, (
+        "Expected exactly one brain_link_created event per reflect() call"
+    )
+    event = brain_link_events[0]
+    assert event["state"] == "completed"
+    assert event["trigger"] == "completed_run"
+    payload_links = event["payload"]["status"]["links"]
+    assert len(payload_links) == len(new_links)
+    # Every emitted link carries the three triple fields the brain-graph
+    # subscriber needs to find the matching edge.
+    for link in payload_links:
+        assert "source_node_id" in link
+        assert "target_node_id" in link
+        assert "relation" in link
+    # The event also carries the memory entry id so the frontend can
+    # correlate the pulse with the originating reflection.
+    assert event["payload"]["status"]["memory_entry_id"] == result["memory_entry"]["entry_id"]
+
+
+def test_reflect_does_not_emit_brain_link_created_when_reflection_skipped(
+    tmp_path, monkeypatch
+) -> None:
+    """If ``reflect()`` short-circuits (assistant disabled, cooldown,
+    duplicate), no brain links are written and no
+    ``brain_link_created`` event is emitted."""
+    from metis_app.seedling.activity import (
+        clear_seedling_activity_events,
+        list_seedling_activity_events,
+    )
+
+    clear_seedling_activity_events()
+
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+    # Companion disabled → reflect short-circuits before brain-link write.
+    settings = {
+        "assistant_identity": {"companion_enabled": False},
+        "assistant_policy": {"reflection_enabled": True},
+    }
+
+    result = service.reflect(trigger="completed_run", settings=settings)
+    assert result["ok"] is False
+
+    events = list_seedling_activity_events()
+    brain_link_events = [e for e in events if e.get("kind") == "brain_link_created"]
+    assert brain_link_events == []
+
+
 def test_assistant_service_dedupes_by_context_for_non_chat_reflections(
     tmp_path,
     monkeypatch,

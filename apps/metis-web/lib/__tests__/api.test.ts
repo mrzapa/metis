@@ -135,6 +135,79 @@ describe("fetchSeedlingStatus", () => {
     ]);
   });
 
+  it("propagates brain_link_created events through the companion bus with the kind field intact", async () => {
+    // Phase 6 follow-up: ``reflect()`` emits a ``kind: "brain_link_created"``
+    // CompanionActivityEvent each time it writes new ``AssistantBrainLink``
+    // rows. The brain-graph view subscribes to this via the same bus
+    // and pulses the matching edges. Round-trip the kind field so a
+    // future bridge change can't silently drop it.
+    const events: unknown[] = [];
+    const unsubscribe = subscribeCompanionActivity((event) => events.push(event));
+    const payload = {
+      running: true,
+      last_tick_at: "2026-04-26T20:00:00+00:00",
+      current_stage: "sapling",
+      next_action_at: "2026-04-26T20:01:00+00:00",
+      queue_depth: 0,
+      activity_events: [
+        {
+          source: "seedling",
+          state: "completed",
+          trigger: "completed_run",
+          kind: "brain_link_created",
+          summary: "Linked 3 new brain edges",
+          timestamp: 1770000200000,
+          payload: {
+            event_id: "seedling-brain-link-1",
+            boot_id: "test-brain-link",
+            status: {
+              memory_entry_id: "abc-123",
+              links: [
+                {
+                  source_node_id: "memory:abc-123",
+                  target_node_id: "assistant:metis",
+                  relation: "learned_from_session",
+                },
+                {
+                  source_node_id: "assistant:metis",
+                  target_node_id: "memory:abc-123",
+                  relation: "remembers",
+                },
+              ],
+            },
+          },
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(payload),
+      }),
+    );
+
+    await fetchSeedlingStatus();
+    unsubscribe();
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        source: "seedling",
+        kind: "brain_link_created",
+        state: "completed",
+        summary: "Linked 3 new brain edges",
+      }),
+    );
+    // The payload carries the link-triple list the brain-graph
+    // subscriber needs to spawn flashes.
+    const event = events[0] as {
+      payload?: { status?: { links?: unknown[]; memory_entry_id?: string } };
+    };
+    expect(event.payload?.status?.links).toHaveLength(2);
+    expect(event.payload?.status?.memory_entry_id).toBe("abc-123");
+  });
+
   it("re-emits replayed sequence numbers when the worker boot_id changes", async () => {
     const events: unknown[] = [];
     const unsubscribe = subscribeCompanionActivity((event) => events.push(event));

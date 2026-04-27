@@ -104,6 +104,55 @@ def test_activity_bridge_records_companion_activity_payload() -> None:
     assert events[0]["payload"]["status"] == {"running": False}
 
 
+def test_activity_bridge_propagates_brain_link_created_kind() -> None:
+    """Phase 6 follow-up: ``kind="brain_link_created"`` is now in the
+    bridge's allow-list. Events with that kind survive the filter
+    (older Phase 4 / 5 kinds also keep working)."""
+    clear_seedling_activity_events()
+    record_seedling_activity(
+        {
+            "state": "completed",
+            "kind": "brain_link_created",
+            "summary": "Linked memory:abc → assistant:metis",
+            "status": {
+                "links": [
+                    {
+                        "source_node_id": "memory:abc",
+                        "target_node_id": "assistant:metis",
+                        "relation": "learned_from_session",
+                    }
+                ],
+            },
+        }
+    )
+
+    events = list_seedling_activity_events()
+    assert len(events) == 1
+    assert events[0]["kind"] == "brain_link_created"
+    assert events[0]["state"] == "completed"
+    assert events[0]["payload"]["status"]["links"][0]["relation"] == "learned_from_session"
+
+
+def test_activity_bridge_drops_unknown_kind_silently() -> None:
+    """Forward-compat guard: unknown ``kind`` values are dropped from
+    the event (the rest of the payload still flows through). Catches
+    a regression where adding a new kind to the allow-list breaks the
+    drop-unknown-kind contract."""
+    clear_seedling_activity_events()
+    record_seedling_activity(
+        {
+            "state": "completed",
+            "kind": "this_kind_does_not_exist",
+            "summary": "Future event",
+        }
+    )
+
+    events = list_seedling_activity_events()
+    assert len(events) == 1
+    assert "kind" not in events[0]
+    assert events[0]["summary"] == "Future event"
+
+
 def test_activity_bridge_rotates_boot_id_after_clear() -> None:
     clear_seedling_activity_events()
     boot_a = get_seedling_activity_boot_id()
