@@ -3436,6 +3436,30 @@ export default function Home() {
         const haloCenterY = py + profile.asymmetryOffset.y * sz * 1.8;
         const auraRadius = sz * (2.8 + profile.coreIntensity * 0.72 + ringCount * 0.14);
 
+        // Spawn shockwave — two concentric rings expand outward from the
+        // new star's position during the ignition window. Drawn first so
+        // the halo + core paint over the rings near the centre, leaving
+        // only the expanding outer arc visible. Skipped when spawnFlash
+        // has decayed (steady-state rendering byte-identical).
+        if (spawnFlash > 0.001) {
+          // Map the existing spawnFlash 0..1 envelope onto an expansion
+          // 0..1 by undoing its peak: t≈0 at peak (just after spawn) so
+          // rings start small, reach max at t≈1 as flash decays.
+          const expand = 1 - spawnFlash;
+          for (let ringIdx = 0; ringIdx < 2; ringIdx++) {
+            const ringDelay = ringIdx * 0.18;
+            const ringExpand = Math.max(0, expand - ringDelay) / Math.max(0.0001, 1 - ringDelay);
+            if (ringExpand <= 0 || ringExpand >= 1) continue;
+            const ringRadius = sz * (1.4 + ringExpand * 7.5);
+            const ringAlpha = (1 - ringExpand) * (1 - ringExpand) * 0.55 * fadeIn;
+            ctx!.strokeStyle = `rgba(${haloColor[0]},${haloColor[1]},${haloColor[2]},${ringAlpha})`;
+            ctx!.lineWidth = 1.4;
+            ctx!.beginPath();
+            ctx!.arc(px, py, ringRadius, 0, Math.PI * 2);
+            ctx!.stroke();
+          }
+        }
+
         // Spawn-flash bonus on halo brightness — kicks in only during the
         // ignition window and decays to zero, so steady-state rendering is
         // identical to before the cinematic landed.
