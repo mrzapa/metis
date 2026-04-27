@@ -2866,9 +2866,17 @@ export default function Home() {
       // Built alongside the existing visibleStarProfiles map below.
       const visibleStarFilterMap = new Map<string, { profile: StellarProfile; apparentMagnitude: number }>();
 
+      // Pan parallax — background layers drift slower than foreground.
+      // Layer 0 = closest (full camera follow), layer 2 = farthest
+      // (~74% follow). Gives the cosmos a felt sense of depth on pan
+      // without touching zoom (foreground/background still scale
+      // together so the relative size hierarchy stays intact).
+      const PARALLAX_FOLLOW = [1, 0.86, 0.74] as const;
       visibleWorldStars.forEach((worldStar) => {
-        const screenX = (worldStar.worldX - backgroundCamera.x) * scale + W / 2;
-        const screenY = (worldStar.worldY - backgroundCamera.y) * scale + H / 2;
+        const follow =
+          PARALLAX_FOLLOW[worldStar.layer] ?? PARALLAX_FOLLOW[0];
+        const screenX = (worldStar.worldX - backgroundCamera.x * follow) * scale + W / 2;
+        const screenY = (worldStar.worldY - backgroundCamera.y * follow) * scale + H / 2;
 
         if (
           screenX < -BACKGROUND_TILE_PADDING_PX
