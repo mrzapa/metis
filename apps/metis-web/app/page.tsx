@@ -3093,6 +3093,78 @@ export default function Home() {
       lastVisibleStarfieldY = backgroundCamera.y;
     }
 
+    /**
+     * Soft elliptical galactic-plane band at the cosmic centre. Visible
+     * from default zoom and most prominent when zoomed out — sells the
+     * "you're inside a galaxy" feel that ambient field stars alone
+     * can't carry. Two stacked gradients:
+     *   1. The wide spine — long ellipse along the galactic plane.
+     *   2. The bright core — small radial puff at the centre.
+     * Fades to nothing once the user has zoomed past local-cluster
+     * scale (>4×) so it never competes with closeup star detail.
+     * Slow rotation in time so the band reads as drifting through
+     * space, not a static painting.
+     */
+    function drawGalacticBand(tMs: number, zoomFactor: number) {
+      // Visibility envelope: full at zoom < 0.5, ramps down to 0 at >4.
+      let envelope: number;
+      if (zoomFactor < 0.5) envelope = 1;
+      else if (zoomFactor < 4) envelope = 1 - (zoomFactor - 0.5) / 3.5;
+      else envelope = 0;
+      if (envelope < 0.02) return;
+
+      const cx = W / 2 + (mouse.x - W / 2) * 0.003;
+      const cy = H / 2 + (mouse.y - H / 2) * 0.003;
+      // Slow rotation so the spine drifts across screen — period ~5 min.
+      const angle = (tMs / 300_000) * Math.PI * 2 - Math.PI * 0.18;
+      const major = Math.max(W, H) * 1.45;
+      const minor = major * 0.085;
+
+      ctx!.save();
+      ctx!.translate(cx, cy);
+      ctx!.rotate(angle);
+
+      // Wide spine — soft cool dust along the galactic plane.
+      const spineGrad = ctx!.createLinearGradient(-major / 2, 0, major / 2, 0);
+      const spineAlpha = 0.18 * envelope;
+      spineGrad.addColorStop(0, "rgba(0,0,0,0)");
+      spineGrad.addColorStop(0.18, `rgba(70, 90, 165, ${spineAlpha * 0.4})`);
+      spineGrad.addColorStop(0.5, `rgba(120, 140, 220, ${spineAlpha})`);
+      spineGrad.addColorStop(0.82, `rgba(70, 90, 165, ${spineAlpha * 0.4})`);
+      spineGrad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx!.fillStyle = spineGrad;
+      ctx!.beginPath();
+      ctx!.ellipse(0, 0, major / 2, minor, 0, 0, Math.PI * 2);
+      ctx!.fill();
+
+      // Inner brighter band — narrower and richer.
+      const innerGrad = ctx!.createLinearGradient(-major * 0.35, 0, major * 0.35, 0);
+      const innerAlpha = 0.22 * envelope;
+      innerGrad.addColorStop(0, "rgba(0,0,0,0)");
+      innerGrad.addColorStop(0.5, `rgba(180, 195, 240, ${innerAlpha})`);
+      innerGrad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx!.fillStyle = innerGrad;
+      ctx!.beginPath();
+      ctx!.ellipse(0, 0, major * 0.35, minor * 0.45, 0, 0, Math.PI * 2);
+      ctx!.fill();
+
+      ctx!.restore();
+
+      // Galactic core — small bright puff at the centre. Drawn after
+      // the band rotates back to identity so the core stays anchored.
+      const coreAlpha = 0.32 * envelope;
+      const coreRadius = Math.min(W, H) * 0.12;
+      const coreGrad = ctx!.createRadialGradient(cx, cy, 0, cx, cy, coreRadius);
+      coreGrad.addColorStop(0, `rgba(255, 226, 178, ${coreAlpha})`);
+      coreGrad.addColorStop(0.32, `rgba(195, 168, 232, ${coreAlpha * 0.45})`);
+      coreGrad.addColorStop(0.7, `rgba(80, 110, 180, ${coreAlpha * 0.18})`);
+      coreGrad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx!.fillStyle = coreGrad;
+      ctx!.beginPath();
+      ctx!.arc(cx, cy, coreRadius, 0, Math.PI * 2);
+      ctx!.fill();
+    }
+
     function drawNebulae(tMs: number) {
       const tSec = tMs / 1000;
       nebulae.forEach(n => {
@@ -4448,6 +4520,9 @@ export default function Home() {
         ctx!.globalAlpha = Math.max(0, canvasOverlayAlpha);
       }
 
+      // Galactic band sits underneath nebulae and dust so they layer
+      // on top — band is the deepest backdrop element on the 2D canvas.
+      drawGalacticBand(ts, backgroundZoomRef.current);
       drawNebulae(ts);
       drawDust();
 
