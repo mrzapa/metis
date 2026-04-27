@@ -42,6 +42,14 @@ export interface LandingStarfieldFrame {
   /** Pixel width over which DoF ramps in from `focusRadius` outward. */
   focusFalloff?: number;
   /**
+   * Mouse-driven parallax offset in shader-space pixels. The shader
+   * subtracts this scaled by tier (field full, sprite half, hero
+   * quarter, closeup zero) so the cursor's position from viewport
+   * centre fakes a 3D parallax effect. Both axes default to 0.
+   */
+  mouseParallaxX?: number;
+  mouseParallaxY?: number;
+  /**
    * M02 Phase 7.3 — respect `prefers-reduced-motion: reduce`. When true, the
    * WebGL shader freezes its `uTime` uniform so twinkle, archetype pulsation,
    * and Phase 6 satellite orbits all halt. Callers update this flag in sync

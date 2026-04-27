@@ -2760,6 +2760,38 @@ export default function Home() {
     }
 
     /**
+     * Compute mouse-driven parallax offset for the WebGL backdrop.
+     * Returns a small (x, y) shift in shader-space pixels that the
+     * vertex shader subtracts (scaled per tier) so background stars
+     * appear to drift opposite to the cursor — fakes 3D depth without
+     * any geometry change. Disabled under reduced motion.
+     */
+    function computeMouseParallax(
+      viewportW: number,
+      viewportH: number,
+      reducedMotionFlag: boolean,
+    ): { x: number; y: number } {
+      if (reducedMotionFlag) return { x: 0, y: 0 };
+      // Normalize the cursor offset from centre to roughly -1..1 across
+      // the viewport diagonal, then scale to produce a max ~12px shift
+      // on the field tier (which receives the full parallax). Sprite,
+      // hero, and closeup tiers attenuate this in the vertex shader.
+      const half = Math.max(viewportW, viewportH) * 0.5 || 1;
+      const PARALLAX_MAX_PX = 14;
+      const dx = ((mouse.x - viewportW * 0.5) / half) * PARALLAX_MAX_PX;
+      const dy = ((mouse.y - viewportH * 0.5) / half) * PARALLAX_MAX_PX;
+      // Clamp so corner-of-screen mouse positions don't punch the shift
+      // outside the intended envelope.
+      const clamp = (v: number) =>
+        v < -PARALLAX_MAX_PX
+          ? -PARALLAX_MAX_PX
+          : v > PARALLAX_MAX_PX
+            ? PARALLAX_MAX_PX
+            : v;
+      return { x: clamp(dx), y: clamp(dy) };
+    }
+
+    /**
      * Apply the latest focus uniforms to the WebGL frame ref without
      * rebuilding the whole frame. Cheap — does not bump revision, so
      * the WebGL geometry pass is skipped. Runs every animation frame
@@ -2781,6 +2813,11 @@ export default function Home() {
       atmFocus.centerX = focus.centerX;
       atmFocus.centerY = focus.centerY;
       atmFocus.strength = focus.strength;
+      // Mouse parallax also lives outside the geometry-rebuild gate so
+      // pointer moves on a settled camera still translate field stars.
+      const parallax = computeMouseParallax(viewportW, viewportH, reducedMotion);
+      frame.mouseParallaxX = parallax.x;
+      frame.mouseParallaxY = parallax.y;
     }
 
     function refreshVisibleStars(backgroundCamera: BackgroundCameraState) {
@@ -3072,6 +3109,11 @@ export default function Home() {
         : null;
       const zoomNorm = Math.log2(Math.max(0.002, backgroundCamera.zoomFactor) + 1) / Math.log2(2001);
       const focus = computeFocusUniforms(W, H);
+      // Mouse parallax — pointer offset from viewport centre, scaled
+      // down so even fast mouse moves only shift background stars by
+      // ~12px. Reduced motion disables it entirely (skip computation
+      // since the shader will subtract zero anyway).
+      const parallax = computeMouseParallax(W, H, reducedMotion);
       landingStarfieldFrameRef.current = {
         height: H,
         revision: landingStarfieldFrameRef.current.revision + 1,
@@ -3083,6 +3125,8 @@ export default function Home() {
         focusStrength: focus.strength,
         focusRadius: focus.radius,
         focusFalloff: focus.falloff,
+        mouseParallaxX: parallax.x,
+        mouseParallaxY: parallax.y,
         reducedMotion,
       };
       lastVisibleStarfieldWidth = W;
@@ -3094,19 +3138,21 @@ export default function Home() {
     }
 
     /**
-     * Soft elliptical galactic-plane band at the cosmic centre. Visible
-     * from default zoom and most prominent when zoomed out — sells the
-     * "you're inside a galaxy" feel that ambient field stars alone
-     * can't carry. Two stacked gradients:
-     *   1. The wide spine — long ellipse along the galactic plane.
-     *   2. The bright core — small radial puff at the centre.
-     * Fades to nothing once the user has zoomed past local-cluster
-     * scale (>4×) so it never competes with closeup star detail.
-     * Slow rotation in time so the band reads as drifting through
-     * space, not a static painting.
+     * Soft galactic spiral structure at the cosmic centre. Two
+     * logarithmic-spiral arms wrap from the bright core outward,
+     * each rendered as a chain of overlapping radial dust blobs that
+     * trace the arm path. Combined with the warm core puff this
+     * sells the "you're looking at a galaxy from inside" feel at low
+     * zoom — replaces the previous flat elliptical band.
+     *
+     * Geometry: r(θ) = innerR * exp(b * θ) for two arms 180° apart.
+     * Slow rotation around the core (period ~10min) so the arms
+     * drift over time without ever obviously looping.
+     *
+     * Visibility envelope: full at zoom < 0.5, ramps down to 0 past
+     * zoom 4× so closeup work isn't competing with it.
      */
-    function drawGalacticBand(tMs: number, zoomFactor: number) {
-      // Visibility envelope: full at zoom < 0.5, ramps down to 0 at >4.
+    function drawGalacticSpiral(tMs: number, zoomFactor: number) {
       let envelope: number;
       if (zoomFactor < 0.5) envelope = 1;
       else if (zoomFactor < 4) envelope = 1 - (zoomFactor - 0.5) / 3.5;
@@ -3115,45 +3161,69 @@ export default function Home() {
 
       const cx = W / 2 + (mouse.x - W / 2) * 0.003;
       const cy = H / 2 + (mouse.y - H / 2) * 0.003;
-      // Slow rotation so the spine drifts across screen — period ~5 min.
-      const angle = (tMs / 300_000) * Math.PI * 2 - Math.PI * 0.18;
-      const major = Math.max(W, H) * 1.45;
-      const minor = major * 0.085;
+      // Slow rotation — one cycle per ~10 min. Arms drift across the
+      // viewport without obviously looping.
+      const rotation = (tMs / 600_000) * Math.PI * 2;
 
-      ctx!.save();
-      ctx!.translate(cx, cy);
-      ctx!.rotate(angle);
+      // Spiral parameters tuned to feel Milky-Way-ish at default zoom.
+      const innerRadius = Math.min(W, H) * 0.08;
+      const outerRadius = Math.max(W, H) * 0.78;
+      const armCount = 2;
+      const blobsPerArm = 16;
+      // Pitch in radians — controls how tight the arms wrap.
+      const pitch = 0.34;
 
-      // Wide spine — soft cool dust along the galactic plane.
-      const spineGrad = ctx!.createLinearGradient(-major / 2, 0, major / 2, 0);
-      const spineAlpha = 0.18 * envelope;
-      spineGrad.addColorStop(0, "rgba(0,0,0,0)");
-      spineGrad.addColorStop(0.18, `rgba(70, 90, 165, ${spineAlpha * 0.4})`);
-      spineGrad.addColorStop(0.5, `rgba(120, 140, 220, ${spineAlpha})`);
-      spineGrad.addColorStop(0.82, `rgba(70, 90, 165, ${spineAlpha * 0.4})`);
-      spineGrad.addColorStop(1, "rgba(0,0,0,0)");
-      ctx!.fillStyle = spineGrad;
-      ctx!.beginPath();
-      ctx!.ellipse(0, 0, major / 2, minor, 0, 0, Math.PI * 2);
-      ctx!.fill();
+      const armBaseAlpha = 0.12 * envelope;
 
-      // Inner brighter band — narrower and richer.
-      const innerGrad = ctx!.createLinearGradient(-major * 0.35, 0, major * 0.35, 0);
-      const innerAlpha = 0.22 * envelope;
-      innerGrad.addColorStop(0, "rgba(0,0,0,0)");
-      innerGrad.addColorStop(0.5, `rgba(180, 195, 240, ${innerAlpha})`);
-      innerGrad.addColorStop(1, "rgba(0,0,0,0)");
-      ctx!.fillStyle = innerGrad;
-      ctx!.beginPath();
-      ctx!.ellipse(0, 0, major * 0.35, minor * 0.45, 0, 0, Math.PI * 2);
-      ctx!.fill();
+      for (let armIdx = 0; armIdx < armCount; armIdx++) {
+        const armOffset = (armIdx / armCount) * Math.PI * 2;
+        for (let i = 0; i < blobsPerArm; i++) {
+          // t = 0 at the core, 1 at the outer tip of the arm.
+          const t = i / (blobsPerArm - 1);
+          // Logarithmic spiral: radius grows exponentially with angle.
+          // Map t → angular sweep of ~2.6 radians per arm so arms
+          // wrap roughly 150° from core to tip.
+          const sweep = t * 2.6;
+          const r =
+            innerRadius
+            + (outerRadius - innerRadius) * (1 - Math.exp(-sweep / pitch / 2.5)) / (1 - Math.exp(-2.6 / pitch / 2.5));
+          const theta = armOffset + sweep + rotation;
+          const x = cx + Math.cos(theta) * r;
+          const y = cy + Math.sin(theta) * r;
+          // Blobs are bigger but dimmer toward the outer arm; brightest
+          // density mid-arm where the core dust meets the open arms.
+          const blobRadius = Math.min(W, H) * (0.06 + t * 0.12);
+          // Alpha falls off near the tip so arms don't hard-end; ramps
+          // up briefly from the core so the inner band reads.
+          const innerRamp = Math.min(1, t / 0.12);
+          const tipFalloff = Math.max(0, 1 - Math.pow(Math.max(0, t - 0.55) / 0.45, 1.5));
+          const alpha = armBaseAlpha * innerRamp * tipFalloff;
+          if (alpha < 0.005) continue;
 
-      ctx!.restore();
+          // Cool blue-violet dust shading toward the outer rim, warmer
+          // toward the core — matches the chromatic break of real
+          // galaxy imagery.
+          const warm = 1 - t; // 1 near core → 0 at tip
+          const r0 = Math.round(120 + warm * 60);
+          const g0 = Math.round(135 + warm * 30);
+          const b0 = Math.round(220 - warm * 20);
 
-      // Galactic core — small bright puff at the centre. Drawn after
-      // the band rotates back to identity so the core stays anchored.
+          const grad = ctx!.createRadialGradient(x, y, 0, x, y, blobRadius);
+          grad.addColorStop(0, `rgba(${r0}, ${g0}, ${b0}, ${alpha})`);
+          grad.addColorStop(0.5, `rgba(${r0}, ${g0}, ${b0}, ${alpha * 0.45})`);
+          grad.addColorStop(1, "rgba(0,0,0,0)");
+          ctx!.fillStyle = grad;
+          ctx!.beginPath();
+          ctx!.arc(x, y, blobRadius, 0, Math.PI * 2);
+          ctx!.fill();
+        }
+      }
+
+      // Galactic core — small bright puff anchored at the centre.
+      // Drawn after the arms so the core sits cleanly on top of any
+      // arm dust that intersects the centre region.
       const coreAlpha = 0.32 * envelope;
-      const coreRadius = Math.min(W, H) * 0.12;
+      const coreRadius = Math.min(W, H) * 0.13;
       const coreGrad = ctx!.createRadialGradient(cx, cy, 0, cx, cy, coreRadius);
       coreGrad.addColorStop(0, `rgba(255, 226, 178, ${coreAlpha})`);
       coreGrad.addColorStop(0.32, `rgba(195, 168, 232, ${coreAlpha * 0.45})`);
@@ -4520,9 +4590,10 @@ export default function Home() {
         ctx!.globalAlpha = Math.max(0, canvasOverlayAlpha);
       }
 
-      // Galactic band sits underneath nebulae and dust so they layer
-      // on top — band is the deepest backdrop element on the 2D canvas.
-      drawGalacticBand(ts, backgroundZoomRef.current);
+      // Galactic spiral sits underneath nebulae and dust so they
+      // layer on top — spiral is the deepest backdrop element on
+      // the 2D canvas.
+      drawGalacticSpiral(ts, backgroundZoomRef.current);
       drawNebulae(ts);
       drawDust();
 
