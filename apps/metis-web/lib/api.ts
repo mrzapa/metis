@@ -982,9 +982,18 @@ export interface CompanionActivityEvent {
    * Bonsai-driven dock callback; Phase 4b adds `"overnight"` from the
    * backend-GGUF reflection cycle; Phase 5 adds `"stage_transition"`
    * fired once per Seedling → Sapling → Bloom → Elder advance so the
-   * dock can render a one-time pulse / confetti.
+   * dock can render a one-time pulse / confetti. Phase 6 follow-up
+   * adds `"brain_link_created"` fired once per reflection that wrote
+   * new ``AssistantBrainLink`` records — the brain-graph view
+   * subscribes to this to pulse the matching edges. Payload carries
+   * ``status.links: Array<{source_node_id, target_node_id, relation}>``
+   * and ``status.memory_entry_id``.
    */
-  kind?: "while_you_work" | "overnight" | "stage_transition";
+  kind?:
+    | "while_you_work"
+    | "overnight"
+    | "stage_transition"
+    | "brain_link_created";
   payload?: Record<string, unknown>;
 }
 

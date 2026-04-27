@@ -194,6 +194,28 @@ What's in place today that M13 will lean on:
   (Personal evals) and M18 (LoRA stretch) are the downstream readers;
   schema_version=1 is the stable contract. M17 coordination: no new
   outbound HTTP, the writer is local-disk-only.
+- **2026-04-26 — Phase 6 follow-up: edge-pulse visual.** The brain
+  graph now flashes a connection between source and target nodes
+  whenever the Seedling writes a new ``AssistantBrainLink``. Backend:
+  ``metis_app/seedling/activity.py`` adds ``"brain_link_created"`` to
+  ``_VALID_KINDS``; ``AssistantCompanionService.reflect()`` emits one
+  ``record_seedling_activity`` event per call (after
+  ``add_brain_links`` succeeds) carrying the list of new links and
+  the originating ``memory_entry_id``. One event per reflection (not
+  per link) keeps the 20-event bridge buffer healthy when a
+  reflection emits 2-4 links. Failures in activity emission are
+  swallowed — the reflection itself never demotes (Phase 5 pattern).
+  Frontend: ``CompanionActivityEvent.kind`` union extended with
+  ``"brain_link_created"`` in ``apps/metis-web/lib/api.ts``;
+  ``brain-graph-3d.tsx`` subscribes to the companion bus, finds both
+  endpoints in ``graphData.nodes``, and spawns the existing
+  Vestige-inspired ``createConnectionFlash`` (emerald ``#34d399`` to
+  match the dock's seedling source color). Multiple links from a
+  single reflection are staggered 80ms apart so the user sees a
+  wave, not a flash. Honors ``prefers-reduced-motion`` (skips spawn
+  entirely — no fallback hint, the brain canvas is too noisy a
+  primary surface to insist). With this landed, the plan-doc *Next
+  up* contains only data-gated retro work and the admin close-out.
 
 ## Next up
 

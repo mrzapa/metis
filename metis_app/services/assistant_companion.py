@@ -325,6 +325,65 @@ class AssistantCompanionService:
             )
         self.repository.add_brain_links(links, max_items=policy.max_brain_links)
 
+        # Phase 6 follow-up — emit a single ``brain_link_created``
+        # CompanionActivityEvent so the brain-graph view can pulse the
+        # new edges. One event per reflection (not per link) keeps the
+        # 20-event bridge buffer healthy when a reflection emits 2-4
+        # links. Failure here is non-fatal — the reflection itself
+        # never demotes on activity-emit errors (Phase 5 pattern).
+        #
+        # Codex P2 fix: emit only the links that were actually retained
+        # by the repository. ``add_brain_links`` enforces ``max_items``
+        # truncation by sorting the merged set DESC by ``created_at``
+        # and slicing — with a small ``max_brain_links`` setting some
+        # incoming links may not be persisted. Re-query after the write
+        # and intersect by ``link_id`` so the frontend never animates
+        # edges that aren't in the stored graph state.
+        if links:
+            try:
+                from metis_app.seedling.activity import (
+                    record_seedling_activity,
+                )
+
+                persisted = self.repository.list_brain_links(
+                    limit=max(int(policy.max_brain_links), 1),
+                )
+                persisted_ids = {item.link_id for item in persisted}
+                persisted_links = [
+                    link for link in links if link.link_id in persisted_ids
+                ]
+                if persisted_links:
+                    link_payloads = [
+                        {
+                            "source_node_id": link.source_node_id,
+                            "target_node_id": link.target_node_id,
+                            "relation": link.relation,
+                        }
+                        for link in persisted_links
+                    ]
+                    summary_label = (
+                        f"Linked {len(link_payloads)} new "
+                        f"brain {'edge' if len(link_payloads) == 1 else 'edges'}"
+                    )
+                    record_seedling_activity(
+                        {
+                            "state": "completed",
+                            "kind": "brain_link_created",
+                            "trigger": trigger,
+                            "summary": summary_label,
+                            "status": {
+                                "links": link_payloads,
+                                "memory_entry_id": memory_entry.entry_id,
+                            },
+                        }
+                    )
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "Failed to emit brain_link_created activity event: %s",
+                    exc,
+                    exc_info=True,
+                )
+
         status.state = "reflected"
         status.last_reflection_at = memory_entry.created_at
         status.last_reflection_trigger = trigger

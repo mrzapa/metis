@@ -10,9 +10,18 @@ from typing import Any
 
 _MAX_EVENTS = 20
 _VALID_STATES = {"running", "completed", "error"}
-# Phase 4 / Phase 5 extension. Additive on the existing event shape;
-# clients that don't know the field ignore it.
-_VALID_KINDS = {"while_you_work", "overnight", "stage_transition"}
+# Phase 4 / Phase 5 / Phase 6-follow-up extension. Additive on the
+# existing event shape; clients that don't know the field ignore it.
+# ``brain_link_created`` (Phase 6 follow-up): emitted once per
+# reflection that wrote new ``AssistantBrainLink`` rows; payload
+# carries the list of ``(source_node_id, target_node_id, relation)``
+# triples so the brain-graph view can pulse the matching edges.
+_VALID_KINDS = {
+    "while_you_work",
+    "overnight",
+    "stage_transition",
+    "brain_link_created",
+}
 _events: deque[dict[str, Any]] = deque(maxlen=_MAX_EVENTS)
 _lock = threading.Lock()
 _sequence = 0
