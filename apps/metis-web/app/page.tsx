@@ -867,6 +867,10 @@ export default function Home() {
   const [addMessage, setAddMessage] = useState<string | null>(null);
   const [selectedUserStarId, setSelectedUserStarId] = useState<string | null>(null);
   const [starDetailsOpen, setStarDetailsOpen] = useState(false);
+  // Atmosphere pulse token — bumped when the dialog opens after a dive
+  // so the cosmic atmosphere fires an expanding ring at the focus
+  // centre, bridging the dive → dialog transition visually.
+  const [atmospherePulseToken, setAtmospherePulseToken] = useState(0);
   const [starDetailsMode, setStarDetailsMode] = useState<"new" | "existing">("new");
   const [pendingDetailStar, setPendingDetailStar] = useState<UserStar | null>(null);
   const [starDetailCloseLockedUntil, setStarDetailCloseLockedUntil] = useState(0);
@@ -1610,6 +1614,11 @@ export default function Home() {
         snapshot: null,
         startedAt: performance.now(),
       };
+    } else {
+      // Dive → dialog handoff: fire the atmosphere pulse so the dialog
+      // reads as blooming out of the focused star rather than appearing
+      // as a hard cut.
+      setAtmospherePulseToken((n) => n + 1);
     }
     setStarFocusPhaseValue("details-open");
   }, [setStarFocusPhaseValue]);
@@ -5682,6 +5691,7 @@ export default function Home() {
       <CosmicAtmosphere
         zoomFactor={backgroundZoomFactor}
         focusFrameRef={atmosphereFocusFrameRef}
+        pulseToken={atmospherePulseToken}
       />
 
       <canvas
