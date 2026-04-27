@@ -7,6 +7,10 @@ import dynamic from "next/dynamic";
 import { NetworkAuditFirstRunCard } from "@/components/network-audit/first-run-card";
 import { FirstRunBanner } from "@/components/home/first-run-banner";
 import { ShootingStarLayer } from "@/components/home/shooting-star-layer";
+import {
+  CosmicAtmosphere,
+  type CosmicAtmosphereFocusFrame,
+} from "@/components/home/cosmic-atmosphere";
 import type { LandingStarfieldFrame, LandingWebglStar } from "@/components/home/landing-starfield-webgl.types";
 
 const LandingStarfieldWebgl = dynamic(
@@ -938,7 +942,12 @@ export default function Home() {
     width: 0,
     height: 0,
   });
-  const constellationCamera = useConstellationCamera();
+  // Opt into spring-eased zoom. Linear lerp felt mechanical — the spring
+  // gives the camera a small overshoot + settle so zoom changes carry
+  // weight. Tuned for ~5-8% overshoot before settling. Dive-zone arcs
+  // are unaffected (the spring branch only fires below the dive zoom
+  // threshold).
+  const constellationCamera = useConstellationCamera({ zoomSpring: true });
   const backgroundCameraOriginRef = constellationCamera.originRef;
   const backgroundCameraTargetOriginRef = constellationCamera.targetOriginRef;
   const backgroundZoomRef = constellationCamera.zoomRef;
@@ -965,6 +974,14 @@ export default function Home() {
     stars: [],
     width: 0,
     zoomScale: 0,
+  });
+  // Mirrored focus state consumed by CosmicAtmosphere's focus bloom.
+  // Updated per-frame from `syncFocusUniformsForFrame` so the bloom
+  // tracks the focused star without driving React re-renders.
+  const atmosphereFocusFrameRef = useRef<CosmicAtmosphereFocusFrame>({
+    centerX: 0,
+    centerY: 0,
+    strength: 0,
   });
   const optimisticIndexKeysRef = useRef<Set<string>>(new Set());
   const starDiveFocusedStarIdRef = useRef<string | null>(null);
@@ -2757,6 +2774,13 @@ export default function Home() {
       frame.focusStrength = focus.strength;
       frame.focusRadius = focus.radius;
       frame.focusFalloff = focus.falloff;
+      // Mirror to the atmosphere bloom ref so the CSS overlay tracks
+      // the focused star centre. Single shared source of truth — the
+      // ref is read by CosmicAtmosphere's internal RAF.
+      const atmFocus = atmosphereFocusFrameRef.current;
+      atmFocus.centerX = focus.centerX;
+      atmFocus.centerY = focus.centerY;
+      atmFocus.strength = focus.strength;
     }
 
     function refreshVisibleStars(backgroundCamera: BackgroundCameraState) {
@@ -2860,9 +2884,17 @@ export default function Home() {
       // Built alongside the existing visibleStarProfiles map below.
       const visibleStarFilterMap = new Map<string, { profile: StellarProfile; apparentMagnitude: number }>();
 
+      // Pan parallax — background layers drift slower than foreground.
+      // Layer 0 = closest (full camera follow), layer 2 = farthest
+      // (~74% follow). Gives the cosmos a felt sense of depth on pan
+      // without touching zoom (foreground/background still scale
+      // together so the relative size hierarchy stays intact).
+      const PARALLAX_FOLLOW = [1, 0.86, 0.74] as const;
       visibleWorldStars.forEach((worldStar) => {
-        const screenX = (worldStar.worldX - backgroundCamera.x) * scale + W / 2;
-        const screenY = (worldStar.worldY - backgroundCamera.y) * scale + H / 2;
+        const follow =
+          PARALLAX_FOLLOW[worldStar.layer] ?? PARALLAX_FOLLOW[0];
+        const screenX = (worldStar.worldX - backgroundCamera.x * follow) * scale + W / 2;
+        const screenY = (worldStar.worldY - backgroundCamera.y * follow) * scale + H / 2;
 
         if (
           screenX < -BACKGROUND_TILE_PADDING_PX
@@ -3059,6 +3091,78 @@ export default function Home() {
       lastVisibleStarfieldZoom = backgroundCamera.zoomFactor;
       lastVisibleStarfieldX = backgroundCamera.x;
       lastVisibleStarfieldY = backgroundCamera.y;
+    }
+
+    /**
+     * Soft elliptical galactic-plane band at the cosmic centre. Visible
+     * from default zoom and most prominent when zoomed out — sells the
+     * "you're inside a galaxy" feel that ambient field stars alone
+     * can't carry. Two stacked gradients:
+     *   1. The wide spine — long ellipse along the galactic plane.
+     *   2. The bright core — small radial puff at the centre.
+     * Fades to nothing once the user has zoomed past local-cluster
+     * scale (>4×) so it never competes with closeup star detail.
+     * Slow rotation in time so the band reads as drifting through
+     * space, not a static painting.
+     */
+    function drawGalacticBand(tMs: number, zoomFactor: number) {
+      // Visibility envelope: full at zoom < 0.5, ramps down to 0 at >4.
+      let envelope: number;
+      if (zoomFactor < 0.5) envelope = 1;
+      else if (zoomFactor < 4) envelope = 1 - (zoomFactor - 0.5) / 3.5;
+      else envelope = 0;
+      if (envelope < 0.02) return;
+
+      const cx = W / 2 + (mouse.x - W / 2) * 0.003;
+      const cy = H / 2 + (mouse.y - H / 2) * 0.003;
+      // Slow rotation so the spine drifts across screen — period ~5 min.
+      const angle = (tMs / 300_000) * Math.PI * 2 - Math.PI * 0.18;
+      const major = Math.max(W, H) * 1.45;
+      const minor = major * 0.085;
+
+      ctx!.save();
+      ctx!.translate(cx, cy);
+      ctx!.rotate(angle);
+
+      // Wide spine — soft cool dust along the galactic plane.
+      const spineGrad = ctx!.createLinearGradient(-major / 2, 0, major / 2, 0);
+      const spineAlpha = 0.18 * envelope;
+      spineGrad.addColorStop(0, "rgba(0,0,0,0)");
+      spineGrad.addColorStop(0.18, `rgba(70, 90, 165, ${spineAlpha * 0.4})`);
+      spineGrad.addColorStop(0.5, `rgba(120, 140, 220, ${spineAlpha})`);
+      spineGrad.addColorStop(0.82, `rgba(70, 90, 165, ${spineAlpha * 0.4})`);
+      spineGrad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx!.fillStyle = spineGrad;
+      ctx!.beginPath();
+      ctx!.ellipse(0, 0, major / 2, minor, 0, 0, Math.PI * 2);
+      ctx!.fill();
+
+      // Inner brighter band — narrower and richer.
+      const innerGrad = ctx!.createLinearGradient(-major * 0.35, 0, major * 0.35, 0);
+      const innerAlpha = 0.22 * envelope;
+      innerGrad.addColorStop(0, "rgba(0,0,0,0)");
+      innerGrad.addColorStop(0.5, `rgba(180, 195, 240, ${innerAlpha})`);
+      innerGrad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx!.fillStyle = innerGrad;
+      ctx!.beginPath();
+      ctx!.ellipse(0, 0, major * 0.35, minor * 0.45, 0, 0, Math.PI * 2);
+      ctx!.fill();
+
+      ctx!.restore();
+
+      // Galactic core — small bright puff at the centre. Drawn after
+      // the band rotates back to identity so the core stays anchored.
+      const coreAlpha = 0.32 * envelope;
+      const coreRadius = Math.min(W, H) * 0.12;
+      const coreGrad = ctx!.createRadialGradient(cx, cy, 0, cx, cy, coreRadius);
+      coreGrad.addColorStop(0, `rgba(255, 226, 178, ${coreAlpha})`);
+      coreGrad.addColorStop(0.32, `rgba(195, 168, 232, ${coreAlpha * 0.45})`);
+      coreGrad.addColorStop(0.7, `rgba(80, 110, 180, ${coreAlpha * 0.18})`);
+      coreGrad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx!.fillStyle = coreGrad;
+      ctx!.beginPath();
+      ctx!.arc(cx, cy, coreRadius, 0, Math.PI * 2);
+      ctx!.fill();
     }
 
     function drawNebulae(tMs: number) {
@@ -3434,6 +3538,30 @@ export default function Home() {
         const haloCenterX = px + profile.asymmetryOffset.x * sz * 2.1;
         const haloCenterY = py + profile.asymmetryOffset.y * sz * 1.8;
         const auraRadius = sz * (2.8 + profile.coreIntensity * 0.72 + ringCount * 0.14);
+
+        // Spawn shockwave — two concentric rings expand outward from the
+        // new star's position during the ignition window. Drawn first so
+        // the halo + core paint over the rings near the centre, leaving
+        // only the expanding outer arc visible. Skipped when spawnFlash
+        // has decayed (steady-state rendering byte-identical).
+        if (spawnFlash > 0.001) {
+          // Map the existing spawnFlash 0..1 envelope onto an expansion
+          // 0..1 by undoing its peak: t≈0 at peak (just after spawn) so
+          // rings start small, reach max at t≈1 as flash decays.
+          const expand = 1 - spawnFlash;
+          for (let ringIdx = 0; ringIdx < 2; ringIdx++) {
+            const ringDelay = ringIdx * 0.18;
+            const ringExpand = Math.max(0, expand - ringDelay) / Math.max(0.0001, 1 - ringDelay);
+            if (ringExpand <= 0 || ringExpand >= 1) continue;
+            const ringRadius = sz * (1.4 + ringExpand * 7.5);
+            const ringAlpha = (1 - ringExpand) * (1 - ringExpand) * 0.55 * fadeIn;
+            ctx!.strokeStyle = `rgba(${haloColor[0]},${haloColor[1]},${haloColor[2]},${ringAlpha})`;
+            ctx!.lineWidth = 1.4;
+            ctx!.beginPath();
+            ctx!.arc(px, py, ringRadius, 0, Math.PI * 2);
+            ctx!.stroke();
+          }
+        }
 
         // Spawn-flash bonus on halo brightness — kicks in only during the
         // ignition window and decays to zero, so steady-state rendering is
@@ -4392,6 +4520,9 @@ export default function Home() {
         ctx!.globalAlpha = Math.max(0, canvasOverlayAlpha);
       }
 
+      // Galactic band sits underneath nebulae and dust so they layer
+      // on top — band is the deepest backdrop element on the 2D canvas.
+      drawGalacticBand(ts, backgroundZoomRef.current);
       drawNebulae(ts);
       drawDust();
 
@@ -5372,6 +5503,18 @@ export default function Home() {
     }
 
     window.addEventListener("resize", onResize);
+    // ResizeObserver covers the cases the window `resize` event misses —
+    // iframe parents that grow without firing a window resize on the
+    // inner window, devtools-driven viewport emulation, container
+    // layouts that reflow without a window-level resize, etc. Without
+    // this, the 2D canvas can stay at its initial 300×150 default
+    // backing buffer even after the page renders at full viewport,
+    // producing ~4× pixelation on everything painted to it.
+    const canvasResizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => onResize())
+        : null;
+    canvasResizeObserver?.observe(canvas);
     canvas.addEventListener("pointerdown", onCanvasPointerDown);
     canvas.addEventListener("lostpointercapture", onCanvasLostPointerCapture);
     document.addEventListener("pointermove", onPointerMove);
@@ -5391,6 +5534,7 @@ export default function Home() {
         artState.image.onerror = null;
       });
       window.removeEventListener("resize", onResize);
+      canvasResizeObserver?.disconnect();
       canvas.removeEventListener("pointerdown", onCanvasPointerDown);
       canvas.removeEventListener("lostpointercapture", onCanvasLostPointerCapture);
       document.removeEventListener("pointermove", onPointerMove);
@@ -5463,6 +5607,11 @@ export default function Home() {
       />
 
       <ShootingStarLayer className="z-[1]" />
+
+      <CosmicAtmosphere
+        zoomFactor={backgroundZoomFactor}
+        focusFrameRef={atmosphereFocusFrameRef}
+      />
 
       <canvas
         ref={canvasRef}
@@ -5550,16 +5699,17 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Semantic-link search across the user's own added stars. Hidden
-          when the user hasn't added any stars yet — the affordance was
-          previously misleading (placeholder hinted "thread stars by
-          meaning" but the search has nothing to index until user stars
-          exist). Reappears the moment the user adds their first star. */}
-      {userStars.length > 0 && (
-        <div className={`metis-semantic-search ${semanticSearchExpanded ? "is-expanded" : ""}`}>
-          {/* Toggle button removed — the FAB radial menu is now the sole
-              entry point for expanding the semantic-search pill. The pill
-              itself still animates width via `is-expanded`. */}
+      {/* Semantic-link search across the user's own added stars.
+          Render gates:
+            1. At least one user star — search has nothing to index until
+               the user has added content.
+            2. Expanded via the FAB Search satellite. Previously this
+               pill rendered collapsed at 54px with the inner toggle
+               button removed, leaving a blank stub on the canvas
+               (audit item, 2026-04-26). The FAB satellite is now the
+               sole entry point and the pill mounts only when in use. */}
+      {userStars.length > 0 && semanticSearchExpanded && (
+        <div className="metis-semantic-search is-expanded">
           <input
             ref={semanticSearchInputRef}
             className="metis-semantic-search-input"
