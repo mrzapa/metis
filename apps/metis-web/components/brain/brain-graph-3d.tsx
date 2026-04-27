@@ -893,9 +893,17 @@ export default function BrainGraph3D({
   //   - Burst (a reflection emits 2-4 links) → 80ms stagger so it
   //     reads as a wave rather than a flash.
   useEffect(() => {
-    const reduceMotion =
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    // Codex P2 fix: optional-chain BOTH the call AND the .matches read.
+    // ``window.matchMedia?.(...)`` returns undefined when matchMedia is
+    // missing (some embedded webviews, jsdom-without-the-shim, certain
+    // test runners); without the second ``?.`` the unconditional
+    // ``.matches`` access would crash BrainGraph3D on mount instead of
+    // safely defaulting to motion-allowed.
+    const reduceMotion = Boolean(
+      typeof window !== "undefined"
+        ? window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
+        : false,
+    );
 
     const timeouts: ReturnType<typeof setTimeout>[] = [];
 
