@@ -75,4 +75,26 @@ describe("CosmicAtmosphere", () => {
       screen.getByTestId("cosmic-atmosphere-focus-bloom"),
     ).toBeInTheDocument();
   });
+
+  it("renders the pulse-ring layer when a focusFrameRef is provided", () => {
+    function Wrapper() {
+      const ref = useRef<CosmicAtmosphereFocusFrame>({
+        centerX: 100,
+        centerY: 80,
+        strength: 0.5,
+      });
+      return <CosmicAtmosphere zoomFactor={20} focusFrameRef={ref} />;
+    }
+    render(<Wrapper />);
+    expect(
+      screen.getByTestId("cosmic-atmosphere-pulse-ring"),
+    ).toBeInTheDocument();
+  });
+
+  it("does not render the pulse-ring layer without a focusFrameRef", () => {
+    render(<CosmicAtmosphere zoomFactor={1} />);
+    expect(
+      screen.queryByTestId("cosmic-atmosphere-pulse-ring"),
+    ).not.toBeInTheDocument();
+  });
 });

@@ -955,6 +955,35 @@ body {
     outline-offset: 4px;
   }
 
+  /* One-shot dispatch animation — runs when the button receives the
+     `is-dispatching` class right after a Send click. Brief inward
+     scale + outward glow ring sells "your message just left". */
+  .chat-send-button.is-dispatching {
+    animation: chat-send-dispatch 360ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes chat-send-dispatch {
+    0% {
+      transform: scale(1);
+      box-shadow:
+        0 0 0 0 color-mix(in oklch, var(--primary) 60%, transparent);
+    }
+    20% {
+      transform: scale(0.92);
+      box-shadow:
+        0 0 0 0 color-mix(in oklch, var(--primary) 60%, transparent);
+    }
+    100% {
+      transform: scale(1);
+      box-shadow:
+        0 0 0 8px transparent;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chat-send-button.is-dispatching {
+      animation: none;
+    }
+  }
+
   :root[data-ui-variant="bold"] .glass-panel,
   :root[data-ui-variant="bold"] .glass-panel-strong,
   :root[data-ui-variant="bold"] .glass-settings-pane,
