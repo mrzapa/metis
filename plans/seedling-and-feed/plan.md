@@ -2,7 +2,7 @@
 Milestone: Seedling + Feed (M13)
 Status: In progress
 Claim: claude/m13-adr-0013-runtime-pivot
-Last updated: 2026-04-25 by Claude
+Last updated: 2026-04-26 by Claude
 Vision pillar: Companion
 ---
 
@@ -172,6 +172,22 @@ What's in place today that M13 will lean on:
   4b retro should add a real `last_user_input_at` if this proves too
   coarse — the seam is `_resolve_last_user_activity` in
   `metis_app/seedling/lifecycle.py`.
+- **2026-04-26 — New-user audit follow-up: heartbeat noise suppressed.**
+  `apps/metis-web/lib/api.ts` now drops `source: "seedling"` events
+  matching the lifecycle-heartbeat structural signature (`state:
+  "running"` + `trigger: "lifecycle"`) before they reach
+  `emitCompanionActivity`. The Phase 2 worker still emits the
+  heartbeat for boot_id tracking, but the user-facing thought log no
+  longer shows 6 lines of "Seedling heartbeat" to brand-new users.
+  The dock's sigil-pulse animation already skipped these events; this
+  brings the thought log in line. Real Seedling activity (Phase 3
+  comets, Phase 4 reflections, Phase 5 stage transitions, Phase 6
+  brain links) carries different state / trigger combinations and is
+  unaffected. Closes the Web UI new-user audit finding (2026-04-25).
+  Branched off `main` after PR #555 (Phase 5) merged; independent of
+  in-flight PR #558 (Phase 6) and PR #561 (Phase 7). Design doc:
+  `docs/plans/2026-04-26-heartbeat-noise-suppress-design.md`. Plan
+  doc: `docs/plans/2026-04-26-heartbeat-noise-suppress.md`.
 
 ## Next up
 
