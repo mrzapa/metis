@@ -37,6 +37,13 @@ export interface CosmicAtmosphereProps {
    * tracking the position smoothly without driving React re-renders.
    */
   focusFrameRef?: MutableRefObject<CosmicAtmosphereFocusFrame> | null;
+  /**
+   * Increment this to fire a one-shot expanding ring pulse at the
+   * current focus centre. Wire it to the dialog open event so the
+   * star → dialog transition reads as the star "blooming open" rather
+   * than a hard dialog appear.
+   */
+  pulseToken?: number;
   className?: string;
 }
 
@@ -46,10 +53,14 @@ const MAX_ZOOM_FOR_INTENSITY = 60;
 export function CosmicAtmosphere({
   zoomFactor,
   focusFrameRef = null,
+  pulseToken = 0,
   className,
 }: CosmicAtmosphereProps) {
   const reducedMotion = useReducedMotion();
   const focusBloomRef = useRef<HTMLDivElement | null>(null);
+  const pulseRingRef = useRef<HTMLDivElement | null>(null);
+  const lastPulseTokenRef = useRef<number>(pulseToken);
+  const pulseStartedAtRef = useRef<number>(0);
 
   // Per-frame focus bloom: read from the ref every animation frame and
   // imperatively update the bloom div's background. Bypasses React
@@ -106,6 +117,57 @@ export function CosmicAtmosphere({
       cancelAnimationFrame(raf);
     };
   }, [focusFrameRef, zoomFactor, reducedMotion]);
+
+  // One-shot ring pulse triggered when `pulseToken` changes. Reads the
+  // current focus centre from `focusFrameRef`; each pulse expands from
+  // the focused star outward over ~620ms and fades. Imperative DOM
+  // updates so the trigger doesn't drive React re-renders.
+  useEffect(() => {
+    if (pulseToken === lastPulseTokenRef.current) return;
+    lastPulseTokenRef.current = pulseToken;
+    if (reducedMotion) return;
+    if (!focusFrameRef) return;
+    const node = pulseRingRef.current;
+    if (!node) return;
+
+    const f = focusFrameRef.current;
+    if (
+      !Number.isFinite(f.centerX)
+      || !Number.isFinite(f.centerY)
+      || f.strength <= 0.05
+    ) {
+      return;
+    }
+    pulseStartedAtRef.current = performance.now();
+    const cx = Math.round(f.centerX);
+    const cy = Math.round(f.centerY);
+    const DURATION_MS = 620;
+
+    let raf = 0;
+    const animate = () => {
+      const t = (performance.now() - pulseStartedAtRef.current) / DURATION_MS;
+      if (t >= 1) {
+        node.style.opacity = "0";
+        return;
+      }
+      // Cubic-out expansion + squared opacity fall-off.
+      const eased = 1 - Math.pow(1 - t, 3);
+      const radius = 16 + eased * 360;
+      const alpha = (1 - t) * (1 - t) * 0.55;
+      node.style.opacity = "1";
+      node.style.background =
+        `radial-gradient(circle at ${cx}px ${cy}px,`
+        + ` transparent ${Math.max(0, radius - 18)}px,`
+        + ` rgba(255, 226, 178, ${alpha}) ${radius}px,`
+        + ` rgba(168, 188, 240, ${alpha * 0.5}) ${radius + 8}px,`
+        + ` transparent ${radius + 36}px)`;
+      raf = requestAnimationFrame(animate);
+    };
+    raf = requestAnimationFrame(animate);
+    return () => {
+      cancelAnimationFrame(raf);
+    };
+  }, [pulseToken, focusFrameRef, reducedMotion]);
 
   // Map zoom (1 → 60+) onto a 0..1 intensity. Use a sub-linear curve so
   // the effect is felt early and saturates rather than going wild at
@@ -176,6 +238,22 @@ export function CosmicAtmosphere({
           style={{
             opacity: 0,
             transition: "opacity 200ms ease-out",
+            mixBlendMode: "screen",
+          }}
+        />
+      )}
+      {/* One-shot ring pulse — fires on `pulseToken` change at the
+          focused star centre. Used by page.tsx to bridge the dive →
+          dialog transition; the dialog appears as if blooming out of
+          the star itself. Imperative DOM updates only — no React
+          re-renders. */}
+      {focusFrameRef && (
+        <div
+          ref={pulseRingRef}
+          className="absolute inset-0"
+          data-testid="cosmic-atmosphere-pulse-ring"
+          style={{
+            opacity: 0,
             mixBlendMode: "screen",
           }}
         />
