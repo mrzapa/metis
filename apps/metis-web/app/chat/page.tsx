@@ -32,6 +32,7 @@ import type {
   TraceEvent,
 } from "@/lib/api";
 import type { RagStreamEvent } from "@/lib/api";
+import { buildEventSignature } from "@/lib/services/rag-stream-dedup";
 import {
   getChatActionStatusFromResult,
   isNyxInstallAction,
@@ -178,18 +179,6 @@ function extractForecastSessionState(messages: Array<{ artifacts?: Array<{ type?
     };
   }
   return null;
-}
-
-function buildEventSignature(
-  event: RagStreamEvent,
-  fallbackRunId: string,
-  eventId: number | null,
-): string {
-  const runId = String(event.run_id || fallbackRunId || "").trim();
-  if (eventId !== null) {
-    return `${runId}:${eventId}`;
-  }
-  return `${runId}:${event.type}:${JSON.stringify(event)}`;
 }
 
 function createClientRunId(): string {
