@@ -13,7 +13,10 @@ from litestar.exceptions import HTTPException as LitestarHTTPException
 from litestar.exceptions import ValidationException
 from litestar.handlers.base import BaseRouteHandler
 
-from metis_app.services.session_repository import SessionRepository
+from metis_app.services.session_repository import (
+    SessionRepository,
+    make_default_session_repo,
+)
 
 _DEFAULT_LOCAL_ORIGINS = [
     "http://localhost",
@@ -80,10 +83,7 @@ def run_engine(func: Any, *args: Any, **kwargs: Any) -> Any:
 
 
 def get_session_repo() -> SessionRepository:
-    db_path = os.getenv("METIS_SESSION_DB_PATH") or None
-    repo = SessionRepository(db_path=db_path)
-    repo.init_db()
-    return repo
+    return make_default_session_repo()
 
 
 def parse_last_event_id(raw_value: str | None) -> int | None:

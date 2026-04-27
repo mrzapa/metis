@@ -5,24 +5,29 @@ from __future__ import annotations
 import json
 
 import pytest
+from litestar.di import Provide
 from litestar.testing import TestClient
 
 from metis_app.api_litestar import create_app
-from metis_app.api_litestar.routes import sessions as sessions_module
 from metis_app.services.session_repository import SessionRepository
 from metis_app.services.trace_store import TraceStore
 
 
 @pytest.fixture
-def repo(tmp_path):
-    r = SessionRepository(db_path=tmp_path / "test_sessions.db")
+def repo(tmp_path, monkeypatch):
+    db_path = tmp_path / "test_sessions.db"
+    # Point the canonical session_repo factory at the test DB. Crosses the
+    # same env-var seam the production factory crosses — no monkeypatching of
+    # internals. Both the test fixture and the route handlers see the same
+    # DB file via this env var.
+    monkeypatch.setenv("METIS_SESSION_DB_PATH", str(db_path))
+    r = SessionRepository(db_path=db_path)
     r.init_db()
     return r
 
 
 @pytest.fixture
-def client(repo, monkeypatch):
-    monkeypatch.setattr(sessions_module, "get_session_repo", lambda: repo)
+def client(repo):
     app = create_app()
     with TestClient(app=app) as c:
         yield c
@@ -138,14 +143,13 @@ def test_get_session_no_absolute_file_paths_in_sources(client, repo):
     assert "file_path" not in msg["sources"][0]
 
 
-def test_get_session_hydrates_latest_nyx_action_result(client, repo, monkeypatch, tmp_path):
-    trace_store = TraceStore(tmp_path / "traces")
-    monkeypatch.setattr(sessions_module, "TraceStore", lambda: trace_store, raising=False)
-
-    # The Litestar route uses hydrate_session_actions from metis_app.services.session_actions
-    # which instantiates TraceStore() — patch at the source module.
-    import metis_app.services.session_actions as sessions_src
-    monkeypatch.setattr(sessions_src, "TraceStore", lambda: trace_store)
+def test_get_session_hydrates_latest_nyx_action_result(repo, tmp_path, monkeypatch):
+    trace_dir = tmp_path / "traces"
+    trace_dir.mkdir()
+    monkeypatch.setenv("METIS_TRACE_DIR", str(trace_dir))
+    trace_store = TraceStore(trace_dir)
+    app = create_app()
+    client_ctx = TestClient(app=app)
 
     repo.create_session(session_id="s1", title="Nyx session")
     repo.append_message(
@@ -237,7 +241,8 @@ def test_get_session_hydrates_latest_nyx_action_result(client, repo, monkeypatch
         },
     )
 
-    r = client.get("/v1/sessions/s1")
+    with client_ctx as c:
+        r = c.get("/v1/sessions/s1")
 
     assert r.status_code == 200
     body = r.json()

@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 import json
+import os
 import pathlib
 import re
 import sqlite3
@@ -808,3 +809,10 @@ class SessionRepository:
             note=str(row["note"] or ""),
             ts=str(row["ts"] or ""),
         )
+
+
+def make_default_session_repo() -> SessionRepository:
+    db_path = os.getenv("METIS_SESSION_DB_PATH") or None
+    repo = SessionRepository(db_path=db_path)
+    repo.init_db()
+    return repo

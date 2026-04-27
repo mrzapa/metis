@@ -105,7 +105,7 @@ Preserve: the SKILL.md format, the trigger schema, `runtime_overrides`, and the 
 
 ### 1.11 Brain graph model and visualization
 
-`metis_app/models/brain_graph.py` · `apps/metis-web/app/brain/` · `metis_app/api/app.py` → `/v1/brain/graph`
+`metis_app/models/brain_graph.py` · `apps/metis-web/app/brain/` · `metis_app/api_litestar/routes/web_graph.py` → `/v1/brain/graph`
 
 The brain graph connects indexes, sessions, skills, and agent profiles as typed nodes (`BrainNode`) and edges (`BrainEdge`). The web UI renders it as an interactive SVG at `/brain`. This is a unique product surface that visualizes the relationships between a user's knowledge base and their conversation history.
 
@@ -137,7 +137,7 @@ Preserve: the pure-Python implementation (zero external deps), the deterministic
 
 ### 1.15 Feedback and run-action approvals
 
-`metis_app/api/sessions.py` → `POST /v1/sessions/{id}/feedback` · `metis_app/api/app.py` → `POST /v1/runs/{run_id}/actions`
+`metis_app/api_litestar/routes/sessions.py` → `POST /v1/sessions/{id}/feedback` · `metis_app/api_litestar/routes/core.py` → `POST /v1/runs/{run_id}/actions`
 
 Users can vote thumbs-up or thumbs-down on any response with an optional text note. The agentic run-action endpoint supports approval or denial of mid-run actions (currently used for `confirm_settings` when `require_action` is set on a request).
 
@@ -145,7 +145,7 @@ Preserve both endpoints and the `action_required` SSE event shape. The run-actio
 
 ### 1.16 API security layer
 
-`metis_app/api/app.py`
+`metis_app/api_litestar/app.py` · `metis_app/api_litestar/common.py` (`require_token_guard`)
 
 `METIS_API_TOKEN` enables Bearer token authentication on all protected endpoints. `METIS_API_CORS_ORIGINS` controls allowed origins. `api_key_*` fields are rejected by default at write time (require `METIS_ALLOW_API_KEY_WRITE=1`). Error mapping (`ValueError` → 400, `RuntimeError` → 503) is consistent across all routes.
 

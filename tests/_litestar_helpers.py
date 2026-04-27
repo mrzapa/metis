@@ -5,6 +5,16 @@ per-tag route modules under ``metis_app.api_litestar.routes``.  Most tests used
 to patch ``api_app_module.WorkspaceOrchestrator`` — this helper patches the
 name across every route module that imports it so a single test monkeypatch
 still works.
+
+WORKAROUND, not a target. Patching ``WorkspaceOrchestrator`` at the route-module
+import site reaches past the public interface; a rename or a route-module split
+silently breaks every dependent test. The right shape is Litestar dependency
+injection: declare ``workspace_orchestrator: WorkspaceOrchestrator`` on the
+route handler and provide it via ``Provide(...)`` on the router, then override
+the dependency in tests via ``app.dependencies["workspace_orchestrator"] =
+Provide(...)``. ``sessions.py`` was migrated to that shape (2026-04-27); the
+remaining eight route modules still use the import-patch helper below.
+Migrating them is tracked as a follow-up.
 """
 
 from __future__ import annotations
