@@ -121,8 +121,14 @@ export function CosmicAtmosphere({
 
   return (
     <div
+      // z-[3] sits above the `#universe` 2D canvas (which has
+      // `z-index: 2` in page.tsx CSS) so the vignette + focus bloom
+      // actually paint on top of the stars/comets they're meant to
+      // tint. Earlier z-[2] tied with the canvas and DOM order put
+      // the canvas on top, hiding the overlay (Codex review on PR
+      // #566).
       className={cn(
-        "pointer-events-none fixed inset-0 z-[2]",
+        "pointer-events-none fixed inset-0 z-[3]",
         className,
       )}
       data-testid="cosmic-atmosphere"
