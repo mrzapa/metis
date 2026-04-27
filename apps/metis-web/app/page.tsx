@@ -7,7 +7,10 @@ import dynamic from "next/dynamic";
 import { NetworkAuditFirstRunCard } from "@/components/network-audit/first-run-card";
 import { FirstRunBanner } from "@/components/home/first-run-banner";
 import { ShootingStarLayer } from "@/components/home/shooting-star-layer";
-import { CosmicAtmosphere } from "@/components/home/cosmic-atmosphere";
+import {
+  CosmicAtmosphere,
+  type CosmicAtmosphereFocusFrame,
+} from "@/components/home/cosmic-atmosphere";
 import type { LandingStarfieldFrame, LandingWebglStar } from "@/components/home/landing-starfield-webgl.types";
 
 const LandingStarfieldWebgl = dynamic(
@@ -971,6 +974,14 @@ export default function Home() {
     stars: [],
     width: 0,
     zoomScale: 0,
+  });
+  // Mirrored focus state consumed by CosmicAtmosphere's focus bloom.
+  // Updated per-frame from `syncFocusUniformsForFrame` so the bloom
+  // tracks the focused star without driving React re-renders.
+  const atmosphereFocusFrameRef = useRef<CosmicAtmosphereFocusFrame>({
+    centerX: 0,
+    centerY: 0,
+    strength: 0,
   });
   const optimisticIndexKeysRef = useRef<Set<string>>(new Set());
   const starDiveFocusedStarIdRef = useRef<string | null>(null);
@@ -2763,6 +2774,13 @@ export default function Home() {
       frame.focusStrength = focus.strength;
       frame.focusRadius = focus.radius;
       frame.focusFalloff = focus.falloff;
+      // Mirror to the atmosphere bloom ref so the CSS overlay tracks
+      // the focused star centre. Single shared source of truth — the
+      // ref is read by CosmicAtmosphere's internal RAF.
+      const atmFocus = atmosphereFocusFrameRef.current;
+      atmFocus.centerX = focus.centerX;
+      atmFocus.centerY = focus.centerY;
+      atmFocus.strength = focus.strength;
     }
 
     function refreshVisibleStars(backgroundCamera: BackgroundCameraState) {
@@ -5515,7 +5533,10 @@ export default function Home() {
 
       <ShootingStarLayer className="z-[1]" />
 
-      <CosmicAtmosphere zoomFactor={backgroundZoomFactor} />
+      <CosmicAtmosphere
+        zoomFactor={backgroundZoomFactor}
+        focusFrameRef={atmosphereFocusFrameRef}
+      />
 
       <canvas
         ref={canvasRef}

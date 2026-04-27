@@ -17,20 +17,95 @@
  * are cheap.
  */
 
+import { useEffect, useRef, type MutableRefObject } from "react";
 import { useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
+
+export interface CosmicAtmosphereFocusFrame {
+  centerX: number;
+  centerY: number;
+  strength: number;
+}
 
 export interface CosmicAtmosphereProps {
   /** Current camera zoom factor — 1.0 = default, >1 = zoomed in. */
   zoomFactor: number;
+  /**
+   * Optional ref to a focus-frame struct that the parent updates each
+   * RAF tick. When supplied and `focusFrameRef.current.strength > 0.05`
+   * an additional starlight bloom is rendered at the focus centre,
+   * tracking the position smoothly without driving React re-renders.
+   */
+  focusFrameRef?: MutableRefObject<CosmicAtmosphereFocusFrame> | null;
   className?: string;
 }
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM_FOR_INTENSITY = 60;
 
-export function CosmicAtmosphere({ zoomFactor, className }: CosmicAtmosphereProps) {
+export function CosmicAtmosphere({
+  zoomFactor,
+  focusFrameRef = null,
+  className,
+}: CosmicAtmosphereProps) {
   const reducedMotion = useReducedMotion();
+  const focusBloomRef = useRef<HTMLDivElement | null>(null);
+
+  // Per-frame focus bloom: read from the ref every animation frame and
+  // imperatively update the bloom div's background. Bypasses React
+  // re-renders so the bloom can track sub-frame focus updates without
+  // perf cost.
+  useEffect(() => {
+    if (!focusFrameRef) return;
+    const node = focusBloomRef.current;
+    if (!node) return;
+    let raf = 0;
+    let lastApplied = "";
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const f = focusFrameRef.current;
+      const active =
+        f.strength > 0.05
+        && Number.isFinite(f.centerX)
+        && Number.isFinite(f.centerY);
+      if (!active) {
+        if (lastApplied !== "idle") {
+          node.style.opacity = "0";
+          lastApplied = "idle";
+        }
+        return;
+      }
+      const z = Math.max(MIN_ZOOM, zoomFactor);
+      const tNorm = Math.min(1, (z - MIN_ZOOM) / (MAX_ZOOM_FOR_INTENSITY - MIN_ZOOM));
+      const intensity = reducedMotion
+        ? Math.min(0.3, tNorm)
+        : Math.pow(tNorm, 0.55);
+      const alpha = reducedMotion
+        ? Math.min(0.18, f.strength * 0.25)
+        : f.strength * (0.28 + intensity * 0.22);
+      const cx = Math.round(f.centerX);
+      const cy = Math.round(f.centerY);
+      const key = `${cx},${cy},${alpha.toFixed(3)}`;
+      if (key === lastApplied) return;
+      lastApplied = key;
+      node.style.opacity = "1";
+      node.style.background = [
+        `radial-gradient(circle at ${cx}px ${cy}px,`
+        + ` rgba(255, 234, 196, ${alpha * 0.9}) 0%,`
+        + ` rgba(255, 196, 140, ${alpha * 0.42}) 6%,`
+        + ` rgba(168, 188, 240, ${alpha * 0.22}) 16%,`
+        + ` transparent 38%)`,
+        `radial-gradient(circle at ${cx}px ${cy}px,`
+        + ` transparent 22%,`
+        + ` rgba(120, 175, 255, ${alpha * 0.12}) 32%,`
+        + ` transparent 58%)`,
+      ].join(", ");
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+    };
+  }, [focusFrameRef, zoomFactor, reducedMotion]);
 
   // Map zoom (1 → 60+) onto a 0..1 intensity. Use a sub-linear curve so
   // the effect is felt early and saturates rather than going wild at
@@ -81,6 +156,24 @@ export function CosmicAtmosphere({ zoomFactor, className }: CosmicAtmosphereProp
           mixBlendMode: "screen",
         }}
       />
+      {/* Focused-star bloom — radial scatter centred on the active
+          focus point. Updated imperatively each frame from the
+          focusFrameRef so position tracks the focused star smoothly
+          without driving React re-renders. Tiny chromatic split
+          between the warm core and cool halo reads as atmospheric
+          refraction. */}
+      {focusFrameRef && (
+        <div
+          ref={focusBloomRef}
+          className="absolute inset-0"
+          data-testid="cosmic-atmosphere-focus-bloom"
+          style={{
+            opacity: 0,
+            transition: "opacity 200ms ease-out",
+            mixBlendMode: "screen",
+          }}
+        />
+      )}
     </div>
   );
 }

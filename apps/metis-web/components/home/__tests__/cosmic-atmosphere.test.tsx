@@ -1,6 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { CosmicAtmosphere } from "../cosmic-atmosphere";
+import { useRef } from "react";
+import {
+  CosmicAtmosphere,
+  type CosmicAtmosphereFocusFrame,
+} from "../cosmic-atmosphere";
 
 describe("CosmicAtmosphere", () => {
   it("renders a fixed full-viewport overlay", () => {
@@ -48,5 +52,27 @@ describe("CosmicAtmosphere", () => {
     render(<CosmicAtmosphere zoomFactor={1000} />);
     const layer = screen.getByTestId("cosmic-atmosphere");
     expect(parseFloat(layer.dataset.intensity ?? "0")).toBe(1);
+  });
+
+  it("does not render the focus-bloom layer when no ref is provided", () => {
+    render(<CosmicAtmosphere zoomFactor={1} />);
+    expect(
+      screen.queryByTestId("cosmic-atmosphere-focus-bloom"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the focus-bloom layer when a focusFrameRef is provided", () => {
+    function Wrapper() {
+      const ref = useRef<CosmicAtmosphereFocusFrame>({
+        centerX: 100,
+        centerY: 80,
+        strength: 0.5,
+      });
+      return <CosmicAtmosphere zoomFactor={20} focusFrameRef={ref} />;
+    }
+    render(<Wrapper />);
+    expect(
+      screen.getByTestId("cosmic-atmosphere-focus-bloom"),
+    ).toBeInTheDocument();
   });
 });
