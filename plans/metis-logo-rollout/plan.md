@@ -1,7 +1,7 @@
 ---
 Milestone: Metis logo rollout (M20)
-Status: Ready
-Claim: unclaimed
+Status: In progress (PR pending)
+Claim: claude/cranky-northcutt-42501d
 Last updated: 2026-04-28 by claude/cranky-northcutt-42501d
 Vision pillar: Cross-cutting + Cosmos
 ---
@@ -12,9 +12,59 @@ Plan doc stub created on 2026-04-28 alongside the intake-workflow
 promotion of the design-team-supplied M-star logo asset
 (`m_star_logo_traced.svg`). Full design captured in
 [`docs/plans/2026-04-28-metis-logo-rollout-design.md`](../../docs/plans/2026-04-28-metis-logo-rollout-design.md)
-— that document is the source of truth for architecture, motion
-spec, surface inventory, edge cases, and phase plan. **No code
-written yet.**
+and the step-by-step implementation in
+[`docs/plans/2026-04-28-metis-logo-rollout-implementation.md`](../../docs/plans/2026-04-28-metis-logo-rollout-implementation.md).
+
+**All four phases shipped on `claude/cranky-northcutt-42501d` (2026-04-28).**
+
+- **Phase 1 — primitives.** Cleaned SVG asset (`public/brand/metis-mark.svg`,
+  3.52 KB, currentColor-themed via `apps/metis-web/scripts/clean-brand-svg.mjs`).
+  Brand design tokens in `tokens.css` + `.metis-glow` utility in `globals.css`.
+  Four React primitives in `apps/metis-web/components/brand/`: `<MetisMark>`,
+  `<MetisGlow>` (with feMorphology ripple rings — tactical refinement of
+  the design doc's "offset paths" approach), `<MetisLockup>`, `<MetisLoader>`.
+  22 brand tests passing. Barrel export.
+- **Phase 2 — surface swaps.** Topbar wordmark → mark (`page-chrome.tsx`).
+  Landing nav wordmark → mark + dead `.metis-logo` CSS pruned (`app/page.tsx`).
+  Home hero `metis-logo.png` → `<MetisMark>` preserving the existing M02
+  orbital halo (deviation from design doc — see design doc Phase 2 commit
+  message for rationale; `<MetisGlow>` ripples would have competed with the
+  existing rotating orbital rings). `<MetisLockup>` on `/setup` welcome.
+  `<MetisLoader>` on the desktop-ready guard. Unused PNG deleted.
+- **Phase 3 — system metadata.** `app/icon.tsx` (32×32 simplified silhouette
+  for browser tabs), `app/apple-icon.tsx` (180×180 full mark), `app/opengraph-image.tsx`
+  (1200×630 lockup + glowing mark), `app/twitter-image.tsx` (alias). Default
+  `favicon.ico` removed. **Static-export fix:** `runtime = "edge"` is incompatible
+  with the project's `output: "export"` config; switched all four routes to
+  `dynamic = "force-static"`. Tauri icon suite regenerated from the SVG via
+  `scripts/build-tauri-icons.mjs` (sharp + `pnpm tauri icon`) — full desktop
+  + mobile + Windows Store suite (~56 files, 392 KB).
+- **Phase 4 — motion polish.** Topbar hover-glow effect via `motion/react`
+  `whileHover` (200ms ease-out, reduced-motion gated). Hero ripple timing
+  defaults accepted (no tweaks needed). Brand `README.md` documenting the
+  primitive surface, theming, reduced-motion contract, how to update the
+  asset, and the deviations from the original design doc.
+
+**Final gate:** 527 tests passing, 0 lint errors, `pnpm build` succeeds with
+all 4 metadata routes prerendered as static content.
+
+User decisions locked in during brainstorming (2026-04-28):
+
+- **Scope 3** — brand surfaces (topbar, nav, hero, splash) +
+  system metadata (favicon, OG, Apple touch, Tauri suite) +
+  per-surface motion treatment (sonar/topography ripple).
+- **Option A wordmark discipline** — mark replaces the
+  `METIS<sup>AI</sup>` typographic wordmark in chrome; the
+  lowercase `metis` humanist lockup from the README header is
+  reserved for *external* surfaces only (OG image, `/setup`
+  welcome card, Tauri splash). The existing uppercase Space
+  Grotesk identity is **not** migrated by M20.
+- **Approach 2** ("Sonar Mark") for the implementation —
+  three composable primitives (`<MetisMark>`, `<MetisGlow>`,
+  `<MetisLockup>`) backed by a cleaned `currentColor`-themed SVG.
+- **Approach 3** ("Living Mark" formed from the existing
+  starfield) is **parked** as a follow-up milestone after M20
+  lands cleanly.
 
 User decisions locked in during brainstorming (2026-04-28):
 
@@ -36,44 +86,24 @@ User decisions locked in during brainstorming (2026-04-28):
 
 ## Next up
 
-The first agent to claim this milestone should:
-
-1. **Read the design doc end-to-end** —
-   [`docs/plans/2026-04-28-metis-logo-rollout-design.md`](../../docs/plans/2026-04-28-metis-logo-rollout-design.md).
-   Don't shortcut from this stub; the design captures every
-   non-obvious choice (currentColor theming, two-layer glow
-   recipe, reduced-motion gating, favicon-at-16px notch
-   simplification, etc.).
-2. **Coordinate with M01.** The Phase 2 hero swap touches
-   `apps/metis-web/components/home/home-visual-system.tsx`,
-   which is an M01 audit hotspot. Confirm M01 isn't mid-edit
-   there before starting Phase 2.
-3. **Start Phase 1 — asset prep + primitives.**
-   - SVGO-clean `m_star_logo_traced.svg` to
-     `apps/metis-web/public/brand/metis-mark.svg` with
-     `fill="currentColor"` and `floatPrecision: 2`.
-   - Generate ripple ring path data — preferred path is to
-     ask the design team for the layered Figma source
-     (the README header clearly already has these as
-     separate layers). Fallback: a one-shot
-     `paper.js`-based script at
-     `scripts/build-metis-ripple-paths.mjs`.
-   - Add brand design tokens to `app/globals.css`
-     (`--brand-mark`, `--brand-glow-near`,
-     `--brand-glow-far`, `--brand-ripple`).
-   - Implement the four React components in
-     `apps/metis-web/components/brand/` plus their tests.
-   - **Do not start surface swaps until Phase 1 lands and
-     the components are reviewed.**
+1. **PR review.** Branch `claude/cranky-northcutt-42501d` is pushed
+   and PR opened. Block on user/team review.
+2. **On merge:** flip Status to `Landed` in IMPLEMENTATION.md M20 row
+   and add the merge SHA. Move row to a `## Landed` section if needed.
+3. **Optional follow-up milestones to file (do NOT do in M20):**
+   - **"Living Mark" formation from starfield** — Approach 3 from
+     brainstorming. Parked. File as a new IDEAS.md entry post-merge.
+   - **Wordmark typography lock-in** — Inter Tight Medium is a
+     placeholder in `<MetisLockup>`. If design specifies Geist or a
+     custom face, file a small ticket; one-line font-family change.
+   - **Tauri icons whitelist in tauri.conf.json** — the existing
+     `bundle.icon` array references only 5 files; the regen produces
+     56. Decide whether to expand the bundle list (more platforms)
+     or trim the generated suite to match. Out of M20 scope.
 
 ## Blockers
 
-- **None.** All upstream decisions are made; the source asset is in
-  hand; the design doc is approved.
-- **Soft dep on design hand-off:** the layered Figma source for
-  the ripple rings is preferred over a generated approximation.
-  If the design team can't supply it within the Phase 1 window,
-  fall back to the `paper.js` script — non-blocking.
+- **None.** Implementation complete on branch; PR pending review.
 
 ## Notes for the next agent
 
