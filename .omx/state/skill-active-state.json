@@ -3,15 +3,15 @@
   "active": true,
   "skill": "ralph",
   "keyword": "$ralph",
-  "phase": "planning",
+  "phase": "executing",
   "activated_at": "2026-04-28T17:47:30.534Z",
-  "updated_at": "2026-04-28T17:47:30.540Z",
+  "updated_at": "2026-04-28T21:16:11.091Z",
   "source": "keyword-detector",
   "input_lock": {
     "active": false,
     "scope": "deep-interview-auto-approval",
     "acquired_at": "2026-04-04T23:54:28.334Z",
-    "released_at": "2026-04-28T17:47:30.534Z",
+    "released_at": "2026-04-28T21:16:11.080Z",
     "blocked_inputs": [
       "yes",
       "y",
