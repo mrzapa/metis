@@ -1,9 +1,12 @@
+<p align="center">
+  <img src="docs/assets/metis-github-header.png" alt="METIS GitHub header with the metis wordmark and glowing star logo" width="100%" />
+</p>
+
 <h1 align="center">METIS AI</h1>
 
 <p align="center">
-  <strong>The private, provider-agnostic AI workspace that runs entirely on your machine.</strong><br />
-  Index your documents. Ask questions. Get grounded answers.<br />
-  No API keys required. Bring a local model and go fully offline.
+  <strong>Private, provider-agnostic AI for grounded local thinking.</strong><br />
+  Index your files, ask cited questions, run local models, and keep your work on your machine.
 </p>
 
 <p align="center">
@@ -15,23 +18,22 @@
 
 <br />
 
-**METIS AI** is a **local-first frontier AI workspace** built with Tauri + Next.js + Litestar. It runs entirely on your machine. Your files never leave your device.
-
-- **Fully local.** Run with a local GGUF model and you don't even need an internet connection.
-- **Swap anything.** LLM, embeddings, vector store. Change providers in a config file. Today it's OpenAI, tomorrow it's a model on your laptop.
-- **Native shell available.** The same app can be packaged in Tauri for a native window experience with no Electron layer.
-- **Constellation home.** The landing page is a live workspace surface for bringing documents into orbit, linking indexes, and jumping into grounded chat.
-- **Six ways to think.** Q&A, Summary, Tutor, Research, Evidence Pack, and Knowledge Search modes give you different lenses on the same documents.
-- **METIS Companion.** An always-on AI companion that learns from your sessions, reflects on conversations, and grows with your workspace.
-- **Evidence-first chat.** Review retrieved sources, inspect trace events, and export grounded answers as JSON or PowerPoint.
-
-<br />
-
 <p align="center">
   <a href="#-quick-start">Quick Start</a> · <a href="#-features">Features</a> · <a href="#-cli">CLI</a> · <a href="#-configuration">Configuration</a> · <a href="#-contributing">Contributing</a>
 </p>
 
 ---
+
+**METIS AI** is a **local-first frontier AI workspace** built with Tauri + Next.js + Litestar. It runs entirely on your machine, keeps your files private, and lets you choose the model/provider stack that matches the work.
+
+| Work privately | Swap every layer | Stay grounded |
+|----------------|------------------|---------------|
+| Run with local GGUF models and work fully offline when you want to. | Change the LLM, embeddings, and vector store from configuration instead of rewriting the app. | Inspect retrieved sources, trace events, and exported evidence packs before you trust an answer. |
+
+- **Constellation home.** Build indexes from uploads, folders, or existing manifests, then send them directly into grounded chat.
+- **Six ways to think.** Q&A, Summary, Tutor, Research, Evidence Pack, and Knowledge Search modes give you different lenses on the same documents.
+- **METIS Companion.** An always-on AI companion learns from your sessions, reflects on conversations, and grows with your workspace.
+- **Native shell available.** Package the same app in Tauri for a native window experience with no Electron layer.
 
 ## ⚡ Quick Start
 
