@@ -133,6 +133,78 @@ def test_activity_bridge_propagates_brain_link_created_kind() -> None:
     assert events[0]["payload"]["status"]["links"][0]["relation"] == "learned_from_session"
 
 
+def test_init_db_idempotent_on_repeat_calls(tmp_path) -> None:
+    """The migration uses ``ALTER TABLE ADD COLUMN`` which raises
+    ``OperationalError: duplicate column name`` when the column
+    exists. The Codex P2 fix gates the catch to that specific
+    message — but the happy path (repeat ``init_db`` on an
+    already-migrated DB) must still succeed silently. Lock that."""
+    from metis_app.services.assistant_repository import AssistantRepository
+
+    repo = AssistantRepository(tmp_path / "assistant.json")
+    # First call creates the table with all columns + runs the
+    # ALTER TABLEs (which will raise duplicate-column for each, since
+    # the CREATE TABLE already declared them).
+    repo.init_db()
+    # Second call must not raise — the duplicate-column errors are
+    # still safely swallowed.
+    repo._schema_ready = False  # force re-run of init_db's ensure path
+    repo.init_db()
+    # And a third — proves the migration is genuinely idempotent
+    # rather than accidentally relying on a one-shot side-effect.
+    repo._schema_ready = False
+    repo.init_db()
+
+
+def test_init_db_reraises_non_duplicate_operational_errors(tmp_path, monkeypatch) -> None:
+    """Codex P2 regression (PR #572): the migration loop must NOT
+    swallow ``OperationalError`` causes other than the
+    duplicate-column case. Errors like ``database is locked``,
+    disk-full, or schema corruption MUST propagate so startup fails
+    loudly rather than entering a broken-schema state.
+
+    Simulate a non-duplicate error by wrapping the connection in a
+    proxy so any ALTER TABLE raises ``database is locked``."""
+    import contextlib
+    import sqlite3
+    from metis_app.services.assistant_repository import AssistantRepository
+
+    repo = AssistantRepository(tmp_path / "assistant.json")
+
+    class _ConnProxy:
+        """Connection proxy that injects a fault into ALTER TABLE
+        but lets every other call through.
+
+        ``sqlite3.Connection.execute`` is a read-only attribute, so
+        we can't monkeypatch it directly — wrap the whole connection
+        in a delegate-everything-except-execute proxy instead."""
+
+        def __init__(self, real: sqlite3.Connection) -> None:
+            self._real = real
+
+        def execute(self, sql, *args, **kwargs):
+            if "ALTER TABLE" in str(sql).upper():
+                raise sqlite3.OperationalError("database is locked")
+            return self._real.execute(sql, *args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    real_connect = repo._connect
+
+    @contextlib.contextmanager
+    def _faulty_connect():
+        with real_connect() as conn:
+            yield _ConnProxy(conn)
+
+    monkeypatch.setattr(repo, "_connect", _faulty_connect)
+
+    # init_db should raise — the lock error is NOT a
+    # duplicate-column case and must propagate.
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        repo.init_db()
+
+
 def test_assistant_status_round_trips_growth_and_user_input_fields(tmp_path) -> None:
     """M13 retro fix: ``AssistantStatus.growth_stage``,
     ``growth_stage_changed_at``, and ``last_user_input_at`` MUST

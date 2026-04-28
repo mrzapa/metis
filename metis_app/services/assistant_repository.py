@@ -152,15 +152,23 @@ class AssistantRepository:
                 """
             )
             # M13 retro (2026-04-26): idempotent column additions for
-            # databases created against the pre-Phase-5 schema. SQLite
-            # raises ``OperationalError`` when the column already
-            # exists; we catch and continue so this is safe to run on
-            # every ``_ensure_ready`` call. Phase 5 added
-            # ``growth_stage`` / ``growth_stage_changed_at`` to the
-            # dataclass but never migrated the SQL schema (latent bug
-            # — Phase 5's in-memory tests passed because they used a
-            # fake repo). Phase 7 retro adds ``last_user_input_at``
-            # for the user-activity proxy fix.
+            # databases created against the pre-Phase-5 schema. Phase
+            # 5 added ``growth_stage`` / ``growth_stage_changed_at``
+            # to the dataclass but never migrated the SQL schema
+            # (latent bug — Phase 5's in-memory tests passed because
+            # they used a fake repo). Phase 7 retro adds
+            # ``last_user_input_at`` for the user-activity proxy fix.
+            #
+            # **Codex P2 fix (PR #572 review):** only the
+            # duplicate-column case is safe to swallow. Other
+            # ``OperationalError`` causes (``database is locked``,
+            # disk-full, schema-corruption, etc.) must NOT be ignored
+            # — silently leaving a partially-migrated DB in place
+            # would cause downstream INSERTs to fail with
+            # missing-column errors that look like data corruption.
+            # Match on SQLite's stable error-message format
+            # ``"duplicate column name: <name>"`` and re-raise
+            # everything else.
             for column_def in (
                 "growth_stage TEXT NOT NULL DEFAULT 'seedling'",
                 "growth_stage_changed_at TEXT NOT NULL DEFAULT ''",
@@ -170,10 +178,18 @@ class AssistantRepository:
                     conn.execute(
                         f"ALTER TABLE assistant_status ADD COLUMN {column_def}"
                     )
-                except sqlite3.OperationalError:
-                    # Column already exists — fresh DBs hit this path,
-                    # plus repeat ``init_db`` calls.
-                    continue
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" in str(exc).lower():
+                        # Column already exists — fresh DBs hit this
+                        # path (CREATE TABLE already declared all
+                        # three columns), plus repeat ``init_db``
+                        # calls on existing migrated DBs.
+                        continue
+                    # Any other OperationalError (lock contention,
+                    # disk-full, etc.) is a genuine failure — re-raise
+                    # so startup fails loudly rather than entering a
+                    # broken-schema state.
+                    raise
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS assistant_memory(

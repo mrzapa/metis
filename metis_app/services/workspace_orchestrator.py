@@ -815,13 +815,24 @@ class WorkspaceOrchestrator:
         Called from any code path that processes fresh user input so
         the overnight quiet-window gate sees the user as present even
         when no reflection fires for the message.
+
+        **Codex P1 fix (PR #572 review):** uses the partial-dict
+        overload of ``update_status`` rather than the
+        ``get_status()`` → mutate → ``update_status(full_object)``
+        pattern. The mutate-and-rewrite-whole-object pattern raced
+        with concurrent reflection updates: a reflection writing
+        ``latest_summary`` / ``last_reflection_at`` between our read
+        and our write would be silently reverted by our stale-state
+        rewrite. The partial-dict path narrows the window to
+        ``update_status``'s internal read-merge-write (which still
+        races, but only over the one ``last_user_input_at`` field;
+        no risk of clobbering unrelated fields).
         """
         from datetime import datetime, timezone
 
-        repo = self._assistant_service.repository
-        status = repo.get_status()
-        status.last_user_input_at = datetime.now(timezone.utc).isoformat()
-        repo.update_status(status)
+        self._assistant_service.repository.update_status(
+            {"last_user_input_at": datetime.now(timezone.utc).isoformat()}
+        )
 
     def save_feedback(
         self,

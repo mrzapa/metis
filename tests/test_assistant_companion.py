@@ -400,6 +400,77 @@ def test_reflect_emits_only_persisted_links_when_max_items_truncates(
     )
 
 
+def test_orchestrator_note_user_input_uses_partial_dict_update(tmp_path) -> None:
+    """Codex P1 regression (PR #572): ``_note_user_input`` MUST use
+    the partial-dict overload of ``update_status``, not the
+    ``get_status() → mutate → update_status(full_object)`` pattern.
+
+    The full-object pattern races with concurrent reflection updates:
+    a reflection writing ``latest_summary`` between our read and our
+    write would be silently reverted by our stale rewrite.
+
+    Direct verification — capture every ``update_status`` call from
+    ``_note_user_input`` and assert each is a partial dict containing
+    ONLY ``last_user_input_at``, never a full ``AssistantStatus``
+    object that would carry stale snapshots of every other field."""
+    from metis_app.models.assistant_types import AssistantStatus
+    from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
+    from metis_app.services.session_repository import SessionRepository
+
+    session_repo = SessionRepository(db_path=tmp_path / "sessions.db")
+    session_repo.init_db()
+    session_repo.create_session(session_id="s1", title="Test session")
+    assistant_repo = AssistantRepository(tmp_path / "assistant.json")
+
+    captured_updates: list = []
+    real_update = assistant_repo.update_status
+
+    def _spy_update_status(payload):
+        captured_updates.append(payload)
+        return real_update(payload)
+
+    assistant_repo.update_status = _spy_update_status  # type: ignore[method-assign]
+
+    assistant_service = AssistantCompanionService(
+        repository=assistant_repo,
+        session_repo=session_repo,
+    )
+    orch = WorkspaceOrchestrator(
+        session_repo=session_repo,
+        assistant_service=assistant_service,
+    )
+
+    # User message → triggers _note_user_input → calls update_status.
+    orch.append_message("s1", role="user", content="hello")
+
+    # Find the call that was made FROM _note_user_input. There may be
+    # other update_status calls in the chain; we assert at least one
+    # is the user-input bump and that one is a partial dict (not a
+    # full AssistantStatus).
+    user_input_calls = [
+        p for p in captured_updates
+        if isinstance(p, dict) and "last_user_input_at" in p
+    ]
+    assert user_input_calls, (
+        "Expected at least one update_status call carrying "
+        "last_user_input_at"
+    )
+    for call in user_input_calls:
+        # Critical: must be a partial dict, NOT a full AssistantStatus
+        # object. The full-object path is the race-prone pattern.
+        assert not isinstance(call, AssistantStatus), (
+            "_note_user_input must use the partial-dict overload, "
+            "not pass a full AssistantStatus (Codex P1 fix)"
+        )
+        # And the partial dict must carry ONLY the user-input field —
+        # carrying anything else risks clobbering concurrent writes
+        # to that other field too.
+        assert set(call.keys()) == {"last_user_input_at"}, (
+            f"Partial-dict call must contain ONLY last_user_input_at "
+            f"(got keys: {set(call.keys())})"
+        )
+
+
 def test_orchestrator_append_message_user_bumps_last_user_input_at(tmp_path) -> None:
     """M13 retro fix: ``WorkspaceOrchestrator.append_message`` with
     ``role="user"`` MUST bump ``AssistantStatus.last_user_input_at``
