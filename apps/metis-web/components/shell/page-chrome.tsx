@@ -101,8 +101,25 @@ export function PageChrome({
               "sticky top-0 z-50 -mx-3 sm:-mx-4 flex items-center px-10 py-7 bg-transparent",
             )}
           >
-            <Link href="/" aria-label="Metis home">
-              <MetisMark size={28} title="Metis home" />
+            <Link
+              href="/"
+              aria-label="Metis home"
+              className="group inline-flex items-center"
+            >
+              <motion.span
+                className="inline-flex"
+                whileHover={
+                  reducedMotion
+                    ? undefined
+                    : {
+                        filter:
+                          "drop-shadow(0 0 6px rgb(var(--brand-glow-near) / 0.7)) drop-shadow(0 0 14px rgb(var(--brand-glow-far) / 0.4))",
+                      }
+                }
+                transition={{ duration: 0.2, ease: "easeOut" }}
+              >
+                <MetisMark size={28} title="Metis home" />
+              </motion.span>
             </Link>
 
             <nav className="ml-10 flex items-center gap-8">
