@@ -10,7 +10,8 @@ import {
  * plenty of resolution for the notches to read cleanly.
  */
 
-export const runtime = "edge";
+// Static export: see app/icon.tsx for rationale.
+export const dynamic = "force-static";
 export const size = { width: 180, height: 180 };
 export const contentType = "image/png";
 

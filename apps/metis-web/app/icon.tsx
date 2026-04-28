@@ -9,7 +9,10 @@ import { ImageResponse } from "next/og";
  * opengraph-image.tsx).
  */
 
-export const runtime = "edge";
+// Static export: render at build time (next.config.ts has output: 'export'
+// for Tauri bundling). No edge runtime — that's incompatible with static
+// export. `dynamic = "force-static"` makes Next pre-render this once.
+export const dynamic = "force-static";
 export const size = { width: 32, height: 32 };
 export const contentType = "image/png";
 

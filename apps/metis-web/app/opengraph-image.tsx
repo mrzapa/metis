@@ -15,7 +15,8 @@ import {
  * primitives faithfully. Visually equivalent at OG resolution.
  */
 
-export const runtime = "edge";
+// Static export: see app/icon.tsx for rationale.
+export const dynamic = "force-static";
 export const alt = "Metis — a local-first frontier AI workspace";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
