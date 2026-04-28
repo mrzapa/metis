@@ -4,7 +4,7 @@
       "command": "repowise",
       "args": [
         "mcp",
-        "C:/Users/samwe/Documents/metis",
+        ".",
         "--transport",
         "stdio"
       ],

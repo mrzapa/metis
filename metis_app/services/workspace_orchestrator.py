@@ -1,8 +1,14 @@
-"""Single orchestration layer that composes all METIS subsystems for the UI.
+"""Orchestration layer that composes engine + retrieval + graph subsystems.
 
-``WorkspaceOrchestrator`` is the **one** entry point that the API (and any
-future UI surface) should call.  It delegates every operation to the existing
-engine and service modules — it never duplicates their logic.
+``WorkspaceOrchestrator`` is the **canonical entry point for compositional
+workflows** — anything that touches indexing, retrieval, streaming, the brain
+graph, or settings should go through here. Pure CRUD routes (sessions, logs,
+observation feedback) call their service repositories directly because they
+have nothing to compose; threading them through this class would add a tier of
+pass-through with no leverage.
+
+When in doubt: if the call would chain two or more subsystems, route it
+through here. If it's a single repository read or write, call the repository.
 
 Subsystems composed here
 ------------------------
@@ -12,6 +18,7 @@ Subsystems composed here
   :mod:`metis_app.engine.streaming`
 * **Graph** — :mod:`metis_app.models.brain_graph`
 * **Sessions / Memory** — :class:`~metis_app.services.session_repository.SessionRepository`
+  (also exposed directly to CRUD routes via ``get_session_repo``)
 * **Skills** — :class:`~metis_app.services.skill_repository.SkillRepository`
 * **Settings** — :mod:`metis_app.settings_store`
 """
@@ -20,7 +27,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import pathlib
 import re
 import threading
@@ -80,7 +86,10 @@ from metis_app.services.nyx_catalog import (
     get_default_nyx_catalog_broker,
 )
 from metis_app.services.nyx_runtime import augment_settings_with_nyx, build_nyx_install_actions
-from metis_app.services.session_repository import SessionRepository
+from metis_app.services.session_repository import (
+    SessionRepository,
+    make_default_session_repo,
+)
 from metis_app.services.skill_repository import SkillRepository, _DEFAULT_CANDIDATES_DB_PATH
 from metis_app.services.trace_store import TraceStore
 from metis_app.models.parity_types import SkillDefinition
@@ -133,7 +142,7 @@ class WorkspaceOrchestrator:
         atlas_repo: AtlasRepository | None = None,
         improvement_repo: ImprovementRepository | None = None,
     ) -> None:
-        self._session_repo: SessionRepository = session_repo or _make_session_repo()
+        self._session_repo: SessionRepository = session_repo or make_default_session_repo()
         self._skill_repo: SkillRepository = skill_repo or SkillRepository()
         self._index_dir: pathlib.Path | str | None = index_dir
         self._trace_store = TraceStore()
@@ -1724,13 +1733,3 @@ class WorkspaceOrchestrator:
         return _settings_store.safe_settings(payload)
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_session_repo() -> SessionRepository:
-    db_path = os.getenv("METIS_SESSION_DB_PATH") or None
-    repo = SessionRepository(db_path=db_path)
-    repo.init_db()
-    return repo

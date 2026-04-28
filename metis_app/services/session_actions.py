@@ -107,13 +107,16 @@ def _build_action_result(
     return result
 
 
-def hydrate_session_actions(detail: SessionDetail) -> SessionDetail:
+def hydrate_session_actions(
+    detail: SessionDetail,
+    trace_store: TraceStore | None = None,
+) -> SessionDetail:
     """Attach action_result payloads to messages whose actions have executed."""
     run_ids = _session_run_ids(detail)
     if not run_ids:
         return detail
 
-    run_traces = TraceStore().read_runs(run_ids)
+    run_traces = (trace_store or TraceStore()).read_runs(run_ids)
     detail.traces = run_traces
 
     for message in detail.messages:

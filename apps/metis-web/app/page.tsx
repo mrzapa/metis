@@ -40,6 +40,7 @@ import {
 } from "@/lib/star-catalogue";
 import { BorderBeam } from "@/components/ui/border-beam";
 import { useConstellationCamera } from "@/hooks/use-constellation-camera";
+import { useStarFocusPhase, type StarFocusPhase } from "@/hooks/use-star-focus-phase";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
 import { useCometNews } from "@/hooks/use-news-comets";
 import { deleteIndex, fetchBrainScaffold, fetchIndexes, fetchSettings, previewLearningRoute, subscribeCompanionActivity } from "@/lib/api";
@@ -188,8 +189,6 @@ const NODE_LABEL_EDGE_MARGIN_PX = 14;
 const NODE_LABEL_CENTER_OFFSET_RATIO = 0.28;
 
 type CanvasTool = "select" | "grab" | "add";
-type StarFocusPhase = "idle" | "focusing" | "details-open" | "returning";
-
 interface CanvasBounds {
   left: number;
   top: number;
@@ -874,7 +873,8 @@ export default function Home() {
   const [starDetailsMode, setStarDetailsMode] = useState<"new" | "existing">("new");
   const [pendingDetailStar, setPendingDetailStar] = useState<UserStar | null>(null);
   const [starDetailCloseLockedUntil, setStarDetailCloseLockedUntil] = useState(0);
-  const [starFocusPhase, setStarFocusPhase] = useState<StarFocusPhase>("idle");
+  const focusPhaseHandle = useStarFocusPhase("idle");
+  const starFocusPhase = focusPhaseHandle.phase;
   const [starDiveFocusStrength, setStarDiveFocusStrength] = useState(0);
   const [availableIndexes, setAvailableIndexes] = useState<IndexSummary[]>([]);
   const [indexesLoading, setIndexesLoading] = useState(true);
@@ -956,7 +956,7 @@ export default function Home() {
   const backgroundCameraTargetOriginRef = constellationCamera.targetOriginRef;
   const backgroundZoomRef = constellationCamera.zoomRef;
   const backgroundZoomTargetRef = constellationCamera.zoomTargetRef;
-  const starFocusPhaseRef = useRef<StarFocusPhase>("idle");
+  const starFocusPhaseRef = focusPhaseHandle.phaseRef;
   const starFocusSessionRef = useRef<{
     starId: string | null;
     focusTarget: ConstellationCameraSnapshot | null;
@@ -1511,13 +1511,7 @@ export default function Home() {
     [router],
   );
 
-  const setStarFocusPhaseValue = useCallback((nextPhase: StarFocusPhase) => {
-    if (starFocusPhaseRef.current === nextPhase) {
-      return;
-    }
-    starFocusPhaseRef.current = nextPhase;
-    setStarFocusPhase(nextPhase);
-  }, []);
+  const setStarFocusPhaseValue = focusPhaseHandle.setPhase;
 
   const setBackgroundZoomTarget = useCallback((
     nextZoomFactor: number,

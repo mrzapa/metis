@@ -44,6 +44,10 @@ import { buildIndexStream, fetchSettings, suggestStarArchetypes, uploadFiles } f
 import type { IndexBuildResult, IndexSummary, StarArchetypeSuggestion } from "@/lib/api";
 import { StarArchetypePicker } from "@/components/constellation/star-archetype-picker";
 import {
+  useIndexBuildProgress,
+  type IndexBuildProgressState,
+} from "@/hooks/use-index-build-progress";
+import {
   buildBrainPlacementIntent,
   buildFacultyAnchoredPlacement,
   getConstellationPlacementDecision,
@@ -64,7 +68,6 @@ import type {
 } from "@/lib/constellation-types";
 import { cn } from "@/lib/utils";
 
-type BuildStep = "idle" | "active" | "done";
 type EntryMode = "new" | "existing";
 type StarDialogView = "build" | "overview";
 type DialogTone = "default" | "error";
@@ -105,18 +108,6 @@ type AttachedIndexSummary = {
   created_at?: string;
   embedding_signature?: string;
   source: "available" | "build" | "unresolved";
-};
-
-interface ProgressState {
-  reading: BuildStep;
-  embedding: BuildStep;
-  saved: BuildStep;
-}
-
-const INITIAL_PROGRESS: ProgressState = {
-  reading: "idle",
-  embedding: "idle",
-  saved: "idle",
 };
 
 const STAGE_OPTIONS: Array<{ value: UserStarStage; label: string; description: string }> = [
@@ -457,7 +448,8 @@ export function StarDetailsPanel({
 
   const [building, setBuilding] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
-  const [progress, setProgress] = useState<ProgressState>(INITIAL_PROGRESS);
+  const buildProgress = useIndexBuildProgress();
+  const progress: IndexBuildProgressState = buildProgress.state;
   const [buildResult, setBuildResult] = useState<IndexBuildResult | null>(null);
 
   const [labelDraft, setLabelDraft] = useState("");
@@ -514,7 +506,7 @@ export function StarDetailsPanel({
     setStatusTone("default");
     setBuildError(null);
     setBuildResult(null);
-    setProgress(INITIAL_PROGRESS);
+    buildProgress.reset();
     setSelectedFiles([]);
     setUploadedPaths([]);
     setRawPaths("");
@@ -868,7 +860,7 @@ export function StarDetailsPanel({
     setBuildError(null);
     setBuildResult(null);
     setStatusMessage(null);
-    setProgress({ reading: "active", embedding: "idle", saved: "idle" });
+    buildProgress.startReading();
 
     try {
       const baseSettings = await fetchSettings();
@@ -878,12 +870,12 @@ export function StarDetailsPanel({
         if (type === "status") {
           const text = String(event.text ?? "").toLowerCase();
           if (text.includes("embedding")) {
-            setProgress({ reading: "done", embedding: "active", saved: "idle" });
+            buildProgress.startEmbedding();
           }
         }
       });
 
-      setProgress({ reading: "done", embedding: "done", saved: "active" });
+      buildProgress.startSaving();
       setBuildResult(result);
       onIndexBuilt(result);
 
@@ -921,15 +913,11 @@ export function StarDetailsPanel({
         throw new Error("Index built, but the star could not be linked.");
       }
 
-      setProgress({ reading: "done", embedding: "done", saved: "done" });
+      buildProgress.finishSaving();
       setView("overview");
     } catch (error) {
       setBuildError(error instanceof Error ? error.message : "Build failed");
-      setProgress((current) =>
-        current.saved === "active"
-          ? { reading: "done", embedding: "done", saved: "idle" }
-          : current,
-      );
+      buildProgress.failSaving();
       setStatusTone("error");
       setStatusMessage(null);
     } finally {

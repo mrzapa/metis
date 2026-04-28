@@ -12,9 +12,9 @@ from litestar.exceptions import HTTPException as LitestarHTTPException
 from pydantic import BaseModel
 
 import metis_app.settings_store as _store
+from metis_app.api_litestar.common import get_session_repo
 from metis_app.services.artifact_converter import ArtifactConverter
 from metis_app.services.behavior_discovery import BehaviorDiscoveryService
-from metis_app.services.session_repository import SessionRepository
 
 _DEFAULT_LIMIT = 50
 
@@ -23,18 +23,6 @@ class FeedbackBody(BaseModel):
     label: str  # "reinforce" | "suppress" | "investigate"
     note: str = ""
     segment: str = ""  # optional trace segment identifier
-
-
-def _db() -> SessionRepository:
-    return SessionRepository()
-
-
-def _svc() -> BehaviorDiscoveryService:
-    return BehaviorDiscoveryService()
-
-
-def _conv() -> ArtifactConverter:
-    return ArtifactConverter()
 
 
 def _validate_label(label: str) -> None:
@@ -46,8 +34,8 @@ def _validate_label(label: str) -> None:
         )
 
 
-def _get_profile_or_404(run_id: str) -> dict[str, Any]:
-    profile = _svc().get_run_profile(run_id)
+def _get_profile_or_404(svc: BehaviorDiscoveryService, run_id: str) -> dict[str, Any]:
+    profile = svc.get_run_profile(run_id)
     if profile is None:
         raise LitestarHTTPException(status_code=404, detail=f"Run not found: {run_id}")
     return profile.to_dict() if hasattr(profile, "to_dict") else dict(profile)
@@ -55,8 +43,7 @@ def _get_profile_or_404(run_id: str) -> dict[str, Any]:
 
 def _latest_feedback_note(run_id: str, label: str = "") -> str:
     try:
-        db = _db()
-        with db._connect() as conn:
+        with get_session_repo()._connect() as conn:
             params: list[Any] = [run_id]
             where_label = ""
             if label:
@@ -73,8 +60,7 @@ def _latest_feedback_note(run_id: str, label: str = "") -> str:
 
 def _latest_label(run_id: str) -> str:
     try:
-        db = _db()
-        with db._connect() as conn:
+        with get_session_repo()._connect() as conn:
             row = conn.execute(
                 "SELECT label FROM trace_feedback WHERE run_id = ? ORDER BY created_at DESC LIMIT 1",
                 (run_id,),
@@ -87,7 +73,7 @@ def _latest_label(run_id: str) -> str:
 @get("/v1/traces/discover")
 def get_discover(limit: int = _DEFAULT_LIMIT) -> dict[str, Any]:
     """Return clustered + ranked behavioral profiles for recent runs."""
-    result = _svc().discover(limit=limit)
+    result = BehaviorDiscoveryService().discover(limit=limit)
     profiles_sorted = sorted(
         result.profiles,
         key=lambda p: p.interestingness_score,
@@ -106,7 +92,7 @@ def get_discover(limit: int = _DEFAULT_LIMIT) -> dict[str, Any]:
 def get_run_semantic(run_id: str) -> dict[str, Any]:
     """Deep behavioral profile for a single run, with optional LLM narrative."""
     settings = _store.load_settings()
-    result = _svc().describe_run(run_id, settings=settings)
+    result = BehaviorDiscoveryService().describe_run(run_id, settings=settings)
     if not result:
         raise LitestarHTTPException(status_code=404, detail=f"Run not found: {run_id}")
     return result
@@ -118,9 +104,8 @@ def post_trace_feedback(run_id: str, data: FeedbackBody) -> dict[str, Any]:
     _validate_label(data.label)
     feedback_id = str(uuid.uuid4())
     ts = datetime.now(timezone.utc).isoformat()
-    db = _db()
     try:
-        with db._connect() as conn:
+        with get_session_repo()._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO trace_feedback(feedback_id, run_id, segment, label, note, created_at)
@@ -140,9 +125,8 @@ def get_trace_feedback(
     limit: int = 50,
 ) -> dict[str, Any]:
     """List trace feedback records, optionally filtered by label or run_id."""
-    db = _db()
     try:
-        with db._connect() as conn:
+        with get_session_repo()._connect() as conn:
             clauses: list[str] = []
             params: list[Any] = []
             if label:
@@ -169,19 +153,23 @@ def get_trace_feedback(
 @post("/v1/traces/{run_id:str}/export/skill", status_code=200)
 def export_run_as_skill(run_id: str, skill_id: str = "") -> dict[str, Any]:
     """Convert a trace run into a SKILL.md in the skills/ directory."""
-    profile_data = _get_profile_or_404(run_id)
+    svc = BehaviorDiscoveryService()
+    profile_data = _get_profile_or_404(svc, run_id)
     note = _latest_feedback_note(run_id, label="reinforce")
-    return _conv().export_as_skill(run_id, profile_data, skill_id=skill_id, feedback_note=note)
+    return ArtifactConverter().export_as_skill(
+        run_id, profile_data, skill_id=skill_id, feedback_note=note
+    )
 
 
 @post("/v1/traces/{run_id:str}/export/eval", status_code=200)
 def export_run_as_eval(run_id: str) -> dict[str, Any]:
     """Append a trace run to evals/golden_dataset.jsonl as a golden eval case."""
-    profile_data = _get_profile_or_404(run_id)
-    events = _svc()._read_run_events(run_id)
+    svc = BehaviorDiscoveryService()
+    profile_data = _get_profile_or_404(svc, run_id)
+    events = svc._read_run_events(run_id)
     note = _latest_feedback_note(run_id, label="reinforce")
     label = _latest_label(run_id)
-    return _conv().export_as_eval(
+    return ArtifactConverter().export_as_eval(
         run_id, profile_data, events, feedback_note=note, label=label
     )
 

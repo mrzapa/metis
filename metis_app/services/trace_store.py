@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import pathlib
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -217,7 +218,10 @@ class TraceStore:
     """Persist run traces to runs.jsonl and per-run JSONL files."""
 
     def __init__(self, base_dir: str | pathlib.Path | None = None) -> None:
-        self.base_dir = pathlib.Path(base_dir or _DEFAULT_TRACE_DIR)
+        if base_dir is None:
+            env_dir = os.getenv("METIS_TRACE_DIR")
+            base_dir = env_dir if env_dir else _DEFAULT_TRACE_DIR
+        self.base_dir = pathlib.Path(base_dir)
         self.runs_dir = self.base_dir / "runs"
         self.runs_jsonl = self.base_dir / "runs.jsonl"
         self.runs_dir.mkdir(parents=True, exist_ok=True)
