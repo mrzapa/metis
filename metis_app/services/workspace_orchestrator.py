@@ -791,7 +791,15 @@ class WorkspaceOrchestrator:
         artifacts: list[dict[str, Any]] | None = None,
         actions: list[dict[str, Any]] | None = None,
     ) -> None:
-        """Append a message to *session_id*."""
+        """Append a message to *session_id*.
+
+        M13 retro (2026-04-26) — when the role is ``"user"``, also
+        bump :attr:`AssistantStatus.last_user_input_at` so the Phase
+        4b overnight quiet-window gate has a reliable "user is here"
+        signal independent of whether a reflection happens to fire.
+        Failures here are non-fatal — the message persistence is the
+        primary contract; the activity timestamp is a side-effect.
+        """
         self._session_repo.append_message(
             session_id,
             role=role,
@@ -800,6 +808,39 @@ class WorkspaceOrchestrator:
             sources=sources or [],
             artifacts=artifacts or [],
             actions=actions or [],
+        )
+        if role == "user":
+            try:
+                self._note_user_input()
+            except Exception:  # noqa: BLE001
+                log.debug(
+                    "Failed to bump last_user_input_at",
+                    exc_info=True,
+                )
+
+    def _note_user_input(self) -> None:
+        """M13 retro — bump the assistant status's user-input timestamp.
+
+        Called from any code path that processes fresh user input so
+        the overnight quiet-window gate sees the user as present even
+        when no reflection fires for the message.
+
+        **Codex P1 fix (PR #572 review):** uses the partial-dict
+        overload of ``update_status`` rather than the
+        ``get_status()`` → mutate → ``update_status(full_object)``
+        pattern. The mutate-and-rewrite-whole-object pattern raced
+        with concurrent reflection updates: a reflection writing
+        ``latest_summary`` / ``last_reflection_at`` between our read
+        and our write would be silently reverted by our stale-state
+        rewrite. The partial-dict path narrows the window to
+        ``update_status``'s internal read-merge-write (which still
+        races, but only over the one ``last_user_input_at`` field;
+        no risk of clobbering unrelated fields).
+        """
+        from datetime import datetime, timezone
+
+        self._assistant_service.repository.update_status(
+            {"last_user_input_at": datetime.now(timezone.utc).isoformat()}
         )
 
     def save_feedback(

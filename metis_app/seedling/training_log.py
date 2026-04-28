@@ -48,38 +48,69 @@ per-line to decide skip / migrate / fail-loud on an unknown version."""
 DEFAULT_LOG_FILENAME = "seedling_training_log.jsonl"
 
 
+def _default_user_home_log_dir() -> pathlib.Path:
+    """Pick a stable per-user log directory.
+
+    Resolution rules:
+
+    - **Windows**: ``%APPDATA%\\metis``. Falls back to ``~/.metis``
+      if ``APPDATA`` is unset (rare; usually only when running
+      under a stripped-down service account).
+    - **POSIX (macOS, Linux)**: ``~/.metis``. We deliberately do
+      *not* honour ``XDG_DATA_HOME`` — METIS already stores
+      ``assistant_state.json``, ``skill_candidates.db``, etc.
+      under a per-user home via per-feature defaults, so the
+      training log fits the established convention.
+
+    The directory is **not** created here; ``record_training_sample``
+    handles ``mkdir -p`` lazily on first write. We compute the path
+    eagerly so the resolution is testable without disk side-effects.
+    """
+    import os
+    import platform
+
+    if platform.system() == "Windows":
+        appdata = os.environ.get("APPDATA", "").strip()
+        if appdata:
+            return pathlib.Path(appdata) / "metis"
+        # APPDATA missing — fall through to the POSIX-style home.
+    return pathlib.Path.home() / ".metis"
+
+
 def resolve_training_log_path(
     settings: dict[str, Any] | None = None,
 ) -> pathlib.Path:
-    """Return the configured JSONL path, defaulting to ``<cwd>/seedling_training_log.jsonl``.
+    """Return the configured JSONL path, defaulting to a per-user home.
 
     Resolution rules (precedence high → low):
 
     1. ``settings["seedling_training_log_path"]`` if non-empty.
-    2. ``<cwd>/seedling_training_log.jsonl``.
+    2. Per-user home — ``%APPDATA%\\metis\\seedling_training_log.jsonl``
+       on Windows, ``~/.metis/seedling_training_log.jsonl`` on POSIX.
 
-    **Default-path caveat (Phase 7 v0).** The default is *cwd*-relative,
-    not a stable per-user home like ``~/.metis/...``. In dev this is
-    typically the repo root (the ``.gitignore`` entry covers that
-    case); in production it depends on the working directory the
-    Litestar app was launched from. Operators running the seedling
-    worker as a service should set ``seedling_training_log_path``
-    explicitly to avoid log fragmentation across restarts. Phase 7
-    retro should consider promoting this to a stable home if cwd
-    drift becomes a real issue — flagged in the plan-doc *Notes for
-    the next agent* section.
+    **Path-stability fix (M13 retro, 2026-04-26).** The Phase 7 v0
+    default was cwd-relative, which fragmented logs across server
+    restarts whenever the Litestar app was launched from different
+    working directories. The new per-user-home default keeps the log
+    in one place across restarts, matches the convention METIS
+    already uses for ``assistant_state.json`` /
+    ``skill_candidates.db`` / etc., and removes the operator
+    footgun. The ``seedling_training_log_path`` setting still wins
+    when set — operators with bespoke layouts (read-only home,
+    encrypted volume, network share) keep their override. Tests pass
+    an explicit ``log_path`` to avoid touching the real user home.
 
     Unlike the comet feed singleton in
     :func:`metis_app.services.comet_pipeline.resolve_feed_repository`,
     we do **not** cache the resolved path: the writer is a one-shot
-    per overnight cycle, so runtime setting changes take effect on the
-    next cycle without server restart.
+    per overnight cycle, so runtime setting changes take effect on
+    the next cycle without server restart.
     """
     cfg = dict(settings or {})
     explicit = str(cfg.get("seedling_training_log_path") or "").strip()
     if explicit:
         return pathlib.Path(explicit)
-    return pathlib.Path.cwd() / DEFAULT_LOG_FILENAME
+    return _default_user_home_log_dir() / DEFAULT_LOG_FILENAME
 
 
 def is_enabled(settings: dict[str, Any] | None = None) -> bool:
@@ -195,6 +226,80 @@ def record_training_sample(
         }
 
     return {"ok": True, "reason": None, "path": str(target)}
+
+
+def record_overnight_feedback(
+    *,
+    target_trace_id: str,
+    vote: int = 0,
+    note: str = "",
+    edited_summary: str = "",
+    feedback_id: str = "",
+    settings: dict[str, Any] | None = None,
+    log_path: pathlib.Path | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Phase 7 retro — append a feedback record for an overnight card.
+
+    Wraps :func:`record_training_sample` with
+    ``kind="overnight_feedback"`` so the future UI surface
+    (thumbs-up / edit-then-save on the morning card) lands in the
+    same JSONL log as the originating overnight reflection. M16
+    (Personal evals) reads both kinds back together when computing
+    per-user improvement signal.
+
+    **Schema_v1 inner shape for ``overnight_feedback`` lines**
+    (additive to the v1 contract; the four base fields below are
+    populated, the others are blank/empty):
+
+    - ``trace_id``: ``"feedback:<feedback_id>"`` — distinguishes
+      feedback rows from reflection rows in M16 readers.
+    - ``kind``: ``"overnight_feedback"``.
+    - ``feedback[0]``: dict with ``feedback_id``,
+      ``target_trace_id``, ``vote`` (int, typically -1 / 0 / 1),
+      ``note`` (free text), ``edited_summary`` (the user's edited
+      version of the morning card; empty if they didn't edit),
+      ``ts``.
+    - ``system_prompt``, ``user_prompt``, ``model_output``: empty
+      strings (no model invocation for a feedback event).
+    - ``retrieved_context``: empty dict.
+
+    The future UI calls this function on the user's
+    thumbs-up / edit-then-save action. A complementary
+    :func:`metis_app.seedling.activity.record_seedling_activity`
+    event with ``kind="overnight_feedback"`` lets the dock surface
+    the feedback in real time (already wired in the bridge's
+    allow-list).
+
+    Returns the same shape as :func:`record_training_sample`.
+    """
+    timestamp = (now or datetime.now(timezone.utc)).isoformat()
+    fid = str(feedback_id or "").strip()
+    if not fid:
+        # Synthesise a deterministic id from the timestamp + target so
+        # M16 dedup-by-id has something stable to grip when callers
+        # don't supply one.
+        fid = f"fb-{timestamp}-{target_trace_id}"
+    feedback_row = {
+        "feedback_id": fid,
+        "target_trace_id": str(target_trace_id or ""),
+        "vote": int(vote),
+        "note": str(note or ""),
+        "edited_summary": str(edited_summary or ""),
+        "ts": timestamp,
+    }
+    return record_training_sample(
+        kind="overnight_feedback",
+        system_prompt="",
+        user_prompt="",
+        model_output="",
+        retrieved_context={},
+        trace_id=f"feedback:{fid}",
+        feedback=[feedback_row],
+        settings=settings,
+        log_path=log_path,
+        now=now,
+    )
 
 
 def read_training_log(

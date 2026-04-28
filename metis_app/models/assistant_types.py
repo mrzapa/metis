@@ -162,6 +162,14 @@ class AssistantStatus:
     latest_why: str = ""
     growth_stage: GrowthStage = "seedling"
     growth_stage_changed_at: str = ""
+    # M13 retro (2026-04-26): dedicated user-input timestamp for the
+    # Phase 4b quiet-window gate. ``last_reflection_at`` was a coarse
+    # proxy that only bumped on reflections — a user actively chatting
+    # without triggering a reflection looked "idle" to the gate. This
+    # field bumps on every chat input so the overnight cycle can
+    # reliably tell "user is here right now" from "user has been
+    # away". ISO 8601 UTC; empty string until first input.
+    last_user_input_at: str = ""
 
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
@@ -192,6 +200,7 @@ class AssistantStatus:
             latest_why=str(data.get("latest_why") or ""),
             growth_stage=growth_stage,
             growth_stage_changed_at=str(data.get("growth_stage_changed_at") or ""),
+            last_user_input_at=str(data.get("last_user_input_at") or ""),
         )
 
 

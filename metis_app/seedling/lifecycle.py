@@ -329,18 +329,30 @@ def _resolve_training_log_writer():
 def _resolve_last_user_activity(orchestrator: Any) -> datetime | None:
     """Look up the most recent user activity timestamp.
 
-    For Phase 4b v0 we rely on the assistant snapshot's
-    ``last_reflection_at`` as a proxy — every manual chat reflection
-    bumps it, and so does the automatic reflection on completed runs.
-    Phase 4b retro can refine this with a dedicated
-    ``last_user_input_at`` field if the proxy proves too coarse.
+    Resolution order (M13 retro, 2026-04-26):
+
+    1. ``status.last_user_input_at`` — dedicated field bumped on
+       every chat input via ``WorkspaceOrchestrator.append_message``.
+       Authoritative when set.
+    2. ``status.last_reflection_at`` — Phase 4b v0 proxy retained
+       for backward compatibility. A user who chats actively
+       without triggering a reflection used to look "idle" to the
+       gate; with (1) live this fallback only fires for sessions
+       predating the new field (or when chat-input bumping hasn't
+       happened yet).
+
+    Returning ``None`` means the gate sees "user has been quiet
+    forever" — the existing ``is_quiet_window`` treats that as
+    quiet, which is the right conservative answer for first-run.
     """
     try:
         snapshot = orchestrator.get_assistant_snapshot()
     except Exception:  # noqa: BLE001
         return None
     status = (snapshot or {}).get("status") or {}
-    raw = status.get("last_reflection_at")
+    # Prefer the dedicated user-input field; fall back to reflection
+    # proxy for back-compat.
+    raw = status.get("last_user_input_at") or status.get("last_reflection_at")
     if not raw:
         return None
     try:
