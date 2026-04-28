@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
+  Hammer,
   Home,
   Lightbulb,
   MessageSquare,
@@ -37,6 +38,7 @@ interface PageChromeProps {
 const NAV_ITEMS = [
   { href: "/", label: "Home", icon: Home },
   { href: "/chat", label: "Chat", icon: MessageSquare },
+  { href: "/forge", label: "Forge", icon: Hammer },
   { href: "/settings", label: "Settings", icon: Settings2 },
   { href: "/improvements", label: "Research log", icon: Lightbulb },
 ];
