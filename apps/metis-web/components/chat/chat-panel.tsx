@@ -164,6 +164,10 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const router = useRouter();
   const [draft, setDraft] = useArrowState(initialDraft ?? "");
+  // One-shot send-dispatch flash — flips true on send, back to false
+  // after the dispatch keyframe (360ms) so the button reads as having
+  // physically dispatched the message.
+  const [sendDispatched, setSendDispatched] = useArrowState(false);
   const [queryMode, setQueryMode] = useArrowState<"direct" | "rag" | "forecast">(initialQueryMode ?? "direct");
   const [pickerOpen, setPickerOpen] = useArrowState(false);
   const [buildStudioOpen, setBuildStudioOpen] = useArrowState(false);
@@ -321,6 +325,11 @@ export function ChatPanel({
     } else if (queryMode === "forecast" && onForecastSend) {
       onForecastSend(text);
     }
+    // Brief dispatch flash on the send button — communicates "message
+    // left the building". Cleared after the keyframe animation
+    // finishes (360ms in chat-send-dispatch).
+    setSendDispatched(true);
+    window.setTimeout(() => setSendDispatched(false), 380);
   }
 
   const canSend =
@@ -1063,7 +1072,10 @@ export function ChatPanel({
             ) : (
               <Button
                 size="icon"
-                className="chat-send-button size-11 shrink-0 rounded-2xl text-primary-foreground disabled:opacity-50 disabled:scale-95"
+                className={cn(
+                  "chat-send-button size-11 shrink-0 rounded-2xl text-primary-foreground disabled:opacity-50 disabled:scale-95",
+                  sendDispatched && "is-dispatching",
+                )}
                 onClick={handleSend}
                 disabled={!canSend}
                 aria-label="Send message"

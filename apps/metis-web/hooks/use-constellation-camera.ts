@@ -59,6 +59,18 @@ export interface ConstellationCameraConfig {
   diveZoomEase?: number;
   /** Cubic-out dive duration (ms), reserved for time-based callers. */
   diveDurationMs?: number;
+  /**
+   * Opt-in: replace the linear-lerp zoom easing with a slightly under-
+   * damped spring so the camera carries a felt sense of weight.
+   * Default false to preserve the existing behavior + test contract.
+   * The dive-zone path is unaffected — its time-based easing already
+   * has its own arc.
+   */
+  zoomSpring?: boolean;
+  /** Spring stiffness when `zoomSpring` is on. */
+  zoomSpringStiffness?: number;
+  /** Spring damping (0..1) when `zoomSpring` is on. <1 → mild overshoot. */
+  zoomSpringDamping?: number;
 }
 
 export interface ConstellationCameraStepOptions {
@@ -108,11 +120,15 @@ export function useConstellationCamera(
   const baseZoomEase = config.baseZoomEase ?? BASE_ZOOM_EASE;
   const diveZoomEase = config.diveZoomEase ?? DIVE_ZOOM_EASE;
   const diveDurationMs = config.diveDurationMs ?? CONSTELLATION_DIVE_DURATION_MS;
+  const zoomSpring = config.zoomSpring ?? false;
+  const zoomSpringStiffness = config.zoomSpringStiffness ?? 0.085;
+  const zoomSpringDamping = config.zoomSpringDamping ?? 0.82;
 
   const originRef = useRef<Point>({ x: 0, y: 0 });
   const targetOriginRef = useRef<Point>({ x: 0, y: 0 });
   const zoomRef = useRef(1);
   const zoomTargetRef = useRef(1);
+  const zoomVelocityRef = useRef(0);
   const scrollVelocityRef = useRef(0);
   const lastInteractionAtMsRef = useRef(0);
 
@@ -164,14 +180,39 @@ export function useConstellationCamera(
       if (Math.abs(zoomDelta) > ZOOM_EASE_SETTLE_EPSILON) {
         if (reducedMotion) {
           zoomRef.current = zoomTargetRef.current;
+          zoomVelocityRef.current = 0;
+        } else if (zoomSpring && zoomRef.current <= STAR_DIVE_ZOOM_THRESHOLD) {
+          // Slightly under-damped spring — gives the camera a felt sense
+          // of weight on zoom changes (overshoots ~5–8% and settles).
+          // Skipped inside the dive zone so the dive's bespoke time-based
+          // arc keeps full control.
+          zoomVelocityRef.current =
+            zoomVelocityRef.current * zoomSpringDamping
+            + zoomDelta * zoomSpringStiffness;
+          const nextZoom = zoomRef.current + zoomVelocityRef.current;
+          const clampedZoom = clampBackgroundZoomFactor(nextZoom);
+          zoomRef.current = clampedZoom;
+          // If the spring would have overshot the catalogue clamp,
+          // kill the velocity so the spring doesn't keep pushing past
+          // the wall — otherwise downstream math (e.g.
+          // `Math.log2(zoomFactor + 1)`) would receive a stale velocity
+          // hint while the position is pinned.
+          if (clampedZoom !== nextZoom) {
+            zoomVelocityRef.current = 0;
+          }
         } else {
           const zoomEase = zoomRef.current > STAR_DIVE_ZOOM_THRESHOLD
             ? diveZoomEase
             : baseZoomEase;
           zoomRef.current = zoomRef.current + zoomDelta * zoomEase;
+          zoomVelocityRef.current = 0;
         }
       } else {
         zoomRef.current = zoomTargetRef.current;
+        zoomVelocityRef.current *= 0.65;
+        if (Math.abs(zoomVelocityRef.current) < ZOOM_EASE_SETTLE_EPSILON) {
+          zoomVelocityRef.current = 0;
+        }
       }
 
       // --- Scroll velocity decay (cheap inertia channel for callers) --------
@@ -277,5 +318,13 @@ export function useConstellationCamera(
       notifyInteraction,
       easeDive,
     };
-  }, [baseOriginEase, baseZoomEase, diveZoomEase, diveDurationMs]);
+  }, [
+    baseOriginEase,
+    baseZoomEase,
+    diveZoomEase,
+    diveDurationMs,
+    zoomSpring,
+    zoomSpringStiffness,
+    zoomSpringDamping,
+  ]);
 }

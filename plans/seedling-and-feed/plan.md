@@ -1,7 +1,7 @@
 ---
 Milestone: Seedling + Feed (M13)
-Status: In progress
-Claim: claude/m13-adr-0013-runtime-pivot
+Status: Landed
+Claim: Landed 2026-04-26 — see *Retrospective* section
 Last updated: 2026-04-26 by Claude
 Vision pillar: Companion
 ---
@@ -194,50 +194,156 @@ What's in place today that M13 will lean on:
   (Personal evals) and M18 (LoRA stretch) are the downstream readers;
   schema_version=1 is the stable contract. M17 coordination: no new
   outbound HTTP, the writer is local-disk-only.
+- **2026-04-26 — Phase 6 follow-up: edge-pulse visual.** The brain
+  graph now flashes a connection between source and target nodes
+  whenever the Seedling writes a new ``AssistantBrainLink``. Backend:
+  ``metis_app/seedling/activity.py`` adds ``"brain_link_created"`` to
+  ``_VALID_KINDS``; ``AssistantCompanionService.reflect()`` emits one
+  ``record_seedling_activity`` event per call (after
+  ``add_brain_links`` succeeds) carrying the list of new links and
+  the originating ``memory_entry_id``. One event per reflection (not
+  per link) keeps the 20-event bridge buffer healthy when a
+  reflection emits 2-4 links. Failures in activity emission are
+  swallowed — the reflection itself never demotes (Phase 5 pattern).
+  Frontend: ``CompanionActivityEvent.kind`` union extended with
+  ``"brain_link_created"`` in ``apps/metis-web/lib/api.ts``;
+  ``brain-graph-3d.tsx`` subscribes to the companion bus, finds both
+  endpoints in ``graphData.nodes``, and spawns the existing
+  Vestige-inspired ``createConnectionFlash`` (emerald ``#34d399`` to
+  match the dock's seedling source color). Multiple links from a
+  single reflection are staggered 80ms apart so the user sees a
+  wave, not a flash. Honors ``prefers-reduced-motion`` (skips spawn
+  entirely — no fallback hint, the brain canvas is too noisy a
+  primary surface to insist). With this landed, the plan-doc *Next
+  up* contains only data-gated retro work and the admin close-out.
 
-## Next up
+## Retrospective
 
-The next concrete actions:
+**M13 (Seedling + Feed) closed 2026-04-26.** The milestone shipped
+its full structural surface across 7 phases plus two polish PRs. All
+three pillars — Cosmos visibility, Companion behaviour, Cortex
+extraction — got non-trivial scaffolding. Below: what landed, what
+got reframed mid-flight, what's deferred to retro.
 
-1. **Phase 6 — brain-graph densification.** In review on PR #558
-   (stacked on PR #555). Activates the Elder gate by setting
-   `StageThresholds.elder_brain_graph_density = 0.5` and adds
-   `BrainGraph.compute_assistant_density()` over the assistant's
-   learned-edge ratio. Edge-pulse animation deferred to a follow-up
-   item below.
-2. **Phase 5 / 6 retro — threshold tuning.** The v0 thresholds in
-   `metis_app/seedling/growth.py::DEFAULT_THRESHOLDS` (including the
-   new `elder_brain_graph_density=0.5`) and the
-   `_TARGET_EDGES_PER_ARTEFACT=2` constant in
-   `metis_app/models/brain_graph.py` are first estimates. Once real
-   usage produces stage-distribution data, tune them and update the
-   plan-doc decision sections accordingly.
-3. **Phase 6 follow-up — edge-pulse visual.** Land a one-time GSAP
-   pulse in `apps/metis-web/components/visualizations/brain-graph-3d.tsx`
-   when a Seedling-produced `AssistantBrainLink` first appears. The
-   frontend already carries the right shape via
-   `subscribeCompanionActivity`; the work is a `kind="brain_link_created"`
-   activity event marker + the visual treatment.
-4. **Phase 7 retro — feedback enrichment.** Phase 7 v0 captures
-   `SessionFeedback` for sessions referenced in `recent_reflections`,
-   but the overnight reflection itself receives no direct user
-   feedback (it's a morning card, not an interactive reply). When a
-   reaction surface ships (thumbs-up on the morning card, edit-then-
-   save), thread that feedback into the same JSONL log under a new
-   `kind="overnight_feedback"` event line. Schema_version stays 1 as
-   long as additive.
-5. **Web UI new-user audit follow-up — heartbeat label.** Translate
-   the "Seedling heartbeat" string the dock shows brand-new users
-   into something a non-developer understands (e.g. "Background
-   research tick" / "Companion checked the feed"); consider showing
-   only the latest event by default. Filed 2026-04-25 from the live
-   walkthrough; small but directly hits the *"intelligence grown,
-   not bought"* promise this milestone owns.
-6. **M13 close-out.** With Phase 7 done, the milestone has shipped
-   its full structural surface. Once Phases 5+6 land via review and
-   the heartbeat-label fix is in, flip the M13 row in
-   `plans/IMPLEMENTATION.md` to `Landed` and capture the milestone
-   retrospective.
+### What landed
+
+| PR | What | Merged |
+|---|---|---|
+| #537 | **Phase 1** — ADR 0007 selected the Seedling model (Llama-3.2-1B Q4_K_M); superseded mid-milestone by ADR 0013. | 2026-04-24 |
+| #541 | **Phase 2** — Seedling lifecycle shell (worker, status cache, startup/shutdown hooks, activity bridge). | 2026-04-24 |
+| #542 + #545 | **Phase 3** — News-comet pipeline + ADR 0008 (per-feature SQLite at `news_items.db`, OPML import, retention windows). | 2026-04-25 |
+| #548 | **Phase 4a** — Bonsai while-you-work reflection writer + `record_external_reflection` route + marketing-copy guard test. | 2026-04-25 |
+| #549 | **Polish** — GSAP ambient seedling-pulse widget replaces the heartbeat text log in the dock. | 2026-04-26 |
+| #550 | **Phase 4b** — Overnight backend GGUF reflection (opt-in), cadence + quiet-window gates, `model_status` four-value enum. | 2026-04-26 |
+| #555 | **Phase 5** — Visible growth stages (Seedling → Sapling → Bloom → Elder), pure compute in `growth.py`, dock badge + transition pulse. | 2026-04-26 |
+| #558 + restoration | **Phase 6** — Brain-graph density + Elder gate via `BrainGraph.compute_assistant_density()`. **Note:** PR #558 was marked merged on GitHub but its substantive code (the density compute, the `_TARGET_EDGES_PER_ARTEFACT=2` constant, the `elder_brain_graph_density=0.5` threshold flip, and the orchestrator wiring) never actually reached `main` — only the meta-commits landed. Discovered 2026-04-26 during retro work. Cherry-picked back to `main` via a separate restoration PR which also brought the Codex P1 (uncapped density) + P2 (drop playbook denominator) review fixes that had been lost with the rest. | 2026-04-26 |
+| #561 | **Phase 7** — LoRA on-deck training-data log (JSONL, `schema_version="1"`, M16/M18 stable contract). | 2026-04-26 |
+| #567 | **Phase 6 follow-up** — Edge-pulse visual via Vestige-inspired `createConnectionFlash` on `brain_link_created` events. | 2026-04-26 |
+
+### Mid-milestone pivots
+
+- **ADR 0007 → ADR 0013 (runtime pivot, 2026-04-25).** A re-audit
+  found the in-browser Bonsai-1.7B WebGPU runtime was already
+  shipping. Inverted the model decision: Bonsai becomes the default
+  reflection runtime; backend GGUF becomes opt-in via the existing
+  GGUF import flow; METIS ships no default backend-model catalog
+  entry as part of M13. Phase 4 split into 4a (Bonsai while-you-work)
+  + 4b (overnight backend) to honour both paths.
+- **Phase 6 schema split.** The brain-graph density signal initially
+  counted memory + playbook artefacts in the denominator. Codex
+  review on PR #558 caught that playbooks emit only structural
+  `assistant_self` edges (never `assistant_learned`), so they
+  diluted density without ever raising the numerator. Fixed before
+  merge by restricting the denominator to memory artefacts only and
+  documenting `_TARGET_EDGES_PER_ARTEFACT=2` as the calibration
+  knob.
+- **Phase 6 P1 fix — uncapped density.** First Phase 6 implementation
+  computed density off the UI snapshot (capped at 8 memories) which
+  is wrong for an Elder gate that needs to see accumulated history.
+  Fixed by introducing `_compute_assistant_density` on the
+  orchestrator that hydrates a density-only `BrainGraph` from the
+  uncapped repository.
+
+### Coordination contracts honoured
+
+- **M06** (skill self-evolution) — M13's reflection cycle is the
+  writer to `skill_candidates.db`; M06 owns the promote step. No
+  duplicate writer was introduced.
+- **M09** (companion realtime visibility) — All Phase 4 / 5 / 6
+  events flow through the existing `CompanionActivityEvent` bus.
+  `kind` was extended additively four times (`while_you_work`,
+  `overnight`, `stage_transition`, `brain_link_created`); no second
+  bus, no second dock.
+- **M10** (homological scaffold) — Phase 6 builds on
+  `BrainGraph.compute_edge_weights()` and the scaffold edges; no
+  parallel graph implementation.
+- **M17** (network audit) — every new outbound HTTP path went
+  through `audited_urlopen` with `trigger_feature` tagging
+  (Phase 3's news-feed fetchers; nothing else in M13 hits the
+  network).
+- **M16** (personal evals, in design) and **M18** (LoRA stretch) —
+  Phase 7's JSONL `schema_version="1"` is the stable contract these
+  downstreams will read. Inner-row `feedback` shape documented in
+  `training_log.py`'s docstring.
+
+### Deferred to retro / data-gated (NOT blocking close-out)
+
+These items are recorded in *Notes for the next agent* and need
+production telemetry before they're actionable:
+
+1. **Threshold tuning.** `DEFAULT_THRESHOLDS` (incl.
+   `elder_brain_graph_density=0.5`) and `_TARGET_EDGES_PER_ARTEFACT=2`
+   are v0 estimates. Tune once usage data covers a meaningful
+   stage-distribution sample. Plan-doc decision section to update
+   alongside.
+2. **Phase 7 path stability.** Training-log default is cwd-relative
+   (`.gitignore` covers dev case). If operators report log
+   fragmentation across server restarts, promote to a stable
+   per-user home (`~/.metis/...` POSIX, `%APPDATA%\metis\...`
+   Windows).
+3. **Phase 7 feedback enrichment.** Overnight reflections currently
+   capture only session-feedback for sessions referenced in
+   `recent_reflections`. When a reaction surface ships on the
+   morning card (thumbs-up / edit-then-save), thread that feedback
+   into the same JSONL log under a new `kind="overnight_feedback"`
+   event line. Schema_version stays 1 (additive).
+4. **Phase 4b user-activity proxy.** The quiet-window gate uses
+   `last_reflection_at` as a stand-in for `last_user_input_at`. If
+   "user appears idle while actively chatting" turns out to be a
+   real failure mode, add a dedicated field. Seam:
+   `_resolve_last_user_activity` in `metis_app/seedling/lifecycle.py`.
+
+### Lessons captured
+
+- **Audit before plan.** ADR 0007 was written without spotting the
+  already-shipping Bonsai WebGPU runtime. ADR 0013's superseding
+  banner now exists as a permanent reminder; future "seedling
+  model" plans must start with a runtime audit before locking the
+  decision.
+- **Activity-bus schema additivity scales.** Four `kind` extensions
+  landed without breaking older subscribers. The pattern (additive
+  union, validated against an allow-list at the bridge, dropped
+  silently on unknown values) holds up under repeated use.
+- **Reviewer-found correctness bugs > self-found.** Codex review
+  caught two non-obvious correctness issues in the same Phase 6 PR
+  (capped-density + playbook-denominator), and one in the Phase 6
+  follow-up (`matchMedia` guard + emit-only-persisted-links).
+  Worth the friction.
+- **Phase splits during review > phase mergers.** Phase 4 split
+  into 4a + 4b mid-flight (post-ADR 0013) shipped cleaner code than
+  the original "one Phase 4" would have. The structural Bonsai vs
+  GGUF distinction was load-bearing enough to deserve its own PR.
+- **Verify merges land the actual diff, not just the meta-commit.**
+  PR #558 was marked merged on GitHub but its substantive
+  ``compute_assistant_density`` / threshold-flip / orchestrator
+  wiring never reached ``main`` — discovered only when the M13
+  retro work tried to read those constants and found the old
+  values. Future close-out PRs should run a sanity grep for the
+  load-bearing symbols of each shipped phase before flipping the
+  IMPLEMENTATION.md row, not trust the GitHub merge state alone.
+  Possible mechanism: a stale local branch tip got force-merged,
+  or a rebase squashed the substantive commits out. Either way the
+  fix is post-merge verification, not pre-merge ceremony.
 
 ## Blockers
 

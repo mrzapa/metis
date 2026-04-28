@@ -27,7 +27,7 @@
  */
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import gsap from "gsap";
 import { MessageSquare, Search, SlidersHorizontal } from "lucide-react";
@@ -73,6 +73,10 @@ export function HomeActionFab({
   const reducedMotion = useReducedMotion();
   const containerRef = useRef<HTMLDivElement>(null);
   const satelliteRefs = useRef<Map<string, HTMLElement>>(new Map());
+  // Hover state for the FAB trigger — drives the satellite "peek"
+  // affordance so first-time users get a hint that there's a menu
+  // before they click. Discarded once `open` flips true.
+  const [triggerHovered, setTriggerHovered] = useState(false);
 
   // Build the satellite list. Order matters — index 0 sits closest to the
   // FAB, animating out first; the rest stagger after it. Memoized so the
@@ -178,6 +182,22 @@ export function HomeActionFab({
           stagger: 0.04,
         },
       );
+    } else if (triggerHovered) {
+      // Hover peek — satellites slide partway out (~30% of full
+      // distance) at reduced opacity so the user can tell there's a
+      // menu without clicking. Pointer events stay off so the peek
+      // can't be clicked accidentally; that requires a real open.
+      gsap.killTweensOf(nodes);
+      gsap.to(nodes, {
+        x: (i) => satellites[i].offset.x * 0.32,
+        y: (i) => satellites[i].offset.y * 0.32,
+        opacity: 0.55,
+        scale: 0.7,
+        pointerEvents: "none",
+        duration: 0.22,
+        ease: "power2.out",
+        stagger: 0.02,
+      });
     } else {
       gsap.killTweensOf(nodes);
       gsap.to(nodes, {
@@ -191,7 +211,7 @@ export function HomeActionFab({
         stagger: { each: 0.03, from: "end" },
       });
     }
-  }, [open, reducedMotion, satellites]);
+  }, [open, reducedMotion, satellites, triggerHovered]);
 
   const handleSatelliteActivate = (key: string) => {
     if (key === "filters") {
@@ -259,7 +279,8 @@ export function HomeActionFab({
       })}
 
       {/* The FAB itself — gold bubble matching the previous chat-bubble.
-          Click toggles the radial menu. */}
+          Click toggles the radial menu; hover triggers a satellite
+          peek-preview so first-time users see there's a menu. */}
       <button
         type="button"
         className={`metis-chat-bubble metis-home-fab-trigger${open ? " is-open" : ""}`}
@@ -267,6 +288,10 @@ export function HomeActionFab({
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={() => onOpenChange(!open)}
+        onMouseEnter={() => setTriggerHovered(true)}
+        onMouseLeave={() => setTriggerHovered(false)}
+        onFocus={() => setTriggerHovered(true)}
+        onBlur={() => setTriggerHovered(false)}
       >
         <svg
           className="metis-celestial-star-svg"

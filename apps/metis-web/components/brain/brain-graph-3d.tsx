@@ -44,6 +44,7 @@ import {
 } from "./brain-graph-view-model";
 import {
   fetchBrainScaffold,
+  subscribeCompanionActivity,
   type BrainScaffoldResponse,
   type BrainScaffoldEdge,
 } from "@/lib/api";
@@ -876,6 +877,109 @@ export default function BrainGraph3D({
     }),
     [activeScopes, data, filter, highlightNowMs, highlightState, scaffoldData],
   );
+
+  // Phase 6 follow-up — pulse newly-created brain edges. The Seedling
+  // emits a CompanionActivityEvent with ``kind: "brain_link_created"``
+  // each time ``reflect()`` writes new ``AssistantBrainLink`` rows.
+  // For each link the payload carries, look up both endpoints in the
+  // current scene graph and spawn a Vestige-inspired connection flash
+  // between them (re-using the existing flash machinery + animation
+  // loop). Honours ``prefers-reduced-motion`` by skipping the spawn
+  // entirely. Edge cases:
+  //   - Reduced motion → no flash (no fallback hint either; the brain
+  //     graph is too noisy a primary surface to insist).
+  //   - Missing scene / unmounted positions → drop silently. Next
+  //     event after the layout settles will succeed.
+  //   - Burst (a reflection emits 2-4 links) → 80ms stagger so it
+  //     reads as a wave rather than a flash.
+  useEffect(() => {
+    // Codex P2 fix: optional-chain BOTH the call AND the .matches read.
+    // ``window.matchMedia?.(...)`` returns undefined when matchMedia is
+    // missing (some embedded webviews, jsdom-without-the-shim, certain
+    // test runners); without the second ``?.`` the unconditional
+    // ``.matches`` access would crash BrainGraph3D on mount instead of
+    // safely defaulting to motion-allowed.
+    const reduceMotion = Boolean(
+      typeof window !== "undefined"
+        ? window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
+        : false,
+    );
+
+    const timeouts: ReturnType<typeof setTimeout>[] = [];
+
+    const unsubscribe = subscribeCompanionActivity((event) => {
+      if (reduceMotion) return;
+      if (event.kind !== "brain_link_created") return;
+      const status = (event.payload?.status ?? {}) as {
+        links?: Array<{
+          source_node_id?: string;
+          target_node_id?: string;
+          relation?: string;
+        }>;
+      };
+      const links = Array.isArray(status.links) ? status.links : [];
+      if (links.length === 0) return;
+
+      const scene = modelSceneRef.current;
+      if (!scene) return;
+
+      // Emerald — matches the dock's source-color for seedling events.
+      const flashColor = new THREE.Color(0x34d399);
+      const STAGGER_MS = 80;
+
+      links.forEach((link, idx) => {
+        const sourceId = String(link.source_node_id ?? "");
+        const targetId = String(link.target_node_id ?? "");
+        if (!sourceId || !targetId) return;
+        const sceneSource = graphData.nodes.find(
+          (n: BrainSceneNode) => n.id === sourceId,
+        );
+        const sceneTarget = graphData.nodes.find(
+          (n: BrainSceneNode) => n.id === targetId,
+        );
+        if (
+          !sceneSource ||
+          sceneSource.x == null ||
+          sceneSource.y == null ||
+          sceneSource.z == null ||
+          !sceneTarget ||
+          sceneTarget.x == null ||
+          sceneTarget.y == null ||
+          sceneTarget.z == null
+        ) {
+          return;
+        }
+
+        const spawn = () => {
+          const fromPos = new THREE.Vector3(
+            sceneSource.x as number,
+            sceneSource.y as number,
+            sceneSource.z as number,
+          );
+          const toPos = new THREE.Vector3(
+            sceneTarget.x as number,
+            sceneTarget.y as number,
+            sceneTarget.z as number,
+          );
+          const flash = createConnectionFlash(fromPos, toPos, flashColor);
+          scene.add(flash.line);
+          connectionFlashesRef.current.push(flash);
+        };
+
+        if (idx === 0) {
+          spawn();
+        } else {
+          const t = setTimeout(spawn, idx * STAGGER_MS);
+          timeouts.push(t);
+        }
+      });
+    });
+
+    return () => {
+      unsubscribe();
+      for (const t of timeouts) clearTimeout(t);
+    };
+  }, [graphData.nodes]);
 
   const facultyLegend = useMemo(
     () => {

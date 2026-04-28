@@ -38,6 +38,11 @@ uniform vec2 uFocusCenter;
 uniform float uFocusStrength;
 uniform float uFocusRadius;
 uniform float uFocusFalloff;
+// Mouse-driven micro-parallax: small viewport-space offset (-1..1) that
+// represents the user's pointer relative to the viewport centre. We
+// translate field/sprite stars opposite to the cursor to fake 3D
+// depth — closeup/hero stars opt out so the focused star never wobbles.
+uniform vec2 uMouseParallax;
 
 varying float vAddable;
 varying float vBloom;
@@ -61,7 +66,15 @@ varying float vSatelliteRadius;
 varying float vSatellitePeriod;
 
 void main() {
-  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+  // Mouse parallax: field tier moves the most (sells "background"),
+  // sprite/hero tiers a graduated half/quarter, closeup ignores it
+  // entirely so the focused dive star stays anchored to its world
+  // position. Tier comes from aShape.w (0=field, 1=sprite, 2=hero,
+  // 3=closeup).
+  float mouseParallaxScale = max(0.0, 1.0 - aShape.w / 2.5);
+  vec3 displacedPosition = position;
+  displacedPosition.xy -= uMouseParallax * mouseParallaxScale;
+  vec4 mvPosition = modelViewMatrix * vec4(displacedPosition, 1.0);
   gl_Position = projectionMatrix * mvPosition;
 
   float twinkle = 0.92 + sin(uTime * aTwinkle.y + aTwinkle.x) * 0.08;
@@ -69,10 +82,15 @@ void main() {
   float heroGlow = aShape.w > 1.5 ? 1.0 + aColorC.w * 0.32 : 1.0;
   float zoomSizeScale = mix(0.15, 1.0, smoothstep(0.0, 0.4, uZoomScale));
 
-  // Depth-of-field-like falloff from the dive focus centre. The focused star
-  // (closeup tier, aShape.w > 2.5) keeps its full size; ambient stars dim and
-  // bloom outward as the viewer settles on the target.
-  float focusDist = distance(position.xy, uFocusCenter);
+  // Depth-of-field-like falloff from the dive focus centre. Computed
+  // from displacedPosition (post mouse-parallax) so the spotlight
+  // stays aligned with the rendered star positions when the cursor
+  // shifts the backdrop. Using the original position.xy would put
+  // the DoF radius out of sync with where the stars actually paint
+  // (Codex review on PR #568). The focused star (closeup tier,
+  // aShape.w > 2.5) keeps its full size; ambient stars dim and bloom
+  // outward as the viewer settles on the target.
+  float focusDist = distance(displacedPosition.xy, uFocusCenter);
   float outsideFocus = smoothstep(uFocusRadius, uFocusRadius + max(1.0, uFocusFalloff), focusDist);
   float isFocused = step(2.5, aShape.w);
   float falloff = outsideFocus * uFocusStrength * (1.0 - isFocused);
@@ -759,6 +777,7 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
         uFocusStrength: { value: 0 },
         uFocusRadius: { value: 200 },
         uFocusFalloff: { value: 400 },
+        uMouseParallax: { value: new THREE.Vector2(0, 0) },
       },
       vertexShader,
     });
@@ -878,6 +897,8 @@ export function LandingStarfieldWebgl({ className, frameRef }: LandingStarfieldW
       material.uniforms.uFocusStrength.value = frame.focusStrength ?? 0;
       material.uniforms.uFocusRadius.value = frame.focusRadius ?? 200;
       material.uniforms.uFocusFalloff.value = frame.focusFalloff ?? 400;
+      const mouseParallax = material.uniforms.uMouseParallax.value as THREE.Vector2;
+      mouseParallax.set(frame.mouseParallaxX ?? 0, frame.mouseParallaxY ?? 0);
       renderer.render(scene, camera);
     };
 

@@ -3,7 +3,7 @@
 import { useEffect, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   Home,
   Lightbulb,
@@ -114,33 +114,58 @@ export function PageChrome({
             </Link>
 
             <nav className="ml-10 flex items-center gap-8">
-              {NAV_ITEMS.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  data-active={isActive(pathname, item.href) ? "true" : "false"}
-                  className={cn(
-                    "hidden text-[13px] font-normal tracking-[0.03em] transition-colors duration-300 sm:inline-flex",
-                    isActive(pathname, item.href)
-                      ? "text-foreground"
-                      : "text-muted-foreground/60 hover:text-foreground",
-                  )}
-                >
-                  {item.label}
-                </Link>
-              ))}
+              {NAV_ITEMS.map((item) => {
+                const active = isActive(pathname, item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    data-active={active ? "true" : "false"}
+                    className={cn(
+                      "relative hidden text-[13px] font-normal tracking-[0.03em] transition-colors duration-300 sm:inline-flex",
+                      active
+                        ? "text-foreground"
+                        : "text-muted-foreground/60 hover:text-foreground",
+                    )}
+                  >
+                    {item.label}
+                    {active ? (
+                      <motion.span
+                        layoutId="nav-active-indicator"
+                        // Subtle accent dash under the active nav item.
+                        // motion's `layoutId` smoothly slides the dash
+                        // across when the user navigates between
+                        // sections. Reduced motion → no slide, just
+                        // appears in place.
+                        className="absolute -bottom-1 left-0 right-0 h-px bg-primary/65"
+                        transition={
+                          reducedMotion
+                            ? { duration: 0 }
+                            : { type: "spring", stiffness: 380, damping: 32 }
+                        }
+                      />
+                    ) : null}
+                  </Link>
+                );
+              })}
             </nav>
             <div className="ml-auto flex items-center">
               <NetworkAuditPill />
             </div>
           </motion.header>
 
-          {/* Page content */}
+          {/* Page content — wrapped in AnimatePresence with the
+              pathname as key so the enter/exit motion fires on every
+              route change, not just first mount. `mode="wait"` keeps
+              the swap clean: old page fades out, then new fades in. */}
           <main className="flex-1 py-4 sm:py-5">
+            <AnimatePresence mode="wait" initial={false}>
             <motion.div
+              key={pathname}
               initial={reducedMotion ? false : { opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, ease: "easeOut" }}
+              exit={reducedMotion ? undefined : { opacity: 0, y: -10, transition: { duration: 0.18, ease: "easeIn" } }}
+              transition={{ duration: 0.42, ease: "easeOut" }}
               className="mx-auto w-full max-w-384"
             >
               {/* Page header */}
@@ -211,6 +236,7 @@ export function PageChrome({
                 {children}
               </section>
             </motion.div>
+            </AnimatePresence>
           </main>
         </div>
       </div>

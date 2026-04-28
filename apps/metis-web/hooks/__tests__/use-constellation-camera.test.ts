@@ -108,4 +108,112 @@ describe("useConstellationCamera", () => {
     // Halfway through 0.7s matches cubicOutEasing(0.5) = 0.875.
     expect(result.current.easeDive(CONSTELLATION_DIVE_DURATION_MS / 2)).toBeCloseTo(0.875, 5);
   });
+
+  describe("zoom spring (opt-in)", () => {
+    it("starts moving slowly on the first step (velocity ramps up)", () => {
+      const { result } = renderHook(() =>
+        useConstellationCamera({ zoomSpring: true }),
+      );
+      act(() => {
+        result.current.setZoomTarget(2);
+        result.current.stepCamera({ reducedMotion: false });
+      });
+      // Spring's first step delta = stiffness * delta = 0.085 * 1 = 0.085.
+      const firstStep = result.current.zoomRef.current - 1;
+      expect(firstStep).toBeGreaterThan(0);
+      expect(firstStep).toBeLessThan(0.12);
+    });
+
+    it("eventually settles at the target after many steps", () => {
+      const { result } = renderHook(() =>
+        useConstellationCamera({ zoomSpring: true }),
+      );
+      act(() => {
+        result.current.setZoomTarget(2);
+        for (let i = 0; i < 400; i++) {
+          result.current.stepCamera({ reducedMotion: false });
+        }
+      });
+      expect(result.current.zoomRef.current).toBeCloseTo(2, 3);
+    });
+
+    it("can briefly overshoot the target (felt weight)", () => {
+      const { result } = renderHook(() =>
+        useConstellationCamera({
+          zoomSpring: true,
+          zoomSpringStiffness: 0.12,
+          zoomSpringDamping: 0.78,
+        }),
+      );
+      act(() => {
+        result.current.setZoomTarget(2);
+      });
+      let peak = 1;
+      for (let i = 0; i < 80; i++) {
+        act(() => {
+          result.current.stepCamera({ reducedMotion: false });
+        });
+        peak = Math.max(peak, result.current.zoomRef.current);
+      }
+      // Loose bounds — assert overshoot exists without pinning down the
+      // exact stiffness/damping curve. Cap at 35% to catch wild tuning.
+      expect(peak).toBeGreaterThan(2);
+      expect(peak).toBeLessThan(2.7);
+    });
+
+    it("snaps under reduced motion even when spring is enabled", () => {
+      const { result } = renderHook(() =>
+        useConstellationCamera({ zoomSpring: true }),
+      );
+      act(() => {
+        result.current.setZoomTarget(5);
+        result.current.stepCamera({ reducedMotion: true });
+      });
+      expect(result.current.zoomRef.current).toBe(5);
+    });
+
+    it("clamps overshoot below MIN_BACKGROUND_ZOOM_FACTOR (no NaN downstream)", () => {
+      // Codex P1 regression: spring zoom-out from a moderate zoom to
+      // the minimum could overshoot below zero, producing NaN when
+      // page.tsx fed it into Math.log2(zoomFactor + 1).
+      const { result } = renderHook(() =>
+        useConstellationCamera({ zoomSpring: true }),
+      );
+      act(() => {
+        result.current.jumpTo({ x: 0, y: 0, zoomFactor: 10 });
+        // Setting zoomTarget below the min clamps the target itself,
+        // but the spring path can still drive zoomRef below 0 mid-flight.
+        result.current.setZoomTarget(0);
+        for (let i = 0; i < 200; i++) {
+          result.current.stepCamera({ reducedMotion: false });
+        }
+      });
+      const final = result.current.zoomRef.current;
+      // Must always remain positive — Math.log2(positive + 1) is finite.
+      expect(final).toBeGreaterThan(0);
+      // And the eventual settle should be at the clamped target.
+      expect(Number.isFinite(final)).toBe(true);
+      expect(Number.isFinite(Math.log2(final + 1))).toBe(true);
+    });
+
+    it("never produces NaN/negative zoom mid-flight on a fast zoom-out", () => {
+      const { result } = renderHook(() =>
+        useConstellationCamera({ zoomSpring: true }),
+      );
+      act(() => {
+        result.current.jumpTo({ x: 0, y: 0, zoomFactor: 50 });
+        result.current.setZoomTarget(0.05);
+      });
+      // Step through the entire motion and assert the value stays
+      // positive + finite at every frame.
+      for (let i = 0; i < 400; i++) {
+        act(() => {
+          result.current.stepCamera({ reducedMotion: false });
+        });
+        const z = result.current.zoomRef.current;
+        expect(Number.isFinite(z)).toBe(true);
+        expect(z).toBeGreaterThan(0);
+      }
+    });
+  });
 });
