@@ -5,8 +5,8 @@
 <h1 align="center">METIS AI</h1>
 
 <p align="center">
-  <strong>Private, provider-agnostic AI for grounded local thinking.</strong><br />
-  Index your files, ask cited questions, run local models, and keep your work on your machine.
+  <strong>Grow an AI that actually knows you.</strong><br />
+  A local-first living AI workspace where your documents become a navigable knowledge universe, your companion remembers, and every frontier technique stays inspectable.
 </p>
 
 <p align="center">
@@ -16,24 +16,36 @@
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Alpha" />
 </p>
 
-<br />
-
 <p align="center">
-  <a href="#-quick-start">Quick Start</a> · <a href="#-features">Features</a> · <a href="#-cli">CLI</a> · <a href="#-configuration">Configuration</a> · <a href="#-contributing">Contributing</a>
+  <a href="#-quick-start">Quick Start</a> ·
+  <a href="#-features">Features</a> ·
+  <a href="#-privacy-and-trust">Privacy</a> ·
+  <a href="#-commercial-licensing">Licensing</a> ·
+  <a href="#-local-development">Development</a> ·
+  <a href="#-contributing">Contributing</a>
 </p>
 
 ---
 
-**METIS AI** is a **local-first frontier AI workspace** built with Tauri + Next.js + Litestar. It runs entirely on your machine, keeps your files private, and lets you choose the model/provider stack that matches the work.
+**METIS AI** is a commercial, local-first AI workspace for people who want an AI that becomes *theirs* instead of another rented cloud assistant. It combines grounded document chat, a constellation-style knowledge map, an always-available companion, and plug-and-play frontier techniques in one inspectable desktop/web product.
 
-| Work privately | Swap every layer | Stay grounded |
-|----------------|------------------|---------------|
-| Run with local GGUF models and work fully offline when you want to. | Change the LLM, embeddings, and vector store from configuration instead of rewriting the app. | Inspect retrieved sources, trace events, and exported evidence packs before you trust an answer. |
+| Private by default | A companion that grows | Frontier techniques, plug-and-play |
+|--------------------|------------------------|------------------------------------|
+| Run with local GGUF models, browser-side WebGPU inference, or your preferred provider. Keep documents, sessions, traces, and memory on your machine. | METIS keeps session context, companion memory, playbooks, and brain links so the workspace compounds around your work. | Q&A, Summary, Tutor, Research, Evidence Pack, Knowledge Search, forecasting, Heretic, Tribev2, swarm, and traceable retrieval live behind one interface. |
 
-- **Constellation home.** Build indexes from uploads, folders, or existing manifests, then send them directly into grounded chat.
-- **Six ways to think.** Q&A, Summary, Tutor, Research, Evidence Pack, and Knowledge Search modes give you different lenses on the same documents.
-- **METIS Companion.** An always-on AI companion learns from your sessions, reflects on conversations, and grows with your workspace.
-- **Native shell available.** Package the same app in Tauri for a native window experience with no Electron layer.
+> **Intelligence grown, not bought.** Every other AI product rents you a stranger's mind. METIS is built to grow one with you.
+
+## Product Tour
+
+| Constellation home | Evidence-first chat |
+|--------------------|---------------------|
+| ![METIS constellation home](apps/metis-web/public/screenshot-home.png) | ![METIS chat with evidence panel](apps/metis-web/public/screenshot-chat.png) |
+| Turn documents, feeds, and sessions into a navigable universe of stars and constellations. | Ask grounded questions, inspect sources, follow trace events, and export evidence-backed work. |
+
+| Settings and model control | Diagnostics and network visibility |
+|----------------------------|------------------------------------|
+| ![METIS settings](apps/metis-web/public/screenshot-settings.png) | ![METIS diagnostics](apps/metis-web/public/screenshot-diagnostics.png) |
+| Swap LLMs, embeddings, vector stores, local models, retrieval depth, and expert features without rewriting the app. | Verify app health and pair it with the Network Audit surface that shows outbound calls and provider provenance. |
 
 ## ⚡ Quick Start
 
@@ -51,117 +63,131 @@ curl -fsSL https://raw.githubusercontent.com/mrzapa/metis/main/scripts/install_m
 irm https://raw.githubusercontent.com/mrzapa/metis/main/scripts/install_metis.ps1 | iex
 ```
 
-The installer clones the repo, sets up a virtual environment, installs dependencies, and drops a launcher on your PATH. It auto-updates on every run.
+The installer clones or updates the repo, creates a virtual environment, installs dependencies, builds the web UI when Node.js is available, and drops a `metis` launcher on your PATH.
 
 ### Run
-
-**Installed launcher (recommended):**
 
 ```bash
 metis
 ```
 
-This starts the local API plus static web UI and opens `http://127.0.0.1:3000`.
+The launcher starts the local Litestar API and static web UI, then opens `http://127.0.0.1:3000`.
 
-**From source (no launcher):**
+You can also run directly from source:
 
 ```bash
 python main.py
 ```
 
-This starts the local API at `http://127.0.0.1:8000` and opens the web UI in your browser.
-
-Native desktop packaging lives in `apps/metis-desktop/`. The repo launcher intentionally opens the local web UI; use the Tauri shell when you need a native packaged build.
-
 | Interface | Command |
 |-----------|---------|
 | **Web UI** | `metis` |
-| **Web UI (from source)** | `python main.py` |
+| **Web UI from source** | `python main.py` |
 | **CLI** | `metis --cli <command>` |
-| **Desktop GUI** | `metis --desktop` / `metis --gui` |
 | **Native desktop shell** | See `apps/metis-desktop/README.md` |
 
-### Use
+### First Workflow
 
-1. **Build an index from the landing page**: upload files, add folders, or pull an existing index into the Home constellation flow
-2. **Ask grounded questions**: switch between Q&A, Summary, Tutor, Research, Evidence Pack, and Knowledge Search in chat
-3. **Inspect the answer**: review sources, follow the retrieval trace, or export the current result as an evidence pack or PowerPoint
-4. **Keep working in context**: sessions persist to SQLite, while the companion dock and settings flows stay available across the app
-
----
+1. **Build an index** from uploaded files, folders, or an existing manifest.
+2. **Ask grounded questions** in Q&A, Summary, Tutor, Research, Evidence Pack, or Knowledge Search mode.
+3. **Inspect the answer** through sources, citations, trace events, and exports.
+4. **Keep working in context** as sessions, companion reflections, and brain links accumulate locally.
 
 ## ✨ Features
 
-### Zero lock-in: swap every layer
+### Cosmos: your knowledge as a universe
 
-Most RAG apps hardcode their stack. METIS AI treats every layer as a plug-in. Switch providers in `settings.json` and restart. That's it.
+METIS turns documents, sessions, feeds, and skills into a constellation-style workspace. Indexed sources become stars you can map, inspect, link, and send into grounded chat. The constellation is the primary navigation model, not decorative chrome.
 
-| Layer | Options | Go fully offline? |
-|-------|---------|:-----------------:|
-| **LLM** | OpenAI · Anthropic · Google · xAI · Cohere · LM Studio · **local GGUF** | Yes, with GGUF |
-| **Embeddings** | Voyage · Sentence Transformers · **local GGUF** | Yes, with GGUF or ST |
-| **Vector store** | In-memory JSON · ChromaDB · Weaviate | Yes, all run locally |
+### Companion: an AI that grows with your work
 
-### Constellation home
+The METIS Companion bootstraps a local identity, reflects on completed work, stores learned memories and playbooks, and surfaces contextual hints from the dock. The default growth story is system-level growth: better memory, richer traces, denser brain links, and accumulated skills. Weight-level continual learning and LoRA fine-tuning are stretch goals, not shipped promises.
 
-The landing page is no longer a static launcher. It is a constellation-style workspace where indexed sources become stars you can map, relink, inspect, and send directly into grounded chat. Build new indexes from uploads, filesystem paths, or existing manifests without leaving Home.
+### Cortex: every layer stays swappable
 
-### Chat workspace
+Most AI products hardcode their stack. METIS treats each layer as replaceable.
 
-Chat is a split-panel workspace with persistent sessions on the left, the live conversation in the middle, and evidence plus trace panels on the right. Research runs stream in progressively, can resume after reconnects, and can export their grounded output as JSON or PPTX.
+| Layer | Current options | Local/offline path |
+|-------|-----------------|--------------------|
+| **LLM** | Anthropic, OpenAI, Google, xAI, Cohere, LM Studio, local GGUF | Local GGUF or LM Studio |
+| **Companion inference** | Browser-side Bonsai 1.7B WebGPU, optional backend GGUF reflection | WebGPU inference after opt-in model download/cache |
+| **Embeddings** | Voyage, Sentence Transformers, local GGUF, provider embeddings | Sentence Transformers or local GGUF |
+| **Vector store** | JSON, ChromaDB, Weaviate | JSON by default; Chroma/Weaviate can run locally |
 
-### Six ways to read a document
+### Six ways to read a corpus
 
-| Mode | What it's for |
-|------|--------------|
-| **Q&A** | Direct, cited answers from your documents |
-| **Summary** | Condensed overviews of long or complex files |
-| **Tutor** | Socratic-style back-and-forth to help you learn |
+| Mode | What it unlocks |
+|------|-----------------|
+| **Q&A** | Direct, cited answers from selected documents |
+| **Summary** | Condensed overviews for long or complex files |
+| **Tutor** | Socratic teaching, flashcards, and guided follow-ups |
 | **Research** | Deep dives with sub-query expansion and reranking |
-| **Evidence Pack** | Structured claim-level grounding with source citations |
-| **Knowledge Search** | Retrieval-first exploration when you want to inspect what the index knows before synthesising |
+| **Evidence Pack** | Claim-level grounding with source citations |
+| **Knowledge Search** | Retrieval-first exploration before synthesis |
 
-### METIS Companion
+### Exportable, inspectable answers
 
-An always-on AI companion that lives in the workspace shell. It bootstraps an identity, reflects on active sessions, stores learned memories and playbooks, and surfaces contextual hints as you work. The companion is always available from the floating dock at the bottom of every page.
+Chat is built around evidence rather than vibes: retrieved sources, citations, run traces, resumable streams, JSON exports, and PowerPoint evidence packs. The point is not just to get an answer, but to understand why METIS produced it.
 
-### Setup, settings, and the companion
+### Frontier modules in one product surface
 
-The first-run setup flow now walks you through model provider choice, credentials, embeddings, a first index build, and staged starter prompts before dropping you into chat. From there, the settings surface exposes both simple controls and deep retrieval/model options, while the floating METIS Companion dock can reflect on work, surface memory, and stay docked across pages.
+METIS keeps ambitious techniques close to the user journey: Heretic model abliteration, TimesFM forecasting, Tribev2 multimodal faculty classification, swarm simulation, recursive retrieval, semantic/structure-aware ingestion, skill derivation from traces, and local model management.
 
-### Everything else
+## 👥 Who METIS Is For
 
-- **Knowledge graphs**: automatic entity extraction and relationship linking
-- **Persistent sessions**: SQLite-backed conversations that auto-save
-- **Agent profiles**: save different configurations for different projects
-- **Structure-aware ingestion**: parses PDFs, DOCX, Markdown, HTML, and plain text
-- **Background processing**: indexing and queries run in threads; the UI never freezes
-- **Theming**: Space Dust, Light, and Dark themes
+- Indie writers, fiction authors, researchers, and creators whose knowledge is their work product.
+- Autodidacts, students, analysts, and tinkerers who want to try frontier AI techniques without building a lab.
+- Homelabbers, r/LocalLLaMA regulars, and local-model users who want a beautiful interface around their stack.
+- Privacy-minded professionals who already care about tools like Obsidian, Kagi, Mullvad, Proton, or Framework.
 
----
+METIS is **not** chasing enterprise procurement, SOC 2-first buyers, team administration, SSO, or regulated-industry compliance on day one. The product is local, single-user, maximalist, and designed for a solo/lifestyle commercial path.
 
-## 💻 CLI
+## Why METIS
 
-The CLI shares the same retrieval backend as the app: same results, no window.
+| Generic cloud chat or RAG apps | METIS |
+|--------------------------------|-------|
+| Sessions are mostly stateless and hosted elsewhere. | Sessions, memory, traces, indexes, and companion state live locally by default. |
+| Privacy is promised at the policy layer. | Network Audit is designed to show what left the machine and which feature caused it. |
+| Retrieval evidence is often hidden or shallow. | Sources, scores, citations, trace events, and exports are first-class. |
+| The model/provider stack is usually fixed. | LLMs, embeddings, vector stores, local GGUFs, and WebGPU companion inference are swappable. |
+| The UI is a chat box with sidebars. | The constellation and brain graph make knowledge, sessions, skills, and growth navigable. |
+| New AI techniques arrive as separate tools. | METIS turns techniques into product modules the companion can learn to use. |
 
-```bash
-# Index a file
-metis --cli index --file docs/my_notes.txt
+## 🔐 Privacy and Trust
 
-# Query it
-metis --cli query --file docs/my_notes.txt --question "What are the key takeaways?"
-```
+- **Local-first by design.** METIS stores indexes, sessions, traces, companion memory, and settings on your machine.
+- **Offline-capable.** Use local GGUF models, local embeddings, and the JSON vector store for fully local operation.
+- **Provider calls are explicit.** Remote LLM, embedding, search, model-download, or vector services are opt-in through settings and provider credentials.
+- **WebGPU Bonsai is opt-in.** The browser-side Bonsai companion model downloads only when loaded, runs inference on-device, and is cached by the browser after first load when supported.
+- **Network Audit is honest, not magic.** The audit layer is a truth surface for outbound calls and SDK invocation provenance; it is not an OS-level firewall.
+- **Protected local API when needed.** Set `METIS_API_TOKEN` to require Bearer auth on protected endpoints.
+- **Growth claims stay honest.** METIS currently grows through memory, traces, skills, retrieval, and brain links. Weight updates, LoRA fine-tuning, and always-on overnight reflection remain opt-in or roadmap work.
 
-You can also run the same CLI entrypoint from source:
+## 💼 Commercial Licensing
 
-```bash
-python main.py --cli index --file docs/my_notes.txt
-python main.py --cli query --file docs/my_notes.txt --question "What are the key takeaways?"
-```
+METIS is proprietary for releases after `v1.0.0`. Versions up to and including `v1.0.0` were released under MIT; later versions require the license terms in [LICENSE](LICENSE) or a separate written agreement.
 
----
+Commercial usage rights are available by agreement with the maintainer. The planned business model in [VISION.md](VISION.md) includes Free, Pro, Lifetime, and Supporter tiers, but this README does not publish purchase links or final pricing until the commercial surface exists.
+
+## 🧱 Tech Stack
+
+| Area | Stack |
+|------|-------|
+| **Primary interface** | Tauri shell around the Next.js web app |
+| **Frontend** | Next.js, React, TypeScript, Tailwind, Three.js/WebGL surfaces |
+| **Backend** | Litestar ASGI service, Python 3.10+ |
+| **Persistence** | SQLite-backed sessions/app state, local files for traces and indexes |
+| **Retrieval** | JSON vector store by default; optional ChromaDB and Weaviate paths |
+| **Local AI** | llama.cpp/GGUF path, Sentence Transformers, browser WebGPU Bonsai companion |
+| **Packaging** | Installer scripts, static web export, Tauri desktop shell |
 
 ## 🛠️ Local Development
+
+Install the Python development dependencies from the repo root:
+
+```bash
+pip install -e ".[dev,api]"
+```
 
 ### API only
 
@@ -190,42 +216,49 @@ This starts:
 - API at `http://127.0.0.1:8000`
 - Next.js dev UI at `http://127.0.0.1:3000`
 
-### Forecast on Windows
+### Native desktop shell
 
-TimesFM 2.5 currently works best in a dedicated Python 3.11 environment on
-Windows. METIS includes a helper script that reproduces the validated setup and
-starts the Litestar backend with forecast support enabled:
+Native desktop packaging lives in `apps/metis-desktop/`. The repo launcher intentionally opens the local web UI; use the Tauri shell when you need a native packaged build.
 
-```powershell
-.\scripts\run_forecast_api_dev.ps1
+## 💻 CLI
+
+The CLI shares the same retrieval backend as the app: same indexing and query path, no window.
+
+```bash
+# Index a file
+metis --cli index --file docs/my_notes.txt
+
+# Query it
+metis --cli query --file docs/my_notes.txt --question "What are the key takeaways?"
 ```
 
-That script:
+You can also run the same CLI entrypoint from source:
 
-- creates `.venv311-forecast`
-- installs `.[dev,api]`
-- installs TimesFM from a pinned upstream Git revision with torch extras
-- installs `jax` and `scikit-learn` for covariate-backed XReg runs
-- starts the API on `http://127.0.0.1:8000` using the Litestar backend
-
-Then run the web UI separately:
-
-```powershell
-cd apps/metis-web
-pnpm dev
+```bash
+python main.py --cli index --file docs/my_notes.txt
+python main.py --cli query --file docs/my_notes.txt --question "What are the key takeaways?"
 ```
 
-Forecast mode now defaults to a near-max 15,360-point context window and a 1k
-horizon cap instead of the older 1k / 256 defaults. That keeps METIS close to
-TimesFM's limit without advertising an invalid context+horizon pair.
+## 🔧 Advanced Configuration
 
----
+METIS ships with defaults in `metis_app/default_settings.json`. Copy values into `settings.json` at the repo root to override them.
 
-## 🔧 Configuration
+### Environment variables
 
-METIS AI ships with sensible defaults in `metis_app/default_settings.json`. To customise, copy it to `settings.json` in the project root. METIS picks it up automatically on the next launch.
+| Variable | What it does |
+|----------|-------------|
+| `NEXT_PUBLIC_METIS_API_BASE` | Overrides the API base URL used by the web UI during local Next.js development |
+| `NEXT_PUBLIC_METIS_API_TOKEN` | Browser-side Bearer token; must match `METIS_API_TOKEN` when auth is enabled |
+| `METIS_API_TOKEN` | Requires Bearer auth on protected local API endpoints |
+| `METIS_API_CORS_ORIGINS` | Overrides allowed CORS origins |
+| `METIS_ALLOW_API_KEY_WRITE` | Allows settings API key writes when set to `1`; disabled by default |
+| `METIS_TEST_WEAVIATE_URL` | Weaviate endpoint for live parity tests |
+| `METIS_TEST_WEAVIATE_API_KEY` | Weaviate API key |
+| `METIS_TEST_WEAVIATE_GRPC_HOST` | Weaviate gRPC host |
+| `METIS_TEST_WEAVIATE_GRPC_PORT` | Weaviate gRPC port |
+| `METIS_TEST_WEAVIATE_GRPC_SECURE` | Enable TLS for gRPC |
 
-### Brain pass native text gating
+### Native brain pass
 
 `enable_brain_pass` keeps METIS's placement and source-normalisation pass enabled. `brain_pass_native_enabled` allows native Tribev2 analysis when the runtime is installed, and `brain_pass_native_text_enabled` keeps text-backed sources on the native path by default.
 
@@ -239,40 +272,49 @@ METIS AI ships with sensible defaults in `metis_app/default_settings.json`. To c
 
 Set `brain_pass_native_text_enabled` to `false` if you want text, document, or image uploads to stay on the lightweight fallback path. Audio and video inputs can still use native analysis when `brain_pass_native_enabled` is on and the runtime is available.
 
-For the native text proxy path, METIS now prefers local system synthesis backends (Windows System.Speech, Linux `espeak`, macOS `say`, or `pyttsx3`) before falling back to gTTS.
+### Forecast on Windows
 
-### Environment variables
+TimesFM 2.5 currently works best in a dedicated Python 3.11 environment on Windows. METIS includes a helper script that reproduces the validated setup and starts the Litestar backend with forecast support enabled:
 
-| Variable | What it does |
-|----------|-------------|
-| `NEXT_PUBLIC_METIS_API_BASE` | Overrides the API base URL used by the web UI during local Next.js development |
-| `METIS_API_TOKEN` | When set, all protected endpoints require a Bearer token |
-| `METIS_TEST_WEAVIATE_URL` | Weaviate endpoint for live parity tests |
-| `METIS_TEST_WEAVIATE_API_KEY` | Weaviate API key |
-| `METIS_TEST_WEAVIATE_GRPC_HOST` | Weaviate gRPC host |
-| `METIS_TEST_WEAVIATE_GRPC_PORT` | Weaviate gRPC port |
-| `METIS_TEST_WEAVIATE_GRPC_SECURE` | Enable TLS for gRPC |
+```powershell
+.\scripts\run_forecast_api_dev.ps1
+```
 
----
+Then run the web UI separately:
+
+```powershell
+cd apps/metis-web
+pnpm dev
+```
+
+Forecast mode defaults to a near-max 15,360-point context window and a 1k horizon cap instead of the older 1k / 256 defaults.
 
 ## 🧪 Testing
 
-```bash
-# Run the test suite
-python -m pytest
+Run checks from the repo root:
 
-# With coverage
+```bash
+ruff check .
+python -m pytest
 python -m pytest --cov=metis_app --cov-report=term
 ```
 
----
+For full dev verification:
+
+```bash
+./scripts/dev_check.sh
+```
+
+```powershell
+.\scripts\dev_check.ps1
+```
 
 ## 📁 Project Layout
 
-```
+```text
 metis_app/
 ├── api_litestar/   # Litestar routes (v1/*)
-├── engine/         # Indexing + retrieval core (provider-agnostic)
+├── engine/         # Indexing + retrieval core boundaries
 ├── models/         # BrainGraph, AppModel, session types
 ├── services/       # Session repository, index service, pipeline
 └── utils/          # Knowledge graph, LLM/embedding providers
@@ -280,13 +322,16 @@ metis_app/
 apps/
 ├── metis-web/      # Next.js web UI (TypeScript + Tailwind)
 │   ├── app/
-│   │   ├── chat/       # Chat interface (RAG Q&A)
-│   │   ├── brain/      # Interactive Brain Graph visualisation
-│   │   ├── setup/      # First-run onboarding wizard
-│   │   └── settings/   # Provider and model configuration
+│   │   ├── chat/        # Grounded chat workspace
+│   │   ├── brain/       # Interactive Brain Graph visualization
+│   │   ├── gguf/        # Local model management
+│   │   ├── library/     # Indexed content surfaces
+│   │   ├── setup/       # First-run onboarding wizard
+│   │   └── settings/    # Provider and model configuration
 │   └── components/
 │       ├── brain/       # BrainGraph 3D component
 │       ├── chat/        # Chat + evidence panels
+│       ├── constellation/
 │       └── shell/       # METIS Companion dock, page chrome
 └── metis-desktop/  # Tauri desktop shell around metis-web
 
@@ -294,27 +339,18 @@ scripts/            # Installers and dev scripts
 skills/             # Self-contained agentic skill workflows
 tests/              # pytest suite
 docker/             # Weaviate for integration testing
+docs/adr/           # Architecture decisions
 ```
-
----
 
 ## 🤝 Contributing
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,api]"
 ruff check .
 python -m pytest
 ```
 
-For full-stack local development:
-
-```bash
-bash scripts/run_nextgen_dev.sh
-```
-
-Make sure linting and tests pass before opening a PR. See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
-
----
+Keep PRs focused, include tests for behavior changes, update docs for user-visible changes, and make sure CI passes before requesting review. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## License
 
