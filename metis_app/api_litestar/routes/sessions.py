@@ -87,8 +87,12 @@ def delete_session(session_repo: SessionRepository, session_id: str) -> dict[str
 router = Router(
     path="",
     dependencies={
-        "session_repo": Provide(get_session_repo, sync_to_thread=False),
-        "trace_store": Provide(_make_trace_store, sync_to_thread=False),
+        # Both providers do blocking I/O on every request:
+        # `get_session_repo()` opens the SQLite connection and runs
+        # schema migrations; `_make_trace_store()` creates the runs
+        # directory. Run them on the threadpool, not the event loop.
+        "session_repo": Provide(get_session_repo, sync_to_thread=True),
+        "trace_store": Provide(_make_trace_store, sync_to_thread=True),
     },
     route_handlers=[
         list_sessions,
