@@ -11,6 +11,7 @@ import {
   MessageSquare,
   Settings2,
 } from "lucide-react";
+import { MetisMark } from "@/components/brand";
 import { MetisCompanionDock } from "@/components/shell/metis-companion-dock";
 import { NetworkAuditPill } from "@/components/shell/network-audit-pill";
 import { WebGPUCompanionProvider } from "@/lib/webgpu-companion/webgpu-companion-context";
@@ -100,19 +101,8 @@ export function PageChrome({
               "sticky top-0 z-50 -mx-3 sm:-mx-4 flex items-center px-10 py-7 bg-transparent",
             )}
           >
-            <Link href="/">
-              <span
-                style={{
-                  fontFamily: "var(--font-display, 'Space Grotesk', inherit)",
-                  fontSize: "15px",
-                  fontWeight: 600,
-                  letterSpacing: "0.2em",
-                  textTransform: "uppercase",
-                  color: "oklch(0.92 0.01 248)",
-                }}
-              >
-                METIS<sup style={{ fontSize: "8px", opacity: 0.4, verticalAlign: "super", marginLeft: "2px" }}>AI</sup>
-              </span>
+            <Link href="/" aria-label="Metis home">
+              <MetisMark size={28} title="Metis home" />
             </Link>
 
             <nav className="ml-10 flex items-center gap-8">
