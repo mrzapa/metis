@@ -236,7 +236,7 @@ got reframed mid-flight, what's deferred to retro.
 | #549 | **Polish** — GSAP ambient seedling-pulse widget replaces the heartbeat text log in the dock. | 2026-04-26 |
 | #550 | **Phase 4b** — Overnight backend GGUF reflection (opt-in), cadence + quiet-window gates, `model_status` four-value enum. | 2026-04-26 |
 | #555 | **Phase 5** — Visible growth stages (Seedling → Sapling → Bloom → Elder), pure compute in `growth.py`, dock badge + transition pulse. | 2026-04-26 |
-| #558 | **Phase 6** — Brain-graph density + Elder gate via `BrainGraph.compute_assistant_density()`. | 2026-04-26 |
+| #558 + restoration | **Phase 6** — Brain-graph density + Elder gate via `BrainGraph.compute_assistant_density()`. **Note:** PR #558 was marked merged on GitHub but its substantive code (the density compute, the `_TARGET_EDGES_PER_ARTEFACT=2` constant, the `elder_brain_graph_density=0.5` threshold flip, and the orchestrator wiring) never actually reached `main` — only the meta-commits landed. Discovered 2026-04-26 during retro work. Cherry-picked back to `main` via a separate restoration PR which also brought the Codex P1 (uncapped density) + P2 (drop playbook denominator) review fixes that had been lost with the rest. | 2026-04-26 |
 | #561 | **Phase 7** — LoRA on-deck training-data log (JSONL, `schema_version="1"`, M16/M18 stable contract). | 2026-04-26 |
 | #567 | **Phase 6 follow-up** — Edge-pulse visual via Vestige-inspired `createConnectionFlash` on `brain_link_created` events. | 2026-04-26 |
 
@@ -333,6 +333,17 @@ production telemetry before they're actionable:
   into 4a + 4b mid-flight (post-ADR 0013) shipped cleaner code than
   the original "one Phase 4" would have. The structural Bonsai vs
   GGUF distinction was load-bearing enough to deserve its own PR.
+- **Verify merges land the actual diff, not just the meta-commit.**
+  PR #558 was marked merged on GitHub but its substantive
+  ``compute_assistant_density`` / threshold-flip / orchestrator
+  wiring never reached ``main`` — discovered only when the M13
+  retro work tried to read those constants and found the old
+  values. Future close-out PRs should run a sanity grep for the
+  load-bearing symbols of each shipped phase before flipping the
+  IMPLEMENTATION.md row, not trust the GitHub merge state alone.
+  Possible mechanism: a stale local branch tip got force-merged,
+  or a rebase squashed the substantive commits out. Either way the
+  fix is post-merge verification, not pre-merge ceremony.
 
 ## Blockers
 
