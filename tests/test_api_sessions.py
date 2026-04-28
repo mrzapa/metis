@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from litestar.di import Provide
 from litestar.testing import TestClient
 
 from metis_app.api_litestar import create_app
