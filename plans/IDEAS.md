@@ -59,6 +59,24 @@ Template for agent-filed intake:
 - **Decision:** <awaiting go/no-go | promoted as M## | merged into M## | parked | rejected>
 -->
 
+### ~~Metis logo rollout — M-star mark + glow primitives~~ → promoted as M20 ([`plans/metis-logo-rollout/plan.md`](metis-logo-rollout/plan.md))
+- **Source:** `m_star_logo_traced.svg` provided by the design team on 2026-04-28 (1000×1000 viewBox, single fill-rule:evenodd path, `fill="#111111"`). Reference image: GitHub README header with white mark + cyan halo + topographic ripple rings + lowercase `metis` wordmark on dark navy.
+- **Ask:** Implement the supplied logo into the frontend across brand, system metadata, and motion surfaces.
+- **Context:** User confirmed scope 3 (brand + metadata + motion) and option A (mark replaces wordmark in chrome; lowercase `metis` lockup reserved for external surfaces only — OG, splash, setup welcome). User specifically called out liking the white version of the mark with the subtle glow per the README header.
+- **Filed:** 2026-04-28 by claude/cranky-northcutt-42501d
+- **Triage:**
+  - What it is: A finished logo asset from the design team, plus a finished GitHub README header that doubles as a style reference. The frontend has no logo glyph today — only typographic wordmarks (`METIS<sup>AI</sup>` in Space Grotesk) in the topbar, landing nav, and a raster `metis-logo.png` in the home hero. No favicon beyond the default Next.js `.ico`, no `app/icon.tsx`, no `apple-icon`, no `opengraph-image`, no Tauri icon suite from a brand source. The work is to wire three composable React primitives (`<MetisMark>`, `<MetisGlow>`, `<MetisLockup>`) backed by a cleaned `currentColor`-themed SVG into all the surfaces that need branding, and to add motion (sonar/topography ripple) on hero + splash without disrupting chrome.
+  - Pillar fit: **Cross-cutting + Cosmos** (🔧🌌). Visual identity is foundational — supports M15 (launch credibility), M01 (productise polish), and the Cosmos/constellation metaphor M02/M12 are built around. The glow + ripple aesthetic specifically reinforces the constellation pillar.
+  - Overlap:
+    - **M01 (Rolling)** — the home-hero swap touches `apps/metis-web/components/home/home-visual-system.tsx`, which is part of M01's audit scope. Coordinate before Phase 2.
+    - **M02 (Landed)** — owns the home visual system. M20 is purely additive (replace one PNG with a primitive); no architectural conflict.
+    - **M14 (Draft)** — Forge technique-card aesthetic could reuse the glow recipe. Soft coordination.
+    - **M15 (Draft needed)** — OG image and Tauri icon suite are load-bearing for launch. M20 unblocks marketing surfaces.
+    - **M17 (Landed)** — metadata files render statically at build time, no outbound calls. Google Fonts `@import` is a separate posture issue, out of M20 scope.
+  - Recommendation: **Promote** as M20 with a 4-phase plan (asset prep + primitives → in-app surfaces → system metadata → motion polish). Approach 3 ("Living Mark" formed from the starfield) is parked as a follow-up milestone after M20 lands.
+  - Rough scope: **multi-day** (4 phases, ~1 phase per day if attacked sequentially; primitives in 1 day, surfaces in 1 day, metadata in half-day, motion polish in 1 day).
+- **Decision:** **Promoted as M20** 2026-04-28. Plan doc stub: [`plans/metis-logo-rollout/plan.md`](metis-logo-rollout/plan.md). Full design captured in [`docs/plans/2026-04-28-metis-logo-rollout-design.md`](../docs/plans/2026-04-28-metis-logo-rollout-design.md).
+
 ### Web UI new-user walkthrough — P0–P3 punch list
 - **Source:** Live click-through of `apps/metis-web` at localhost:3000 acting as a brand-new user with no context. Captured 2026-04-25 by claude/youthful-agnesi-8ab627 using the Claude-in-Chrome MCP, plus DOM/network instrumentation.
 - **Ask:** File the findings as ideas and triage into an implementation plan.
