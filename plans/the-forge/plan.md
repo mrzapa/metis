@@ -1,8 +1,8 @@
 ---
 Milestone: The Forge (M14)
-Status: Draft
-Claim: unclaimed
-Last updated: 2026-04-19 by claude/plans-m14-m16-m17
+Status: In progress
+Claim: claude/m14-phase1-shell
+Last updated: 2026-04-28 by claude/m14-phase1-shell
 Vision pillar: Companion + Cortex
 ---
 
