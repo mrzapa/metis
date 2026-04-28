@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getApiBase } from "@/lib/api";
+import { MetisLoader } from "@/components/brand";
 import { LaunchStage } from "@/components/shell/launch-stage";
 import { Button } from "@/components/ui/button";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
@@ -116,6 +117,9 @@ export function DesktopReadyGuard({ children }: DesktopReadyGuardProps) {
         statusTone="checking"
         aside={
           <div className="space-y-4">
+            <div className="flex items-center justify-center pb-2">
+              <MetisLoader size={120} />
+            </div>
             <div>
               <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
                 Launch phases
