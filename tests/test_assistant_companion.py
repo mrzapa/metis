@@ -400,6 +400,47 @@ def test_reflect_emits_only_persisted_links_when_max_items_truncates(
     )
 
 
+def test_orchestrator_append_message_user_bumps_last_user_input_at(tmp_path) -> None:
+    """M13 retro fix: ``WorkspaceOrchestrator.append_message`` with
+    ``role="user"`` MUST bump ``AssistantStatus.last_user_input_at``
+    so the Phase 4b overnight quiet-window gate sees the user as
+    present even when no reflection fires for the message.
+
+    Assistant-role messages MUST NOT bump the field — they're the
+    response, not user activity."""
+    from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
+    from metis_app.services.session_repository import SessionRepository
+
+    session_repo = SessionRepository(db_path=tmp_path / "sessions.db")
+    session_repo.init_db()
+    session_repo.create_session(session_id="s1", title="Test session")
+    assistant_repo = AssistantRepository(tmp_path / "assistant.json")
+    assistant_service = AssistantCompanionService(
+        repository=assistant_repo,
+        session_repo=session_repo,
+    )
+    orch = WorkspaceOrchestrator(
+        session_repo=session_repo,
+        assistant_service=assistant_service,
+    )
+
+    # Baseline: status has no last_user_input_at.
+    assert assistant_repo.get_status().last_user_input_at == ""
+
+    # User message → bumps the field.
+    orch.append_message("s1", role="user", content="hello")
+    after_user = assistant_repo.get_status().last_user_input_at
+    assert after_user, "Expected last_user_input_at to be bumped on user message"
+
+    # Assistant message → must NOT change the timestamp (stays at
+    # the user-message bump).
+    orch.append_message("s1", role="assistant", content="hi back")
+    after_assistant = assistant_repo.get_status().last_user_input_at
+    assert after_assistant == after_user, (
+        "Assistant-role messages must not bump last_user_input_at"
+    )
+
+
 def test_reflect_does_not_emit_brain_link_created_when_reflection_skipped(
     tmp_path, monkeypatch
 ) -> None:

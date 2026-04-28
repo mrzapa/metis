@@ -62,6 +62,61 @@ class StageThresholds:
 
     Each named counter is the **minimum** count required. Boolean AND
     across the named counters; missing counters are treated as zero.
+
+    **Tuning checklist (M13 retro, 2026-04-26).** These are v0
+    estimates locked at Phase 5 / 6 ship time. Tuning them is
+    deliberately data-gated — picking new numbers without
+    stage-distribution telemetry would be theatre. When real-user
+    data accumulates (M16 personal evals will surface this), tune
+    in this order:
+
+    1. **Measure stage distribution.** Pull
+       ``AssistantStatus.growth_stage`` for every active workspace
+       across a representative window (≥30 days, ≥50 users). The
+       healthy shape is roughly:
+
+       - ~40% Seedling (first-week users)
+       - ~35% Sapling (engaged but exploring)
+       - ~20% Bloom (settled, productive)
+       - ~5% Elder (deep-investment power users)
+
+       If the mass is stuck at Seedling (e.g., 80%+), thresholds
+       are too aggressive — drop ``sapling_stars`` toward 5-7. If
+       Elder is empty after months of use, the Elder gate is too
+       tight — relax ``elder_brain_graph_density`` to 0.4 first
+       (cheapest knob), then ``elder_promoted_skills`` to 2.
+
+    2. **Validate the density-gate calibration.** With Phase 6
+       live, ``elder_brain_graph_density=0.5`` is the load-bearing
+       gate. Pull ``BrainGraph.compute_assistant_density`` per
+       workspace and look at the distribution among workspaces that
+       hit the structural Elder counts (≥200 stars + ≥3 promoted
+       skills + ≥30 reflections). Healthy: median density ≥ 0.6,
+       p10 ≥ 0.4. Unhealthy: density bunched at 0.3-0.4 means the
+       ``_TARGET_EDGES_PER_ARTEFACT=2`` constant is wrong for real
+       reflection cadence — drop it to 1 (rationale: half of
+       reflections get cross-linked, not all).
+
+    3. **Validate threshold + density together.** Don't tune
+       structural counts and density in the same release —
+       distributions become uninterpretable. One change per
+       release; observe for 2+ weeks.
+
+    Code-side knobs (when ready to tune):
+    - ``sapling_stars`` / ``sapling_reflections`` (lines below).
+    - ``bloom_stars`` / ``bloom_faculties`` /
+      ``bloom_skill_candidates`` / ``bloom_reflections``.
+    - ``elder_stars`` / ``elder_promoted_skills`` /
+      ``elder_reflections`` / ``elder_brain_graph_density``.
+    - ``_TARGET_EDGES_PER_ARTEFACT`` in
+      :mod:`metis_app.models.brain_graph` (calibrates density
+      saturation; tune alongside ``elder_brain_graph_density``).
+
+    Plan-doc cross-reference: keep
+    ``plans/seedling-and-feed/plan.md`` *Phase 5 thresholds — v0
+    decision* and *Phase 6 brain-graph density — v0 decision*
+    sections in sync with any changes here. Any tuning PR should
+    link the telemetry that motivated it.
     """
 
     sapling_stars: int = 10
@@ -75,14 +130,15 @@ class StageThresholds:
     elder_stars: int = 200
     elder_promoted_skills: int = 3
     elder_reflections: int = 30
-    # Phase 6 activates this gate. Values are normalised to [0.0, 1.0]
-    # by ``BrainGraph.compute_assistant_density``. The 0.5 threshold is
-    # a v0 estimate calibrated against the doc-locked Elder counts:
-    # 30 reflections + 3 promoted skills + 200 indexed stars typically
-    # produce ~3 edges per assistant-scope node (i.e., density ≈ 0.75)
-    # in real workspaces, so 0.5 is a comfortable but non-trivial gate.
-    # See ``plans/seedling-and-feed/plan.md`` *Phase 6 brain-graph
-    # density — v0 decision* for the calibration math.
+    # Phase 6 activates this gate. Values are normalised to [0.0,
+    # 1.0] by ``BrainGraph.compute_assistant_density``. The 0.5
+    # threshold is a v0 estimate calibrated against the doc-locked
+    # Elder counts: 30 reflections + 3 promoted skills + 200
+    # indexed stars typically produce ~3 edges per assistant-scope
+    # node (i.e., density ≈ 0.75) in real workspaces, so 0.5 is a
+    # comfortable but non-trivial gate. See the *Tuning checklist*
+    # above + ``plans/seedling-and-feed/plan.md`` *Phase 6
+    # brain-graph density — v0 decision* for the calibration math.
     elder_brain_graph_density: float = 0.5
 
 

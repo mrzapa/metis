@@ -782,7 +782,15 @@ class WorkspaceOrchestrator:
         artifacts: list[dict[str, Any]] | None = None,
         actions: list[dict[str, Any]] | None = None,
     ) -> None:
-        """Append a message to *session_id*."""
+        """Append a message to *session_id*.
+
+        M13 retro (2026-04-26) — when the role is ``"user"``, also
+        bump :attr:`AssistantStatus.last_user_input_at` so the Phase
+        4b overnight quiet-window gate has a reliable "user is here"
+        signal independent of whether a reflection happens to fire.
+        Failures here are non-fatal — the message persistence is the
+        primary contract; the activity timestamp is a side-effect.
+        """
         self._session_repo.append_message(
             session_id,
             role=role,
@@ -792,6 +800,28 @@ class WorkspaceOrchestrator:
             artifacts=artifacts or [],
             actions=actions or [],
         )
+        if role == "user":
+            try:
+                self._note_user_input()
+            except Exception:  # noqa: BLE001
+                log.debug(
+                    "Failed to bump last_user_input_at",
+                    exc_info=True,
+                )
+
+    def _note_user_input(self) -> None:
+        """M13 retro — bump the assistant status's user-input timestamp.
+
+        Called from any code path that processes fresh user input so
+        the overnight quiet-window gate sees the user as present even
+        when no reflection fires for the message.
+        """
+        from datetime import datetime, timezone
+
+        repo = self._assistant_service.repository
+        status = repo.get_status()
+        status.last_user_input_at = datetime.now(timezone.utc).isoformat()
+        repo.update_status(status)
 
     def save_feedback(
         self,

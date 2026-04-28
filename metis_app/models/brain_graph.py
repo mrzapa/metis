@@ -19,8 +19,27 @@ def _as_text(value: Any) -> str:
 # M13 Phase 6 — calibrates "fully grown" for ``compute_assistant_density``.
 # A companion that links each reflection back to its session AND to a
 # related index hits ~2 learned edges per memory artefact and saturates
-# the density metric at 1.0. Tuning knob for retro density-threshold
-# adjustments (planned 0.4/0.6 tweak alongside the Elder gate).
+# the density metric at 1.0.
+#
+# **Tuning knob (M13 retro):** this is one of two coupled levers that
+# control the Elder gate. The other is
+# ``StageThresholds.elder_brain_graph_density`` in
+# :mod:`metis_app.seedling.growth`. Tune them in lockstep, not
+# independently — see the *Tuning checklist* in
+# :class:`metis_app.seedling.growth.StageThresholds`'s docstring for
+# the order-of-operations.
+#
+# - **Drop to 1** if observed density is bunched at 0.3-0.4 across
+#   structurally-Elder workspaces (means real reflection cadence
+#   produces ~1 cross-link, not 2).
+# - **Raise to 3** if every workspace saturates at 1.0 long before
+#   reaching the structural Elder counts (means cross-linking is
+#   denser than v0 calibration assumed).
+#
+# Default 2 matches what
+# ``AssistantCompanionService.reflect`` already emits per
+# reflection — keep aligned with that emitter unless reflection
+# changes.
 _TARGET_EDGES_PER_ARTEFACT = 2
 
 

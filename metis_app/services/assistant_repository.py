@@ -144,10 +144,36 @@ class AssistantRepository:
                     last_reflection_at TEXT NOT NULL,
                     last_reflection_trigger TEXT NOT NULL,
                     latest_summary TEXT NOT NULL,
-                    latest_why TEXT NOT NULL
+                    latest_why TEXT NOT NULL,
+                    growth_stage TEXT NOT NULL DEFAULT 'seedling',
+                    growth_stage_changed_at TEXT NOT NULL DEFAULT '',
+                    last_user_input_at TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
+            # M13 retro (2026-04-26): idempotent column additions for
+            # databases created against the pre-Phase-5 schema. SQLite
+            # raises ``OperationalError`` when the column already
+            # exists; we catch and continue so this is safe to run on
+            # every ``_ensure_ready`` call. Phase 5 added
+            # ``growth_stage`` / ``growth_stage_changed_at`` to the
+            # dataclass but never migrated the SQL schema (latent bug
+            # — Phase 5's in-memory tests passed because they used a
+            # fake repo). Phase 7 retro adds ``last_user_input_at``
+            # for the user-activity proxy fix.
+            for column_def in (
+                "growth_stage TEXT NOT NULL DEFAULT 'seedling'",
+                "growth_stage_changed_at TEXT NOT NULL DEFAULT ''",
+                "last_user_input_at TEXT NOT NULL DEFAULT ''",
+            ):
+                try:
+                    conn.execute(
+                        f"ALTER TABLE assistant_status ADD COLUMN {column_def}"
+                    )
+                except sqlite3.OperationalError:
+                    # Column already exists — fresh DBs hit this path,
+                    # plus repeat ``init_db`` calls.
+                    continue
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS assistant_memory(
@@ -384,12 +410,14 @@ class AssistantRepository:
                 id, state, paused, runtime_ready, runtime_source, runtime_provider,
                 runtime_model, bootstrap_state, bootstrap_message,
                 recommended_model_name, recommended_quant, recommended_use_case,
-                last_reflection_at, last_reflection_trigger, latest_summary, latest_why
+                last_reflection_at, last_reflection_trigger, latest_summary, latest_why,
+                growth_stage, growth_stage_changed_at, last_user_input_at
             ) VALUES (
                 :id, :state, :paused, :runtime_ready, :runtime_source, :runtime_provider,
                 :runtime_model, :bootstrap_state, :bootstrap_message,
                 :recommended_model_name, :recommended_quant, :recommended_use_case,
-                :last_reflection_at, :last_reflection_trigger, :latest_summary, :latest_why
+                :last_reflection_at, :last_reflection_trigger, :latest_summary, :latest_why,
+                :growth_stage, :growth_stage_changed_at, :last_user_input_at
             )
             """,
             self._status_row(status),
@@ -486,12 +514,14 @@ class AssistantRepository:
                     id, state, paused, runtime_ready, runtime_source, runtime_provider,
                     runtime_model, bootstrap_state, bootstrap_message,
                     recommended_model_name, recommended_quant, recommended_use_case,
-                    last_reflection_at, last_reflection_trigger, latest_summary, latest_why
+                    last_reflection_at, last_reflection_trigger, latest_summary, latest_why,
+                    growth_stage, growth_stage_changed_at, last_user_input_at
                 ) VALUES (
                     :id, :state, :paused, :runtime_ready, :runtime_source, :runtime_provider,
                     :runtime_model, :bootstrap_state, :bootstrap_message,
                     :recommended_model_name, :recommended_quant, :recommended_use_case,
-                    :last_reflection_at, :last_reflection_trigger, :latest_summary, :latest_why
+                    :last_reflection_at, :last_reflection_trigger, :latest_summary, :latest_why,
+                    :growth_stage, :growth_stage_changed_at, :last_user_input_at
                 )
                 """,
                 self._status_row(resolved),

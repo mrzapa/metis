@@ -286,32 +286,61 @@ got reframed mid-flight, what's deferred to retro.
   downstreams will read. Inner-row `feedback` shape documented in
   `training_log.py`'s docstring.
 
-### Deferred to retro / data-gated (NOT blocking close-out)
+### Deferred-items retro pass (2026-04-26)
 
-These items are recorded in *Notes for the next agent* and need
-production telemetry before they're actionable:
+Status of the four items deferred at close-out:
 
-1. **Threshold tuning.** `DEFAULT_THRESHOLDS` (incl.
-   `elder_brain_graph_density=0.5`) and `_TARGET_EDGES_PER_ARTEFACT=2`
-   are v0 estimates. Tune once usage data covers a meaningful
-   stage-distribution sample. Plan-doc decision section to update
-   alongside.
-2. **Phase 7 path stability.** Training-log default is cwd-relative
-   (`.gitignore` covers dev case). If operators report log
-   fragmentation across server restarts, promote to a stable
-   per-user home (`~/.metis/...` POSIX, `%APPDATA%\metis\...`
-   Windows).
-3. **Phase 7 feedback enrichment.** Overnight reflections currently
-   capture only session-feedback for sessions referenced in
-   `recent_reflections`. When a reaction surface ships on the
-   morning card (thumbs-up / edit-then-save), thread that feedback
-   into the same JSONL log under a new `kind="overnight_feedback"`
-   event line. Schema_version stays 1 (additive).
-4. **Phase 4b user-activity proxy.** The quiet-window gate uses
-   `last_reflection_at` as a stand-in for `last_user_input_at`. If
-   "user appears idle while actively chatting" turns out to be a
-   real failure mode, add a dedicated field. Seam:
-   `_resolve_last_user_activity` in `metis_app/seedling/lifecycle.py`.
+1. **Threshold tuning** — **deferred (data-gated, can't be
+   completed today).** Picking new threshold numbers without
+   stage-distribution telemetry would be theatre. *Done in this
+   pass:* added a *Tuning checklist* docstring to
+   :class:`metis_app.seedling.growth.StageThresholds` documenting
+   the three-step procedure (measure stage distribution → validate
+   the density gate → tune one knob per release), plus a
+   cross-reference annotation on
+   ``_TARGET_EDGES_PER_ARTEFACT`` in
+   :mod:`metis_app.models.brain_graph` documenting it as a coupled
+   knob. Future tuning PRs will land mechanically once telemetry
+   exists. ✅ documented, ⏳ awaiting data.
+
+2. **Phase 7 path stability** — **completed.** The training-log
+   default flipped from cwd-relative to a stable per-user home:
+   ``%APPDATA%\metis\seedling_training_log.jsonl`` on Windows,
+   ``~/.metis/seedling_training_log.jsonl`` on POSIX. The
+   ``seedling_training_log_path`` setting still wins when set —
+   operators with bespoke layouts keep the override. New helper
+   ``_default_user_home_log_dir`` is testable without touching the
+   real user home (tests monkeypatch ``Path.home`` + ``APPDATA``).
+   3 new test cases. ✅
+
+3. **Phase 7 feedback enrichment** — **schema plumbed; UI
+   deferred.** Added :func:`record_overnight_feedback` to
+   ``training_log.py`` so the future morning-card reaction surface
+   can land as a thin client without bridge changes. The activity
+   bridge's ``_VALID_KINDS`` now includes ``"overnight_feedback"``,
+   so a complementary ``CompanionActivityEvent`` (when the user
+   rates the card) flows through to the dock. Schema_version stays
+   1 (additive); inner-row shape documented in the writer's
+   docstring. The UI itself is out of scope per the original
+   "*WHEN a reaction surface ships*" caveat. 4 new test cases. ✅
+   plumbing, ⏳ UI for a future milestone.
+
+4. **Phase 4b user-activity proxy** — **completed.** Added
+   ``AssistantStatus.last_user_input_at`` field, bumped from
+   ``WorkspaceOrchestrator.append_message`` whenever ``role
+   == "user"``. ``_resolve_last_user_activity`` now prefers the
+   dedicated field and falls back to ``last_reflection_at`` only
+   when unset (back-compat for sessions predating the field). Also
+   surfaced a **latent Phase 5 bug**: the ``assistant_status`` SQL
+   schema was missing ``growth_stage`` /
+   ``growth_stage_changed_at`` columns — Phase 5 added them to the
+   dataclass but never migrated the table. Phase 5 tests passed
+   only because they used a fake in-memory repo. Fixed with an
+   idempotent ALTER TABLE migration that adds the three new
+   columns (the two Phase 5 ones + ``last_user_input_at``) on
+   every ``init_db`` call. 5 new test cases (orchestrator
+   integration + resolver preference + persistence round-trip).
+   ✅ + Phase 5 schema bug also fixed.
 
 ### Lessons captured
 

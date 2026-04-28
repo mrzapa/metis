@@ -21,6 +21,7 @@ from metis_app.seedling.training_log import (
     TRAINING_LOG_SCHEMA_VERSION,
     is_enabled,
     read_training_log,
+    record_overnight_feedback,
     record_training_sample,
     resolve_training_log_path,
 )
@@ -56,10 +57,44 @@ def _gguf_settings(
 # ---------------------------------------------------------------------------
 
 
-def test_default_path_resolves_to_cwd_filename() -> None:
-    """No setting override → cwd-relative ``seedling_training_log.jsonl``."""
+def test_default_path_resolves_to_per_user_home(tmp_path, monkeypatch) -> None:
+    """M13 retro: no setting override → per-user-home default. We
+    monkeypatch ``Path.home`` and force the POSIX branch by clearing
+    ``APPDATA`` so the test doesn't touch the real user home."""
+    fake_home = tmp_path / "fake-home"
+    monkeypatch.setattr(pathlib.Path, "home", lambda: fake_home)
+    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+
     resolved = resolve_training_log_path({})
     assert resolved.name == DEFAULT_LOG_FILENAME
+    assert resolved.parent == fake_home / ".metis"
+
+
+def test_default_path_uses_appdata_on_windows(tmp_path, monkeypatch) -> None:
+    """On Windows, the per-user-home default lands in
+    ``%APPDATA%\\metis\\seedling_training_log.jsonl``."""
+    fake_appdata = tmp_path / "fake-appdata"
+    monkeypatch.setenv("APPDATA", str(fake_appdata))
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+
+    resolved = resolve_training_log_path({})
+    assert resolved == fake_appdata / "metis" / DEFAULT_LOG_FILENAME
+
+
+def test_default_path_falls_back_to_home_when_appdata_unset_on_windows(
+    tmp_path, monkeypatch
+) -> None:
+    """Defensive: a Windows session running under a stripped-down
+    service account may not have ``APPDATA`` set. Fall through to
+    ``~/.metis/...`` rather than crashing."""
+    fake_home = tmp_path / "fake-home"
+    monkeypatch.setattr(pathlib.Path, "home", lambda: fake_home)
+    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+
+    resolved = resolve_training_log_path({})
+    assert resolved == fake_home / ".metis" / DEFAULT_LOG_FILENAME
 
 
 def test_explicit_path_overrides_default(tmp_path) -> None:
@@ -70,14 +105,17 @@ def test_explicit_path_overrides_default(tmp_path) -> None:
     assert resolved == custom
 
 
-def test_blank_path_falls_back_to_default() -> None:
-    """An empty string is treated as 'not set', not as the cwd path
-    literally — we don't want a malformed ``''`` setting to write
-    to ``./``."""
-    assert (
-        resolve_training_log_path({"seedling_training_log_path": ""}).name
-        == DEFAULT_LOG_FILENAME
-    )
+def test_blank_path_falls_back_to_default(tmp_path, monkeypatch) -> None:
+    """An empty string is treated as 'not set', not literally as ``./``
+    — defensive against a malformed settings file."""
+    fake_home = tmp_path / "fake-home"
+    monkeypatch.setattr(pathlib.Path, "home", lambda: fake_home)
+    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+
+    resolved = resolve_training_log_path({"seedling_training_log_path": ""})
+    assert resolved.name == DEFAULT_LOG_FILENAME
+    assert resolved.parent == fake_home / ".metis"
 
 
 def test_is_enabled_default_true() -> None:
@@ -414,6 +452,126 @@ def test_collect_feedback_handles_missing_session_id() -> None:
     feedback = _collect_feedback_for_reflections(orch, recent)
     assert feedback == []
     assert orch.get_session_calls == []
+
+
+def test_record_overnight_feedback_writes_v1_compliant_line(tmp_path) -> None:
+    """Phase 7 retro — feedback rows land in the same JSONL log as
+    overnight reflections, distinguished by
+    ``kind="overnight_feedback"``. Schema_version stays 1 (additive).
+    Inner-row shape is documented in
+    ``training_log.record_overnight_feedback``'s docstring."""
+    log_path = tmp_path / "training.jsonl"
+    fixed_now = datetime(2026, 4, 26, 8, 0, 0, tzinfo=timezone.utc)
+
+    # First write an overnight reflection so the log has a target row.
+    record_training_sample(
+        kind="overnight",
+        system_prompt="sys",
+        user_prompt="user",
+        model_output="The morning card text.",
+        trace_id="memory:reflection-1",
+        log_path=log_path,
+        now=datetime(2026, 4, 26, 6, 0, tzinfo=timezone.utc),
+    )
+
+    # Now the user reacts to the morning card.
+    result = record_overnight_feedback(
+        target_trace_id="memory:reflection-1",
+        vote=1,
+        note="Helpful — actioned the first follow-up.",
+        edited_summary="(left as-is)",
+        feedback_id="fb-1",
+        log_path=log_path,
+        now=fixed_now,
+    )
+
+    assert result["ok"] is True
+    rows = read_training_log(log_path)
+    assert len(rows) == 2
+
+    feedback_row = rows[1]
+    # Schema_v1 contract — same version as overnight reflections.
+    assert feedback_row["schema_version"] == TRAINING_LOG_SCHEMA_VERSION
+    assert feedback_row["kind"] == "overnight_feedback"
+    assert feedback_row["trace_id"] == "feedback:fb-1"
+    assert feedback_row["ts"] == fixed_now.isoformat()
+    # Empty model fields — no LLM invocation for a feedback event.
+    assert feedback_row["system_prompt"] == ""
+    assert feedback_row["user_prompt"] == ""
+    assert feedback_row["model_output"] == ""
+    assert feedback_row["retrieved_context"] == {}
+
+    # Inner feedback row carries the M16-readable details.
+    assert len(feedback_row["feedback"]) == 1
+    inner = feedback_row["feedback"][0]
+    assert inner["feedback_id"] == "fb-1"
+    assert inner["target_trace_id"] == "memory:reflection-1"
+    assert inner["vote"] == 1
+    assert inner["note"] == "Helpful — actioned the first follow-up."
+    assert inner["edited_summary"] == "(left as-is)"
+    assert inner["ts"] == fixed_now.isoformat()
+
+
+def test_record_overnight_feedback_synthesises_id_when_unset(tmp_path) -> None:
+    """Defensive: callers may not supply a ``feedback_id``. The
+    writer synthesises a deterministic id from the timestamp +
+    target so M16 dedup-by-id has something stable to grip."""
+    log_path = tmp_path / "training.jsonl"
+    fixed_now = datetime(2026, 4, 26, 8, 0, 0, tzinfo=timezone.utc)
+    record_overnight_feedback(
+        target_trace_id="memory:r1",
+        vote=-1,
+        log_path=log_path,
+        now=fixed_now,
+    )
+    feedback_row = read_training_log(log_path)[0]
+    assert feedback_row["trace_id"].startswith("feedback:fb-")
+    assert "memory:r1" in feedback_row["trace_id"]
+
+
+def test_record_overnight_feedback_respects_disabled_setting(tmp_path) -> None:
+    """The privacy off-switch (``seedling_training_log_enabled``)
+    applies to feedback writes too — disabling means the writer is
+    a no-op."""
+    log_path = tmp_path / "training.jsonl"
+    result = record_overnight_feedback(
+        target_trace_id="memory:r1",
+        vote=1,
+        log_path=log_path,
+        settings={"seedling_training_log_enabled": False},
+    )
+    assert result["ok"] is False
+    assert result["reason"] == "training_log_disabled"
+    assert not log_path.exists()
+
+
+def test_activity_bridge_propagates_overnight_feedback_kind() -> None:
+    """The bridge's ``_VALID_KINDS`` includes
+    ``"overnight_feedback"`` so a complementary
+    CompanionActivityEvent (fired when the user rates the morning
+    card) survives the filter and reaches the dock."""
+    from metis_app.seedling.activity import (
+        clear_seedling_activity_events,
+        list_seedling_activity_events,
+        record_seedling_activity,
+    )
+
+    clear_seedling_activity_events()
+    record_seedling_activity(
+        {
+            "state": "completed",
+            "kind": "overnight_feedback",
+            "summary": "Rated last night's reflection",
+            "status": {
+                "target_trace_id": "memory:reflection-1",
+                "feedback": {"vote": 1, "note": ""},
+            },
+        }
+    )
+    events = list_seedling_activity_events()
+    assert len(events) == 1
+    assert events[0]["kind"] == "overnight_feedback"
+    assert events[0]["payload"]["status"]["target_trace_id"] == "memory:reflection-1"
 
 
 def test_collect_feedback_returns_empty_when_no_reflections() -> None:

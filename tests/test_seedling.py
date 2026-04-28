@@ -133,6 +133,35 @@ def test_activity_bridge_propagates_brain_link_created_kind() -> None:
     assert events[0]["payload"]["status"]["links"][0]["relation"] == "learned_from_session"
 
 
+def test_assistant_status_round_trips_growth_and_user_input_fields(tmp_path) -> None:
+    """M13 retro fix: ``AssistantStatus.growth_stage``,
+    ``growth_stage_changed_at``, and ``last_user_input_at`` MUST
+    survive ``update_status`` → ``get_status`` round-trip on disk.
+
+    Phase 5 added ``growth_stage`` to the dataclass but never
+    extended the SQL schema — the field silently dropped on every
+    persist (latent bug; in-memory tests passed because they used a
+    fake repo). This test catches the regression on the real
+    ``AssistantRepository`` and locks the M13 retro schema migration."""
+    from metis_app.models.assistant_types import AssistantStatus
+    from metis_app.services.assistant_repository import AssistantRepository
+
+    repo = AssistantRepository(tmp_path / "assistant.json")
+    status = AssistantStatus()
+    status.growth_stage = "sapling"
+    status.growth_stage_changed_at = "2026-04-26T05:00:00+00:00"
+    status.last_user_input_at = "2026-04-26T05:30:00+00:00"
+    repo.update_status(status)
+
+    # Reconstruct from disk via a fresh repo instance to prove the
+    # values genuinely persisted (not just held in process memory).
+    repo2 = AssistantRepository(tmp_path / "assistant.json")
+    after = repo2.get_status()
+    assert after.growth_stage == "sapling"
+    assert after.growth_stage_changed_at == "2026-04-26T05:00:00+00:00"
+    assert after.last_user_input_at == "2026-04-26T05:30:00+00:00"
+
+
 def test_activity_bridge_drops_unknown_kind_silently() -> None:
     """Forward-compat guard: unknown ``kind`` values are dropped from
     the event (the rest of the payload still flows through). Catches

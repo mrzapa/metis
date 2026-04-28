@@ -303,6 +303,66 @@ def test_runner_propagates_persist_skip(tmp_path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# M13 retro — _resolve_last_user_activity preference
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_last_user_activity_prefers_dedicated_input_field() -> None:
+    """M13 retro fix: when both ``last_user_input_at`` and
+    ``last_reflection_at`` are populated, the resolver MUST prefer
+    the dedicated user-input field. The reflection-time proxy was
+    load-bearing under Phase 4b but produces stale values for users
+    who chat actively without triggering a reflection."""
+    from metis_app.seedling.lifecycle import _resolve_last_user_activity
+
+    class _Snapshot:
+        def get_assistant_snapshot(self):
+            return {
+                "status": {
+                    "last_reflection_at": "2026-04-26T00:00:00+00:00",
+                    "last_user_input_at": "2026-04-26T05:00:00+00:00",
+                }
+            }
+
+    resolved = _resolve_last_user_activity(_Snapshot())
+    assert resolved is not None
+    # Must be the LATER (input) timestamp, not the reflection one.
+    assert resolved == datetime(2026, 4, 26, 5, 0, tzinfo=timezone.utc)
+
+
+def test_resolve_last_user_activity_falls_back_to_reflection_proxy() -> None:
+    """Backward compat: when the dedicated input field is empty
+    (e.g. a session predating the new field, or no chat input has
+    happened yet), the resolver still falls back to
+    ``last_reflection_at`` so existing deployments don't regress."""
+    from metis_app.seedling.lifecycle import _resolve_last_user_activity
+
+    class _Snapshot:
+        def get_assistant_snapshot(self):
+            return {
+                "status": {
+                    "last_reflection_at": "2026-04-26T00:00:00+00:00",
+                    "last_user_input_at": "",
+                }
+            }
+
+    resolved = _resolve_last_user_activity(_Snapshot())
+    assert resolved == datetime(2026, 4, 26, 0, 0, tzinfo=timezone.utc)
+
+
+def test_resolve_last_user_activity_returns_none_when_both_empty() -> None:
+    """No history → None. The quiet-window gate treats None as
+    quiet, which is the right conservative answer for first-run."""
+    from metis_app.seedling.lifecycle import _resolve_last_user_activity
+
+    class _Snapshot:
+        def get_assistant_snapshot(self):
+            return {"status": {}}
+
+    assert _resolve_last_user_activity(_Snapshot()) is None
+
+
+# ---------------------------------------------------------------------------
 # worker.set_overnight_status — literal fallback (architect review)
 # ---------------------------------------------------------------------------
 

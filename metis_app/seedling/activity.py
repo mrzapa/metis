@@ -10,17 +10,25 @@ from typing import Any
 
 _MAX_EVENTS = 20
 _VALID_STATES = {"running", "completed", "error"}
-# Phase 4 / Phase 5 / Phase 6-follow-up extension. Additive on the
-# existing event shape; clients that don't know the field ignore it.
-# ``brain_link_created`` (Phase 6 follow-up): emitted once per
-# reflection that wrote new ``AssistantBrainLink`` rows; payload
-# carries the list of ``(source_node_id, target_node_id, relation)``
-# triples so the brain-graph view can pulse the matching edges.
+# Phase 4 / Phase 5 / Phase 6-follow-up / Phase 7-retro extension.
+# Additive on the existing event shape; clients that don't know the
+# field ignore it.
+# - ``brain_link_created`` (Phase 6 follow-up): emitted once per
+#   reflection that wrote new ``AssistantBrainLink`` rows; payload
+#   carries the list of ``(source_node_id, target_node_id, relation)``
+#   triples so the brain-graph view can pulse the matching edges.
+# - ``overnight_feedback`` (Phase 7 retro): emitted when the user
+#   rates the morning overnight card (thumbs-up / down / edit-then-
+#   save). Future M16 surface; the schema is plumbed now so a thin
+#   client can land the UI later without bridge changes. Payload
+#   carries ``status.target_trace_id`` (the original overnight
+#   reflection) and ``status.feedback`` (vote / note / edited_summary).
 _VALID_KINDS = {
     "while_you_work",
     "overnight",
     "stage_transition",
     "brain_link_created",
+    "overnight_feedback",
 }
 _events: deque[dict[str, Any]] = deque(maxlen=_MAX_EVENTS)
 _lock = threading.Lock()
