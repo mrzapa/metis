@@ -295,6 +295,7 @@ vi.mock("lucide-react", () => {
     Copy: Icon,
     Cpu: Icon,
     Database: Icon,
+    ExternalLink: Icon,
     FileCheck: Icon,
     FileDown: Icon,
     FileSpreadsheet: Icon,

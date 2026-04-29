@@ -26,11 +26,39 @@ should treat changes to ``id`` fields the same way.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
 Settings = dict[str, Any]
 ForgePillar = Literal["cosmos", "companion", "cortex", "cross-cutting"]
+
+
+RuntimeStatus = Literal["ready", "blocked"]
+
+
+@dataclass(frozen=True)
+class RuntimeReadiness:
+    """Phase 3b — per-technique pre-flight readiness report.
+
+    ``status`` summarises whether the technique can be flipped right
+    now; ``blockers`` lists the human-readable reasons it cannot. A
+    descriptor without prerequisites returns ``status="ready"`` and
+    an empty blocker list (the default produced by
+    :func:`_always_ready`). ``cta`` carries an optional UI hint for
+    the gallery's "Get ready" affordance — the frontend uses
+    ``cta_kind`` to pick a render branch (e.g. open an install
+    dialog vs. deep-link into another route) and ``cta_target`` to
+    parameterise it.
+    """
+
+    status: RuntimeStatus = "ready"
+    blockers: tuple[str, ...] = ()
+    cta_kind: Literal["install_heretic", "switch_chat_path", None] = None
+    cta_target: str | None = None
+
+
+def _always_ready(_settings: Settings) -> RuntimeReadiness:
+    return RuntimeReadiness()
 
 
 @dataclass(frozen=True)
@@ -52,15 +80,22 @@ class TechniqueDescriptor:
     # next ``GET /v1/forge/techniques`` reflects the new state via
     # the descriptor's own ``enabled_predicate``.
     #
-    # ``None`` here marks a technique as **read-only** — typically
-    # because flipping it cleanly requires a runtime pre-flight check
-    # the gallery does not yet do (Heretic CLI on PATH, TimesFM model
-    # download, GGUF model selection, ...). Phase 3b will lift the
-    # remaining read-only entries by adding pre-flight readiness
-    # checks; the read-only ones still render and report their
-    # current ``enabled`` state, they just lack the switch.
+    # ``None`` marks a technique as informational-only — typically
+    # because flipping it would either need a global state change
+    # (TimesFM rewires ``chat_path``) or a runtime pre-flight check
+    # whose CTA isn't a simple toggle. Phase 3b adds a parallel
+    # ``runtime_probe`` for the case where the prereq is just
+    # missing-but-installable (Heretic CLI on PATH).
     enable_overrides: dict[str, Any] | None = None
     disable_overrides: dict[str, Any] | None = None
+    # Phase 3b — runtime readiness probe. Returns a
+    # :class:`RuntimeReadiness` describing whether the technique can
+    # be flipped right now. The default (``_always_ready``) reports
+    # ``status="ready"`` with no blockers, which is correct for the
+    # eleven Phase 3a-toggleable techniques. Heretic and TimesFM
+    # ship dedicated probes that surface the missing CLI / chat-mode
+    # context to the frontend's "Get ready" CTA.
+    runtime_probe: Callable[[Settings], RuntimeReadiness] = field(default=_always_ready)
 
     def is_enabled(self, settings: Settings) -> bool:
         """Resolve the live enabled state for this technique.
@@ -75,9 +110,31 @@ class TechniqueDescriptor:
         except Exception:
             return False
 
+    def readiness(self, settings: Settings) -> RuntimeReadiness:
+        """Resolve the live readiness state for this technique.
+
+        Same defensive posture as ``is_enabled``: any exception in
+        the probe collapses to ``status="blocked"`` with an
+        ``"unknown error"`` blocker, so a flaky probe (e.g. a future
+        ``subprocess`` call) can't take down the gallery endpoint.
+        """
+        try:
+            return self.runtime_probe(settings)
+        except Exception as exc:
+            return RuntimeReadiness(
+                status="blocked",
+                blockers=(f"runtime probe failed: {exc!s}",),
+            )
+
     @property
     def toggleable(self) -> bool:
-        """True iff the gallery should render an interactive toggle."""
+        """True iff the gallery should render an interactive toggle.
+
+        Requires both override payloads. Independent from runtime
+        readiness — a toggleable+blocked technique still surfaces
+        the switch, just disabled, so the user sees what's available
+        once the blocker clears.
+        """
         return self.enable_overrides is not None and self.disable_overrides is not None
 
 
@@ -140,6 +197,57 @@ def _heretic_enabled(settings: Settings) -> bool:
         return bool(is_heretic_available())
     except Exception:
         return False
+
+
+# ── Runtime readiness probes (Phase 3b) ───────────────────────────
+
+
+def _heretic_readiness(settings: Settings) -> RuntimeReadiness:
+    """Block Heretic when the CLI is missing on ``$PATH``.
+
+    Lazy-import the service module so the registry doesn't pay the
+    ``heretic_service`` import cost on every gallery fetch when
+    Heretic isn't even configured.
+    """
+    try:
+        from metis_app.services.heretic_service import is_heretic_available
+    except Exception as exc:
+        return RuntimeReadiness(
+            status="blocked",
+            blockers=(f"could not import heretic_service: {exc!s}",),
+            cta_kind="install_heretic",
+        )
+    if not is_heretic_available():
+        return RuntimeReadiness(
+            status="blocked",
+            blockers=("Heretic CLI is not on $PATH",),
+            cta_kind="install_heretic",
+        )
+    if not settings.get("heretic_output_dir"):
+        # CLI is there but no output dir is configured — toggling on
+        # will set a default, so this is "ready" rather than blocked.
+        # Reported as an empty-blockers ready state.
+        return RuntimeReadiness(status="ready")
+    return RuntimeReadiness(status="ready")
+
+
+def _timesfm_readiness(_settings: Settings) -> RuntimeReadiness:
+    """TimesFM is informational-only in the Forge.
+
+    Activating Forecast mode rewires the global ``chat_path`` setting,
+    which would silently change every chat session — too invasive for
+    a gallery-side toggle. The blocker reports the actual activation
+    path (the chat-mode picker) and surfaces a deep-link CTA.
+    """
+    return RuntimeReadiness(
+        status="blocked",
+        blockers=(
+            "Forecast mode is activated by switching the chat to "
+            "Forecast (it rewires the chat path globally).",
+        ),
+        cta_kind="switch_chat_path",
+        cta_target="/chat",
+    )
 
 
 def _semantic_chunking_enabled(settings: Settings) -> bool:
@@ -280,10 +388,11 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
             "metis_app.services.forecast_service",
             "metis_app.engine.forecasting",
         ),
-        # Read-only in Phase 3 — turning Forecast on globally rewires
-        # the whole chat surface and needs a model-download pre-flight
-        # check that the gallery does not yet do. Phase 3b will lift
-        # this once the chat-mode integration is sound.
+        # No overrides — Forecast is activated by switching the chat
+        # mode, not by flipping a setting. The runtime probe surfaces
+        # this contextually so the card shows a "Open chat to switch
+        # to Forecast" CTA instead of a dead lock badge.
+        runtime_probe=_timesfm_readiness,
     ),
     TechniqueDescriptor(
         id="tribev2-multimodal",
@@ -318,10 +427,15 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
             "metis_app.services.heretic_service",
             "metis_app.api_litestar.routes.heretic",
         ),
-        # Read-only in Phase 3 — needs the ``heretic`` CLI on PATH,
-        # which is a per-machine pre-flight check the gallery does
-        # not yet do. Phase 3b will surface a "Get ready" affordance
-        # for the un-ready case.
+        # Phase 3b — toggleable when the CLI is on $PATH. Enable
+        # writes a sensible default output dir (the engine creates
+        # the directory on the next run if it doesn't exist);
+        # disable clears it so ``_heretic_enabled`` reads False
+        # again. The card disables the switch when
+        # ``runtime_probe`` reports blocked.
+        enable_overrides={"heretic_output_dir": ".metis_cache/heretic-out"},
+        disable_overrides={"heretic_output_dir": ""},
+        runtime_probe=_heretic_readiness,
     ),
     TechniqueDescriptor(
         id="news-comets",

@@ -1,12 +1,18 @@
 ---
 Milestone: The Forge (M14)
 Status: In progress
-Claim: claude/m14-phase3-toggles (Phase 3a — toggle wiring)
-Last updated: 2026-04-29 by claude/m14-phase3-toggles
+Claim: claude/m14-phase3b-readiness (Phase 3b — runtime readiness)
+Last updated: 2026-04-29 by claude/m14-phase3b-readiness
 Vision pillar: Companion + Cortex
 ---
 
 ## Progress
+
+**Phase 3a — Toggle wiring + companion-dock acknowledgement (Landed via PR #579 / `01b26c6`, 2026-04-29)**
+
+* `TechniqueDescriptor` gains `enable_overrides` / `disable_overrides` payloads + a derived `toggleable` flag. Eleven of the thirteen registry entries get override pairs; toggleable cards show a real `<button role="switch">` that POSTs the payload through the existing `/v1/settings` endpoint.
+* New `source: "forge"` + `kind: "technique_toggled"` event on `CompanionActivityEvent`. The companion dock gets a dedicated collapsed-state toast ("Companion absorbed X." / "Companion stood down X.") so the toggle reads as a companion action regardless of dock posture.
+* Codex P1 fix: semantic-chunking's OR-predicate disable now clears every input key, not just `chunk_strategy`. New regression test seeds a maximally-on base for every descriptor's `setting_keys` and asserts the disable payload still drives the predicate `False`.
 
 **Phase 2b — Canvas-integrated Skills-sector stars (Landed via PR #578 / `c873e47`, 2026-04-29)**
 
@@ -145,60 +151,40 @@ What's in place today that M14 will lean on:
 
 ## Next up
 
-Phases 1, 2a, and 2b have landed. Phase 3 is **split** so the
-toggle-wiring slice ships before the runtime-prereq slice, since
-the latter needs per-technique pre-flight checks (Heretic CLI on
-PATH, TimesFM model download status) that don't exist in the engine
-yet.
+Phases 1, 2a, 2b, and 3a have landed. Phase 3b lifts the runtime-
+prereq techniques (Heretic + TimesFM) from read-only to a richer
+"ready / blocked" posture with a "Get ready" CTA.
 
-**Phase 3a — Toggle wiring + companion-dock acknowledgement (in PR, claude/m14-phase3-toggles, 2026-04-29)**
+**Phase 3b — Pre-flight readiness for runtime-prereq techniques (in PR, claude/m14-phase3b-readiness, 2026-04-29)**
 
-1. **Extend `TechniqueDescriptor` with `enable_overrides` and
-   `disable_overrides` payloads.** When both are present the
-   gallery card shows a real `<button role="switch">`. Flipping it
-   ``POST``s the override payload to the existing `/v1/settings`
-   endpoint — no new endpoint, no fork of the descriptor's
-   ``enabled_predicate``. The route serialises the overrides plus
-   a convenience ``toggleable`` boolean so the frontend has one
-   field to gate the switch render on. Toggleable techniques today:
-   IterRAG convergence, sub-query expansion, hybrid search, MMR,
-   reranker, swarm personas, Tribev2 multimodal, news comets,
-   Hebbian edges, citation v2, semantic chunking — eleven of the
-   thirteen registry entries.
-2. **Wire the optimistic toggle on the gallery card.** Card holds
-   pending state for the spinner; on click the parent forge page
-   optimistically updates state, calls `toggleForgeTechnique()`,
-   reverts on failure, and emits a `CompanionActivityEvent` with
-   `source: "forge"` and `kind: "technique_toggled"`. The
-   `CompanionActivityEvent` type gains both enum entries; the
-   companion dock (`metis-companion-dock.tsx`) handles the new
-   source by surfacing an "absorbed X" / "stood down X" toast,
-   matching the principle-#4 "capability not configuration"
-   framing ADR 0014 calls out.
+3. **Per-technique readiness probes.** `TechniqueDescriptor` grows
+   a `runtime_probe: Callable[[Settings], RuntimeReadiness]` that
+   defaults to "always ready" — the eleven Phase 3a-toggleable
+   techniques pick up the default for free. Heretic ships a probe
+   that checks `is_heretic_available()` (the CLI on `$PATH`) and
+   reports `status="blocked"` with a blocker like
+   `"Heretic CLI is not on $PATH"` and a `cta_kind="install_heretic"`
+   when the CLI is missing; with the CLI present the probe returns
+   `ready` and the existing `_heretic_enabled` predicate gates the
+   on/off state. TimesFM keeps no overrides but ships its own
+   probe that returns `blocked` permanently, with a
+   `cta_kind="switch_chat_path"` + `cta_target="/chat"` so the
+   gallery's CTA deep-links to the chat-mode picker rather than
+   pretending TimesFM is a one-click toggle.
+4. **"Get ready" affordance on the card.** Blocked cards render a
+   new readiness row that surfaces the blocker text and a CTA
+   button. For `install_heretic` it opens a small dialog with the
+   `pipx install heretic-cli` instructions and a link to the
+   upstream repo; for `switch_chat_path` it's a `<Link>` straight
+   to `/chat`. Toggleable + blocked cards (Heretic without CLI)
+   show their switch disabled with a clear `aria-label`; once the
+   blocker clears (the user installs the CLI and the next
+   `visibilitychange` re-fetch picks it up), the switch re-enables
+   without any further wiring.
 
-**Phase 3b — Pre-flight readiness for runtime-prereq techniques (next claimable)**
-
-Heretic abliteration and TimesFM forecasting stay read-only in
-Phase 3a — the descriptor's `enable_overrides` is `None` and the
-card renders a small "Read-only — needs runtime check" lock badge
-instead of a switch. Phase 3b adds:
-
-3. **Per-technique readiness probes.** Heretic needs the CLI on
-   `$PATH` (`heretic_service.is_heretic_available()`); TimesFM
-   needs the model downloaded and the `chat_path` rewire. The
-   route grows a `runtime_status: "ready" | "blocked"` field plus
-   an optional `runtime_blockers: string[]` (e.g.
-   `["heretic CLI not on PATH"]`). Toggleable cards also gain a
-   ``ready`` posture so a future technique that needs a model
-   download can use the same plumbing.
-4. **"Get ready" affordance for un-ready cards.** The lock badge
-   becomes a real CTA — for Heretic, opens a small dialog with the
-   install instructions; for TimesFM, deep-links to `/gguf` (the
-   model picker). Once the readiness probe passes, the lock
-   collapses into the regular toggle.
-
-Phases 4–7 keep the original *Proposed phase breakdown* below. Each
-should land on its own branch
+Phases 4–7 keep the original *Proposed phase breakdown* below. The
+next claimable phase after 3b lands is **Phase 4 — arXiv-paste
+absorption flow**. Each phase should land on its own branch
 (`claude/m14-phase<N>-<descriptor>`).
 
 ## Blockers
