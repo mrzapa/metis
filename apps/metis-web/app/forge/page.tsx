@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { cn } from "@/lib/utils";
 import { fetchForgeTechniques, type ForgeTechnique } from "@/lib/api";
+import { useHashScroll } from "@/lib/use-hash-scroll";
 
 const PILLAR_LABEL: Record<ForgeTechnique["pillar"], string> = {
   cosmos: "Cosmos",
@@ -43,6 +44,13 @@ export default function ForgePage() {
       cancelled = true;
     };
   }, []);
+
+  // Honour `/forge#<technique-id>` deep-links once the inventory has
+  // rendered. Browsers run automatic fragment navigation before the
+  // client-side fetch completes, so without this the constellation's
+  // Skills-sector stars (Phase 2) and the dock's "absorbed X" event
+  // copy (Phase 3) would land at the top of the page on first load.
+  useHashScroll(techniques !== null);
 
   const enabledCount = techniques?.filter((t) => t.enabled).length ?? 0;
   const totalCount = techniques?.length ?? 0;
