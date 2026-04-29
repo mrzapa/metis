@@ -37,7 +37,7 @@ and the step-by-step implementation in
   `favicon.ico` removed. **Static-export fix:** `runtime = "edge"` is incompatible
   with the project's `output: "export"` config; switched all four routes to
   `dynamic = "force-static"`. Tauri icon suite regenerated from the SVG via
-  `scripts/build-tauri-icons.mjs` (sharp + `pnpm tauri icon`) — full desktop
+  `apps/metis-web/scripts/build-tauri-icons.mjs` (sharp + `pnpm tauri icon`) — full desktop
   + mobile + Windows Store suite (~56 files, 392 KB).
 - **Phase 4 — motion polish.** Topbar hover-glow effect via `motion/react`
   `whileHover` (200ms ease-out, reduced-motion gated). Hero ripple timing

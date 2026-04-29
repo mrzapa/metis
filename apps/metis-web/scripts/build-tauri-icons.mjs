@@ -12,7 +12,15 @@
  *      128x128@2x.png, icon.icns, icon.ico) into
  *      apps/metis-desktop/src-tauri/icons/.
  *
- * Run via: node scripts/build-tauri-icons.mjs
+ * Run via (from the repo root):
+ *   node apps/metis-web/scripts/build-tauri-icons.mjs
+ *
+ * The script lives under apps/metis-web/ specifically so that Node's
+ * bare-import resolution for `sharp` finds the module via
+ * apps/metis-web/node_modules — the only place sharp is declared.
+ * (The repo has no root package.json / hoisted node_modules; running
+ * the script from anywhere else would fail with ERR_MODULE_NOT_FOUND
+ * on a clean checkout.)
  *
  * Re-run this script whenever public/brand/metis-mark.svg changes.
  * The output icons are committed; consumers don't need to re-run
@@ -27,10 +35,13 @@ import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const root = resolve(__dirname, "..");
+// __dirname = <repo>/apps/metis-web/scripts
+const metisWebDir = resolve(__dirname, "..");
+// repoRoot = <repo>
+const repoRoot = resolve(metisWebDir, "..", "..");
 
-const sourceSvg = resolve(root, "apps/metis-web/public/brand/metis-mark.svg");
-const tauriDir = resolve(root, "apps/metis-desktop");
+const sourceSvg = resolve(metisWebDir, "public/brand/metis-mark.svg");
+const tauriDir = resolve(repoRoot, "apps/metis-desktop");
 const iconsDir = resolve(tauriDir, "src-tauri/icons");
 const tempPng = resolve(iconsDir, "_source-1024.png");
 

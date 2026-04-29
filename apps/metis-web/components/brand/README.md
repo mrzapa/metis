@@ -83,8 +83,11 @@ If the design team supplies an updated SVG:
    contains `fill-rule="evenodd"`, viewBox preserved.
 4. Open `apps/metis-web/public/brand/metis-mark.svg`, copy the new
    `d=` value into `METIS_MARK_PATH_D` in `metis-mark-path.ts`.
-5. Run `node scripts/build-tauri-icons.mjs` (from the worktree root)
-   to regenerate the desktop icon suite.
+5. Run `node apps/metis-web/scripts/build-tauri-icons.mjs` (from the
+   worktree root) to regenerate the desktop icon suite. The script
+   lives under `apps/metis-web/` so Node's bare-import resolution
+   for `sharp` finds the local `node_modules` (the repo has no root
+   `package.json` / hoisted `node_modules`).
 6. Run `pnpm test components/brand` and `pnpm build`.
 7. Visual spot-check at `/`, `/setup`, and the metadata routes
    (`/icon`, `/apple-icon`, `/opengraph-image`).
