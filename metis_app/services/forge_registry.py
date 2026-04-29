@@ -395,7 +395,17 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
         enabled_predicate=_semantic_chunking_enabled,
         engine_symbols=("metis_app.services.semantic_chunker",),
         enable_overrides={"chunk_strategy": "semantic"},
-        disable_overrides={"chunk_strategy": "fixed"},
+        # ``_semantic_chunking_enabled`` ORs three keys, so the disable
+        # path must clear every one of them. If a previous user state
+        # (or another surface — `/settings`) had flipped
+        # ``structure_aware_ingestion`` or ``semantic_layout_ingestion``
+        # on, leaving them untouched here would leave the technique
+        # reading as ENABLED despite the toggle showing OFF.
+        disable_overrides={
+            "chunk_strategy": "fixed",
+            "structure_aware_ingestion": False,
+            "semantic_layout_ingestion": False,
+        },
     ),
 )
 

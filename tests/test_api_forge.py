@@ -147,6 +147,96 @@ def test_overrides_flip_the_descriptor_predicate() -> None:
         )
 
 
+def test_disable_overrides_clear_every_predicate_input_for_or_predicates() -> None:
+    """Regression test for the semantic-chunking OR-predicate bug
+    (Codex P1 review on PR #579): when a predicate ORs multiple
+    settings keys, ``disable_overrides`` must zero every one of them.
+
+    The earlier ``test_overrides_flip_the_descriptor_predicate``
+    starts from default settings, where the predicate's "companion
+    keys" happen to be off, so it would let a partial disable through
+    silently. This test seeds a *maximally-on* base — every key the
+    descriptor declares in ``setting_keys`` is set to a value that
+    would individually satisfy the predicate — and then asserts the
+    disable payload still drives ``is_enabled`` to ``False``. Any
+    future OR-predicate descriptor that ships a one-knob disable
+    will trip here.
+    """
+    import metis_app.settings_store as settings_store
+
+    truthy_seed = settings_store.load_settings()
+    for descriptor in get_registry():
+        if not descriptor.toggleable:
+            continue
+        if descriptor.id in {"heretic-abliteration", "timesfm-forecasting"}:
+            continue
+        # Build a settings dict where every key the predicate could
+        # read has been explicitly set to a value that, on its own,
+        # makes the predicate read True.
+        seed = dict(truthy_seed)
+        for key in descriptor.setting_keys:
+            seed[key] = _maximally_on_value_for(key)
+        # Sanity: the seed should make the predicate ON.
+        assert descriptor.is_enabled(seed) is True, (
+            f"test seed did not make {descriptor.id!r} read ON; "
+            "_maximally_on_value_for likely needs a new branch for "
+            f"{descriptor.setting_keys!r}"
+        )
+        off = dict(seed)
+        off.update(descriptor.disable_overrides or {})
+        assert descriptor.is_enabled(off) is False, (
+            f"{descriptor.id!r} disable_overrides leaves the "
+            "predicate reading ON when other companion keys had been "
+            "previously enabled — the disable payload must clear every "
+            "input the predicate ORs over"
+        )
+
+
+def _maximally_on_value_for(key: str) -> object:
+    """Pick a value for ``key`` that would make any predicate that
+    reads it interpret it as 'on'. Boolean keys → True; the handful
+    of value-keys read by current predicates have known on values.
+    """
+    # Value keys that current predicates read explicitly. Add new
+    # entries here when a future predicate gates on a string or
+    # numeric value.
+    explicit_on = {
+        "hybrid_alpha": 0.5,
+        "retrieval_mode": "mmr",
+        "swarm_n_personas": 8,
+        "chat_path": "Forecast",
+        "chunk_strategy": "semantic",
+        "heretic_output_dir": "/tmp/heretic",
+        "agentic_max_iterations": 4,
+        "agentic_convergence_threshold": 0.95,
+        "agentic_iteration_budget": 4,
+        "swarm_n_rounds": 4,
+        "subquery_max_docs": 100,
+        "mmr_lambda": 0.5,
+        "hebbian_boost": 1.0,
+        "hebbian_decay": 0.999,
+        "forecast_model_id": "google/timesfm-2.5-200m-pytorch",
+        "forecast_max_context": 2048,
+        "forecast_max_horizon": 256,
+        "forecast_use_quantiles": True,
+        "forecast_xreg_mode": "xreg + timesfm",
+        "brain_pass_native_enabled": True,
+        "brain_pass_native_text_enabled": True,
+        "brain_pass_model_id": "facebook/tribev2",
+        "news_comet_sources": ["arxiv"],
+        "news_comet_poll_interval_seconds": 300,
+        "news_comet_max_active": 5,
+        "news_comet_auto_absorb_threshold": 0.5,
+        "news_comet_rss_feeds": [],
+        "news_comet_reddit_subs": [],
+        "enable_claim_level_grounding_citefix_lite": True,
+    }
+    if key in explicit_on:
+        return explicit_on[key]
+    # Default: treat unknown keys as booleans flipped on.
+    return True
+
+
 def test_list_techniques_ids_are_unique_and_url_safe() -> None:
     """Slugs are stable URL anchors per ADR 0014; renames need a
     redirect or deprecation pass. Guard them mechanically."""
