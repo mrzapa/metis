@@ -1,8 +1,8 @@
 ---
 Milestone: The Forge (M14)
 Status: In progress
-Claim: claude/m14-phase2b-constellation-stars (Phase 2b)
-Last updated: 2026-04-29 by claude/m14-phase2b-constellation-stars
+Claim: claude/m14-phase2-canvas-stars (Phase 2b refactor — canvas integration)
+Last updated: 2026-04-29 by claude/m14-phase2-canvas-stars
 Vision pillar: Companion + Cortex
 ---
 
@@ -161,43 +161,32 @@ coupling to the gallery.
    with the gallery component. Pillar tone variants already exist as
    constants in the page; lift them into the card.
 
-**Phase 2b — Constellation Skills-sector beacon (in PR, claude/m14-phase2b-constellation-stars, 2026-04-29)**
+**Phase 2b — Canvas-integrated Skills-sector stars (in PR, claude/m14-phase2-canvas-stars, 2026-04-29)**
 
-3. **Surface a star per active technique near the Skills sector.**
-   `apps/metis-web/app/page.tsx` renders the existing faculty
-   constellations imperatively into a Canvas2D pipeline (see the
-   `nodes` / `FACULTY_CONCEPTS` array around line 2480 and the
-   `CONSTELLATION_FACULTIES.forEach` block at line 2498). Promoting
-   technique stars into that pipeline is a multi-day surgical change
-   to a 7,379-line hotspot file (99.8th %ile churn) — too risky for
-   a single Phase 2b PR.
-   Phase 2b instead ships a contained, HTML/SVG-based
-   `<ForgeSkillsCluster>` overlay layered on top of the canvas. The
-   overlay anchors itself in screen-space to the Skills faculty's
-   normalised position from `CONSTELLATION_FACULTIES`, fans the
-   active techniques out as small dots around it, applies the
-   pillar accent colour and faculty palette tone, labels each dot
-   on hover, and routes clicks to `/forge#<technique-id>` via the
-   `useRouter` push. Reduced-motion gated.
-   The overlay does **not** zoom-track the canvas camera in v1 —
-   that's the deferred Phase 2c work below. v1's scope is to
-   ship the deep-link contract and make absorbed techniques
-   visible on the home page.
+3. **One canvas star per active technique, fanned around the Skills
+   faculty anchor.** Stars flow through the same projection /
+   camera transform user stars use, so they pan, zoom, and
+   parallax alongside the rest of the constellation. They are not
+   user content — drawn after `drawUserStars`, hit-tested via a
+   dedicated `getHitForgeStar`, click-routed straight to
+   `/forge#<technique-id>` (the star observatory dialog stays
+   reserved for user-content stars per ADR 0014).
+   New module `apps/metis-web/lib/forge-stars.ts` owns the
+   normalised position math (ring around the Skills anchor),
+   pillar → palette mapping, and the `useForgeStars()` hook that
+   re-fetches on document `visibilitychange` so toggles made
+   elsewhere in the app reflect when the user returns to the home
+   page. The home-page render-loop additions are limited to:
+   one ref, one render-loop call (`drawForgeStars(ts)`), one
+   hit-test, and one branch in `onCanvasPointerDown`.
 
-**Phase 2c — Canvas-integrated technique stars (next claimable)**
-
-When the home-page canvas pipeline gets touched for other reasons
-(or when the imperative `nodes` array grows a public hook for
-overlays), promote `<ForgeSkillsCluster>`'s anchor logic into the
-canvas layer so technique stars zoom-track the constellation and
-sit visually identical to faculty stars. Until then the v1 overlay
-is the right delivery.
-
-If the M12 catalogue search ever needs to surface technique stars
-as findable items, the entry-point would be a `CatalogueUserStar`-
-shaped adapter feeding the search index — but per ADR 0014 the
-technique-state source of truth is `forge_registry`, not the
-catalogue store, so this is genuinely optional.
+The earlier scope-cut Phase 2b (a fixed-position SVG overlay,
+`<ForgeSkillsCluster>`, landed via PR #577 and merged into
+`32fb74c`) is **superseded** by this PR. The overlay component
+and its tests are deleted; the canvas-integrated stars take its
+place. Reviewer feedback: an overlay that does not zoom-track the
+constellation does not deliver the ""star in the Skills sector""
+promise.
 
 Phases 3–7 keep the original *Proposed phase breakdown* below. Each
 should land on its own branch
