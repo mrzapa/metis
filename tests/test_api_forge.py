@@ -67,6 +67,14 @@ def test_list_techniques_response_shape() -> None:
         "toggleable",
         "enable_overrides",
         "disable_overrides",
+        # Phase 3b additions — runtime readiness probe output. Every
+        # entry reports a ``runtime_status`` (default "ready") plus a
+        # blockers list and an optional CTA descriptor for the
+        # gallery's "Get ready" affordance.
+        "runtime_status",
+        "runtime_blockers",
+        "runtime_cta_kind",
+        "runtime_cta_target",
     }
     for entry in techniques:
         assert required_fields <= entry.keys()
@@ -89,6 +97,15 @@ def test_list_techniques_response_shape() -> None:
         else:
             assert entry["enable_overrides"] is None
             assert entry["disable_overrides"] is None
+        assert entry["runtime_status"] in {"ready", "blocked"}
+        assert isinstance(entry["runtime_blockers"], list)
+        assert all(isinstance(b, str) for b in entry["runtime_blockers"])
+        if entry["runtime_status"] == "ready":
+            assert entry["runtime_blockers"] == []
+        else:
+            assert entry["runtime_blockers"], "blocked status must list at least one blocker"
+        if entry["runtime_cta_kind"] is not None:
+            assert entry["runtime_cta_kind"] in {"install_heretic", "switch_chat_path"}
 
 
 def test_toggleable_overrides_reference_real_setting_keys() -> None:
@@ -128,23 +145,26 @@ def test_overrides_flip_the_descriptor_predicate() -> None:
     import metis_app.settings_store as settings_store
 
     base = dict(settings_store.load_settings())
-    for descriptor in get_registry():
-        if not descriptor.toggleable:
-            continue
-        on = dict(base)
-        on.update(descriptor.enable_overrides or {})
-        assert descriptor.is_enabled(on) is True, (
-            f"{descriptor.id!r} enable_overrides did not flip the predicate ON"
-        )
-        off = dict(base)
-        off.update(descriptor.disable_overrides or {})
-        # Heretic and similar runtime-prereq techniques rely on more
-        # than just settings — only assert the simpler predicates.
-        if descriptor.id in {"heretic-abliteration", "timesfm-forecasting"}:
-            continue
-        assert descriptor.is_enabled(off) is False, (
-            f"{descriptor.id!r} disable_overrides did not flip the predicate OFF"
-        )
+    # Stub the Heretic CLI check globally for this test so the
+    # predicate behaves like CLI-on-PATH. The dedicated probe tests
+    # (``test_heretic_probe_*``) cover the missing-CLI branch.
+    with patch(
+        "metis_app.services.heretic_service.is_heretic_available",
+        return_value=True,
+    ):
+        for descriptor in get_registry():
+            if not descriptor.toggleable:
+                continue
+            on = dict(base)
+            on.update(descriptor.enable_overrides or {})
+            assert descriptor.is_enabled(on) is True, (
+                f"{descriptor.id!r} enable_overrides did not flip the predicate ON"
+            )
+            off = dict(base)
+            off.update(descriptor.disable_overrides or {})
+            assert descriptor.is_enabled(off) is False, (
+                f"{descriptor.id!r} disable_overrides did not flip the predicate OFF"
+            )
 
 
 def test_disable_overrides_clear_every_predicate_input_for_or_predicates() -> None:
@@ -165,31 +185,162 @@ def test_disable_overrides_clear_every_predicate_input_for_or_predicates() -> No
     import metis_app.settings_store as settings_store
 
     truthy_seed = settings_store.load_settings()
-    for descriptor in get_registry():
-        if not descriptor.toggleable:
-            continue
-        if descriptor.id in {"heretic-abliteration", "timesfm-forecasting"}:
-            continue
-        # Build a settings dict where every key the predicate could
-        # read has been explicitly set to a value that, on its own,
-        # makes the predicate read True.
-        seed = dict(truthy_seed)
-        for key in descriptor.setting_keys:
-            seed[key] = _maximally_on_value_for(key)
-        # Sanity: the seed should make the predicate ON.
-        assert descriptor.is_enabled(seed) is True, (
-            f"test seed did not make {descriptor.id!r} read ON; "
-            "_maximally_on_value_for likely needs a new branch for "
-            f"{descriptor.setting_keys!r}"
-        )
-        off = dict(seed)
-        off.update(descriptor.disable_overrides or {})
-        assert descriptor.is_enabled(off) is False, (
-            f"{descriptor.id!r} disable_overrides leaves the "
-            "predicate reading ON when other companion keys had been "
-            "previously enabled — the disable payload must clear every "
-            "input the predicate ORs over"
-        )
+    # Same Heretic-CLI stub as the simpler predicate test above —
+    # the maximally-on seed includes a heretic_output_dir, but the
+    # predicate also requires the CLI on PATH. The dedicated
+    # ``test_heretic_probe_*`` cases cover the runtime-only branch.
+    with patch(
+        "metis_app.services.heretic_service.is_heretic_available",
+        return_value=True,
+    ):
+        for descriptor in get_registry():
+            if not descriptor.toggleable:
+                continue
+            # Build a settings dict where every key the predicate could
+            # read has been explicitly set to a value that, on its own,
+            # makes the predicate read True.
+            seed = dict(truthy_seed)
+            for key in descriptor.setting_keys:
+                seed[key] = _maximally_on_value_for(key)
+            # Sanity: the seed should make the predicate ON.
+            assert descriptor.is_enabled(seed) is True, (
+                f"test seed did not make {descriptor.id!r} read ON; "
+                "_maximally_on_value_for likely needs a new branch for "
+                f"{descriptor.setting_keys!r}"
+            )
+            off = dict(seed)
+            off.update(descriptor.disable_overrides or {})
+            assert descriptor.is_enabled(off) is False, (
+                f"{descriptor.id!r} disable_overrides leaves the "
+                "predicate reading ON when other companion keys had been "
+                "previously enabled — the disable payload must clear every "
+                "input the predicate ORs over"
+            )
+
+
+def test_heretic_enable_override_uses_service_default_output_dir() -> None:
+    """The Forge's enable payload must write the same output root the
+    Heretic service falls back to on its own. CWD-relative paths
+    break in packaged/desktop runs where the process working
+    directory is read-only or unstable.
+
+    The service's default lives inline at
+    ``HereticService.__init__`` (``output_root or
+    pathlib.Path.home() / ".metis_heretic"``); we mirror it as
+    ``HERETIC_DEFAULT_OUTPUT_DIR`` in ``forge_registry``. If either
+    drifts, this test trips.
+    """
+    import pathlib
+
+    from metis_app.services.forge_registry import HERETIC_DEFAULT_OUTPUT_DIR
+
+    descriptor = get_descriptor("heretic-abliteration")
+    assert descriptor is not None
+    assert descriptor.enable_overrides is not None
+    assert descriptor.enable_overrides == {
+        "heretic_output_dir": HERETIC_DEFAULT_OUTPUT_DIR,
+    }
+
+    expected_default = str(pathlib.Path.home() / ".metis_heretic")
+    assert HERETIC_DEFAULT_OUTPUT_DIR == expected_default
+    # Hard guard: path must be absolute. A CWD-relative path here is
+    # exactly the bug Codex P1 caught on PR #580.
+    assert pathlib.Path(HERETIC_DEFAULT_OUTPUT_DIR).is_absolute()
+
+
+def test_heretic_probe_blocks_when_cli_missing() -> None:
+    """When the ``heretic`` CLI is not on ``$PATH``, the descriptor's
+    readiness probe returns ``status="blocked"`` with a single
+    blocker referring to the missing CLI and an ``install_heretic``
+    CTA for the frontend.
+    """
+    from metis_app.services.forge_registry import RuntimeReadiness
+
+    descriptor = get_descriptor("heretic-abliteration")
+    assert descriptor is not None
+
+    with patch(
+        "metis_app.services.heretic_service.is_heretic_available",
+        return_value=False,
+    ):
+        readiness = descriptor.readiness({})
+
+    assert isinstance(readiness, RuntimeReadiness)
+    assert readiness.status == "blocked"
+    assert any("PATH" in b for b in readiness.blockers)
+    assert readiness.cta_kind == "install_heretic"
+
+
+def test_heretic_probe_ready_when_cli_available() -> None:
+    descriptor = get_descriptor("heretic-abliteration")
+    assert descriptor is not None
+    with patch(
+        "metis_app.services.heretic_service.is_heretic_available",
+        return_value=True,
+    ):
+        readiness = descriptor.readiness({})
+    assert readiness.status == "ready"
+    assert readiness.blockers == ()
+
+
+def test_timesfm_probe_is_informational_blocked() -> None:
+    """TimesFM is not toggleable from the gallery; the probe reports
+    a permanent blocker pointing to the chat-mode picker so the
+    frontend can render a deep-link CTA."""
+    descriptor = get_descriptor("timesfm-forecasting")
+    assert descriptor is not None
+    readiness = descriptor.readiness({})
+    assert readiness.status == "blocked"
+    assert any("Forecast" in b for b in readiness.blockers)
+    assert readiness.cta_kind == "switch_chat_path"
+    assert readiness.cta_target == "/chat"
+
+
+def test_route_serialises_runtime_blocker_for_blocked_techniques() -> None:
+    """End-to-end: with the Heretic CLI absent, the route output's
+    ``heretic-abliteration`` row reports ``runtime_status="blocked"``
+    and includes the blocker text in ``runtime_blockers``."""
+    with patch(
+        "metis_app.services.heretic_service.is_heretic_available",
+        return_value=False,
+    ):
+        with _client() as client:
+            techniques = client.get("/v1/forge/techniques").json()["techniques"]
+    heretic = next(t for t in techniques if t["id"] == "heretic-abliteration")
+    assert heretic["runtime_status"] == "blocked"
+    assert any("PATH" in b for b in heretic["runtime_blockers"])
+    assert heretic["runtime_cta_kind"] == "install_heretic"
+    # TimesFM is independent of Heretic but always informational-blocked.
+    timesfm = next(t for t in techniques if t["id"] == "timesfm-forecasting")
+    assert timesfm["runtime_status"] == "blocked"
+    assert timesfm["runtime_cta_kind"] == "switch_chat_path"
+
+
+def test_readiness_swallows_probe_errors() -> None:
+    """A probe that raises must collapse to ``status="blocked"``
+    rather than propagate up to the route handler. The collapsed
+    state's blocker text mentions the failure so debugging stays
+    cheap."""
+    from metis_app.services.forge_registry import (
+        RuntimeReadiness,
+        TechniqueDescriptor,
+    )
+
+    def boom(_settings: object) -> RuntimeReadiness:
+        raise RuntimeError("network down")
+
+    descriptor = TechniqueDescriptor(
+        id="boom",
+        name="Boom",
+        description="boom",
+        pillar="cortex",
+        setting_keys=(),
+        enabled_predicate=lambda _: False,
+        runtime_probe=boom,
+    )
+    readiness = descriptor.readiness({})
+    assert readiness.status == "blocked"
+    assert any("network down" in b for b in readiness.blockers)
 
 
 def _maximally_on_value_for(key: str) -> object:
