@@ -3769,3 +3769,36 @@ export function subscribeNetworkAuditStream(
     }
   };
 }
+
+// ── Forge (M14) ──────────────────────────────────────────────────────
+
+export type ForgePillar =
+  | "cosmos"
+  | "companion"
+  | "cortex"
+  | "cross-cutting";
+
+export interface ForgeTechnique {
+  id: string;
+  name: string;
+  description: string;
+  pillar: ForgePillar;
+  enabled: boolean;
+  setting_keys: string[];
+  engine_symbols: string[];
+  recent_uses: unknown[];
+}
+
+export interface ForgeTechniquesResponse {
+  techniques: ForgeTechnique[];
+  phase: number;
+}
+
+export async function fetchForgeTechniques(): Promise<ForgeTechniquesResponse> {
+  const res = await apiFetch(`${await getApiBase()}/v1/forge/techniques`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch forge techniques (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as ForgeTechniquesResponse;
+}

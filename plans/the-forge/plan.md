@@ -1,20 +1,57 @@
 ---
 Milestone: The Forge (M14)
-Status: Draft
-Claim: unclaimed
-Last updated: 2026-04-19 by claude/plans-m14-m16-m17
+Status: In progress
+Claim: claude/m14-phase1-shell
+Last updated: 2026-04-28 by claude/m14-phase1-shell
 Vision pillar: Companion + Cortex
 ---
 
 ## Progress
 
-*(milestone not started as a cohesive unit — this doc is the first real
-plan pass. The Forge is a thin new UI surface over a lot of
-already-shipped technique infrastructure. Crucially, **every named
-frontier technique the Forge will list already exists as working code
-in the repo**; what's missing is the gallery surface that elevates
-them from "settings checkbox" to "capability the companion just
-absorbed". See the harvest inventory in *Notes for the next agent*.)*
+**Phase 1 — Forge route + shell (in PR, claude/m14-phase1-shell, 2026-04-28)**
+
+- ADR 0014 (`docs/adr/0014-forge-route-and-toggle-state.md`) lands the
+  four architectural calls Phase 1's *Next up* asked for: single-page
+  route with deep-link anchors; reuse `settings_store.py` behind a
+  thin `forge_registry.py` facade (Phase 2); the `TechniqueDescriptor`
+  shape; star-per-active-technique as the principle #9 resolution; the
+  arXiv-paste boundary (no code generation, only proposals + skill
+  drafts) declared early so M15 launch copy stays honest. Free-tier
+  posture for the gallery itself nailed down so M15 doesn't relitigate.
+- Backend stub: `metis_app/api_litestar/routes/forge.py` with
+  `GET /v1/forge/techniques` returning a static hardcoded inventory of
+  13 marquee techniques mirroring the harvest inventory. Mounted in
+  `metis_app/api_litestar/app.py` between `features.router` and
+  `gguf.router`.
+- Tests: `tests/test_api_forge.py` (4 tests, all green) covers
+  inventory contents, response shape, slug uniqueness/URL-safety, and
+  the *every-setting-key-exists-in-default_settings.json* invariant
+  that guards the hand-curated registry.
+- Frontend route: `apps/metis-web/app/forge/page.tsx` (PageChrome
+  wrapper, fetch + loading + error states, read-only inventory grid
+  with pillar pill — no toggles yet) and
+  `apps/metis-web/app/forge/loading.tsx`. Each technique row carries
+  its slug as the DOM `id` so Phase 2's constellation deep-links land
+  in the right place.
+- API client: `fetchForgeTechniques()` plus
+  `ForgeTechnique` / `ForgePillar` / `ForgeTechniquesResponse` types
+  in `apps/metis-web/lib/api.ts`.
+- Nav entry: `Hammer` icon → `/forge` between `/chat` and `/settings`
+  in `components/shell/page-chrome.tsx`.
+- Verification (per harness ground rules): backend pytest 1357 pass /
+  2 pre-existing fail (`tests/test_install_launcher.py` README docs
+  unrelated to Forge); frontend `npx tsc --noEmit` clean for Forge
+  files (only the pre-existing `metis-sigil.test.tsx` GrowthStage
+  error remains); `npx vitest run` green (513 pass, 10 skipped); ruff
+  clean on the touched Python files.
+
+*(this doc was the first real plan pass; the milestone proper is
+underway. The Forge remains a thin new UI surface over a lot of
+already-shipped technique infrastructure — **every named frontier
+technique the Forge will list already exists as working code in the
+repo**; what's missing is the gallery interaction that elevates them
+from "settings checkbox" to "capability the companion just absorbed".
+See the harvest inventory in *Notes for the next agent*.)*
 
 What's in place today that M14 will lean on:
 
@@ -76,44 +113,40 @@ What's in place today that M14 will lean on:
 
 ## Next up
 
-The first concrete actions for whoever claims M14:
+Phase 1 is in PR. The next claimable phase is **Phase 2 — Technique
+cards (read-only) + star home**. Concrete first actions for whoever
+picks it up:
 
-1. **Write ADR 0010 — Forge route and toggle-state architecture.**
-   Decide three things in one doc: (a) route shape —
-   single-page `/forge` with anchored sections vs.
-   `/forge` index + `/forge/<technique-id>` detail pages; (b)
-   toggle-state storage — reuse existing `settings_store.py` keys
-   (already-in-place but scattered), promote to a typed
-   `forge_state` module sitting on top of M11's agent-native KV
-   store, or introduce a new `forge_state.db`; (c) what
-   constitutes a "technique" in Forge terms — is it any
-   settings-gated capability, a `skills/` entry, or a new
-   first-class registry object? Recommend (a) single-page with
-   deep-link anchors for v1, (b) reuse `settings_store.py` behind
-   a thin `forge_registry.py` facade, (c) introduce a
-   `TechniqueDescriptor` dataclass — lightweight, registry-driven,
-   non-dynamic. This is the biggest design choice in M14 and
-   should be argued in writing before any UI code.
-2. **Build the technique inventory — read-only first.** Ship
-   `apps/metis-web/app/forge/page.tsx` rendering a static list
-   of every technique from the harvest inventory below, with
-   description, pillar, current enable state pulled from
-   `fetchSettings()`. No toggles yet. The goal is to make the
-   data surface real before adding interaction. Parallel
-   backend work: a new `metis_app/api_litestar/routes/forge.py`
-   exposing `GET /v1/forge/techniques` returning
-   `[{id, name, description, pillar, enabled, setting_keys,
-   recent_uses}]`.
-3. **Spike a single toggle end-to-end.** Pick one technique
-   with a clear on/off — suggest `use_reranker`. Wire the
-   Forge card's toggle to `updateSettings({use_reranker: true})`,
-   verify it propagates to the retrieval pipeline, and fire a
-   `CompanionActivityEvent` with
-   `source: "forge", kind: "technique_toggled",
-   payload: {technique_id: "reranker", enabled: true}`. If this
-   round-trips cleanly — settings write, pipeline uses new value
-   on next query, dock reflects the change — the mechanism
-   scales to every other card.
+1. **Promote the Phase 1 static inventory into a typed registry.**
+   Introduce `metis_app/services/forge_registry.py` with the
+   `TechniqueDescriptor` dataclass shape ADR 0014 fixed. Move the
+   13 static entries from
+   `metis_app/api_litestar/routes/forge.py:_TECHNIQUE_INVENTORY`
+   into the registry. Replace the route handler's
+   `_serialise(default_enabled)` path with one that calls
+   `descriptor.enabled_predicate(load_settings())` so the gallery
+   reflects live user overrides. Update
+   `tests/test_api_forge.py` to flex the live-read path with a
+   stubbed settings store (its `setting_keys` invariant still applies).
+2. **Render the cards.** Build
+   `apps/metis-web/components/forge/technique-card.tsx` and
+   `apps/metis-web/components/forge/technique-gallery.tsx`,
+   leaning on M02 primitives (`border-beam`, `tooltip`,
+   `animated-lucide-icon`). Read-only — no toggles yet (that's Phase 3).
+   Replace the placeholder `<ul>` rendering in `app/forge/page.tsx`
+   with the gallery component. Pillar tone variants already exist as
+   constants in the page; lift them into the card.
+3. **Wire the constellation deep-link.** Each enabled technique gets
+   a star in a new "Skills" sector via the M12 catalogue plumbing.
+   The star's observatory dialog
+   (`apps/metis-web/components/constellation/star-observatory-dialog.tsx`)
+   deep-links to `/forge#<technique-id>` rather than rendering the
+   technique inline. Coordinate with whoever picks up M12's
+   ongoing work to avoid colliding on `star-catalogue` data shape.
+
+Phases 3–7 keep the original *Proposed phase breakdown* below. Each
+should land on its own branch
+(`claude/m14-phase<N>-<descriptor>`).
 
 ## Blockers
 
