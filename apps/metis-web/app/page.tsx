@@ -7,7 +7,6 @@ import dynamic from "next/dynamic";
 import { MetisMark } from "@/components/brand";
 import { NetworkAuditFirstRunCard } from "@/components/network-audit/first-run-card";
 import { FirstRunBanner } from "@/components/home/first-run-banner";
-import { ForgeSkillsCluster } from "@/components/forge/forge-skills-cluster";
 import { ShootingStarLayer } from "@/components/home/shooting-star-layer";
 import {
   CosmicAtmosphere,
@@ -94,7 +93,6 @@ import {
   projectConstellationPoint,
   screenToConstellationPoint,
   screenToWorldPoint,
-  STAR_DIVE_ZOOM_THRESHOLD,
   type ConstellationFacultyMetadata,
   type ConstellationFieldStar,
   type ConstellationNodePoint,
@@ -148,6 +146,7 @@ import type {
   IndexSummary,
   LearningRoutePreviewRequest,
 } from "@/lib/api";
+import { useForgeStars, type ForgeStar } from "@/lib/forge-stars";
 import type {
   LandingStarHitTarget,
   LandingStarSpatialHash,
@@ -925,6 +924,11 @@ export default function Home() {
   const coarsePointerRef = useRef(false);
   const mouseRef = useRef({ x: -1000, y: -1000 });
   const userStarsRef = useRef<UserStar[]>(userStars);
+  // M14 Phase 2b — active Forge techniques projected as canvas stars
+  // in the Skills sector. Re-fetches on visibility-change so toggles
+  // made elsewhere reflect when the user returns to the home page.
+  const forgeStars = useForgeStars();
+  const forgeStarsRef = useRef<ForgeStar[]>(forgeStars);
   const selectedUserStarIdRef = useRef<string | null>(selectedUserStarId);
   const hoveredUserStarIdRef = useRef<string | null>(hoveredUserStarId);
   const hoveredAddCandidateRef = useRef<StarData | null>(null);
@@ -1034,6 +1038,14 @@ export default function Home() {
     userStarsRef.current = userStars;
     starfieldRevisionRef.current += 1;
   }, [userStars]);
+
+  useEffect(() => {
+    forgeStarsRef.current = forgeStars;
+    // Bumping the starfield revision invalidates any cached star
+    // catalogues that the renderer keeps; the same lever the
+    // user-star sync above pulls.
+    starfieldRevisionRef.current += 1;
+  }, [forgeStars]);
 
   useEffect(() => {
     availableIndexesRef.current = availableIndexes;
@@ -3771,6 +3783,88 @@ export default function Home() {
       });
     }
 
+    // ── Forge technique stars (M14 Phase 2b) ──────────────────────────
+    //
+    // One canvas star per active Forge technique, projected through the
+    // same camera transform user stars use so they pan/zoom alongside
+    // the rest of the constellation. Drawn after `drawUserStars` so
+    // they sit visually on the same layer.
+    //
+    // Hit-tested in `getHitForgeStar`; clicks deep-link to
+    // `/forge#<id>` (handled in the pointer-down branch below). The
+    // star observatory dialog is **not** opened — the Forge gallery is
+    // the single source of UI truth for technique state per ADR 0014.
+
+    function projectForgeStars(): { star: ForgeStar; target: ProjectedUserStarHitTarget }[] {
+      const camera = readBackgroundCamera();
+      return forgeStarsRef.current.map((star) => ({
+        star,
+        target: buildProjectedUserStarHitTarget(
+          { id: star.id, x: star.x, y: star.y, size: star.size },
+          W,
+          H,
+          camera,
+          coarsePointerRef.current ? 12 : 0,
+          mouse,
+        ),
+      }));
+    }
+
+    function drawForgeStars(t: number) {
+      const projected = projectForgeStars();
+      if (projected.length === 0) return;
+
+      const constellationScale = getConstellationCameraScale(backgroundZoomRef.current);
+      const baseScale = Math.max(0.58, 0.36 + Math.pow(constellationScale, 0.72) * 0.64);
+
+      projected.forEach(({ star, target }) => {
+        const px = target.x;
+        const py = target.y;
+        const [r, g, b] = star.paletteRgb;
+        const sz = star.size * 1.5 * baseScale;
+        // Gentle shared twinkle keyed off the star id so adjacent
+        // technique stars do not pulse in lockstep.
+        const phaseSeed = star.id.length * 0.41;
+        const twinkle = 0.86
+          + Math.sin(t * 0.0028 + phaseSeed) * 0.08
+          + Math.cos(t * 0.0017 + phaseSeed * 0.6) * 0.04;
+
+        const haloRadius = sz * 6.5;
+        const halo = ctx!.createRadialGradient(px, py, sz * 0.22, px, py, haloRadius);
+        halo.addColorStop(0, `rgba(${r},${g},${b},0.18)`);
+        halo.addColorStop(0.5, `rgba(${r},${g},${b},0.07)`);
+        halo.addColorStop(1, "rgba(0,0,0,0)");
+        ctx!.fillStyle = halo;
+        ctx!.beginPath();
+        ctx!.arc(px, py, haloRadius, 0, Math.PI * 2);
+        ctx!.fill();
+
+        // Inner glow ring — gives the star a defined edge against the
+        // halo without painting a hard core dot.
+        ctx!.strokeStyle = `rgba(${r},${g},${b},${0.55 * twinkle})`;
+        ctx!.lineWidth = 1.2;
+        ctx!.beginPath();
+        ctx!.arc(px, py, sz * 1.7, 0, Math.PI * 2);
+        ctx!.stroke();
+
+        // Bright core.
+        ctx!.fillStyle = `rgba(${Math.min(255, r + 32)},${Math.min(255, g + 32)},${Math.min(255, b + 32)},${0.92 * twinkle})`;
+        ctx!.beginPath();
+        ctx!.arc(px, py, sz * 0.78, 0, Math.PI * 2);
+        ctx!.fill();
+      });
+    }
+
+    function getHitForgeStar(clientX: number, clientY: number): ForgeStar | null {
+      const projected = projectForgeStars();
+      if (projected.length === 0) return null;
+      const pointer = getCanvasPointer(clientX, clientY);
+      const targets = projected.map(({ target }) => target);
+      const hit = findClosestProjectedTarget(targets, pointer);
+      if (!hit) return null;
+      return projected.find(({ target }) => target.id === hit.id)?.star ?? null;
+    }
+
     function drawDust() {
       dust.forEach(d => {
         d.x += d.vx + (mouse.x - W / 2) * 0.00008;
@@ -4650,6 +4744,7 @@ export default function Home() {
       drawUserStarEdges(ts);
       drawAddCandidatePreview(ts);
       drawUserStars(ts);
+      drawForgeStars(ts);
 
       // ── Offscreen bloom composite for Polaris ────────────────────────────────
       // Draw Polaris to an offscreen canvas, then composite back with a soft
@@ -5288,6 +5383,20 @@ export default function Home() {
         return;
       }
 
+      // M14 Phase 2b — forge stars take precedence over user-star
+      // hit-tests since they sit in the Skills sector at a fixed
+      // ring radius and there is no drag affordance for them. A hit
+      // routes to /forge#<id>; the rest of the click pipeline (drag
+      // arming, observatory dialog) stays untouched.
+      const hitForgeStar = getHitForgeStar(e.clientX, e.clientY);
+      if (hitForgeStar) {
+        clearHoveredCandidate();
+        hideStarTooltip();
+        closeConcept();
+        router.push(`/forge#${hitForgeStar.id}`);
+        return;
+      }
+
       const hitStar = getHitStar(e.clientX, e.clientY);
       if (!hitStar) {
         return;
@@ -5722,18 +5831,6 @@ export default function Home() {
         data-focus-phase={starFocusPhase}
         data-details-open={starDetailsOpen ? "true" : "false"}
         data-pan-active={isCanvasPanning ? "true" : "false"}
-      />
-
-      {/* M14 Phase 2b: Skills-sector beacon — one screen-space dot per
-          active Forge technique, anchored to the Skills faculty
-          position, deep-linking to `/forge#<id>`. Hidden during
-          star-dive zoom and while a star-details overlay is open so it
-          does not crowd the focused content. */}
-      <ForgeSkillsCluster
-        hidden={
-          starDetailsOpen
-          || backgroundZoomFactor >= STAR_DIVE_ZOOM_THRESHOLD
-        }
       />
 
       <div className="metis-hero-overlay">
