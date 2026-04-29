@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { MetisMark } from "@/components/brand";
 import { NetworkAuditFirstRunCard } from "@/components/network-audit/first-run-card";
 import { FirstRunBanner } from "@/components/home/first-run-banner";
 import { ShootingStarLayer } from "@/components/home/shooting-star-layer";
@@ -5685,7 +5686,9 @@ export default function Home() {
 
       <nav className="metis-nav">
         <div className="metis-nav-left">
-          <div className="metis-logo">METIS<sup>AI</sup></div>
+          <Link href="/" aria-label="Metis home" className="metis-logo">
+            <MetisMark size={32} title="Metis home" />
+          </Link>
           <Link href="/chat" className="metis-nav-link">Chat</Link>
           <Link href="/settings" className="metis-nav-link">Settings</Link>
         </div>
@@ -6102,13 +6105,7 @@ body {
   background: transparent;
 }
 .metis-nav-left { display: flex; align-items: center; gap: 40px; }
-.metis-logo {
-  font-family: 'Space Grotesk', sans-serif;
-  font-weight: 600; font-size: 15px;
-  letter-spacing: 3px; color: var(--text-bright);
-  text-transform: uppercase;
-}
-.metis-logo sup { font-size: 8px; opacity: 0.4; vertical-align: super; margin-left: 2px; }
+.metis-logo { display: inline-flex; align-items: center; }
 .metis-nav-link {
   font-size: 13px; font-weight: 400;
   color: var(--text-dim); text-decoration: none;

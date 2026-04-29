@@ -2210,3 +2210,16 @@ body {
   color: oklch(0.78 0.11 78);
   letter-spacing: 0.2em;
 }
+
+/* ── Brand glow recipe (M20 — used by <MetisGlow>) ─────────────────────────
+ * Two-layer halo around the M-star mark. The inner back-glow that bleeds
+ * through the M's negative-space notches is rendered as a duplicated, blurred
+ * path inside the SVG (see metis-glow.tsx); this class adds the outer halo
+ * via a layered drop-shadow stack. Tokens defined in tokens.css.
+ * ─────────────────────────────────────────────────────────────────────────── */
+.metis-glow {
+  filter:
+    drop-shadow(0 0 6px  rgb(var(--brand-glow-near) / 0.85))
+    drop-shadow(0 0 18px rgb(var(--brand-glow-near) / 0.55))
+    drop-shadow(0 0 48px rgb(var(--brand-glow-far)  / 0.35));
+}

@@ -7,7 +7,7 @@ This is the **single source of truth for what is being worked on in METIS and
 what comes next.** Every row is a milestone from `VISION.md`. Agents claim rows,
 do the work, update the row when they stop.
 
-**Last reviewed:** 2026-04-27 (M12 row reconciled to `Landed` to match `plans/interactive-star-catalogue/plan.md` frontmatter — Phases 0–4 shipped via `70eeb40` + `771634f` on 2026-04-24, Phase 4c storage migration deferred per ADR 0012; M18/M19 stretch stubs created at `plans/lora-stretch/plan.md` and `plans/mobile-stretch/plan.md`. Earlier 2026-04-26 pass flipped M13 from `In progress` to `Landed`: the Seedling + Feed milestone shipped its full structural surface via Phases 1-7 plus the heartbeat-widget polish (PR #549) and the edge-pulse follow-up (PR #567). Retrospective + deferred-items audit captured in `plans/seedling-and-feed/plan.md` *Retrospective* section. 2026-04-24 (M12 row flipped from `Draft needed` to `Ready` and claimed by `claude/m12-plan-and-claim`; new plan doc `plans/interactive-star-catalogue/plan.md` supersedes `docs/plans/2026-04-05-interactive-star-catalogue.md` — verified genuinely open: no catalogue-search overlay, catalogue-star inspector, spectral/magnitude filter, or promote-non-addable flow on `main`. Earlier same-day pass flipped M10 from `Draft` to `Landed` to close the reconciliation noted on 2026-04-22 — the underlying homological-scaffold work shipped in `cc3923f` (2026-03-28) + `6fa1ff2` (2026-04-05) and the plan.md was marked Landed via PR #529 (`95480be`, 2026-04-22). Prior 2026-04-22 pass reconciled M17 Phase 7 to `Landed` via PR #527 (`3cde870`, 2026-04-21); Phase 8 (Tauri-layer enforcement) remains a declared v2 stretch. 2026-04-20 pass reconciled stale-ready M03/M04/M05/M06 rows to Landed after a code-vs-plan audit, and reconciled M17 Phase 6 via PR #525). See [`Prompt agents.md`](Prompt%20agents.md) for the onboarding prompt to give a fresh agent.
+**Last reviewed:** 2026-04-28 (M20 implemented end-to-end on `claude/cranky-northcutt-42501d` and flipped to `Ready for review` — 4 phases / ~17 commits delivering brand primitives, surface swaps, Next.js metadata routes, Tauri icon suite, and motion polish. PR pending. Earlier same-day pass: M20 added as `Ready` after intake-workflow promotion of the design-team-supplied M-star logo asset; full design captured in `docs/plans/2026-04-28-metis-logo-rollout-design.md`, plan doc stub at `plans/metis-logo-rollout/plan.md`. Earlier 2026-04-27 pass: M12 row reconciled to `Landed` to match `plans/interactive-star-catalogue/plan.md` frontmatter — Phases 0–4 shipped via `70eeb40` + `771634f` on 2026-04-24, Phase 4c storage migration deferred per ADR 0012; M18/M19 stretch stubs created at `plans/lora-stretch/plan.md` and `plans/mobile-stretch/plan.md`. Earlier 2026-04-26 pass flipped M13 from `In progress` to `Landed`: the Seedling + Feed milestone shipped its full structural surface via Phases 1-7 plus the heartbeat-widget polish (PR #549) and the edge-pulse follow-up (PR #567). Retrospective + deferred-items audit captured in `plans/seedling-and-feed/plan.md` *Retrospective* section. 2026-04-24 (M12 row flipped from `Draft needed` to `Ready` and claimed by `claude/m12-plan-and-claim`; new plan doc `plans/interactive-star-catalogue/plan.md` supersedes `docs/plans/2026-04-05-interactive-star-catalogue.md` — verified genuinely open: no catalogue-search overlay, catalogue-star inspector, spectral/magnitude filter, or promote-non-addable flow on `main`. Earlier same-day pass flipped M10 from `Draft` to `Landed` to close the reconciliation noted on 2026-04-22 — the underlying homological-scaffold work shipped in `cc3923f` (2026-03-28) + `6fa1ff2` (2026-04-05) and the plan.md was marked Landed via PR #529 (`95480be`, 2026-04-22). Prior 2026-04-22 pass reconciled M17 Phase 7 to `Landed` via PR #527 (`3cde870`, 2026-04-21); Phase 8 (Tauri-layer enforcement) remains a declared v2 stretch. 2026-04-20 pass reconciled stale-ready M03/M04/M05/M06 rows to Landed after a code-vs-plan audit, and reconciled M17 Phase 6 via PR #525). See [`Prompt agents.md`](Prompt%20agents.md) for the onboarding prompt to give a fresh agent.
 
 ## Quick start for a fresh agent
 
@@ -72,6 +72,7 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 | M17 | **Network audit** — outbound call panel, per-provider block, offline proof | 🔧 | Landed | [`plans/network-audit/plan.md`](network-audit/plan.md) | Phases 1-7 landed (PRs #516-#521, #525, #527; Phase 7 merge `3cde870`, 2026-04-21); Phase 8 (Tauri-layer enforcement) deferred as v2 stretch | 2026-04-22 | — |
 | M18 | **LoRA fine-tuning (stretch)** — companion weights adapt to user data | 🌱 | Draft needed | [`plans/lora-stretch/plan.md`](lora-stretch/plan.md) (stub) | — | 2026-04-27 | M13, M16 |
 | M19 | **Mobile companion (stretch)** — Tauri Mobile or PWA, read-only | 🌌 | Draft needed | [`plans/mobile-stretch/plan.md`](mobile-stretch/plan.md) (stub) | — | 2026-04-27 | M15 |
+| M20 | **Metis logo rollout** — M-star mark + glow primitives, brand-system metadata (favicon / OG / Tauri), per-surface motion | 🔧🌌 | In progress | [`plans/metis-logo-rollout/plan.md`](metis-logo-rollout/plan.md) (design: [`docs/plans/2026-04-28-metis-logo-rollout-design.md`](../docs/plans/2026-04-28-metis-logo-rollout-design.md), impl: [`docs/plans/2026-04-28-metis-logo-rollout-implementation.md`](../docs/plans/2026-04-28-metis-logo-rollout-implementation.md)) | claude/cranky-northcutt-42501d (4 phases shipped, PR pending) | 2026-04-28 | — |
 
 ### Superseded
 
@@ -110,6 +111,19 @@ files, coordinate.
 - **M17** — Network panel in settings, per-provider kill switch. Operational note: should land *before* M13 (M13 massively increases outbound traffic). Backend uses stdlib `urllib` only — one wrapper covers 100% of in-process outbound. `metis_app/audit.py` is a pytest parity runner, unrelated; new package at `metis_app/network_audit/`.
 - **M18** — LoRA training loop, eval gate, weight swap.
 - **M19** — Read-only mobile client, sync protocol.
+- **M20** — Frontend-only brand rollout. Adds three primitives at
+  `apps/metis-web/components/brand/*` (`<MetisMark>`, `<MetisGlow>`,
+  `<MetisLockup>`), one cleaned `currentColor`-themed SVG at
+  `public/brand/metis-mark.svg`, four Next.js metadata files
+  (`app/icon.tsx`, `apple-icon.tsx`, `opengraph-image.tsx`,
+  `twitter-image.tsx`), and a Tauri PNG icon suite under
+  `apps/metis-desktop/src-tauri/icons/`. Touches the topbar
+  (`components/shell/page-chrome.tsx`), landing nav (`app/page.tsx`),
+  home hero (`components/home/home-visual-system.tsx`), setup welcome
+  (`app/setup/page.tsx`), and desktop loader
+  (`components/desktop-ready.tsx`). Motion via `motion/react`,
+  reduced-motion gated. **Coordinate with M01** before Phase 2 (hero
+  swap touches an M01 hotspot).
 
 ---
 

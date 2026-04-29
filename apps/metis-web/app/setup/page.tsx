@@ -5,6 +5,7 @@ import { useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MetisLockup } from "@/components/brand";
 import { AmbientBackdrop } from "@/components/shell/ambient-backdrop";
 import { MetisCompanionDock } from "@/components/shell/metis-companion-dock";
 import { WebGPUCompanionProvider } from "@/lib/webgpu-companion/webgpu-companion-context";
@@ -628,6 +629,7 @@ export default function SetupPage() {
         <main className="flex-1 py-8">
           <section className="mb-6">
             <div className="glass-panel rounded-2xl px-5 py-5 sm:px-6">
+              <MetisLockup size="md" wordmarkPosition="right" className="mb-4" />
               <p className="text-xs font-medium uppercase tracking-[0.2em] text-primary/80">
                 Quick setup
               </p>

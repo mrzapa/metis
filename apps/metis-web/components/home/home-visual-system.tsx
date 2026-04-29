@@ -1,6 +1,6 @@
 "use client";
 
-import Image from "next/image";
+import { MetisMark } from "@/components/brand";
 import { motion, useReducedMotion } from "motion/react";
 import { useId } from "react";
 import type { CSSProperties, ReactNode } from "react";
@@ -131,14 +131,26 @@ export function MetisHomeLogo({
         aria-hidden="true"
         className="pointer-events-none absolute inset-[20%] rounded-full bg-[radial-gradient(circle_at_50%_50%,rgba(173,198,255,0.16),transparent_68%)] blur-md"
       />
-      <Image
-        src="/metis-logo.png"
-        alt="METIS logo"
-        fill
-        sizes="(max-width: 768px) 160px, 192px"
-        priority={priority}
-        className="relative z-10 size-full object-contain drop-shadow-[0_0_34px_rgba(9,105,218,0.32)]"
-      />
+      {/*
+        M20: replaced rasterised metis-logo.png with the new <MetisMark>
+        SVG. The mark sits centred inside the existing M02 orbital halo
+        (the rotating rings + radial gradients above) — those rings are
+        part of the home-page identity, so we deliberately do NOT wrap
+        the mark in <MetisGlow>'s own ripple rings here (they would
+        duplicate the orbital treatment). The drop-shadow class keeps
+        the original cyan-blue halo glow that ties the mark to the
+        starfield aesthetic.
+      */}
+      <div
+        aria-hidden={priority ? undefined : "true"}
+        className="relative z-10 flex size-full items-center justify-center"
+      >
+        <MetisMark
+          size={172}
+          title={priority ? "Metis" : undefined}
+          className="drop-shadow-[0_0_34px_rgba(9,105,218,0.45)]"
+        />
+      </div>
     </motion.div>
   );
 }
