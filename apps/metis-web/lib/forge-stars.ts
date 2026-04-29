@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CONSTELLATION_FACULTIES,
   FACULTY_PALETTE,
@@ -103,9 +103,16 @@ interface UseForgeStarsOptions {
  *  constellation stars. Re-fetches on visibility change so the home
  *  page reflects toggles made elsewhere in the app (e.g. /settings
  *  or the Forge gallery itself). On error, returns an empty array
- *  rather than crashing the constellation render. */
+ *  rather than crashing the constellation render.
+ *
+ *  Concurrency guard: each `refresh()` call increments a request
+ *  token tracked in a ref; only the latest request gets to call
+ *  `setStars`. Prevents a slow earlier fetch from clobbering the
+ *  result of a faster later one when the user toggles visibility
+ *  rapidly or the network is bursty. */
 export function useForgeStars(options: UseForgeStarsOptions = {}): ForgeStar[] {
   const [stars, setStars] = useState<ForgeStar[]>([]);
+  const latestRequestRef = useRef(0);
 
   useEffect(() => {
     if (options.override !== undefined) {
@@ -116,13 +123,14 @@ export function useForgeStars(options: UseForgeStarsOptions = {}): ForgeStar[] {
 
     let cancelled = false;
     async function refresh() {
+      const requestId = ++latestRequestRef.current;
       try {
         const payload = await fetchForgeTechniques();
-        if (cancelled) return;
+        if (cancelled || requestId !== latestRequestRef.current) return;
         const active = payload.techniques.filter((t) => t.enabled);
         setStars(forgeStarPositions(active));
       } catch {
-        if (cancelled) return;
+        if (cancelled || requestId !== latestRequestRef.current) return;
         // Forge stars are decorative on the home page — failing the
         // fetch should not blow up the constellation. Drop to empty
         // state and let the next visibility-change retry.
@@ -143,6 +151,11 @@ export function useForgeStars(options: UseForgeStarsOptions = {}): ForgeStar[] {
 
     return () => {
       cancelled = true;
+      // Bumping the token on unmount is belt-and-braces — the
+      // `cancelled` flag already short-circuits, but the bump
+      // guarantees that any still-in-flight responses also fail
+      // their token check.
+      latestRequestRef.current += 1;
       if (typeof document !== "undefined") {
         document.removeEventListener("visibilitychange", onVisibilityChange);
       }

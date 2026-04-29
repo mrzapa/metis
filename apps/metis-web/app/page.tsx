@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import { MetisMark } from "@/components/brand";
 import { NetworkAuditFirstRunCard } from "@/components/network-audit/first-run-card";
 import { FirstRunBanner } from "@/components/home/first-run-banner";
+import { ForgeStarsKeyboardNav } from "@/components/forge/forge-stars-keyboard-nav";
 import { ShootingStarLayer } from "@/components/home/shooting-star-layer";
 import {
   CosmicAtmosphere,
@@ -5832,6 +5833,13 @@ export default function Home() {
         data-details-open={starDetailsOpen ? "true" : "false"}
         data-pan-active={isCanvasPanning ? "true" : "false"}
       />
+
+      {/* M14 Phase 2b — keyboard / screen-reader access path for the
+          canvas-rendered technique stars. Visually hidden until
+          focused; reveals as a small pinned card in the bottom-right
+          when a sighted keyboard user tabs in. Same data source as
+          the canvas projection, so it cannot drift out of sync. */}
+      <ForgeStarsKeyboardNav stars={forgeStars} />
 
       <div className="metis-hero-overlay">
         <BorderBeam size="md" colorVariant="sunset" strength={0.8}>

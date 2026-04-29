@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 import {
   FORGE_STAR_RING_PHASE,
@@ -6,12 +7,40 @@ import {
   FORGE_STAR_SIZE,
   forgeStarPositions,
   pillarStarPalette,
+  useForgeStars,
 } from "../forge-stars";
 import { CONSTELLATION_FACULTIES, FACULTY_PALETTE } from "../constellation-home";
-import type { ForgeTechnique } from "../api";
+import type { ForgeTechnique, ForgeTechniquesResponse } from "../api";
 
 const SKILLS = CONSTELLATION_FACULTIES.find((f) => f.id === "skills");
 if (!SKILLS) throw new Error("Skills faculty missing from CONSTELLATION_FACULTIES");
+
+// Hoisted mock state — setting `mockState.fetcher` rebinds what
+// `fetchForgeTechniques` does for the next call. `vi.mock` runs at
+// module load before this top-level code, so the factory cannot
+// close over a non-hoisted variable directly.
+const mockState = vi.hoisted(() => ({
+  fetcher: null as
+    | (() => Promise<ForgeTechniquesResponse>)
+    | null,
+}));
+
+vi.mock("../api", async () => {
+  const actual = await vi.importActual<typeof import("../api")>("../api");
+  return {
+    ...actual,
+    fetchForgeTechniques: () => {
+      if (mockState.fetcher === null) {
+        return Promise.resolve({ techniques: [], phase: 2 });
+      }
+      return mockState.fetcher();
+    },
+  };
+});
+
+afterEach(() => {
+  mockState.fetcher = null;
+});
 
 function makeTechnique(id: string, overrides: Partial<ForgeTechnique> = {}): ForgeTechnique {
   return {
@@ -78,6 +107,80 @@ describe("pillarStarPalette", () => {
 
   it("returns a neutral palette for cross-cutting techniques", () => {
     expect(pillarStarPalette("cross-cutting")).toEqual([208, 216, 232]);
+  });
+});
+
+describe("useForgeStars stale-response guard", () => {
+  it("ignores an older fetch that resolves after a newer one", async () => {
+    // Two pending promises: the FIRST one resolves *late* with
+    // ""old"" data, the SECOND one resolves *first* with ""new"" data.
+    // The hook must end with the new data because the old payload's
+    // request token is stale by the time it lands.
+    let resolveFirst: ((value: ForgeTechniquesResponse) => void) | null = null;
+    let resolveSecond: ((value: ForgeTechniquesResponse) => void) | null = null;
+    const oldPayload: ForgeTechniquesResponse = {
+      phase: 2,
+      techniques: [makeTechnique("stale-only", { pillar: "cortex" })],
+    };
+    const newPayload: ForgeTechniquesResponse = {
+      phase: 2,
+      techniques: [
+        makeTechnique("fresh-a", { pillar: "cortex" }),
+        makeTechnique("fresh-b", { pillar: "companion" }),
+      ],
+    };
+
+    let callIndex = 0;
+    mockState.fetcher = () => {
+      callIndex += 1;
+      if (callIndex === 1) {
+        return new Promise<ForgeTechniquesResponse>((r) => {
+          resolveFirst = r;
+        });
+      }
+      return new Promise<ForgeTechniquesResponse>((r) => {
+        resolveSecond = r;
+      });
+    };
+
+    const { result } = renderHook(() => useForgeStars());
+    expect(result.current).toEqual([]);
+
+    // Trigger a second request (mimicking a `visibilitychange`).
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    // Resolve the SECOND fetch first — this is the ""newer"" request
+    // and its result should land.
+    await act(async () => {
+      resolveSecond?.(newPayload);
+    });
+
+    await waitFor(() => {
+      expect(result.current.map((s) => s.id)).toEqual(["fresh-a", "fresh-b"]);
+    });
+
+    // Now resolve the FIRST (older) fetch. Its result is stale and
+    // must be discarded by the request-token guard.
+    await act(async () => {
+      resolveFirst?.(oldPayload);
+    });
+
+    // Give the microtask queue a tick; assert the state did not
+    // regress to the stale payload.
+    await Promise.resolve();
+    expect(result.current.map((s) => s.id)).toEqual(["fresh-a", "fresh-b"]);
+  });
+
+  it("falls silent when the fetch rejects", async () => {
+    mockState.fetcher = () => Promise.reject(new Error("network down"));
+    const { result } = renderHook(() => useForgeStars());
+    await waitFor(() => {
+      // Hook handles the rejection gracefully; we land on an empty
+      // star list rather than throwing through the React tree.
+      expect(result.current).toEqual([]);
+    });
   });
 });
 
