@@ -59,6 +59,34 @@ Template for agent-filed intake:
 - **Decision:** <awaiting go/no-go | promoted as M## | merged into M## | parked | rejected>
 -->
 
+### Living Mark — M-star formation from the starfield
+
+- **Source:** Approach 3 from the M20 brainstorming (2026-04-28); parked at the time so M20 could ship the primitives + metadata cleanly without expanding scope.
+- **Ask:** On home-page first-load, animate a subset of the existing starfield stars (`app/layout.tsx` radial-gradient layers) into the M-star silhouette over 2–3 seconds, then settle into the static glowing mark. The mark "lives" in the constellation rather than sitting on top of it.
+- **Context:** The README header reference image already conveys this aesthetic via the topographic ripple rings; Living Mark is the *temporal* version — the brand emerges from the same particles that paint the rest of the home page. Reuses the existing `<MetisGlow>` primitive for the settle state, so this is purely additive — no rework of M20's primitives.
+- **Filed:** 2026-04-29 by claude/cranky-northcutt-42501d
+- **Triage:**
+  - What it is: A motion-design effort that ties the brand mark to the constellation pillar at the level of the home page's first impression. Stars in the existing `app/layout.tsx` starfield (`radial-gradient` layers + nebula blobs) animate into the mark's silhouette via constrained physics or pre-computed paths, then transition to the static glowing mark via the existing `<MetisGlow>`. Subsequent visits skip the formation if cached. Only fires on `/`; chrome stays static.
+  - Pillar fit: **Cosmos** (🌌). Reinforces the *constellation as identity* metaphor that M02 / M12 are built around. Cross-cuts mildly into M01 polish.
+  - Overlap: M02 (Landed; owns the home visual system + landing-stars), M01 (Rolling; first-impression UX). Touches `apps/metis-web/components/home/home-visual-system.tsx` and possibly `apps/metis-web/lib/landing-stars/*` for the formation pathing.
+  - Recommendation: **Promote** as a new milestone (M21). Substantial creative work (~multi-day) that warrants brainstorm + design + plan, not a patch. Should be claimed *after* M20 lands so the primitives are stable.
+  - Rough scope: **multi-day**. Brainstorm + design (half-day) → formation animation prototype (1 day) → integration + reduced-motion fallback (half-day) → tuning (half-day).
+- **Decision:** *awaiting go/no-go.*
+
+### Wordmark typography lock-in for the lockup
+
+- **Source:** M20 implementation note; `<MetisLockup>` ships with `Inter Tight Medium` as a placeholder font-family.
+- **Ask:** Decide the canonical font for the lowercase `metis` wordmark in `<MetisLockup>` (OG image, `/setup` welcome, Apple touch, Tauri splash). The README header reference image looks like Inter Tight or Geist; design team has not formally specified.
+- **Context:** Inter is already loaded via `app/layout.tsx`; Inter Tight is the same Google-Fonts family with tighter tracking. Geist would require a new font load. A custom face is also possible. The choice affects only `<MetisLockup>`'s `font-family` rule — one-line code change once the typeface is decided. Visible on every external surface, so the choice is brand-load-bearing.
+- **Filed:** 2026-04-29 by claude/cranky-northcutt-42501d
+- **Triage:**
+  - What it is: A design decision, not an engineering effort. The implementation cost once a typeface is chosen is trivial (font-family swap + maybe an `@font-face` import).
+  - Pillar fit: **Cross-cutting** — visual identity, no behavior change.
+  - Overlap: None mechanical. Touches `apps/metis-web/components/brand/metis-lockup.tsx` only.
+  - Recommendation: **Park** until the design team weighs in. The current Inter Tight Medium placeholder is not embarrassing and degrades gracefully (Inter is already loaded). Revisit when (a) marketing surfaces ship to the public and brand consistency becomes load-bearing, or (b) design specifies a font.
+  - Rough scope: **1-hour patch** once the typeface is decided.
+- **Decision:** *parked* 2026-04-29; will be moved to *Iced* below if user confirms park.
+
 ### ~~Metis logo rollout — M-star mark + glow primitives~~ → promoted as M20 ([`plans/metis-logo-rollout/plan.md`](metis-logo-rollout/plan.md))
 - **Source:** `m_star_logo_traced.svg` provided by the design team on 2026-04-28 (1000×1000 viewBox, single fill-rule:evenodd path, `fill="#111111"`). Reference image: GitHub README header with white mark + cyan halo + topographic ripple rings + lowercase `metis` wordmark on dark navy.
 - **Ask:** Implement the supplied logo into the frontend across brand, system metadata, and motion surfaces.
