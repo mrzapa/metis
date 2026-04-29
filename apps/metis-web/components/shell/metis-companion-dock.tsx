@@ -157,6 +157,17 @@ export function MetisCompanionDock({
 
   const minimized = Boolean(snapshot?.identity.minimized);
   const showAtlasToast = Boolean(toastMessage?.startsWith("Saved to Atlas"));
+  // M14 Phase 3 — surface the Forge toggle acknowledgement in the
+  // collapsed dock too. The standard ``toastMessage`` slot lives
+  // inside the expanded panel (line ~1140), so without this branch
+  // the user flips a card and sees nothing until they expand the
+  // dock. The copy convention is fixed in the Forge page handler:
+  // either "Companion absorbed X." or "Companion stood down X."
+  const showForgeToast = Boolean(
+    toastMessage
+    && (toastMessage.startsWith("Companion absorbed")
+      || toastMessage.startsWith("Companion stood down")),
+  );
   // Phase 5 — visible growth stage. Defaults to "seedling" client-side
   // until the additive backend payload is observed. The dock badge,
   // tooltip copy, and the stage_transition pulse all key off this.
@@ -321,6 +332,23 @@ export function MetisCompanionDock({
       }
       if (event.source === "autonomous_research" && event.state === "completed") {
         setToastMessage("New star added to constellation");
+      }
+      // M14 Phase 3 — Forge technique toggle acknowledgement. The
+      // event-payload carries `technique_id` and `enabled`; the toast
+      // copy frames the flip as a companion action ("absorbed" /
+      // "stood down") rather than a settings write, per ADR 0014's
+      // principle-#4 guard.
+      if (event.source === "forge" && event.kind === "technique_toggled") {
+        const togglePayload = event.payload as
+          | { technique_id?: string; enabled?: boolean; technique_name?: string }
+          | undefined;
+        const display = togglePayload?.technique_name ?? togglePayload?.technique_id ?? "technique";
+        const enabled = Boolean(togglePayload?.enabled);
+        setToastMessage(
+          enabled
+            ? `Companion absorbed ${display}.`
+            : `Companion stood down ${display}.`,
+        );
       }
       // Phase 5 — one-time stage-transition magic moment. The
       // backend has already persisted the new stage; we surface a
@@ -703,6 +731,14 @@ export function MetisCompanionDock({
       {showAtlasToast ? (
         <div className="absolute bottom-full right-0 mb-3 w-[min(22rem,calc(100vw-2rem))] rounded-[1.1rem] border border-emerald-400/20 bg-[rgba(7,24,20,0.95)] px-3 py-2.5 shadow-2xl shadow-black/35 backdrop-blur-xl">
           <p className="text-xs font-medium text-emerald-300">{toastMessage}</p>
+        </div>
+      ) : null}
+      {showForgeToast ? (
+        <div
+          data-testid="forge-toggle-toast"
+          className="absolute bottom-full right-0 mb-3 w-[min(22rem,calc(100vw-2rem))] rounded-[1.1rem] border border-violet-400/25 bg-[rgba(15,11,32,0.95)] px-3 py-2.5 shadow-2xl shadow-black/35 backdrop-blur-xl"
+        >
+          <p className="text-xs font-medium text-violet-200">{toastMessage}</p>
         </div>
       ) : null}
       {atlasCandidate?.status === "candidate" ? (
@@ -1117,8 +1153,11 @@ export function MetisCompanionDock({
                   </button>
                 )}
 
-{/* Toast notification for new star – taps through to /brain */}
-                {toastMessage && !showAtlasToast && (
+{/* Toast notification for new star – taps through to /brain.
+                    Forge toggle toasts (M14 Phase 3) render in the
+                    collapsed-dock branch above instead, since they don't
+                    deep-link to the brain view. */}
+                {toastMessage && !showAtlasToast && !showForgeToast && (
                   <Link
                     href="/brain"
                     className="flex items-center gap-2 rounded-[1rem] border border-violet-400/20 bg-violet-400/10 px-3 py-2 transition-colors hover:bg-violet-400/15"

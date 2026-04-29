@@ -970,7 +970,18 @@ export interface TraceEvent {
 }
 
 export interface CompanionActivityEvent {
-  source: "rag_stream" | "index_build" | "autonomous_research" | "reflection" | "seedling" | "news_comet";
+  source:
+    | "rag_stream"
+    | "index_build"
+    | "autonomous_research"
+    | "reflection"
+    | "seedling"
+    | "news_comet"
+    // M14 Phase 3 — fired when the user flips a Forge technique
+    // card. The dock surfaces a one-line "absorbed X" / "stood
+    // down X" acknowledgement so the toggle reads as a companion
+    // action, not just a settings write.
+    | "forge";
   state: "running" | "completed" | "error";
   trigger: string;
   summary: string;
@@ -987,13 +998,16 @@ export interface CompanionActivityEvent {
    * new ``AssistantBrainLink`` records — the brain-graph view
    * subscribes to this to pulse the matching edges. Payload carries
    * ``status.links: Array<{source_node_id, target_node_id, relation}>``
-   * and ``status.memory_entry_id``.
+   * and ``status.memory_entry_id``. M14 Phase 3 adds
+   * ``"technique_toggled"`` for Forge card flips; payload carries
+   * ``{technique_id: string, enabled: boolean}``.
    */
   kind?:
     | "while_you_work"
     | "overnight"
     | "stage_transition"
-    | "brain_link_created";
+    | "brain_link_created"
+    | "technique_toggled";
   payload?: Record<string, unknown>;
 }
 
@@ -3787,6 +3801,14 @@ export interface ForgeTechnique {
   setting_keys: string[];
   engine_symbols: string[];
   recent_uses: unknown[];
+  // Phase 3 — interactive toggle wiring. When ``toggleable`` is
+  // false, the gallery card stays read-only (typically a runtime
+  // pre-flight check is missing on the descriptor). When true, the
+  // card writes ``enable_overrides`` / ``disable_overrides`` through
+  // ``updateSettings()`` to flip the underlying engine knobs.
+  toggleable: boolean;
+  enable_overrides: Record<string, unknown> | null;
+  disable_overrides: Record<string, unknown> | null;
 }
 
 export interface ForgeTechniquesResponse {
@@ -3801,4 +3823,36 @@ export async function fetchForgeTechniques(): Promise<ForgeTechniquesResponse> {
     throw new Error(`Failed to fetch forge techniques (${res.status}): ${detail}`);
   }
   return (await res.json()) as ForgeTechniquesResponse;
+}
+
+/**
+ * Phase 3 helper — toggle a Forge technique on or off by writing the
+ * descriptor-supplied settings overrides through the existing
+ * ``/v1/settings`` endpoint. Returns the merged settings dict the
+ * server saved, so callers can verify the technique's own predicate
+ * keys flipped the right way.
+ */
+export async function toggleForgeTechnique(
+  technique: Pick<ForgeTechnique, "id" | "toggleable" | "enable_overrides" | "disable_overrides">,
+  enabled: boolean,
+): Promise<Record<string, unknown>> {
+  if (!technique.toggleable) {
+    throw new Error(`Forge technique ${technique.id} is not toggleable`);
+  }
+  const overrides = enabled ? technique.enable_overrides : technique.disable_overrides;
+  if (!overrides) {
+    throw new Error(`Forge technique ${technique.id} has no ${enabled ? "enable" : "disable"} overrides`);
+  }
+  return updateSettings(overrides);
+}
+
+/**
+ * Phase 3 helper — fan out a ``CompanionActivityEvent`` to subscribed
+ * dock listeners. The event-bus producer ``emitCompanionActivity`` is
+ * module-private, so this thin wrapper is what surfaces a public
+ * "the user just toggled a technique" signal without bleeding the
+ * full bus surface into the rest of the app.
+ */
+export function publishCompanionActivity(event: CompanionActivityEvent): void {
+  emitCompanionActivity(event);
 }

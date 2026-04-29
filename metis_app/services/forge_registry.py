@@ -45,6 +45,22 @@ class TechniqueDescriptor:
     enabled_predicate: Callable[[Settings], bool]
     engine_symbols: tuple[str, ...] = ()
     docs_url: str | None = None
+    # Phase 3 — when both ``enable_overrides`` and
+    # ``disable_overrides`` are set, the gallery card renders an
+    # interactive toggle. Flipping it ``POST``s the relevant payload
+    # to ``/v1/settings`` (the existing settings endpoint), and the
+    # next ``GET /v1/forge/techniques`` reflects the new state via
+    # the descriptor's own ``enabled_predicate``.
+    #
+    # ``None`` here marks a technique as **read-only** — typically
+    # because flipping it cleanly requires a runtime pre-flight check
+    # the gallery does not yet do (Heretic CLI on PATH, TimesFM model
+    # download, GGUF model selection, ...). Phase 3b will lift the
+    # remaining read-only entries by adding pre-flight readiness
+    # checks; the read-only ones still render and report their
+    # current ``enabled`` state, they just lack the switch.
+    enable_overrides: dict[str, Any] | None = None
+    disable_overrides: dict[str, Any] | None = None
 
     def is_enabled(self, settings: Settings) -> bool:
         """Resolve the live enabled state for this technique.
@@ -58,6 +74,11 @@ class TechniqueDescriptor:
             return bool(self.enabled_predicate(settings))
         except Exception:
             return False
+
+    @property
+    def toggleable(self) -> bool:
+        """True iff the gallery should render an interactive toggle."""
+        return self.enable_overrides is not None and self.disable_overrides is not None
 
 
 # ── Predicate helpers ──────────────────────────────────────────────
@@ -158,6 +179,8 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
             "metis_app.engine.querying",
             "metis_app.engine.streaming",
         ),
+        enable_overrides={"agentic_mode": True},
+        disable_overrides={"agentic_mode": False},
     ),
     TechniqueDescriptor(
         id="sub-query-expansion",
@@ -170,6 +193,8 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
         setting_keys=("use_sub_queries", "subquery_max_docs"),
         enabled_predicate=_bool_key("use_sub_queries", default=True),
         engine_symbols=("metis_app.services.retrieval_pipeline",),
+        enable_overrides={"use_sub_queries": True},
+        disable_overrides={"use_sub_queries": False},
     ),
     TechniqueDescriptor(
         id="hybrid-search",
@@ -185,6 +210,11 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
             "metis_app.services.hybrid_scorer",
             "metis_app.services.vector_store",
         ),
+        # Enable lands on a 50/50 BM25 + vector blend; disable goes
+        # back to pure vector (1.0). Power users still tweak the alpha
+        # via /settings; the toggle just picks a sensible default.
+        enable_overrides={"hybrid_alpha": 0.5},
+        disable_overrides={"hybrid_alpha": 1.0},
     ),
     TechniqueDescriptor(
         id="mmr-diversification",
@@ -197,6 +227,8 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
         setting_keys=("mmr_lambda", "retrieval_mode"),
         enabled_predicate=_mmr_enabled,
         engine_symbols=("metis_app.services.retrieval_pipeline",),
+        enable_overrides={"retrieval_mode": "mmr"},
+        disable_overrides={"retrieval_mode": "flat"},
     ),
     TechniqueDescriptor(
         id="reranker",
@@ -209,6 +241,8 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
         setting_keys=("use_reranker",),
         enabled_predicate=_bool_key("use_reranker", default=True),
         engine_symbols=("metis_app.services.reranker",),
+        enable_overrides={"use_reranker": True},
+        disable_overrides={"use_reranker": False},
     ),
     TechniqueDescriptor(
         id="swarm-personas",
@@ -221,6 +255,10 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
         setting_keys=("swarm_n_personas", "swarm_n_rounds"),
         enabled_predicate=_swarm_enabled,
         engine_symbols=("metis_app.services.swarm_service",),
+        # Enable restores the default-settings persona count (8); the
+        # 0-personas state is the natural disable knob.
+        enable_overrides={"swarm_n_personas": 8},
+        disable_overrides={"swarm_n_personas": 0},
     ),
     TechniqueDescriptor(
         id="timesfm-forecasting",
@@ -242,6 +280,10 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
             "metis_app.services.forecast_service",
             "metis_app.engine.forecasting",
         ),
+        # Read-only in Phase 3 — turning Forecast on globally rewires
+        # the whole chat surface and needs a model-download pre-flight
+        # check that the gallery does not yet do. Phase 3b will lift
+        # this once the chat-mode integration is sound.
     ),
     TechniqueDescriptor(
         id="tribev2-multimodal",
@@ -259,6 +301,8 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
         ),
         enabled_predicate=_bool_key("enable_brain_pass", default=True),
         engine_symbols=("metis_app.services.brain_pass",),
+        enable_overrides={"enable_brain_pass": True},
+        disable_overrides={"enable_brain_pass": False},
     ),
     TechniqueDescriptor(
         id="heretic-abliteration",
@@ -274,6 +318,10 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
             "metis_app.services.heretic_service",
             "metis_app.api_litestar.routes.heretic",
         ),
+        # Read-only in Phase 3 — needs the ``heretic`` CLI on PATH,
+        # which is a per-machine pre-flight check the gallery does
+        # not yet do. Phase 3b will surface a "Get ready" affordance
+        # for the un-ready case.
     ),
     TechniqueDescriptor(
         id="news-comets",
@@ -297,6 +345,8 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
             "metis_app.services.news_ingest_service",
             "metis_app.services.comet_decision_engine",
         ),
+        enable_overrides={"news_comets_enabled": True},
+        disable_overrides={"news_comets_enabled": False},
     ),
     TechniqueDescriptor(
         id="hebbian-edges",
@@ -309,6 +359,8 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
         setting_keys=("enable_hebbian", "hebbian_boost", "hebbian_decay"),
         enabled_predicate=_bool_key("enable_hebbian", default=True),
         engine_symbols=("metis_app.utils.hebbian_decoder",),
+        enable_overrides={"enable_hebbian": True},
+        disable_overrides={"enable_hebbian": False},
     ),
     TechniqueDescriptor(
         id="citation-v2",
@@ -324,6 +376,8 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
         ),
         enabled_predicate=_bool_key("enable_citation_v2", default=True),
         engine_symbols=("metis_app.services.response_pipeline",),
+        enable_overrides={"enable_citation_v2": True},
+        disable_overrides={"enable_citation_v2": False},
     ),
     TechniqueDescriptor(
         id="semantic-chunking",
@@ -340,6 +394,18 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
         ),
         enabled_predicate=_semantic_chunking_enabled,
         engine_symbols=("metis_app.services.semantic_chunker",),
+        enable_overrides={"chunk_strategy": "semantic"},
+        # ``_semantic_chunking_enabled`` ORs three keys, so the disable
+        # path must clear every one of them. If a previous user state
+        # (or another surface — `/settings`) had flipped
+        # ``structure_aware_ingestion`` or ``semantic_layout_ingestion``
+        # on, leaving them untouched here would leave the technique
+        # reading as ENABLED despite the toggle showing OFF.
+        disable_overrides={
+            "chunk_strategy": "fixed",
+            "structure_aware_ingestion": False,
+            "semantic_layout_ingestion": False,
+        },
     ),
 )
 

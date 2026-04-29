@@ -9,6 +9,7 @@ import { PILLAR_LABEL } from "@/components/forge/pillar";
 
 interface TechniqueGalleryProps {
   techniques: ForgeTechnique[];
+  onToggle?: (technique: ForgeTechnique, enabled: boolean) => Promise<void>;
 }
 
 // Render order: keep the registry's declared order so Cortex's
@@ -21,7 +22,7 @@ interface TechniqueGalleryProps {
 // The summary header counts active vs total across pillars; per-pillar
 // counts go beside the section title so the user can see, at a glance,
 // how much of each pillar METIS has lit up.
-export function TechniqueGallery({ techniques }: TechniqueGalleryProps) {
+export function TechniqueGallery({ techniques, onToggle }: TechniqueGalleryProps) {
   const reducedMotion = useReducedMotion();
   const grouped = useMemo(() => groupByPillar(techniques), [techniques]);
   const totalActive = techniques.filter((t) => t.enabled).length;
@@ -57,7 +58,7 @@ export function TechniqueGallery({ techniques }: TechniqueGalleryProps) {
             <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {items.map((technique) => (
                 <li key={technique.id} className="contents">
-                  <TechniqueCard technique={technique} />
+                  <TechniqueCard technique={technique} onToggle={onToggle} />
                 </li>
               ))}
             </ul>
