@@ -1,12 +1,29 @@
 ---
 Milestone: The Forge (M14)
 Status: In progress
-Claim: claude/m14-phase2-cards (Phase 2a)
-Last updated: 2026-04-29 by claude/m14-phase2-cards
+Claim: claude/m14-phase2b-constellation-stars (Phase 2b)
+Last updated: 2026-04-29 by claude/m14-phase2b-constellation-stars
 Vision pillar: Companion + Cortex
 ---
 
 ## Progress
+
+**Phase 2a — Registry + technique cards (Landed via PR #576 / `9af7154`, 2026-04-29)**
+
+* `metis_app/services/forge_registry.py` introduces the typed
+  `TechniqueDescriptor` dataclass that ADR 0014 fixed; the route at
+  `metis_app/api_litestar/routes/forge.py` reads `load_settings()` once
+  per request and serialises each descriptor's live `enabled` field.
+* `apps/metis-web/components/forge/{pillar.ts,technique-card.tsx,
+  technique-gallery.tsx}` render the gallery with M02 primitives
+  (`BorderBeam`, `Tooltip`, `AnimatedLucideIcon`). Cards group by
+  pillar (Cortex first, then Companion), active-first within each
+  group, with per-pillar `N of M active` counters and a settings-keys
+  tooltip on each card. Card DOM `id`s match the technique slugs so
+  the Phase 1 `/forge#<id>` deep-link contract carries through.
+* Tests: 7 new in `tests/test_api_forge.py` covering live-settings
+  round-trip (with `load_settings` patched), exception isolation in
+  `is_enabled`, descriptor lookup, and registry-vs-defaults drift.
 
 **Phase 1 — Forge route + shell (Landed via PR #575 / `0bd11b4`, 2026-04-29)**
 
@@ -144,24 +161,43 @@ coupling to the gallery.
    with the gallery component. Pillar tone variants already exist as
    constants in the page; lift them into the card.
 
-**Phase 2b — Constellation Skills-sector stars (next claimable)**
+**Phase 2b — Constellation Skills-sector beacon (in PR, claude/m14-phase2b-constellation-stars, 2026-04-29)**
 
-The `Skills` faculty already exists in
-`apps/metis-web/lib/constellation-home.ts` (`CONSTELLATION_FACULTIES`
-line 152, palette entry `skills: [104, 219, 170]`). Phase 2b adds the
-*technique stars themselves* under that faculty:
+3. **Surface a star per active technique near the Skills sector.**
+   `apps/metis-web/app/page.tsx` renders the existing faculty
+   constellations imperatively into a Canvas2D pipeline (see the
+   `nodes` / `FACULTY_CONCEPTS` array around line 2480 and the
+   `CONSTELLATION_FACULTIES.forEach` block at line 2498). Promoting
+   technique stars into that pipeline is a multi-day surgical change
+   to a 7,379-line hotspot file (99.8th %ile churn) — too risky for
+   a single Phase 2b PR.
+   Phase 2b instead ships a contained, HTML/SVG-based
+   `<ForgeSkillsCluster>` overlay layered on top of the canvas. The
+   overlay anchors itself in screen-space to the Skills faculty's
+   normalised position from `CONSTELLATION_FACULTIES`, fans the
+   active techniques out as small dots around it, applies the
+   pillar accent colour and faculty palette tone, labels each dot
+   on hover, and routes clicks to `/forge#<technique-id>` via the
+   `useRouter` push. Reduced-motion gated.
+   The overlay does **not** zoom-track the canvas camera in v1 —
+   that's the deferred Phase 2c work below. v1's scope is to
+   ship the deep-link contract and make absorbed techniques
+   visible on the home page.
 
-3. **Wire the constellation deep-link.** Each enabled technique gets
-   a star in the existing `skills` faculty sector via the M12
-   catalogue plumbing. The star's observatory dialog
-   (`apps/metis-web/components/constellation/star-observatory-dialog.tsx`)
-   deep-links to `/forge#<technique-id>` rather than rendering the
-   technique inline. The Phase 1 page already honours the hash
-   anchor via `useHashScroll`, so this is purely the
-   *star-generation + dialog-branching* side of the contract.
-   Coordinate with M12's `star-catalogue` data shape — read
-   `apps/metis-web/lib/star-catalogue/types.ts` and
-   `user-star-adapter.ts` first.
+**Phase 2c — Canvas-integrated technique stars (next claimable)**
+
+When the home-page canvas pipeline gets touched for other reasons
+(or when the imperative `nodes` array grows a public hook for
+overlays), promote `<ForgeSkillsCluster>`'s anchor logic into the
+canvas layer so technique stars zoom-track the constellation and
+sit visually identical to faculty stars. Until then the v1 overlay
+is the right delivery.
+
+If the M12 catalogue search ever needs to surface technique stars
+as findable items, the entry-point would be a `CatalogueUserStar`-
+shaped adapter feeding the search index — but per ADR 0014 the
+technique-state source of truth is `forge_registry`, not the
+catalogue store, so this is genuinely optional.
 
 Phases 3–7 keep the original *Proposed phase breakdown* below. Each
 should land on its own branch
