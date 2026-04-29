@@ -26,11 +26,21 @@ should treat changes to ``id`` fields the same way.
 
 from __future__ import annotations
 
+import pathlib
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
 Settings = dict[str, Any]
 ForgePillar = Literal["cosmos", "companion", "cortex", "cross-cutting"]
+
+# Mirror of ``HereticService``'s default output root. The service
+# itself falls back to this when ``heretic_output_dir`` is empty
+# (`metis_app/services/heretic_service.py:309`). Resolving via
+# ``Path.home()`` at import time gives an absolute, user-home-based
+# path that survives packaged/desktop runs where the process CWD is
+# not necessarily writable. ``HERETIC_DEFAULT_OUTPUT_DIR_ALIGNS_WITH_SERVICE``
+# (the test in ``tests/test_api_forge.py``) trips if this drifts.
+HERETIC_DEFAULT_OUTPUT_DIR = str(pathlib.Path.home() / ".metis_heretic")
 
 
 RuntimeStatus = Literal["ready", "blocked"]
@@ -428,12 +438,13 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
             "metis_app.api_litestar.routes.heretic",
         ),
         # Phase 3b — toggleable when the CLI is on $PATH. Enable
-        # writes a sensible default output dir (the engine creates
-        # the directory on the next run if it doesn't exist);
-        # disable clears it so ``_heretic_enabled`` reads False
-        # again. The card disables the switch when
+        # writes the user-home-based default output dir
+        # (``HERETIC_DEFAULT_OUTPUT_DIR``) so packaged/desktop runs
+        # don't fail mid-flight when the process CWD isn't writable;
+        # disable clears the setting so ``_heretic_enabled`` reads
+        # False again. The card disables the switch when
         # ``runtime_probe`` reports blocked.
-        enable_overrides={"heretic_output_dir": ".metis_cache/heretic-out"},
+        enable_overrides={"heretic_output_dir": HERETIC_DEFAULT_OUTPUT_DIR},
         disable_overrides={"heretic_output_dir": ""},
         runtime_probe=_heretic_readiness,
     ),

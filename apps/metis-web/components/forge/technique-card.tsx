@@ -302,26 +302,18 @@ function HereticInstallDialog({ open, onOpenChange }: HereticInstallDialogProps)
         <div className="flex flex-col gap-3 text-sm leading-relaxed text-muted-foreground">
           <ol className="list-decimal space-y-2 pl-5">
             <li>
-              Install via <code className="rounded bg-white/8 px-1.5 py-0.5 font-mono text-xs">pipx</code>
-              {" "}so the CLI lands on your <code className="rounded bg-white/8 px-1.5 py-0.5 font-mono text-xs">$PATH</code>:
-              <pre className="mt-2 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs">pipx install heretic-cli</pre>
+              Install the package backend ships against (
+              <code className="rounded bg-white/8 px-1.5 py-0.5 font-mono text-xs">heretic-llm</code>
+              {" "}on PyPI; same string referenced by{" "}
+              <code className="rounded bg-white/8 px-1.5 py-0.5 font-mono text-xs">pyproject.toml</code>
+              {" "}and the engine's preflight messaging):
+              <pre className="mt-2 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs">pip install heretic-llm</pre>
             </li>
             <li>
-              Confirm with <code className="rounded bg-white/8 px-1.5 py-0.5 font-mono text-xs">heretic --version</code>{" "}
-              in a fresh terminal. If the command is found, METIS will pick it up on the next gallery refresh.
-            </li>
-            <li>
-              For the source build and a longer reading on what abliteration does, see{" "}
-              <a
-                href="https://github.com/p-e-w/heretic"
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 text-foreground/90 underline-offset-2 hover:underline"
-              >
-                p-e-w/heretic
-                <ExternalLink className="size-3" aria-hidden="true" />
-              </a>
-              .
+              Confirm the binary landed on your{" "}
+              <code className="rounded bg-white/8 px-1.5 py-0.5 font-mono text-xs">$PATH</code>:
+              <pre className="mt-2 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs">heretic --help</pre>
+              METIS picks it up on the next gallery refresh (or whenever the home page comes back into focus).
             </li>
           </ol>
         </div>

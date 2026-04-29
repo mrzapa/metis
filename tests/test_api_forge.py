@@ -218,6 +218,36 @@ def test_disable_overrides_clear_every_predicate_input_for_or_predicates() -> No
             )
 
 
+def test_heretic_enable_override_uses_service_default_output_dir() -> None:
+    """The Forge's enable payload must write the same output root the
+    Heretic service falls back to on its own. CWD-relative paths
+    break in packaged/desktop runs where the process working
+    directory is read-only or unstable.
+
+    The service's default lives inline at
+    ``HereticService.__init__`` (``output_root or
+    pathlib.Path.home() / ".metis_heretic"``); we mirror it as
+    ``HERETIC_DEFAULT_OUTPUT_DIR`` in ``forge_registry``. If either
+    drifts, this test trips.
+    """
+    import pathlib
+
+    from metis_app.services.forge_registry import HERETIC_DEFAULT_OUTPUT_DIR
+
+    descriptor = get_descriptor("heretic-abliteration")
+    assert descriptor is not None
+    assert descriptor.enable_overrides is not None
+    assert descriptor.enable_overrides == {
+        "heretic_output_dir": HERETIC_DEFAULT_OUTPUT_DIR,
+    }
+
+    expected_default = str(pathlib.Path.home() / ".metis_heretic")
+    assert HERETIC_DEFAULT_OUTPUT_DIR == expected_default
+    # Hard guard: path must be absolute. A CWD-relative path here is
+    # exactly the bug Codex P1 caught on PR #580.
+    assert pathlib.Path(HERETIC_DEFAULT_OUTPUT_DIR).is_absolute()
+
+
 def test_heretic_probe_blocks_when_cli_missing() -> None:
     """When the ``heretic`` CLI is not on ``$PATH``, the descriptor's
     readiness probe returns ``status="blocked"`` with a single

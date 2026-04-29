@@ -251,6 +251,9 @@ describe("<TechniqueCard /> Phase 3b runtime readiness", () => {
     const dialogTitle = await screen.findByRole("heading", { name: /install heretic cli/i });
     expect(dialogTitle).toBeTruthy();
     // Install command is rendered verbatim so the user can copy it.
-    expect(screen.getByText(/pipx install heretic-cli/i)).toBeTruthy();
+    // `heretic-llm` matches the package the backend's preflight
+    // messaging and `pyproject.toml` reference — the dialog must
+    // not point at a different package.
+    expect(screen.getByText(/pip install heretic-llm/i)).toBeTruthy();
   });
 });
