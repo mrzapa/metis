@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import { MetisMark } from "@/components/brand";
 import { NetworkAuditFirstRunCard } from "@/components/network-audit/first-run-card";
 import { FirstRunBanner } from "@/components/home/first-run-banner";
+import { ForgeSkillsCluster } from "@/components/forge/forge-skills-cluster";
 import { ShootingStarLayer } from "@/components/home/shooting-star-layer";
 import {
   CosmicAtmosphere,
@@ -93,6 +94,7 @@ import {
   projectConstellationPoint,
   screenToConstellationPoint,
   screenToWorldPoint,
+  STAR_DIVE_ZOOM_THRESHOLD,
   type ConstellationFacultyMetadata,
   type ConstellationFieldStar,
   type ConstellationNodePoint,
@@ -5720,6 +5722,18 @@ export default function Home() {
         data-focus-phase={starFocusPhase}
         data-details-open={starDetailsOpen ? "true" : "false"}
         data-pan-active={isCanvasPanning ? "true" : "false"}
+      />
+
+      {/* M14 Phase 2b: Skills-sector beacon — one screen-space dot per
+          active Forge technique, anchored to the Skills faculty
+          position, deep-linking to `/forge#<id>`. Hidden during
+          star-dive zoom and while a star-details overlay is open so it
+          does not crowd the focused content. */}
+      <ForgeSkillsCluster
+        hidden={
+          starDetailsOpen
+          || backgroundZoomFactor >= STAR_DIVE_ZOOM_THRESHOLD
+        }
       />
 
       <div className="metis-hero-overlay">
