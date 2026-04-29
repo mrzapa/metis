@@ -1,14 +1,14 @@
 ---
 Milestone: The Forge (M14)
 Status: In progress
-Claim: claude/m14-phase1-shell
-Last updated: 2026-04-28 by claude/m14-phase1-shell
+Claim: claude/m14-phase2-cards (Phase 2a)
+Last updated: 2026-04-29 by claude/m14-phase2-cards
 Vision pillar: Companion + Cortex
 ---
 
 ## Progress
 
-**Phase 1 — Forge route + shell (in PR, claude/m14-phase1-shell, 2026-04-28)**
+**Phase 1 — Forge route + shell (Landed via PR #575 / `0bd11b4`, 2026-04-29)**
 
 - ADR 0014 (`docs/adr/0014-forge-route-and-toggle-state.md`) lands the
   four architectural calls Phase 1's *Next up* asked for: single-page
@@ -113,9 +113,16 @@ What's in place today that M14 will lean on:
 
 ## Next up
 
-Phase 1 is in PR. The next claimable phase is **Phase 2 — Technique
-cards (read-only) + star home**. Concrete first actions for whoever
-picks it up:
+Phase 1 has landed (PR #575, merge `0bd11b4`, 2026-04-29). Phase 2 is
+**split into two PRs for size and reviewability** — the gallery work
+and the constellation work are independent enough that bundling them
+would push the diff past the Phase 1 PR's already-substantial 1075
+lines. The Phase 1 page already wires `id={technique.id}` anchors and
+a `useHashScroll` helper, so the cross-piece deep-link contract is
+already live; Phase 2b can ship the star generation without further
+coupling to the gallery.
+
+**Phase 2a — Registry + technique cards (in PR, claude/m14-phase2-cards, 2026-04-29)**
 
 1. **Promote the Phase 1 static inventory into a typed registry.**
    Introduce `metis_app/services/forge_registry.py` with the
@@ -136,13 +143,25 @@ picks it up:
    Replace the placeholder `<ul>` rendering in `app/forge/page.tsx`
    with the gallery component. Pillar tone variants already exist as
    constants in the page; lift them into the card.
+
+**Phase 2b — Constellation Skills-sector stars (next claimable)**
+
+The `Skills` faculty already exists in
+`apps/metis-web/lib/constellation-home.ts` (`CONSTELLATION_FACULTIES`
+line 152, palette entry `skills: [104, 219, 170]`). Phase 2b adds the
+*technique stars themselves* under that faculty:
+
 3. **Wire the constellation deep-link.** Each enabled technique gets
-   a star in a new "Skills" sector via the M12 catalogue plumbing.
-   The star's observatory dialog
+   a star in the existing `skills` faculty sector via the M12
+   catalogue plumbing. The star's observatory dialog
    (`apps/metis-web/components/constellation/star-observatory-dialog.tsx`)
    deep-links to `/forge#<technique-id>` rather than rendering the
-   technique inline. Coordinate with whoever picks up M12's
-   ongoing work to avoid colliding on `star-catalogue` data shape.
+   technique inline. The Phase 1 page already honours the hash
+   anchor via `useHashScroll`, so this is purely the
+   *star-generation + dialog-branching* side of the contract.
+   Coordinate with M12's `star-catalogue` data shape — read
+   `apps/metis-web/lib/star-catalogue/types.ts` and
+   `user-star-adapter.ts` first.
 
 Phases 3–7 keep the original *Proposed phase breakdown* below. Each
 should land on its own branch
