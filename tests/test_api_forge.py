@@ -61,6 +61,12 @@ def test_list_techniques_response_shape() -> None:
         "setting_keys",
         "engine_symbols",
         "recent_uses",
+        # Phase 3 additions — every entry exposes its toggle posture
+        # and (when toggleable) the settings overrides the frontend
+        # writes through ``POST /v1/settings``.
+        "toggleable",
+        "enable_overrides",
+        "disable_overrides",
     }
     for entry in techniques:
         assert required_fields <= entry.keys()
@@ -74,6 +80,71 @@ def test_list_techniques_response_shape() -> None:
         assert isinstance(entry["engine_symbols"], list)
         # Phase 2a still has no live trace integration (that's Phase 6).
         assert entry["recent_uses"] == []
+        assert isinstance(entry["toggleable"], bool)
+        if entry["toggleable"]:
+            assert isinstance(entry["enable_overrides"], dict)
+            assert isinstance(entry["disable_overrides"], dict)
+            assert entry["enable_overrides"], "toggleable technique must declare enable_overrides"
+            assert entry["disable_overrides"], "toggleable technique must declare disable_overrides"
+        else:
+            assert entry["enable_overrides"] is None
+            assert entry["disable_overrides"] is None
+
+
+def test_toggleable_overrides_reference_real_setting_keys() -> None:
+    """Every override key must exist in default_settings.json — same
+    invariant as the descriptor's ``setting_keys``, applied to the
+    overrides too. Drift here would land the frontend writing a key
+    the engine ignores.
+    """
+    import metis_app.settings_store as settings_store
+
+    settings = settings_store.load_settings()
+
+    with _client() as client:
+        techniques = client.get("/v1/forge/techniques").json()["techniques"]
+
+    for entry in techniques:
+        if not entry["toggleable"]:
+            continue
+        for payload_label, payload in (
+            ("enable_overrides", entry["enable_overrides"]),
+            ("disable_overrides", entry["disable_overrides"]),
+        ):
+            for key in payload.keys():
+                assert key in settings, (
+                    f"{entry['id']!r} {payload_label} references missing "
+                    f"setting key {key!r}"
+                )
+
+
+def test_overrides_flip_the_descriptor_predicate() -> None:
+    """Self-check: applying ``enable_overrides`` to the default
+    settings makes ``is_enabled`` return ``True``; applying
+    ``disable_overrides`` makes it return ``False``. Without this,
+    the frontend toggle could silently land settings the predicate
+    interprets the wrong way.
+    """
+    import metis_app.settings_store as settings_store
+
+    base = dict(settings_store.load_settings())
+    for descriptor in get_registry():
+        if not descriptor.toggleable:
+            continue
+        on = dict(base)
+        on.update(descriptor.enable_overrides or {})
+        assert descriptor.is_enabled(on) is True, (
+            f"{descriptor.id!r} enable_overrides did not flip the predicate ON"
+        )
+        off = dict(base)
+        off.update(descriptor.disable_overrides or {})
+        # Heretic and similar runtime-prereq techniques rely on more
+        # than just settings — only assert the simpler predicates.
+        if descriptor.id in {"heretic-abliteration", "timesfm-forecasting"}:
+            continue
+        assert descriptor.is_enabled(off) is False, (
+            f"{descriptor.id!r} disable_overrides did not flip the predicate OFF"
+        )
 
 
 def test_list_techniques_ids_are_unique_and_url_safe() -> None:

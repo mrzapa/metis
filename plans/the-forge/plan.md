@@ -1,12 +1,27 @@
 ---
 Milestone: The Forge (M14)
 Status: In progress
-Claim: claude/m14-phase2-canvas-stars (Phase 2b refactor — canvas integration)
-Last updated: 2026-04-29 by claude/m14-phase2-canvas-stars
+Claim: claude/m14-phase3-toggles (Phase 3a — toggle wiring)
+Last updated: 2026-04-29 by claude/m14-phase3-toggles
 Vision pillar: Companion + Cortex
 ---
 
 ## Progress
+
+**Phase 2b — Canvas-integrated Skills-sector stars (Landed via PR #578 / `c873e47`, 2026-04-29)**
+
+* New module `apps/metis-web/lib/forge-stars.ts` — `forgeStarPositions(active)` fans active techniques
+  evenly around the Skills faculty anchor; `useForgeStars()` hook re-fetches on
+  `visibilitychange` with a request-token guard (Codex P2.1) so stale responses can't clobber fresher
+  state.
+* `apps/metis-web/app/page.tsx` — new ref + render-loop call (`drawForgeStars(ts)` after
+  `drawUserStars`), inline projector via `buildProjectedUserStarHitTarget`, hit-test
+  (`getHitForgeStar`) and a branch in `onCanvasPointerDown` that takes precedence over user-star
+  drag arming and routes to `/forge#<technique-id>`.
+* New `<ForgeStarsKeyboardNav>` mounted alongside the canvas — visually-hidden `<nav>` landmark
+  (Tailwind `sr-only`) with one focusable button per active technique, revealing on
+  `:focus-within` (Codex P2.2 — keyboard / screen-reader access path that was lost when the SVG
+  overlay was promoted to canvas).
 
 **Phase 2a — Registry + technique cards (Landed via PR #576 / `9af7154`, 2026-04-29)**
 
@@ -130,65 +145,59 @@ What's in place today that M14 will lean on:
 
 ## Next up
 
-Phase 1 has landed (PR #575, merge `0bd11b4`, 2026-04-29). Phase 2 is
-**split into two PRs for size and reviewability** — the gallery work
-and the constellation work are independent enough that bundling them
-would push the diff past the Phase 1 PR's already-substantial 1075
-lines. The Phase 1 page already wires `id={technique.id}` anchors and
-a `useHashScroll` helper, so the cross-piece deep-link contract is
-already live; Phase 2b can ship the star generation without further
-coupling to the gallery.
+Phases 1, 2a, and 2b have landed. Phase 3 is **split** so the
+toggle-wiring slice ships before the runtime-prereq slice, since
+the latter needs per-technique pre-flight checks (Heretic CLI on
+PATH, TimesFM model download status) that don't exist in the engine
+yet.
 
-**Phase 2a — Registry + technique cards (in PR, claude/m14-phase2-cards, 2026-04-29)**
+**Phase 3a — Toggle wiring + companion-dock acknowledgement (in PR, claude/m14-phase3-toggles, 2026-04-29)**
 
-1. **Promote the Phase 1 static inventory into a typed registry.**
-   Introduce `metis_app/services/forge_registry.py` with the
-   `TechniqueDescriptor` dataclass shape ADR 0014 fixed. Move the
-   13 static entries from
-   `metis_app/api_litestar/routes/forge.py:_TECHNIQUE_INVENTORY`
-   into the registry. Replace the route handler's
-   `_serialise(default_enabled)` path with one that calls
-   `descriptor.enabled_predicate(load_settings())` so the gallery
-   reflects live user overrides. Update
-   `tests/test_api_forge.py` to flex the live-read path with a
-   stubbed settings store (its `setting_keys` invariant still applies).
-2. **Render the cards.** Build
-   `apps/metis-web/components/forge/technique-card.tsx` and
-   `apps/metis-web/components/forge/technique-gallery.tsx`,
-   leaning on M02 primitives (`border-beam`, `tooltip`,
-   `animated-lucide-icon`). Read-only — no toggles yet (that's Phase 3).
-   Replace the placeholder `<ul>` rendering in `app/forge/page.tsx`
-   with the gallery component. Pillar tone variants already exist as
-   constants in the page; lift them into the card.
+1. **Extend `TechniqueDescriptor` with `enable_overrides` and
+   `disable_overrides` payloads.** When both are present the
+   gallery card shows a real `<button role="switch">`. Flipping it
+   ``POST``s the override payload to the existing `/v1/settings`
+   endpoint — no new endpoint, no fork of the descriptor's
+   ``enabled_predicate``. The route serialises the overrides plus
+   a convenience ``toggleable`` boolean so the frontend has one
+   field to gate the switch render on. Toggleable techniques today:
+   IterRAG convergence, sub-query expansion, hybrid search, MMR,
+   reranker, swarm personas, Tribev2 multimodal, news comets,
+   Hebbian edges, citation v2, semantic chunking — eleven of the
+   thirteen registry entries.
+2. **Wire the optimistic toggle on the gallery card.** Card holds
+   pending state for the spinner; on click the parent forge page
+   optimistically updates state, calls `toggleForgeTechnique()`,
+   reverts on failure, and emits a `CompanionActivityEvent` with
+   `source: "forge"` and `kind: "technique_toggled"`. The
+   `CompanionActivityEvent` type gains both enum entries; the
+   companion dock (`metis-companion-dock.tsx`) handles the new
+   source by surfacing an "absorbed X" / "stood down X" toast,
+   matching the principle-#4 "capability not configuration"
+   framing ADR 0014 calls out.
 
-**Phase 2b — Canvas-integrated Skills-sector stars (in PR, claude/m14-phase2-canvas-stars, 2026-04-29)**
+**Phase 3b — Pre-flight readiness for runtime-prereq techniques (next claimable)**
 
-3. **One canvas star per active technique, fanned around the Skills
-   faculty anchor.** Stars flow through the same projection /
-   camera transform user stars use, so they pan, zoom, and
-   parallax alongside the rest of the constellation. They are not
-   user content — drawn after `drawUserStars`, hit-tested via a
-   dedicated `getHitForgeStar`, click-routed straight to
-   `/forge#<technique-id>` (the star observatory dialog stays
-   reserved for user-content stars per ADR 0014).
-   New module `apps/metis-web/lib/forge-stars.ts` owns the
-   normalised position math (ring around the Skills anchor),
-   pillar → palette mapping, and the `useForgeStars()` hook that
-   re-fetches on document `visibilitychange` so toggles made
-   elsewhere in the app reflect when the user returns to the home
-   page. The home-page render-loop additions are limited to:
-   one ref, one render-loop call (`drawForgeStars(ts)`), one
-   hit-test, and one branch in `onCanvasPointerDown`.
+Heretic abliteration and TimesFM forecasting stay read-only in
+Phase 3a — the descriptor's `enable_overrides` is `None` and the
+card renders a small "Read-only — needs runtime check" lock badge
+instead of a switch. Phase 3b adds:
 
-The earlier scope-cut Phase 2b (a fixed-position SVG overlay,
-`<ForgeSkillsCluster>`, landed via PR #577 and merged into
-`32fb74c`) is **superseded** by this PR. The overlay component
-and its tests are deleted; the canvas-integrated stars take its
-place. Reviewer feedback: an overlay that does not zoom-track the
-constellation does not deliver the ""star in the Skills sector""
-promise.
+3. **Per-technique readiness probes.** Heretic needs the CLI on
+   `$PATH` (`heretic_service.is_heretic_available()`); TimesFM
+   needs the model downloaded and the `chat_path` rewire. The
+   route grows a `runtime_status: "ready" | "blocked"` field plus
+   an optional `runtime_blockers: string[]` (e.g.
+   `["heretic CLI not on PATH"]`). Toggleable cards also gain a
+   ``ready`` posture so a future technique that needs a model
+   download can use the same plumbing.
+4. **"Get ready" affordance for un-ready cards.** The lock badge
+   becomes a real CTA — for Heretic, opens a small dialog with the
+   install instructions; for TimesFM, deep-links to `/gguf` (the
+   model picker). Once the readiness probe passes, the lock
+   collapses into the regular toggle.
 
-Phases 3–7 keep the original *Proposed phase breakdown* below. Each
+Phases 4–7 keep the original *Proposed phase breakdown* below. Each
 should land on its own branch
 (`claude/m14-phase<N>-<descriptor>`).
 

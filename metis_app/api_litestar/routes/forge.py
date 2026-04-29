@@ -36,6 +36,13 @@ def _serialise(descriptor: TechniqueDescriptor, settings: dict[str, Any]) -> dic
         "setting_keys": list(descriptor.setting_keys),
         "engine_symbols": list(descriptor.engine_symbols),
         "recent_uses": [],
+        # Phase 3 — interactive toggle wiring. ``toggleable`` is a
+        # convenience for the frontend; the actual override payloads
+        # ride on the same object so the toggle button can call
+        # ``POST /v1/settings`` directly with the right keys.
+        "toggleable": descriptor.toggleable,
+        "enable_overrides": descriptor.enable_overrides,
+        "disable_overrides": descriptor.disable_overrides,
     }
 
 
