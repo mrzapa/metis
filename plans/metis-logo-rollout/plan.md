@@ -95,16 +95,19 @@ User decisions locked in during brainstorming (2026-04-28):
 ## Follow-ups filed (post-PR-open, 2026-04-29)
 
 - **"Living Mark" formation from starfield** — filed in
-  [`plans/IDEAS.md`](../IDEAS.md) under *Open ideas*. Triage
-  recommends **Promote** as a new milestone (M21); awaiting
-  go/no-go from user. Multi-day creative work that should not be
-  bundled into M20.
+  [`plans/IDEAS.md`](../IDEAS.md) under *Open ideas*. **Promote
+  decision locked, gated on M20 PR #574 landing.** When M20 merges
+  to `main`, the next agent runs `superpowers:brainstorming` on
+  the IDEAS entry, produces an M21 design doc, and adds a row to
+  `IMPLEMENTATION.md`. Stacking it on the open M20 PR risks
+  merge-conflict pain in `home-visual-system.tsx` (the same hero
+  M20 modifies).
 - **Wordmark typography lock-in** (Inter Tight Medium placeholder
   in `<MetisLockup>`) — filed in [`plans/IDEAS.md`](../IDEAS.md)
-  with **Park** recommendation. The placeholder degrades gracefully;
-  revisit when (a) marketing surfaces ship publicly and brand
-  consistency becomes load-bearing, or (b) design specifies a
-  typeface. One-hour patch when triggered.
+  *Iced* section as **Parked** 2026-04-29. The placeholder
+  degrades gracefully (Inter is already loaded); revisit when
+  design specifies a typeface or marketing surfaces ship
+  publicly. One-hour patch when triggered.
 - **Tauri `bundle.icon` whitelist** — investigated and **resolved
   as a non-issue** on 2026-04-29. The existing 5-file list is
   Tauri 2's standard desktop set; the additional 50+ files

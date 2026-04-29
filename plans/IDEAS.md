@@ -71,21 +71,7 @@ Template for agent-filed intake:
   - Overlap: M02 (Landed; owns the home visual system + landing-stars), M01 (Rolling; first-impression UX). Touches `apps/metis-web/components/home/home-visual-system.tsx` and possibly `apps/metis-web/lib/landing-stars/*` for the formation pathing.
   - Recommendation: **Promote** as a new milestone (M21). Substantial creative work (~multi-day) that warrants brainstorm + design + plan, not a patch. Should be claimed *after* M20 lands so the primitives are stable.
   - Rough scope: **multi-day**. Brainstorm + design (half-day) → formation animation prototype (1 day) → integration + reduced-motion fallback (half-day) → tuning (half-day).
-- **Decision:** *awaiting go/no-go.*
-
-### Wordmark typography lock-in for the lockup
-
-- **Source:** M20 implementation note; `<MetisLockup>` ships with `Inter Tight Medium` as a placeholder font-family.
-- **Ask:** Decide the canonical font for the lowercase `metis` wordmark in `<MetisLockup>` (OG image, `/setup` welcome, Apple touch, Tauri splash). The README header reference image looks like Inter Tight or Geist; design team has not formally specified.
-- **Context:** Inter is already loaded via `app/layout.tsx`; Inter Tight is the same Google-Fonts family with tighter tracking. Geist would require a new font load. A custom face is also possible. The choice affects only `<MetisLockup>`'s `font-family` rule — one-line code change once the typeface is decided. Visible on every external surface, so the choice is brand-load-bearing.
-- **Filed:** 2026-04-29 by claude/cranky-northcutt-42501d
-- **Triage:**
-  - What it is: A design decision, not an engineering effort. The implementation cost once a typeface is chosen is trivial (font-family swap + maybe an `@font-face` import).
-  - Pillar fit: **Cross-cutting** — visual identity, no behavior change.
-  - Overlap: None mechanical. Touches `apps/metis-web/components/brand/metis-lockup.tsx` only.
-  - Recommendation: **Park** until the design team weighs in. The current Inter Tight Medium placeholder is not embarrassing and degrades gracefully (Inter is already loaded). Revisit when (a) marketing surfaces ship to the public and brand consistency becomes load-bearing, or (b) design specifies a font.
-  - Rough scope: **1-hour patch** once the typeface is decided.
-- **Decision:** *parked* 2026-04-29; will be moved to *Iced* below if user confirms park.
+- **Decision:** **Promote — gated on M20 PR #574 landing** (2026-04-29). Living Mark touches the same `home-visual-system.tsx` hero that M20 modifies; stacking on the open PR risks merge-conflict pain if PR feedback rewrites that file. After M20 merges to `main`, the next agent runs `superpowers:brainstorming` on this entry, produces an M21 design doc, and adds the row to `IMPLEMENTATION.md`.
 
 ### ~~Metis logo rollout — M-star mark + glow primitives~~ → promoted as M20 ([`plans/metis-logo-rollout/plan.md`](metis-logo-rollout/plan.md))
 - **Source:** `m_star_logo_traced.svg` provided by the design team on 2026-04-28 (1000×1000 viewBox, single fill-rule:evenodd path, `fill="#111111"`). Reference image: GitHub README header with white mark + cyan halo + topographic ripple rings + lowercase `metis` wordmark on dark navy.
@@ -212,6 +198,19 @@ Template for agent-filed intake:
 ## Iced
 
 <!-- Parked ideas — not rejected, not active. -->
+
+### Wordmark typography lock-in for the lockup
+- **Source:** M20 implementation note; `<MetisLockup>` ships with `Inter Tight Medium` as a placeholder font-family.
+- **Ask:** Decide the canonical font for the lowercase `metis` wordmark in `<MetisLockup>` (OG image, `/setup` welcome, Apple touch, Tauri splash). The README header reference image looks like Inter Tight or Geist; design team has not formally specified.
+- **Context:** Inter is already loaded via `app/layout.tsx`; Inter Tight is the same Google-Fonts family with tighter tracking. Geist would require a new font load. A custom face is also possible. The choice affects only `<MetisLockup>`'s `font-family` rule — one-line code change once the typeface is decided. Visible on every external surface, so the choice is brand-load-bearing.
+- **Filed:** 2026-04-29 by claude/cranky-northcutt-42501d
+- **Triage:**
+  - What it is: A design decision, not an engineering effort. The implementation cost once a typeface is chosen is trivial (font-family swap + maybe an `@font-face` import).
+  - Pillar fit: **Cross-cutting** — visual identity, no behavior change.
+  - Overlap: None mechanical. Touches `apps/metis-web/components/brand/metis-lockup.tsx` only.
+  - Recommendation: **Park** until the design team weighs in. The current Inter Tight Medium placeholder is not embarrassing and degrades gracefully (Inter is already loaded). Revisit when (a) marketing surfaces ship to the public and brand consistency becomes load-bearing, or (b) design specifies a font.
+  - Rough scope: **1-hour patch** once the typeface is decided.
+- **Decision:** **Parked** 2026-04-29. Revisit when design specifies a typeface or marketing surfaces ship publicly.
 
 ### Local-first product analytics for onboarding measurement
 - **Source:** Observation from founders-kit review pass (2026-04-18)
