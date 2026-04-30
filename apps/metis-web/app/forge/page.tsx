@@ -6,6 +6,7 @@ import { PageChrome } from "@/components/shell/page-chrome";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { AbsorbForm } from "@/components/forge/absorb-form";
+import { ProposalReviewPane } from "@/components/forge/proposal-review-pane";
 import { TechniqueGallery } from "@/components/forge/technique-gallery";
 import {
   fetchForgeTechniques,
@@ -18,6 +19,10 @@ import { useHashScroll } from "@/lib/use-hash-scroll";
 export default function ForgePage() {
   const [techniques, setTechniques] = useState<ForgeTechnique[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // M14 Phase 4b — bumping this prop re-fetches the proposal review
+  // pane after a successful absorb, so a freshly-persisted proposal
+  // surfaces immediately instead of after a manual reload.
+  const [proposalRefreshKey, setProposalRefreshKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,7 +120,10 @@ export default function ForgePage() {
           />
         ) : (
           <>
-            <AbsorbForm />
+            <AbsorbForm
+              onProposalPersisted={() => setProposalRefreshKey((n) => n + 1)}
+            />
+            <ProposalReviewPane refreshKey={proposalRefreshKey} />
             <TechniqueGallery techniques={techniques} onToggle={handleToggle} />
             <p className="text-xs text-muted-foreground/60">
               Flipping a card writes the technique&apos;s setting overrides through

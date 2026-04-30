@@ -3866,7 +3866,88 @@ export interface ForgeAbsorbResponse {
   source_url: string;
   matches: ForgeAbsorbMatch[];
   proposal: ForgeAbsorbProposal | null;
+  // Phase 4b — present when the absorb pipeline persisted the
+  // proposal to ``forge_proposals.db`` for later review. ``null``
+  // when no proposal was generated or the persistence layer failed
+  // (the absorb result is still useful in-memory).
+  proposal_id: number | null;
   error: string | null;
+}
+
+// ── M14 Phase 4b — proposal persistence + review pane ─────────────
+
+export type ForgeProposalStatus = "pending" | "accepted" | "rejected";
+
+export interface ForgeProposalRecord {
+  id: number;
+  source_url: string;
+  arxiv_id: string | null;
+  title: string;
+  summary: string | null;
+  proposal_name: string;
+  proposal_claim: string;
+  proposal_pillar: ForgePillar;
+  proposal_sketch: string;
+  status: ForgeProposalStatus;
+  created_at: number;
+  resolved_at: number | null;
+  skill_path: string | null;
+}
+
+export interface ForgeProposalsResponse {
+  proposals: ForgeProposalRecord[];
+}
+
+export async function listForgeProposals(
+  status: ForgeProposalStatus = "pending",
+): Promise<ForgeProposalsResponse> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/forge/proposals?status=${encodeURIComponent(status)}`,
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to list forge proposals (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as ForgeProposalsResponse;
+}
+
+export interface ForgeProposalAcceptResponse {
+  status: "accepted";
+  skill_path: string;
+  proposal_id: number;
+}
+
+export async function acceptForgeProposal(
+  proposalId: number,
+): Promise<ForgeProposalAcceptResponse> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/forge/proposals/${proposalId}/accept`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to accept proposal (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as ForgeProposalAcceptResponse;
+}
+
+export async function rejectForgeProposal(proposalId: number): Promise<void> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/forge/proposals/${proposalId}/reject`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to reject proposal (${res.status}): ${detail}`);
+  }
 }
 
 /**

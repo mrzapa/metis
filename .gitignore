@@ -34,6 +34,7 @@ assistant_state.json
 rag_sessions.db
 app_state.db
 skill_candidates.db
+forge_proposals.db
 network_audit.db
 network_audit.db-*
 news_items.db

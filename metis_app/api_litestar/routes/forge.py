@@ -22,11 +22,13 @@ single GET cannot stutter on multiple JSON loads.
 from __future__ import annotations
 
 import logging
+import pathlib
 from typing import Any
 
 from litestar import Router, get, post
 from litestar.exceptions import HTTPException
 
+from metis_app.services import forge_proposals
 from metis_app.services.forge_absorb import absorb
 from metis_app.services.forge_registry import (
     TechniqueDescriptor,
@@ -35,6 +37,27 @@ from metis_app.services.forge_registry import (
 from metis_app.settings_store import load_settings
 
 log = logging.getLogger(__name__)
+
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+
+
+def _proposal_db_path() -> pathlib.Path:
+    """Resolve the on-disk path for ``forge_proposals.db``.
+
+    Wrapped in a thin function so tests can patch the path to a
+    pytest tmp_path without leaking writes to the repo root. Falls
+    through to ``forge_proposals.DEFAULT_DB_PATH`` in production.
+    """
+    return forge_proposals.DEFAULT_DB_PATH
+
+
+def _skills_root_for_drafts() -> pathlib.Path:
+    """Resolve the directory new skill drafts get written to.
+
+    Defaults to ``<repo>/skills`` (the same place the existing nine
+    YAML-frontmatter skills live). Tests patch this to a tmp path.
+    """
+    return _REPO_ROOT / "skills"
 
 
 def _serialise(descriptor: TechniqueDescriptor, settings: dict[str, Any]) -> dict[str, Any]:
@@ -119,11 +142,109 @@ def absorb_technique(data: dict[str, Any]) -> dict[str, Any]:
 
     settings = load_settings()
     llm = _build_llm_for_absorb(settings)
-    return absorb(url.strip(), llm=llm)
+    result = absorb(url.strip(), llm=llm)
+
+    # Phase 4b — persist successful proposals so the review pane
+    # survives a reload. We only save when the absorb pipeline
+    # actually produced a proposal; matches-only or error responses
+    # don't pollute the db.
+    proposal_id: int | None = None
+    proposal = result.get("proposal")
+    if proposal:
+        try:
+            proposal_id = forge_proposals.save_proposal(
+                db_path=_proposal_db_path(),
+                source_url=str(result.get("source_url") or url),
+                arxiv_id=str(result.get("arxiv_id") or "") or None,
+                title=str(result.get("title") or ""),
+                summary=str(result.get("summary") or "") or None,
+                proposal_name=str(proposal.get("name") or ""),
+                proposal_claim=str(proposal.get("claim") or ""),
+                proposal_pillar=str(proposal.get("pillar_guess") or "cross-cutting"),
+                proposal_sketch=str(proposal.get("implementation_sketch") or ""),
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Persistence is a best-effort enhancement — if the db is
+            # unwritable (read-only filesystem, packaging issue), the
+            # absorb result still ships; the user just loses the
+            # review-pane survival behaviour.
+            log.warning("Forge proposal persistence failed: %s", exc)
+    result["proposal_id"] = proposal_id
+    return result
+
+
+@get("/v1/forge/proposals", sync_to_thread=False)
+def list_proposals_route(status: str | None = None) -> dict[str, Any]:
+    """Return persisted proposals newest-first.
+
+    Defaults to ``status="pending"`` so the review pane only renders
+    rows that still need a decision. Pass ``?status=accepted`` (or
+    ``rejected``) to fetch the audit history.
+    """
+    rows = forge_proposals.list_proposals(
+        db_path=_proposal_db_path(),
+        status=status if status else "pending",
+    )
+    return {"proposals": rows}
+
+
+@post("/v1/forge/proposals/{proposal_id:int}/accept", status_code=200, sync_to_thread=False)
+def accept_proposal_route(proposal_id: int) -> dict[str, Any]:
+    """Draft a ``skills/<slug>/SKILL.md`` from the proposal and mark
+    the row accepted. Returns ``{status, skill_path}`` so the
+    frontend can deep-link the user to the file they should edit.
+
+    A 409 is returned when the slug already has a SKILL.md (the
+    user has accepted twice; we don't silently clobber). A 404
+    means the id doesn't exist.
+    """
+    db_path = _proposal_db_path()
+    proposal = forge_proposals.get_proposal(db_path=db_path, proposal_id=proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail=f"proposal {proposal_id} not found")
+
+    skills_root = _skills_root_for_drafts()
+    try:
+        skill_path = forge_proposals.write_skill_draft(
+            db_path=db_path,
+            proposal_id=proposal_id,
+            skills_root=skills_root,
+        )
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    relative = str(skill_path.relative_to(skills_root.parent)) if skill_path.is_absolute() else str(skill_path)
+    forge_proposals.mark_accepted(
+        db_path=db_path,
+        proposal_id=proposal_id,
+        skill_path=relative,
+    )
+    return {
+        "status": "accepted",
+        "skill_path": relative,
+        "proposal_id": proposal_id,
+    }
+
+
+@post("/v1/forge/proposals/{proposal_id:int}/reject", status_code=200, sync_to_thread=False)
+def reject_proposal_route(proposal_id: int) -> dict[str, Any]:
+    """Mark the proposal rejected without writing any skill draft."""
+    db_path = _proposal_db_path()
+    proposal = forge_proposals.get_proposal(db_path=db_path, proposal_id=proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail=f"proposal {proposal_id} not found")
+    forge_proposals.mark_rejected(db_path=db_path, proposal_id=proposal_id)
+    return {"status": "rejected", "proposal_id": proposal_id}
 
 
 router = Router(
     path="",
-    route_handlers=[list_techniques, absorb_technique],
+    route_handlers=[
+        list_techniques,
+        absorb_technique,
+        list_proposals_route,
+        accept_proposal_route,
+        reject_proposal_route,
+    ],
     tags=["forge"],
 )

@@ -10,23 +10,30 @@ import {
 } from "@/lib/api";
 import { PILLAR_LABEL, PILLAR_TONE } from "@/components/forge/pillar";
 
-// M14 Phase 4a — "Absorb a technique" form at the top of the Forge
+// M14 Phase 4a/4b — "Absorb a technique" form at the top of the Forge
 // gallery. Accepts an arxiv URL, POSTs it to ``/v1/forge/absorb``,
 // and renders the response inline. The server side runs the
-// fetch → cross-reference → LLM-summary pipeline; the UI is just
-// "submit, render result, show errors honestly".
+// fetch → cross-reference → LLM-summary pipeline; Phase 4b's route
+// also persists the proposal so the review pane below can pick it
+// up without a manual reload.
 //
-// Phase 4a explicit boundaries:
-// * No persistence — the result is in-memory only. Refreshing the
-//   page loses it. Phase 4b adds the proposals.db review pane.
-// * arxiv-only — non-arxiv URLs come back with
+// Boundaries:
+// * arxiv-only ingestion — non-arxiv URLs come back with
 //   ``source_kind="unsupported"`` and we show the user a clear
 //   message rather than pretending to process them.
 // * The pipeline NEVER writes engine code. The proposal is a
 //   structured *document*; per ADR 0014 the user must hand-review
 //   before any engine change ships.
 
-export function AbsorbForm() {
+interface AbsorbFormProps {
+  /** Called when the absorb pipeline successfully persisted a
+   *  proposal (Phase 4b). The forge page bumps a refresh key so
+   *  the proposal review pane below this form re-fetches and the
+   *  freshly-saved proposal appears immediately. */
+  onProposalPersisted?: (proposalId: number) => void;
+}
+
+export function AbsorbForm({ onProposalPersisted }: AbsorbFormProps = {}) {
   const [url, setUrl] = useState("");
   const [result, setResult] = useState<ForgeAbsorbResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +49,9 @@ export function AbsorbForm() {
     try {
       const payload = await absorbForgeUrl(trimmed);
       setResult(payload);
+      if (payload.proposal_id !== null && onProposalPersisted) {
+        onProposalPersisted(payload.proposal_id);
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Absorb request failed.";
       setError(message);

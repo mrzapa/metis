@@ -1,12 +1,18 @@
 ---
 Milestone: The Forge (M14)
 Status: In progress
-Claim: claude/m14-phase4a-absorb (Phase 4a — arXiv-paste absorption pipeline)
-Last updated: 2026-04-30 by claude/m14-phase4a-absorb
+Claim: claude/m14-phase4b-proposals (Phase 4b — proposal persistence + review pane)
+Last updated: 2026-04-30 by claude/m14-phase4b-proposals
 Vision pillar: Companion + Cortex
 ---
 
 ## Progress
+
+**Phase 4a — arXiv-paste absorption pipeline (Landed via PR #581 / `985ed02`, 2026-04-30)**
+
+* `metis_app/services/forge_absorb.py` (new) owns the four-step pipeline: SSRF-safe fetch through `audited_urlopen` (`forge.absorb` trigger), arxiv ID parsing, Atom-API metadata extraction, token-overlap cross-reference against the registry, and an LLM call with a strict-JSON system prompt that returns a `TechniqueProposal`.
+* `POST /v1/forge/absorb` route + `<AbsorbForm>` mounted above the gallery; in-memory only (Phase 4b adds persistence).
+* Codex P2 follow-up: `extract_arxiv_id` now validates hostname against an allow-list (`{arxiv.org, www.arxiv.org, export.arxiv.org}`) and anchors the regex on the path component instead of substring-searching the full URL — closes a spoofing path where `notarxiv.org/abs/...` or arxiv URLs in query parameters were silently treated as arxiv sources.
 
 **Phase 3b — Runtime readiness probes + Get-ready CTA (Landed via PR #580 / `f92ff68`, 2026-04-29)**
 
@@ -157,72 +163,51 @@ What's in place today that M14 will lean on:
 
 ## Next up
 
-Phases 1, 2a, 2b, 3a, and 3b have landed. Phase 4 splits the
-"Absorb a technique" flow into three slices so the LLM-driven
-pipeline ships before the persistence + comet-feed integration.
+Phases 1, 2a, 2b, 3a, 3b, and 4a have landed. Phase 4b adds
+persistence + review pane so a successful absorb survives a
+reload; Phase 4c (news-comet auto-absorb) stays deferred.
 
-**Phase 4a — arXiv-paste absorption pipeline (in PR, claude/m14-phase4a-absorb, 2026-04-30)**
+**Phase 4b — Proposal persistence + review pane (in PR, claude/m14-phase4b-proposals, 2026-04-30)**
 
-5. **Arxiv-only absorb pipeline.** New module
-   `metis_app/services/forge_absorb.py` owns:
-   * `_safe_get_bytes` — SSRF-safe fetch through `audited_urlopen`
-     with a `forge.absorb` trigger so the M17 panel attributes the
-     call. Mirrors the size-cap + timeout pattern from
-     `news_ingest_service._safe_get`.
-   * `extract_arxiv_id` — parses `/abs/<id>`, `/abs/<id>vN`,
-     `/pdf/<id>.pdf`, and the legacy `<archive>/<id>` form.
-   * `fetch_arxiv_metadata` — pulls title + abstract from the free
-     arxiv Atom API.
-   * `cross_reference_against_registry` — token-overlap match
-     against the existing descriptor name+description text. Surfaces
-     "you already have this" candidates the user can deep-link to
-     via the existing `/forge#<id>` anchors.
-   * `summarise_to_proposal` — calls the assistant's configured LLM
-     (`create_llm(settings)`) with a strict-JSON-out system prompt
-     and parses the response into a `TechniqueProposal` dict
-     (`{name, claim, pillar_guess, implementation_sketch}`). Empty
-     or unparseable responses collapse to `None`; the route surfaces
-     a "couldn't draft a proposal" hint when the user has no LLM
-     provider configured.
-   * `absorb` — orchestrator that runs the four steps above and
-     returns a `{source_kind, title, summary, source_url, matches,
-     proposal, error}` envelope.
-6. **`POST /v1/forge/absorb` route** in `metis_app/api_litestar/routes/forge.py`.
-   Validates the URL (4xx on missing/empty), resolves the LLM via a
-   thin `_build_llm_for_absorb(settings)` helper that swallows
-   `create_llm` failures so the endpoint returns a `proposal: null`
-   payload instead of a 500. SSRF guard at the orchestrator level
-   rejects non-`http(s)` schemes; non-arxiv URLs come back with
-   `source_kind="unsupported"` so the gallery can render an honest
-   "Phase 4a only ingests arxiv" message.
-7. **`<AbsorbForm>`** at the top of the gallery —
-   `apps/metis-web/components/forge/absorb-form.tsx`. URL input +
-   submit button; on submit calls `absorbForgeUrl(url)` and renders
-   the response inline. The result panel has three branches:
-   matches against the existing registry (clickable, deep-link to
-   the relevant card via `/forge#<id>`), a proposal panel
-   (name + claim + pillar + sketch + a "Phase 4a — proposal only"
-   notice per ADR 0014's "no untrusted code from papers"
-   boundary), or a clear unsupported / error message. Loading
-   spinner on the submit button while the request is in flight;
-   form is in-memory only — refresh loses the result.
-
-**Phase 4b — Proposal persistence + review pane (next claimable)**
-
-8. Persist accepted proposals into a new `forge_proposals.db` (or
-   extend the existing `skill_candidates.db`; ADR 0011 will
-   resolve). Add a "Pending proposals" section to the gallery so a
-   proposal survives a reload and the user can take action later.
-   The accept handler drafts a `skills/<id>/SKILL.md` (YAML
-   frontmatter + body); reject marks the row promoted+rejected.
+8. **Persist successful proposals to ``forge_proposals.db``.** New
+   module ``metis_app/services/forge_proposals.py`` owns a small
+   sqlite layer (separate from M06's ``skill_candidates.db`` —
+   different domain, different fields) with:
+   * ``save_proposal`` — writes a row with the proposal fields
+     plus the source URL and arxiv id, status ``pending``.
+   * ``list_proposals`` — newest-first, filterable by status.
+   * ``get_proposal`` — full row by id.
+   * ``mark_accepted`` / ``mark_rejected`` — set status +
+     ``resolved_at`` timestamp; accepted rows also record
+     ``skill_path``.
+   * ``slugify_proposal_name`` + ``write_skill_draft`` — produce
+     a YAML-frontmatter ``skills/<slug>/SKILL.md`` with
+     ``enabled_by_default: false``, empty
+     ``runtime_overrides``, and a body that surfaces the
+     proposal claim + sketch + source URL. Refuses to overwrite
+     an existing draft (route raises 409).
+9. **Three new routes** under ``/v1/forge/proposals``:
+   ``GET`` (defaults to ``status=pending``),
+   ``POST /<id>/accept`` (writes the skill draft + marks accepted),
+   ``POST /<id>/reject`` (marks rejected, no draft). The existing
+   absorb route also persists on success and includes the new
+   ``proposal_id`` in its response so the frontend can refresh
+   the review pane immediately.
+10. **`<ProposalReviewPane>`** mounts between `<AbsorbForm>` and
+    the technique gallery. Fetches pending proposals, hides
+    itself when there are none, and renders one row per proposal
+    with Accept (drafts the skill) and Dismiss (rejects)
+    actions. Bumps a ``refreshKey`` from the parent forge page
+    after each absorb so a freshly-persisted proposal shows up
+    without a manual reload.
 
 **Phase 4c — News-comet auto-absorb (deferred)**
 
-9. The M13 comet decision-engine emits "absorb" recommendations
-   for high-score arxiv comets. Phase 4c routes those into the
-   same `forge_proposals.db` so a user opening the Forge sees
-   "your METIS noticed three papers overnight — review them."
-   No new ingestion; just plumb the existing comet output.
+11. The M13 comet decision-engine emits "absorb" recommendations
+    for high-score arxiv comets. Phase 4c routes those into the
+    same `forge_proposals.db` so a user opening the Forge sees
+    "your METIS noticed three papers overnight — review them."
+    No new ingestion; just plumb the existing comet output.
 
 Phases 5–7 keep the original *Proposed phase breakdown* below. Each
 phase should land on its own branch

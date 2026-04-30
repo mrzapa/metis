@@ -37,6 +37,7 @@ const arxivResponse: ForgeAbsorbResponse = {
     pillar_guess: "cortex",
     implementation_sketch: "Score top-k hits with a cross-encoder.",
   },
+  proposal_id: 42,
   error: null,
 };
 
@@ -95,6 +96,7 @@ describe("<AbsorbForm />", () => {
       source_url: "https://example.com/blog",
       matches: [],
       proposal: null,
+      proposal_id: null,
       error: null,
     });
     render(<AbsorbForm />);
@@ -121,11 +123,12 @@ describe("<AbsorbForm />", () => {
   });
 
   it("disables the submit button while the request is in flight", async () => {
-    let resolveAbsorb: ((value: ForgeAbsorbResponse) => void) | null = null;
+    type Resolver = ((value: ForgeAbsorbResponse) => void) | null;
+    const resolverRef: { current: Resolver } = { current: null };
     mockAbsorb.fn.mockImplementation(
       () =>
         new Promise<ForgeAbsorbResponse>((resolve) => {
-          resolveAbsorb = resolve;
+          resolverRef.current = resolve;
         }),
     );
     render(<AbsorbForm />);
@@ -139,7 +142,7 @@ describe("<AbsorbForm />", () => {
       expect(screen.getByRole("button", { name: /absorbing/i })).toBeDisabled();
     });
 
-    resolveAbsorb?.(arxivResponse);
+    resolverRef.current?.(arxivResponse);
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /^absorb$/i })).not.toBeDisabled();
     });
