@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, FileText, Loader2, TriangleAlert, X } from "lucide-react";
+import { Check, FileText, Loader2, Sparkles, TriangleAlert, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   acceptForgeProposal,
@@ -178,9 +178,21 @@ function ProposalRow({
       className="flex flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.02] p-3"
     >
       <header className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h3 className="font-display text-sm font-semibold text-foreground">
-          {proposal.proposal_name}
-        </h3>
+        <div className="flex flex-wrap items-baseline gap-2">
+          <h3 className="font-display text-sm font-semibold text-foreground">
+            {proposal.proposal_name}
+          </h3>
+          {proposal.source === "comet" ? (
+            <span
+              data-testid="forge-proposal-comet-badge"
+              title="Auto-generated from your news-comet feed"
+              className="inline-flex items-center gap-1 rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-amber-200"
+            >
+              <Sparkles className="size-2.5" aria-hidden="true" />
+              From comet feed
+            </span>
+          ) : null}
+        </div>
         <span
           className={cn(
             "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em]",

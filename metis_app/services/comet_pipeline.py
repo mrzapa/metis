@@ -20,6 +20,8 @@ from typing import Any
 
 from metis_app.models.comet_event import CometEvent
 from metis_app.services.comet_decision_engine import CometDecisionEngine
+from metis_app.services.forge_comet_bridge import auto_absorb_comets
+from metis_app.services.forge_proposals import DEFAULT_DB_PATH as FORGE_PROPOSALS_DB_PATH
 from metis_app.services.news_feed_repository import (
     NewsFeedRepository,
     get_default_repository,
@@ -137,7 +139,41 @@ def run_poll_cycle(
         if repo.record_comet(event):
             persisted.append(event)
 
+    # Phase 4c — opt-in forge-bridge fanout. Routes high-relevance
+    # arxiv absorb-decisions into the same review pane the manual
+    # ``/v1/forge/absorb`` endpoint feeds. Worker-hardened: any
+    # exception in the bridge is logged and dropped, so a Forge
+    # outage doesn't kill the comet polling worker.
+    if settings.get("forge_comet_auto_absorb_enabled", False):
+        try:
+            auto_absorb_comets(
+                persisted,
+                db_path=FORGE_PROPOSALS_DB_PATH,
+                llm_factory=lambda: _build_llm(settings),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("forge auto-absorb bridge failed: %s", exc)
+
     return {
         "comets": [c.to_dict() for c in persisted],
         "total_active": repo.list_active_count(),
     }
+
+
+def _build_llm(settings: dict[str, Any]) -> Any | None:
+    """Resolve the assistant LLM for the bridge's absorb call.
+
+    Lazy-imported so the comet-polling worker doesn't pay
+    ``llm_providers``' import cost when ``forge_comet_auto_absorb_enabled``
+    is off (the common case).
+    """
+    try:
+        from metis_app.utils.llm_providers import create_llm
+    except Exception as exc:  # noqa: BLE001
+        log.warning("forge auto-absorb: cannot import llm_providers: %s", exc)
+        return None
+    try:
+        return create_llm(settings)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("forge auto-absorb: create_llm failed: %s", exc)
+        return None

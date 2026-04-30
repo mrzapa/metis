@@ -205,6 +205,7 @@
   "news_comet_auto_absorb_threshold": 0.75,
   "news_comet_rss_feeds": [],
   "news_comet_reddit_subs": [],
+  "forge_comet_auto_absorb_enabled": false,
   "seedling_feed_db_path": "",
   "seedling_feed_retention_days": 14,
   "seedling_feed_max_rows": 50000,
