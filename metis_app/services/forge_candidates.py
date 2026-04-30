@@ -40,6 +40,7 @@ from metis_app.services.skill_repository import SkillRepository
 log = logging.getLogger(__name__)
 
 SettingsWriter = Callable[[dict[str, Any]], None]
+SettingsReader = Callable[[], dict[str, Any]]
 
 # Slug regex matches the rules ``parse_skill_file`` consumers
 # enforce: lowercase, alphanumeric + hyphen, no leading/trailing
@@ -222,6 +223,32 @@ def _yaml_escape(value: str) -> str:
     return value
 
 
+def _merge_skills_enabled(
+    existing_skills: Any, slug: str
+) -> dict[str, Any]:
+    """Return a copy of ``existing_skills`` with ``enabled[slug] = True``
+    spliced in, preserving every other key the caller already had.
+
+    ``save_settings`` does a top-level shallow ``dict.update``, so if we
+    handed it ``{"skills": {"enabled": {slug: True}}}`` the entire
+    ``skills`` object would be overwritten — wiping unrelated toggles
+    and any sibling subkeys like ``skills.config``. Centralising the
+    merge here makes the deep-merge intent obvious and keeps the writer
+    contract narrow (it only ever sees the single top-level
+    ``skills`` field).
+    """
+    base: dict[str, Any] = (
+        dict(existing_skills) if isinstance(existing_skills, dict) else {}
+    )
+    enabled_existing = base.get("enabled")
+    enabled: dict[str, Any] = (
+        dict(enabled_existing) if isinstance(enabled_existing, dict) else {}
+    )
+    enabled[slug] = True
+    base["enabled"] = enabled
+    return base
+
+
 def accept_candidate(
     *,
     candidates_db: pathlib.Path,
@@ -229,6 +256,7 @@ def accept_candidate(
     skills_root: pathlib.Path,
     settings_writer: SettingsWriter,
     slug_override: str | None = None,
+    settings_reader: SettingsReader | None = None,
 ) -> dict[str, Any]:
     """Promote a candidate into a real skill draft + activate it.
 
@@ -242,11 +270,19 @@ def accept_candidate(
        (raises ``FileExistsError`` → route translates to 409).
     4. Write the skill draft (``parse_skill_file``-valid frontmatter
        per the round-trip test in ``test_forge_candidates.py``).
-    5. Call ``settings_writer({"skills": {"enabled": {slug: True}}})``
-       so the runtime turns the skill on; the writer is injected so
-       callers can route the update through the existing
-       ``/v1/settings`` endpoint or test fixtures.
+    5. Deep-merge the new ``enabled[slug] = True`` toggle into the
+       existing ``settings["skills"]`` snapshot (read via
+       ``settings_reader``) and pass the *full* updated ``skills``
+       object to ``settings_writer``. ``save_settings`` does a
+       shallow ``dict.update``, so this preserves unrelated skill
+       toggles (regression: PR #584 Codex P1).
     6. Mark the candidate row promoted via the existing repo helper.
+
+    Atomicity: if ``settings_writer`` raises, the just-written
+    ``SKILL.md`` is removed (and the empty slug folder torn down) and
+    the candidate row stays pending so a retry re-enters the accept
+    flow cleanly instead of hitting ``FileExistsError`` on step 3
+    (regression: PR #584 Codex P2).
 
     Returns ``{slug, skill_path, candidate_id, name, description}``
     so the route can surface the file path back to the frontend
@@ -287,17 +323,34 @@ def accept_candidate(
     skill_path.write_text(contents, encoding="utf-8")
 
     # Flip the settings override so the runtime treats the skill as
-    # ON for this user. The writer is responsible for merging this
-    # patch into the live settings store; we hand it the minimal
-    # diff so the same endpoint that powers Phase 3a's toggle
-    # writes can be reused.
-    settings_writer(
-        {
-            "skills": {
-                "enabled": {slug: True},
-            },
-        }
-    )
+    # ON for this user. We deep-merge into the existing skills snapshot
+    # because ``save_settings`` only does a top-level shallow update —
+    # passing the partial diff would clobber unrelated toggles.
+    try:
+        existing = settings_reader() if settings_reader is not None else {}
+        merged_skills = _merge_skills_enabled(existing.get("skills"), slug)
+        settings_writer({"skills": merged_skills})
+    except Exception:
+        # Roll back the draft we just wrote so a retry doesn't hit
+        # FileExistsError. We deliberately don't catch+swallow here:
+        # the caller (route layer) needs the original exception to map
+        # it to a meaningful HTTP status.
+        try:
+            skill_path.unlink(missing_ok=True)
+            # Only remove the slug folder if we created it empty; never
+            # tear down a directory that holds other files.
+            try:
+                skill_dir.rmdir()
+            except OSError:
+                pass
+        except OSError:
+            log.warning(
+                "forge_candidates: failed to roll back %s after settings "
+                "writer error",
+                skill_path,
+                exc_info=True,
+            )
+        raise
 
     # Finally, mark the candidate row promoted so the auto-promotion
     # path doesn't re-process it. We keep ``rejected = 0`` because

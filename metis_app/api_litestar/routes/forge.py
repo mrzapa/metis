@@ -295,6 +295,7 @@ def accept_candidate_route(
             candidate_id=candidate_id,
             skills_root=_skills_root_for_drafts(),
             settings_writer=_save_settings,
+            settings_reader=load_settings,
             slug_override=slug_override,
         )
     except LookupError as exc:

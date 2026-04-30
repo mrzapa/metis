@@ -195,6 +195,102 @@ def test_accept_candidate_uses_slug_override_when_provided(
     assert (skills_root / "my-awesome-reranker" / "SKILL.md").exists()
 
 
+def test_accept_candidate_preserves_existing_skill_toggles(
+    candidates_db: pathlib.Path, tmp_path: pathlib.Path,
+) -> None:
+    """Accept must not clobber unrelated skill toggles. ``save_settings``
+    does a shallow ``dict.update``, so the service has to deep-merge the
+    new slug into the *existing* ``settings["skills"]`` payload before
+    handing it off to the writer.
+
+    Regression for the Phase 5 Codex P1 review on PR #584: previously,
+    the service handed the writer ``{"skills": {"enabled": {slug: True}}}``
+    which would overwrite the entire existing ``skills`` object — wiping
+    other-skill toggles and any sibling ``skills.config`` entries.
+    """
+    from metis_app.services.forge_candidates import accept_candidate
+
+    skills_root = tmp_path / "skills"
+    settings_writes: list[dict[str, object]] = []
+
+    def fake_settings_writer(payload: dict[str, object]) -> None:
+        settings_writes.append(payload)
+
+    def fake_settings_reader() -> dict[str, object]:
+        return {
+            "skills": {
+                "enabled": {
+                    "existing-skill": True,
+                    "another-disabled-one": False,
+                },
+                "config": {"existing-skill": {"foo": "bar"}},
+            }
+        }
+
+    result = accept_candidate(
+        candidates_db=candidates_db,
+        candidate_id=1,
+        skills_root=skills_root,
+        settings_writer=fake_settings_writer,
+        settings_reader=fake_settings_reader,
+    )
+
+    assert settings_writes, "expected settings_writer to be called"
+    payload = settings_writes[0]
+    assert "skills" in payload
+    skills_payload = payload["skills"]
+    assert isinstance(skills_payload, dict)
+    enabled = skills_payload["enabled"]
+    assert isinstance(enabled, dict)
+    # Pre-existing toggles preserved.
+    assert enabled["existing-skill"] is True
+    assert enabled["another-disabled-one"] is False
+    # The newly-accepted skill turned on.
+    assert enabled[result["slug"]] is True
+    # Sibling subkey (e.g. ``skills.config``) was not dropped.
+    assert skills_payload["config"] == {"existing-skill": {"foo": "bar"}}
+
+
+def test_accept_candidate_rolls_back_skill_file_on_writer_failure(
+    candidates_db: pathlib.Path, tmp_path: pathlib.Path,
+) -> None:
+    """If ``settings_writer`` raises after the SKILL.md draft has been
+    written, the service must delete the draft so the user can retry
+    without hitting ``FileExistsError`` and the candidate row stays
+    pending so the retry actually re-enters the accept flow.
+
+    Regression for the Phase 5 Codex P2 review on PR #584.
+    """
+    import sqlite3 as _sqlite3
+
+    from metis_app.services.forge_candidates import accept_candidate
+
+    skills_root = tmp_path / "skills"
+
+    def failing_writer(_payload: dict[str, object]) -> None:
+        raise OSError("settings.json read-only")
+
+    with pytest.raises(OSError):
+        accept_candidate(
+            candidates_db=candidates_db,
+            candidate_id=1,
+            skills_root=skills_root,
+            settings_writer=failing_writer,
+        )
+
+    # The draft must NOT remain on disk: a retry would otherwise hit
+    # FileExistsError and the user would be stuck in a partially-applied
+    # state.
+    expected = skills_root / "how-do-i-rerank-results-with-a" / "SKILL.md"
+    assert not expected.exists()
+    # Candidate stays pending so the retry can re-enter the flow.
+    with _sqlite3.connect(candidates_db) as conn:
+        row = conn.execute(
+            "SELECT promoted, rejected FROM skill_candidates WHERE id = 1"
+        ).fetchone()
+    assert row == (0, 0)
+
+
 def test_reject_candidate_marks_promoted_and_rejected(
     candidates_db: pathlib.Path,
 ) -> None:
