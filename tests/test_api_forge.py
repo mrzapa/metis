@@ -218,6 +218,95 @@ def test_disable_overrides_clear_every_predicate_input_for_or_predicates() -> No
             )
 
 
+def test_absorb_route_returns_arxiv_proposal_payload() -> None:
+    """End-to-end through the route: an arxiv URL is fetched (mocked),
+    cross-referenced, and (with a mocked LLM) returns a proposal."""
+    fake_atom = b"""<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2501.12345v1</id>
+    <title>Cross-encoder reranking that matters</title>
+    <summary>We propose a sparse cross-encoder reranking method that
+combines BM25 hits with a neural reranking pass.</summary>
+  </entry>
+</feed>
+"""
+    fake_proposal = (
+        '{"name": "Sparse Cross-Encoder Reranking",'
+        ' "claim": "Reranks BM25 hits with a small cross-encoder.",'
+        ' "pillar_guess": "cortex",'
+        ' "implementation_sketch": "Score top-k hits with a cross-encoder."}'
+    )
+
+    class _FakeLLM:
+        def invoke(self, _msgs: object) -> object:
+            return type("R", (), {"content": fake_proposal})()
+
+    with (
+        patch(
+            "metis_app.services.forge_absorb._safe_get_bytes",
+            return_value=fake_atom,
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._build_llm_for_absorb",
+            return_value=_FakeLLM(),
+        ),
+        _client() as client,
+    ):
+        resp = client.post(
+            "/v1/forge/absorb",
+            json={"url": "https://arxiv.org/abs/2501.12345"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+
+    assert body["source_kind"] == "arxiv"
+    assert "Cross-encoder reranking" in body["title"]
+    assert body["proposal"]["name"] == "Sparse Cross-Encoder Reranking"
+    # Existing-registry cross-reference: the reranker descriptor
+    # surfaces because the abstract mentions "reranking" / "BM25".
+    assert any(m["id"] == "reranker" for m in body["matches"])
+
+
+def test_absorb_route_rejects_missing_url() -> None:
+    """A request with no ``url`` field is a 4xx (Litestar surfaces a
+    ``ValidationException`` as 400; the absorb route raises one when
+    ``url`` is missing). The exact code is 400 — anything else means
+    the route silently accepted a request it shouldn't have."""
+    with _client() as client:
+        resp = client.post("/v1/forge/absorb", json={})
+    assert resp.status_code == 400
+
+
+def test_absorb_route_returns_error_payload_for_unsupported_url() -> None:
+    """Non-arxiv URLs return a 200 with ``source_kind="unsupported"``
+    so the gallery can render a "Phase 4a is arxiv-only" message
+    without treating the response as an error."""
+    with _client() as client:
+        resp = client.post(
+            "/v1/forge/absorb",
+            json={"url": "https://example.com/blog/post"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source_kind"] == "unsupported"
+    assert body["proposal"] is None
+
+
+def test_absorb_route_rejects_non_http_scheme() -> None:
+    """SSRF guard at the route level: ``file://``, ``ftp://`` and the
+    empty string come back as ``source_kind="error"`` without
+    touching the network."""
+    with _client() as client:
+        resp = client.post(
+            "/v1/forge/absorb",
+            json={"url": "file:///etc/passwd"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source_kind"] == "error"
+
+
 def test_heretic_enable_override_uses_service_default_output_dir() -> None:
     """The Forge's enable payload must write the same output root the
     Heretic service falls back to on its own. CWD-relative paths

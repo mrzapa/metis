@@ -1,12 +1,18 @@
 ---
 Milestone: The Forge (M14)
 Status: In progress
-Claim: claude/m14-phase3b-readiness (Phase 3b — runtime readiness)
-Last updated: 2026-04-29 by claude/m14-phase3b-readiness
+Claim: claude/m14-phase4a-absorb (Phase 4a — arXiv-paste absorption pipeline)
+Last updated: 2026-04-30 by claude/m14-phase4a-absorb
 Vision pillar: Companion + Cortex
 ---
 
 ## Progress
+
+**Phase 3b — Runtime readiness probes + Get-ready CTA (Landed via PR #580 / `f92ff68`, 2026-04-29)**
+
+* `TechniqueDescriptor` gains a `runtime_probe` callable defaulting to `_always_ready`. `RuntimeReadiness` carries `status`, `blockers`, and an optional `cta_kind` / `cta_target`. Heretic ships a probe that lazy-imports `is_heretic_available()` and reports `blocked` + `cta_kind="install_heretic"` when the CLI is missing; TimesFM ships a permanent informational blocker with `cta_kind="switch_chat_path"`.
+* Card surfaces a readiness row with the blocker text + a CTA. Heretic CTA opens an install dialog; TimesFM CTA is a Next.js `<Link>` to `/chat`. Toggleable+blocked cards keep the switch disabled with a clear `aria-label`.
+* Codex P1 follow-up: `enable_overrides` for Heretic now writes the user-home-resolved `~/.metis_heretic` path (matching the service's own default at `heretic_service.py:309`) instead of a CWD-relative string. Codex P2 follow-up: install dialog now points at `pip install heretic-llm` (matching the backend's preflight error messaging and `pyproject.toml`) instead of the made-up `pipx install heretic-cli`.
 
 **Phase 3a — Toggle wiring + companion-dock acknowledgement (Landed via PR #579 / `01b26c6`, 2026-04-29)**
 
@@ -151,40 +157,75 @@ What's in place today that M14 will lean on:
 
 ## Next up
 
-Phases 1, 2a, 2b, and 3a have landed. Phase 3b lifts the runtime-
-prereq techniques (Heretic + TimesFM) from read-only to a richer
-"ready / blocked" posture with a "Get ready" CTA.
+Phases 1, 2a, 2b, 3a, and 3b have landed. Phase 4 splits the
+"Absorb a technique" flow into three slices so the LLM-driven
+pipeline ships before the persistence + comet-feed integration.
 
-**Phase 3b — Pre-flight readiness for runtime-prereq techniques (in PR, claude/m14-phase3b-readiness, 2026-04-29)**
+**Phase 4a — arXiv-paste absorption pipeline (in PR, claude/m14-phase4a-absorb, 2026-04-30)**
 
-3. **Per-technique readiness probes.** `TechniqueDescriptor` grows
-   a `runtime_probe: Callable[[Settings], RuntimeReadiness]` that
-   defaults to "always ready" — the eleven Phase 3a-toggleable
-   techniques pick up the default for free. Heretic ships a probe
-   that checks `is_heretic_available()` (the CLI on `$PATH`) and
-   reports `status="blocked"` with a blocker like
-   `"Heretic CLI is not on $PATH"` and a `cta_kind="install_heretic"`
-   when the CLI is missing; with the CLI present the probe returns
-   `ready` and the existing `_heretic_enabled` predicate gates the
-   on/off state. TimesFM keeps no overrides but ships its own
-   probe that returns `blocked` permanently, with a
-   `cta_kind="switch_chat_path"` + `cta_target="/chat"` so the
-   gallery's CTA deep-links to the chat-mode picker rather than
-   pretending TimesFM is a one-click toggle.
-4. **"Get ready" affordance on the card.** Blocked cards render a
-   new readiness row that surfaces the blocker text and a CTA
-   button. For `install_heretic` it opens a small dialog with the
-   `pipx install heretic-cli` instructions and a link to the
-   upstream repo; for `switch_chat_path` it's a `<Link>` straight
-   to `/chat`. Toggleable + blocked cards (Heretic without CLI)
-   show their switch disabled with a clear `aria-label`; once the
-   blocker clears (the user installs the CLI and the next
-   `visibilitychange` re-fetch picks it up), the switch re-enables
-   without any further wiring.
+5. **Arxiv-only absorb pipeline.** New module
+   `metis_app/services/forge_absorb.py` owns:
+   * `_safe_get_bytes` — SSRF-safe fetch through `audited_urlopen`
+     with a `forge.absorb` trigger so the M17 panel attributes the
+     call. Mirrors the size-cap + timeout pattern from
+     `news_ingest_service._safe_get`.
+   * `extract_arxiv_id` — parses `/abs/<id>`, `/abs/<id>vN`,
+     `/pdf/<id>.pdf`, and the legacy `<archive>/<id>` form.
+   * `fetch_arxiv_metadata` — pulls title + abstract from the free
+     arxiv Atom API.
+   * `cross_reference_against_registry` — token-overlap match
+     against the existing descriptor name+description text. Surfaces
+     "you already have this" candidates the user can deep-link to
+     via the existing `/forge#<id>` anchors.
+   * `summarise_to_proposal` — calls the assistant's configured LLM
+     (`create_llm(settings)`) with a strict-JSON-out system prompt
+     and parses the response into a `TechniqueProposal` dict
+     (`{name, claim, pillar_guess, implementation_sketch}`). Empty
+     or unparseable responses collapse to `None`; the route surfaces
+     a "couldn't draft a proposal" hint when the user has no LLM
+     provider configured.
+   * `absorb` — orchestrator that runs the four steps above and
+     returns a `{source_kind, title, summary, source_url, matches,
+     proposal, error}` envelope.
+6. **`POST /v1/forge/absorb` route** in `metis_app/api_litestar/routes/forge.py`.
+   Validates the URL (4xx on missing/empty), resolves the LLM via a
+   thin `_build_llm_for_absorb(settings)` helper that swallows
+   `create_llm` failures so the endpoint returns a `proposal: null`
+   payload instead of a 500. SSRF guard at the orchestrator level
+   rejects non-`http(s)` schemes; non-arxiv URLs come back with
+   `source_kind="unsupported"` so the gallery can render an honest
+   "Phase 4a only ingests arxiv" message.
+7. **`<AbsorbForm>`** at the top of the gallery —
+   `apps/metis-web/components/forge/absorb-form.tsx`. URL input +
+   submit button; on submit calls `absorbForgeUrl(url)` and renders
+   the response inline. The result panel has three branches:
+   matches against the existing registry (clickable, deep-link to
+   the relevant card via `/forge#<id>`), a proposal panel
+   (name + claim + pillar + sketch + a "Phase 4a — proposal only"
+   notice per ADR 0014's "no untrusted code from papers"
+   boundary), or a clear unsupported / error message. Loading
+   spinner on the submit button while the request is in flight;
+   form is in-memory only — refresh loses the result.
 
-Phases 4–7 keep the original *Proposed phase breakdown* below. The
-next claimable phase after 3b lands is **Phase 4 — arXiv-paste
-absorption flow**. Each phase should land on its own branch
+**Phase 4b — Proposal persistence + review pane (next claimable)**
+
+8. Persist accepted proposals into a new `forge_proposals.db` (or
+   extend the existing `skill_candidates.db`; ADR 0011 will
+   resolve). Add a "Pending proposals" section to the gallery so a
+   proposal survives a reload and the user can take action later.
+   The accept handler drafts a `skills/<id>/SKILL.md` (YAML
+   frontmatter + body); reject marks the row promoted+rejected.
+
+**Phase 4c — News-comet auto-absorb (deferred)**
+
+9. The M13 comet decision-engine emits "absorb" recommendations
+   for high-score arxiv comets. Phase 4c routes those into the
+   same `forge_proposals.db` so a user opening the Forge sees
+   "your METIS noticed three papers overnight — review them."
+   No new ingestion; just plumb the existing comet output.
+
+Phases 5–7 keep the original *Proposed phase breakdown* below. Each
+phase should land on its own branch
 (`claude/m14-phase<N>-<descriptor>`).
 
 ## Blockers

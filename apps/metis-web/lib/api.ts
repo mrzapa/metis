@@ -3837,6 +3837,57 @@ export async function fetchForgeTechniques(): Promise<ForgeTechniquesResponse> {
   return (await res.json()) as ForgeTechniquesResponse;
 }
 
+// ── M14 Phase 4a — arXiv-paste absorb pipeline ───────────────────
+
+export type ForgeAbsorbSourceKind =
+  | "arxiv"
+  | "unsupported"
+  | "error";
+
+export interface ForgeAbsorbProposal {
+  name: string;
+  claim: string;
+  pillar_guess: ForgePillar;
+  implementation_sketch: string;
+}
+
+export interface ForgeAbsorbMatch {
+  id: string;
+  name: string;
+  pillar: ForgePillar;
+  description: string;
+  match_score: number;
+}
+
+export interface ForgeAbsorbResponse {
+  source_kind: ForgeAbsorbSourceKind;
+  title: string | null;
+  summary: string | null;
+  source_url: string;
+  matches: ForgeAbsorbMatch[];
+  proposal: ForgeAbsorbProposal | null;
+  error: string | null;
+}
+
+/**
+ * Phase 4a — POST a URL to the absorb pipeline. The server fetches
+ * the page (arxiv only in 4a), cross-references the abstract against
+ * the registry, and (when an LLM is configured) returns a
+ * structured proposal the user can review.
+ */
+export async function absorbForgeUrl(url: string): Promise<ForgeAbsorbResponse> {
+  const res = await apiFetch(`${await getApiBase()}/v1/forge/absorb`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to absorb URL (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as ForgeAbsorbResponse;
+}
+
 /**
  * Phase 3 helper — toggle a Forge technique on or off by writing the
  * descriptor-supplied settings overrides through the existing
