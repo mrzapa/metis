@@ -48,7 +48,6 @@ import {
   type BrainScaffoldResponse,
   type BrainScaffoldEdge,
 } from "@/lib/api";
-import { buildCanvasFont, measureSingleLineTextWidth } from "@/lib/pretext-labels";
 
 // -- Constants ----------------------------------------------------------------
 
@@ -215,9 +214,10 @@ function makeTextSprite(text: string, color: string, nodeRadius: number): THREE.
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d")!;
   const fontSize = 56;
-  const fontFamily = `-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif`;
-  const font = buildCanvasFont(fontSize, fontFamily, 500);
-  const textW = measureSingleLineTextWidth(text, font);
+  const font = `500 ${fontSize}px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif`;
+  ctx.font = font;
+  const metrics = ctx.measureText(text);
+  const textW = metrics.width;
 
   const padX = 22;
   const padY = 14;
