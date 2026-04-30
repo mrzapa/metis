@@ -3837,6 +3837,73 @@ export async function fetchForgeTechniques(): Promise<ForgeTechniquesResponse> {
   return (await res.json()) as ForgeTechniquesResponse;
 }
 
+// ── M14 Phase 5 — skill-candidate review pane ────────────────────
+
+export interface ForgeCandidateRecord {
+  id: number;
+  query_text: string;
+  convergence_score: number;
+  created_at: number;
+  default_slug: string;
+  trace_excerpt: string;
+}
+
+export interface ForgeCandidatesResponse {
+  candidates: ForgeCandidateRecord[];
+}
+
+export async function listForgeCandidates(): Promise<ForgeCandidatesResponse> {
+  const res = await apiFetch(`${await getApiBase()}/v1/forge/candidates`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to list forge candidates (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as ForgeCandidatesResponse;
+}
+
+export interface ForgeCandidateAcceptResponse {
+  slug: string;
+  skill_path: string;
+  candidate_id: number;
+  name: string;
+  description: string;
+}
+
+export async function acceptForgeCandidate(
+  candidateId: number,
+  slugOverride?: string,
+): Promise<ForgeCandidateAcceptResponse> {
+  const body = slugOverride ? JSON.stringify({ slug: slugOverride }) : "{}";
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/forge/candidates/${candidateId}/accept`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to accept candidate (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as ForgeCandidateAcceptResponse;
+}
+
+export async function rejectForgeCandidate(candidateId: number): Promise<void> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/forge/candidates/${candidateId}/reject`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to reject candidate (${res.status}): ${detail}`);
+  }
+}
+
 // ── M14 Phase 4a — arXiv-paste absorb pipeline ───────────────────
 
 export type ForgeAbsorbSourceKind =

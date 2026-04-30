@@ -1,12 +1,25 @@
 ---
 Milestone: The Forge (M14)
 Status: In progress
-Claim: claude/m14-phase4b-proposals (Phase 4b — proposal persistence + review pane)
-Last updated: 2026-04-30 by claude/m14-phase4b-proposals
+Claim: claude/m14-phase5-skill-candidates (Phase 5 — skill-candidate review pane)
+Last updated: 2026-04-30 by claude/m14-phase5-skill-candidates
 Vision pillar: Companion + Cortex
 ---
 
 ## Progress
+
+**Phase 4c — News-comet auto-absorb bridge (in PR #583, 2026-04-30)**
+
+* Additive migration on ``forge_proposals.db`` adds ``source`` (``"manual"`` | ``"comet"``) and ``comet_id`` columns. New ``forge_comet_bridge.auto_absorb_comets`` runs the absorb pipeline for arxiv absorb-decisions, dedups against pending rows, and persists with ``source="comet"``. Wired into ``comet_pipeline.run_poll_cycle`` behind the opt-in ``forge_comet_auto_absorb_enabled`` setting.
+* Frontend: ``ForgeProposalRecord`` gains ``source`` + ``comet_id``; review pane renders a "From comet feed" badge for comet-sourced rows.
+* Codex P2 follow-up: dedup helper ``forge_proposals.pending_comet_ids`` runs an unbounded ``SELECT comet_id`` query so the seen-set holds past 50 pending rows. Replaces the previous paginated ``list_proposals`` call that silently truncated the dedup horizon.
+
+**Phase 4b — Proposal persistence + review pane (Landed via PR #582 / `a4acc89`, 2026-04-30)**
+
+* New ``metis_app/services/forge_proposals.py`` (sqlite, separate from M06's ``skill_candidates.db``) with save/list/get/mark-accepted/mark-rejected + a YAML-frontmatter ``SKILL.md`` writer.
+* Three new routes: ``GET /v1/forge/proposals``, ``POST /v1/forge/proposals/<id>/accept`` (drafts skill + 409 on slug collision + 404 on unknown id), ``POST /v1/forge/proposals/<id>/reject``. Existing absorb route now persists on the way through.
+* New ``<ProposalReviewPane>`` mounts between absorb form and gallery; hides itself when no pending proposals.
+* Codex P1 follow-up: skill draft frontmatter now satisfies ``parse_skill_file`` — dropped unknown ``pillar`` and ``source_url`` keys (moved to body) and added the missing ``triggers.file_types`` and ``triggers.output_styles`` axes.
 
 **Phase 4a — arXiv-paste absorption pipeline (Landed via PR #581 / `985ed02`, 2026-04-30)**
 
@@ -163,54 +176,50 @@ What's in place today that M14 will lean on:
 
 ## Next up
 
-Phases 1, 2a, 2b, 3a, 3b, and 4a have landed. Phase 4b adds
-persistence + review pane so a successful absorb survives a
-reload; Phase 4c (news-comet auto-absorb) stays deferred.
+Phases 1 through 4c have landed. Phase 5 surfaces M06's
+seedling-reflection skill candidates in the Forge so the user can
+review, name, and accept (or dismiss) each one — closing the loop
+between the producer side (already shipped in M06) and a
+human-in-the-loop activation surface.
 
-**Phase 4b — Proposal persistence + review pane (in PR, claude/m14-phase4b-proposals, 2026-04-30)**
+**Phase 5 — Skill-candidate review pane (in PR, claude/m14-phase5-skill-candidates, 2026-04-30)**
 
-8. **Persist successful proposals to ``forge_proposals.db``.** New
-   module ``metis_app/services/forge_proposals.py`` owns a small
-   sqlite layer (separate from M06's ``skill_candidates.db`` —
-   different domain, different fields) with:
-   * ``save_proposal`` — writes a row with the proposal fields
-     plus the source URL and arxiv id, status ``pending``.
-   * ``list_proposals`` — newest-first, filterable by status.
-   * ``get_proposal`` — full row by id.
-   * ``mark_accepted`` / ``mark_rejected`` — set status +
-     ``resolved_at`` timestamp; accepted rows also record
-     ``skill_path``.
-   * ``slugify_proposal_name`` + ``write_skill_draft`` — produce
-     a YAML-frontmatter ``skills/<slug>/SKILL.md`` with
-     ``enabled_by_default: false``, empty
-     ``runtime_overrides``, and a body that surfaces the
-     proposal claim + sketch + source URL. Refuses to overwrite
-     an existing draft (route raises 409).
-9. **Three new routes** under ``/v1/forge/proposals``:
-   ``GET`` (defaults to ``status=pending``),
-   ``POST /<id>/accept`` (writes the skill draft + marks accepted),
-   ``POST /<id>/reject`` (marks rejected, no draft). The existing
-   absorb route also persists on success and includes the new
-   ``proposal_id`` in its response so the frontend can refresh
-   the review pane immediately.
-10. **`<ProposalReviewPane>`** mounts between `<AbsorbForm>` and
-    the technique gallery. Fetches pending proposals, hides
-    itself when there are none, and renders one row per proposal
-    with Accept (drafts the skill) and Dismiss (rejects)
-    actions. Bumps a ``refreshKey`` from the parent forge page
-    after each absorb so a freshly-persisted proposal shows up
-    without a manual reload.
+12. **Schema migration on ``skill_candidates.db``.** ``ALTER TABLE
+    ADD COLUMN rejected INTEGER NOT NULL DEFAULT 0`` runs in
+    ``SkillRepository._init_candidates_db`` so legacy databases
+    upgrade transparently. The auto-promotion path's existing
+    ``WHERE promoted = 0`` filter widens to
+    ``promoted = 0 AND rejected = 0`` so dismissed candidates don't
+    get re-promoted by the LLM judge on the next reflection tick.
+    New ``mark_candidate_rejected`` flips both flags in one UPDATE.
+13. **New ``metis_app/services/forge_candidates.py``.** Provides
+    ``list_pending_candidates`` (with default-slug + trace-excerpt
+    fields the review pane needs), ``accept_candidate`` (drafts a
+    ``parse_skill_file``-valid ``SKILL.md``, flips
+    ``settings["skills"]["enabled"][slug] = true`` via an injected
+    ``settings_writer``, marks the candidate promoted), and
+    ``reject_candidate``. The skill-draft writer emits all four
+    ``triggers`` axes as empty lists and ``runtime_overrides: {}``;
+    the user fills them in once the skill has been exercised.
+14. **Three new routes** under ``/v1/forge/candidates``:
+    ``GET`` (returns pending candidates),
+    ``POST /<id>/accept`` (optionally takes a ``slug`` field for
+    rename-before-commit; 404 on unknown id, 409 if the slug
+    folder already has a SKILL.md, 400 on empty slug),
+    ``POST /<id>/reject``. The accept route routes settings
+    updates through the existing ``save_settings`` helper.
+15. **`<CandidateSkillsPane>`** mounts between
+    ``<ProposalReviewPane>`` and the technique gallery. Each row
+    shows the originating query, an emerald "X% converged" badge,
+    a trace excerpt, and an editable slug input pre-seeded from
+    the server's ``default_slug``. Accept calls the API with the
+    edited slug (only when changed); Dismiss calls the reject
+    endpoint. Hides itself when there are no pending candidates.
 
-**Phase 4c — News-comet auto-absorb (deferred)**
-
-11. The M13 comet decision-engine emits "absorb" recommendations
-    for high-score arxiv comets. Phase 4c routes those into the
-    same `forge_proposals.db` so a user opening the Forge sees
-    "your METIS noticed three papers overnight — review them."
-    No new ingestion; just plumb the existing comet output.
-
-Phases 5–7 keep the original *Proposed phase breakdown* below. Each
-phase should land on its own branch
+Phases 6–7 keep the original *Proposed phase breakdown* below. The
+next claimable phase after 5 lands is **Phase 6 — Trace
+integration** (per-technique recent-uses on the gallery cards).
+Each phase should land on its own branch
 (`claude/m14-phase<N>-<descriptor>`).
 
 ## Blockers

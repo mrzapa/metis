@@ -28,17 +28,29 @@ from typing import Any
 from litestar import Router, get, post
 from litestar.exceptions import HTTPException
 
-from metis_app.services import forge_proposals
+from metis_app.services import forge_candidates, forge_proposals
 from metis_app.services.forge_absorb import absorb
 from metis_app.services.forge_registry import (
     TechniqueDescriptor,
     get_registry,
 )
-from metis_app.settings_store import load_settings
+from metis_app.settings_store import load_settings, save_settings as _save_settings
 
 log = logging.getLogger(__name__)
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+
+
+def _candidates_db_path() -> pathlib.Path:
+    """Resolve the on-disk path for ``skill_candidates.db``.
+
+    M06's seedling reflection populates the database; the Forge
+    consumes from the same file. Wrapped in a thin function so
+    tests can patch the path to a tmp dir.
+    """
+    from metis_app.services.skill_repository import _DEFAULT_CANDIDATES_DB_PATH
+
+    return _DEFAULT_CANDIDATES_DB_PATH
 
 
 def _proposal_db_path() -> pathlib.Path:
@@ -237,6 +249,81 @@ def reject_proposal_route(proposal_id: int) -> dict[str, Any]:
     return {"status": "rejected", "proposal_id": proposal_id}
 
 
+# ── M14 Phase 5 — skill-candidate review (M06 producer side) ──────
+
+
+@get("/v1/forge/candidates", sync_to_thread=False)
+def list_candidates_route() -> dict[str, Any]:
+    """Return the seedling reflection's pending skill candidates.
+
+    Each row carries a default slug + trace excerpt so the review
+    pane can render without re-deriving them client-side. Promoted
+    or rejected rows fall out of view (the underlying
+    ``list_candidates`` filter handles both).
+    """
+    rows = forge_candidates.list_pending_candidates(
+        db_path=_candidates_db_path(),
+    )
+    return {"candidates": rows}
+
+
+@post(
+    "/v1/forge/candidates/{candidate_id:int}/accept",
+    status_code=200,
+    sync_to_thread=False,
+)
+def accept_candidate_route(
+    candidate_id: int, data: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Promote a candidate into a real skill draft.
+
+    Writes ``skills/<slug>/SKILL.md``, flips
+    ``settings["skills"]["enabled"][slug] = true`` via the existing
+    ``save_settings`` helper, marks the candidate promoted. Optional
+    ``slug`` field on the body lets the user rename before commit.
+
+    Returns 404 if the candidate id isn't known and 409 if the slug
+    folder already has a SKILL.md.
+    """
+    slug_override = None
+    if data and isinstance(data.get("slug"), str) and data["slug"].strip():
+        slug_override = data["slug"]
+
+    try:
+        result = forge_candidates.accept_candidate(
+            candidates_db=_candidates_db_path(),
+            candidate_id=candidate_id,
+            skills_root=_skills_root_for_drafts(),
+            settings_writer=_save_settings,
+            settings_reader=load_settings,
+            slug_override=slug_override,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return result
+
+
+@post(
+    "/v1/forge/candidates/{candidate_id:int}/reject",
+    status_code=200,
+    sync_to_thread=False,
+)
+def reject_candidate_route(candidate_id: int) -> dict[str, Any]:
+    """Mark a candidate dismissed (promoted=1, rejected=1)."""
+    try:
+        forge_candidates.reject_candidate(
+            candidates_db=_candidates_db_path(),
+            candidate_id=candidate_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "rejected", "candidate_id": candidate_id}
+
+
 router = Router(
     path="",
     route_handlers=[
@@ -245,6 +332,9 @@ router = Router(
         list_proposals_route,
         accept_proposal_route,
         reject_proposal_route,
+        list_candidates_route,
+        accept_candidate_route,
+        reject_candidate_route,
     ],
     tags=["forge"],
 )

@@ -77,6 +77,90 @@ def test_companion_capture_skips_below_threshold(tmp_path):
     assert saved is False
 
 
+def test_mark_candidate_rejected_records_both_promoted_and_rejected(tmp_path, repo):
+    """M14 Phase 5 — the user's explicit "Dismiss" on a Forge
+    candidate must mark the row both ``promoted = 1`` (so the
+    auto-promotion path skips it) and ``rejected = 1`` (so the
+    Forge can later distinguish dismissed from accepted in the
+    audit history)."""
+    db_path = tmp_path / "skill_candidates.db"
+    repo.save_candidate(
+        db_path=db_path,
+        query_text="What is reranking?",
+        trace_json="{}",
+        convergence_score=0.95,
+    )
+    repo.mark_candidate_rejected(db_path=db_path, candidate_id=1)
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT promoted, rejected FROM skill_candidates WHERE id = 1"
+        ).fetchone()
+    assert row == (1, 1), (
+        f"expected promoted=1, rejected=1; got {row!r}"
+    )
+
+
+def test_list_candidates_excludes_rejected_rows(tmp_path, repo):
+    """``list_candidates`` is the auto-promotion path's input. It
+    already filters ``promoted = 0``; once Phase 5 lets users reject,
+    the same query must also exclude ``rejected = 1`` so a dismissed
+    candidate doesn't get auto-promoted on the next reflection tick."""
+    db_path = tmp_path / "skill_candidates.db"
+    repo.save_candidate(
+        db_path=db_path,
+        query_text="Keep me",
+        trace_json="{}",
+        convergence_score=0.99,
+    )
+    repo.save_candidate(
+        db_path=db_path,
+        query_text="Dismiss me",
+        trace_json="{}",
+        convergence_score=0.99,
+    )
+    repo.mark_candidate_rejected(db_path=db_path, candidate_id=2)
+
+    candidates = repo.list_candidates(db_path=db_path, limit=10)
+    queries = [c["query_text"] for c in candidates]
+    assert queries == ["Keep me"], (
+        f"rejected row leaked into list_candidates: {queries!r}"
+    )
+
+
+def test_legacy_skill_candidates_db_migrates_in_place(tmp_path, repo):
+    """An existing ``skill_candidates.db`` predates the ``rejected``
+    column; opening it via ``_init_candidates_db`` must add the
+    column with ``DEFAULT 0`` and preserve every existing row."""
+    db_path = tmp_path / "skill_candidates.db"
+    # Simulate the legacy schema (no ``rejected`` column).
+    legacy = sqlite3.connect(str(db_path))
+    legacy.execute("""
+        CREATE TABLE skill_candidates (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            query_text TEXT NOT NULL,
+            trace_json TEXT NOT NULL,
+            convergence_score REAL NOT NULL DEFAULT 0.0,
+            created_at REAL NOT NULL,
+            promoted  INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    legacy.execute(
+        "INSERT INTO skill_candidates (query_text, trace_json, convergence_score, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        ("legacy query", "{}", 0.95, 1.0),
+    )
+    legacy.commit()
+    legacy.close()
+
+    # First read through the migrated path adds the column.
+    candidates = repo.list_candidates(db_path=db_path, limit=10)
+    assert [c["query_text"] for c in candidates] == ["legacy query"]
+    with sqlite3.connect(db_path) as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(skill_candidates)").fetchall()}
+    assert "rejected" in cols
+
+
 def test_list_candidates_returns_top_unreviewed(tmp_path, repo):
     db_path = tmp_path / "skill_candidates.db"
     for i in range(5):

@@ -336,9 +336,22 @@ class SkillRepository:
                 trace_json TEXT NOT NULL,
                 convergence_score REAL NOT NULL DEFAULT 0.0,
                 created_at REAL NOT NULL,
-                promoted  INTEGER NOT NULL DEFAULT 0
+                promoted  INTEGER NOT NULL DEFAULT 0,
+                rejected  INTEGER NOT NULL DEFAULT 0
             )
         """)
+        # M14 Phase 5 — additive migration for legacy schemas that
+        # predate the ``rejected`` column. ``ALTER TABLE ADD COLUMN``
+        # is the safe path; existing rows pick up the declared default
+        # (``0``) so they continue to surface in ``list_candidates``.
+        existing_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(skill_candidates)").fetchall()
+        }
+        if "rejected" not in existing_columns:
+            conn.execute(
+                "ALTER TABLE skill_candidates ADD COLUMN rejected INTEGER NOT NULL DEFAULT 0"
+            )
         conn.commit()
         return conn
 
@@ -365,9 +378,12 @@ class SkillRepository:
         limit: int = 5,
     ) -> list[dict]:
         conn = self._init_candidates_db(db_path)
+        # M14 Phase 5 — also exclude ``rejected = 1`` rows. The
+        # auto-promotion path treats those as discarded by the user;
+        # they should not be reconsidered for promotion.
         rows = conn.execute(
             "SELECT id, query_text, trace_json, convergence_score, created_at FROM skill_candidates "
-            "WHERE promoted = 0 ORDER BY convergence_score DESC LIMIT ?",
+            "WHERE promoted = 0 AND rejected = 0 ORDER BY convergence_score DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [
@@ -379,6 +395,23 @@ class SkillRepository:
         conn = self._init_candidates_db(db_path)
         with conn:
             conn.execute("UPDATE skill_candidates SET promoted = 1 WHERE id = ?", (candidate_id,))
+
+    def mark_candidate_rejected(self, *, db_path: pathlib.Path, candidate_id: int) -> None:
+        """M14 Phase 5 — record the user's "Dismiss" action on a
+        candidate. Sets both ``promoted = 1`` (so the auto-promotion
+        path's ``promoted = 0`` filter excludes it) and
+        ``rejected = 1`` (so the audit history can distinguish
+        dismissed-by-user from auto-promoted-into-a-skill). The
+        seedling reflection's promotion loop already filters
+        ``promoted = 0``, so the row is effectively retired across
+        both surfaces with one UPDATE.
+        """
+        conn = self._init_candidates_db(db_path)
+        with conn:
+            conn.execute(
+                "UPDATE skill_candidates SET promoted = 1, rejected = 1 WHERE id = ?",
+                (candidate_id,),
+            )
 
     def count_candidates(
         self, *, db_path: pathlib.Path
