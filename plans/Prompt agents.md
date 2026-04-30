@@ -68,11 +68,36 @@ the task is open-ended, say so: "scan the table for the highest-priority
   to your branch name and `Last updated` to today's date. Commit that row
   update as a standalone `docs(m##): claim …` commit on a fresh branch off
   `main`. This is how other agents know the row is taken.
+- **Declare your modes in the plan doc before writing test or implementation
+  code.** Add two one-line declarations near the top of the milestone's
+  plan doc:
+  - `TDD Mode: strict | pragmatic` — *strict* requires concrete RED → GREEN
+    evidence (test name + failing-then-passing run output cited in the
+    plan doc's *Progress*). *Pragmatic* requires an explicit rationale for
+    skipping the RED step plus compensating verification evidence.
+  - `QA Execution Mode: human | agent-operated | hybrid` — never fake
+    human sign-off for agent-operated QA, and never omit sign-off for
+    human or hybrid QA. The mode determines what counts as "verified".
+
+  Forcing a single deliberate choice up front prevents the ambient drift
+  where tests get written after the fact and "QA" silently means "the agent
+  ran the dev server once."
 - **Respect the plan's phase boundaries.** The plan doc's phases are usually
   shippable slices. Don't try to land the entire milestone in one PR — land
   one phase, open the PR, let it merge, then start the next phase on a new
   branch. Each PR title should read `feat(m##): Phase N — <summary>` or the
   equivalent convention you see in recent merges (`git log --oneline`).
+- **Treat merged phases as locked.** Once a phase PR merges, the
+  corresponding section of the plan doc — its *Progress* entries, the
+  decisions it captured, the evidence it cited — is **append-only**.
+  Corrections, regressions, follow-up clarifications, and "actually we
+  did it differently" notes go under a new `## Addenda` subsection in the
+  same plan doc, dated and attributed. Never rewrite a previous *Progress*
+  line. This is what made the M03 / M12 reconciliations (PR #524 era)
+  possible at all: locked history meant the drift was visible to a later
+  reader instead of being silently overwritten by whoever last touched
+  the doc. The trust-but-verify rule above catches stale `Status` values;
+  this rule keeps the plan-doc body itself trustworthy as a record.
 - **Harvest first, greenfield second.** Every M## plan doc has a harvest
   inventory describing what already exists in the codebase that the work
   can wrap or extend. Read it. Most milestones are "thin new surface over
@@ -97,6 +122,16 @@ the task is open-ended, say so: "scan the table for the highest-priority
 - **When you finish the phase:** push the branch, open a PR with a
   summary that mirrors the commit messages, and stop. Do not immediately
   start the next phase — let the human review the PR first.
+- **At milestone closeout, capture lessons.** When you flip
+  `Status: Landed` in `IMPLEMENTATION.md`, also append a 1–3 bullet
+  `## Lessons` section to the plan doc covering anything that should
+  outlive this milestone — surprises in the existing code, conventions
+  you discovered, gotchas the next agent should inherit, dead ends the
+  plan doc didn't predict. If a lesson is durable enough to affect future
+  architectural choices, also add an entry to `docs/adr/` (single source
+  of truth for *why* decisions). Single-run noise stays in the plan doc;
+  durable lessons promote up. Skipping this step is how hard-won context
+  gets lost between agent sessions.
 
 **Tool skills available in this harness** (invoke via the Skill tool if the
 environment supports it):
