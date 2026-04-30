@@ -5,6 +5,7 @@ import { Hammer, Loader2, TriangleAlert } from "lucide-react";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
+import { AbsorbForm } from "@/components/forge/absorb-form";
 import { TechniqueGallery } from "@/components/forge/technique-gallery";
 import {
   fetchForgeTechniques,
@@ -114,6 +115,7 @@ export default function ForgePage() {
           />
         ) : (
           <>
+            <AbsorbForm />
             <TechniqueGallery techniques={techniques} onToggle={handleToggle} />
             <p className="text-xs text-muted-foreground/60">
               Flipping a card writes the technique&apos;s setting overrides through
