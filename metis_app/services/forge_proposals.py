@@ -212,6 +212,31 @@ def list_proposals(
         conn.close()
 
 
+def pending_comet_ids(*, db_path: pathlib.Path) -> set[str]:
+    """Return every ``comet_id`` whose proposal row is still
+    ``status="pending"``.
+
+    Phase 4c — used by the news-comet bridge to dedup repeat
+    absorptions of the same comet. Queries the column directly
+    rather than going through ``list_proposals`` so a large
+    backlog (>50 pending rows) can't silently truncate the
+    seen-set and let a duplicate slip through. Codex P2 review on
+    PR #583 caught exactly that bug — the seen-set was hard-capped
+    by ``list_proposals`` default ``limit=50``.
+    """
+    conn = _init_db(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT comet_id FROM forge_proposals
+            WHERE status = 'pending' AND comet_id IS NOT NULL
+            """
+        ).fetchall()
+        return {row["comet_id"] for row in rows if row["comet_id"]}
+    finally:
+        conn.close()
+
+
 def get_proposal(
     *,
     db_path: pathlib.Path,

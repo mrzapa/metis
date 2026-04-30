@@ -46,9 +46,13 @@ def _already_pending_comet_ids(db_path: pathlib.Path) -> set[str]:
     repeat absorption can produce a fresh row (the user might have
     changed their mind about a topic, and the previous skill draft
     has already been written).
+
+    Uses ``forge_proposals.pending_comet_ids`` (a direct column
+    query) rather than ``list_proposals`` so a backlog of more
+    than 50 pending rows can't silently let an older comet slip
+    past the dedup. See Codex P2 on PR #583.
     """
-    pending = forge_proposals.list_proposals(db_path=db_path, status="pending")
-    return {row["comet_id"] for row in pending if row.get("comet_id")}
+    return forge_proposals.pending_comet_ids(db_path=db_path)
 
 
 def auto_absorb_comets(
