@@ -20,6 +20,10 @@ function makeTechnique(overrides: Partial<ForgeTechnique> = {}): ForgeTechnique 
     toggleable: true,
     enable_overrides: { use_reranker: true },
     disable_overrides: { use_reranker: false },
+    runtime_status: "ready",
+    runtime_blockers: [],
+    runtime_cta_kind: null,
+    runtime_cta_target: null,
     ...overrides,
   };
 }
@@ -127,19 +131,129 @@ describe("<TechniqueCard /> Phase 3 toggle", () => {
     expect(alert).toHaveTextContent(/forge backend exploded/i);
   });
 
-  it("renders a read-only badge for non-toggleable techniques", () => {
+  it("renders a read-only badge for non-toggleable, ready techniques", () => {
     renderCard({
       technique: makeTechnique({
-        id: "heretic-abliteration",
-        name: "Heretic abliteration",
+        id: "informational",
+        name: "Informational",
         toggleable: false,
         enable_overrides: null,
         disable_overrides: null,
+        runtime_status: "ready",
+        runtime_blockers: [],
       }),
       onToggle: vi.fn(async () => {}),
     });
     expect(
       screen.getByLabelText(/read-only — needs runtime check/i),
     ).toBeTruthy();
+  });
+});
+
+describe("<TechniqueCard /> Phase 3b runtime readiness", () => {
+  it("disables the switch when a toggleable technique is blocked", () => {
+    renderCard({
+      technique: makeTechnique({
+        id: "heretic-abliteration",
+        name: "Heretic abliteration",
+        toggleable: true,
+        enable_overrides: { heretic_output_dir: ".metis_cache/heretic-out" },
+        disable_overrides: { heretic_output_dir: "" },
+        runtime_status: "blocked",
+        runtime_blockers: ["Heretic CLI is not on $PATH"],
+        runtime_cta_kind: "install_heretic",
+      }),
+      onToggle: vi.fn(async () => {}),
+    });
+    const sw = screen.getByRole("switch");
+    expect(sw).toBeDisabled();
+    expect(sw).toHaveAttribute("data-blocked", "true");
+    expect(sw.getAttribute("aria-label")).toMatch(/blocked|runtime check/i);
+  });
+
+  it("does not call onToggle when a blocked switch is clicked", () => {
+    const onToggle = vi.fn(async () => {});
+    renderCard({
+      technique: makeTechnique({
+        id: "heretic-abliteration",
+        name: "Heretic abliteration",
+        toggleable: true,
+        enable_overrides: { heretic_output_dir: "x" },
+        disable_overrides: { heretic_output_dir: "" },
+        runtime_status: "blocked",
+        runtime_blockers: ["Heretic CLI is not on $PATH"],
+        runtime_cta_kind: "install_heretic",
+      }),
+      onToggle,
+    });
+    fireEvent.click(screen.getByRole("switch"));
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("surfaces the readiness row + blocker text when blocked", () => {
+    renderCard({
+      technique: makeTechnique({
+        id: "heretic-abliteration",
+        name: "Heretic abliteration",
+        toggleable: true,
+        enable_overrides: { heretic_output_dir: "x" },
+        disable_overrides: { heretic_output_dir: "" },
+        runtime_status: "blocked",
+        runtime_blockers: ["Heretic CLI is not on $PATH"],
+        runtime_cta_kind: "install_heretic",
+      }),
+      onToggle: vi.fn(async () => {}),
+    });
+    const row = screen.getByTestId("forge-readiness-row");
+    expect(row).toHaveTextContent(/heretic cli is not on \$PATH/i);
+    expect(screen.getByTestId("forge-readiness-cta")).toHaveTextContent(/get ready/i);
+  });
+
+  it("renders a chat-link CTA for switch_chat_path techniques", () => {
+    renderCard({
+      technique: makeTechnique({
+        id: "timesfm-forecasting",
+        name: "TimesFM forecasting",
+        toggleable: false,
+        enable_overrides: null,
+        disable_overrides: null,
+        runtime_status: "blocked",
+        runtime_blockers: ["Forecast mode is activated by switching the chat to Forecast."],
+        runtime_cta_kind: "switch_chat_path",
+        runtime_cta_target: "/chat",
+      }),
+      onToggle: vi.fn(async () => {}),
+    });
+    // No switch + no read-only lock badge — only the readiness row
+    // with the deep-link CTA.
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByLabelText(/read-only/i)).toBeNull();
+    const cta = screen.getByTestId("forge-readiness-cta");
+    expect(cta).toHaveAttribute("href", "/chat");
+    expect(cta).toHaveTextContent(/open chat/i);
+  });
+
+  it("opens the install-Heretic dialog when the Get-ready CTA is clicked", async () => {
+    renderCard({
+      technique: makeTechnique({
+        id: "heretic-abliteration",
+        name: "Heretic abliteration",
+        toggleable: true,
+        enable_overrides: { heretic_output_dir: "x" },
+        disable_overrides: { heretic_output_dir: "" },
+        runtime_status: "blocked",
+        runtime_blockers: ["Heretic CLI is not on $PATH"],
+        runtime_cta_kind: "install_heretic",
+      }),
+      onToggle: vi.fn(async () => {}),
+    });
+    fireEvent.click(screen.getByTestId("forge-readiness-cta"));
+    const dialogTitle = await screen.findByRole("heading", { name: /install heretic cli/i });
+    expect(dialogTitle).toBeTruthy();
+    // Install command is rendered verbatim so the user can copy it.
+    // `heretic-llm` matches the package the backend's preflight
+    // messaging and `pyproject.toml` reference — the dialog must
+    // not point at a different package.
+    expect(screen.getByText(/pip install heretic-llm/i)).toBeTruthy();
   });
 });

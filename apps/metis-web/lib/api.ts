@@ -3792,6 +3792,10 @@ export type ForgePillar =
   | "cortex"
   | "cross-cutting";
 
+export type ForgeRuntimeStatus = "ready" | "blocked";
+
+export type ForgeRuntimeCtaKind = "install_heretic" | "switch_chat_path";
+
 export interface ForgeTechnique {
   id: string;
   name: string;
@@ -3809,6 +3813,14 @@ export interface ForgeTechnique {
   toggleable: boolean;
   enable_overrides: Record<string, unknown> | null;
   disable_overrides: Record<string, unknown> | null;
+  // Phase 3b — runtime readiness. ``ready`` techniques can be
+  // flipped immediately; ``blocked`` techniques surface their
+  // blockers and an optional CTA the gallery uses to direct the
+  // user to the right place (install dialog, chat-mode picker, ...).
+  runtime_status: ForgeRuntimeStatus;
+  runtime_blockers: string[];
+  runtime_cta_kind: ForgeRuntimeCtaKind | null;
+  runtime_cta_target: string | null;
 }
 
 export interface ForgeTechniquesResponse {

@@ -27,6 +27,7 @@ from metis_app.settings_store import load_settings
 
 
 def _serialise(descriptor: TechniqueDescriptor, settings: dict[str, Any]) -> dict[str, Any]:
+    readiness = descriptor.readiness(settings)
     return {
         "id": descriptor.id,
         "name": descriptor.name,
@@ -43,6 +44,16 @@ def _serialise(descriptor: TechniqueDescriptor, settings: dict[str, Any]) -> dic
         "toggleable": descriptor.toggleable,
         "enable_overrides": descriptor.enable_overrides,
         "disable_overrides": descriptor.disable_overrides,
+        # Phase 3b — runtime readiness. ``runtime_status`` is "ready"
+        # or "blocked"; ``runtime_blockers`` is the list of human-
+        # readable reasons a blocked technique can't be flipped.
+        # ``runtime_cta_kind`` and ``runtime_cta_target`` parameterise
+        # the gallery's "Get ready" affordance (install dialog vs.
+        # deep-link).
+        "runtime_status": readiness.status,
+        "runtime_blockers": list(readiness.blockers),
+        "runtime_cta_kind": readiness.cta_kind,
+        "runtime_cta_target": readiness.cta_target,
     }
 
 

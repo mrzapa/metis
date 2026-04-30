@@ -55,6 +55,10 @@ function makeTechnique(id: string, overrides: Partial<ForgeTechnique> = {}): For
     toggleable: false,
     enable_overrides: null,
     disable_overrides: null,
+    runtime_status: "ready",
+    runtime_blockers: [],
+    runtime_cta_kind: null,
+    runtime_cta_target: null,
     ...overrides,
   };
 }
