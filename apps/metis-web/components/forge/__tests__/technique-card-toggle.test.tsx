@@ -17,6 +17,7 @@ function makeTechnique(overrides: Partial<ForgeTechnique> = {}): ForgeTechnique 
     setting_keys: ["use_reranker"],
     engine_symbols: ["metis_app.services.reranker"],
     recent_uses: [],
+    weekly_use_count: 0,
     toggleable: true,
     enable_overrides: { use_reranker: true },
     disable_overrides: { use_reranker: false },
