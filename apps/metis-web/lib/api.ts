@@ -3805,6 +3805,12 @@ export interface ForgeTechnique {
   setting_keys: string[];
   engine_symbols: string[];
   recent_uses: unknown[];
+  // Phase 6 — card-face counter. The list endpoint computes a
+  // single-pass count of trace events (in the last 7 days) whose
+  // ``event_type`` is one of the descriptor's declared markers. The
+  // mini-timeline that fills out on card expansion is fetched lazily
+  // from ``/v1/forge/techniques/<id>/recent-uses``.
+  weekly_use_count: number;
   // Phase 3 — interactive toggle wiring. When ``toggleable`` is
   // false, the gallery card stays read-only (typically a runtime
   // pre-flight check is missing on the descriptor). When true, the
@@ -3823,6 +3829,20 @@ export interface ForgeTechnique {
   runtime_cta_target: string | null;
 }
 
+export interface ForgeRecentUseEvent {
+  run_id: string;
+  timestamp: string;
+  stage: string;
+  event_type: string;
+  preview: string;
+}
+
+export interface ForgeRecentUsesResponse {
+  events: ForgeRecentUseEvent[];
+  weekly_count: number;
+}
+
+
 export interface ForgeTechniquesResponse {
   techniques: ForgeTechnique[];
   phase: number;
@@ -3835,6 +3855,30 @@ export async function fetchForgeTechniques(): Promise<ForgeTechniquesResponse> {
     throw new Error(`Failed to fetch forge techniques (${res.status}): ${detail}`);
   }
   return (await res.json()) as ForgeTechniquesResponse;
+}
+
+/**
+ * Phase 6 — fetch the per-technique mini-timeline.
+ *
+ * The list endpoint already exposes ``weekly_use_count`` for the
+ * card-face pill; this lazy detail call is for the expanded card
+ * surface that shows the most-recent N matching trace events.
+ */
+export async function fetchForgeRecentUses(
+  techniqueId: string,
+): Promise<ForgeRecentUsesResponse> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/forge/techniques/${encodeURIComponent(
+      techniqueId,
+    )}/recent-uses`,
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(
+      `Failed to fetch recent uses for ${techniqueId} (${res.status}): ${detail}`,
+    );
+  }
+  return (await res.json()) as ForgeRecentUsesResponse;
 }
 
 // ── M14 Phase 5 — skill-candidate review pane ────────────────────

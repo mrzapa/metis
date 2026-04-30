@@ -1,15 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "motion/react";
 import {
+  ChevronDown,
   CircleDashed,
   CircleDot,
   ExternalLink,
   Loader2,
   Lock,
   ShieldAlert,
+  Sparkles,
   TriangleAlert,
 } from "lucide-react";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
@@ -27,7 +29,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import type { ForgeTechnique } from "@/lib/api";
+import type { ForgeRecentUseEvent, ForgeTechnique } from "@/lib/api";
+import { fetchForgeRecentUses } from "@/lib/api";
 import {
   PILLAR_GLYPH_TONE,
   PILLAR_ICON,
@@ -193,6 +196,9 @@ export function TechniqueCard({ technique, onToggle }: TechniqueCardProps) {
             </TooltipContent>
           </Tooltip>
         ) : null}
+        {technique.weekly_use_count > 0 ? (
+          <WeeklyUsePill count={technique.weekly_use_count} />
+        ) : null}
         {errorMessage ? (
           <span
             role="alert"
@@ -203,6 +209,10 @@ export function TechniqueCard({ technique, onToggle }: TechniqueCardProps) {
           </span>
         ) : null}
       </div>
+
+      {technique.weekly_use_count > 0 ? (
+        <RecentUsesPanel techniqueId={technique.id} />
+      ) : null}
     </motion.article>
   );
 
@@ -400,6 +410,157 @@ function ReadOnlyBadge() {
       </TooltipContent>
     </Tooltip>
   );
+}
+
+interface WeeklyUsePillProps {
+  count: number;
+}
+
+function WeeklyUsePill({ count }: WeeklyUsePillProps) {
+  // Phase 6 — card-face counter. The exact wording matters: "uses this
+  // week" reads as evidence the technique is earning its slot, which
+  // is the point of VISION's "intelligence grown, not bought" framing.
+  // Singularised at exactly one to avoid the "1 uses" awkwardness.
+  const noun = count === 1 ? "use" : "uses";
+  return (
+    <span
+      data-testid="forge-weekly-use-pill"
+      className="inline-flex items-center gap-1 rounded-md border border-emerald-400/25 bg-emerald-400/10 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.1em] text-emerald-100/85"
+    >
+      <Sparkles className="size-3" aria-hidden="true" />
+      {count} {noun} this week
+    </span>
+  );
+}
+
+interface RecentUsesPanelProps {
+  techniqueId: string;
+}
+
+type FetchState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "loaded"; events: ForgeRecentUseEvent[] }
+  | { status: "error"; message: string };
+
+function RecentUsesPanel({ techniqueId }: RecentUsesPanelProps) {
+  // The detail call is lazy: the gallery renders 13 cards in one
+  // shot, and most users won't expand every one. We only hit
+  // ``/recent-uses`` when the user explicitly opens the panel, and
+  // we cache per-card (no refetch on collapse + re-open) so the
+  // mini-timeline stays snappy.
+  const [open, setOpen] = useState(false);
+  const [state, setState] = useState<FetchState>({ status: "idle" });
+
+  const ensureLoaded = useCallback(async () => {
+    if (state.status !== "idle") return;
+    setState({ status: "loading" });
+    try {
+      const data = await fetchForgeRecentUses(techniqueId);
+      setState({ status: "loaded", events: data.events });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not load recent uses";
+      setState({ status: "error", message });
+    }
+  }, [state, techniqueId]);
+
+  const onTriggerClick = useCallback(() => {
+    if (!open) {
+      void ensureLoaded();
+    }
+    setOpen((prev) => !prev);
+  }, [ensureLoaded, open]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        data-testid="forge-recent-uses-trigger"
+        onClick={onTriggerClick}
+        aria-expanded={open}
+        aria-controls={`recent-uses-${techniqueId}`}
+        className="inline-flex w-full items-center justify-between gap-2 rounded-md border border-white/8 bg-white/3 px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-white/14 hover:text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+      >
+        <span>Recent uses</span>
+        <ChevronDown
+          className={cn(
+            "size-3.5 transition-transform",
+            open ? "rotate-180" : undefined,
+          )}
+          aria-hidden="true"
+        />
+      </button>
+      {open ? (
+        <div
+          id={`recent-uses-${techniqueId}`}
+          className="flex flex-col gap-1.5 rounded-lg border border-white/6 bg-black/15 p-2"
+        >
+          {state.status === "loading" ? (
+            <div
+              data-testid="forge-recent-uses-loading"
+              className="flex items-center gap-2 text-[11px] text-muted-foreground/80"
+            >
+              <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+              Loading…
+            </div>
+          ) : null}
+          {state.status === "error" ? (
+            <p
+              role="alert"
+              data-testid="forge-recent-uses-error"
+              className="text-[11px] leading-snug text-destructive"
+            >
+              {state.message}
+            </p>
+          ) : null}
+          {state.status === "loaded" && state.events.length === 0 ? (
+            <p
+              data-testid="forge-recent-uses-empty"
+              className="text-[11px] text-muted-foreground/70"
+            >
+              No recent uses yet — your companion hasn't fired this technique
+              in the last week.
+            </p>
+          ) : null}
+          {state.status === "loaded" && state.events.length > 0 ? (
+            <ul className="flex flex-col gap-1.5">
+              {state.events.map((event, index) => (
+                <li
+                  key={`${event.run_id}-${index}`}
+                  data-testid="forge-recent-uses-row"
+                  className="flex flex-col gap-0.5 rounded-md border border-white/6 bg-white/3 px-2 py-1.5 text-[11px] leading-snug"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground/70">
+                      {event.event_type}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/60">
+                      {formatTimestamp(event.timestamp)}
+                    </span>
+                  </div>
+                  {event.preview ? (
+                    <p className="text-foreground/85">{event.preview}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function formatTimestamp(value: string): string {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function StatusBadge({ active }: { active: boolean }) {

@@ -28,12 +28,14 @@ from typing import Any
 from litestar import Router, get, post
 from litestar.exceptions import HTTPException
 
-from metis_app.services import forge_candidates, forge_proposals
+from metis_app.services import forge_candidates, forge_proposals, forge_trace
 from metis_app.services.forge_absorb import absorb
 from metis_app.services.forge_registry import (
     TechniqueDescriptor,
+    get_descriptor,
     get_registry,
 )
+from metis_app.services.trace_store import TraceStore
 from metis_app.settings_store import load_settings, save_settings as _save_settings
 
 log = logging.getLogger(__name__)
@@ -72,7 +74,12 @@ def _skills_root_for_drafts() -> pathlib.Path:
     return _REPO_ROOT / "skills"
 
 
-def _serialise(descriptor: TechniqueDescriptor, settings: dict[str, Any]) -> dict[str, Any]:
+def _serialise(
+    descriptor: TechniqueDescriptor,
+    settings: dict[str, Any],
+    *,
+    weekly_use_count: int = 0,
+) -> dict[str, Any]:
     readiness = descriptor.readiness(settings)
     return {
         "id": descriptor.id,
@@ -82,7 +89,17 @@ def _serialise(descriptor: TechniqueDescriptor, settings: dict[str, Any]) -> dic
         "enabled": descriptor.is_enabled(settings),
         "setting_keys": list(descriptor.setting_keys),
         "engine_symbols": list(descriptor.engine_symbols),
+        # ``recent_uses`` is reserved for the per-technique detail
+        # endpoint (``GET /v1/forge/techniques/<id>/recent-uses``).
+        # The list response keeps it as an empty list to preserve the
+        # existing field shape; the card-face counter rides on
+        # ``weekly_use_count`` instead.
         "recent_uses": [],
+        # Phase 6 — per-technique 7-day counter for the card face.
+        # The list endpoint computes all counts in a single
+        # ``runs.jsonl`` scan via ``forge_trace.weekly_use_counts``;
+        # detail-level events are fetched lazily on card expansion.
+        "weekly_use_count": int(weekly_use_count),
         # Phase 3 — interactive toggle wiring. ``toggleable`` is a
         # convenience for the frontend; the actual override payloads
         # ride on the same object so the toggle button can call
@@ -109,13 +126,69 @@ def list_techniques() -> dict[str, Any]:
 
     Each entry's ``enabled`` field is computed from the live
     ``settings_store`` snapshot, so user overrides surface in the
-    gallery without a reload.
+    gallery without a reload. Phase 6 adds a per-technique
+    ``weekly_use_count`` derived from a single pass over
+    ``runs.jsonl`` — failures here degrade gracefully to zero rather
+    than 500ing the whole gallery.
     """
     settings = load_settings()
+    registry = get_registry()
+    weekly_counts: dict[str, int] = {}
+    try:
+        weekly_counts = forge_trace.weekly_use_counts(
+            descriptors=registry,
+            store=TraceStore(),
+        )
+    except Exception:
+        # The trace store is best-effort here: a missing dir, a
+        # filesystem error, or a malformed jsonl line should leave
+        # the gallery renderable with zero-counts rather than 500.
+        log.warning(
+            "forge_trace: weekly_use_counts failed; defaulting to 0",
+            exc_info=True,
+        )
     return {
-        "techniques": [_serialise(descriptor, settings) for descriptor in get_registry()],
-        "phase": 2,
+        "techniques": [
+            _serialise(
+                descriptor,
+                settings,
+                weekly_use_count=weekly_counts.get(descriptor.id, 0),
+            )
+            for descriptor in registry
+        ],
+        "phase": 6,
     }
+
+
+@get(
+    "/v1/forge/techniques/{technique_id:str}/recent-uses",
+    sync_to_thread=False,
+)
+def technique_recent_uses(technique_id: str) -> dict[str, Any]:
+    """Return the descriptor's recent trace events.
+
+    Returns a 404 if ``technique_id`` is unknown. A descriptor with
+    no ``trace_event_types`` declared returns 200 with an empty
+    payload — the card renders a "no recent uses yet" empty state.
+    """
+    descriptor = get_descriptor(technique_id)
+    if descriptor is None:
+        raise HTTPException(
+            status_code=404, detail=f"unknown technique {technique_id!r}"
+        )
+    try:
+        result = forge_trace.recent_uses_for_technique(
+            descriptor=descriptor,
+            store=TraceStore(),
+        )
+    except Exception:
+        log.warning(
+            "forge_trace: recent_uses_for_technique(%s) failed",
+            technique_id,
+            exc_info=True,
+        )
+        return {"events": [], "weekly_count": 0}
+    return result
 
 
 def _build_llm_for_absorb(settings: dict[str, Any]) -> Any | None:
@@ -328,6 +401,7 @@ router = Router(
     path="",
     route_handlers=[
         list_techniques,
+        technique_recent_uses,
         absorb_technique,
         list_proposals_route,
         accept_proposal_route,

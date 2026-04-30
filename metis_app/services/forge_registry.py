@@ -106,6 +106,19 @@ class TechniqueDescriptor:
     # ship dedicated probes that surface the missing CLI / chat-mode
     # context to the frontend's "Get ready" CTA.
     runtime_probe: Callable[[Settings], RuntimeReadiness] = field(default=_always_ready)
+    # Phase 6 — trace markers. The set of TraceEvent ``event_type``
+    # strings the engine emits when this technique fires. The Forge
+    # gallery uses this in two places:
+    #
+    # * the card-face "Used X times this week" counter (single pass
+    #   over ``runs.jsonl`` filtered by membership in this set), and
+    # * the per-card detail endpoint
+    #   (``/v1/forge/techniques/<id>/recent-uses``) which projects the
+    #   matching events into a mini-timeline.
+    #
+    # An empty tuple is allowed and means "no trace integration wired
+    # yet" — the card renders an empty state instead of a counter.
+    trace_event_types: tuple[str, ...] = ()
 
     def is_enabled(self, settings: Settings) -> bool:
         """Resolve the live enabled state for this technique.
@@ -299,6 +312,18 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
         ),
         enable_overrides={"agentic_mode": True},
         disable_overrides={"agentic_mode": False},
+        # The agentic loop emits these on each iteration (see
+        # ``stream_events._STATUS_BY_EVENT_TYPE`` for the canonical
+        # list). ``iteration_complete`` and ``iteration_converged``
+        # are the most informative for the card-face counter — one per
+        # actual converged answer rather than one per micro-step.
+        trace_event_types=(
+            "iteration_start",
+            "iteration_complete",
+            "iteration_converged",
+            "gaps_identified",
+            "refinement_retrieval",
+        ),
     ),
     TechniqueDescriptor(
         id="sub-query-expansion",
@@ -313,6 +338,7 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
         engine_symbols=("metis_app.services.retrieval_pipeline",),
         enable_overrides={"use_sub_queries": True},
         disable_overrides={"use_sub_queries": False},
+        trace_event_types=("subqueries",),
     ),
     TechniqueDescriptor(
         id="hybrid-search",
@@ -377,6 +403,25 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
         # 0-personas state is the natural disable knob.
         enable_overrides={"swarm_n_personas": 8},
         disable_overrides={"swarm_n_personas": 0},
+        # Both the simulation_*  and swarm_* event families are
+        # included — the codebase uses them somewhat interchangeably
+        # (``stream_events`` maps both to the simulation lifecycle).
+        # ``swarm_complete`` is the natural "one per finished
+        # simulation" counter event.
+        trace_event_types=(
+            "swarm_start",
+            "swarm_round_start",
+            "swarm_persona_vote",
+            "swarm_round_end",
+            "swarm_synthesis",
+            "swarm_complete",
+            "persona_created",
+            "simulation_round_start",
+            "simulation_round",
+            "simulation_complete",
+            "topics_extracted",
+            "belief_shift",
+        ),
     ),
     TechniqueDescriptor(
         id="timesfm-forecasting",
@@ -503,6 +548,11 @@ _REGISTRY: tuple[TechniqueDescriptor, ...] = (
         engine_symbols=("metis_app.services.response_pipeline",),
         enable_overrides={"enable_citation_v2": True},
         disable_overrides={"enable_citation_v2": False},
+        # ``claim_grounding`` fires once per validated answer when the
+        # citation v2 pass is on (``app_controller.py:2003``). It's
+        # the cleanest signal that the technique earned its keep on
+        # this run.
+        trace_event_types=("claim_grounding",),
     ),
     TechniqueDescriptor(
         id="semantic-chunking",

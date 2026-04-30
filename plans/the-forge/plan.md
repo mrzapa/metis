@@ -1,12 +1,27 @@
 ---
 Milestone: The Forge (M14)
 Status: In progress
-Claim: claude/m14-phase5-skill-candidates (Phase 5 — skill-candidate review pane)
-Last updated: 2026-04-30 by claude/m14-phase5-skill-candidates
+Claim: claude/m14-phase6-trace-integration (Phase 6 — trace integration)
+Last updated: 2026-05-01 by claude/m14-phase6-trace-integration
 Vision pillar: Companion + Cortex
 ---
 
 ## Progress
+
+**Phase 6 — Trace integration (in PR, claude/m14-phase6-trace-integration, 2026-05-01)**
+
+* `TechniqueDescriptor` gains a `trace_event_types: tuple[str, ...]` field declaring the event-type strings the engine emits when this technique fires. Empty tuple = "no markers wired yet"; the card renders an empty state instead of a counter.
+* New `metis_app/services/forge_trace.py` exposes (a) `recent_uses_for_technique(descriptor, store, *, limit, now=None)` which returns a `{events, weekly_count}` payload filtered by descriptor markers, projecting each event into a tiny `{run_id, timestamp, stage, event_type, preview}` shape; and (b) `weekly_use_counts(descriptors, store, *, now=None)` for the single-pass list-endpoint scan. Heavy payload fields (`prompt`, `retrieval_results`, `tool_calls`, `validator`, `artifacts`) are stripped before crossing the API boundary.
+* List endpoint `GET /v1/forge/techniques` now adds `weekly_use_count: int` per entry; bumped `phase: 6`. Trace-store failures degrade gracefully to zero counts rather than 500ing the gallery.
+* New detail endpoint `GET /v1/forge/techniques/<id>/recent-uses` returns the per-technique mini-timeline (404 for unknown ids; 200 with empty payload for descriptors without markers).
+* Marquee techniques wired with markers: `iterrag-convergence`, `sub-query-expansion`, `swarm-personas`, `citation-v2`. The other nine descriptors keep an empty `trace_event_types` until follow-up work confirms the canonical event names — the card simply hides the pill in those cases.
+* Frontend: `<TechniqueCard>` gains a "X uses this week" pill (singularised at 1) and a lazy-loaded recent-uses panel (one fetch per card lifetime; cached on close+reopen). New `fetchForgeRecentUses(id)` API client. Existing fixtures updated with `weekly_use_count: 0`.
+
+**Phase 5 — Skill-candidate review pane (Landed via PR #584 / `15b631d`, 2026-04-30)**
+
+* New `metis_app/services/forge_candidates.py` (list/accept/reject); SQLite migration on `skill_candidates.db` adds `rejected INTEGER NOT NULL DEFAULT 0`; route layer at `/v1/forge/candidates*` with 404/409/400 mapping; `<CandidateSkillsPane>` mounted between the proposal-review pane and the gallery.
+* Codex P1 follow-up: `accept_candidate()` now deep-merges `enabled[slug] = True` into the existing `settings.skills` snapshot before calling the writer, so the shallow `dict.update` in `save_settings` no longer wipes unrelated skill toggles. Added `settings_reader` injection.
+* Codex P2 follow-up: settings_writer failures roll back the just-written SKILL.md draft (and the empty slug folder) so retries don't hit `FileExistsError`. `mark_candidate_promoted` only runs on the success path.
 
 **Phase 4c — News-comet auto-absorb bridge (in PR #583, 2026-04-30)**
 
@@ -216,10 +231,12 @@ human-in-the-loop activation surface.
     edited slug (only when changed); Dismiss calls the reject
     endpoint. Hides itself when there are no pending candidates.
 
-Phases 6–7 keep the original *Proposed phase breakdown* below. The
-next claimable phase after 5 lands is **Phase 6 — Trace
-integration** (per-technique recent-uses on the gallery cards).
-Each phase should land on its own branch
+Phase 7 keeps the original *Proposed phase breakdown* below. The
+next claimable phase after 6 lands is **Phase 7 (stretch) — Export
+/ share a technique bundle** (`.metis-skill` file format), or any
+of the harvest-debt items: extending `trace_event_types` to the
+remaining nine descriptors once the engine-side event names are
+audited. Each phase should land on its own branch
 (`claude/m14-phase<N>-<descriptor>`).
 
 ## Blockers

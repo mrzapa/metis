@@ -52,6 +52,7 @@ function makeTechnique(id: string, overrides: Partial<ForgeTechnique> = {}): For
     setting_keys: [],
     engine_symbols: [],
     recent_uses: [],
+    weekly_use_count: 0,
     toggleable: false,
     enable_overrides: null,
     disable_overrides: null,

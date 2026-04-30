@@ -27,7 +27,7 @@ def test_list_techniques_returns_registry_inventory() -> None:
         assert resp.status_code == 200
         payload = resp.json()
 
-    assert payload["phase"] == 2
+    assert payload["phase"] == 6
     techniques = payload["techniques"]
     assert len(techniques) == len(get_registry())
 
@@ -87,8 +87,14 @@ def test_list_techniques_response_shape() -> None:
         assert isinstance(entry["setting_keys"], list)
         assert all(isinstance(key, str) for key in entry["setting_keys"])
         assert isinstance(entry["engine_symbols"], list)
-        # Phase 2a still has no live trace integration (that's Phase 6).
+        # Phase 6 — trace integration. ``recent_uses`` is reserved for
+        # the per-technique detail endpoint; the list response keeps
+        # the field as an empty list to preserve the existing shape.
+        # The card-face counter rides on ``weekly_use_count`` instead.
         assert entry["recent_uses"] == []
+        assert "weekly_use_count" in entry
+        assert isinstance(entry["weekly_use_count"], int)
+        assert entry["weekly_use_count"] >= 0
         assert isinstance(entry["toggleable"], bool)
         if entry["toggleable"]:
             assert isinstance(entry["enable_overrides"], dict)
@@ -1086,3 +1092,99 @@ def test_get_descriptor_resolves_known_slugs(slug: str) -> None:
 
 def test_get_descriptor_returns_none_for_unknown_slug() -> None:
     assert get_descriptor("not-a-real-technique") is None
+
+
+# ── M14 Phase 6 — trace integration ───────────────────────────────
+
+
+@pytest.fixture
+def _phase6_trace_store(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch):
+    """Redirect ``TraceStore`` to a tmp_path-backed dir for the Phase 6
+    routes. The route reads from the ``METIS_TRACE_DIR`` env var, so
+    this monkeypatch is enough to isolate the test from any real trace
+    data on disk."""
+    monkeypatch.setenv("METIS_TRACE_DIR", str(tmp_path))
+    from metis_app.services.trace_store import TraceStore
+
+    store = TraceStore(tmp_path)
+    return store
+
+
+def test_list_techniques_response_includes_weekly_use_count(
+    _phase6_trace_store,
+) -> None:
+    """The card face shows "Used X times this week" — a per-technique
+    scalar that the list endpoint must surface so the gallery doesn't
+    need a per-card detail call just to render the badge."""
+    store = _phase6_trace_store
+    store.append_event(
+        run_id="run-A", stage="reflection", event_type="iteration_complete"
+    )
+    store.append_event(
+        run_id="run-A", stage="reflection", event_type="iteration_complete"
+    )
+
+    with _client() as client:
+        techniques = client.get("/v1/forge/techniques").json()["techniques"]
+
+    by_id = {entry["id"]: entry for entry in techniques}
+    assert "weekly_use_count" in by_id["iterrag-convergence"], (
+        "list endpoint must expose weekly_use_count for the card pill"
+    )
+    assert by_id["iterrag-convergence"]["weekly_use_count"] >= 2
+
+
+def test_recent_uses_route_returns_filtered_events(
+    _phase6_trace_store,
+) -> None:
+    store = _phase6_trace_store
+    store.append_event(
+        run_id="run-1", stage="reflection", event_type="iteration_complete",
+        payload={"summary": "converged in 2"},
+    )
+    store.append_event(
+        run_id="run-1", stage="synthesis", event_type="llm_response"
+    )
+
+    with _client() as client:
+        resp = client.get(
+            "/v1/forge/techniques/iterrag-convergence/recent-uses"
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "events" in body
+    assert "weekly_count" in body
+    types = {e["event_type"] for e in body["events"]}
+    assert types == {"iteration_complete"}
+
+
+def test_recent_uses_route_404s_for_unknown_technique() -> None:
+    with _client() as client:
+        resp = client.get("/v1/forge/techniques/not-a-thing/recent-uses")
+    assert resp.status_code == 404
+
+
+def test_recent_uses_route_returns_empty_for_descriptor_without_markers(
+    _phase6_trace_store,
+) -> None:
+    """Phase 6 ships markers for the marquee techniques only. Cards
+    whose descriptor has no markers wired yet must still get a clean
+    empty response (not a 500), so the gallery renders consistently."""
+    # Find a descriptor that has no trace markers wired and probe it.
+    from metis_app.services.forge_registry import get_registry
+
+    candidates = [d for d in get_registry() if not d.trace_event_types]
+    if not candidates:
+        pytest.skip(
+            "every descriptor declares trace markers — empty-marker test "
+            "no longer applicable"
+        )
+
+    target = candidates[0].id
+    with _client() as client:
+        resp = client.get(f"/v1/forge/techniques/{target}/recent-uses")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["events"] == []
+    assert body["weekly_count"] == 0
