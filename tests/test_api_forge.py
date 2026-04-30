@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pathlib
 from typing import Any
 from unittest.mock import patch
 
@@ -558,6 +559,233 @@ def test_absorb_route_rejects_non_http_scheme() -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body["source_kind"] == "error"
+
+
+def test_list_candidates_route_returns_pending_candidates(tmp_path) -> None:
+    """``GET /v1/forge/candidates`` exposes the seedling's pending
+    skill candidates with default-slug + trace-excerpt fields the
+    review pane needs."""
+    from metis_app.services.skill_repository import SkillRepository
+
+    candidates_db = tmp_path / "skill_candidates.db"
+    repo = SkillRepository(skills_dir=tmp_path / "skills")
+    repo.save_candidate(
+        db_path=candidates_db,
+        query_text="How does reranking work?",
+        trace_json='{"iterations": 3}',
+        convergence_score=0.97,
+    )
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._candidates_db_path",
+            return_value=candidates_db,
+        ),
+        _client() as client,
+    ):
+        resp = client.get("/v1/forge/candidates")
+        body = resp.json()
+
+    assert resp.status_code == 200
+    assert len(body["candidates"]) == 1
+    row = body["candidates"][0]
+    assert row["query_text"] == "How does reranking work?"
+    assert row["default_slug"] == "how-does-reranking-work"
+    assert "iterations" in row["trace_excerpt"]
+
+
+def test_accept_candidate_route_writes_skill_and_flips_settings(
+    tmp_path,
+) -> None:
+    """The route drafts a SKILL.md, calls the settings writer, and
+    marks the candidate promoted. Settings are written through the
+    existing ``save_settings`` helper, so we patch it to capture the
+    payload."""
+    from metis_app.services.skill_repository import SkillRepository
+
+    candidates_db = tmp_path / "skill_candidates.db"
+    skills_root = tmp_path / "skills"
+    repo = SkillRepository(skills_dir=skills_root)
+    repo.save_candidate(
+        db_path=candidates_db,
+        query_text="What is BM25?",
+        trace_json="{}",
+        convergence_score=0.95,
+    )
+
+    captured: list[dict[str, Any]] = []
+
+    def fake_save_settings(payload: dict[str, Any]) -> dict[str, Any]:
+        captured.append(payload)
+        return payload
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._candidates_db_path",
+            return_value=candidates_db,
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=skills_root,
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._save_settings",
+            side_effect=fake_save_settings,
+        ),
+        _client() as client,
+    ):
+        resp = client.post("/v1/forge/candidates/1/accept", json={})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["slug"] == "what-is-bm25"
+    assert body["skill_path"].endswith("SKILL.md")
+    assert pathlib.Path(body["skill_path"]).exists()
+    assert captured, "expected settings_writer to be invoked"
+    assert captured[0]["skills"]["enabled"]["what-is-bm25"] is True
+
+
+def test_accept_candidate_route_passes_slug_override(tmp_path) -> None:
+    from metis_app.services.skill_repository import SkillRepository
+
+    candidates_db = tmp_path / "skill_candidates.db"
+    skills_root = tmp_path / "skills"
+    repo = SkillRepository(skills_dir=skills_root)
+    repo.save_candidate(
+        db_path=candidates_db,
+        query_text="Whatever",
+        trace_json="{}",
+        convergence_score=0.95,
+    )
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._candidates_db_path",
+            return_value=candidates_db,
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=skills_root,
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._save_settings",
+            side_effect=lambda payload: payload,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(
+            "/v1/forge/candidates/1/accept",
+            json={"slug": "Custom Reranker"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["slug"] == "custom-reranker"
+
+
+def test_accept_candidate_route_returns_404_for_unknown_id(tmp_path) -> None:
+    candidates_db = tmp_path / "skill_candidates.db"
+    skills_root = tmp_path / "skills"
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._candidates_db_path",
+            return_value=candidates_db,
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=skills_root,
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._save_settings",
+            side_effect=lambda payload: payload,
+        ),
+        _client() as client,
+    ):
+        resp = client.post("/v1/forge/candidates/9999/accept", json={})
+    assert resp.status_code == 404
+
+
+def test_accept_candidate_route_returns_409_when_skill_exists(
+    tmp_path,
+) -> None:
+    """If the target slug folder already has a SKILL.md, the route
+    surfaces 409 instead of clobbering."""
+    from metis_app.services.skill_repository import SkillRepository
+
+    candidates_db = tmp_path / "skill_candidates.db"
+    skills_root = tmp_path / "skills"
+    repo = SkillRepository(skills_dir=skills_root)
+    repo.save_candidate(
+        db_path=candidates_db,
+        query_text="Some query",
+        trace_json="{}",
+        convergence_score=0.95,
+    )
+    target = skills_root / "some-query" / "SKILL.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("existing", encoding="utf-8")
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._candidates_db_path",
+            return_value=candidates_db,
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=skills_root,
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._save_settings",
+            side_effect=lambda payload: payload,
+        ),
+        _client() as client,
+    ):
+        resp = client.post("/v1/forge/candidates/1/accept", json={})
+    assert resp.status_code == 409
+
+
+def test_reject_candidate_route_marks_rejected(tmp_path) -> None:
+    from metis_app.services.skill_repository import SkillRepository
+
+    candidates_db = tmp_path / "skill_candidates.db"
+    repo = SkillRepository(skills_dir=tmp_path / "skills")
+    repo.save_candidate(
+        db_path=candidates_db,
+        query_text="Whatever",
+        trace_json="{}",
+        convergence_score=0.95,
+    )
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._candidates_db_path",
+            return_value=candidates_db,
+        ),
+        _client() as client,
+    ):
+        resp = client.post("/v1/forge/candidates/1/reject", json={})
+
+    assert resp.status_code == 200
+    import sqlite3
+
+    with sqlite3.connect(candidates_db) as conn:
+        row = conn.execute(
+            "SELECT promoted, rejected FROM skill_candidates WHERE id = 1"
+        ).fetchone()
+    assert row == (1, 1)
+
+
+def test_reject_candidate_route_returns_404_for_unknown_id(tmp_path) -> None:
+    candidates_db = tmp_path / "skill_candidates.db"
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._candidates_db_path",
+            return_value=candidates_db,
+        ),
+        _client() as client,
+    ):
+        resp = client.post("/v1/forge/candidates/9999/reject", json={})
+    assert resp.status_code == 404
 
 
 def test_heretic_enable_override_uses_service_default_output_dir() -> None:
