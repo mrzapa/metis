@@ -59,6 +59,27 @@ Template for agent-filed intake:
 - **Decision:** <awaiting go/no-go | promoted as M## | merged into M## | parked | rejected>
 -->
 
+### ~~chenglou/pretext — fast canvas text measurement & layout~~ → merged into M01 ([`docs/preserve-and-productize-plan.md`](../docs/preserve-and-productize-plan.md) → *2026-05-01 — Notes for the next agent*)
+
+- **Source:** https://github.com/chenglou/pretext (npm `@chenglou/pretext`, MIT, 45.9k★ on a 2-month-old repo, primary lang TypeScript, last push 2026-04-22).
+- **Ask:** Add to ideas and triage how/if to implement pretext into METIS.
+- **Context:** Pretext is a "pure JS/TS library for multiline text measurement & layout" by Cheng Lou (ex-React core). Avoids `getBoundingClientRect`-induced reflow by measuring via `Intl.Segmenter` + Canvas 2D directly. Ships line-breaking, word-wrap, BiDi/RTL, soft-hyphens. Targets browsers (no SSR yet). Pinned at `0.0.5`.
+- **Filed:** 2026-05-01 by claude/gifted-knuth-27aeb0
+- **Triage:**
+  - What it is: A performance-oriented browser text-layout primitive. Inputs: a string + a Canvas font shorthand. Outputs: line ranges, widths, segment cursors. The library *measures*; the caller renders (DOM, Canvas, SVG, WebGL sprite atlas — wherever). Notable for combining `Intl.Segmenter` grapheme awareness (correct for emoji, CJK, combining marks) with native canvas measurement, and for not touching the layout tree.
+  - **Already in the codebase.** Integrated on 2026-03-29 in commit `3c6dd61` (bundled into a feature commit titled "feat: add index deletion functionality"). Today it powers node-cluster label sprites in [apps/metis-web/app/page.tsx:2542-2552](apps/metis-web/app/page.tsx:2542) (and one more call around [line 4234](apps/metis-web/app/page.tsx:4234)) via the wrapper at [apps/metis-web/lib/pretext-labels.ts](apps/metis-web/lib/pretext-labels.ts), which adds a font-keyed measurement cache and a `ctx.measureText` fallback. So the question isn't "should we adopt pretext" — it's "where else does it earn its keep, and is the existing integration healthy".
+  - Audit of remaining unwrapped `ctx.measureText` calls: only one — [apps/metis-web/components/brain/brain-graph-3d.tsx:219](apps/metis-web/components/brain/brain-graph-3d.tsx:219), which sizes BrainGraph node-label pills with raw canvas measurement. Migrating it to `measureSingleLineTextWidth` would: (a) inherit the cache (BrainGraph can re-measure the same labels per frame during pan/zoom), (b) get grapheme-cluster correctness for any concept titles containing emoji or CJK, and (c) consolidate the project on one measurement primitive. Comets/landing-starfield don't currently render text via canvas measureText; OG image is Next.js metadata routes (server-side, where pretext has no SSR support yet).
+  - Pillar fit: **Cross-cutting + Cosmos** (🔧🌌). Pure infrastructure beneath label rendering on Cosmos surfaces (constellation, BrainGraph). Not a vision-pillar feature on its own.
+  - Overlap:
+    - **M01 (Rolling)** — natural home: "consolidate canvas text measurement on the pretext wrapper" is exactly the surface-existing-infrastructure ethos.
+    - **M10 (Landed)** — owns BrainGraph homological surfaces; the label-pill code in `brain-graph-3d.tsx` lives downstream of M10's data. Migrating its measurement is purely cosmetic to that milestone.
+    - **M14 (In progress)** — Forge technique cards are plain DOM React components; no text-measurement need. Not impacted.
+    - **M21 / Living Mark (parked above)** — formation animation; doesn't need text layout.
+  - Risks worth noting: (1) Library is at `0.0.5` — pre-1.0 means breaking changes are normal; we should keep the wrapper as our only import surface so a future bump or fork can be done in one file. (2) Hard requirement on `Intl.Segmenter` and Canvas 2D — both fine in Tauri's webview and modern browsers, but we should not assume them in any Node-side code path (server-rendered metadata, future tests).
+  - Recommendation: **Merge into M01** as a small, scoped item under *Notes for the next agent*: (a) migrate `brain-graph-3d.tsx`'s `ctx.measureText` call to `measureSingleLineTextWidth`, (b) add a one-paragraph "All canvas text measurement goes through `lib/pretext-labels.ts`" note in the M01 cleanup conventions, (c) flag the `0.0.x` pin so a future agent watches for the 0.1.0 / 1.0.0 release. No dedicated milestone.
+  - Rough scope: **half-day patch** (single-file migration + a tiny visual-regression check on the BrainGraph label pills + a docs note in M01).
+- **Decision:** **Merged into M01** 2026-05-01. Half-day patch (BrainGraph migration + convention note + 0.0.x pin warning) captured under [`docs/preserve-and-productize-plan.md` → *2026-05-01 — Notes for the next agent*](../docs/preserve-and-productize-plan.md). No new milestone row in `IMPLEMENTATION.md`.
+
 ### Living Mark — M-star formation from the starfield
 
 - **Source:** Approach 3 from the M20 brainstorming (2026-04-28); parked at the time so M20 could ship the primitives + metadata cleanly without expanding scope.
