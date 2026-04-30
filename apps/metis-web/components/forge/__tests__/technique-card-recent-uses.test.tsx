@@ -155,4 +155,42 @@ describe("<TechniqueCard /> Phase 6 — recent uses", () => {
     renderCard(makeTechnique({ weekly_use_count: 0 }));
     expect(screen.queryByTestId("forge-recent-uses-trigger")).toBeNull();
   });
+
+  it("retries the fetch when the user re-opens after an error", async () => {
+    // Codex P2 on PR #585: a transient network failure on the first
+    // open should not lock the panel into a permanent error state.
+    // Re-opening must retry so the user isn't forced to refresh the
+    // whole page to recover.
+    mocks.fetchRecentUses
+      .mockRejectedValueOnce(new Error("transient network blip"))
+      .mockResolvedValueOnce({
+        events: [
+          {
+            run_id: "run-recovered",
+            timestamp: "2026-04-30T10:00:00+00:00",
+            stage: "reflection",
+            event_type: "iteration_complete",
+            preview: "converged after retry",
+          },
+        ],
+        weekly_count: 1,
+      });
+
+    renderCard(makeTechnique({ weekly_use_count: 1 }));
+    const trigger = screen.getByTestId("forge-recent-uses-trigger");
+    fireEvent.click(trigger); // open → triggers failing fetch
+    await screen.findByTestId("forge-recent-uses-error");
+    expect(mocks.fetchRecentUses).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(trigger); // collapse
+    fireEvent.click(trigger); // re-open → MUST retry
+
+    await waitFor(() =>
+      expect(mocks.fetchRecentUses).toHaveBeenCalledTimes(2),
+    );
+    const row = await screen.findByTestId("forge-recent-uses-row");
+    expect(row).toHaveTextContent(/converged after retry/);
+    // Error message should have been cleared on the successful retry.
+    expect(screen.queryByTestId("forge-recent-uses-error")).toBeNull();
+  });
 });

@@ -453,7 +453,13 @@ function RecentUsesPanel({ techniqueId }: RecentUsesPanelProps) {
   const [state, setState] = useState<FetchState>({ status: "idle" });
 
   const ensureLoaded = useCallback(async () => {
-    if (state.status !== "idle") return;
+    // Skip refetching when we already have data or a request is in
+    // flight; ``error`` state IS allowed through so the user can
+    // recover from a transient blip by collapsing + re-opening (Codex
+    // P2 on PR #585 — without this, the inline error was permanent
+    // for the rest of the card's lifetime and the only escape was a
+    // full page refresh).
+    if (state.status === "loading" || state.status === "loaded") return;
     setState({ status: "loading" });
     try {
       const data = await fetchForgeRecentUses(techniqueId);

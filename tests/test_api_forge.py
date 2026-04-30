@@ -1115,13 +1115,18 @@ def test_list_techniques_response_includes_weekly_use_count(
 ) -> None:
     """The card face shows "Used X times this week" — a per-technique
     scalar that the list endpoint must surface so the gallery doesn't
-    need a per-card detail call just to render the badge."""
+    need a per-card detail call just to render the badge.
+
+    The counter is *runs-this-week*, not *marker-events-this-week*
+    (Codex P2 on PR #585), so we seed two distinct runs even though
+    each emits the same single marker event.
+    """
     store = _phase6_trace_store
     store.append_event(
         run_id="run-A", stage="reflection", event_type="iteration_complete"
     )
     store.append_event(
-        run_id="run-A", stage="reflection", event_type="iteration_complete"
+        run_id="run-B", stage="reflection", event_type="iteration_complete"
     )
 
     with _client() as client:

@@ -153,6 +153,14 @@ def recent_uses_for_technique(
     capped at *limit* entries and ordered newest-first. Each event is
     projected into a minimal shape the frontend can render directly:
     ``{run_id, timestamp, stage, event_type, preview}``.
+
+    The weekly count is **runs-this-week**, not events-this-week —
+    iterative techniques like IterRAG emit several marker events per
+    run, and counting raw events would inflate them relative to
+    one-event-per-run techniques. Rows that lack a ``run_id`` (a
+    malformed jsonl line, an early bootstrap event) fall back to
+    each-event-counted-once so a single broken row can't zero the
+    counter (Codex P2 on PR #585).
     """
     markers = set(descriptor.trace_event_types)
     if not markers:
@@ -168,7 +176,8 @@ def recent_uses_for_technique(
             else now.replace(tzinfo=timezone.utc)
         ) - _WEEKLY_WINDOW
 
-    weekly_count = 0
+    weekly_run_ids: set[str] = set()
+    weekly_unidentified = 0
     matched: list[tuple[datetime | None, dict[str, Any]]] = []
     for row in _iter_runs_jsonl(store):
         event_type = str(row.get("event_type") or "")
@@ -176,8 +185,13 @@ def recent_uses_for_technique(
             continue
         ts = _parse_iso(row.get("timestamp"))
         if ts is not None and ts >= cutoff:
-            weekly_count += 1
+            run_id = str(row.get("run_id") or "").strip()
+            if run_id:
+                weekly_run_ids.add(run_id)
+            else:
+                weekly_unidentified += 1
         matched.append((ts, row))
+    weekly_count = len(weekly_run_ids) + weekly_unidentified
 
     # Newest-first; rows without timestamps sort to the bottom so a
     # malformed timestamp doesn't masquerade as the most-recent event.
@@ -214,6 +228,12 @@ def weekly_use_counts(
     :func:`recent_uses_for_technique` once per descriptor — the list
     endpoint renders all 13 cards and we don't want 13× the I/O on a
     single page load.
+
+    Counts are **unique runs**, not raw event counts: a single agentic
+    run that emits ``iteration_start`` + ``iteration_complete`` +
+    ``gaps_identified`` should count as one IterRAG use, not three
+    (Codex P2 on PR #585). Rows missing a ``run_id`` fall back to
+    each-event-counted-once so malformed lines don't zero counters.
     """
     cutoff: datetime
     if now is None:
@@ -225,8 +245,12 @@ def weekly_use_counts(
             else now.replace(tzinfo=timezone.utc)
         ) - _WEEKLY_WINDOW
 
-    # event_type -> count over the last 7 days
-    per_event: dict[str, int] = {}
+    # event_type -> set of run_ids seen with that marker in the
+    # weekly window; events without a run_id are tallied separately
+    # under ``unidentified[event_type]`` so they still contribute to
+    # the count without poisoning the dedup set.
+    per_event_runs: dict[str, set[str]] = {}
+    per_event_unidentified: dict[str, int] = {}
     for row in _iter_runs_jsonl(store):
         ts = _parse_iso(row.get("timestamp"))
         if ts is None or ts < cutoff:
@@ -234,12 +258,23 @@ def weekly_use_counts(
         event_type = str(row.get("event_type") or "")
         if not event_type:
             continue
-        per_event[event_type] = per_event.get(event_type, 0) + 1
+        run_id = str(row.get("run_id") or "").strip()
+        if run_id:
+            per_event_runs.setdefault(event_type, set()).add(run_id)
+        else:
+            per_event_unidentified[event_type] = (
+                per_event_unidentified.get(event_type, 0) + 1
+            )
 
     out: dict[str, int] = {}
     for descriptor in descriptors:
-        total = 0
+        # Union of run_ids across all of the descriptor's markers — a
+        # run that emits two markers we both care about still counts
+        # once for the descriptor, not twice.
+        descriptor_runs: set[str] = set()
+        descriptor_unidentified = 0
         for marker in descriptor.trace_event_types:
-            total += per_event.get(marker, 0)
-        out[descriptor.id] = total
+            descriptor_runs.update(per_event_runs.get(marker, ()))
+            descriptor_unidentified += per_event_unidentified.get(marker, 0)
+        out[descriptor.id] = len(descriptor_runs) + descriptor_unidentified
     return out

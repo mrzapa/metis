@@ -248,6 +248,107 @@ def test_recent_uses_skips_corrupt_lines(tmp_path) -> None:
     assert len(result["events"]) == 2
 
 
+def test_weekly_count_dedupes_per_run_for_iterative_techniques(tmp_path) -> None:
+    """Iterative techniques like ``iterrag-convergence`` emit several
+    marker events per run (``iteration_start`` + ``iteration_complete``
+    + ``gaps_identified`` ...). The "uses this week" pill is a
+    *runs-this-week* count, not a *marker-events-this-week* count —
+    otherwise iterative techniques look artificially more used than
+    one-event-per-run techniques and cross-card comparisons mislead.
+
+    Regression for the Phase 6 Codex P2 review on PR #585.
+    """
+    from metis_app.services.forge_trace import recent_uses_for_technique
+
+    store = TraceStore(tmp_path)
+    now = datetime(2026, 4, 30, 12, 0, 0, tzinfo=timezone.utc)
+    base_ts = (now - timedelta(hours=1)).isoformat()
+    # ONE run that emits THREE distinct iterrag markers — the natural
+    # shape of a converged agentic loop.
+    for event_type in ("iteration_start", "iteration_complete", "gaps_identified"):
+        _seed(
+            store,
+            run_id="run-loop",
+            event_type=event_type,
+            stage="reflection",
+            timestamp=base_ts,
+        )
+
+    descriptor = _make_descriptor(
+        slug="iterrag",
+        trace_event_types=(
+            "iteration_start",
+            "iteration_complete",
+            "gaps_identified",
+        ),
+    )
+    result = recent_uses_for_technique(
+        descriptor=descriptor, store=store, now=now
+    )
+    assert result["weekly_count"] == 1, (
+        "single run with three marker events should count as 1 use, "
+        f"not {result['weekly_count']}"
+    )
+
+
+def test_weekly_use_counts_dedupes_per_run_in_bulk_scan(tmp_path) -> None:
+    """The list-endpoint bulk path dedupes the same way the per-card
+    detail path does — a single run that emits multiple markers
+    counts as one across the whole gallery."""
+    from metis_app.services.forge_trace import weekly_use_counts
+
+    store = TraceStore(tmp_path)
+    now = datetime(2026, 4, 30, 12, 0, 0, tzinfo=timezone.utc)
+    ts = (now - timedelta(hours=1)).isoformat()
+    # Two distinct runs, each emitting two markers.
+    for run_id in ("run-A", "run-B"):
+        _seed(store, run_id=run_id, event_type="iteration_start", timestamp=ts)
+        _seed(
+            store,
+            run_id=run_id,
+            event_type="iteration_complete",
+            timestamp=ts,
+        )
+
+    descriptors = (
+        _make_descriptor(
+            slug="iterrag",
+            trace_event_types=("iteration_start", "iteration_complete"),
+        ),
+    )
+    counts = weekly_use_counts(
+        descriptors=descriptors, store=store, now=now
+    )
+    assert counts["iterrag"] == 2, (
+        "two runs (each with two markers) should count as 2, "
+        f"not {counts['iterrag']}"
+    )
+
+
+def test_weekly_count_falls_back_to_event_count_when_run_id_missing(tmp_path) -> None:
+    """Trace rows with an empty/missing ``run_id`` can't be deduped
+    sensibly — each one is its own "use". The fallback prevents a
+    single broken row from collapsing the count to zero."""
+    from metis_app.services.forge_trace import recent_uses_for_technique
+
+    store = TraceStore(tmp_path)
+    now = datetime(2026, 4, 30, 12, 0, 0, tzinfo=timezone.utc)
+    ts = (now - timedelta(hours=1)).isoformat()
+    _seed(store, run_id="", event_type="iteration_start", timestamp=ts)
+    _seed(store, run_id="", event_type="iteration_complete", timestamp=ts)
+
+    descriptor = _make_descriptor(
+        slug="iterrag",
+        trace_event_types=("iteration_start", "iteration_complete"),
+    )
+    result = recent_uses_for_technique(
+        descriptor=descriptor, store=store, now=now
+    )
+    # Two events with no run_id ⇒ each counted distinctly. Anything
+    # else would silently zero the counter on a malformed jsonl line.
+    assert result["weekly_count"] == 2
+
+
 @pytest.mark.parametrize(
     ("slug", "expected_marker"),
     [
