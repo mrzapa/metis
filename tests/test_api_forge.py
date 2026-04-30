@@ -293,6 +293,259 @@ def test_absorb_route_returns_error_payload_for_unsupported_url() -> None:
     assert body["proposal"] is None
 
 
+def test_absorb_route_persists_successful_proposals(tmp_path) -> None:
+    """When the LLM returns a proposal, the route saves it to
+    ``forge_proposals.db`` and includes the new row's ``proposal_id``
+    in the response so the frontend can mark it pending in the
+    review pane immediately."""
+    from metis_app.services import forge_proposals
+
+    fake_atom = b"""<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2501.12345v1</id>
+    <title>Cross-encoder reranking that matters</title>
+    <summary>We propose a sparse cross-encoder reranking method.</summary>
+  </entry>
+</feed>
+"""
+    fake_proposal = (
+        '{"name": "Sparse Cross-Encoder Reranking",'
+        ' "claim": "Reranks BM25 hits with a small cross-encoder.",'
+        ' "pillar_guess": "cortex",'
+        ' "implementation_sketch": "Score top-k hits with a CE model."}'
+    )
+
+    class _FakeLLM:
+        def invoke(self, _msgs: object) -> object:
+            return type("R", (), {"content": fake_proposal})()
+
+    db_path = tmp_path / "forge_proposals.db"
+
+    with (
+        patch(
+            "metis_app.services.forge_absorb._safe_get_bytes",
+            return_value=fake_atom,
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._build_llm_for_absorb",
+            return_value=_FakeLLM(),
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._proposal_db_path",
+            return_value=db_path,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(
+            "/v1/forge/absorb",
+            json={"url": "https://arxiv.org/abs/2501.12345"},
+        )
+        body = resp.json()
+
+    assert body["proposal_id"] is not None
+    rows = forge_proposals.list_proposals(db_path=db_path)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "pending"
+    assert rows[0]["proposal_name"] == "Sparse Cross-Encoder Reranking"
+
+
+def test_list_proposals_route_returns_pending_only_by_default(
+    tmp_path,
+) -> None:
+    """GET /v1/forge/proposals defaults to pending so the review pane
+    doesn't show old accepted/rejected rows."""
+    from metis_app.services.forge_proposals import (
+        mark_accepted,
+        save_proposal,
+    )
+
+    db_path = tmp_path / "forge_proposals.db"
+    save_proposal(  # type: ignore[arg-type]
+        db_path=db_path,
+        source_url="https://arxiv.org/abs/2501.00001",
+        arxiv_id="2501.00001",
+        title="Pending Paper",
+        summary="",
+        proposal_name="Pending",
+        proposal_claim="A pending claim.",
+        proposal_pillar="cortex",
+        proposal_sketch="A pending sketch.",
+    )
+    accepted_id = save_proposal(  # type: ignore[arg-type]
+        db_path=db_path,
+        source_url="https://arxiv.org/abs/2501.00002",
+        arxiv_id="2501.00002",
+        title="Accepted Paper",
+        summary="",
+        proposal_name="Accepted",
+        proposal_claim="An accepted claim.",
+        proposal_pillar="cortex",
+        proposal_sketch="An accepted sketch.",
+    )
+    mark_accepted(db_path=db_path, proposal_id=accepted_id, skill_path="skills/x/SKILL.md")
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._proposal_db_path",
+            return_value=db_path,
+        ),
+        _client() as client,
+    ):
+        resp = client.get("/v1/forge/proposals")
+        body = resp.json()
+
+    assert resp.status_code == 200
+    assert len(body["proposals"]) == 1
+    assert body["proposals"][0]["proposal_name"] == "Pending"
+
+
+def test_accept_proposal_route_writes_skill_draft_and_marks_accepted(
+    tmp_path,
+) -> None:
+    """POST /v1/forge/proposals/<id>/accept drafts the skill md file
+    and updates the row's status. The response carries the relative
+    ``skill_path`` so the frontend can deep-link the user to the
+    file they should edit."""
+    from metis_app.services.forge_proposals import (
+        get_proposal,
+        save_proposal,
+    )
+
+    db_path = tmp_path / "forge_proposals.db"
+    skills_root = tmp_path / "skills"
+    proposal_id = save_proposal(  # type: ignore[arg-type]
+        db_path=db_path,
+        source_url="https://arxiv.org/abs/2501.00001",
+        arxiv_id="2501.00001",
+        title="Pending Paper",
+        summary="",
+        proposal_name="Sparse Reranker",
+        proposal_claim="Reranks hits.",
+        proposal_pillar="cortex",
+        proposal_sketch="Score top-k hits.",
+    )
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._proposal_db_path",
+            return_value=db_path,
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=skills_root,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(f"/v1/forge/proposals/{proposal_id}/accept", json={})
+        body = resp.json()
+
+    assert resp.status_code == 200
+    assert body["status"] == "accepted"
+    assert body["skill_path"].endswith("SKILL.md")
+    row = get_proposal(db_path=db_path, proposal_id=proposal_id)
+    assert row is not None
+    assert row["status"] == "accepted"
+    skill_file = skills_root / "sparse-reranker" / "SKILL.md"
+    assert skill_file.exists()
+
+
+def test_accept_proposal_route_returns_409_if_skill_draft_exists(
+    tmp_path,
+) -> None:
+    """A second accept on the same proposal slug must not silently
+    clobber the existing draft. The route returns a 409."""
+    from metis_app.services.forge_proposals import save_proposal
+
+    db_path = tmp_path / "forge_proposals.db"
+    skills_root = tmp_path / "skills"
+    skills_root.mkdir(parents=True, exist_ok=True)
+    # Pre-create the skill dir with a SKILL.md so the writer trips.
+    (skills_root / "sparse-reranker").mkdir()
+    (skills_root / "sparse-reranker" / "SKILL.md").write_text("existing", encoding="utf-8")
+
+    proposal_id = save_proposal(  # type: ignore[arg-type]
+        db_path=db_path,
+        source_url="https://arxiv.org/abs/2501.00001",
+        arxiv_id="2501.00001",
+        title="Pending Paper",
+        summary="",
+        proposal_name="Sparse Reranker",
+        proposal_claim="Reranks hits.",
+        proposal_pillar="cortex",
+        proposal_sketch="Score top-k hits.",
+    )
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._proposal_db_path",
+            return_value=db_path,
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=skills_root,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(f"/v1/forge/proposals/{proposal_id}/accept", json={})
+
+    assert resp.status_code == 409
+
+
+def test_reject_proposal_route_marks_rejected(tmp_path) -> None:
+    from metis_app.services.forge_proposals import (
+        get_proposal,
+        save_proposal,
+    )
+
+    db_path = tmp_path / "forge_proposals.db"
+    proposal_id = save_proposal(  # type: ignore[arg-type]
+        db_path=db_path,
+        source_url="https://arxiv.org/abs/2501.00001",
+        arxiv_id="2501.00001",
+        title="Pending Paper",
+        summary="",
+        proposal_name="Sparse Reranker",
+        proposal_claim="Reranks hits.",
+        proposal_pillar="cortex",
+        proposal_sketch="Score top-k hits.",
+    )
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._proposal_db_path",
+            return_value=db_path,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(f"/v1/forge/proposals/{proposal_id}/reject", json={})
+
+    assert resp.status_code == 200
+    row = get_proposal(db_path=db_path, proposal_id=proposal_id)
+    assert row is not None
+    assert row["status"] == "rejected"
+
+
+def test_accept_proposal_route_returns_404_for_unknown_id(tmp_path) -> None:
+    db_path = tmp_path / "forge_proposals.db"
+    skills_root = tmp_path / "skills"
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._proposal_db_path",
+            return_value=db_path,
+        ),
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=skills_root,
+        ),
+        _client() as client,
+    ):
+        resp = client.post("/v1/forge/proposals/9999/accept", json={})
+
+    assert resp.status_code == 404
+
+
 def test_absorb_route_rejects_non_http_scheme() -> None:
     """SSRF guard at the route level: ``file://``, ``ftp://`` and the
     empty string come back as ``source_kind="error"`` without
