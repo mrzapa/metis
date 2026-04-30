@@ -49,11 +49,20 @@ _HTTP_TIMEOUT = 12.0
 _MAX_BODY_BYTES = 1_500_000  # arxiv abstracts are tiny; HTML pages cap at ~1.5 MB
 _ARXIV_ATOM_NS = {"a": "http://www.w3.org/2005/Atom"}
 
-_ARXIV_ID_PATTERNS = (
+# Hostname allow-list. The arxiv API and HTML site both serve from
+# ``arxiv.org``; ``www.`` is the canonical user-facing alias and
+# ``export.arxiv.org`` is the documented API host. Any other
+# hostname (``notarxiv.org``, ``arxiv.org.attacker.com``, an arbitrary
+# domain that smuggles an arxiv URL through a query parameter) is
+# **not** an arxiv source — the previous substring-search regex
+# accepted those, which Codex P2 review on PR #581 caught.
+_ARXIV_HOSTS = frozenset({"arxiv.org", "www.arxiv.org", "export.arxiv.org"})
+
+_ARXIV_PATH_PATTERNS = (
     # /abs/2501.12345 or /abs/2501.12345v2 or /abs/cs.AI/0501001
-    re.compile(r"arxiv\.org/abs/([A-Za-z\.\-]+/\d{7}|\d{4}\.\d{4,5}(?:v\d+)?)", re.IGNORECASE),
+    re.compile(r"^/abs/([A-Za-z\.\-]+/\d{7}|\d{4}\.\d{4,5}(?:v\d+)?)/?$", re.IGNORECASE),
     # /pdf/2501.12345.pdf or /pdf/2501.12345v3.pdf
-    re.compile(r"arxiv\.org/pdf/(\d{4}\.\d{4,5}(?:v\d+)?)\.pdf", re.IGNORECASE),
+    re.compile(r"^/pdf/(\d{4}\.\d{4,5}(?:v\d+)?)\.pdf$", re.IGNORECASE),
 )
 
 
@@ -99,9 +108,24 @@ def extract_arxiv_id(url: str) -> str | None:
     Supports the three URL shapes the user is most likely to paste:
     ``/abs/<id>``, ``/abs/<id>v<N>``, ``/pdf/<id>.pdf``, plus the
     legacy ``/abs/<archive>/<id>`` form for pre-2007 papers.
+
+    Hostname is checked against an allow-list of arxiv hosts and the
+    path-shape regex anchors on ``^/abs/`` or ``^/pdf/``, so URLs
+    that merely contain an arxiv-shaped substring (e.g. inside a
+    query parameter, or under a lookalike host like
+    ``notarxiv.org``) are rejected. See
+    ``test_extract_arxiv_id_rejects_lookalike_hosts``.
     """
-    for pattern in _ARXIV_ID_PATTERNS:
-        match = pattern.search(url)
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return None
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in _ARXIV_HOSTS:
+        return None
+    path = parsed.path or ""
+    for pattern in _ARXIV_PATH_PATTERNS:
+        match = pattern.match(path)
         if match:
             return match.group(1)
     return None

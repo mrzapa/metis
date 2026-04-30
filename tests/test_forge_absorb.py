@@ -31,6 +31,46 @@ def test_extract_arxiv_id_returns_none_for_non_arxiv() -> None:
     assert extract_arxiv_id("https://blog.example.com/posts/intro") is None
 
 
+def test_extract_arxiv_id_rejects_lookalike_hosts() -> None:
+    """Hostname must be exactly an arxiv host. ``notarxiv.org`` and
+    subdomain shenanigans like ``arxiv.org.attacker.com`` would
+    otherwise match the regex's substring search and trick the
+    pipeline into treating an arbitrary URL as an arxiv source.
+
+    Codex P2 review on PR #581 caught this — the original
+    ``re.search`` over the whole URL string allowed
+    ``notarxiv.org/abs/2501.12345`` through.
+    """
+    from metis_app.services.forge_absorb import extract_arxiv_id
+
+    assert extract_arxiv_id("https://notarxiv.org/abs/2501.12345") is None
+    assert extract_arxiv_id("https://arxiv.org.attacker.com/abs/2501.12345") is None
+    assert extract_arxiv_id("https://attacker-arxiv.org/abs/2501.12345") is None
+
+
+def test_extract_arxiv_id_ignores_arxiv_in_query_string() -> None:
+    """An arxiv-shaped substring inside a query parameter must not
+    promote the URL to an arxiv source. The pipeline ends up
+    fetching the real arxiv.org for the spoofed ID, so the
+    ``source_kind="arxiv"`` payload would be wrong by attribution."""
+    from metis_app.services.forge_absorb import extract_arxiv_id
+
+    assert extract_arxiv_id(
+        "https://attacker.example/r?to=https://arxiv.org/abs/2501.12345"
+    ) is None
+
+
+def test_extract_arxiv_id_accepts_export_subdomain() -> None:
+    """``export.arxiv.org`` is the documented API host and a
+    legitimate alias when users paste the API URL directly."""
+    from metis_app.services.forge_absorb import extract_arxiv_id
+
+    assert (
+        extract_arxiv_id("https://export.arxiv.org/abs/2501.12345")
+        == "2501.12345"
+    )
+
+
 _ARXIV_ATOM_RESPONSE = b"""<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
