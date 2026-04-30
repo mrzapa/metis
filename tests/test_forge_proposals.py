@@ -226,6 +226,41 @@ def test_write_skill_draft_slugs_the_proposal_name(
     assert skill_path.parent.name == "sparse-cross-encoder-reranking-v2"
 
 
+def test_write_skill_draft_round_trips_through_parse_skill_file(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The drafted ``SKILL.md`` must satisfy the canonical loader's
+    schema. Codex P1 review on PR #582 caught that the original
+    template emitted unknown keys (``pillar``, ``source_url``) and
+    omitted required trigger keys (``file_types``, ``output_styles``),
+    so every accepted skill landed in an unloadable state.
+
+    This test runs the actual ``parse_skill_file`` over the drafted
+    file and asserts ``errors`` is empty — the same gate any real
+    skill in ``skills/`` has to pass.
+    """
+    from metis_app.services.forge_proposals import (
+        save_proposal,
+        write_skill_draft,
+    )
+    from metis_app.services.skill_repository import parse_skill_file
+
+    proposal_id = save_proposal(  # type: ignore[arg-type]
+        db_path=tmp_path / "forge_proposals.db",
+        **_sample_proposal_payload(),
+    )
+    skill_path = write_skill_draft(
+        db_path=tmp_path / "forge_proposals.db",
+        proposal_id=proposal_id,
+        skills_root=tmp_path / "skills",
+    )
+
+    skill_def = parse_skill_file(skill_path)
+    assert skill_def.errors == [], (
+        f"skill loader rejected the drafted file: {skill_def.errors}"
+    )
+
+
 def test_write_skill_draft_refuses_to_overwrite(tmp_path: pathlib.Path) -> None:
     """The user has accepted twice — second accept must not silently
     clobber the first draft; the route surfaces a friendly error

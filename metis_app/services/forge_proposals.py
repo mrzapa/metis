@@ -292,6 +292,26 @@ def write_skill_draft(
 
 
 def _format_skill_draft(proposal: dict[str, Any], slug: str) -> str:
+    """Emit a YAML-frontmatter SKILL.md whose frontmatter satisfies
+    the schema enforced by ``skill_repository.parse_skill_file``.
+
+    Constraints (Codex P1 on PR #582 caught these — the original
+    draft used unknown keys + missing trigger keys, so every
+    accepted skill loaded with errors and could not be activated):
+
+    * Frontmatter keys are limited to ``FRONTMATTER_REQUIRED_KEYS``
+      (``id``, ``name``, ``description``, ``enabled_by_default``,
+      ``priority``, ``triggers``, ``runtime_overrides``) plus the
+      optional ``metadata``. Custom keys like ``pillar`` and
+      ``source_url`` would trigger "Unknown frontmatter keys"
+      errors, so they live in the markdown body instead.
+    * ``triggers`` must contain all four ``TRIGGER_KEYS``:
+      ``keywords``, ``modes``, ``file_types``, ``output_styles``.
+      Empty lists are valid and document the user's intent to
+      fill them in later.
+    * ``runtime_overrides`` stays empty — the user reviews and
+      picks settings themselves before activation (ADR 0014).
+    """
     name = str(proposal["proposal_name"]).strip()
     description = str(proposal["proposal_claim"]).strip()
     sketch = str(proposal["proposal_sketch"]).strip()
@@ -306,12 +326,12 @@ def _format_skill_draft(proposal: dict[str, Any], slug: str) -> str:
         f"description: {_yaml_escape(description)}\n"
         "enabled_by_default: false\n"
         "priority: 50\n"
-        f"pillar: {pillar}\n"
         "triggers:\n"
         "  keywords: []\n"
         "  modes: []\n"
+        "  file_types: []\n"
+        "  output_styles: []\n"
         "runtime_overrides: {}\n"
-        f"source_url: {_yaml_escape(source_url)}\n"
         "---\n"
     )
     body = (
@@ -321,7 +341,8 @@ def _format_skill_draft(proposal: dict[str, Any], slug: str) -> str:
         "`runtime_overrides` block is intentional.\n\n"
         "## Source\n\n"
         f"- Title: {title}\n"
-        f"- URL: {source_url}\n\n"
+        f"- URL: {source_url}\n"
+        f"- Pillar (proposal): {pillar}\n\n"
         "## Claim\n\n"
         f"{description}\n\n"
         "## Implementation sketch\n\n"
@@ -329,8 +350,11 @@ def _format_skill_draft(proposal: dict[str, Any], slug: str) -> str:
         "## Notes for the user\n\n"
         "Fill in `runtime_overrides` once you know which engine "
         "settings to flip (the Forge gallery's existing toggles are a "
-        "good reference). Keep `enabled_by_default: false` until the "
-        "skill has been exercised manually.\n"
+        "good reference). Add the relevant `triggers.keywords`, "
+        "`modes`, `file_types`, and `output_styles` so the skill "
+        "auto-activates in the right contexts. Keep "
+        "`enabled_by_default: false` until the skill has been "
+        "exercised manually.\n"
     )
     return frontmatter + "\n" + body
 
