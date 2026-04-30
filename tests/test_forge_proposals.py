@@ -149,6 +149,117 @@ def test_mark_rejected_sets_status(tmp_db: pathlib.Path) -> None:
     assert isinstance(row["resolved_at"], float)
 
 
+def test_save_proposal_defaults_source_to_manual(tmp_db: pathlib.Path) -> None:
+    """Phase 4a/4b absorb calls don't pass ``source`` — they default
+    to ``"manual"`` (the user pasted a URL into the form)."""
+    from metis_app.services.forge_proposals import (
+        get_proposal,
+        save_proposal,
+    )
+
+    proposal_id = save_proposal(db_path=tmp_db, **_sample_proposal_payload())  # type: ignore[arg-type]
+    row = get_proposal(db_path=tmp_db, proposal_id=proposal_id)
+    assert row is not None
+    assert row["source"] == "manual"
+    assert row["comet_id"] is None
+
+
+def test_save_proposal_records_comet_source(tmp_db: pathlib.Path) -> None:
+    """Phase 4c — auto-absorb from the news-comet pipeline marks the
+    proposal so the UI can render it differently ("from your
+    overnight feed")."""
+    from metis_app.services.forge_proposals import (
+        get_proposal,
+        save_proposal,
+    )
+
+    proposal_id = save_proposal(  # type: ignore[arg-type]
+        db_path=tmp_db,
+        source="comet",
+        comet_id="comet_abc123",
+        **_sample_proposal_payload(),
+    )
+    row = get_proposal(db_path=tmp_db, proposal_id=proposal_id)
+    assert row is not None
+    assert row["source"] == "comet"
+    assert row["comet_id"] == "comet_abc123"
+
+
+def test_save_proposal_rejects_invalid_source(tmp_db: pathlib.Path) -> None:
+    """``source`` is a small enum; unknown values must trip the
+    write so a future producer can't quietly inject a third
+    category the UI doesn't know how to render."""
+    from metis_app.services.forge_proposals import save_proposal
+
+    with pytest.raises(ValueError):
+        save_proposal(  # type: ignore[arg-type]
+            db_path=tmp_db,
+            source="invented",
+            **_sample_proposal_payload(),
+        )
+
+
+def test_init_db_migrates_legacy_schema_in_place(tmp_db: pathlib.Path) -> None:
+    """Existing databases predate the ``source`` + ``comet_id`` columns;
+    re-opening one must add the columns without losing any rows.
+    Mirrors what real users will see when they upgrade past Phase 4c."""
+    import sqlite3
+
+    # Simulate a Phase 4b-era database (no source / comet_id).
+    legacy_conn = sqlite3.connect(str(tmp_db))
+    legacy_conn.execute(
+        """
+        CREATE TABLE forge_proposals (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_url      TEXT NOT NULL,
+            arxiv_id        TEXT,
+            title           TEXT NOT NULL,
+            summary         TEXT,
+            proposal_name   TEXT NOT NULL,
+            proposal_claim  TEXT NOT NULL,
+            proposal_pillar TEXT NOT NULL,
+            proposal_sketch TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'pending',
+            created_at      REAL NOT NULL,
+            resolved_at     REAL,
+            skill_path      TEXT
+        )
+        """
+    )
+    legacy_conn.execute(
+        """
+        INSERT INTO forge_proposals (
+            source_url, title, proposal_name, proposal_claim,
+            proposal_pillar, proposal_sketch, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("https://arxiv.org/abs/2401.00001", "Old Paper", "Old", "Old claim.",
+         "cortex", "Old sketch.", 1.0),
+    )
+    legacy_conn.commit()
+    legacy_conn.close()
+
+    from metis_app.services.forge_proposals import list_proposals, save_proposal
+
+    rows = list_proposals(db_path=tmp_db)
+    assert len(rows) == 1
+    # Legacy row still readable, with the new fields filled with
+    # the migration defaults.
+    legacy = rows[0]
+    assert legacy["proposal_name"] == "Old"
+    assert legacy["source"] == "manual"
+    assert legacy["comet_id"] is None
+    # New writes through the migrated schema work fine.
+    new_id = save_proposal(  # type: ignore[arg-type]
+        db_path=tmp_db,
+        source="comet",
+        comet_id="comet_xyz",
+        **_sample_proposal_payload(),
+    )
+    assert new_id > 0
+
+
 def test_save_proposal_rejects_invalid_pillar(tmp_db: pathlib.Path) -> None:
     """Pillar enum mirrors ``TechniqueDescriptor`` — invalid values
     must be caught at write time so the gallery's render contract

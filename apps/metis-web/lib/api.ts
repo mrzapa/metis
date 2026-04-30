@@ -3944,6 +3944,7 @@ export interface ForgeAbsorbResponse {
 // ── M14 Phase 4b — proposal persistence + review pane ─────────────
 
 export type ForgeProposalStatus = "pending" | "accepted" | "rejected";
+export type ForgeProposalSource = "manual" | "comet";
 
 export interface ForgeProposalRecord {
   id: number;
@@ -3959,6 +3960,12 @@ export interface ForgeProposalRecord {
   created_at: number;
   resolved_at: number | null;
   skill_path: string | null;
+  // M14 Phase 4c — proposals can originate from a paste-into-form
+  // action ("manual") or from the news-comet auto-absorb bridge
+  // ("comet"). The review pane renders a small badge for the
+  // latter so the user knows METIS volunteered the proposal.
+  source: ForgeProposalSource;
+  comet_id: string | null;
 }
 
 export interface ForgeProposalsResponse {

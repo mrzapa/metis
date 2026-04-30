@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -106,6 +107,154 @@ def test_run_poll_cycle_short_circuits_when_no_items(monkeypatch) -> None:
         indexes=[],
     )
     assert result == {"comets": [], "message": "No new items"}
+
+
+def test_run_poll_cycle_skips_forge_bridge_when_setting_off() -> None:
+    """Phase 4c bridge is opt-in. With
+    ``forge_comet_auto_absorb_enabled`` unset (default), the poll
+    cycle never reaches into the forge proposals db."""
+    from metis_app.services.comet_decision_engine import CometDecisionEngine
+    from metis_app.services.news_ingest_service import NewsIngestService
+
+    absorb_event = CometEvent(
+        comet_id="c-arxiv",
+        news_item=NewsItem(
+            title="A paper",
+            url="https://arxiv.org/abs/2501.99999",
+            source_channel="rss",
+        ),
+        decision="absorb",
+        relevance_score=0.95,
+        classification_score=0.9,
+        gap_score=0.95,
+    )
+
+    class DummyIngest(NewsIngestService):
+        def ingest(self, settings, *, brain_pass_fn=None):  # type: ignore[override]
+            return [absorb_event]
+
+    class DummyEngine(CometDecisionEngine):
+        def evaluate_batch(self, events, indexes, settings):  # type: ignore[override]
+            return list(events)
+
+    bridge_calls: list[Any] = []
+
+    def fake_bridge(events, *, db_path, llm_factory):
+        bridge_calls.append((list(events), db_path))
+        return []
+
+    settings = {
+        "news_comets_enabled": True,
+        # forge_comet_auto_absorb_enabled NOT set -> default false
+    }
+
+    with patch(
+        "metis_app.services.comet_pipeline.auto_absorb_comets",
+        side_effect=fake_bridge,
+    ):
+        run_poll_cycle(
+            settings, ingest=DummyIngest(), engine=DummyEngine(), indexes=[]
+        )
+
+    assert bridge_calls == []
+
+
+def test_run_poll_cycle_invokes_forge_bridge_when_setting_on() -> None:
+    """When ``forge_comet_auto_absorb_enabled`` is true the poll
+    cycle hands the decided events to the bridge after persisting
+    the comets themselves. Bridge failures must not propagate — a
+    raise here would kill the polling worker."""
+    from metis_app.services.comet_decision_engine import CometDecisionEngine
+    from metis_app.services.news_ingest_service import NewsIngestService
+
+    absorb_event = CometEvent(
+        comet_id="c-arxiv",
+        news_item=NewsItem(
+            title="A paper",
+            url="https://arxiv.org/abs/2501.99999",
+            source_channel="rss",
+        ),
+        decision="absorb",
+        relevance_score=0.95,
+        classification_score=0.9,
+        gap_score=0.95,
+    )
+
+    class DummyIngest(NewsIngestService):
+        def ingest(self, settings, *, brain_pass_fn=None):  # type: ignore[override]
+            return [absorb_event]
+
+    class DummyEngine(CometDecisionEngine):
+        def evaluate_batch(self, events, indexes, settings):  # type: ignore[override]
+            return list(events)
+
+    bridge_calls: list[Any] = []
+
+    def fake_bridge(events, *, db_path, llm_factory):
+        bridge_calls.append([e.comet_id for e in events])
+        return [42]
+
+    settings = {
+        "news_comets_enabled": True,
+        "forge_comet_auto_absorb_enabled": True,
+    }
+
+    with patch(
+        "metis_app.services.comet_pipeline.auto_absorb_comets",
+        side_effect=fake_bridge,
+    ):
+        result = run_poll_cycle(
+            settings, ingest=DummyIngest(), engine=DummyEngine(), indexes=[]
+        )
+
+    assert bridge_calls == [["c-arxiv"]]
+    # The comet itself still surfaces in the response — the bridge
+    # is additive, not a replacement.
+    assert any(c["comet_id"] == "c-arxiv" for c in result["comets"])
+
+
+def test_run_poll_cycle_swallows_bridge_failures() -> None:
+    """Worker hardening: a bridge exception must not kill the poll
+    cycle's persisted comet response."""
+    from metis_app.services.comet_decision_engine import CometDecisionEngine
+    from metis_app.services.news_ingest_service import NewsIngestService
+
+    absorb_event = CometEvent(
+        comet_id="c-arxiv",
+        news_item=NewsItem(
+            title="A paper",
+            url="https://arxiv.org/abs/2501.99999",
+            source_channel="rss",
+        ),
+        decision="absorb",
+    )
+
+    class DummyIngest(NewsIngestService):
+        def ingest(self, settings, *, brain_pass_fn=None):  # type: ignore[override]
+            return [absorb_event]
+
+    class DummyEngine(CometDecisionEngine):
+        def evaluate_batch(self, events, indexes, settings):  # type: ignore[override]
+            return list(events)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("network down")
+
+    settings = {
+        "news_comets_enabled": True,
+        "forge_comet_auto_absorb_enabled": True,
+    }
+
+    with patch(
+        "metis_app.services.comet_pipeline.auto_absorb_comets",
+        side_effect=boom,
+    ):
+        result = run_poll_cycle(
+            settings, ingest=DummyIngest(), engine=DummyEngine(), indexes=[]
+        )
+
+    # Comets still persisted — only the forge bridge dropped.
+    assert any(c["comet_id"] == "c-arxiv" for c in result["comets"])
 
 
 def test_run_poll_cycle_persists_decided_comets_up_to_max_active() -> None:

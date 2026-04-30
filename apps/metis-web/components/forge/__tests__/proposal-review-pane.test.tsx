@@ -36,6 +36,8 @@ function makeProposal(overrides: Partial<ForgeProposalRecord> = {}): ForgePropos
     created_at: 1716054000.0,
     resolved_at: null,
     skill_path: null,
+    source: "manual",
+    comet_id: null,
     ...overrides,
   };
 }
@@ -139,6 +141,37 @@ describe("<ProposalReviewPane />", () => {
     render(<ProposalReviewPane />);
     const alert = await screen.findByTestId("forge-proposal-review-error");
     expect(alert).toHaveTextContent(/server down/);
+  });
+
+  it("renders a 'From comet feed' badge for comet-sourced proposals", async () => {
+    mocks.list.mockResolvedValue({
+      proposals: [
+        makeProposal({
+          id: 50,
+          source: "comet",
+          comet_id: "comet_xyz",
+          proposal_name: "Comet-sourced proposal",
+        }),
+      ],
+    });
+    render(<ProposalReviewPane />);
+    await waitFor(() => {
+      expect(screen.getByTestId("forge-proposal-review-pane")).toBeTruthy();
+    });
+    expect(screen.getByTestId("forge-proposal-comet-badge")).toHaveTextContent(
+      /from comet feed/i,
+    );
+  });
+
+  it("does not render the comet badge for manually-pasted proposals", async () => {
+    mocks.list.mockResolvedValue({
+      proposals: [makeProposal({ source: "manual" })],
+    });
+    render(<ProposalReviewPane />);
+    await waitFor(() => {
+      expect(screen.getByTestId("forge-proposal-review-pane")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("forge-proposal-comet-badge")).toBeNull();
   });
 
   it("re-fetches when refreshKey prop bumps", async () => {
