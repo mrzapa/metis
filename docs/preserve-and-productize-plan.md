@@ -677,3 +677,22 @@ This subsumes the M13 plan's jargon-translation item; refine the M13 plan note t
 53. **Companion overlay covers the right pane on every page** including Privacy & network audit. Same persistence problem as Chat. Default-collapsed across the whole app would solve it. (Already implied by audit item 16 — flagging the cross-page recurrence.)
 
 Phase mapping: items 47, 48, 49 are **Phase 1 / 2** (high-impact noob-friendly + brand-aligned). Items 50, 51, 52 are **Phase 4** (IA polish). Item 53 is already covered by audit item 16.
+
+---
+
+## 2026-05-01 — Notes for the next agent
+
+### Canvas text measurement: consolidate on `lib/pretext-labels.ts`
+
+**Context.** `@chenglou/pretext` (npm `@chenglou/pretext@0.0.5`) is already a dependency, vendored on 2026-03-29 in commit `3c6dd61` (folded into an unrelated "feat: add index deletion" commit, easy to miss). It's a TS library that measures text via `Intl.Segmenter` + Canvas 2D — grapheme-cluster-correct, no DOM reflow. Today it backs node-cluster label sprites in [apps/metis-web/app/page.tsx:2542-2552](../apps/metis-web/app/page.tsx:2542) and [line 4234](../apps/metis-web/app/page.tsx:4234) via the wrapper at [apps/metis-web/lib/pretext-labels.ts](../apps/metis-web/lib/pretext-labels.ts), which adds a font-keyed cache and a `ctx.measureText` fallback.
+
+**Audit finding (2026-05-01).** A grep for `measureText` across `apps/metis-web` shows only one site that bypasses the wrapper: [apps/metis-web/components/brain/brain-graph-3d.tsx:219](../apps/metis-web/components/brain/brain-graph-3d.tsx:219) — BrainGraph node-label pill sprites. It calls `ctx.measureText(text)` directly inside the per-frame label draw path.
+
+**Action.** A small consolidation patch (~half-day):
+1. Migrate [brain-graph-3d.tsx:217-222](../apps/metis-web/components/brain/brain-graph-3d.tsx:217) to import `measureSingleLineTextWidth` + `buildCanvasFont` from `@/lib/pretext-labels` and replace the raw `ctx.measureText(text).width` call. The wrapper's font-keyed cache is the main win — BrainGraph re-measures the same labels every pan/zoom frame, so this is a real per-frame allocation/measurement saving, not theoretical.
+2. Add a single line under the M01 conventions: **all canvas text measurement in `apps/metis-web` must go through `lib/pretext-labels.ts`** (so a future Forge or constellation surface can't re-introduce a raw `ctx.measureText`).
+3. Tiny visual-regression check on the BrainGraph label pills (zoom in/out, ensure pill widths still hug the labels). No mocks; just open `/`, navigate to a brain view, eyeball.
+
+**Risk to flag for the next agent.** The library is pinned at `0.0.5` — pre-1.0, breaking changes are normal. Keep the wrapper as the only import surface so a future bump or fork can be done in one file. No Node-side imports (server-rendered metadata routes, unit tests) — pretext requires `Intl.Segmenter` + Canvas 2D, fine in Tauri's webview but absent in Node without polyfills.
+
+**Filed by:** intake triage on `claude/gifted-knuth-27aeb0` (2026-05-01). Source idea: [`plans/IDEAS.md` → "chenglou/pretext"](../plans/IDEAS.md).
