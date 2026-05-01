@@ -219,6 +219,57 @@ Phase 1 PR review, then Phase 2 (P1 perf): #6 settings request-storm
 dedup, #7 comets/events abort spam, #8 hard-reload nav, #9 model-load
 progress.
 
+## Addenda
+
+### 2026-05-01 — Codex P1 follow-up on Phase 1 #5
+
+Codex review of [PR #588](https://github.com/mrzapa/metis/pull/588) flagged
+that **#5's first cut introduced a false-ready state on step 5 of the
+setup wizard**. Removing `api_key_*` from the PATCH payload was correct,
+but `directChatReadiness` still treated `apiKey.trim().length > 0` as
+proof of credentials. So a user could:
+
+1. Pick Anthropic/OpenAI in step 1
+2. Paste a key in step 2 (key is now intentionally never persisted)
+3. See a green "Direct chat ready" pill on step 5
+4. Click "Finish and open chat"
+5. Land in `/chat` with no stored credential → first request fails
+
+**Fix (this commit):**
+
+- Drop the `apiKey.trim().length > 0` shortcut from
+  `directChatReadiness` — only a *persisted* credential
+  (`baselineSettings.api_key_<provider>` or `credential_pool[<provider>]`)
+  counts as ready.
+- Add a third state: `{ ready: false, wizardKeyOnly: true }` for the
+  case where the user typed a key but no persistent credential exists.
+- Step-5 launch summary now renders a distinct amber `KEY WON'T PERSIST`
+  pill (different from `MISSING API KEY`) and an explanatory line
+  pointing the user at `settings.json` and the env-var override —
+  matching the same constraint surfaced on the wizard's API-key step.
+
+Browser-preview verified via a temporary main-repo mirror of
+`apps/metis-web/app/setup/page.tsx` (worktree can't run Turbopack
+because of the `node_modules` junction limitation). Step 5 with
+Anthropic + a pasted key correctly shows:
+
+> KEY WON'T PERSIST · STARTER PROMPT STAGED
+>
+> Direct chat won't work yet for Anthropic: the wizard does not save
+> API keys. Copy the key from step 2 into settings.json (or set
+> METIS_ALLOW_API_KEY_WRITE=1 to let UI writes through), then return
+> to chat.
+
+`vitest run` after the fix: 593 passed, 10 skipped, 0 failed.
+
+**Lesson for the next agent.** When you delete a write path, audit every
+*read* path that used to depend on it. The wizard had two consumers of
+`apiKey`: the PATCH payload (deleted in Phase 1) and the readiness
+predicate (missed in Phase 1). The PATCH was the noisy bug; the
+readiness predicate was the silent one. Codex caught it in review,
+which is the system working — but a careful walk of all `apiKey`
+references at the time of the original fix would have caught it too.
+
 ## Blockers
 
 - **#2 needs a product decision:** delete `/library/` route entirely or

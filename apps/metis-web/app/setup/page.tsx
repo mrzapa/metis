@@ -184,9 +184,25 @@ export default function SetupPage() {
   }, [apiKey, baselineSettings, embeddingProvider, llmProvider]);
 
   // Providers that never require an API key — chat can launch even when
-  // no credential is configured. Anything else needs a non-empty
-  // `api_key_<provider>` (either from the wizard input, the existing
-  // settings file, or a `credential_pool` entry).
+  // no credential is configured. Anything else needs a *persisted*
+  // `api_key_<provider>` — either an existing entry in settings.json or
+  // a `credential_pool` mapping. The wizard's apiKey input is **not**
+  // counted: M21 #5 stopped persisting it (the backend's settings
+  // PATCH 403s any api_key_* write unless METIS_ALLOW_API_KEY_WRITE=1
+  // is set), so a key pasted into the wizard never reaches the chat
+  // surface. Treating it as ready here would show a false-green
+  // "Direct chat ready" pill on step 5. Codex caught this on the M21
+  // Phase 1 PR.
+  //
+  // The result has three shapes now:
+  //   - `ready: true`                   — local provider OR a
+  //                                       persisted credential exists
+  //   - `ready: false, wizardKeyOnly`   — user pasted a key in step 2
+  //                                       but no persisted credential
+  //                                       exists; needs settings.json
+  //   - `ready: false`                  — no credential at all; user
+  //                                       can switch to a local
+  //                                       provider or skip
   const directChatReadiness = useMemo(() => {
     const NO_KEY_PROVIDERS = new Set<string>([
       "local",
@@ -196,9 +212,6 @@ export default function SetupPage() {
       "local_gguf",
     ]);
     if (NO_KEY_PROVIDERS.has(llmProvider)) {
-      return { ready: true as const };
-    }
-    if (apiKey.trim().length > 0) {
       return { ready: true as const };
     }
     const existingKey = baselineSettings[`api_key_${llmProvider}`];
@@ -219,7 +232,8 @@ export default function SetupPage() {
     const providerLabel =
       LLM_PROVIDERS.find((provider) => provider.value === llmProvider)?.label ??
       llmProvider;
-    return { ready: false as const, providerLabel };
+    const wizardKeyOnly = apiKey.trim().length > 0;
+    return { ready: false as const, providerLabel, wizardKeyOnly };
   }, [apiKey, baselineSettings, llmProvider]);
 
   async function handleInstantLaunch() {
@@ -496,6 +510,11 @@ export default function SetupPage() {
                     label={builtIndex ? "RAG ready" : "Direct chat ready"}
                     tone={builtIndex ? "connected" : "neutral"}
                   />
+                ) : directChatReadiness.wizardKeyOnly ? (
+                  <StatusPill
+                    label="Key won’t persist"
+                    tone="warning"
+                  />
                 ) : (
                   <StatusPill
                     label="Missing API key"
@@ -506,11 +525,13 @@ export default function SetupPage() {
               </div>
 
               <p className="mt-4 text-sm leading-7 text-muted-foreground">
-                {!directChatReadiness.ready
-                  ? `Add an API key for ${directChatReadiness.providerLabel} or switch to local model.`
-                  : builtIndex
+                {directChatReadiness.ready
+                  ? builtIndex
                     ? "Opens chat with this index preselected and a starter prompt staged."
-                    : "Opens direct chat with a starter prompt staged."}
+                    : "Opens direct chat with a starter prompt staged."
+                  : directChatReadiness.wizardKeyOnly
+                    ? `Direct chat won’t work yet for ${directChatReadiness.providerLabel}: the wizard does not save API keys. Copy the key from step 2 into settings.json (or set METIS_ALLOW_API_KEY_WRITE=1 to let UI writes through), then return to chat.`
+                    : `Add an API key for ${directChatReadiness.providerLabel} in settings.json or switch to a local model.`}
               </p>
             </div>
           </div>
