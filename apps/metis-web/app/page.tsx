@@ -141,7 +141,7 @@ import {
   buildLandingStarSpatialHash,
   findClosestLandingStarHitTarget,
 } from "@/lib/landing-stars/landing-star-spatial-index";
-import { StarCatalogue, DEFAULT_CATALOGUE_CONFIG, fnv1a32, SeededRNG, generateStarName } from "@/lib/star-catalogue";
+import { StarCatalogue, DEFAULT_CATALOGUE_CONFIG, generateStarName } from "@/lib/star-catalogue";
 import type { CatalogueStar } from "@/lib/star-catalogue";
 import {
   buildCanvasFont,
@@ -4159,128 +4159,21 @@ export default function Home() {
       ctx!.arc(ppx, ppy, coronaR, 0, Math.PI * 2);
       ctx!.fill();
 
-      // ── 3a. Orbit ring — always present as idle breath, intensifies with H₁ ─
-      if (!reducedMotion) {
-        const ringR = 40 * sc;
-        const ringAngle = -ts * 0.00005 + noise2D(noiseT * 0.6, 8.0) * 0.04; // noise wobble
-        // Idle baseline alpha + H₁ loop amplification + noise flicker
-        const ringFlicker = noise2D(noiseT * 2.3, 9.0) * 0.02;
-        const ringAlpha = 0.04 + idleBreath * 0.06 + topoLoopStrength * 0.20 + ringFlicker;
-        ctx!.save();
-        ctx!.translate(ppx, ppy);
-        ctx!.rotate(ringAngle);
-        ctx!.beginPath();
-        ctx!.arc(0, 0, ringR, 0, Math.PI * 2);
-        ctx!.strokeStyle = `rgba(140,180,255,${ringAlpha * pulse})`;
-        ctx!.lineWidth = 0.6 + idleBreath * 0.3 + topoLoopStrength * 0.5;
-        ctx!.setLineDash([3 * sc, 5 * sc]);
-        ctx!.stroke();
-        ctx!.setLineDash([]);
-        // Second ring — appears with deeper loop data or strong idle breath
-        if (topoLoopStrength > 0.3 || idleBreath > 0.3) {
-          const ring2Alpha = topoLoopStrength > 0.3
-            ? ringAlpha * 0.5
-            : 0.03 + idleBreath * 0.04;
-          ctx!.beginPath();
-          ctx!.arc(0, 0, ringR + 5 * sc, 0, Math.PI * 2);
-          ctx!.strokeStyle = `rgba(180,140,255,${ring2Alpha * pulse})`;
-          ctx!.lineWidth = 0.4 + idleBreath * 0.15;
-          ctx!.setLineDash([2 * sc, 7 * sc]);
-          ctx!.stroke();
-          ctx!.setLineDash([]);
-        }
-        ctx!.restore();
-      }
-
-      // ── 3b. Orbiting particles — always-on idle motes + extra per component ──
-      if (!reducedMotion) {
-        // Always show 2 idle motes; topology data adds up to 4 more (max 6)
-        const idleMotes = 2;
-        const dataParticles = Math.min(4, topoBetti0);
-        const particleCount = idleMotes + dataParticles;
-        const orbitR = 36 * sc;
-        for (let pi = 0; pi < particleCount; pi++) {
-          const isIdleMote = pi < idleMotes;
-          const orbitSpeed = isIdleMote
-            ? 0.00025 + pi * 0.00012  // idle: slower, dreamier
-            : 0.0004 + (pi - idleMotes) * 0.00008;
-          const orbitPhase = (pi / particleCount) * Math.PI * 2;
-          const angle = ts * orbitSpeed + orbitPhase;
-          // Slight eccentricity per particle for organic feel + noise drift
-          const eccX = 1.0 + Math.sin(pi * 2.17) * 0.15;
-          const eccY = 1.0 + Math.cos(pi * 1.73) * 0.12;
-          const noiseDrift = noise2D(ts * 0.0001 + pi * 3.7, 12.0 + pi) * 2.5 * sc;
-          const px = ppx + Math.cos(angle) * orbitR * eccX + noiseDrift;
-          const py = ppy + Math.sin(angle) * orbitR * eccY + noiseDrift * 0.7;
-          // Idle motes are subtle but always visible; data particles are bolder
-          const pAlpha = isIdleMote
-            ? (0.15 + idleBreath * 0.20) * pulse
-            : (0.3 + topoStrength * 0.5) * pulse;
-          const pR = isIdleMote
-            ? (0.9 + (pi % 2) * 0.2) * sc
-            : (1.2 + ((pi - idleMotes) % 3) * 0.3) * sc;
-
-          // Particle glow
-          const pg = ctx!.createRadialGradient(px, py, 0, px, py, pR * 4);
-          pg.addColorStop(0, `rgba(160,200,255,${pAlpha * 0.5})`);
-          pg.addColorStop(1, "rgba(0,0,0,0)");
-          ctx!.fillStyle = pg;
-          ctx!.beginPath();
-          ctx!.arc(px, py, pR * 4, 0, Math.PI * 2);
-          ctx!.fill();
-
-          // Particle core
-          ctx!.beginPath();
-          ctx!.arc(px, py, pR, 0, Math.PI * 2);
-          ctx!.fillStyle = `rgba(220,235,255,${pAlpha})`;
-          ctx!.fill();
-        }
-      }
-
-      // 8-point diffraction spikes: 4 long warm + 4 short cool (slowly rotating)
-      // Spike brightness boosted by topology activity
-      const spikeAngle = ts * 0.00007;
-      const spikeBoost = topoStrength * 0.25; // up to +25% alpha
-      ctx!.save();
-      ctx!.lineCap = "round";
-      for (let ii = 0; ii < 4; ii++) {
-        const a  = spikeAngle + (Math.PI / 4) * ii;
-        const a2 = a + Math.PI / 8;
-
-        // Long primary spike (warm gold — extends further with topology)
-        const primaryLen = (30 + topoStrength * 8) * sc;
-        ctx!.beginPath();
-        ctx!.moveTo(ppx + Math.cos(a) * coreR * 1.2, ppy + Math.sin(a) * coreR * 1.2);
-        ctx!.lineTo(ppx + Math.cos(a) * primaryLen,   ppy + Math.sin(a) * primaryLen);
-        ctx!.strokeStyle = `rgba(255,238,150,${(0.50 + spikeBoost) * pulse})`;
-        ctx!.lineWidth = 0.85 + topoStrength * 0.4;
-        ctx!.stroke();
-
-        // Short secondary spike (cool blue-white)
-        const secondaryLen = (16 + topoStrength * 4) * sc;
-        ctx!.beginPath();
-        ctx!.moveTo(ppx + Math.cos(a2) * coreR * 1.2, ppy + Math.sin(a2) * coreR * 1.2);
-        ctx!.lineTo(ppx + Math.cos(a2) * secondaryLen, ppy + Math.sin(a2) * secondaryLen);
-        ctx!.strokeStyle = `rgba(180,212,255,${(0.32 + spikeBoost * 0.6) * pulse})`;
-        ctx!.lineWidth = 0.55 + topoStrength * 0.25;
-        ctx!.stroke();
-      }
-
-      // ── Tertiary spikes — always shimmer faintly, amplify with H₁ loops ──
-      {
-        for (let ii = 0; ii < 4; ii++) {
-          const a3 = spikeAngle + (Math.PI / 8) + (Math.PI / 4) * ii;
-          const tertiaryLen = (8 + idleBreath * 3 + topoLoopStrength * 8) * sc;
-          const tertiaryAlpha = (0.06 + idleBreath * 0.06 + topoLoopStrength * 0.16) * pulse;
-          ctx!.beginPath();
-          ctx!.moveTo(ppx + Math.cos(a3) * coreR * 1.4, ppy + Math.sin(a3) * coreR * 1.4);
-          ctx!.lineTo(ppx + Math.cos(a3) * tertiaryLen,  ppy + Math.sin(a3) * tertiaryLen);
-          ctx!.strokeStyle = `rgba(160,180,255,${tertiaryAlpha})`;
-          ctx!.lineWidth = 0.35 + idleBreath * 0.1;
-          ctx!.stroke();
-        }
-      }
-      ctx!.restore();
+      // 2026-05-01 (M21 Phase 5): the rotating orbit ring (3a), orbiting
+      // particles (3b), and the 8-point diffraction spike pattern + tertiary
+      // spikes were removed per user critique — together they read as a
+      // generic "JJ Abrams lens flare" rather than a meaningful element of
+      // the constellation. The core star, halo, micro-nodes, and animated
+      // constellation lines remain — those carry the actual visual story.
+      //
+      // M10's H₁ topology amplification used to ride on the orbit-ring alpha
+      // + diffraction-spike length; that signal now needs another surface if
+      // it ever becomes load-bearing. See `plans/ui-critical-triage/plan.md`
+      // (Phase 5 entry) and `docs/adr/0006-constellation-design-2d-primary.md`
+      // (2026-05-01 addendum) for context.
+      //
+      // Reinstate by reverting this section against git history — every
+      // removed primitive is recoverable.
 
       // Core disk (warm white)
       ctx!.beginPath();
@@ -4448,14 +4341,14 @@ export default function Home() {
           ctx!.beginPath(); ctx!.arc(px, py, s + 4 + proximity * 4, 0, Math.PI * 2);
           ctx!.strokeStyle = `rgba(${r},${g},${bl},${proximity * 0.22})`; ctx!.lineWidth = 0.5; ctx!.stroke();
         }
-        const labelLayout = syncNodeLabelLayout(n, px, py, s, nodeGalaxyScale);
-
-        ctx!.font = labelLayout.font;
-        ctx!.textAlign = "center";
-        // Fade labels out as we zoom very far out (below 0.3x)
-        const labelZoomAlpha = Math.min(1, Math.max(0, (backgroundZoomRef.current - 0.05) / 0.25));
-        ctx!.fillStyle = `rgba(${r},${g},${bl},${(0.48 + b * 0.24) * labelZoomAlpha})`;
-        ctx!.fillText(n.concept.title, labelLayout.x, labelLayout.y);
+        // 2026-05-01 (M21 Phase 5): faculty title text under each anchor is
+        // suppressed per user critique — labels read as confusing "function"
+        // declarations rather than navigation aids. Hit-zone bookkeeping
+        // still runs (semantic-search, drag-to-reassign etc. depend on it),
+        // we just stop painting the text. Reinstate by un-commenting the
+        // fillText below if a future agent decides to surface labels again.
+        syncNodeLabelLayout(n, px, py, s, nodeGalaxyScale);
+        // (label fillText intentionally omitted — see comment above)
       });
     }
 
@@ -5110,41 +5003,16 @@ export default function Home() {
       }, 180);
     }
 
-    /**
-     * Phase 1.4: display a tiered name tooltip.
-     *
-     * - `classical` (landmark) kind sets the Bayer/Flamsteed convention footer.
-     * - `user` kind bolds the name via the `[data-kind="user"]` CSS selector.
-     * - The `class` slot stays dimmed monospace and optional.
-     */
-    function showCatalogueTooltip(
-      params: {
-        name: string;
-        kind: "classical" | "user";
-        spectralClass?: string | null;
-        clientX: number;
-        clientY: number;
-      },
-    ) {
-      const el = catalogueTooltipRef.current;
-      if (!el) return;
-      const nameEl = el.querySelector<HTMLSpanElement>('[data-field="name"]');
-      const classEl = el.querySelector<HTMLSpanElement>('[data-field="class"]');
-      const footerEl = el.querySelector<HTMLSpanElement>('[data-field="footer"]');
-      if (nameEl) nameEl.textContent = params.name;
-      if (classEl) classEl.textContent = params.spectralClass ?? "";
-      if (footerEl) {
-        footerEl.textContent = params.kind === "classical"
-          ? "Classical star name (Bayer/Flamsteed convention)"
-          : "";
-      }
-      el.setAttribute("data-kind", params.kind);
-      el.setAttribute("data-footer", params.kind === "classical" ? "true" : "false");
-      el.style.display = "flex";
-      el.style.left = `${params.clientX + 14}px`;
-      el.style.top = `${params.clientY - 10}px`;
-    }
-
+    // 2026-05-01 (M21 Phase 5): `showCatalogueTooltip` and the matching
+    // `getHoveredLandmarkStar` hit-test below were removed because the
+    // landmark hover surfaced an auto-generated classical name plus a
+    // "Bayer/Flamsteed convention" footer that read as AI slop. The
+    // tooltip element stays in the JSX (and `hideCatalogueTooltip`
+    // remains as a defensive no-op called from many cleanup paths) — it
+    // simply has no producer anymore. ADR 0006 still mandates tiered
+    // naming at the *data* level; only the hover *surface* is gone. See
+    // `docs/adr/0006-constellation-design-2d-primary.md` (2026-05-01
+    // addendum).
     function hideCatalogueTooltip() {
       const el = catalogueTooltipRef.current;
       if (el) el.style.display = "none";
@@ -5199,76 +5067,6 @@ export default function Home() {
         pointer.y,
         { queryPaddingPx: 12 },
       ) ?? null;
-    }
-
-    /**
-     * Phase 1.4 — landmark hit-test.
-     *
-     * The 11 faculty constellations in `CONSTELLATION_FACULTIES` render as
-     * anchor + secondary stars on the 2D canvas (not part of the WebGL
-     * starfield), so they never land in `landingStarSpatialHash`. This helper
-     * walks the small nodes list, computes each faculty star's screen
-     * position using the same parallax + camera scale math as the draw loop,
-     * and returns the closest hit within a small radius.
-     *
-     * Names are generated through `generateStarName({ tier: "landmark" })`
-     * so the tiered-naming policy is enforced in one place. The seed is
-     * deterministic in `(facultyId, starIndex)` so the same anchor star
-     * always yields the same classical designation across sessions.
-     */
-    function getHoveredLandmarkStar(clientX: number, clientY: number): {
-      facultyId: string;
-      starIndex: number;
-      classicalName: string;
-    } | null {
-      const bounds = readCanvasBounds();
-      const pointerX = clientX - bounds.left;
-      const pointerY = clientY - bounds.top;
-      const cameraScale = getConstellationCameraScale(backgroundZoomRef.current);
-      const hitRadiusPx = coarsePointerRef.current ? 22 : 14;
-      const hitRadiusSq = hitRadiusPx * hitRadiusPx;
-
-      let bestDistSq = Number.POSITIVE_INFINITY;
-      let bestHit: { facultyId: string; starIndex: number } | null = null;
-
-      for (const node of nodes) {
-        const parallax = node.parallax ?? 0;
-        const anchorX = node.x + (mouse.x - W / 2) * parallax;
-        const anchorY = node.y + (mouse.y - H / 2) * parallax;
-        const stars = node.concept.faculty.shape.stars;
-        for (let i = 0; i < stars.length; i += 1) {
-          const shapeStar = stars[i];
-          const sx = anchorX + shapeStar.dx * W * cameraScale;
-          const sy = anchorY + shapeStar.dy * H * cameraScale;
-          const dx = sx - pointerX;
-          const dy = sy - pointerY;
-          const distSq = dx * dx + dy * dy;
-          if (distSq < hitRadiusSq && distSq < bestDistSq) {
-            bestDistSq = distSq;
-            bestHit = { facultyId: node.concept.faculty.id, starIndex: i };
-          }
-        }
-      }
-
-      if (!bestHit) return null;
-
-      // Deterministic seed per landmark star — same name across sessions.
-      const seedKey = `landmark|${bestHit.facultyId}|${bestHit.starIndex}`;
-      const rng = new SeededRNG(fnv1a32(seedKey));
-      // Landmark anchor stars (index 0) → bright classical (mag ~2);
-      // secondary stars (index >= 1) → dimmer Flamsteed number (mag ~3–5).
-      const magnitude = bestHit.starIndex === 0 ? 2 : 3.5;
-      const generated = generateStarName({
-        tier: "landmark",
-        rng,
-        magnitude,
-      });
-
-      return {
-        facultyId: bestHit.facultyId,
-        starIndex: bestHit.starIndex,
-        classicalName: generated.name ?? bestHit.facultyId,
-      };
     }
 
     function releaseCanvasPointerCapture(pointerId?: number | null) {
@@ -5484,37 +5282,17 @@ export default function Home() {
         hoverExpandedRef.current = true;
       }
 
-      if (hover < 0) {
-        // Phase 1.4: check faculty constellation stars first — they're the
-        // landmark tier (classical Bayer/Flamsteed name + convention footer).
-        // Falls through to catalogue stars, which are field tier (nameless).
-        const landmarkHit = getHoveredLandmarkStar(e.clientX, e.clientY);
-        if (landmarkHit) {
-          showCatalogueTooltip({
-            name: landmarkHit.classicalName,
-            kind: "classical",
-            spectralClass: null,
-            clientX: e.clientX,
-            clientY: e.clientY,
-          });
-        } else {
-          const catHit = getHoveredCatalogueStar(e.clientX, e.clientY);
-          // ADR 0006: field stars (no name) hover silently.
-          if (catHit && !catHit.addable && catHit.catalogueName) {
-            showCatalogueTooltip({
-              name: catHit.catalogueName,
-              kind: "classical",
-              spectralClass: catHit.profile.spectralClass,
-              clientX: e.clientX,
-              clientY: e.clientY,
-            });
-          } else {
-            hideCatalogueTooltip();
-          }
-        }
-      } else {
-        hideCatalogueTooltip();
-      }
+      // 2026-05-01 (M21 Phase 5): hover-tooltip for `classical`-tier stars
+      // (faculty landmarks + named catalogue stars) is silenced per user
+      // critique — the auto-generated Bayer/Flamsteed names + the
+      // "Classical star name (Bayer/Flamsteed convention)" footer combined
+      // to read as AI slop. Names still exist (deterministic via
+      // `generateStarName`) and surface on click via the catalogue
+      // inspector / observatory dialog. ADR 0006's tiered-naming policy is
+      // preserved at the *data* layer; only the hover surface is removed.
+      // See `docs/adr/0006-constellation-design-2d-primary.md` (2026-05-01
+      // addendum).
+      hideCatalogueTooltip();
     }
 
     function onCanvasPointerDown(e: PointerEvent) {
