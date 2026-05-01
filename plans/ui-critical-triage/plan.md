@@ -1,8 +1,8 @@
 ---
 Milestone: M21 — UI critical-eye triage
 Status: In progress
-Claim: claude/objective-napier-432f1e
-Last updated: 2026-05-01 by claude
+Claim: claude/m21-p0-fixes (P1 — #6 request-storm dedup; P0 batch already shipped via PR #588)
+Last updated: 2026-05-01 by claude/m21-p0-fixes
 Vision pillar: Cross-cutting
 TDD Mode: pragmatic
 QA Execution Mode: agent-operated
