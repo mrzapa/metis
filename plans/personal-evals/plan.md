@@ -1,14 +1,15 @@
 ---
 Milestone: Personal evals (M16)
 Status: In progress
-Claim: claude/m16-phase1-adrs
-Last updated: 2026-05-01 by claude/m16-phase1-adrs
+Claim: claude/m16-phase2-eval-store
+Last updated: 2026-05-01 by claude/m16-phase2-eval-store
 Vision pillar: Companion
 ---
 
-TDD Mode: pragmatic
+TDD Mode: pragmatic (Phase 1) -> strict (Phase 2)
 QA Execution Mode: agent-operated
 Phase 1 rationale: docs-only ADR slice; there is no meaningful RED -> GREEN loop, so verification comes from the harvest audit, local DB/corpus probe, and repo checks recorded in Progress.
+Phase 2 rationale: implementation slice with three new pure-Python modules (store, corpus, generation) — each has clean RED -> GREEN evidence (schema migrations, JSONL seed-import idempotency, content-addressed generation hashing). RED tests are written first against `:memory:` SQLite and `tmp_path` JSONL fixtures before the module bodies, captured in *Progress* under cited test names.
 
 ## Progress
 
