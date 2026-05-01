@@ -21,26 +21,44 @@ single GET cannot stutter on multiple JSON loads.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 import pathlib
+import re
+import tempfile
 from typing import Any
 
-from litestar import Router, get, post
+from litestar import Request, Router, get, post
+from litestar.datastructures import UploadFile
 from litestar.exceptions import HTTPException
 
-from metis_app.services import forge_candidates, forge_proposals, forge_trace
+from metis_app.services import (
+    forge_bundle,
+    forge_candidates,
+    forge_proposals,
+    forge_trace,
+)
 from metis_app.services.forge_absorb import absorb
 from metis_app.services.forge_registry import (
     TechniqueDescriptor,
     get_descriptor,
     get_registry,
 )
+from metis_app.services.skill_repository import parse_skill_file
 from metis_app.services.trace_store import TraceStore
 from metis_app.settings_store import load_settings, save_settings as _save_settings
 
 log = logging.getLogger(__name__)
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+
+# M14 Phase 7 (Codex P2) — restrict bundle export `version` to
+# filename-safe characters before it flows into the
+# `<skill_id>-<version>.metis-skill` path. Letters, digits, dot,
+# dash, underscore, plus, tilde — covers semver and common
+# release-tag punctuation; rejects path separators and traversal.
+_VERSION_PATTERN = re.compile(r"[A-Za-z0-9._+~\-]+")
 
 
 def _candidates_db_path() -> pathlib.Path:
@@ -397,6 +415,247 @@ def reject_candidate_route(candidate_id: int) -> dict[str, Any]:
     return {"status": "rejected", "candidate_id": candidate_id}
 
 
+# ── M14 Phase 7 — `.metis-skill` bundle export / import ───────────
+
+
+def _serialise_manifest(manifest: forge_bundle.Manifest) -> dict[str, Any]:
+    return {
+        "bundle_format_version": int(manifest.bundle_format_version),
+        "skill_id": manifest.skill_id,
+        "name": manifest.name,
+        "description": manifest.description,
+        "version": manifest.version,
+        "exported_at": manifest.exported_at,
+        "min_metis_version": manifest.min_metis_version,
+        "author": manifest.author,
+        "dependencies": [dict(dep) for dep in manifest.dependencies],
+    }
+
+
+@get("/v1/forge/skills", sync_to_thread=False)
+def list_installed_skills() -> dict[str, Any]:
+    """List installed skills under the live ``skills/`` root.
+
+    Returns id, name, description, and a repo-relative path so the
+    frontend can route to the on-disk file. A missing or empty
+    directory returns ``{"skills": []}`` rather than 500.
+    """
+    skills_root = _skills_root_for_drafts()
+    if not skills_root.is_dir():
+        return {"skills": []}
+
+    entries: list[dict[str, Any]] = []
+    for child in sorted(skills_root.iterdir()):
+        if not child.is_dir():
+            continue
+        skill_md = child / "SKILL.md"
+        if not skill_md.is_file():
+            continue
+        try:
+            skill_def = parse_skill_file(skill_md)
+        except Exception:  # noqa: BLE001
+            log.warning(
+                "list_installed_skills: skipping unparseable %s",
+                skill_md,
+                exc_info=True,
+            )
+            continue
+        try:
+            relative = str(skill_md.relative_to(skills_root.parent))
+        except ValueError:
+            relative = str(skill_md)
+        entries.append(
+            {
+                "id": skill_def.skill_id,
+                "name": skill_def.name,
+                "description": skill_def.description,
+                "path": relative,
+            }
+        )
+    return {"skills": entries}
+
+
+@post(
+    "/v1/forge/skills/{skill_id:str}/export",
+    status_code=200,
+    sync_to_thread=False,
+)
+def export_skill_bundle(
+    skill_id: str, data: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Pack ``skills/<skill_id>/`` into a base64-encoded bundle.
+
+    Body fields: ``version`` (required), ``author`` (optional). The
+    response carries ``filename`` (``<id>-<version>.metis-skill``),
+    ``content_base64`` (the tarball bytes), and ``sha256`` (a
+    fingerprint the UI can show).
+    """
+    payload = data or {}
+    version = str(payload.get("version") or "").strip()
+    if not version:
+        raise HTTPException(
+            status_code=400, detail="`version` is required"
+        )
+    # `version` flows directly into the bundle filename
+    # `<skill_id>-<version>.metis-skill`. Reject path separators
+    # and traversal characters up front so a malicious or fat-
+    # fingered version can't make `pack_skill` try to write to a
+    # nested non-existent directory (the symptom Codex P2 caught).
+    # Permitted alphabet: letters, digits, dot, dash, underscore,
+    # plus, tilde — the conservative subset of semver + common
+    # release-tag punctuation. Adjust if a real-world version
+    # legitimately needs more.
+    if not _VERSION_PATTERN.fullmatch(version):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "`version` may only contain letters, digits, "
+                "and the punctuation `. - _ + ~`"
+            ),
+        )
+    author_raw = payload.get("author")
+    author = (
+        str(author_raw).strip()
+        if isinstance(author_raw, str) and author_raw.strip()
+        else None
+    )
+
+    skills_root = _skills_root_for_drafts()
+    skill_dir = skills_root / skill_id
+    if not skill_dir.is_dir() or not (skill_dir / "SKILL.md").is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"unknown skill {skill_id!r}",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        bundle_path = forge_bundle.pack_skill(
+            skill_dir=skill_dir,
+            version=version,
+            dest_dir=pathlib.Path(tmp),
+            author=author,
+        )
+        content = bundle_path.read_bytes()
+        filename = bundle_path.name
+
+    return {
+        "filename": filename,
+        "content_base64": base64.b64encode(content).decode("ascii"),
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }
+
+
+async def _read_bundle_upload(request: Request[Any, Any, Any]) -> bytes:
+    """Pull the ``file`` part out of a multipart upload.
+
+    Centralised so both preview + install use the same field name and
+    400-on-missing posture. Returns the bytes; raises 400 if the
+    upload is absent or empty.
+    """
+    form = await request.form()
+    upload = form.get("file")
+    if not isinstance(upload, UploadFile):
+        raise HTTPException(
+            status_code=400, detail="`file` upload is required"
+        )
+    content = await upload.read()
+    await upload.close()
+    if not content:
+        raise HTTPException(
+            status_code=400, detail="uploaded bundle is empty"
+        )
+    return content
+
+
+@post("/v1/forge/skills/import/preview", status_code=200)
+async def import_bundle_preview(
+    request: Request[Any, Any, Any],
+) -> dict[str, Any]:
+    """Inspect an uploaded bundle without touching disk.
+
+    Surfaces the manifest, the SKILL.md frontmatter, the validation
+    errors, and a ``conflict`` flag that's true when the recipient's
+    ``skills/<id>/SKILL.md`` already exists. The frontend uses this
+    to decide whether to show a "Replace existing skill?"
+    confirmation before calling install.
+    """
+    content = await _read_bundle_upload(request)
+    skills_root = _skills_root_for_drafts()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        bundle_path = pathlib.Path(tmp) / "incoming.metis-skill"
+        bundle_path.write_bytes(content)
+        inspected = forge_bundle.inspect_bundle(bundle_path)
+
+    skill_id = inspected.manifest.skill_id
+    conflict = bool(skill_id) and (
+        skills_root / skill_id / "SKILL.md"
+    ).is_file()
+
+    return {
+        "manifest": _serialise_manifest(inspected.manifest),
+        "skill_frontmatter": inspected.skill_frontmatter,
+        "skill_body_excerpt": inspected.skill_body[:400],
+        "errors": list(inspected.errors),
+        "conflict": conflict,
+    }
+
+
+@post("/v1/forge/skills/import/install", status_code=200)
+async def import_bundle_install(
+    request: Request[Any, Any, Any],
+) -> dict[str, Any]:
+    """Install an uploaded bundle into ``<skills_root>/<id>/``.
+
+    Form fields: ``file`` (required), ``replace`` (optional —
+    string-coerced; ``"true"``/``"1"``/``"yes"`` flips). Returns
+    409 when the slug exists and ``replace`` is falsy; 400 on
+    validation failure; 200 with ``{skill_id, replaced}`` on
+    success.
+    """
+    form = await request.form()
+    upload = form.get("file")
+    if not isinstance(upload, UploadFile):
+        raise HTTPException(
+            status_code=400, detail="`file` upload is required"
+        )
+    content = await upload.read()
+    await upload.close()
+    if not content:
+        raise HTTPException(
+            status_code=400, detail="uploaded bundle is empty"
+        )
+
+    replace_raw = form.get("replace")
+    replace_text = (
+        str(replace_raw).strip().lower()
+        if isinstance(replace_raw, str)
+        else ""
+    )
+    replace = replace_text in {"true", "1", "yes"}
+
+    skills_root = _skills_root_for_drafts()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        bundle_path = pathlib.Path(tmp) / "incoming.metis-skill"
+        bundle_path.write_bytes(content)
+        try:
+            result = forge_bundle.install_bundle(
+                bundle_path,
+                skills_root=skills_root,
+                replace=replace,
+            )
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except forge_bundle.BundleValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "skill_id": result.skill_id,
+        "replaced": result.replaced,
+    }
+
+
 router = Router(
     path="",
     route_handlers=[
@@ -409,6 +668,10 @@ router = Router(
         list_candidates_route,
         accept_candidate_route,
         reject_candidate_route,
+        list_installed_skills,
+        export_skill_bundle,
+        import_bundle_preview,
+        import_bundle_install,
     ],
     tags=["forge"],
 )

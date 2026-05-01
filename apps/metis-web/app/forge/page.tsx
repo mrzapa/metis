@@ -6,7 +6,9 @@ import { PageChrome } from "@/components/shell/page-chrome";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { AbsorbForm } from "@/components/forge/absorb-form";
+import { BundleImportZone } from "@/components/forge/bundle-import-zone";
 import { CandidateSkillsPane } from "@/components/forge/candidate-skills-pane";
+import { InstalledSkillsPane } from "@/components/forge/installed-skills-pane";
 import { ProposalReviewPane } from "@/components/forge/proposal-review-pane";
 import { TechniqueGallery } from "@/components/forge/technique-gallery";
 import {
@@ -24,6 +26,11 @@ export default function ForgePage() {
   // pane after a successful absorb, so a freshly-persisted proposal
   // surfaces immediately instead of after a manual reload.
   const [proposalRefreshKey, setProposalRefreshKey] = useState(0);
+  // M14 Phase 7 — bumping this prop re-fetches the installed-skills
+  // pane after a successful bundle import. Routed through a separate
+  // counter so candidate/proposal flows don't trigger an unnecessary
+  // skills-list fetch.
+  const [installedRefreshKey, setInstalledRefreshKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,7 +132,11 @@ export default function ForgePage() {
               onProposalPersisted={() => setProposalRefreshKey((n) => n + 1)}
             />
             <ProposalReviewPane refreshKey={proposalRefreshKey} />
+            <BundleImportZone
+              onInstalled={() => setInstalledRefreshKey((n) => n + 1)}
+            />
             <CandidateSkillsPane refreshKey={proposalRefreshKey} />
+            <InstalledSkillsPane refreshKey={installedRefreshKey} />
             <TechniqueGallery techniques={techniques} onToggle={handleToggle} />
             <p className="text-xs text-muted-foreground/60">
               Flipping a card writes the technique&apos;s setting overrides through

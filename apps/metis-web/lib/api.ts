@@ -1000,14 +1000,18 @@ export interface CompanionActivityEvent {
    * ``status.links: Array<{source_node_id, target_node_id, relation}>``
    * and ``status.memory_entry_id``. M14 Phase 3 adds
    * ``"technique_toggled"`` for Forge card flips; payload carries
-   * ``{technique_id: string, enabled: boolean}``.
+   * ``{technique_id: string, enabled: boolean}``. M14 Phase 7 adds
+   * ``"skill_imported"`` fired after a successful
+   * ``.metis-skill`` bundle install through the Forge import zone;
+   * payload carries ``{skill_id: string, replaced: boolean}``.
    */
   kind?:
     | "while_you_work"
     | "overnight"
     | "stage_transition"
     | "brain_link_created"
-    | "technique_toggled";
+    | "technique_toggled"
+    | "skill_imported";
   payload?: Record<string, unknown>;
 }
 
@@ -4117,4 +4121,145 @@ export async function toggleForgeTechnique(
  */
 export function publishCompanionActivity(event: CompanionActivityEvent): void {
   emitCompanionActivity(event);
+}
+
+// ── M14 Phase 7 — `.metis-skill` bundle export / import ──────────
+
+/**
+ * One row in the Forge's "Installed skills" pane. Mirrors the
+ * shape returned by `GET /v1/forge/skills`. The `path` field is
+ * the SKILL.md location relative to the repo root; the frontend
+ * does not need to fetch it directly, but the field is retained
+ * so power-user workflows ("show me on disk") can lean on it.
+ */
+export interface ForgeInstalledSkill {
+  id: string;
+  name: string;
+  description: string;
+  path: string;
+}
+
+export interface ForgeInstalledSkillsResponse {
+  skills: ForgeInstalledSkill[];
+}
+
+export async function fetchInstalledSkills(): Promise<ForgeInstalledSkillsResponse> {
+  const res = await apiFetch(`${await getApiBase()}/v1/forge/skills`);
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to list installed skills (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as ForgeInstalledSkillsResponse;
+}
+
+/**
+ * Mirror of `forge_bundle.Manifest` over the wire. Optional fields
+ * (`author`, `dependencies`) ride as `null`/`[]` so the dialog can
+ * render a stable shape regardless of whether the bundle author
+ * filled them in.
+ */
+export interface ForgeBundleManifest {
+  bundle_format_version: number;
+  skill_id: string;
+  name: string;
+  description: string;
+  version: string;
+  exported_at: string;
+  min_metis_version: string;
+  author: string | null;
+  dependencies: { id: string; min_version: string }[];
+}
+
+/**
+ * Pack `<id>` into a `.metis-skill` bundle and return a Blob ready
+ * to feed to `URL.createObjectURL` for the browser download
+ * trigger. The backend ships base64+sha256; this helper decodes
+ * the bytes client-side so the caller never sees the encoding.
+ */
+export async function exportSkillBundle(
+  skillId: string,
+  version: string,
+  author?: string,
+): Promise<{ filename: string; sha256: string; blob: Blob }> {
+  const body: Record<string, string> = { version };
+  if (author && author.trim()) {
+    body.author = author.trim();
+  }
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/forge/skills/${encodeURIComponent(skillId)}/export`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to export skill ${skillId} (${res.status}): ${detail}`);
+  }
+  const payload = (await res.json()) as {
+    filename: string;
+    content_base64: string;
+    sha256: string;
+  };
+
+  // Decode the base64 string into a binary Blob client-side. We
+  // hand-roll the loop because `atob`-then-`Uint8Array.from` keeps
+  // the path obvious and avoids pulling in a buffer polyfill.
+  const binary = atob(payload.content_base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  const blob = new Blob([bytes], { type: "application/x-metis-skill" });
+  return { filename: payload.filename, sha256: payload.sha256, blob };
+}
+
+export interface ForgeBundlePreview {
+  manifest: ForgeBundleManifest;
+  skill_frontmatter: Record<string, unknown>;
+  skill_body_excerpt: string;
+  errors: string[];
+  conflict: boolean;
+}
+
+export async function previewSkillBundle(file: File): Promise<ForgeBundlePreview> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/forge/skills/import/preview`,
+    { method: "POST", body: form },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to preview skill bundle (${res.status}): ${detail}`);
+  }
+  return (await res.json()) as ForgeBundlePreview;
+}
+
+export interface ForgeBundleInstallResponse {
+  skill_id: string;
+  replaced: boolean;
+}
+
+export async function installSkillBundle(
+  file: File,
+  options: { replace?: boolean } = {},
+): Promise<ForgeBundleInstallResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("replace", options.replace ? "true" : "false");
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/forge/skills/import/install`,
+    { method: "POST", body: form },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    const error = new Error(
+      `Failed to install skill bundle (${res.status}): ${detail}`,
+    ) as Error & { status?: number };
+    error.status = res.status;
+    throw error;
+  }
+  return (await res.json()) as ForgeBundleInstallResponse;
 }

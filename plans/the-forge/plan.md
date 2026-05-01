@@ -1,14 +1,107 @@
 ---
 Milestone: The Forge (M14)
 Status: In progress
-Claim: claude/m14-phase6-trace-integration (Phase 6 — trace integration)
-Last updated: 2026-05-01 by claude/m14-phase6-trace-integration
+Claim: claude/jovial-volhard-3fa662 (Phase 7 — `.metis-skill` bundle export/import)
+Last updated: 2026-05-01 by claude/jovial-volhard-3fa662
 Vision pillar: Companion + Cortex
 ---
 
+TDD Mode: strict — pure-Python tarball pack/unpack and tarball-traversal
+defences are textbook red-green-refactor; routes follow established
+patterns from earlier phases. Each new function lands with a failing
+test cited in the *Progress* entry, then the code that makes it pass.
+
+QA Execution Mode: agent-operated — backend pytest + frontend `tsc
+--noEmit` + `vitest run` are the gates. The drag-drop import flow
+gets a manual preview-tools pass (start dev server, drop a fixture
+bundle, snapshot the preview dialog) so the tarball→preview→install
+loop is exercised end-to-end before the PR opens. No human sign-off
+expected; preview screenshots + test output are the evidence.
+
 ## Progress
 
-**Phase 6 — Trace integration (in PR, claude/m14-phase6-trace-integration, 2026-05-01)**
+**Phase 7 — `.metis-skill` bundle export / import (in PR, claude/jovial-volhard-3fa662, 2026-05-01)**
+
+* ADR 0015 (`docs/adr/0015-metis-skill-bundle-format.md`) records
+  the format decisions: POSIX tar at the bundle root with
+  `manifest.yaml` + a `skill/` payload directory, unsigned v1
+  (signing without a trust root is theatre — punted to the
+  marketplace milestone), explicit `replace=True` switch on
+  install (409 default, never silent clobber of local edits),
+  Python 3.12 `tarfile` data filter + explicit `_is_unsafe_member`
+  prefix check as belt-and-braces traversal defence.
+* New `metis_app/services/forge_bundle.py` exposes `Manifest`
+  (frozen dataclass with paired `to_yaml`/`from_yaml`),
+  `pack_skill`, `inspect_bundle`, `validate_bundle`, and
+  `install_bundle`. `from_yaml` rejects unsupported
+  `bundle_format_version` values up front so v1 readers
+  hard-fail on v2+ bundles instead of silently mis-parsing them.
+  Six error classes covered by `validate_bundle`: missing
+  manifest, missing SKILL.md, unsupported format version,
+  skill_id mismatch (manifest vs. SKILL.md frontmatter),
+  unsafe traversal path (`..`), absolute path member.
+  `install_bundle` stages into a tempdir, re-checks every
+  member against `_is_unsafe_member`, then moves the validated
+  payload to `<skills_root>/<id>/`. Replace=False raises
+  `FileExistsError`; replace=True flags the result as
+  `replaced=True` and overwrites cleanly.
+* Four new endpoints under `/v1/forge/skills*` in
+  `metis_app/api_litestar/routes/forge.py`, each delegating to
+  `forge_bundle` so the route layer never touches `tarfile`
+  directly: `GET /v1/forge/skills` (list installed skills with
+  id, name, description, repo-relative path; missing root
+  returns `{"skills": []}` rather than 500ing),
+  `POST /v1/forge/skills/{id}/export` (returns
+  `{filename, content_base64, sha256}`; 404 on unknown id;
+  400 on missing version), `POST /v1/forge/skills/import/preview`
+  (multipart upload, returns parsed manifest + frontmatter +
+  errors + `conflict` flag without touching disk),
+  `POST /v1/forge/skills/import/install` (multipart upload +
+  `replace` flag; 409 on slug conflict without replace,
+  400 on validation failure).
+* Frontend additions in `apps/metis-web/lib/api.ts`:
+  `fetchInstalledSkills`, `exportSkillBundle` (decodes the
+  base64 envelope to a `Blob` client-side, returns `{filename,
+  sha256, blob}` ready for `URL.createObjectURL`),
+  `previewSkillBundle`, `installSkillBundle` (attaches
+  `status` to the thrown `Error` so the UI can disambiguate
+  the 409 race-condition fallback). `CompanionActivityEvent.kind`
+  union extended with `"skill_imported"` for the dock event.
+* New `<InstalledSkillsPane>` (emerald accent) lists the
+  installed skills with inline version + author inputs and a
+  per-row Export button that triggers the browser download
+  via `URL.createObjectURL`. New `<BundleImportZone>` (cyan
+  accent) provides a dashed-border drop zone (with a
+  fallback hidden file input for keyboard / screen-reader
+  users), a manifest preview dialog with validation errors
+  + an opt-in "Replace existing skill" checkbox when the
+  preview reports `conflict: true`, and a
+  `kind: "skill_imported"` `CompanionActivityEvent` on
+  successful install. Both panes mount on `app/forge/page.tsx`
+  in the order: AbsorbForm → ProposalReviewPane →
+  BundleImportZone → CandidateSkillsPane → InstalledSkillsPane
+  → TechniqueGallery, so the import-from-bundle and
+  installed-skills-with-export surfaces sit visually with
+  the other "review/share a capability" panes rather than
+  with the frontier-techniques gallery.
+* Tests: 27 new in `tests/test_forge_bundle.py` (Manifest YAML
+  round-trip, optional-field elision, version rejection;
+  pack→inspect round-trip, filename shape, extra-payload-files
+  preservation, optional author; six `validate_bundle` error
+  classes; install replace-vs-conflict semantics + invalid
+  bundle raises `BundleValidationError`; **parametrised
+  byte-identical round-trip over every shipped skill in
+  `skills/` — all nine** confirm pack→install reproduces
+  `SKILL.md` byte-for-byte). 13 new in `tests/test_api_forge.py`
+  for the four new routes (200/400/404/409 paths each, plus
+  manifest serialisation parity). Frontend `tsc --noEmit` clean
+  on touched files; `vitest run` 623 pass / 10 skipped.
+  Backend pytest 1396 pass / 2 pre-existing fail
+  (`tests/test_install_launcher.py` README docs unrelated to
+  Forge — same posture as Phase 1's verification record).
+  Ruff clean.
+
+**Phase 6 — Trace integration (Landed via PR #585 / `15da54e`, 2026-05-01)**
 
 * `TechniqueDescriptor` gains a `trace_event_types: tuple[str, ...]` field declaring the event-type strings the engine emits when this technique fires. Empty tuple = "no markers wired yet"; the card renders an empty state instead of a counter.
 * New `metis_app/services/forge_trace.py` exposes (a) `recent_uses_for_technique(descriptor, store, *, limit, now=None)` which returns a `{events, weekly_count}` payload filtered by descriptor markers, projecting each event into a tiny `{run_id, timestamp, stage, event_type, preview}` shape; and (b) `weekly_use_counts(descriptors, store, *, now=None)` for the single-pass list-endpoint scan. Heavy payload fields (`prompt`, `retrieval_results`, `tool_calls`, `validator`, `artifacts`) are stripped before crossing the API boundary.
@@ -23,7 +116,7 @@ Vision pillar: Companion + Cortex
 * Codex P1 follow-up: `accept_candidate()` now deep-merges `enabled[slug] = True` into the existing `settings.skills` snapshot before calling the writer, so the shallow `dict.update` in `save_settings` no longer wipes unrelated skill toggles. Added `settings_reader` injection.
 * Codex P2 follow-up: settings_writer failures roll back the just-written SKILL.md draft (and the empty slug folder) so retries don't hit `FileExistsError`. `mark_candidate_promoted` only runs on the success path.
 
-**Phase 4c — News-comet auto-absorb bridge (in PR #583, 2026-04-30)**
+**Phase 4c — News-comet auto-absorb bridge (Landed via PR #583 / `e841e38`, 2026-05-01)**
 
 * Additive migration on ``forge_proposals.db`` adds ``source`` (``"manual"`` | ``"comet"``) and ``comet_id`` columns. New ``forge_comet_bridge.auto_absorb_comets`` runs the absorb pipeline for arxiv absorb-decisions, dedups against pending rows, and persists with ``source="comet"``. Wired into ``comet_pipeline.run_poll_cycle`` behind the opt-in ``forge_comet_auto_absorb_enabled`` setting.
 * Frontend: ``ForgeProposalRecord`` gains ``source`` + ``comet_id``; review pane renders a "From comet feed" badge for comet-sourced rows.
@@ -191,53 +284,91 @@ What's in place today that M14 will lean on:
 
 ## Next up
 
-Phases 1 through 4c have landed. Phase 5 surfaces M06's
-seedling-reflection skill candidates in the Forge so the user can
-review, name, and accept (or dismiss) each one — closing the loop
-between the producer side (already shipped in M06) and a
-human-in-the-loop activation surface.
+Phases 1 through 6 have landed. Phase 7 closes the milestone by
+producing the **`.metis-skill` bundle format** so installed skills
+can be exported and re-imported between METIS installs — the
+*shareable* foundation `pro-tier-launch/plan.md` will eventually
+build a marketplace on. Per the milestone's *What NOT to do*
+section: this phase ships the *file format* + local export/import,
+nothing remote.
 
-**Phase 5 — Skill-candidate review pane (in PR, claude/m14-phase5-skill-candidates, 2026-04-30)**
+**Phase 7 — `.metis-skill` bundle export / import (claude/jovial-volhard-3fa662, 2026-05-01)**
 
-12. **Schema migration on ``skill_candidates.db``.** ``ALTER TABLE
-    ADD COLUMN rejected INTEGER NOT NULL DEFAULT 0`` runs in
-    ``SkillRepository._init_candidates_db`` so legacy databases
-    upgrade transparently. The auto-promotion path's existing
-    ``WHERE promoted = 0`` filter widens to
-    ``promoted = 0 AND rejected = 0`` so dismissed candidates don't
-    get re-promoted by the LLM judge on the next reflection tick.
-    New ``mark_candidate_rejected`` flips both flags in one UPDATE.
-13. **New ``metis_app/services/forge_candidates.py``.** Provides
-    ``list_pending_candidates`` (with default-slug + trace-excerpt
-    fields the review pane needs), ``accept_candidate`` (drafts a
-    ``parse_skill_file``-valid ``SKILL.md``, flips
-    ``settings["skills"]["enabled"][slug] = true`` via an injected
-    ``settings_writer``, marks the candidate promoted), and
-    ``reject_candidate``. The skill-draft writer emits all four
-    ``triggers`` axes as empty lists and ``runtime_overrides: {}``;
-    the user fills them in once the skill has been exercised.
-14. **Three new routes** under ``/v1/forge/candidates``:
-    ``GET`` (returns pending candidates),
-    ``POST /<id>/accept`` (optionally takes a ``slug`` field for
-    rename-before-commit; 404 on unknown id, 409 if the slug
-    folder already has a SKILL.md, 400 on empty slug),
-    ``POST /<id>/reject``. The accept route routes settings
-    updates through the existing ``save_settings`` helper.
-15. **`<CandidateSkillsPane>`** mounts between
-    ``<ProposalReviewPane>`` and the technique gallery. Each row
-    shows the originating query, an emerald "X% converged" badge,
-    a trace excerpt, and an editable slug input pre-seeded from
-    the server's ``default_slug``. Accept calls the API with the
-    edited slug (only when changed); Dismiss calls the reject
-    endpoint. Hides itself when there are no pending candidates.
+16. **ADR 0015 — `.metis-skill` bundle format.** Tarball at the
+    bundle root with `manifest.yaml` (bundle_format_version,
+    skill_id, version, description, exported_at, min_metis_version,
+    dependencies) plus the unaltered `skills/<id>/` payload
+    directory. Unsigned in v1 — `pyca/cryptography` is not in the
+    dep set, and signing without a trust root buys nothing. The
+    ADR records the schema, the slip-safe extraction posture
+    (Python 3.12 `extraction_filter='data'` + explicit path-prefix
+    check), the conflict-resolution flow on import (replace vs.
+    error), and the deferred items (signing, semver dep
+    resolution, marketplace).
+17. **New `metis_app/services/forge_bundle.py`.** Provides
+    `Manifest` (frozen dataclass + YAML round-trip), `pack_skill`
+    (writes a `.metis-skill` tarball from a `skills/<id>/`
+    directory + version + author), `inspect_bundle` (returns
+    parsed manifest + frontmatter for the preview pane,
+    leaves the tarball untouched), `validate_bundle` (returns a
+    list of human-readable errors covering manifest schema,
+    SKILL.md frontmatter, slug-vs-directory mismatch, slug
+    conflicts against the live `skills/` root, and unsafe paths
+    inside the tarball), and `install_bundle` (extracts under
+    `skills/<id>/` honouring an explicit `replace=True` switch
+    when the slug already exists). All functions take their roots
+    as arguments — no module-level state — so tests can drive
+    them with `tmp_path`.
+18. **Four new routes** in `metis_app/api_litestar/routes/forge.py`:
+    `GET /v1/forge/skills` (list the installed skills with id,
+    name, description, version-from-frontmatter-if-present, path
+    relative to repo root); `POST /v1/forge/skills/<id>/export`
+    (body `{version, author?}`, returns
+    `{filename, content_base64, sha256}`, 404 on unknown id);
+    `POST /v1/forge/skills/import/preview` (multipart upload —
+    the file isn't installed, the route returns the parsed
+    manifest + SKILL.md frontmatter + validation errors + a
+    `conflict: bool` flag computed from `skills/<id>/SKILL.md`
+    existence); `POST /v1/forge/skills/import/install`
+    (multipart upload + `replace: bool`, installs into
+    `skills/<id>/`, returns `{skill_id, replaced}`, 409 on
+    conflict-without-replace, 400 on validation failure).
+19. **Frontend additions.**
+    - `apps/metis-web/lib/api.ts`: `fetchInstalledSkills()`,
+      `exportSkillBundle(id, version, author?) -> Blob` (decodes
+      base64 to a Blob client-side; the route ships base64 so the
+      Litestar JSON path stays simple), `previewSkillBundle(file)`,
+      `installSkillBundle(file, replace) -> {skill_id, replaced}`.
+    - `apps/metis-web/components/forge/installed-skills-pane.tsx`:
+      lists the installed skills under an "Installed skills"
+      eyebrow, with an "Export" button per row that downloads
+      `<id>-<version>.metis-skill` via the API. Hides itself when
+      the list is empty.
+    - `apps/metis-web/components/forge/bundle-import-zone.tsx`:
+      dashed-border drop zone (also accepts a hidden file input
+      for keyboard users), preview dialog showing manifest +
+      frontmatter + validation errors + conflict warning,
+      Install button that calls the install route. On success,
+      publishes a `CompanionActivityEvent` with
+      `kind: "skill_imported"` so the dock acknowledges
+      ("Companion absorbed *skill name*").
+    - Mounted on `app/forge/page.tsx` between
+      `<CandidateSkillsPane>` and `<TechniqueGallery>` — the
+      reading order is candidates → import-from-bundle → installed
+      skills (export) → frontier techniques.
+20. **Tests.** `tests/test_forge_bundle.py` covers pack→inspect
+    round-trip, manifest YAML round-trip, validate's six error
+    classes, install replace-vs-conflict semantics, and the
+    explicit `..`-traversal defence on `install_bundle`.
+    `tests/test_api_forge.py` extends with the four new routes
+    (404 / 409 / 400 / 200 for each). Frontend vitest covers the
+    preview-dialog + drop-zone components.
 
-Phase 7 keeps the original *Proposed phase breakdown* below. The
-next claimable phase after 6 lands is **Phase 7 (stretch) — Export
-/ share a technique bundle** (`.metis-skill` file format), or any
-of the harvest-debt items: extending `trace_event_types` to the
-remaining nine descriptors once the engine-side event names are
-audited. Each phase should land on its own branch
-(`claude/m14-phase<N>-<descriptor>`).
+The remaining harvest-debt item — extending `trace_event_types`
+to the nine descriptors that ship empty markers — does **not**
+gate Phase 7. It can land as a follow-up `feat(m14): trace
+markers for <descriptor>` PR per descriptor whenever the
+engine-side event names are audited.
 
 ## Blockers
 
