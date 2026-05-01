@@ -64,6 +64,7 @@ import {
   findHoveredComet,
   pruneCometLabelState,
   rectsOverlap,
+  tickHoverPersistence,
   type Rect as CometCardRect,
 } from "@/lib/constellation-comet-labels";
 import {
@@ -4783,18 +4784,23 @@ export default function Home() {
 
         // M22 Phase 3+5 — hovered comet gets a canvas-rendered card
         // with title/summary/faculty pill/footer. Card stays canvas
-        // to keep the visual language consistent. Phase 5 adds a
-        // 600ms persistence window after the last "comet under
-        // cursor" pointermove so the card doesn't flicker as the
-        // cursor transits between the comet head and the card.
-        const HOVER_PERSISTENCE_MS = 600;
+        // to keep the visual language consistent.
+        //
+        // tickHoverPersistence keeps the card alive while the cursor
+        // is still over the comet head OR over the previously-drawn
+        // card bbox (necessary because pointermove doesn't fire while
+        // the cursor is stationary — a timer-only expiry would dismiss
+        // the card mid-read). Once the cursor actually leaves both,
+        // the 600ms grace window starts counting down.
         const hoverState = cometHoverStateRef.current;
-        if (
-          hoverState.cometId &&
-          performance.now() - hoverState.lastSeenAtMs > HOVER_PERSISTENCE_MS
-        ) {
-          hoverState.cometId = null;
-        }
+        const nextHover = tickHoverPersistence(
+          hoverState,
+          { x: mouse.x, y: mouse.y },
+          cometSprites,
+          performance.now(),
+        );
+        hoverState.cometId = nextHover.cometId;
+        hoverState.lastSeenAtMs = nextHover.lastSeenAtMs;
         const hovered = hoverState.cometId
           ? cometSprites.find((c) => c.comet_id === hoverState.cometId)
           : null;

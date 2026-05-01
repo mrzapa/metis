@@ -1,7 +1,7 @@
 ---
 Milestone: M22 — Comet headline labels
 Status: Landed
-Claim: Phases 1-3+5 landed via PR #589, #590, #592, #(Phase 5 pending); Phase 4 (collision suppression) deferred
+Claim: Phases 1-3+5 landed via PR #589, #590, #592, #593; Phase 4 (collision suppression) deferred
 Last updated: 2026-05-01 by claude/m22-phase-5-polish
 Vision pillar: Cosmos
 ---
@@ -17,7 +17,7 @@ Vision pillar: Cosmos
 - 2026-05-01 — Phase 3 claimed on `claude/m22-phase-3-hover-card`. Hover hit-test, canvas hover card with title/summary/faculty/source/age, `clampToSafeArea`, click-to-open, and `wrapText` shipped in `lib/pretext-labels.ts` — first consumer of pretext's line-breaking surface in METIS.
 - 2026-05-01 — **Phase 3 landed via PR #592** (with 9 Copilot review fixes, including a real footer age bug and a real title-overlaps-pill layout bug — both pinned by tests + reproduced before fixing).
 - 2026-05-01 — **Phase 4 (collision suppression) deferred** per the design's perf-risk note: "Default `max_active` is small. If a future setting raises it to 20+, the per-frame O(label_count²) collision test starts to bite. Acceptable for now." Re-introducible if a real-world high-comet-count scene surfaces label overlaps.
-- 2026-05-01 — **Phase 5 landed via PR #(pending).** Footer plumbing (`sourceChannel` + `publishedAt` through `CometData`, `formatCompactAge` restored with the `publishedAt=0` guard the Phase 3 review caught), 600ms hover-card persistence, M22 row flipped to `Landed`. M22 is complete.
+- 2026-05-01 — **Phase 5 landed via PR #593.** Footer plumbing (`sourceChannel` + `publishedAt` through `CometData`, `formatCompactAge` restored with the `publishedAt=0` guard the Phase 3 review caught), 600ms hover-card persistence, M22 row flipped to `Landed`. M22 is complete.
 
 ## Retrospective
 

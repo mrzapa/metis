@@ -14,6 +14,7 @@ import {
   samplePathAt,
   shouldFlipOrientation,
   smoothedTangentAt,
+  tickHoverPersistence,
   truncateLabelToFit,
 } from "../constellation-comet-labels";
 import { measureSingleLineTextWidth } from "../pretext-labels";
@@ -433,9 +434,112 @@ describe("drawCometHoverCard", () => {
   });
 });
 
+describe("tickHoverPersistence", () => {
+  // The persistence helper centralises the "is the hover card still
+  // alive?" decision. Pure function; caller (page.tsx render loop)
+  // owns the storage. Activity sources that keep the card alive:
+  //   - cursor still within HOVER_RADIUS_PX of the comet head
+  //   - cursor still inside the last drawn card bbox
+  // Without these, the Phase 5 timer-only logic expired the card
+  // even when the user was deliberately reading it.
+  const PERSISTENCE_MS = 600;
+
+  it("returns the original null state when nothing is hovered", () => {
+    const state = { cometId: null, cardBbox: null, lastSeenAtMs: 0 };
+    const next = tickHoverPersistence(state, { x: 0, y: 0 }, [], 1000);
+    expect(next.cometId).toBeNull();
+  });
+
+  it("refreshes lastSeenAtMs while cursor stays on the comet head (no move events needed)", () => {
+    // Stationary cursor: pointermove never fires, but the cursor IS
+    // still hovering. The render-loop tick must keep the card alive.
+    const comet = mkComet({ comet_id: "a", x: 100, y: 100 });
+    const state = {
+      cometId: "a",
+      cardBbox: { x: 200, y: 50, w: 220, h: 120 },
+      lastSeenAtMs: 0, // ancient — would have expired without the fix
+    };
+    const next = tickHoverPersistence(state, { x: 105, y: 100 }, [comet], 5000);
+    expect(next.cometId).toBe("a");
+    expect(next.lastSeenAtMs).toBe(5000);
+  });
+
+  it("refreshes lastSeenAtMs while cursor sits inside the last card bbox", () => {
+    const comet = mkComet({ comet_id: "a", x: 100, y: 100 });
+    const cardBbox = { x: 200, y: 50, w: 220, h: 120 };
+    const state = { cometId: "a", cardBbox, lastSeenAtMs: 0 };
+    // Cursor far from the head (well past 24px) but inside the card.
+    const next = tickHoverPersistence(state, { x: 250, y: 80 }, [comet], 5000);
+    expect(next.cometId).toBe("a");
+    expect(next.lastSeenAtMs).toBe(5000);
+  });
+
+  it("preserves cometId without refreshing lastSeenAtMs while inside the persistence window", () => {
+    const comet = mkComet({ comet_id: "a", x: 100, y: 100 });
+    const state = {
+      cometId: "a",
+      cardBbox: { x: 200, y: 50, w: 220, h: 120 },
+      lastSeenAtMs: 1000,
+    };
+    // Cursor far from both head and card; nowMs - lastSeenAtMs = 400 < 600.
+    const next = tickHoverPersistence(state, { x: 800, y: 500 }, [comet], 1400);
+    expect(next.cometId).toBe("a");
+    expect(next.lastSeenAtMs).toBe(1000); // unchanged — counting down
+  });
+
+  it("expires the cometId when persistence window elapses with cursor away", () => {
+    const comet = mkComet({ comet_id: "a", x: 100, y: 100 });
+    const state = {
+      cometId: "a",
+      cardBbox: { x: 200, y: 50, w: 220, h: 120 },
+      lastSeenAtMs: 1000,
+    };
+    // 700ms past last sighting and cursor nowhere near.
+    const next = tickHoverPersistence(state, { x: 800, y: 500 }, [comet], 1700);
+    expect(next.cometId).toBeNull();
+  });
+
+  it("drops cometId immediately when the comet has left the active set", () => {
+    // Comet absorbed/dismissed between frames — list no longer contains it.
+    const state = {
+      cometId: "gone",
+      cardBbox: { x: 200, y: 50, w: 220, h: 120 },
+      lastSeenAtMs: 5000,
+    };
+    const next = tickHoverPersistence(state, { x: 100, y: 100 }, [], 5000);
+    expect(next.cometId).toBeNull();
+  });
+
+  it("treats a null cardBbox as 'no card-area activity' (still expires after timer)", () => {
+    const comet = mkComet({ comet_id: "a", x: 100, y: 100 });
+    const state = {
+      cometId: "a",
+      cardBbox: null,
+      lastSeenAtMs: 1000,
+    };
+    // Cursor away from head, no cardBbox to fall back on, past the window.
+    const next = tickHoverPersistence(state, { x: 800, y: 500 }, [comet], 1700);
+    expect(next.cometId).toBeNull();
+  });
+
+  it("respects a custom persistenceMs", () => {
+    const comet = mkComet({ comet_id: "a", x: 100, y: 100 });
+    const state = {
+      cometId: "a",
+      cardBbox: null,
+      lastSeenAtMs: 1000,
+    };
+    // Cursor away; 50ms past lastSeenAtMs, with a 30ms window.
+    const next = tickHoverPersistence(state, { x: 800, y: 500 }, [comet], 1050, 30);
+    expect(next.cometId).toBeNull();
+  });
+});
+
 describe("formatCompactAge", () => {
   // Use an explicit nowMs so tests are wall-clock independent. The
-  // fixed reference is 2026-05-01T00:00:00Z = 1761955200000ms.
+  // value below is `Date.parse("2025-11-01T00:00:00Z")` — any fixed
+  // instant works; what matters is that publishedSeconds is computed
+  // as a relative offset from this constant.
   const REFERENCE_NOW_MS = 1_761_955_200_000;
 
   it("returns 'now' for a future or zero age", () => {

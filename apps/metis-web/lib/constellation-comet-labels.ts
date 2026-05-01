@@ -385,6 +385,8 @@ const LABEL_BASE_OPACITY = 0.65;
 
 /** Hover-detect radius around a comet head, in CSS pixels. */
 const HOVER_RADIUS_PX = 24;
+/** Default persistence window for `tickHoverPersistence`, in ms. */
+const HOVER_PERSISTENCE_MS = 600;
 
 /** A rectangle in screen-space pixels — `x/y` is the top-left corner. */
 export interface Rect {
@@ -538,6 +540,79 @@ export function findHoveredComet(
 const flipState = new Map<string, boolean>();
 
 /**
+ * Snapshot of the page-level hover state consumed by `tickHoverPersistence`.
+ * Caller (page.tsx) owns the storage; the helper is pure.
+ */
+export interface HoverPersistenceState {
+  /** Currently-tracked comet, or `null` if none. */
+  cometId: string | null;
+  /**
+   * Last drawn card bounding rect (used for "is the cursor still
+   * inside the card?" hit-testing). May be `null` between hovers
+   * before the first card has rendered.
+   */
+  cardBbox: Rect | null;
+  /**
+   * Timestamp of the most recent frame on which the cursor was
+   * confirmed over the comet head OR the card bbox. The persistence
+   * window counts down from this value.
+   */
+  lastSeenAtMs: number;
+}
+
+/**
+ * Decide whether the hover card should remain alive for one more
+ * frame. Pure function; returns the next `{cometId, lastSeenAtMs}`
+ * for the caller to write back into its ref.
+ *
+ * The render loop must call this every frame (not just on
+ * `pointermove`) — `pointermove` doesn't fire while the cursor is
+ * stationary, so a timer-only expiry would dismiss the card while
+ * the user is actively reading it. This helper keeps the card alive
+ * as long as the cursor is **still hovering** (over the comet head OR
+ * over the previously-drawn card bbox), and only counts down the
+ * `persistenceMs` window once the cursor has actually left both.
+ *
+ * Returns `cometId: null` when:
+ *   - The state already had no `cometId`.
+ *   - The tracked comet is no longer in the active list (absorbed /
+ *     dismissed).
+ *   - `nowMs - state.lastSeenAtMs > persistenceMs` AND the cursor is
+ *     not currently on the head or the card.
+ */
+export function tickHoverPersistence(
+  state: Readonly<HoverPersistenceState>,
+  cursor: CursorPoint,
+  comets: ReadonlyArray<CometData>,
+  nowMs: number,
+  persistenceMs: number = HOVER_PERSISTENCE_MS,
+): { cometId: string | null; lastSeenAtMs: number } {
+  if (!state.cometId) {
+    return { cometId: null, lastSeenAtMs: state.lastSeenAtMs };
+  }
+  const target = comets.find((c) => c.comet_id === state.cometId);
+  if (!target) {
+    return { cometId: null, lastSeenAtMs: state.lastSeenAtMs };
+  }
+
+  const onHead = Math.hypot(target.x - cursor.x, target.y - cursor.y) <= HOVER_RADIUS_PX;
+  const onCard =
+    state.cardBbox !== null &&
+    cursor.x >= state.cardBbox.x &&
+    cursor.x <= state.cardBbox.x + state.cardBbox.w &&
+    cursor.y >= state.cardBbox.y &&
+    cursor.y <= state.cardBbox.y + state.cardBbox.h;
+
+  if (onHead || onCard) {
+    return { cometId: state.cometId, lastSeenAtMs: nowMs };
+  }
+  if (nowMs - state.lastSeenAtMs > persistenceMs) {
+    return { cometId: null, lastSeenAtMs: state.lastSeenAtMs };
+  }
+  return { cometId: state.cometId, lastSeenAtMs: state.lastSeenAtMs };
+}
+
+/**
  * Drop flip-state entries for comets no longer in the active set.
  * Caller should invoke once per frame (or whenever the active comet
  * list changes) with the currently-rendered comet IDs to prevent the
@@ -681,6 +756,21 @@ const FACULTY_SHORT_CODE: Record<string, string> = {
 
 function facultyShortCode(facultyId: string): string {
   return FACULTY_SHORT_CODE[facultyId.toLowerCase()] ?? facultyId.slice(0, 3).toUpperCase();
+}
+
+/**
+ * Extract the host from a comet URL, with a www. prefix stripped.
+ * Returns `""` for missing or malformed URLs rather than letting
+ * `new URL()` throw — a malformed backend payload must NOT take
+ * down the canvas frame.
+ */
+function hostFromUrlSafe(url: string): string {
+  if (!url) return "";
+  try {
+    return new URL(url, "http://x").host.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -911,9 +1001,7 @@ export function drawCometHoverCard(
   // so missing timestamps degrade gracefully instead of showing 1970.
   cursorY += CARD_SUMMARY_TO_FOOTER_GAP;
   const footerFont = buildCanvasFont(CARD_FOOTER_FONT_SIZE, LABEL_FONT_FAMILY, 400);
-  const sourceText =
-    comet.sourceChannel ||
-    (comet.url ? new URL(comet.url, "http://x").host.replace(/^www\./, "") : "");
+  const sourceText = comet.sourceChannel || hostFromUrlSafe(comet.url);
   const ageText = formatCompactAge(comet.publishedAt, opts.now ?? Date.now());
   const footerLine = sourceText ? `${sourceText} · ${ageText}` : ageText;
   ctx.font = footerFont;
