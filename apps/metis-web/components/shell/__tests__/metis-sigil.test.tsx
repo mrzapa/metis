@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import type { GrowthStage } from "@/lib/api";
 import { MetisSigil } from "../metis-sigil";
 
 describe("MetisSigil", () => {
@@ -11,7 +12,7 @@ describe("MetisSigil", () => {
   });
 
   it("exposes the stage as a data attribute for each growth stage", () => {
-    const stages = ["seedling", "sapling", "bloom", "elder"] as const;
+    const stages: GrowthStage[] = ["seedling", "sapling", "bloom", "elder"];
     for (const stage of stages) {
       const { unmount } = render(
         <MetisSigil stage={stage} ariaLabel={`sigil-${stage}`} />,
@@ -25,13 +26,13 @@ describe("MetisSigil", () => {
   });
 
   it("renders one ring per stage tier", () => {
-    const expected: Record<string, number> = {
+    const expected: Record<GrowthStage, number> = {
       seedling: 1,
       sapling: 2,
       bloom: 3,
       elder: 4,
     };
-    for (const stage of Object.keys(expected) as Array<keyof typeof expected>) {
+    for (const stage of Object.keys(expected) as GrowthStage[]) {
       const { container, unmount } = render(
         <MetisSigil stage={stage} ariaLabel={`sigil-${stage}`} />,
       );
