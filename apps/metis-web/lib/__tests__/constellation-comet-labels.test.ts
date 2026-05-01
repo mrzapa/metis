@@ -5,6 +5,7 @@ import {
   clampTangentForReducedMotion,
   computeArcLengths,
   drawCometLabel,
+  findHoveredComet,
   placeCharactersAlongPath,
   samplePathAt,
   shouldFlipOrientation,
@@ -370,6 +371,46 @@ describe("placeCharactersAlongPath with flipped opt", () => {
     const placed = placeCharactersAlongPath("AB", font, horizontalTail);
     expect(placed[0].tangent).toBeCloseTo(0, 5);
     expect(placed[1].tangent).toBeCloseTo(0, 5);
+  });
+});
+
+describe("findHoveredComet", () => {
+  it("returns the nearest comet within 24px of the cursor", () => {
+    const comets = [
+      mkComet({ comet_id: "a", x: 100, y: 100 }),
+      mkComet({ comet_id: "b", x: 200, y: 200 }),
+    ];
+    expect(findHoveredComet(comets, { x: 110, y: 105 })?.comet_id).toBe("a");
+    expect(findHoveredComet(comets, { x: 195, y: 210 })?.comet_id).toBe("b");
+  });
+
+  it("returns the nearest comet when two are within range (resolves ties by relevance)", () => {
+    // Both comets within 24px; cursor is slightly closer to "low" but
+    // "high" has higher relevance — distance wins (tie-breaker is the
+    // implementation detail; assert on what's documented: "nearest").
+    const comets = [
+      mkComet({ comet_id: "low", x: 100, y: 100, relevanceScore: 0.9 }),
+      mkComet({ comet_id: "high", x: 110, y: 100, relevanceScore: 0.1 }),
+    ];
+    expect(findHoveredComet(comets, { x: 102, y: 100 })?.comet_id).toBe("low");
+    expect(findHoveredComet(comets, { x: 108, y: 100 })?.comet_id).toBe("high");
+  });
+
+  it("returns null when no comet is within 24px", () => {
+    const comets = [mkComet({ comet_id: "a", x: 0, y: 0 })];
+    expect(findHoveredComet(comets, { x: 50, y: 50 })).toBeNull();
+  });
+
+  it("returns null on an empty comet list", () => {
+    expect(findHoveredComet([], { x: 0, y: 0 })).toBeNull();
+  });
+
+  it("considers the 24px boundary inclusive", () => {
+    const comets = [mkComet({ comet_id: "a", x: 0, y: 0 })];
+    // Exactly 24px away (3-4-5 triangle scaled).
+    expect(findHoveredComet(comets, { x: 0, y: 24 })?.comet_id).toBe("a");
+    // Beyond.
+    expect(findHoveredComet(comets, { x: 0, y: 25 })).toBeNull();
   });
 });
 

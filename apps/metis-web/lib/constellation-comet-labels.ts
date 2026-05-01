@@ -383,6 +383,39 @@ const LABEL_FONT_WEIGHT = 400;
 /** Phase 1 ambient opacity multiplier; multiplied by `comet.opacity`. */
 const LABEL_BASE_OPACITY = 0.65;
 
+/** Hover-detect radius around a comet head, in CSS pixels. */
+const HOVER_RADIUS_PX = 24;
+
+export interface CursorPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Find the comet whose head is closest to `cursor`, within
+ * `HOVER_RADIUS_PX` (24px). Returns `null` when no comet head is in
+ * range (or the comet list is empty).
+ *
+ * Pure function — no module-level state. Caller invokes per pointer
+ * event and stores the result for the canvas render loop.
+ */
+export function findHoveredComet(
+  comets: ReadonlyArray<CometData>,
+  cursor: CursorPoint,
+): CometData | null {
+  if (comets.length === 0) return null;
+  let best: CometData | null = null;
+  let bestDist = HOVER_RADIUS_PX;
+  for (const c of comets) {
+    const d = Math.hypot(c.x - cursor.x, c.y - cursor.y);
+    if (d <= bestDist) {
+      best = c;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
 /**
  * Per-comet flip state. Module-level so that hysteresis carries across
  * frames without the caller having to plumb state. Cleaned by
