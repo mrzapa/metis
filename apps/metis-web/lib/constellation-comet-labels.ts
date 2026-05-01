@@ -382,6 +382,15 @@ const LABEL_FONT_SIZE_PX = 11;
 const LABEL_FONT_WEIGHT = 400;
 /** Phase 1 ambient opacity multiplier; multiplied by `comet.opacity`. */
 const LABEL_BASE_OPACITY = 0.65;
+/**
+ * Effective-alpha threshold below which a label is treated as
+ * visually imperceptible and skipped. Used by `prepareCometLabel`
+ * to keep invisible comets out of the suppression pipeline —
+ * without this, a near-zero-alpha entering/fading comet's bbox
+ * could block a fully-visible lower-relevance comet's label
+ * (Phase 4 regression caught in PR #595 review).
+ */
+const MIN_VISIBLE_LABEL_ALPHA = 0.05;
 
 /** Hover-detect radius around a comet head, in CSS pixels. */
 const HOVER_RADIUS_PX = 24;
@@ -637,30 +646,54 @@ export interface DrawCometLabelOpts {
 }
 
 /**
- * Render a comet's full title as path-text along its tail.
- *
- * Phase 2 contract: spatially-smoothed per-character tangent (Task 2.1),
- * orientation flip with hysteresis tracked per `comet.comet_id`
- * (Task 2.3), 18-grapheme + arc-length truncation budget (Task 2.4),
- * and reduced-motion ±10° tangent clamp (Task 2.5).
- *
- * `tailHistory` from `tickComet` is in oldest-first order. The current
- * `comet.x/y` is prepended via `buildHeadFirstPath` so the label starts
- * at the rendered head, not one frame behind it.
+ * The output of `prepareCometLabel` — everything `drawPreparedLabel`
+ * needs to render, plus the bbox `suppressCollidingLabels` consumes
+ * for the collision check. `null` means "no label this frame" (empty
+ * title, sub-2 tail, truncation produced no chars).
  */
-export function drawCometLabel(
-  ctx: CanvasRenderingContext2D,
+export interface PreparedCometLabel {
+  cometId: string;
+  relevance: number;
+  bbox: Rect;
+  placed: ReadonlyArray<PlacedChar>;
+  font: string;
+  /** rgba color string with the comet's faculty colour + per-frame alpha. */
+  fillStyle: string;
+}
+
+/**
+ * Compute everything needed to render a comet label this frame, but
+ * don't draw yet. The returned bbox flows into
+ * `suppressCollidingLabels`; if the label survives, the caller passes
+ * the same `PreparedCometLabel` to `drawPreparedLabel`.
+ *
+ * Behaviour identical to the old `drawCometLabel` minus the actual
+ * canvas calls: spatially-smoothed per-character tangent (Task 2.1),
+ * orientation flip with hysteresis (Task 2.3), 18-grapheme +
+ * arc-length truncation (Task 2.4), reduced-motion ±10° clamp (Task
+ * 2.5), and `buildHeadFirstPath` to keep the label flush with the
+ * rendered head (Task 1 review fix).
+ */
+export function prepareCometLabel(
   comet: CometData,
   opts: DrawCometLabelOpts = {},
-): void {
-  if (comet.title.length === 0) return;
+): PreparedCometLabel | null {
+  if (comet.title.length === 0) return null;
+
+  // Visibility short-circuit: a comet with effective alpha below
+  // MIN_VISIBLE_LABEL_ALPHA contributes no visible glyphs. Skip it
+  // BEFORE collision suppression so an invisible high-relevance
+  // candidate can't block a visible low-relevance one. (Pre-Phase-4
+  // every label drew independently, so opacity didn't affect
+  // cross-comet visibility; Phase 4's suppression makes this
+  // matter.)
+  if (LABEL_BASE_OPACITY * comet.opacity < MIN_VISIBLE_LABEL_ALPHA) {
+    return null;
+  }
 
   const tail = buildHeadFirstPath(comet);
-  if (tail.length < 2) return;
+  if (tail.length < 2) return null;
 
-  // Dominant tangent: use the path's mid-arc tangent as a stable proxy
-  // for "which way is this label pointing right now." Cheaper than
-  // averaging per-char tangents and equivalent for hysteresis decisions.
   const arcLengths = computeArcLengths(tail);
   const total = arcLengths[arcLengths.length - 1];
   const dominantTangent = smoothedTangentAt(arcLengths, tail, total / 2);
@@ -670,26 +703,40 @@ export function drawCometLabel(
   if (isFlipped !== wasFlipped) flipState.set(comet.comet_id, isFlipped);
 
   const font = buildCanvasFont(LABEL_FONT_SIZE_PX, LABEL_FONT_FAMILY, LABEL_FONT_WEIGHT);
-  // Truncate to fit the available arc length under the 18-grapheme cap.
-  // As the comet's tail grows, more characters become renderable; short
-  // tails show only the prefix that fits, so headlines materialise.
   const truncated = truncateLabelToFit(comet.title, font, total);
-  if (truncated.length === 0) return;
+  if (truncated.length === 0) return null;
   const placed = placeCharactersAlongPath(truncated, font, tail, {
     flipped: isFlipped,
     reducedMotion: opts.reducedMotion,
   });
-  if (placed.length === 0) return;
+  if (placed.length === 0) return null;
 
   const [r, g, b] = comet.color;
   const alpha = LABEL_BASE_OPACITY * comet.opacity;
+  const fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  const bbox = rotatedLabelBbox(placed, LABEL_FONT_SIZE_PX);
 
+  return {
+    cometId: comet.comet_id,
+    relevance: comet.relevanceScore,
+    bbox,
+    placed,
+    font,
+    fillStyle,
+  };
+}
+
+/** Draw a `PreparedCometLabel` to the canvas. Pure side-effect; no math. */
+export function drawPreparedLabel(
+  ctx: CanvasRenderingContext2D,
+  prepared: PreparedCometLabel,
+): void {
   ctx.save();
-  ctx.font = font;
+  ctx.font = prepared.font;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  for (const p of placed) {
+  ctx.fillStyle = prepared.fillStyle;
+  for (const p of prepared.placed) {
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(p.tangent);
@@ -697,6 +744,158 @@ export function drawCometLabel(
     ctx.restore();
   }
   ctx.restore();
+}
+
+/**
+ * Convenience wrapper that prepares + draws a single comet's label
+ * with no collision check. Kept for callers that don't need
+ * suppression (e.g. tests, single-comet scenes). The page render
+ * loop uses the explicit prepare → suppress → draw pipeline.
+ *
+ * Phase 2 contract: spatially-smoothed per-character tangent (Task 2.1),
+ * orientation flip with hysteresis tracked per `comet.comet_id`
+ * (Task 2.3), 18-grapheme + arc-length truncation budget (Task 2.4),
+ * and reduced-motion ±10° tangent clamp (Task 2.5).
+ */
+export function drawCometLabel(
+  ctx: CanvasRenderingContext2D,
+  comet: CometData,
+  opts: DrawCometLabelOpts = {},
+): void {
+  const prepared = prepareCometLabel(comet, opts);
+  if (prepared) drawPreparedLabel(ctx, prepared);
+}
+
+// -- Collision suppression ----------------------------------------------------
+
+/**
+ * Approximate horizontal extent of one rendered glyph at `fontSize`,
+ * in CSS pixels. Used by `rotatedLabelBbox` to size each glyph's
+ * rotated quad. Rough rule-of-thumb (0.6 × font-size) chosen to
+ * match the average advance width across the Latin alphabet at
+ * typical canvas font rendering — the bbox doesn't need pixel
+ * accuracy because `suppressCollidingLabels` uses a 40% area
+ * threshold, well above per-glyph noise.
+ */
+const GLYPH_HALF_ADVANCE_FACTOR = 0.3;
+
+/**
+ * Compute the AABB enclosing every glyph in a placed-chars label,
+ * accounting for per-character rotation. Used by
+ * `suppressCollidingLabels` for cheap per-frame overlap checks
+ * across multiple comets' labels.
+ *
+ * Each glyph is modelled as a `(2 × halfAdv) × fontSize` rectangle
+ * centred on its `(x, y)`, where
+ * `halfAdv = fontSize × GLYPH_HALF_ADVANCE_FACTOR` (≈ 0.6 × fontSize
+ * total advance, matching the average Latin glyph width). Each
+ * rect is rotated by its `tangent`, and the bbox is the min/max
+ * over all four corners of every glyph's rotated quad.
+ *
+ * Returns `{x: 0, y: 0, w: 0, h: 0}` for an empty placed list — the
+ * caller's overlap test treats a zero-area rect as non-overlapping.
+ */
+export function rotatedLabelBbox(
+  placed: ReadonlyArray<PlacedChar>,
+  fontSize: number,
+): Rect {
+  if (placed.length === 0) return { x: 0, y: 0, w: 0, h: 0 };
+  const halfAdv = fontSize * GLYPH_HALF_ADVANCE_FACTOR;
+  const halfH = fontSize / 2;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const p of placed) {
+    const cos = Math.cos(p.tangent);
+    const sin = Math.sin(p.tangent);
+    // Glyph's local rect corners: (±halfAdv, ±halfH). Rotate each by
+    // tangent, translate to (p.x, p.y), then expand min/max.
+    for (const [lx, ly] of [
+      [-halfAdv, -halfH],
+      [halfAdv, -halfH],
+      [-halfAdv, halfH],
+      [halfAdv, halfH],
+    ]) {
+      const wx = p.x + lx * cos - ly * sin;
+      const wy = p.y + lx * sin + ly * cos;
+      if (wx < minX) minX = wx;
+      if (wx > maxX) maxX = wx;
+      if (wy < minY) minY = wy;
+      if (wy > maxY) maxY = wy;
+    }
+  }
+
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/** A label paired with its bbox + relevance for collision suppression. */
+export interface SuppressionCandidate {
+  /** Stable identifier (e.g. `comet_id`); preserved through suppression. */
+  id: string;
+  /** Higher relevance wins ties when two labels overlap. */
+  relevance: number;
+  /** Rotated AABB from `rotatedLabelBbox`. */
+  bbox: Rect;
+}
+
+/** Default overlap-area / smaller-bbox-area threshold for suppression. */
+const DEFAULT_SUPPRESSION_THRESHOLD = 0.4;
+
+/**
+ * Resolve which labels should render this frame: sort by relevance
+ * descending, then for each candidate, AABB-overlap-test against the
+ * already-kept set. Drop the candidate if its overlap ratio (overlap
+ * area / smaller-bbox area) exceeds `threshold` against ANY kept
+ * label.
+ *
+ * Pure function. Caller (page.tsx render loop) builds the
+ * `SuppressionCandidate[]` from `cometSprites` + the prepared
+ * `PlacedChar[]` lists, calls this, and then renders only the
+ * survivors.
+ *
+ * Rationale (from design § Collision suppression): the visible
+ * label set should NOT have heavy overlaps that turn glyphs into
+ * mush. Higher-`relevanceScore` comets win because they're the
+ * news the user most cares about.
+ */
+export function suppressCollidingLabels(
+  candidates: ReadonlyArray<SuppressionCandidate>,
+  threshold: number = DEFAULT_SUPPRESSION_THRESHOLD,
+): SuppressionCandidate[] {
+  if (candidates.length === 0) return [];
+
+  const sorted = [...candidates].sort((a, b) => b.relevance - a.relevance);
+  const kept: SuppressionCandidate[] = [];
+  for (const cand of sorted) {
+    let suppressed = false;
+    for (const k of kept) {
+      if (overlapRatio(cand.bbox, k.bbox) > threshold) {
+        suppressed = true;
+        break;
+      }
+    }
+    if (!suppressed) kept.push(cand);
+  }
+  return kept;
+}
+
+/**
+ * Overlap-area / smaller-bbox-area ratio for two AABBs. Returns 0
+ * when either rect has zero area or when they don't overlap (per
+ * `rectsOverlap`'s edge-touching = non-overlapping convention).
+ */
+function overlapRatio(a: Rect, b: Rect): number {
+  if (!rectsOverlap(a, b)) return 0;
+  const aArea = a.w * a.h;
+  const bArea = b.w * b.h;
+  if (aArea <= 0 || bArea <= 0) return 0;
+  const overlapW = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const overlapH = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  const overlapArea = overlapW * overlapH;
+  return overlapArea / Math.min(aArea, bArea);
 }
 
 // -- Hover card ---------------------------------------------------------------
