@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, useReducedMotion } from "motion/react";
-import { type ReactNode, useId } from "react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -57,9 +57,20 @@ export function MetisGlow({
   const reducedMotion = useReducedMotion();
   const filterIdBase = useId();
 
-  const showRings = !reducedMotion && animated !== "static";
+  // SSR-safe: useReducedMotion() can only resolve client-side, so during
+  // the server pass and the first client render we render the static
+  // (no-rings, no breathing) branch. After useEffect runs we know the
+  // real reduced-motion value and can opt into the motion variant. This
+  // is what eliminates the SSR-vs-client hydration mismatch.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const allowMotion = mounted && !reducedMotion;
+  const showRings = allowMotion && animated !== "static";
   const effectiveIntensity =
-    reducedMotion && animated !== "static" ? 0.9 * intensity : intensity;
+    !allowMotion && animated !== "static" ? 0.9 * intensity : intensity;
 
   return (
     <div
@@ -135,7 +146,7 @@ export function MetisGlow({
       {/* Mark, with a subtle breathing pulse during on-mount idle. The
           breathing is a glow-opacity oscillation on the mark itself —
           the rings handle the entrance moment; this carries the idle. */}
-      {!reducedMotion && animated === "on-mount" ? (
+      {allowMotion && animated === "on-mount" ? (
         <motion.div
           className="relative inline-flex"
           initial={{ opacity: 0 }}

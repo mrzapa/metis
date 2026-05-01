@@ -56,12 +56,16 @@ written as the fix lands.
   route entirely (and any links pointing at it) **or** ship a minimal
   documents-list view backed by `GET /v1/index/list`. Lean toward delete +
   redirect to `/?focus=library` until M14/M16 give it a real home.
-- **#3 `/v1/atlas/candidate` returns 404 on every chat send.** Chat fires
-  `GET /v1/atlas/candidate?session_id=…&run_id=…` immediately after creating
-  a session. Backend has no such route. Find the caller in
-  `apps/metis-web/components/chat/*` or `lib/api.ts`, remove the dead call
-  (or rewire to whatever endpoint replaced it). Verify the privacy panel
-  feed quiets down after the fix.
+- **#3 `/v1/atlas/candidate` 404 noise** *(reprioritised P0 → P3 on
+  closer look)*. The endpoint exists at
+  [`metis_app/api_litestar/routes/atlas.py:16`](metis_app/api_litestar/routes/atlas.py)
+  and the 404 is **semantic** — "no candidate yet for this run". The
+  frontend already handles it (`fetchAtlasCandidate` returns null on 404,
+  see [`apps/metis-web/lib/api.ts:3102-3119`](apps/metis-web/lib/api.ts)).
+  The privacy/network audit shows `127.0.0.1` calls as non-outbound, so
+  the 404 doesn't pollute that. The only remaining cost is dev-console
+  noise. Defer to a future API-cleanliness pass that flips the contract
+  to `200 OK { candidate: null }`.
 - **#4 Top navigation inconsistent across pages.**
   - `/` (home): `Metis home · Chat · Settings` (3 items)
   - Every other page: `Home · Chat · Forge · Settings · Research log`
@@ -164,15 +168,56 @@ Land in priority bands. Each phase = one PR.
 
 - 2026-05-01 — Milestone filed; QA walk completed by `claude` (agent-op).
   Bug inventory (#1–#22) captured. No code committed yet against this row.
+- 2026-05-01 — **Phase 1 (P0 fixes) implemented** on this branch:
+  - **#1 hydration:** `apps/metis-web/components/brand/metis-glow.tsx`
+    now defers the motion branch behind a `mounted` state set from
+    `useEffect`. SSR + first client render produce the static branch
+    (matching what reduced-motion users see permanently); animated
+    variant opts in after hydration. The Next.js dev-overlay "1 Issue"
+    badge that fired on every page should clear.
+  - **#3 reprioritised P0 → P3:** the `/v1/atlas/candidate` 404 is a
+    semantic "no candidate yet", correctly handled by the frontend
+    (`fetchAtlasCandidate` returns null on 404). Local-API 404s don't
+    count as outbound, so privacy panel stays clean. Defer to a future
+    cleanliness pass (`200 OK { candidate: null }`).
+  - **#4 nav inconsistency:** added Forge + Research log to the home
+    page's inline `metis-nav` (`apps/metis-web/app/page.tsx`); item set
+    now matches `<PageChrome>` everywhere. Comment explains why two nav
+    components exist.
+  - **#2 library stub:** wired `apps/metis-web/app/library/page.tsx`
+    to render the existing `<NyxCatalogPage>` component (which was
+    fully implemented and orphaned). NYX deep-links from chat artifacts
+    can now reach the catalog landing. The `[componentName]/page.tsx`
+    detail route stays out of scope for this phase.
+  - **#5 setup/settings api-key contradiction:** discovered this was a
+    *functional* bug (not just copy): the wizard's `handleFinish` sent
+    `api_key_*` in the settings PATCH, which the backend always 403s
+    unless `METIS_ALLOW_API_KEY_WRITE=1`. Wizard saves were silently
+    failing for any user who pasted a key. Removed `api_key_*` from
+    the PATCH payload (the in-memory key is still threaded into
+    `IndexBuildStudio.settingsOverrides` for one-shot index builds —
+    that path doesn't go through the settings gate). Updated the
+    wizard's help copy to be honest about the constraint and direct
+    users to `settings.json` or the env-var override.
+- 2026-05-01 — **Verification:**
+  - `tsc --noEmit` (with junction to main-repo `node_modules`) — only
+    a single pre-existing error in
+    `apps/metis-web/components/shell/__tests__/metis-sigil.test.tsx`,
+    unrelated to my touched files. None of the four files I edited
+    flag.
+  - `vitest run` — 593 passed, 10 skipped, 2 test files skipped, 0
+    failed. Exit 0.
+  - **Browser-preview verify skipped** — Turbopack rejects a
+    `node_modules` junction in the worktree ("symlink points out of
+    filesystem root"), and the worktree itself has no `node_modules`
+    install. The static evidence (tsc + 593 passing tests + mechanical
+    diff inspection) is the verification for these specific edits.
 
 ## Next up
 
-Phase 1 — start with #1 (hydration) as it lands on every page and is the
-single visible "1 Issue" badge a reviewer sees first. Then #3 (dead atlas
-endpoint, smallest fix), then #4 (nav alignment), then #2 (library stub
-decision needs a one-line product call from the user — favor delete + soft
-link until M14/M16 owns documents UX), then #5 (api-key contradiction —
-might be a copy-only fix).
+Phase 1 PR review, then Phase 2 (P1 perf): #6 settings request-storm
+dedup, #7 comets/events abort spam, #8 hard-reload nav, #9 model-load
+progress.
 
 ## Blockers
 

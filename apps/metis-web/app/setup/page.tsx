@@ -251,17 +251,12 @@ export default function SetupPage() {
         basic_wizard_completed: true,
       };
 
-      if (apiKey) {
-        const keyField =
-          llmProvider === "anthropic"
-            ? "api_key_anthropic"
-            : llmProvider === "openai"
-              ? "api_key_openai"
-              : null;
-        if (keyField) {
-          updates[keyField] = apiKey;
-        }
-      }
+      // Note: api_key_* are intentionally NOT sent. The backend's
+      // settings PATCH endpoint blocks api_key_* writes (403 unless
+      // METIS_ALLOW_API_KEY_WRITE=1) — including them here used to
+      // crash the whole wizard save. The wizard's API-key input is
+      // captured for the user to copy into settings.json themselves.
+      // See M21 #5.
 
       await updateSettings(updates);
 
@@ -331,7 +326,7 @@ export default function SetupPage() {
       description:
         llmProvider === "local"
           ? "Local model mode does not require a hosted API key. You can continue immediately or add one later if you switch providers."
-          : "Paste the API key for the selected provider. You can also add it later in settings.",
+          : "API keys are not stored through the wizard. METIS reads them from settings.json — paste here as a reminder to copy it across after this step.",
       content: (
         <div className="space-y-3">
           <label
@@ -354,7 +349,15 @@ export default function SetupPage() {
           <p className="text-sm leading-7 text-muted-foreground">
             {llmProvider === "local"
               ? "Leave this blank if you’re staying fully local."
-              : "If you skip this now, you can still add it later in your settings file."}
+              : (
+                <>
+                  This wizard never writes <code className="rounded bg-amber-500/15 px-1">api_key_*</code> to settings —
+                  the backend rejects those updates by design. To finish setup with a hosted provider, paste your key
+                  into <code className="rounded bg-amber-500/15 px-1">settings.json</code> at the repo root after the
+                  wizard completes (or set <code className="rounded bg-amber-500/15 px-1">METIS_ALLOW_API_KEY_WRITE=1</code> to
+                  let UI writes through).
+                </>
+              )}
           </p>
         </div>
       ),
