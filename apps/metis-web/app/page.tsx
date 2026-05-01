@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { useReducedMotion } from "motion/react";
 import { MetisMark } from "@/components/brand";
 import { NetworkAuditFirstRunCard } from "@/components/network-audit/first-run-card";
 import { FirstRunBanner } from "@/components/home/first-run-banner";
@@ -57,7 +58,7 @@ import {
   drawPolarisTendril,
   drawAbsorptionBurst,
 } from "@/lib/constellation-comets";
-import { drawCometLabel } from "@/lib/constellation-comet-labels";
+import { drawCometLabel, pruneCometLabelState } from "@/lib/constellation-comet-labels";
 import {
   buildBrainPlacementIntent,
   buildFacultyAnchoredPlacement,
@@ -843,6 +844,14 @@ export default function Home() {
     updateUserStarById,
     starLimit,
   } = useConstellationStars();
+  // M22 Phase 2 — read prefers-reduced-motion once at the top of Home and
+  // pipe into the canvas render loop via a ref so changes propagate without
+  // re-running the loop's useEffect.
+  const reducedMotion = useReducedMotion() ?? false;
+  const reducedMotionRef = useRef(reducedMotion);
+  useEffect(() => {
+    reducedMotionRef.current = reducedMotion;
+  }, [reducedMotion]);
 
   // Comet-news: subscribe to live news events rendered as comets.
   // Start enabled to preserve the pre-settings-wiring UX, then reconcile to
@@ -4733,12 +4742,16 @@ export default function Home() {
       }
       if (cometSprites.length > 0 && ctx) {
         drawCometSprites(ctx, cometSprites, ts);
-        // M22 Phase 1 — tracer-bullet path-text headline labels along each
-        // comet's tail. No truncation/flip/collision/reduced-motion yet;
-        // those land in Phase 2.
+        // M22 Phase 1+2 — path-text headline labels along each comet's tail.
+        // Smoothed per-char tangent, orientation flip with hysteresis,
+        // 18-grapheme + arc-length truncation, reduced-motion ±10° clamp.
+        // Collision suppression and hover card land in Phases 3-4.
+        const labelOpts = { reducedMotion: reducedMotionRef.current };
         for (const c of cometSprites) {
-          drawCometLabel(ctx, c);
+          drawCometLabel(ctx, c, labelOpts);
         }
+        // Drop module-level flip state for comets that left the active set.
+        pruneCometLabelState(cometSprites.map((c) => c.comet_id));
       }
       // Absorption burst effects (persists briefly after comet absorbed)
       for (let i = absorbBursts.length - 1; i >= 0; i--) {

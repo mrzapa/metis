@@ -2,11 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHeadFirstPath,
+  clampTangentForReducedMotion,
   computeArcLengths,
   drawCometLabel,
   placeCharactersAlongPath,
   samplePathAt,
+  shouldFlipOrientation,
+  smoothedTangentAt,
+  truncateLabelToFit,
 } from "../constellation-comet-labels";
+import { measureSingleLineTextWidth } from "../pretext-labels";
 import type { CometData } from "../comet-types";
 
 function mkComet(overrides: Partial<CometData> = {}): CometData {
@@ -158,6 +163,213 @@ describe("placeCharactersAlongPath", () => {
     expect(placed).toHaveLength(2);
     expect(placed[0].char).toBe("é");
     expect(placed[1].char).toBe("z");
+  });
+});
+
+describe("smoothedTangentAt", () => {
+  it("matches the raw tangent on a straight horizontal line", () => {
+    const tail = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 20, y: 0 },
+      { x: 30, y: 0 },
+    ];
+    const arc = computeArcLengths(tail);
+    expect(smoothedTangentAt(arc, tail, 15)).toBeCloseTo(0, 3);
+  });
+
+  it("smooths a sharp right-angle corner — tangent at the elbow lies between the two segment angles", () => {
+    // 90° turn: x then y. Raw tangent jumps from 0 to π/2 at the elbow.
+    // Smoothed should land somewhere in (0, π/2).
+    const tail = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 10, y: 20 },
+    ];
+    const arc = computeArcLengths(tail);
+    const smoothed = smoothedTangentAt(arc, tail, 10); // exactly at the elbow
+    expect(smoothed).toBeGreaterThan(0);
+    expect(smoothed).toBeLessThan(Math.PI / 2);
+  });
+
+  it("falls back to samplePathAt's tangent for sub-2-point tails", () => {
+    expect(smoothedTangentAt([], [], 0)).toBeCloseTo(0);
+    expect(smoothedTangentAt([0], [{ x: 5, y: 5 }], 0)).toBeCloseTo(0);
+  });
+
+  it("equals the raw segment tangent at endpoints (no neighbour to smooth with)", () => {
+    const tail = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+    ];
+    const arc = computeArcLengths(tail);
+    // s=0 and s=total — no later/earlier neighbour to average against.
+    expect(smoothedTangentAt(arc, tail, 0)).toBeCloseTo(0);
+    expect(smoothedTangentAt(arc, tail, 20)).toBeCloseTo(Math.PI / 2);
+  });
+});
+
+describe("clampTangentForReducedMotion", () => {
+  const TEN_DEG_RAD = (10 * Math.PI) / 180;
+
+  it("does not clamp when reducedMotion is false", () => {
+    expect(clampTangentForReducedMotion(Math.PI / 3, false)).toBeCloseTo(Math.PI / 3);
+    expect(clampTangentForReducedMotion(-Math.PI, false)).toBeCloseTo(-Math.PI);
+  });
+
+  it("clamps positive tangents to +10° under reducedMotion", () => {
+    expect(clampTangentForReducedMotion(Math.PI / 2, true)).toBeCloseTo(TEN_DEG_RAD);
+  });
+
+  it("clamps negative tangents to -10° under reducedMotion", () => {
+    expect(clampTangentForReducedMotion(-Math.PI / 2, true)).toBeCloseTo(-TEN_DEG_RAD);
+  });
+
+  it("preserves small tangents under reducedMotion (within the band)", () => {
+    expect(clampTangentForReducedMotion(0.1, true)).toBeCloseTo(0.1);
+    expect(clampTangentForReducedMotion(-0.05, true)).toBeCloseTo(-0.05);
+  });
+
+  it("preserves zero", () => {
+    expect(clampTangentForReducedMotion(0, true)).toBe(0);
+    expect(clampTangentForReducedMotion(0, false)).toBe(0);
+  });
+});
+
+describe("placeCharactersAlongPath with reducedMotion opt", () => {
+  const elbow = [
+    { x: 0, y: 0 },
+    { x: 10, y: 0 },
+    { x: 10, y: 100 }, // sharp elbow into a long vertical
+    { x: 10, y: 200 },
+  ];
+  const font = '400 11px "Space Grotesk", sans-serif';
+
+  it("clamps every character's tangent to ±10° when reducedMotion is true", () => {
+    const TEN_DEG_RAD = (10 * Math.PI) / 180;
+    const placed = placeCharactersAlongPath("AAAAAAAAAA", font, elbow, { reducedMotion: true });
+    for (const p of placed) {
+      expect(Math.abs(p.tangent)).toBeLessThanOrEqual(TEN_DEG_RAD + 1e-9);
+    }
+  });
+
+  it("does not clamp when reducedMotion is unset", () => {
+    const placed = placeCharactersAlongPath("AAAAAAAAAA", font, elbow);
+    // At least one character downstream of the elbow has a steep tangent.
+    const TEN_DEG_RAD = (10 * Math.PI) / 180;
+    expect(placed.some((p) => Math.abs(p.tangent) > TEN_DEG_RAD)).toBe(true);
+  });
+
+  it("under flipped: true AND reducedMotion: true, the FINAL (post-flip) tangent stays in the readable band", () => {
+    // Tail pointing in -x direction → smoothedTangent ≈ ±π, which triggers
+    // the flip. Pre-fix bug: the ±10° clamp was applied to the raw tangent
+    // BEFORE the flip offset, so a tangent of ~π collapsed to ±10° and then
+    // gained +π = ~190°, rendering glyphs upside-down for exactly the
+    // down-left/down-right cases that need flipping. Regression test: under
+    // reducedMotion AND flipped, every character must still read upright
+    // (final |tangent| ≤ 10°).
+    const backwardTail = [
+      { x: 0, y: 0 },
+      { x: -200, y: 0 },
+    ];
+    const placed = placeCharactersAlongPath("AB", font, backwardTail, {
+      flipped: true,
+      reducedMotion: true,
+    });
+    const TEN_DEG_RAD = (10 * Math.PI) / 180;
+    for (const p of placed) {
+      expect(Math.abs(p.tangent)).toBeLessThanOrEqual(TEN_DEG_RAD + 1e-9);
+    }
+  });
+});
+
+describe("truncateLabelToFit", () => {
+  const font = '400 11px "Space Grotesk", sans-serif';
+
+  it("returns the full string when it fits and is under the hard cap", () => {
+    expect(truncateLabelToFit("Hi", font, 10000)).toBe("Hi");
+  });
+
+  it("hard-caps at 18 graphemes + ellipsis when the text is long", () => {
+    const long = "This is a much longer headline than 18 chars";
+    const out = truncateLabelToFit(long, font, 10000);
+    expect(out.endsWith("…")).toBe(true);
+    // 18 graphemes + 1 ellipsis = 19 (codepoint length, not UTF-16 length)
+    const cps = Array.from(out);
+    expect(cps.length).toBeLessThanOrEqual(19);
+    expect(out.startsWith(long.slice(0, 5))).toBe(true);
+  });
+
+  it("further truncates when the available arc length is short", () => {
+    const out = truncateLabelToFit("Hello world", font, 20);
+    expect(out.length).toBeLessThan("Hello world".length);
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.startsWith("H")).toBe(true);
+    // The result's full pixel width must fit within the budget.
+    expect(measureSingleLineTextWidth(out, font)).toBeLessThanOrEqual(20 + 0.5);
+  });
+
+  it("returns empty string when no character + ellipsis fits", () => {
+    expect(truncateLabelToFit("Hello", font, 1)).toBe("");
+  });
+
+  it("returns empty for empty input or zero budget", () => {
+    expect(truncateLabelToFit("", font, 100)).toBe("");
+    expect(truncateLabelToFit("Hello", font, 0)).toBe("");
+  });
+});
+
+describe("shouldFlipOrientation", () => {
+  // Hysteresis: enter flipped state at |tangent| > 95°, exit at |tangent| ≤ 90°.
+  it("does not flip below the enter threshold from unflipped", () => {
+    expect(shouldFlipOrientation(Math.PI / 2 - 0.1, false)).toBe(false);
+  });
+
+  it("flips when |tangent| crosses 95° from unflipped", () => {
+    expect(shouldFlipOrientation((95 * Math.PI) / 180 + 0.01, false)).toBe(true);
+  });
+
+  it("once flipped, stays flipped while |tangent| > 90°", () => {
+    expect(shouldFlipOrientation((92 * Math.PI) / 180, true)).toBe(true);
+  });
+
+  it("once flipped, unflips when |tangent| ≤ 90°", () => {
+    expect(shouldFlipOrientation((89 * Math.PI) / 180, true)).toBe(false);
+  });
+
+  it("treats negative tangents symmetrically (uses magnitude)", () => {
+    // -100° is just as upside-down as +100°.
+    expect(shouldFlipOrientation((-100 * Math.PI) / 180, false)).toBe(true);
+    expect(shouldFlipOrientation((-89 * Math.PI) / 180, true)).toBe(false);
+  });
+
+  it("π (perfect 180°) flips from either state", () => {
+    expect(shouldFlipOrientation(Math.PI, false)).toBe(true);
+    expect(shouldFlipOrientation(-Math.PI, true)).toBe(true);
+  });
+});
+
+describe("placeCharactersAlongPath with flipped opt", () => {
+  const horizontalTail = [
+    { x: 0, y: 0 },
+    { x: 200, y: 0 },
+  ];
+  const font = '400 11px "Space Grotesk", sans-serif';
+
+  it("when flipped: true, all character tangents are rotated by π", () => {
+    const placed = placeCharactersAlongPath("AB", font, horizontalTail, { flipped: true });
+    expect(placed).toHaveLength(2);
+    // Underlying smoothed tangent on a horizontal tail is 0; flipped → π.
+    expect(placed[0].tangent).toBeCloseTo(Math.PI, 5);
+    expect(placed[1].tangent).toBeCloseTo(Math.PI, 5);
+  });
+
+  it("when flipped: false (default), tangents match the smoothed baseline", () => {
+    const placed = placeCharactersAlongPath("AB", font, horizontalTail);
+    expect(placed[0].tangent).toBeCloseTo(0, 5);
+    expect(placed[1].tangent).toBeCloseTo(0, 5);
   });
 });
 
