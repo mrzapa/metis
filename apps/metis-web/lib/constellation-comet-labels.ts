@@ -1,6 +1,7 @@
 "use client";
 
-import { measureSingleLineTextWidth } from "./pretext-labels";
+import type { CometData } from "./comet-types";
+import { buildCanvasFont, measureSingleLineTextWidth } from "./pretext-labels";
 
 /**
  * Path-text rendering for comet headline labels.
@@ -137,4 +138,67 @@ export function placeCharactersAlongPath(
     s += w;
   }
   return out;
+}
+
+// -- Canvas rendering ---------------------------------------------------------
+
+const LABEL_FONT_FAMILY =
+  '"Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+const LABEL_FONT_SIZE_PX = 11;
+const LABEL_FONT_WEIGHT = 400;
+/** Phase 1 ambient opacity multiplier; multiplied by `comet.opacity`. */
+const LABEL_BASE_OPACITY = 0.65;
+
+export interface DrawCometLabelOpts {
+  /** Reserved for Phase 2 fade animations. Phase 1 ignores it. */
+  ts?: number;
+}
+
+/**
+ * Render a comet's full title as path-text along its tail.
+ *
+ * Phase 1 contract: per-character position from `placeCharactersAlongPath`,
+ * per-character rotation from raw segment tangent. No truncation, no
+ * orientation flip, no collision suppression, no reduced-motion clamp,
+ * no faculty-color tweaks beyond a constant opacity multiplier.
+ *
+ * `tailHistory` from `tickComet` is in oldest-first order (each tick
+ * pushes the current head to the END of the array; `shift()` drops the
+ * oldest from the FRONT). `placeCharactersAlongPath` walks from index
+ * 0 outward, so we reverse the input here so characters lay along the
+ * trail from the head back into the past.
+ */
+export function drawCometLabel(
+  ctx: CanvasRenderingContext2D,
+  comet: CometData,
+  _opts: DrawCometLabelOpts = {},
+): void {
+  if (comet.tailHistory.length < 2 || comet.title.length === 0) return;
+
+  // tailHistory: [oldest, ..., current_head]. We want head-first for layout.
+  const tail: TailPoint[] = comet.tailHistory
+    .slice()
+    .reverse()
+    .map((p) => ({ x: p.x, y: p.y }));
+
+  const font = buildCanvasFont(LABEL_FONT_SIZE_PX, LABEL_FONT_FAMILY, LABEL_FONT_WEIGHT);
+  const placed = placeCharactersAlongPath(comet.title, font, tail);
+  if (placed.length === 0) return;
+
+  const [r, g, b] = comet.color;
+  const alpha = LABEL_BASE_OPACITY * comet.opacity;
+
+  ctx.save();
+  ctx.font = font;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  for (const p of placed) {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.tangent);
+    ctx.fillText(p.char, 0, 0);
+    ctx.restore();
+  }
+  ctx.restore();
 }

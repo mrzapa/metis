@@ -2,9 +2,42 @@ import { describe, expect, it } from "vitest";
 
 import {
   computeArcLengths,
+  drawCometLabel,
   placeCharactersAlongPath,
   samplePathAt,
 } from "../constellation-comet-labels";
+import type { CometData } from "../comet-types";
+
+function mkComet(overrides: Partial<CometData> = {}): CometData {
+  return {
+    comet_id: "test-comet",
+    x: 100,
+    y: 100,
+    vx: 1,
+    vy: 0,
+    tailHistory: [
+      { x: 60, y: 100 },
+      { x: 70, y: 100 },
+      { x: 80, y: 100 },
+      { x: 90, y: 100 },
+      { x: 100, y: 100 },
+    ],
+    color: [120, 200, 255],
+    facultyId: "perception",
+    targetX: 0,
+    targetY: 0,
+    phase: "drifting",
+    phaseStartedAt: 0,
+    size: 4,
+    opacity: 1,
+    title: "Hello world",
+    summary: "",
+    url: "",
+    decision: "drift",
+    relevanceScore: 0.5,
+    ...overrides,
+  };
+}
 
 describe("computeArcLengths", () => {
   it("returns cumulative arc length from index 0 outward along the polyline", () => {
@@ -105,5 +138,30 @@ describe("placeCharactersAlongPath", () => {
     expect(placeCharactersAlongPath("", font, horizontalTail)).toEqual([]);
     expect(placeCharactersAlongPath("ABC", font, [{ x: 0, y: 0 }])).toEqual([]);
     expect(placeCharactersAlongPath("ABC", font, [])).toEqual([]);
+  });
+});
+
+describe("drawCometLabel (smoke)", () => {
+  it("does not throw with a real-shaped comet", () => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return; // jsdom without canvas package — skip
+    const comet = mkComet();
+    expect(() => drawCometLabel(ctx, comet)).not.toThrow();
+  });
+
+  it("returns early without throwing when tail is too short", () => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const shortTail = mkComet({ tailHistory: [{ x: 0, y: 0 }] });
+    expect(() => drawCometLabel(ctx, shortTail)).not.toThrow();
+  });
+
+  it("returns early without throwing when title is empty", () => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    expect(() => drawCometLabel(ctx, mkComet({ title: "" }))).not.toThrow();
   });
 });
