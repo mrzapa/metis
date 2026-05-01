@@ -140,6 +140,25 @@ describe("placeCharactersAlongPath", () => {
     expect(placeCharactersAlongPath("ABC", font, [{ x: 0, y: 0 }])).toEqual([]);
     expect(placeCharactersAlongPath("ABC", font, [])).toEqual([]);
   });
+
+  it("treats a ZWJ-emoji sequence as a single grapheme cluster", () => {
+    // 👨‍👩‍👧 = man (U+1F468) + ZWJ + woman (U+1F469) + ZWJ + girl (U+1F467)
+    // = 5 code points, 8 UTF-16 code units, but ONE user-visible character.
+    // Iterating by code point would yield 5 PlacedChar entries; correct
+    // behaviour is one entry per grapheme cluster.
+    const placed = placeCharactersAlongPath("👨‍👩‍👧A", font, horizontalTail);
+    expect(placed).toHaveLength(2);
+    expect(placed[0].char).toBe("👨‍👩‍👧");
+    expect(placed[1].char).toBe("A");
+  });
+
+  it("treats a base-letter + combining-mark as a single grapheme cluster", () => {
+    // "e" + U+0301 (combining acute accent) = "é" — 2 code points, 1 grapheme.
+    const placed = placeCharactersAlongPath("éz", font, horizontalTail);
+    expect(placed).toHaveLength(2);
+    expect(placed[0].char).toBe("é");
+    expect(placed[1].char).toBe("z");
+  });
 });
 
 describe("buildHeadFirstPath", () => {

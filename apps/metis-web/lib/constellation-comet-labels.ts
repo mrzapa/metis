@@ -129,15 +129,39 @@ export function placeCharactersAlongPath(
 
   const out: PlacedChar[] = [];
   let s = 0;
-  for (const ch of label) {
-    const w = measureSingleLineTextWidth(ch, font);
+  for (const grapheme of segmentGraphemes(label)) {
+    const w = measureSingleLineTextWidth(grapheme, font);
     const center = s + w / 2;
     if (center > total) break;
     const sample = samplePathAt(arcLengths, tail, center);
-    out.push({ char: ch, x: sample.x, y: sample.y, tangent: sample.tangent });
+    out.push({ char: grapheme, x: sample.x, y: sample.y, tangent: sample.tangent });
     s += w;
   }
   return out;
+}
+
+/**
+ * Iterate `label` by user-visible characters (grapheme clusters), not
+ * Unicode code points. ZWJ emoji like 👨‍👩‍👧 (5 code points, 1 grapheme)
+ * and base+combining sequences like "é" (e + U+0301, 2 code points, 1
+ * grapheme) yield ONE entry per visible character.
+ *
+ * Falls back to per-code-point iteration if `Intl.Segmenter` is
+ * unavailable. Pretext requires `Intl.Segmenter`, so any browser/runtime
+ * that successfully runs `lib/pretext-labels.ts` will hit the
+ * Segmenter path.
+ */
+function segmentGraphemes(label: string): string[] {
+  if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
+    const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    const out: string[] = [];
+    for (const { segment } of seg.segment(label)) {
+      out.push(segment);
+    }
+    return out;
+  }
+  // Code-point fallback (no grapheme awareness; ZWJ sequences will split).
+  return Array.from(label);
 }
 
 /**
