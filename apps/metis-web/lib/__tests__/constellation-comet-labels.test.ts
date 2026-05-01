@@ -8,7 +8,9 @@ import {
   samplePathAt,
   shouldFlipOrientation,
   smoothedTangentAt,
+  truncateLabelToFit,
 } from "../constellation-comet-labels";
+import { measureSingleLineTextWidth } from "../pretext-labels";
 import type { CometData } from "../comet-types";
 
 function mkComet(overrides: Partial<CometData> = {}): CometData {
@@ -205,6 +207,42 @@ describe("smoothedTangentAt", () => {
     // s=0 and s=total — no later/earlier neighbour to average against.
     expect(smoothedTangentAt(arc, tail, 0)).toBeCloseTo(0);
     expect(smoothedTangentAt(arc, tail, 20)).toBeCloseTo(Math.PI / 2);
+  });
+});
+
+describe("truncateLabelToFit", () => {
+  const font = '400 11px "Space Grotesk", sans-serif';
+
+  it("returns the full string when it fits and is under the hard cap", () => {
+    expect(truncateLabelToFit("Hi", font, 10000)).toBe("Hi");
+  });
+
+  it("hard-caps at 18 graphemes + ellipsis when the text is long", () => {
+    const long = "This is a much longer headline than 18 chars";
+    const out = truncateLabelToFit(long, font, 10000);
+    expect(out.endsWith("…")).toBe(true);
+    // 18 graphemes + 1 ellipsis = 19 (codepoint length, not UTF-16 length)
+    const cps = Array.from(out);
+    expect(cps.length).toBeLessThanOrEqual(19);
+    expect(out.startsWith(long.slice(0, 5))).toBe(true);
+  });
+
+  it("further truncates when the available arc length is short", () => {
+    const out = truncateLabelToFit("Hello world", font, 20);
+    expect(out.length).toBeLessThan("Hello world".length);
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.startsWith("H")).toBe(true);
+    // The result's full pixel width must fit within the budget.
+    expect(measureSingleLineTextWidth(out, font)).toBeLessThanOrEqual(20 + 0.5);
+  });
+
+  it("returns empty string when no character + ellipsis fits", () => {
+    expect(truncateLabelToFit("Hello", font, 1)).toBe("");
+  });
+
+  it("returns empty for empty input or zero budget", () => {
+    expect(truncateLabelToFit("", font, 100)).toBe("");
+    expect(truncateLabelToFit("Hello", font, 0)).toBe("");
   });
 });
 

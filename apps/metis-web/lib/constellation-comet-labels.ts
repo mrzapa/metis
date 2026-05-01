@@ -94,6 +94,60 @@ export function samplePathAt(
 /** Half-window used by `smoothedTangentAt` to compute the secant tangent. */
 const TANGENT_SMOOTHING_DELTA_PX = 5;
 
+/** Hard cap on grapheme count for ambient labels per the design spec. */
+const TRUNCATION_HARD_CAP_GRAPHEMES = 18;
+const ELLIPSIS = "…";
+
+/**
+ * Truncate `text` to fit within `maxArcLengthPx` along the comet's
+ * tail, observing two budgets in priority order:
+ *
+ *   1. **Hard grapheme cap** — never more than 18 user-visible
+ *      characters + ellipsis (per the design spec). RSS / HN headlines
+ *      can easily exceed this; the hover card shows the full title.
+ *   2. **Pixel budget** — the rendered width (text + ellipsis if
+ *      truncated) must fit in `maxArcLengthPx`. As the comet's tail
+ *      grows, the budget grows; characters appear progressively.
+ *
+ * Returns:
+ *   - The original `text` when it fits entirely under both budgets.
+ *   - `prefix + "…"` (the longest grapheme prefix that still fits with
+ *     the ellipsis appended) when truncation is needed.
+ *   - `""` when not even one grapheme + ellipsis fits, OR when the
+ *     budget is non-positive, OR when the input is empty.
+ */
+export function truncateLabelToFit(
+  text: string,
+  font: string,
+  maxArcLengthPx: number,
+): string {
+  if (text.length === 0 || maxArcLengthPx <= 0) return "";
+
+  const graphemes = segmentGraphemes(text);
+
+  // Case 1: short and pixel-fits — return as-is.
+  if (graphemes.length <= TRUNCATION_HARD_CAP_GRAPHEMES) {
+    if (measureSingleLineTextWidth(text, font) <= maxArcLengthPx) {
+      return text;
+    }
+  }
+
+  // Case 2: truncated prefix + ellipsis. Walk longest-first so we keep
+  // the most characters that fit. The hard cap bounds the longest
+  // candidate.
+  const ellipsisWidth = measureSingleLineTextWidth(ELLIPSIS, font);
+  const maxPrefix = Math.min(TRUNCATION_HARD_CAP_GRAPHEMES, graphemes.length);
+  for (let i = maxPrefix; i > 0; i -= 1) {
+    const prefix = graphemes.slice(0, i).join("");
+    const w = measureSingleLineTextWidth(prefix, font) + ellipsisWidth;
+    if (w <= maxArcLengthPx) return prefix + ELLIPSIS;
+  }
+
+  // Case 3: not even one grapheme + ellipsis fits — render nothing
+  // rather than a lone ellipsis floating on the trail.
+  return "";
+}
+
 /** Enter the flipped state when |tangent| crosses 95° (hysteresis upper bound). */
 const FLIP_ENTER_RAD = (95 * Math.PI) / 180;
 /** Exit the flipped state when |tangent| drops to 90° or below (hysteresis lower bound). */
@@ -336,7 +390,12 @@ export function drawCometLabel(
   if (isFlipped !== wasFlipped) flipState.set(comet.comet_id, isFlipped);
 
   const font = buildCanvasFont(LABEL_FONT_SIZE_PX, LABEL_FONT_FAMILY, LABEL_FONT_WEIGHT);
-  const placed = placeCharactersAlongPath(comet.title, font, tail, { flipped: isFlipped });
+  // Truncate to fit the available arc length under the 18-grapheme cap.
+  // As the comet's tail grows, more characters become renderable; short
+  // tails show only the prefix that fits, so headlines materialise.
+  const truncated = truncateLabelToFit(comet.title, font, total);
+  if (truncated.length === 0) return;
+  const placed = placeCharactersAlongPath(truncated, font, tail, { flipped: isFlipped });
   if (placed.length === 0) return;
 
   const [r, g, b] = comet.color;
