@@ -58,7 +58,14 @@ import {
   drawPolarisTendril,
   drawAbsorptionBurst,
 } from "@/lib/constellation-comets";
-import { drawCometLabel, pruneCometLabelState } from "@/lib/constellation-comet-labels";
+import {
+  drawCometHoverCard,
+  drawCometLabel,
+  findHoveredComet,
+  pruneCometLabelState,
+  rectsOverlap,
+  type Rect as CometCardRect,
+} from "@/lib/constellation-comet-labels";
 import {
   buildBrainPlacementIntent,
   buildFacultyAnchoredPlacement,
@@ -852,6 +859,15 @@ export default function Home() {
   useEffect(() => {
     reducedMotionRef.current = reducedMotion;
   }, [reducedMotion]);
+
+  // M22 Phase 3 — hover state for the canvas-rendered comet card.
+  // Mutated by the canvas pointermove handler; read by the render loop.
+  // cardBbox is set by drawCometHoverCard each frame the card renders,
+  // and consumed by the canvas pointerdown handler for click hit-testing.
+  const cometHoverStateRef = useRef<{
+    cometId: string | null;
+    cardBbox: CometCardRect | null;
+  }>({ cometId: null, cardBbox: null });
 
   // Comet-news: subscribe to live news events rendered as comets.
   // Start enabled to preserve the pre-settings-wiring UX, then reconcile to
@@ -4745,13 +4761,46 @@ export default function Home() {
         // M22 Phase 1+2 — path-text headline labels along each comet's tail.
         // Smoothed per-char tangent, orientation flip with hysteresis,
         // 18-grapheme + arc-length truncation, reduced-motion ±10° clamp.
-        // Collision suppression and hover card land in Phases 3-4.
+        // Collision suppression lands in Phase 4.
         const labelOpts = { reducedMotion: reducedMotionRef.current };
         for (const c of cometSprites) {
           drawCometLabel(ctx, c, labelOpts);
         }
         // Drop module-level flip state for comets that left the active set.
         pruneCometLabelState(cometSprites.map((c) => c.comet_id));
+
+        // M22 Phase 3 — hovered comet gets a canvas-rendered card with
+        // title/summary/faculty pill/footer. Card stays canvas to keep
+        // the visual language consistent with the rest of the
+        // constellation. Fixed UI rects are passed in so the card
+        // clamps away from the zoom pill / FAB / hero overlays.
+        const hoverState = cometHoverStateRef.current;
+        const hovered = hoverState.cometId
+          ? cometSprites.find((c) => c.comet_id === hoverState.cometId)
+          : null;
+        if (hovered) {
+          const fixedRects: CometCardRect[] = [];
+          const zoomPill = document.querySelector<HTMLElement>(".metis-zoom-pill");
+          if (zoomPill) {
+            const r = zoomPill.getBoundingClientRect();
+            fixedRects.push({ x: r.left, y: r.top, w: r.width, h: r.height });
+          }
+          // Comet positions are computed in CSS-pixel viewport space
+          // (see makeCometData(evt, W, H, …) where W/H come from
+          // window.innerWidth/Height). Pass the same coordinate space
+          // to drawCometHoverCard so its clampToSafeArea aligns.
+          hoverState.cardBbox = drawCometHoverCard(
+            ctx,
+            hovered,
+            { x: hovered.x, y: hovered.y },
+            {
+              viewport: { w: window.innerWidth, h: window.innerHeight },
+              fixedRects,
+            },
+          );
+        } else {
+          hoverState.cardBbox = null;
+        }
       }
       // Absorption burst effects (persists briefly after comet absorbed)
       for (let i = absorbBursts.length - 1; i >= 0; i--) {
@@ -5185,6 +5234,13 @@ export default function Home() {
       mouse.x = e.clientX;
       mouse.y = e.clientY;
 
+      // M22 Phase 3 — update hovered-comet state on every move so the
+      // render loop can draw the hover card next frame. findHoveredComet
+      // is O(n) over a small list (max_active typically 4-8); fine to
+      // run on every pointer event.
+      const hovered = findHoveredComet(cometSprites, { x: e.clientX, y: e.clientY });
+      cometHoverStateRef.current.cometId = hovered ? hovered.comet_id : null;
+
       const panState = panStateRef.current;
       if (panState && panState.pointerId === e.pointerId) {
         const travelDistance = Math.hypot(e.clientX - panState.startClientX, e.clientY - panState.startClientY);
@@ -5416,6 +5472,37 @@ export default function Home() {
         closeConcept();
         router.push(`/forge#${hitForgeStar.id}`);
         return;
+      }
+
+      // M22 Phase 3 — clicks on a comet head (within 16px) or its
+      // hover card open the article in a new tab. We check head-radius
+      // explicitly here (not the 24px hover radius) so a click that
+      // *just* triggers hover doesn't also open the URL — the user
+      // has to commit. Card clicks honour the saved bbox from the
+      // last frame; if it's still drawn, it's still hittable.
+      const COMET_CLICK_RADIUS = 16;
+      const hitComet = cometSprites.find((c) =>
+        Math.hypot(c.x - e.clientX, c.y - e.clientY) <= COMET_CLICK_RADIUS,
+      );
+      const cardBbox = cometHoverStateRef.current.cardBbox;
+      const cardClicked =
+        cardBbox &&
+        rectsOverlap(
+          { x: e.clientX - 1, y: e.clientY - 1, w: 2, h: 2 },
+          cardBbox,
+        );
+      const cometIdToOpen =
+        hitComet?.comet_id ??
+        (cardClicked ? cometHoverStateRef.current.cometId : null);
+      if (cometIdToOpen) {
+        const target = cometSprites.find((c) => c.comet_id === cometIdToOpen);
+        if (target?.url) {
+          clearHoveredCandidate();
+          hideStarTooltip();
+          closeConcept();
+          window.open(target.url, "_blank", "noopener,noreferrer");
+          return;
+        }
       }
 
       const hitStar = getHitStar(e.clientX, e.clientY);
