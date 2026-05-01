@@ -149,18 +149,14 @@ const LABEL_FONT_WEIGHT = 400;
 /** Phase 1 ambient opacity multiplier; multiplied by `comet.opacity`. */
 const LABEL_BASE_OPACITY = 0.65;
 
-export interface DrawCometLabelOpts {
-  /** Reserved for Phase 2 fade animations. Phase 1 ignores it. */
-  ts?: number;
-}
-
 /**
  * Render a comet's full title as path-text along its tail.
  *
  * Phase 1 contract: per-character position from `placeCharactersAlongPath`,
  * per-character rotation from raw segment tangent. No truncation, no
  * orientation flip, no collision suppression, no reduced-motion clamp,
- * no faculty-color tweaks beyond a constant opacity multiplier.
+ * no faculty-color tweaks beyond a constant opacity multiplier. Phase 2
+ * will add a `DrawCometLabelOpts` parameter for the mitigation knobs.
  *
  * `tailHistory` from `tickComet` is in oldest-first order (each tick
  * pushes the current head to the END of the array; `shift()` drops the
@@ -171,7 +167,6 @@ export interface DrawCometLabelOpts {
 export function drawCometLabel(
   ctx: CanvasRenderingContext2D,
   comet: CometData,
-  _opts: DrawCometLabelOpts = {},
 ): void {
   if (comet.tailHistory.length < 2 || comet.title.length === 0) return;
 
