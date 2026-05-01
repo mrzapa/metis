@@ -696,25 +696,21 @@ Phase mapping: items 47, 48, 49 are **Phase 1 / 2** (high-impact noob-friendly +
 
 **Filed by:** intake triage on `claude/gifted-knuth-27aeb0` (2026-05-01). Source idea: [`plans/IDEAS.md` → "chenglou/pretext"](../plans/IDEAS.md).
 
-### 4.9 3D brain-graph subtree — unmounted, decision needed (2026-05-01)
+### 4.9 3D brain-graph subtree — reaped (2026-05-01)
 
-`apps/metis-web/components/brain/brain-graph-3d.tsx` · `brain-graph-animated-wrapper.tsx` · `brain-graph-animation-showcase.tsx` · `BRAIN_ANIMATIONS.md`
+**Status:** Closed. Files deleted, dep dropped, landed-plan-docs annotated.
 
-**The signal.** A grep across `apps/metis-web` shows zero imports of `brain-graph-3d`, `BrainGraph3D`, `brain-graph-animated-wrapper`, or `BrainGraphAnimatedWrapper` from any `app/**` route, page, or layout — no static imports, no `next/dynamic` indirection, nothing under `app/**/*brain*`. The import chain dead-ends at `BrainGraphAnimationShowcase`, which is exported but never imported. `BrainGraph3D` itself is heavy (Three.js, UnrealBloomPass, OutputPass, GSAP, custom WebGL post-processing) so a mounted instance would be obvious in the bundle. User confirmed 2026-05-01 the path was "pretty sure meant to be deleted."
+The unmounted-but-claimed-load-bearing subtree was reaped:
 
-**The wrinkle.** Several **landed** plan docs claim brain-graph-3d.tsx is load-bearing:
+- Deleted `apps/metis-web/components/brain/brain-graph-3d.tsx` (1658 LoC), `brain-graph-animated-wrapper.tsx`, `brain-graph-animation-showcase.tsx`, and `BRAIN_ANIMATIONS.md`.
+- Dropped `react-force-graph-3d` from `apps/metis-web/package.json` (-36 packages from the lockfile).
+- Annotated [`plans/trive-v2-homological-scaffold/plan.md`](../plans/trive-v2-homological-scaffold/plan.md), [`plans/seedling-and-feed/plan.md`](../plans/seedling-and-feed/plan.md), [`docs/plans/2026-04-26-edge-pulse-visual-design.md`](plans/2026-04-26-edge-pulse-visual-design.md), and [`docs/plans/2026-04-28-metis-logo-rollout-design.md`](plans/2026-04-28-metis-logo-rollout-design.md) — each plan now notes that the brain-graph-3d visual layer never reached users in v1.
 
-- [`plans/trive-v2-homological-scaffold/plan.md`](../plans/trive-v2-homological-scaffold/plan.md) (M10, Landed `6fa1ff2` 2026-04-05) — H₁ persistent-homology rings rendered as `THREE.TorusGeometry` on top of the 3D scene.
-- [`plans/seedling-and-feed/plan.md`](../plans/seedling-and-feed/plan.md) (M13, Landed) — `brain-graph-3d.tsx subscribes to the companion bus`.
-- [`docs/plans/2026-04-26-edge-pulse-visual-design.md`](plans/2026-04-26-edge-pulse-visual-design.md) (edge-pulse PR #567, Landed 2026-04-26) — claims the file `subscribes and pulses on new brain links`.
-- [`docs/plans/2026-04-28-metis-logo-rollout-design.md`](plans/2026-04-28-metis-logo-rollout-design.md) (M20, in progress) — references its GSAP usage.
-- A `brain-graph-3d.test.tsx` is named in the edge-pulse plan but does not exist in the worktree.
+**Why "reap" not "remount":**
+- Verification (re-run 2026-05-01): zero imports of `BrainGraph3D` / `BrainGraphAnimatedWrapper` from any `app/**` route, page, or layout. No static imports, no `next/dynamic` indirection, nothing under `app/**/*brain*`. The import chain still dead-ended at `BrainGraphAnimationShowcase` which was exported but never imported anywhere.
+- User confirmed 2026-05-01 the path was meant to be deleted.
+- Three.js post-processing passes (`UnrealBloomPass`, `OutputPass`) used only by the deleted file. `three` itself is kept (also used by the live `landing-starfield-webgl.tsx`).
+- `gsap` is broadly used elsewhere — kept.
+- `components/brain/brain-graph.tsx` is a pure types-and-helpers module shared by `brain-graph-view-model.ts` (still live) — kept.
 
-So either (a) the file was mounted on a brain page that got deleted during M02 / M12 work and these landed milestones quietly stopped being end-to-end exercisable, or (b) the file is live via a code path I haven't found. Either way, this is a **preserve-and-productise question** worth resolving — it's the difference between "remount it on a route" and "remove it plus its plan-doc references plus the heavy deps it drags in."
-
-**Recommended next-agent action (M01 sweep).**
-1. Confirm there is no live mount point — `git log --diff-filter=D --summary` for any deleted file under `app/**/*brain*` to see when the route last existed, plus a runtime check (`grep` on the running server's served bundles or a `next build` artifact analysis).
-2. **If genuinely unmounted:** delete the `*-3d.tsx`, `*-animated-wrapper.tsx`, `*-animation-showcase.tsx`, `BRAIN_ANIMATIONS.md`, and any orphan deps (`react-force-graph-3d`, `three`'s `examples/jsm/postprocessing/*`). Add a one-liner to each named landed plan doc (M10, M13, edge-pulse) noting that the visual layer never reached users in v1 and was reaped in M01 — so the plan docs reflect reality.
-3. **If a remount was intended:** add the route under `app/brain/page.tsx` (or similar), wire it via `next/dynamic({ ssr: false })`, and route enough data into it to exercise the M10 H₁ rings, M13 companion subscription, and edge-pulse handlers. Then promote *§4.9* to Landed.
-
-Note: [`components/brain/brain-graph.tsx`](../apps/metis-web/components/brain/brain-graph.tsx) is a pure types-and-helpers module (no JSX), shared by both the 3D path above and `brain-graph-view-model.ts`. **Don't delete it** — even if §4.9 reaps the 3D files, the types are imported by the view model.
+If a future need for a mounted 3D brain view emerges (M10's H₁ rings on a real route, M16's eval-result visualisation, etc.), the design lives in git history (`brain-graph-3d.tsx` last commit before delete) — it's a re-introduction with a route, not a recovery from corruption.

@@ -168,8 +168,9 @@ Architecture:
   filter for the inner back-glow (faithful to the reference).
 - **Animate the ripple rings with CSS keyframes.** Rejected. The
   existing pattern in this codebase for orchestrated motion is
-  `motion/react` (`page-chrome.tsx`, `brain-graph-3d.tsx` GSAP
-  pulses, dock animations). CSS keyframes can't easily stagger
+  `motion/react` (`page-chrome.tsx`, ~~`brain-graph-3d.tsx` GSAP
+  pulses~~ [reaped 2026-05-01 under M01 §4.9 — was never mounted],
+  dock animations). CSS keyframes can't easily stagger
   five elements with `useReducedMotion()` gating from the same
   component, and we'd be inventing a new motion vocabulary for
   one feature.
