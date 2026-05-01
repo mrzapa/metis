@@ -8,11 +8,13 @@ import {
   drawCometHoverCard,
   drawCometLabel,
   findHoveredComet,
+  formatCompactAge,
   placeCharactersAlongPath,
   rectsOverlap,
   samplePathAt,
   shouldFlipOrientation,
   smoothedTangentAt,
+  tickHoverPersistence,
   truncateLabelToFit,
 } from "../constellation-comet-labels";
 import { measureSingleLineTextWidth } from "../pretext-labels";
@@ -43,6 +45,8 @@ function mkComet(overrides: Partial<CometData> = {}): CometData {
     title: "Hello world",
     summary: "",
     url: "",
+    sourceChannel: "",
+    publishedAt: 0,
     decision: "drift",
     relevanceScore: 0.5,
     ...overrides,
@@ -427,6 +431,150 @@ describe("drawCometHoverCard", () => {
     expect(() =>
       drawCometHoverCard(ctx, c, { x: c.x, y: c.y }, { viewport: vp }),
     ).not.toThrow();
+  });
+});
+
+describe("tickHoverPersistence", () => {
+  // The persistence helper centralises the "is the hover card still
+  // alive?" decision. Pure function; caller (page.tsx render loop)
+  // owns the storage. Activity sources that keep the card alive:
+  //   - cursor still within HOVER_RADIUS_PX of the comet head
+  //   - cursor still inside the last drawn card bbox
+  // Without these, the Phase 5 timer-only logic expired the card
+  // even when the user was deliberately reading it.
+  const PERSISTENCE_MS = 600;
+
+  it("returns the original null state when nothing is hovered", () => {
+    const state = { cometId: null, cardBbox: null, lastSeenAtMs: 0 };
+    const next = tickHoverPersistence(state, { x: 0, y: 0 }, [], 1000);
+    expect(next.cometId).toBeNull();
+  });
+
+  it("refreshes lastSeenAtMs while cursor stays on the comet head (no move events needed)", () => {
+    // Stationary cursor: pointermove never fires, but the cursor IS
+    // still hovering. The render-loop tick must keep the card alive.
+    const comet = mkComet({ comet_id: "a", x: 100, y: 100 });
+    const state = {
+      cometId: "a",
+      cardBbox: { x: 200, y: 50, w: 220, h: 120 },
+      lastSeenAtMs: 0, // ancient — would have expired without the fix
+    };
+    const next = tickHoverPersistence(state, { x: 105, y: 100 }, [comet], 5000);
+    expect(next.cometId).toBe("a");
+    expect(next.lastSeenAtMs).toBe(5000);
+  });
+
+  it("refreshes lastSeenAtMs while cursor sits inside the last card bbox", () => {
+    const comet = mkComet({ comet_id: "a", x: 100, y: 100 });
+    const cardBbox = { x: 200, y: 50, w: 220, h: 120 };
+    const state = { cometId: "a", cardBbox, lastSeenAtMs: 0 };
+    // Cursor far from the head (well past 24px) but inside the card.
+    const next = tickHoverPersistence(state, { x: 250, y: 80 }, [comet], 5000);
+    expect(next.cometId).toBe("a");
+    expect(next.lastSeenAtMs).toBe(5000);
+  });
+
+  it("preserves cometId without refreshing lastSeenAtMs while inside the persistence window", () => {
+    const comet = mkComet({ comet_id: "a", x: 100, y: 100 });
+    const state = {
+      cometId: "a",
+      cardBbox: { x: 200, y: 50, w: 220, h: 120 },
+      lastSeenAtMs: 1000,
+    };
+    // Cursor far from both head and card; nowMs - lastSeenAtMs = 400 < 600.
+    const next = tickHoverPersistence(state, { x: 800, y: 500 }, [comet], 1400);
+    expect(next.cometId).toBe("a");
+    expect(next.lastSeenAtMs).toBe(1000); // unchanged — counting down
+  });
+
+  it("expires the cometId when persistence window elapses with cursor away", () => {
+    const comet = mkComet({ comet_id: "a", x: 100, y: 100 });
+    const state = {
+      cometId: "a",
+      cardBbox: { x: 200, y: 50, w: 220, h: 120 },
+      lastSeenAtMs: 1000,
+    };
+    // 700ms past last sighting and cursor nowhere near.
+    const next = tickHoverPersistence(state, { x: 800, y: 500 }, [comet], 1700);
+    expect(next.cometId).toBeNull();
+  });
+
+  it("drops cometId immediately when the comet has left the active set", () => {
+    // Comet absorbed/dismissed between frames — list no longer contains it.
+    const state = {
+      cometId: "gone",
+      cardBbox: { x: 200, y: 50, w: 220, h: 120 },
+      lastSeenAtMs: 5000,
+    };
+    const next = tickHoverPersistence(state, { x: 100, y: 100 }, [], 5000);
+    expect(next.cometId).toBeNull();
+  });
+
+  it("treats a null cardBbox as 'no card-area activity' (still expires after timer)", () => {
+    const comet = mkComet({ comet_id: "a", x: 100, y: 100 });
+    const state = {
+      cometId: "a",
+      cardBbox: null,
+      lastSeenAtMs: 1000,
+    };
+    // Cursor away from head, no cardBbox to fall back on, past the window.
+    const next = tickHoverPersistence(state, { x: 800, y: 500 }, [comet], 1700);
+    expect(next.cometId).toBeNull();
+  });
+
+  it("respects a custom persistenceMs", () => {
+    const comet = mkComet({ comet_id: "a", x: 100, y: 100 });
+    const state = {
+      cometId: "a",
+      cardBbox: null,
+      lastSeenAtMs: 1000,
+    };
+    // Cursor away; 50ms past lastSeenAtMs, with a 30ms window.
+    const next = tickHoverPersistence(state, { x: 800, y: 500 }, [comet], 1050, 30);
+    expect(next.cometId).toBeNull();
+  });
+});
+
+describe("formatCompactAge", () => {
+  // Use an explicit nowMs so tests are wall-clock independent. The
+  // value below is `Date.parse("2025-11-01T00:00:00Z")` — any fixed
+  // instant works; what matters is that publishedSeconds is computed
+  // as a relative offset from this constant.
+  const REFERENCE_NOW_MS = 1_761_955_200_000;
+
+  it("returns 'now' for a future or zero age", () => {
+    // publishedAt in the future relative to nowMs
+    expect(formatCompactAge(REFERENCE_NOW_MS / 1000 + 60, REFERENCE_NOW_MS)).toBe("now");
+    // publishedAt exactly at nowMs
+    expect(formatCompactAge(REFERENCE_NOW_MS / 1000, REFERENCE_NOW_MS)).toBe("now");
+  });
+
+  it("returns 'Xs ago' for sub-minute ages", () => {
+    expect(formatCompactAge((REFERENCE_NOW_MS - 30_000) / 1000, REFERENCE_NOW_MS)).toBe("30s ago");
+  });
+
+  it("returns 'Xm ago' for sub-hour ages", () => {
+    expect(formatCompactAge((REFERENCE_NOW_MS - 12 * 60 * 1000) / 1000, REFERENCE_NOW_MS)).toBe(
+      "12m ago",
+    );
+  });
+
+  it("returns 'Xh ago' for sub-day ages", () => {
+    expect(
+      formatCompactAge((REFERENCE_NOW_MS - 5 * 60 * 60 * 1000) / 1000, REFERENCE_NOW_MS),
+    ).toBe("5h ago");
+  });
+
+  it("returns 'Xd ago' for multi-day ages", () => {
+    expect(
+      formatCompactAge((REFERENCE_NOW_MS - 3 * 24 * 60 * 60 * 1000) / 1000, REFERENCE_NOW_MS),
+    ).toBe("3d ago");
+  });
+
+  it("treats publishedAt=0 (unset) as 'now', not the 1970 epoch", () => {
+    // Without this guard, formatCompactAge(0, Date.now()) returns
+    // ~20000d ago — the bug Copilot caught in PR #592.
+    expect(formatCompactAge(0, REFERENCE_NOW_MS)).toBe("now");
   });
 });
 

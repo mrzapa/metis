@@ -385,6 +385,8 @@ const LABEL_BASE_OPACITY = 0.65;
 
 /** Hover-detect radius around a comet head, in CSS pixels. */
 const HOVER_RADIUS_PX = 24;
+/** Default persistence window for `tickHoverPersistence`, in ms. */
+const HOVER_PERSISTENCE_MS = 600;
 
 /** A rectangle in screen-space pixels — `x/y` is the top-left corner. */
 export interface Rect {
@@ -538,6 +540,79 @@ export function findHoveredComet(
 const flipState = new Map<string, boolean>();
 
 /**
+ * Snapshot of the page-level hover state consumed by `tickHoverPersistence`.
+ * Caller (page.tsx) owns the storage; the helper is pure.
+ */
+export interface HoverPersistenceState {
+  /** Currently-tracked comet, or `null` if none. */
+  cometId: string | null;
+  /**
+   * Last drawn card bounding rect (used for "is the cursor still
+   * inside the card?" hit-testing). May be `null` between hovers
+   * before the first card has rendered.
+   */
+  cardBbox: Rect | null;
+  /**
+   * Timestamp of the most recent frame on which the cursor was
+   * confirmed over the comet head OR the card bbox. The persistence
+   * window counts down from this value.
+   */
+  lastSeenAtMs: number;
+}
+
+/**
+ * Decide whether the hover card should remain alive for one more
+ * frame. Pure function; returns the next `{cometId, lastSeenAtMs}`
+ * for the caller to write back into its ref.
+ *
+ * The render loop must call this every frame (not just on
+ * `pointermove`) — `pointermove` doesn't fire while the cursor is
+ * stationary, so a timer-only expiry would dismiss the card while
+ * the user is actively reading it. This helper keeps the card alive
+ * as long as the cursor is **still hovering** (over the comet head OR
+ * over the previously-drawn card bbox), and only counts down the
+ * `persistenceMs` window once the cursor has actually left both.
+ *
+ * Returns `cometId: null` when:
+ *   - The state already had no `cometId`.
+ *   - The tracked comet is no longer in the active list (absorbed /
+ *     dismissed).
+ *   - `nowMs - state.lastSeenAtMs > persistenceMs` AND the cursor is
+ *     not currently on the head or the card.
+ */
+export function tickHoverPersistence(
+  state: Readonly<HoverPersistenceState>,
+  cursor: CursorPoint,
+  comets: ReadonlyArray<CometData>,
+  nowMs: number,
+  persistenceMs: number = HOVER_PERSISTENCE_MS,
+): { cometId: string | null; lastSeenAtMs: number } {
+  if (!state.cometId) {
+    return { cometId: null, lastSeenAtMs: state.lastSeenAtMs };
+  }
+  const target = comets.find((c) => c.comet_id === state.cometId);
+  if (!target) {
+    return { cometId: null, lastSeenAtMs: state.lastSeenAtMs };
+  }
+
+  const onHead = Math.hypot(target.x - cursor.x, target.y - cursor.y) <= HOVER_RADIUS_PX;
+  const onCard =
+    state.cardBbox !== null &&
+    cursor.x >= state.cardBbox.x &&
+    cursor.x <= state.cardBbox.x + state.cardBbox.w &&
+    cursor.y >= state.cardBbox.y &&
+    cursor.y <= state.cardBbox.y + state.cardBbox.h;
+
+  if (onHead || onCard) {
+    return { cometId: state.cometId, lastSeenAtMs: nowMs };
+  }
+  if (nowMs - state.lastSeenAtMs > persistenceMs) {
+    return { cometId: null, lastSeenAtMs: state.lastSeenAtMs };
+  }
+  return { cometId: state.cometId, lastSeenAtMs: state.lastSeenAtMs };
+}
+
+/**
  * Drop flip-state entries for comets no longer in the active set.
  * Caller should invoke once per frame (or whenever the active comet
  * list changes) with the currently-rendered comet IDs to prevent the
@@ -684,6 +759,51 @@ function facultyShortCode(facultyId: string): string {
 }
 
 /**
+ * Extract the host from a comet URL, with a www. prefix stripped.
+ * Returns `""` for missing or malformed URLs rather than letting
+ * `new URL()` throw — a malformed backend payload must NOT take
+ * down the canvas frame.
+ */
+function hostFromUrlSafe(url: string): string {
+  if (!url) return "";
+  try {
+    return new URL(url, "http://x").host.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Compact "Xs ago" / "Xm ago" / "Xh ago" / "Xd ago" formatter for the
+ * hover-card footer. `publishedSeconds` is the backend's epoch-seconds
+ * value (CometData.publishedAt); `nowMs` is wall-clock ms (passed in
+ * for testability — production callers use Date.now()).
+ *
+ * Special cases:
+ *   - `publishedSeconds <= 0` → "now". The backend defaults
+ *     NewsItem.published_at to 0.0 when the source feed didn't carry
+ *     a timestamp. Without this guard, formatCompactAge would render
+ *     "~20000d ago" using the 1970 epoch as the publish time
+ *     (the bug Copilot caught in PR #592).
+ *   - `publishedSeconds * 1000 >= nowMs` → "now". Future or
+ *     equal-to-now publish times collapse to "now" rather than
+ *     showing a negative age.
+ */
+export function formatCompactAge(publishedSeconds: number, nowMs: number): string {
+  if (publishedSeconds <= 0) return "now";
+  const ageMs = nowMs - publishedSeconds * 1000;
+  if (ageMs <= 0) return "now";
+  const sec = Math.floor(ageMs / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.floor(hr / 24);
+  return `${days}d ago`;
+}
+
+/**
  * Take the first `maxLines` lines from a wrapped result. If the wrap
  * produced more lines than the cap, append an ellipsis to the last
  * shown line so the user knows there's more.
@@ -731,6 +851,8 @@ function clampLines(
 export interface DrawCometHoverCardOpts {
   viewport: Size;
   fixedRects?: ReadonlyArray<Rect>;
+  /** Wall-clock ms used by the footer's age formatter. Defaults to `Date.now()`. */
+  now?: number;
 }
 
 /**
@@ -872,20 +994,16 @@ export function drawCometHoverCard(
     }
   }
 
-  // Footer.
+  // Footer — `${source} · ${age}` per the design spec. `source` prefers
+  // the explicit channel (e.g. "hackernews"); falls back to the URL host.
+  // `age` reads CometData.publishedAt (epoch seconds, plumbed in Phase 5).
+  // formatCompactAge returns "now" when publishedAt is 0 (unset by feed)
+  // so missing timestamps degrade gracefully instead of showing 1970.
   cursorY += CARD_SUMMARY_TO_FOOTER_GAP;
   const footerFont = buildCanvasFont(CARD_FOOTER_FONT_SIZE, LABEL_FONT_FAMILY, 400);
-  // Phase 3 footer placeholder: prefer the URL's host (e.g. "news.ycombinator.com")
-  // when available, else fall back to a relevance percentage. The design spec
-  // calls for `${source} · ${age}` but published_at and source_channel live on
-  // the nested news_item payload that the renderer doesn't currently receive;
-  // Phase 5 polish wires those through to CometData and replaces this footer.
-  const hostText = comet.url
-    ? new URL(comet.url, "http://x").host.replace(/^www\./, "")
-    : "";
-  const footerLine = hostText
-    ? hostText
-    : `relevance ${(comet.relevanceScore * 100).toFixed(0)}%`;
+  const sourceText = comet.sourceChannel || hostFromUrlSafe(comet.url);
+  const ageText = formatCompactAge(comet.publishedAt, opts.now ?? Date.now());
+  const footerLine = sourceText ? `${sourceText} · ${ageText}` : ageText;
   ctx.font = footerFont;
   ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
   ctx.fillText(footerLine, bbox.x + CARD_PAD_X, cursorY);

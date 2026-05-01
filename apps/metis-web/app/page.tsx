@@ -64,6 +64,7 @@ import {
   findHoveredComet,
   pruneCometLabelState,
   rectsOverlap,
+  tickHoverPersistence,
   type Rect as CometCardRect,
 } from "@/lib/constellation-comet-labels";
 import {
@@ -860,14 +861,22 @@ export default function Home() {
     reducedMotionRef.current = reducedMotion;
   }, [reducedMotion]);
 
-  // M22 Phase 3 — hover state for the canvas-rendered comet card.
+  // M22 Phase 3+5 — hover state for the canvas-rendered comet card.
   // Mutated by the canvas pointermove handler; read by the render loop.
-  // cardBbox is set by drawCometHoverCard each frame the card renders,
-  // and consumed by the canvas pointerdown handler for click hit-testing.
+  // - cometId       : the currently-tracked comet, if any.
+  // - cardBbox      : last drawn rect, used by pointerdown for click
+  //                   hit-testing.
+  // - lastSeenAtMs  : timestamp of the most recent pointermove that
+  //                   found a comet under the cursor. The render loop
+  //                   clears cometId after HOVER_PERSISTENCE_MS so the
+  //                   card persists briefly after mouseleave (per the
+  //                   design's "card persists ~600ms after mouseleave
+  //                   to allow cursor transit toward the card").
   const cometHoverStateRef = useRef<{
     cometId: string | null;
     cardBbox: CometCardRect | null;
-  }>({ cometId: null, cardBbox: null });
+    lastSeenAtMs: number;
+  }>({ cometId: null, cardBbox: null, lastSeenAtMs: 0 });
   // M22 Phase 3 — cache the .metis-zoom-pill DOM ref so the render
   // loop avoids a querySelector per frame. Refreshed lazily if the
   // cached element is detached (e.g. dev-mode HMR remount).
@@ -4773,12 +4782,25 @@ export default function Home() {
         // Drop module-level flip state for comets that left the active set.
         pruneCometLabelState(cometSprites.map((c) => c.comet_id));
 
-        // M22 Phase 3 — hovered comet gets a canvas-rendered card with
-        // title/summary/faculty pill/footer. Card stays canvas to keep
-        // the visual language consistent with the rest of the
-        // constellation. Fixed UI rects are passed in so the card
-        // clamps away from the zoom pill / FAB / hero overlays.
+        // M22 Phase 3+5 — hovered comet gets a canvas-rendered card
+        // with title/summary/faculty pill/footer. Card stays canvas
+        // to keep the visual language consistent.
+        //
+        // tickHoverPersistence keeps the card alive while the cursor
+        // is still over the comet head OR over the previously-drawn
+        // card bbox (necessary because pointermove doesn't fire while
+        // the cursor is stationary — a timer-only expiry would dismiss
+        // the card mid-read). Once the cursor actually leaves both,
+        // the 600ms grace window starts counting down.
         const hoverState = cometHoverStateRef.current;
+        const nextHover = tickHoverPersistence(
+          hoverState,
+          { x: mouse.x, y: mouse.y },
+          cometSprites,
+          performance.now(),
+        );
+        hoverState.cometId = nextHover.cometId;
+        hoverState.lastSeenAtMs = nextHover.lastSeenAtMs;
         const hovered = hoverState.cometId
           ? cometSprites.find((c) => c.comet_id === hoverState.cometId)
           : null;
@@ -5246,20 +5268,30 @@ export default function Home() {
       mouse.x = e.clientX;
       mouse.y = e.clientY;
 
-      // M22 Phase 3 — update hovered-comet state on pointer moves that
-      // are actually interacting with the canvas. The pointermove
+      // M22 Phase 3+5 — update hovered-comet state on pointer moves
+      // that are actually interacting with the canvas. The pointermove
       // listener is on `document`, so it fires for every move including
       // those over the star tooltip, settings popovers, the chrome,
       // etc. Without this gate we'd render comet hover cards under
       // overlay UI. The same gate is used by the existing
       // hoveredNode / starTooltip pipeline below at line ~5318+.
+      //
+      // Phase 5: when the cursor IS on the canvas but no longer over a
+      // comet, leave cometId set — the render loop will clear it after
+      // HOVER_PERSISTENCE_MS so the card persists during cursor transit.
+      // Going OUT of the canvas (overlay UI, off-screen) clears
+      // immediately so a stuck card never blocks other UI.
       if (isClientPointInsideCanvas(e.clientX, e.clientY)) {
         const targetElement = getPointerTargetElement(e.target, e.clientX, e.clientY);
         const onCanvas = targetElement === canvas;
         const onStarTooltip = Boolean(targetElement?.closest("#starTooltipCard"));
         if (onCanvas && !onStarTooltip) {
           const hovered = findHoveredComet(cometSprites, { x: e.clientX, y: e.clientY });
-          cometHoverStateRef.current.cometId = hovered ? hovered.comet_id : null;
+          if (hovered) {
+            cometHoverStateRef.current.cometId = hovered.comet_id;
+            cometHoverStateRef.current.lastSeenAtMs = performance.now();
+          }
+          // else: leave cometId — render loop expires after persistence window.
         } else {
           cometHoverStateRef.current.cometId = null;
         }
