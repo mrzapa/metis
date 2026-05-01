@@ -232,6 +232,26 @@ export interface PlacedChar {
  * (Phase 1: silently; Phase 2 adds an ellipsis fallback under the
  * truncation budget).
  */
+/** ±10° clamp band for `clampTangentForReducedMotion`. */
+const REDUCED_MOTION_MAX_TANGENT_RAD = (10 * Math.PI) / 180;
+
+/**
+ * Clamp a per-character tangent to ±10° from horizontal when the user
+ * has `prefers-reduced-motion: reduce` set. The path-text effect still
+ * tracks the trail's curvature, but the per-character rotation
+ * amplitude is heavily damped so the motion is felt rather than
+ * aggressive.
+ *
+ * No-op when `reducedMotion` is false. Pass-through for tangents
+ * already within the band.
+ */
+export function clampTangentForReducedMotion(tangent: number, reducedMotion: boolean): number {
+  if (!reducedMotion) return tangent;
+  if (tangent > REDUCED_MOTION_MAX_TANGENT_RAD) return REDUCED_MOTION_MAX_TANGENT_RAD;
+  if (tangent < -REDUCED_MOTION_MAX_TANGENT_RAD) return -REDUCED_MOTION_MAX_TANGENT_RAD;
+  return tangent;
+}
+
 export interface PlaceCharactersOpts {
   /**
    * When true, every character's tangent is rotated by π so the label
@@ -240,6 +260,14 @@ export interface PlaceCharactersOpts {
    * for tails diving down-and-left across the screen.
    */
   flipped?: boolean;
+  /**
+   * When true, every character's tangent is clamped to ±10°
+   * (`clampTangentForReducedMotion`) so the path-text effect is
+   * dampened for users with `prefers-reduced-motion: reduce`. The
+   * label still bends with the trail, but the rotation amplitude is
+   * limited.
+   */
+  reducedMotion?: boolean;
 }
 
 export function placeCharactersAlongPath(
@@ -253,6 +281,7 @@ export function placeCharactersAlongPath(
   const arcLengths = computeArcLengths(tail);
   const total = arcLengths[arcLengths.length - 1];
   const flipOffset = opts.flipped ? Math.PI : 0;
+  const reducedMotion = opts.reducedMotion ?? false;
 
   const out: PlacedChar[] = [];
   let s = 0;
@@ -263,9 +292,12 @@ export function placeCharactersAlongPath(
     const sample = samplePathAt(arcLengths, tail, center);
     // Position from the polyline-linear sample; tangent from the
     // secant-smoothed window so character rotations vary continuously
-    // even at segment corners.
-    const tangent = smoothedTangentAt(arcLengths, tail, center) + flipOffset;
-    out.push({ char: grapheme, x: sample.x, y: sample.y, tangent });
+    // even at segment corners. Reduced-motion clamp happens BEFORE the
+    // flip offset is applied so the clamp band is symmetric around the
+    // baseline reading direction (not the flipped-180° baseline).
+    const baseTangent = smoothedTangentAt(arcLengths, tail, center);
+    const clamped = clampTangentForReducedMotion(baseTangent, reducedMotion);
+    out.push({ char: grapheme, x: sample.x, y: sample.y, tangent: clamped + flipOffset });
     s += w;
   }
   return out;
@@ -355,15 +387,23 @@ export function pruneCometLabelState(activeCometIds: Iterable<string>): void {
   }
 }
 
+export interface DrawCometLabelOpts {
+  /**
+   * When true, the per-character tangent is clamped to ±10° so the
+   * path-text effect is dampened for users with
+   * `prefers-reduced-motion: reduce`. Should be passed through from
+   * `useReducedMotion` (motion/react) at the page level.
+   */
+  reducedMotion?: boolean;
+}
+
 /**
  * Render a comet's full title as path-text along its tail.
  *
- * Phase 2: spatially-smoothed per-character tangent (Task 2.1), and
+ * Phase 2 contract: spatially-smoothed per-character tangent (Task 2.1),
  * orientation flip with hysteresis tracked per `comet.comet_id`
- * (Task 2.3). When `|dominant tangent| > 95°` the label baseline flips
- * 180° so text stays right-side-up; it unflips when `|dominant tangent|
- * ≤ 90°`. Hysteresis prevents flicker as a comet's trajectory wobbles
- * near the threshold.
+ * (Task 2.3), 18-grapheme + arc-length truncation budget (Task 2.4),
+ * and reduced-motion ±10° tangent clamp (Task 2.5).
  *
  * `tailHistory` from `tickComet` is in oldest-first order. The current
  * `comet.x/y` is prepended via `buildHeadFirstPath` so the label starts
@@ -372,6 +412,7 @@ export function pruneCometLabelState(activeCometIds: Iterable<string>): void {
 export function drawCometLabel(
   ctx: CanvasRenderingContext2D,
   comet: CometData,
+  opts: DrawCometLabelOpts = {},
 ): void {
   if (comet.title.length === 0) return;
 
@@ -395,7 +436,10 @@ export function drawCometLabel(
   // tails show only the prefix that fits, so headlines materialise.
   const truncated = truncateLabelToFit(comet.title, font, total);
   if (truncated.length === 0) return;
-  const placed = placeCharactersAlongPath(truncated, font, tail, { flipped: isFlipped });
+  const placed = placeCharactersAlongPath(truncated, font, tail, {
+    flipped: isFlipped,
+    reducedMotion: opts.reducedMotion,
+  });
   if (placed.length === 0) return;
 
   const [r, g, b] = comet.color;

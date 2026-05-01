@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHeadFirstPath,
+  clampTangentForReducedMotion,
   computeArcLengths,
   drawCometLabel,
   placeCharactersAlongPath,
@@ -207,6 +208,58 @@ describe("smoothedTangentAt", () => {
     // s=0 and s=total — no later/earlier neighbour to average against.
     expect(smoothedTangentAt(arc, tail, 0)).toBeCloseTo(0);
     expect(smoothedTangentAt(arc, tail, 20)).toBeCloseTo(Math.PI / 2);
+  });
+});
+
+describe("clampTangentForReducedMotion", () => {
+  const TEN_DEG_RAD = (10 * Math.PI) / 180;
+
+  it("does not clamp when reducedMotion is false", () => {
+    expect(clampTangentForReducedMotion(Math.PI / 3, false)).toBeCloseTo(Math.PI / 3);
+    expect(clampTangentForReducedMotion(-Math.PI, false)).toBeCloseTo(-Math.PI);
+  });
+
+  it("clamps positive tangents to +10° under reducedMotion", () => {
+    expect(clampTangentForReducedMotion(Math.PI / 2, true)).toBeCloseTo(TEN_DEG_RAD);
+  });
+
+  it("clamps negative tangents to -10° under reducedMotion", () => {
+    expect(clampTangentForReducedMotion(-Math.PI / 2, true)).toBeCloseTo(-TEN_DEG_RAD);
+  });
+
+  it("preserves small tangents under reducedMotion (within the band)", () => {
+    expect(clampTangentForReducedMotion(0.1, true)).toBeCloseTo(0.1);
+    expect(clampTangentForReducedMotion(-0.05, true)).toBeCloseTo(-0.05);
+  });
+
+  it("preserves zero", () => {
+    expect(clampTangentForReducedMotion(0, true)).toBe(0);
+    expect(clampTangentForReducedMotion(0, false)).toBe(0);
+  });
+});
+
+describe("placeCharactersAlongPath with reducedMotion opt", () => {
+  const elbow = [
+    { x: 0, y: 0 },
+    { x: 10, y: 0 },
+    { x: 10, y: 100 }, // sharp elbow into a long vertical
+    { x: 10, y: 200 },
+  ];
+  const font = '400 11px "Space Grotesk", sans-serif';
+
+  it("clamps every character's tangent to ±10° when reducedMotion is true", () => {
+    const TEN_DEG_RAD = (10 * Math.PI) / 180;
+    const placed = placeCharactersAlongPath("AAAAAAAAAA", font, elbow, { reducedMotion: true });
+    for (const p of placed) {
+      expect(Math.abs(p.tangent)).toBeLessThanOrEqual(TEN_DEG_RAD + 1e-9);
+    }
+  });
+
+  it("does not clamp when reducedMotion is unset", () => {
+    const placed = placeCharactersAlongPath("AAAAAAAAAA", font, elbow);
+    // At least one character downstream of the elbow has a steep tangent.
+    const TEN_DEG_RAD = (10 * Math.PI) / 180;
+    expect(placed.some((p) => Math.abs(p.tangent) > TEN_DEG_RAD)).toBe(true);
   });
 });
 
