@@ -1193,3 +1193,399 @@ def test_recent_uses_route_returns_empty_for_descriptor_without_markers(
     body = resp.json()
     assert body["events"] == []
     assert body["weekly_count"] == 0
+
+
+# ── M14 Phase 7 — `.metis-skill` bundle export/import ─────────────
+
+
+def _write_phase7_skill(
+    skills_root: pathlib.Path,
+    slug: str,
+    *,
+    body: str = "phase 7 fixture body\n",
+) -> pathlib.Path:
+    """Write a parse_skill_file-valid SKILL.md fixture under
+    ``<skills_root>/<slug>/`` for the bundle-route tests.
+    """
+    import yaml as _yaml
+
+    skill_dir = skills_root / slug
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    frontmatter = {
+        "id": slug,
+        "name": slug.replace("-", " ").title(),
+        "description": f"Fixture skill {slug}.",
+        "enabled_by_default": False,
+        "priority": 50,
+        "triggers": {
+            "keywords": [],
+            "modes": [],
+            "file_types": [],
+            "output_styles": [],
+        },
+        "runtime_overrides": {},
+    }
+    fm_text = _yaml.safe_dump(frontmatter, sort_keys=False)
+    skill_path = skill_dir / "SKILL.md"
+    skill_path.write_text(f"---\n{fm_text}---\n{body}", encoding="utf-8")
+    return skill_path
+
+
+def test_list_installed_skills_returns_skills_root_contents(
+    tmp_path: pathlib.Path,
+) -> None:
+    skills_root = tmp_path / "skills"
+    _write_phase7_skill(skills_root, "qa-fixture")
+    _write_phase7_skill(skills_root, "swarm-fixture")
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=skills_root,
+        ),
+        _client() as client,
+    ):
+        resp = client.get("/v1/forge/skills")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    ids = {entry["id"] for entry in payload["skills"]}
+    assert ids == {"qa-fixture", "swarm-fixture"}
+    for entry in payload["skills"]:
+        assert isinstance(entry["name"], str) and entry["name"]
+        assert isinstance(entry["description"], str)
+        assert isinstance(entry["path"], str)
+
+
+def test_list_installed_skills_returns_empty_for_missing_root(
+    tmp_path: pathlib.Path,
+) -> None:
+    """An empty or missing ``skills/`` directory must not 500 the
+    Forge — the gallery should still render with a blank list."""
+    nowhere = tmp_path / "no-such-dir"
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=nowhere,
+        ),
+        _client() as client,
+    ):
+        resp = client.get("/v1/forge/skills")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"skills": []}
+
+
+def test_export_skill_returns_base64_bundle_with_sha(
+    tmp_path: pathlib.Path,
+) -> None:
+    import base64 as _b64
+    import hashlib as _hashlib
+
+    from metis_app.services import forge_bundle as _forge_bundle
+
+    skills_root = tmp_path / "skills"
+    _write_phase7_skill(skills_root, "qa-fixture")
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=skills_root,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(
+            "/v1/forge/skills/qa-fixture/export",
+            json={"version": "0.2.0", "author": "tests@example.com"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["filename"] == "qa-fixture-0.2.0.metis-skill"
+    raw = _b64.b64decode(body["content_base64"])
+    assert _hashlib.sha256(raw).hexdigest() == body["sha256"]
+
+    bundle_path = tmp_path / "decoded.metis-skill"
+    bundle_path.write_bytes(raw)
+    inspected = _forge_bundle.inspect_bundle(bundle_path)
+    assert inspected.errors == []
+    assert inspected.manifest.skill_id == "qa-fixture"
+    assert inspected.manifest.version == "0.2.0"
+    assert inspected.manifest.author == "tests@example.com"
+
+
+def test_export_unknown_skill_returns_404(tmp_path: pathlib.Path) -> None:
+    skills_root = tmp_path / "skills"
+    skills_root.mkdir()
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=skills_root,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(
+            "/v1/forge/skills/does-not-exist/export",
+            json={"version": "0.1.0"},
+        )
+
+    assert resp.status_code == 404
+
+
+def test_export_skill_400_on_missing_version(tmp_path: pathlib.Path) -> None:
+    """The ADR 0015 manifest schema requires a non-empty ``version``."""
+    skills_root = tmp_path / "skills"
+    _write_phase7_skill(skills_root, "qa-fixture")
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=skills_root,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(
+            "/v1/forge/skills/qa-fixture/export",
+            json={},
+        )
+
+    assert resp.status_code == 400
+
+
+def test_import_preview_returns_manifest_and_no_conflict(
+    tmp_path: pathlib.Path,
+) -> None:
+    from metis_app.services import forge_bundle as _forge_bundle
+
+    src_root = tmp_path / "src"
+    target_root = tmp_path / "target"
+    target_root.mkdir()
+    _write_phase7_skill(src_root, "qa-fixture")
+    bundle_path = _forge_bundle.pack_skill(
+        skill_dir=src_root / "qa-fixture",
+        version="0.1.0",
+        dest_dir=tmp_path,
+    )
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=target_root,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(
+            "/v1/forge/skills/import/preview",
+            files={"file": ("qa.metis-skill", bundle_path.read_bytes())},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["manifest"]["skill_id"] == "qa-fixture"
+    assert body["manifest"]["version"] == "0.1.0"
+    assert body["manifest"]["bundle_format_version"] == 1
+    assert body["conflict"] is False
+    assert body["errors"] == []
+
+
+def test_import_preview_flags_conflict_when_slug_exists(
+    tmp_path: pathlib.Path,
+) -> None:
+    from metis_app.services import forge_bundle as _forge_bundle
+
+    src_root = tmp_path / "src"
+    target_root = tmp_path / "target"
+    _write_phase7_skill(src_root, "qa-fixture")
+    _write_phase7_skill(target_root, "qa-fixture", body="existing\n")
+    bundle_path = _forge_bundle.pack_skill(
+        skill_dir=src_root / "qa-fixture",
+        version="0.1.0",
+        dest_dir=tmp_path,
+    )
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=target_root,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(
+            "/v1/forge/skills/import/preview",
+            files={"file": ("qa.metis-skill", bundle_path.read_bytes())},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["conflict"] is True
+    assert body["errors"] == []
+
+
+def test_import_preview_400_on_missing_file(tmp_path: pathlib.Path) -> None:
+    with _client() as client:
+        resp = client.post("/v1/forge/skills/import/preview", files={})
+    assert resp.status_code == 400
+
+
+def test_import_install_writes_skill_to_skills_root(
+    tmp_path: pathlib.Path,
+) -> None:
+    from metis_app.services import forge_bundle as _forge_bundle
+
+    src_root = tmp_path / "src"
+    target_root = tmp_path / "target"
+    _write_phase7_skill(src_root, "qa-fixture", body="from bundle\n")
+    bundle_path = _forge_bundle.pack_skill(
+        skill_dir=src_root / "qa-fixture",
+        version="0.1.0",
+        dest_dir=tmp_path,
+    )
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=target_root,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(
+            "/v1/forge/skills/import/install",
+            files={"file": ("qa.metis-skill", bundle_path.read_bytes())},
+            data={"replace": "false"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["skill_id"] == "qa-fixture"
+    assert body["replaced"] is False
+    on_disk = (target_root / "qa-fixture" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "from bundle" in on_disk
+
+
+def test_import_install_409_on_slug_conflict_without_replace(
+    tmp_path: pathlib.Path,
+) -> None:
+    from metis_app.services import forge_bundle as _forge_bundle
+
+    src_root = tmp_path / "src"
+    target_root = tmp_path / "target"
+    _write_phase7_skill(src_root, "qa-fixture", body="from bundle\n")
+    _write_phase7_skill(target_root, "qa-fixture", body="local edits\n")
+    bundle_path = _forge_bundle.pack_skill(
+        skill_dir=src_root / "qa-fixture",
+        version="0.1.0",
+        dest_dir=tmp_path,
+    )
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=target_root,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(
+            "/v1/forge/skills/import/install",
+            files={"file": ("qa.metis-skill", bundle_path.read_bytes())},
+            data={"replace": "false"},
+        )
+
+    assert resp.status_code == 409
+    on_disk = (target_root / "qa-fixture" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "local edits" in on_disk
+
+
+def test_import_install_replace_true_overwrites(
+    tmp_path: pathlib.Path,
+) -> None:
+    from metis_app.services import forge_bundle as _forge_bundle
+
+    src_root = tmp_path / "src"
+    target_root = tmp_path / "target"
+    _write_phase7_skill(src_root, "qa-fixture", body="from bundle\n")
+    _write_phase7_skill(target_root, "qa-fixture", body="local edits\n")
+    bundle_path = _forge_bundle.pack_skill(
+        skill_dir=src_root / "qa-fixture",
+        version="0.1.0",
+        dest_dir=tmp_path,
+    )
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=target_root,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(
+            "/v1/forge/skills/import/install",
+            files={"file": ("qa.metis-skill", bundle_path.read_bytes())},
+            data={"replace": "true"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["replaced"] is True
+    on_disk = (target_root / "qa-fixture" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "from bundle" in on_disk
+    assert "local edits" not in on_disk
+
+
+def test_import_install_400_on_invalid_bundle(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A tarball missing the skill payload must come back as 400."""
+    import tarfile as _tarfile
+    from io import BytesIO as _BytesIO
+
+    import yaml as _yaml
+
+    bad_path = tmp_path / "bad.metis-skill"
+    target_root = tmp_path / "target"
+    target_root.mkdir()
+    manifest_text = _yaml.safe_dump(
+        {
+            "bundle_format_version": 1,
+            "skill_id": "qa-fixture",
+            "name": "x",
+            "description": "x",
+            "version": "0.1.0",
+            "exported_at": "2026-05-01T12:00:00Z",
+            "min_metis_version": "0.1.0",
+        }
+    ).encode("utf-8")
+    with _tarfile.open(bad_path, mode="w") as tf:
+        info = _tarfile.TarInfo(name="manifest.yaml")
+        info.size = len(manifest_text)
+        tf.addfile(info, _BytesIO(manifest_text))
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=target_root,
+        ),
+        _client() as client,
+    ):
+        resp = client.post(
+            "/v1/forge/skills/import/install",
+            files={"file": ("bad.metis-skill", bad_path.read_bytes())},
+            data={"replace": "false"},
+        )
+
+    assert resp.status_code == 400
+
+
+def test_import_install_400_on_missing_file(tmp_path: pathlib.Path) -> None:
+    with _client() as client:
+        resp = client.post(
+            "/v1/forge/skills/import/install", data={"replace": "false"}
+        )
+    assert resp.status_code == 400
