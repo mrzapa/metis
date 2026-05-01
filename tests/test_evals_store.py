@@ -257,3 +257,120 @@ def test_get_default_store_returns_singleton(
         assert a is b
     finally:
         reset_default_store_for_tests()
+
+
+# ----------------------------------------------------------------------
+# Phase 2 review (PR #599 items 3 + 4) — insert_task_if_absent provides
+# the "do not overwrite" semantics seed import requires. The pre-existing
+# upsert_task uses ON CONFLICT DO UPDATE, which is the right primitive
+# for runner-driven mutations but the wrong primitive for idempotent
+# imports.
+# ----------------------------------------------------------------------
+
+
+def test_insert_task_if_absent_returns_true_on_first_insert(
+    tmp_path: Path,
+) -> None:
+    store = _make_store(tmp_path)
+    row = _task_row(task_id="t1")
+    inserted = store.insert_task_if_absent(row)
+    assert inserted is True
+    fetched = store.get_task("t1")
+    assert fetched is not None
+
+
+def test_insert_task_if_absent_returns_false_when_exists(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    first = _task_row(task_id="t1", task_type="qa")
+    store.insert_task_if_absent(first)
+    second = _task_row(task_id="t1", task_type="summary")
+    inserted = store.insert_task_if_absent(second)
+    assert inserted is False
+    fetched = store.get_task("t1")
+    assert fetched is not None
+    # The original row survives — the second call must not overwrite,
+    # even on a payload-changing input.
+    assert fetched.task_type == "qa"
+
+
+# ----------------------------------------------------------------------
+# Phase 2 review (PR #599 item 5) — singleton construction must be
+# guarded by a lock so concurrent first callers cannot race each other
+# into building two EvalStore instances under the same env override.
+# ----------------------------------------------------------------------
+
+
+def test_get_default_store_singleton_under_concurrent_first_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    monkeypatch.setenv(DEFAULT_DB_ENV_VAR, str(tmp_path / "concurrent.db"))
+    reset_default_store_for_tests()
+
+    barrier = threading.Barrier(8)
+    instances: list[EvalStore] = []
+    lock = threading.Lock()
+
+    def _race() -> None:
+        barrier.wait()
+        store = get_default_store()
+        with lock:
+            instances.append(store)
+
+    try:
+        threads = [threading.Thread(target=_race) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(instances) == 8
+        first = instances[0]
+        for other in instances[1:]:
+            assert other is first
+    finally:
+        reset_default_store_for_tests()
+
+
+# ----------------------------------------------------------------------
+# Phase 2 review (PR #599 item 6) — close() releases the shared
+# in-memory connection (and any future shared file connection); reset
+# helper must call close before clearing the singleton.
+# ----------------------------------------------------------------------
+
+
+def test_close_releases_shared_in_memory_connection() -> None:
+    store = EvalStore(":memory:")
+    store.init_db()
+    # Sanity-check we can still query before close.
+    assert store.list_tasks() == []
+    store.close()
+    # Subsequent operations must not use the closed connection.
+    with pytest.raises(Exception):
+        store.list_tasks()
+
+
+def test_close_is_idempotent() -> None:
+    store = EvalStore(":memory:")
+    store.init_db()
+    store.close()
+    # A second close is a no-op rather than an error.
+    store.close()
+
+
+def test_reset_default_store_closes_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(DEFAULT_DB_ENV_VAR, ":memory:")
+    reset_default_store_for_tests()
+    store = get_default_store()
+    # In-memory store has a shared connection — reset must close it
+    # rather than letting it dangle.
+    reset_default_store_for_tests()
+    with pytest.raises(Exception):
+        store.list_tasks()
+    # And after reset, a fresh store can be obtained.
+    reset_default_store_for_tests()
+    next_store = get_default_store()
+    assert next_store is not store
+    reset_default_store_for_tests()

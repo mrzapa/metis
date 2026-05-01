@@ -27,6 +27,15 @@ from .store import EvalStore, EvalTaskRow
 log = logging.getLogger(__name__)
 
 
+# Only ``reinforce``-labeled rows enter the corpus. The export endpoint
+# at ``observe.py:177`` forwards ``_latest_label(run_id)`` verbatim,
+# so suppress / investigate rows DO appear in
+# ``evals/golden_dataset.jsonl`` and must be filtered here. Plan-doc
+# semantics (Phase 2): tasks enter the corpus when the user explicitly
+# labels a run ``reinforce``.
+_IMPORTABLE_LABELS: frozenset[str] = frozenset({"reinforce"})
+
+
 _TASK_TYPE_BY_MODE: dict[str, str] = {
     "q&a": "qa",
     "qa": "qa",
@@ -157,8 +166,24 @@ def import_seed_jsonl(
 
     Returns a summary dict with counts of ``imported`` / ``skipped`` /
     ``malformed`` rows plus the resolved ``path``. Existing rows are
-    detected by ``task_id`` (= ``eval_id``) and left untouched, matching
-    ADR 0017 §3's idempotency contract.
+    left untouched via :meth:`EvalStore.insert_task_if_absent`, which
+    uses ``ON CONFLICT DO NOTHING`` rather than ``ON CONFLICT DO
+    UPDATE`` — matching ADR 0017 §3's idempotency contract regardless
+    of whether a pre-scan succeeds, and avoiding the previous
+    O(corpus) round-trip needed to enumerate ``task_id``s up front.
+
+    Skip semantics:
+
+    - Rows whose ``label`` is not in :data:`_IMPORTABLE_LABELS` (today
+      that means anything except ``reinforce``) are counted as
+      ``skipped``, never as ``malformed``. The plan-doc rule is that
+      only reinforce-labeled traces become tasks — suppress and
+      investigate are grading signals on runs, not corpus members.
+    - Rows whose ``task_id`` is already present are counted as
+      ``skipped``.
+    - JSON-decode failures, non-dict rows, missing ``eval_id``, and
+      shape errors raised from :func:`eval_task_from_jsonl_row` are
+      counted as ``malformed``.
     """
 
     summary: dict[str, Any] = {
@@ -169,12 +194,6 @@ def import_seed_jsonl(
     }
     if not jsonl_path.exists():
         return summary
-
-    try:
-        existing = {row.task_id for row in store.list_tasks()}
-    except Exception as exc:  # pragma: no cover - defensive
-        log.warning("Could not enumerate existing tasks: %s", exc)
-        existing = set()
 
     try:
         with jsonl_path.open("r", encoding="utf-8") as fh:
@@ -195,7 +214,8 @@ def import_seed_jsonl(
                 if not eval_id:
                     summary["malformed"] += 1
                     continue
-                if eval_id in existing:
+                label = str(row.get("label") or "").strip().lower()
+                if label not in _IMPORTABLE_LABELS:
                     summary["skipped"] += 1
                     continue
                 try:
@@ -204,9 +224,11 @@ def import_seed_jsonl(
                     log.warning("Skipping seed row %s: %s", eval_id, exc)
                     summary["malformed"] += 1
                     continue
-                store.upsert_task(task.to_storage_row())
-                existing.add(eval_id)
-                summary["imported"] += 1
+                inserted = store.insert_task_if_absent(task.to_storage_row())
+                if inserted:
+                    summary["imported"] += 1
+                else:
+                    summary["skipped"] += 1
     except OSError as exc:
         log.warning("Could not read seed JSONL %s: %s", jsonl_path, exc)
         return summary

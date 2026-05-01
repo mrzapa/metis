@@ -28,6 +28,12 @@ from .store import EvalGeneration, EvalStore
 # is excluded from the fingerprint, so theme / log-level / verbosity /
 # UI toggles do not bump generations on their own. Edits here are
 # behaviour-affecting and must be reviewed alongside ADR 0017.
+#
+# When a setting is a nested dict (e.g. ``assistant_runtime``), the
+# nested-key allowlist below projects it to its behavior-affecting
+# subset before hashing. Without that projection, runtime metadata such
+# as ``bootstrap_state`` or hardware-detection ``recommended_*`` fields
+# would bump generations on every cold start.
 GENERATION_SETTINGS: tuple[str, ...] = (
     # LLM choice + invocation parameters that change inference output.
     "llm_provider",
@@ -64,8 +70,54 @@ GENERATION_SETTINGS: tuple[str, ...] = (
     "local_gguf_model_path",
     "local_gguf_context_length",
     # Companion runtime block (provider/model overrides, fallback policy).
+    # The nested dict is projected to ``_ASSISTANT_RUNTIME_MATERIAL_KEYS``
+    # before hashing so volatile fields (bootstrap state, hardware
+    # recommendations, install policy) do not bump the generation.
     "assistant_runtime",
 )
+
+
+# Behavior-affecting subkeys inside the ``assistant_runtime`` block.
+# Volatile fields that change at runtime (``bootstrap_state``,
+# ``recommended_*``, ``auto_install``, ``auto_bootstrap``) are
+# deliberately excluded — they describe how the runtime was set up,
+# not how it answers questions.
+_ASSISTANT_RUNTIME_MATERIAL_KEYS: frozenset[str] = frozenset(
+    {
+        "provider",
+        "model",
+        "local_gguf_model_path",
+        "local_gguf_context_length",
+        "local_gguf_gpu_layers",
+        "local_gguf_threads",
+        "max_context_chars",
+        "context_window",
+        "context_window_override",
+        "fallback_to_primary",
+    }
+)
+
+
+# A small registry of nested-dict projections. Each entry takes the raw
+# settings value and returns the canonical material subset to feed into
+# the hash. Adding a new entry here is the right way to keep new
+# nested-block settings stable across irrelevant runtime metadata.
+def _project_assistant_runtime(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {k: value[k] for k in sorted(_ASSISTANT_RUNTIME_MATERIAL_KEYS) if k in value}
+
+
+_NESTED_PROJECTIONS: dict[str, Any] = {
+    "assistant_runtime": _project_assistant_runtime,
+}
+
+
+def _project_setting(key: str, value: Any) -> Any:
+    projector = _NESTED_PROJECTIONS.get(key)
+    if projector is not None:
+        return projector(value)
+    return value
 
 
 def _utc_now_iso() -> str:
@@ -85,12 +137,25 @@ def _hash_skill_set(enabled_skill_ids: Iterable[str]) -> str:
     return _sha256_hex(_canonical_json(normalized))
 
 
-def _hash_settings(settings: dict[str, Any]) -> str:
+def _material_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    """Return the material subset of ``settings`` with nested dicts
+    projected to their behavior-affecting subkeys.
+
+    See ``_NESTED_PROJECTIONS`` for the per-key projectors. Plain values
+    pass through unchanged. The result is what gets canonicalised and
+    hashed — keeping the projection in one place avoids drift between
+    ``settings_hash`` and ``runtime_spec_json``.
+    """
+
     material: dict[str, Any] = {}
     for key in GENERATION_SETTINGS:
         if key in settings:
-            material[key] = settings[key]
-    return _sha256_hex(_canonical_json(material))
+            material[key] = _project_setting(key, settings[key])
+    return material
+
+
+def _hash_settings(settings: dict[str, Any]) -> str:
+    return _sha256_hex(_canonical_json(_material_settings(settings)))
 
 
 def _runtime_spec(
@@ -100,9 +165,7 @@ def _runtime_spec(
 ) -> dict[str, Any]:
     skill_ids = sorted({str(sid) for sid in enabled_skill_ids if str(sid)})
     spec: dict[str, Any] = {
-        "settings": {
-            key: settings[key] for key in GENERATION_SETTINGS if key in settings
-        },
+        "settings": _material_settings(settings),
         "enabled_skill_ids": skill_ids,
         "lora_adapter_id": lora_adapter_id,
     }

@@ -166,3 +166,123 @@ def test_import_seed_jsonl_skips_malformed_lines(tmp_path: Path) -> None:
     summary = import_seed_jsonl(store, jsonl)
     assert summary["imported"] == 1
     assert summary["malformed"] == 1
+
+
+# ----------------------------------------------------------------------
+# Phase 2 review — non-reinforce label filter (PR #599 review item 1).
+# The export endpoint at observe.py:177 forwards `_latest_label(run_id)`
+# verbatim, so suppress/investigate rows DO reach the JSONL. The plan
+# doc says only ``reinforce`` enters the corpus, so the import path
+# must filter — otherwise negative or unresolved traces would be scored
+# as if they were golden cases.
+# ----------------------------------------------------------------------
+
+
+def test_import_seed_jsonl_skips_suppress_label(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    jsonl = tmp_path / "golden_dataset.jsonl"
+    row = dict(SAMPLE_ROW)
+    row["eval_id"] = "e-suppress"
+    row["label"] = "suppress"
+    jsonl.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    summary = import_seed_jsonl(store, jsonl)
+    assert summary["imported"] == 0
+    assert summary["skipped"] == 1
+    assert summary["malformed"] == 0
+    assert store.list_tasks() == []
+
+
+def test_import_seed_jsonl_skips_investigate_label(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    jsonl = tmp_path / "golden_dataset.jsonl"
+    row = dict(SAMPLE_ROW)
+    row["eval_id"] = "e-investigate"
+    row["label"] = "investigate"
+    jsonl.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    summary = import_seed_jsonl(store, jsonl)
+    assert summary["imported"] == 0
+    assert summary["skipped"] == 1
+    assert store.list_tasks() == []
+
+
+def test_import_seed_jsonl_skips_rows_with_missing_label(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    jsonl = tmp_path / "golden_dataset.jsonl"
+    row = dict(SAMPLE_ROW)
+    row["eval_id"] = "e-no-label"
+    row.pop("label", None)
+    jsonl.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    summary = import_seed_jsonl(store, jsonl)
+    # Missing label means we cannot prove the run was a positive
+    # reinforce — skip rather than guess. Counts as ``skipped`` so the
+    # operator can see it in the summary.
+    assert summary["imported"] == 0
+    assert summary["skipped"] == 1
+    assert store.list_tasks() == []
+
+
+def test_import_seed_jsonl_imports_mixed_jsonl_only_reinforce(
+    tmp_path: Path,
+) -> None:
+    store = _make_store(tmp_path)
+    jsonl = tmp_path / "golden_dataset.jsonl"
+    rows = [
+        {**SAMPLE_ROW, "eval_id": "e-good", "label": "reinforce"},
+        {**SAMPLE_ROW, "eval_id": "e-bad", "label": "suppress"},
+        {**SAMPLE_ROW, "eval_id": "e-meh", "label": "investigate"},
+    ]
+    jsonl.write_text(
+        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8"
+    )
+    summary = import_seed_jsonl(store, jsonl)
+    assert summary["imported"] == 1
+    assert summary["skipped"] == 2
+    assert {row.task_id for row in store.list_tasks()} == {"e-good"}
+
+
+# ----------------------------------------------------------------------
+# Phase 2 review — items 3 + 4: idempotency must not depend on the
+# pre-scan succeeding. The runtime contract is that an existing task
+# row is left untouched even if the pre-scan returns an empty set
+# (because we use ``INSERT ... ON CONFLICT DO NOTHING`` rather than
+# ``ON CONFLICT DO UPDATE``).
+# ----------------------------------------------------------------------
+
+
+def test_import_seed_jsonl_preserves_existing_payload_on_repeat(
+    tmp_path: Path,
+) -> None:
+    store = _make_store(tmp_path)
+    jsonl = tmp_path / "golden_dataset.jsonl"
+    jsonl.write_text(json.dumps(SAMPLE_ROW) + "\n", encoding="utf-8")
+    import_seed_jsonl(store, jsonl)
+
+    # Simulate a downstream edit to the stored task — e.g. a future
+    # phase tagging tasks with custom metadata. The idempotent re-run
+    # must NOT clobber that edit, even if the pre-scan path were ever
+    # broken.
+    original = store.get_task("e-1")
+    assert original is not None
+    edited_payload = json.loads(original.payload_json)
+    edited_payload["mode"] = "edited-by-user"
+    from metis_app.evals.store import EvalTaskRow
+
+    store.upsert_task(
+        EvalTaskRow(
+            task_id=original.task_id,
+            created_at=original.created_at,
+            task_type=original.task_type,
+            source_run_id=original.source_run_id,
+            payload_json=json.dumps(edited_payload),
+            tags_json=original.tags_json,
+        )
+    )
+
+    # Re-import the unchanged JSONL — the existing edited payload must
+    # survive.
+    summary = import_seed_jsonl(store, jsonl)
+    assert summary["imported"] == 0
+    assert summary["skipped"] == 1
+    fetched = store.get_task("e-1")
+    assert fetched is not None
+    assert json.loads(fetched.payload_json)["mode"] == "edited-by-user"

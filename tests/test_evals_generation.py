@@ -216,6 +216,110 @@ def test_bump_if_needed_reuses_existing_on_repeat(tmp_path: Path) -> None:
     assert fetched.notes == "initial"
 
 
+# ----------------------------------------------------------------------
+# Phase 2 review (PR #599 item 2) — assistant_runtime is a mixed dict
+# of behavior-affecting fields (provider, model, GGUF tuning) and
+# volatile non-behavioral fields (bootstrap_state, recommended_*,
+# auto_install). Hashing the whole block bumps generations on
+# bootstrap-state transitions and hardware-detection refreshes, which
+# fragments week-over-week comparisons. The hash must project
+# assistant_runtime to a stable material-only subset.
+# ----------------------------------------------------------------------
+
+
+_RUNTIME_BASE = dict(_BASE_SETTINGS, assistant_runtime={
+    "provider": "anthropic",
+    "model": "claude-opus-4-6",
+    "local_gguf_model_path": "",
+    "local_gguf_context_length": 2048,
+    "local_gguf_gpu_layers": 0,
+    "local_gguf_threads": 0,
+    "fallback_to_primary": True,
+    "auto_bootstrap": True,
+    "auto_install": False,
+    "bootstrap_state": "pending",
+    "recommended_model_name": "",
+    "recommended_quant": "",
+    "recommended_use_case": "chat",
+})
+
+
+def test_generation_id_unaffected_by_assistant_runtime_bootstrap_state() -> None:
+    base = current_generation_id(
+        settings=_RUNTIME_BASE,
+        enabled_skill_ids=[],
+        lora_adapter_id=None,
+    )
+    flipped = dict(_RUNTIME_BASE)
+    flipped["assistant_runtime"] = dict(
+        _RUNTIME_BASE["assistant_runtime"], bootstrap_state="complete"
+    )
+    later = current_generation_id(
+        settings=flipped,
+        enabled_skill_ids=[],
+        lora_adapter_id=None,
+    )
+    assert base == later
+
+
+def test_generation_id_unaffected_by_recommended_metadata() -> None:
+    base = current_generation_id(
+        settings=_RUNTIME_BASE,
+        enabled_skill_ids=[],
+        lora_adapter_id=None,
+    )
+    flipped = dict(_RUNTIME_BASE)
+    flipped["assistant_runtime"] = dict(
+        _RUNTIME_BASE["assistant_runtime"],
+        recommended_model_name="phi-3.5-mini",
+        recommended_quant="Q4_K_M",
+        recommended_use_case="chat",
+        auto_install=True,
+    )
+    later = current_generation_id(
+        settings=flipped,
+        enabled_skill_ids=[],
+        lora_adapter_id=None,
+    )
+    assert base == later
+
+
+def test_generation_id_changes_when_assistant_runtime_provider_changes() -> None:
+    base = current_generation_id(
+        settings=_RUNTIME_BASE,
+        enabled_skill_ids=[],
+        lora_adapter_id=None,
+    )
+    flipped = dict(_RUNTIME_BASE)
+    flipped["assistant_runtime"] = dict(
+        _RUNTIME_BASE["assistant_runtime"], provider="local"
+    )
+    later = current_generation_id(
+        settings=flipped,
+        enabled_skill_ids=[],
+        lora_adapter_id=None,
+    )
+    assert base != later
+
+
+def test_generation_id_changes_when_assistant_runtime_model_changes() -> None:
+    base = current_generation_id(
+        settings=_RUNTIME_BASE,
+        enabled_skill_ids=[],
+        lora_adapter_id=None,
+    )
+    flipped = dict(_RUNTIME_BASE)
+    flipped["assistant_runtime"] = dict(
+        _RUNTIME_BASE["assistant_runtime"], model="claude-haiku-4-5"
+    )
+    later = current_generation_id(
+        settings=flipped,
+        enabled_skill_ids=[],
+        lora_adapter_id=None,
+    )
+    assert base != later
+
+
 def test_bump_if_needed_inserts_again_after_change(tmp_path: Path) -> None:
     store = _make_store(tmp_path)
     a = bump_if_needed(

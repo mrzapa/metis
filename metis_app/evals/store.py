@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import pathlib
 import sqlite3
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Iterator
@@ -103,12 +104,15 @@ class EvalStore:
         self.db_path = pathlib.Path(target) if target != ":memory:" else None
         self._db_target = target
         self._shared_conn: sqlite3.Connection | None = None
+        self._closed = False
         if target == ":memory:":
             self._shared_conn = sqlite3.connect(target, check_same_thread=False)
             self._shared_conn.row_factory = sqlite3.Row
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
+        if self._closed:
+            raise RuntimeError("EvalStore is closed")
         if self._shared_conn is not None:
             yield self._shared_conn
             self._shared_conn.commit()
@@ -124,6 +128,32 @@ class EvalStore:
             conn.commit()
         finally:
             conn.close()
+
+    def close(self) -> None:
+        """Release any shared SQLite connection. Idempotent.
+
+        File-backed stores open a fresh connection per ``_connect`` call
+        so this is a no-op for them; in-memory stores (and any future
+        URI-shared connection) hold a long-lived ``_shared_conn`` that
+        leaks unless explicitly released. Mirrors the
+        ``NetworkAuditStore.close`` lifecycle so the runtime-singleton
+        teardown helpers stay parallel between the two packages.
+        """
+
+        if self._closed:
+            return
+        self._closed = True
+        if self._shared_conn is not None:
+            try:
+                self._shared_conn.close()
+            finally:
+                self._shared_conn = None
+
+    def __enter__(self) -> "EvalStore":
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        self.close()
 
     def init_db(self) -> None:
         with self._connect() as conn:
@@ -203,6 +233,39 @@ class EvalStore:
                     row.tags_json,
                 ),
             )
+
+    def insert_task_if_absent(self, row: EvalTaskRow) -> bool:
+        """Insert a task only if its ``task_id`` is not already present.
+
+        Returns ``True`` when a new row was inserted, ``False`` when an
+        existing row with the same ``task_id`` was preserved untouched.
+
+        ADR 0017 §3 keys idempotent seed import on ``eval_id``, and the
+        runtime contract is that an existing row is left alone — even
+        if a re-run sees an unexpected payload diff. ``upsert_task`` is
+        the right primitive for runner-driven mutations; this method is
+        the right primitive for importers and any other caller that
+        must not clobber existing state.
+        """
+
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO tasks(task_id, created_at, task_type, source_run_id,
+                                  payload_json, tags_json)
+                VALUES(?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id) DO NOTHING
+                """,
+                (
+                    row.task_id,
+                    row.created_at,
+                    row.task_type,
+                    row.source_run_id,
+                    row.payload_json,
+                    row.tags_json,
+                ),
+            )
+            return cursor.rowcount > 0
 
     def get_task(self, task_id: str) -> EvalTaskRow | None:
         with self._connect() as conn:
@@ -369,20 +432,62 @@ def _row_to_generation(row: sqlite3.Row) -> EvalGeneration:
 # ----------------------------------------------------------------------
 # Module-level default store — env-overridable, test-resettable. Mirrors
 # the network_audit pattern so callers do not need to thread a store
-# through every call site.
+# through every call site, and so concurrent first callers under
+# Litestar's executor pool cannot race each other into building two
+# stores against the same env override.
 # ----------------------------------------------------------------------
 
 _default_store: EvalStore | None = None
+_default_store_lock = threading.Lock()
 
 
 def get_default_store() -> EvalStore:
+    """Return the process-wide default :class:`EvalStore`.
+
+    Lazy-instantiated under :data:`_default_store_lock` so concurrent
+    first callers (e.g. two Litestar handlers fielding requests during
+    cold start) cannot race each other into constructing two stores.
+    Subsequent calls take the fast path with no lock acquisition cost
+    since the singleton is already set.
+    """
+
     global _default_store
-    if _default_store is None:
-        _default_store = EvalStore()
-        _default_store.init_db()
-    return _default_store
+    if _default_store is not None:
+        return _default_store
+    with _default_store_lock:
+        if _default_store is None:
+            store = EvalStore()
+            store.init_db()
+            _default_store = store
+        return _default_store
+
+
+def close_default_store() -> None:
+    """Close the process-wide default store, if it was constructed.
+
+    Intended for the Litestar ``on_shutdown`` hook so the underlying
+    SQLite connection (in-memory or future shared-file) is released
+    cleanly on a normal shutdown. Idempotent — a second call is a
+    no-op. For test-teardown semantics, prefer
+    :func:`reset_default_store_for_tests`.
+    """
+
+    global _default_store
+    with _default_store_lock:
+        if _default_store is not None:
+            try:
+                _default_store.close()
+            finally:
+                _default_store = None
 
 
 def reset_default_store_for_tests() -> None:
-    global _default_store
-    _default_store = None
+    """Test-only helper: close the singleton and clear the binding.
+
+    Mirrors the ``network_audit`` parity helper. Closes any shared
+    SQLite connection (essential for ``:memory:`` stores, which would
+    otherwise leak across tests) and forces the next
+    :func:`get_default_store` call to build a fresh instance.
+    """
+
+    close_default_store()

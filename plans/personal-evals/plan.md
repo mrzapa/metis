@@ -91,6 +91,53 @@ and will be harvested rather than rebuilt. See the harvest list in
   tests/test_evals_*.py` => clean (after dropping unused
   `os`/`uuid`/`pytest` imports + an unused `store` binding flagged on
   the first ruff pass).
+- 2026-05-01 Phase 2 review-fix slice landed on PR #599 — six items
+  flagged on the open PR addressed in one squash:
+  1. **(P1)** `import_seed_jsonl` now filters on
+     `label == "reinforce"` before importing. The export endpoint at
+     `observe.py:177` forwards `_latest_label(run_id)` verbatim, so
+     suppress / investigate rows DO appear in
+     `evals/golden_dataset.jsonl`; without the filter they would have
+     been graded as if they were golden cases. Plan-doc semantics
+     (only `reinforce` enters the corpus) is now enforced at the
+     import layer too.
+  2. **(P2)** `assistant_runtime` is projected to a material-subkey
+     allowlist (`provider`, `model`, GGUF tuning, context-window,
+     `fallback_to_primary`) before hashing. Volatile fields
+     (`bootstrap_state`, `recommended_*`, `auto_install`,
+     `auto_bootstrap`) no longer bump generations on cold start or
+     hardware-detection refresh. `_NESTED_PROJECTIONS` is the
+     extension point for future nested-block settings.
+  3. **(P2)** `EvalStore.insert_task_if_absent(row) -> bool` lands as
+     the right primitive for importers and any other call site that
+     must not clobber existing rows. Uses `INSERT ... ON CONFLICT DO
+     NOTHING` and reports via `cursor.rowcount`. `import_seed_jsonl`
+     drops its `list_tasks()` pre-scan and uses this method directly,
+     resolving both the O(N) read-amplification finding and the
+     pre-scan-failure idempotency hole flagged in the same review.
+  4. **(P2)** Same fix as item 3 — pre-scan pathway is gone, so a
+     read failure can no longer fall through to an `upsert_task`
+     overwrite of an existing row.
+  5. **(P2)** `get_default_store` now uses double-checked locking
+     under a module-level `threading.Lock`, mirroring
+     `metis_app/network_audit/runtime.py`. Concurrent first callers
+     under Litestar's executor pool can no longer race into building
+     two stores against the same env override; subsequent calls take
+     the fast path with no lock cost.
+  6. **(P2)** `EvalStore.close()` releases any shared SQLite
+     connection (essential for `:memory:` stores, which would
+     otherwise leak across tests) and is idempotent; new
+     `close_default_store()` mirrors the network_audit shutdown helper
+     and is what `reset_default_store_for_tests()` now calls under the
+     hood.
+- 2026-05-01 Review-fix verification:
+  `python -m pytest tests/ --ignore=tests/_litestar_helpers --ignore=tests/test_api_app.py`
+  => `1562 passed, 12 skipped` (delta = 15 new pytest cases — 4 label-
+  filter, 4 assistant-runtime projection, 2 `insert_task_if_absent`,
+  1 idempotency-against-edits, 1 concurrent-singleton, 3 close /
+  reset-close); `cd apps/metis-web && npx tsc --noEmit` => clean;
+  `cd apps/metis-web && npx vitest run` => `74 passed, 2 skipped`;
+  `ruff check metis_app/evals tests/test_evals_*.py` => clean.
 
 What's in place today that M16 will lean on — "personal evals" is
 closer to shipping than the table status suggests, because the raw
