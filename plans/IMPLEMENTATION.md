@@ -73,6 +73,7 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 | M18 | **LoRA fine-tuning (stretch)** — companion weights adapt to user data | 🌱 | Draft needed | [`plans/lora-stretch/plan.md`](lora-stretch/plan.md) (stub) | — | 2026-04-27 | M13, M16 |
 | M19 | **Mobile companion (stretch)** — Tauri Mobile or PWA, read-only | 🌌 | Draft needed | [`plans/mobile-stretch/plan.md`](mobile-stretch/plan.md) (stub) | — | 2026-04-27 | M15 |
 | M20 | **Metis logo rollout** — M-star mark + glow primitives, brand-system metadata (favicon / OG / Tauri), per-surface motion | 🔧🌌 | In progress | [`plans/metis-logo-rollout/plan.md`](metis-logo-rollout/plan.md) (design: [`docs/plans/2026-04-28-metis-logo-rollout-design.md`](../docs/plans/2026-04-28-metis-logo-rollout-design.md), impl: [`docs/plans/2026-04-28-metis-logo-rollout-implementation.md`](../docs/plans/2026-04-28-metis-logo-rollout-implementation.md)) | claude/cranky-northcutt-42501d (4 phases shipped, PR pending) | 2026-04-28 | — |
+| M22 | **Comet headline labels** — path-text label along comet tail + canvas hover card with title/summary/faculty/source/age, click-to-open | 🌌 | Draft needed | [`docs/plans/2026-05-01-comet-headline-labels-design.md`](../docs/plans/2026-05-01-comet-headline-labels-design.md) (design only; plan stub pending) | — | 2026-05-01 | M13 |
 
 ### Superseded
 
@@ -111,6 +112,7 @@ files, coordinate.
 - **M17** — Network panel in settings, per-provider kill switch. Operational note: should land *before* M13 (M13 massively increases outbound traffic). Backend uses stdlib `urllib` only — one wrapper covers 100% of in-process outbound. `metis_app/audit.py` is a pytest parity runner, unrelated; new package at `metis_app/network_audit/`.
 - **M18** — LoRA training loop, eval gate, weight swap.
 - **M19** — Read-only mobile client, sync protocol.
+- **M22** — New visual layer on top of M13's comet pipeline. Touches `apps/metis-web/lib/constellation-comet-labels.ts` (new), `apps/metis-web/lib/pretext-labels.ts` (adds `wrapText`), `apps/metis-web/app/page.tsx` (renderer + hover hit-test + click). No backend. First consumer of pretext's line-breaking surface in METIS. Design at [`docs/plans/2026-05-01-comet-headline-labels-design.md`](../docs/plans/2026-05-01-comet-headline-labels-design.md). 5 phases, multi-day. Promoted from the 2026-05-01 pretext intake's UI-exploration brainstorm.
 - **M20** — Frontend-only brand rollout. Adds three primitives at
   `apps/metis-web/components/brand/*` (`<MetisMark>`, `<MetisGlow>`,
   `<MetisLockup>`), one cleaned `currentColor`-themed SVG at
