@@ -38,3 +38,52 @@ export function computeArcLengths(tail: ReadonlyArray<TailPoint>): number[] {
   }
   return out;
 }
+
+export interface PathSample {
+  x: number;
+  y: number;
+  /** Tangent angle in radians, measured from +x axis. */
+  tangent: number;
+}
+
+/**
+ * Sample the polyline at a given arc length `s`.
+ *
+ * Linear interpolation within the segment that contains `s`. If `s` is
+ * past the polyline's total length, clamps to the last point and uses
+ * the last segment's tangent. Empty / single-point tails degrade to a
+ * zero-tangent origin sample.
+ *
+ * @param arcLengths Cumulative arc lengths from `computeArcLengths`.
+ * @param tail Polyline points; must be the same array used to compute `arcLengths`.
+ * @param s Arc length from index 0 outward.
+ */
+export function samplePathAt(
+  arcLengths: ReadonlyArray<number>,
+  tail: ReadonlyArray<TailPoint>,
+  s: number,
+): PathSample {
+  if (tail.length === 0) return { x: 0, y: 0, tangent: 0 };
+  if (tail.length === 1) return { x: tail[0].x, y: tail[0].y, tangent: 0 };
+
+  // Find the segment [i, i+1] that contains s. If s is past the end,
+  // clamp to the last segment.
+  let i = arcLengths.length - 2;
+  for (let k = 0; k < arcLengths.length - 1; k += 1) {
+    if (s <= arcLengths[k + 1]) {
+      i = k;
+      break;
+    }
+  }
+
+  const segLen = arcLengths[i + 1] - arcLengths[i];
+  const tRaw = segLen === 0 ? 0 : (s - arcLengths[i]) / segLen;
+  const t = Math.min(1, Math.max(0, tRaw));
+  const dx = tail[i + 1].x - tail[i].x;
+  const dy = tail[i + 1].y - tail[i].y;
+  return {
+    x: tail[i].x + dx * t,
+    y: tail[i].y + dy * t,
+    tangent: Math.atan2(dy, dx),
+  };
+}
