@@ -8,6 +8,7 @@ import {
   drawCometHoverCard,
   drawCometLabel,
   findHoveredComet,
+  formatCompactAge,
   placeCharactersAlongPath,
   rectsOverlap,
   samplePathAt,
@@ -43,6 +44,8 @@ function mkComet(overrides: Partial<CometData> = {}): CometData {
     title: "Hello world",
     summary: "",
     url: "",
+    sourceChannel: "",
+    publishedAt: 0,
     decision: "drift",
     relevanceScore: 0.5,
     ...overrides,
@@ -427,6 +430,47 @@ describe("drawCometHoverCard", () => {
     expect(() =>
       drawCometHoverCard(ctx, c, { x: c.x, y: c.y }, { viewport: vp }),
     ).not.toThrow();
+  });
+});
+
+describe("formatCompactAge", () => {
+  // Use an explicit nowMs so tests are wall-clock independent. The
+  // fixed reference is 2026-05-01T00:00:00Z = 1761955200000ms.
+  const REFERENCE_NOW_MS = 1_761_955_200_000;
+
+  it("returns 'now' for a future or zero age", () => {
+    // publishedAt in the future relative to nowMs
+    expect(formatCompactAge(REFERENCE_NOW_MS / 1000 + 60, REFERENCE_NOW_MS)).toBe("now");
+    // publishedAt exactly at nowMs
+    expect(formatCompactAge(REFERENCE_NOW_MS / 1000, REFERENCE_NOW_MS)).toBe("now");
+  });
+
+  it("returns 'Xs ago' for sub-minute ages", () => {
+    expect(formatCompactAge((REFERENCE_NOW_MS - 30_000) / 1000, REFERENCE_NOW_MS)).toBe("30s ago");
+  });
+
+  it("returns 'Xm ago' for sub-hour ages", () => {
+    expect(formatCompactAge((REFERENCE_NOW_MS - 12 * 60 * 1000) / 1000, REFERENCE_NOW_MS)).toBe(
+      "12m ago",
+    );
+  });
+
+  it("returns 'Xh ago' for sub-day ages", () => {
+    expect(
+      formatCompactAge((REFERENCE_NOW_MS - 5 * 60 * 60 * 1000) / 1000, REFERENCE_NOW_MS),
+    ).toBe("5h ago");
+  });
+
+  it("returns 'Xd ago' for multi-day ages", () => {
+    expect(
+      formatCompactAge((REFERENCE_NOW_MS - 3 * 24 * 60 * 60 * 1000) / 1000, REFERENCE_NOW_MS),
+    ).toBe("3d ago");
+  });
+
+  it("treats publishedAt=0 (unset) as 'now', not the 1970 epoch", () => {
+    // Without this guard, formatCompactAge(0, Date.now()) returns
+    // ~20000d ago — the bug Copilot caught in PR #592.
+    expect(formatCompactAge(0, REFERENCE_NOW_MS)).toBe("now");
   });
 });
 

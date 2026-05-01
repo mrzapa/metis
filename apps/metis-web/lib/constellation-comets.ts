@@ -73,6 +73,8 @@ export function makeCometData(
     title: event.news_item.title,
     summary: event.news_item.summary,
     url: event.news_item.url,
+    sourceChannel: event.news_item.source_channel,
+    publishedAt: event.news_item.published_at,
     decision: event.decision,
     relevanceScore: event.relevance_score,
   };

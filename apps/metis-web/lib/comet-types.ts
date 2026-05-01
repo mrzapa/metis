@@ -67,6 +67,10 @@ export interface CometData {
   summary: string;
   /** Source URL */
   url: string;
+  /** Source channel (e.g. "rss", "hackernews", "reddit") for the hover-card footer. */
+  sourceChannel: string;
+  /** Publication time in epoch seconds (matches the backend's NewsItem.published_at). */
+  publishedAt: number;
   /** Decision from the engine */
   decision: CometDecision;
   /** Relevance score 0-1 */
