@@ -1,14 +1,14 @@
 ---
 Milestone: The Forge (M14)
 Status: In progress
-Claim: claude/m14-phase6-trace-integration (Phase 6 — trace integration)
-Last updated: 2026-05-01 by claude/m14-phase6-trace-integration
+Claim: claude/jovial-volhard-3fa662 (reconcile Phase 4c + Phase 6 → Landed; assess Phase 7)
+Last updated: 2026-05-01 by claude/jovial-volhard-3fa662
 Vision pillar: Companion + Cortex
 ---
 
 ## Progress
 
-**Phase 6 — Trace integration (in PR, claude/m14-phase6-trace-integration, 2026-05-01)**
+**Phase 6 — Trace integration (Landed via PR #585 / `15da54e`, 2026-05-01)**
 
 * `TechniqueDescriptor` gains a `trace_event_types: tuple[str, ...]` field declaring the event-type strings the engine emits when this technique fires. Empty tuple = "no markers wired yet"; the card renders an empty state instead of a counter.
 * New `metis_app/services/forge_trace.py` exposes (a) `recent_uses_for_technique(descriptor, store, *, limit, now=None)` which returns a `{events, weekly_count}` payload filtered by descriptor markers, projecting each event into a tiny `{run_id, timestamp, stage, event_type, preview}` shape; and (b) `weekly_use_counts(descriptors, store, *, now=None)` for the single-pass list-endpoint scan. Heavy payload fields (`prompt`, `retrieval_results`, `tool_calls`, `validator`, `artifacts`) are stripped before crossing the API boundary.
@@ -23,7 +23,7 @@ Vision pillar: Companion + Cortex
 * Codex P1 follow-up: `accept_candidate()` now deep-merges `enabled[slug] = True` into the existing `settings.skills` snapshot before calling the writer, so the shallow `dict.update` in `save_settings` no longer wipes unrelated skill toggles. Added `settings_reader` injection.
 * Codex P2 follow-up: settings_writer failures roll back the just-written SKILL.md draft (and the empty slug folder) so retries don't hit `FileExistsError`. `mark_candidate_promoted` only runs on the success path.
 
-**Phase 4c — News-comet auto-absorb bridge (in PR #583, 2026-04-30)**
+**Phase 4c — News-comet auto-absorb bridge (Landed via PR #583 / `e841e38`, 2026-05-01)**
 
 * Additive migration on ``forge_proposals.db`` adds ``source`` (``"manual"`` | ``"comet"``) and ``comet_id`` columns. New ``forge_comet_bridge.auto_absorb_comets`` runs the absorb pipeline for arxiv absorb-decisions, dedups against pending rows, and persists with ``source="comet"``. Wired into ``comet_pipeline.run_poll_cycle`` behind the opt-in ``forge_comet_auto_absorb_enabled`` setting.
 * Frontend: ``ForgeProposalRecord`` gains ``source`` + ``comet_id``; review pane renders a "From comet feed" badge for comet-sourced rows.
