@@ -648,6 +648,19 @@ const CARD_FOOTER_LINE_HEIGHT = 13;
 
 const CARD_PILL_FONT_SIZE = 9;
 const CARD_PILL_INSET = 8;
+/** Pill height matches what the renderer draws: text-size + 6px padding. */
+const CARD_PILL_HEIGHT = CARD_PILL_FONT_SIZE + 6;
+/** Gap between the pill's bottom and the title's top so they don't kiss. */
+const CARD_PILL_BOTTOM_GAP = 4;
+/**
+ * Offset from the card's top edge to the title's top — at least
+ * `CARD_PAD_Y`, but pushed below the pill if the pill would
+ * otherwise overlap the first title line.
+ */
+const CARD_TITLE_TOP_OFFSET = Math.max(
+  CARD_PAD_Y,
+  CARD_PILL_INSET + CARD_PILL_HEIGHT + CARD_PILL_BOTTOM_GAP,
+);
 
 const CARD_TITLE_TO_SUMMARY_GAP = 4;
 const CARD_SUMMARY_TO_FOOTER_GAP = 6;
@@ -671,24 +684,6 @@ function facultyShortCode(facultyId: string): string {
 }
 
 /**
- * Compact `{n}{unit} ago` formatter for hover-card footers
- * (e.g. `12m ago`, `2h ago`, `3d ago`). `nowMs` and `publishedSeconds`
- * are explicit so tests can pin the wall clock.
- */
-function formatCompactAge(publishedSeconds: number, nowMs: number): string {
-  const ageMs = nowMs - publishedSeconds * 1000;
-  if (ageMs < 0) return "now";
-  const sec = Math.floor(ageMs / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const days = Math.floor(hr / 24);
-  return `${days}d ago`;
-}
-
-/**
  * Take the first `maxLines` lines from a wrapped result. If the wrap
  * produced more lines than the cap, append an ellipsis to the last
  * shown line so the user knows there's more.
@@ -709,8 +704,6 @@ function clampLines(
 export interface DrawCometHoverCardOpts {
   viewport: Size;
   fixedRects?: ReadonlyArray<Rect>;
-  /** Defaults to `Date.now()`; injectable for tests. */
-  now?: number;
 }
 
 /**
@@ -766,7 +759,11 @@ export function drawCometHoverCard(
     (summaryLines.length > 0 ? CARD_TITLE_TO_SUMMARY_GAP + summaryH : 0) +
     CARD_SUMMARY_TO_FOOTER_GAP +
     CARD_FOOTER_LINE_HEIGHT;
-  const cardH = CARD_PAD_Y * 2 + Math.max(innerH, CARD_TITLE_LINE_HEIGHT);
+  // titleTopOffset reserves vertical space for the pill so the first title
+  // line doesn't render underneath it. CARD_PAD_Y is the floor when the
+  // pill is small enough to fit beside the title (only happens for very
+  // short pill text, which we don't currently emit).
+  const cardH = CARD_TITLE_TOP_OFFSET + Math.max(innerH, CARD_TITLE_LINE_HEIGHT) + CARD_PAD_Y;
 
   const desiredX = anchor.x + CARD_ANCHOR_OFFSET;
   const desiredY = anchor.y - cardH / 2;
@@ -804,7 +801,7 @@ export function drawCometHoverCard(
   ctx.font = pillFont;
   const pillTextW = ctx.measureText(pillText).width;
   const pillW = pillTextW + 10;
-  const pillH = CARD_PILL_FONT_SIZE + 6;
+  const pillH = CARD_PILL_HEIGHT;
   const pillX = bbox.x + bbox.w - pillW - CARD_PILL_INSET;
   const pillY = bbox.y + CARD_PILL_INSET;
   ctx.strokeStyle = facultyColor;
@@ -821,8 +818,10 @@ export function drawCometHoverCard(
   ctx.textBaseline = "middle";
   ctx.fillText(pillText, pillX + pillW / 2, pillY + pillH / 2);
 
-  // Title.
-  let cursorY = bbox.y + CARD_PAD_Y;
+  // Title — start below the pill (CARD_TITLE_TOP_OFFSET) rather than
+  // directly under CARD_PAD_Y so the first line doesn't render
+  // underneath the faculty pill in the top-right.
+  let cursorY = bbox.y + CARD_TITLE_TOP_OFFSET;
   ctx.font = titleFont;
   ctx.fillStyle = facultyColor;
   ctx.textAlign = "left";
@@ -844,21 +843,17 @@ export function drawCometHoverCard(
 
   // Footer.
   cursorY += CARD_SUMMARY_TO_FOOTER_GAP;
-  const nowMs = opts.now ?? Date.now();
   const footerFont = buildCanvasFont(CARD_FOOTER_FONT_SIZE, LABEL_FONT_FAMILY, 400);
-  const footerText = `${comet.url ? new URL(comet.url, "http://x").host || "" : ""}`.replace(
-    /^www\./,
-    "",
-  );
-  // Prefer the explicit source channel, falling back to a derived host.
-  // We intentionally use comet.title/summary fields not the news_item ones —
-  // CometData inlines them, but channel + published_at live in nested data
-  // that the renderer doesn't currently receive. The footer surfaces the
-  // host from the URL plus the relevance score as a stand-in until M22
-  // Phase 5 polish wires the full news_item payload into CometData.
-  const ageText = formatCompactAge(0, nowMs); // 0 → "now" until news_item plumbing arrives
-  const footerLine = footerText
-    ? `${footerText} · ${ageText}`
+  // Phase 3 footer placeholder: prefer the URL's host (e.g. "news.ycombinator.com")
+  // when available, else fall back to a relevance percentage. The design spec
+  // calls for `${source} · ${age}` but published_at and source_channel live on
+  // the nested news_item payload that the renderer doesn't currently receive;
+  // Phase 5 polish wires those through to CometData and replaces this footer.
+  const hostText = comet.url
+    ? new URL(comet.url, "http://x").host.replace(/^www\./, "")
+    : "";
+  const footerLine = hostText
+    ? hostText
     : `relevance ${(comet.relevanceScore * 100).toFixed(0)}%`;
   ctx.font = footerFont;
   ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
