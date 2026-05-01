@@ -41,9 +41,13 @@ Vision pillar: Cosmos
 
 ## Deferred items
 
-- **Phase 4 — Collision suppression.** Per design's perf risk note. File as a follow-up if real-world `max_active` grows or QA finds visible label overlaps.
-- **BiDi.** Phases 1-5 shipped LTR-only. If real-world RSS feeds surface mojibake or backwards-rendered headlines, file as a Phase 6 follow-up.
-- **Fixed-UI rect coverage.** Phase 3 only includes `.metis-zoom-pill` in the avoidance list. The FAB, hero overlay, and top-bar live further from the typical comet trajectory; extend if QA finds real overlaps.
+- ~~**Phase 4 — Collision suppression.**~~ Shipped via [PR #(Phase 4 follow-up)](#) on 2026-05-01. `rotatedLabelBbox` + `suppressCollidingLabels` + prepare/suppress/draw pipeline; +12 unit tests. Highest-relevance comet wins when AABBs overlap >40%.
+- ~~**Fixed-UI rect coverage.**~~ Shipped via the same PR. Hover-card safe-area now also avoids `.metis-home-fab-root`, `.metis-hero-overlay`, and a synthetic 64px top-viewport band (the page-chrome topbar doesn't have a single stable className — a fixed-band fallback is more robust than chasing chrome's class composition).
+- **BiDi.** Phases 1-5 shipped LTR-only. **Still deferred.** Pretext's `prepareWithSegments` already returns BiDi-aware segment cursors, so `wrapText` (the one Phase 3 surface that uses pretext's full layout pipeline) handles mixed-script content correctly out of the box. The real risk lives in `placeCharactersAlongPath`'s per-character tangent assignment: it walks `Intl.Segmenter` graphemes in **source order**, not pretext's **visual order**. For a mixed-LTR/RTL headline, the character-to-tangent mapping would skew. Implementing this blind is risky — BiDi is one of the trickiest text-layout problems, has no observable acceptance criterion without a concrete failing case, and pretext's segment-cursor API would need wrapping (currently exposed only via private types in our wrapper). The design doc's *Risks* section explicitly framed this as "Phase 1 ships LTR-only. Phase 4 [now Phase 6] adds BiDi if real-world feeds surface it." Keep deferred. **First triggers to revisit:**
+  1. Real RSS feed surfaces an Arabic / Hebrew / mixed-script headline and the path-text comes out garbled.
+  2. The user explicitly waives the "if surfaced" gate.
+  3. We land a BiDi-aware test fixture (e.g. an Arabic headline string + an expected per-char tangent assignment) that pins the failure mode.
+- **Live preview QA.** API was offline for the entire M22 lifetime. Unit tests cover the math; visual look-and-feel of bending labels and hover cards remains unconfirmed against a real comet feed. **First action when API is next running:** spend ~5 min on `/` walking the design's *Live preview verification* checklist.
 
 ## Notes for the next agent
 
