@@ -1,8 +1,8 @@
 ---
 Milestone: M22 — Comet headline labels
 Status: In progress
-Claim: claude/m22-phase-1-tracer-pathtext
-Last updated: 2026-05-01 by claude/m22-phase-1-tracer-pathtext
+Claim: claude/m22-phase-2-mitigations (Phase 1 PR #589 open)
+Last updated: 2026-05-01 by claude/m22-phase-2-mitigations
 Vision pillar: Cosmos
 ---
 
