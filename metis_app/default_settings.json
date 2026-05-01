@@ -219,5 +219,9 @@
   "seedling_training_log_path": "",
   "network_audit_airplane_mode": false,
   "provider_block_llm": {},
-  "network_audit_discoverability_dismissed": false
+  "network_audit_discoverability_dismissed": false,
+  "evals_enabled": false,
+  "evals_cadence_hours": 24,
+  "evals_auto_seed_enabled": false,
+  "evals_share_optin": false
 }

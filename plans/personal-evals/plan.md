@@ -56,6 +56,41 @@ and will be harvested rather than rebuilt. See the harvest list in
   => `1511 passed, 12 skipped`; `cd apps/metis-web && npx tsc --noEmit`
   => clean; `cd apps/metis-web && npx vitest run` => `74 passed, 2
   skipped`; `ruff check tests/test_install_launcher.py` => clean.
+- 2026-05-01 Phase 2 claim flipped on the M16 row to
+  `claude/m16-phase2-eval-store`; plan-doc frontmatter and TDD-mode
+  declaration updated to record the strict-mode shift for the
+  implementation slice.
+- 2026-05-01 Phase 2 RED tests landed first as
+  `tests/test_evals_store.py`, `tests/test_evals_corpus.py`,
+  `tests/test_evals_generation.py`, `tests/test_evals_settings_keys.py`
+  (36 total). Initial run captured the expected RED with
+  `ModuleNotFoundError: No module named 'metis_app.evals'` across all
+  three import sites — strict-mode evidence per the Phase 2 rationale
+  declared above.
+- 2026-05-01 Phase 2 GREEN landed: new package `metis_app/evals/` ships
+  `store.py` (ADR 0017 schema for `tasks`/`runs`/`generations` plus an
+  env-overridable default-store singleton mirroring the
+  `network_audit` pattern), `corpus.py` (`EvalTask` dataclass mirroring
+  the `ArtifactConverter.export_as_eval` shape + idempotent
+  `import_seed_jsonl` keyed on `eval_id` per ADR 0017 §3), and
+  `generation.py` (content-addressed SHA-256 `current_generation_id`,
+  `GENERATION_SETTINGS` material-settings allowlist, and
+  `bump_if_needed` that preserves `first_seen_at`/`notes` on repeat
+  via `ON CONFLICT DO NOTHING`). Settings keys `evals_enabled` /
+  `evals_cadence_hours` / `evals_auto_seed_enabled` /
+  `evals_share_optin` added to `metis_app/default_settings.json` and
+  `AppSettings` with defaults aligned to ADR 0018 (off / 24h / off /
+  off) so fresh installs do not surface a hollow report and
+  `evals_share_optin` stays inert.
+- 2026-05-01 Phase 2 verification:
+  `python -m pytest tests/ --ignore=tests/_litestar_helpers --ignore=tests/test_api_app.py`
+  => `1547 passed, 12 skipped` (delta = 36 new tests, all GREEN);
+  `cd apps/metis-web && npx tsc --noEmit` => clean;
+  `cd apps/metis-web && npx vitest run` => `74 passed, 2 skipped`;
+  `ruff check metis_app/evals metis_app/settings_store.py
+  tests/test_evals_*.py` => clean (after dropping unused
+  `os`/`uuid`/`pytest` imports + an unused `store` binding flagged on
+  the first ruff pass).
 
 What's in place today that M16 will lean on — "personal evals" is
 closer to shipping than the table status suggests, because the raw
@@ -130,21 +165,28 @@ time-series or surfaced as an eval report:
 
 ## Next up
 
-1. **Phase 2 — scaffold the eval store around ADR 0017.** Add
-  `metis_app/evals/{corpus,store,generation}.py` with the `tasks`,
-  `runs`, and `generations` schema in a dedicated `evals.db`, plus
-  first-run import from `evals/golden_dataset.jsonl` when present.
-2. **Phase 2 — wire backend config without growing a second settings
-  surface.** Add `evals_enabled`, `evals_cadence_hours`,
-  `evals_auto_seed_enabled`, and `evals_share_optin` to
-  `metis_app/default_settings.json` / `settings_store.py`, keeping the
-  default posture aligned with ADR 0018 and treating empty local
-  history as the default startup path.
-3. **Phase 3 prep — reserve the activity + API surface before the
-  runner lands.** Extend the existing `CompanionActivityEvent` bus with
-  `source: "eval_run"` and sketch `/v1/evals/tasks` plus
-  `/v1/evals/runs` against the real field names captured in the
-  2026-05-01 inventory memo below.
+1. **Phase 3 — eval run harness.** Land
+  `metis_app/evals/runner.py` with `run_eval(task, settings, *,
+  progress_cb=None) -> EvalRun` that builds a `WorkspaceOrchestrator`
+  invocation against the task's `query` / `expected_strategy` / `mode`,
+  records the trace `run_id`, captures the answer text and behavior
+  profile, and emits through `progress_cb`. Wire the runner into
+  Litestar's executor pool the way `autonomous_research_service`
+  already does so interactive use never blocks. Call
+  `bump_if_needed` from `metis_app.evals.generation` once per run so
+  every `runs.generation_id` row has a matching entry in `generations`.
+2. **Phase 3 prep — extend the activity + API surface before the
+  runner lands.** Add a `"eval_run"` value to
+  `CompanionActivityEvent.source` (frontend `apps/metis-web/lib/api.ts`
+  + backend emitters), and sketch `/v1/evals/tasks` / `/v1/evals/runs`
+  / `/v1/evals/run/{task_id}` against the field names captured in
+  the 2026-05-01 inventory memo below.
+3. **Phase 3 — grading lanes (ADR 0016).** Add
+  `metis_app/evals/grading.py` with the three v1 lanes (trace label,
+  message vote, implicit `BehaviorProfile`) renormalised over whichever
+  lanes are present, plus the `review_required=true` propagation when
+  any `investigate` label appears in the run's `trace_feedback`
+  history.
 
 ## Blockers
 
