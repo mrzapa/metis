@@ -170,7 +170,11 @@ export function placeCharactersAlongPath(
     const center = s + w / 2;
     if (center > total) break;
     const sample = samplePathAt(arcLengths, tail, center);
-    out.push({ char: grapheme, x: sample.x, y: sample.y, tangent: sample.tangent });
+    // Position from the polyline-linear sample; tangent from the
+    // secant-smoothed window so character rotations vary continuously
+    // even at segment corners.
+    const tangent = smoothedTangentAt(arcLengths, tail, center);
+    out.push({ char: grapheme, x: sample.x, y: sample.y, tangent });
     s += w;
   }
   return out;
