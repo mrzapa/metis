@@ -386,6 +386,119 @@ const LABEL_BASE_OPACITY = 0.65;
 /** Hover-detect radius around a comet head, in CSS pixels. */
 const HOVER_RADIUS_PX = 24;
 
+/** A rectangle in screen-space pixels — `x/y` is the top-left corner. */
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface Size {
+  w: number;
+  h: number;
+}
+
+/**
+ * AABB overlap test. Edge-touching rects (one's right edge equals the
+ * other's left edge) are treated as NON-overlapping — useful for
+ * "card sits flush against the toolbar with zero overlap."
+ */
+export function rectsOverlap(a: Rect, b: Rect): boolean {
+  return !(
+    a.x + a.w <= b.x ||
+    b.x + b.w <= a.x ||
+    a.y + a.h <= b.y ||
+    b.y + b.h <= a.y
+  );
+}
+
+/** Default outer-edge margin used by `clampToSafeArea`. */
+const SAFE_AREA_MARGIN_PX = 16;
+/** Padding the card keeps when nudging away from a fixed UI rect. */
+const FIXED_RECT_AVOIDANCE_PADDING = 8;
+/**
+ * Bound on the iterative nudge loop in `clampToSafeArea`. Each iteration
+ * may displace the rect through one fixed UI element; we cap at
+ * 2 × fixedRects.length to allow at most two passes through the list
+ * (covering the case where escaping rect A pushes us into rect B).
+ */
+const SAFE_AREA_NUDGE_BUDGET_FACTOR = 2;
+
+/**
+ * Clamp a rect into the viewport's safe area (inset by `margin`) and
+ * iteratively nudge it away from any of `fixedRects` it overlaps.
+ *
+ * Strategy:
+ *   1. Clamp into `viewport` with a `margin`-px outer inset.
+ *   2. Walk `fixedRects` looking for an overlap; if found, pick the
+ *      smallest-magnitude axis-aligned displacement that escapes the
+ *      offender AND keeps the rect inside the viewport.
+ *   3. Repeat up to `2 × fixedRects.length` times. If we can't escape
+ *      (no displacement keeps the rect inside the viewport), accept the
+ *      remaining overlap as least-bad rather than relocating wildly.
+ *
+ * Pure function. Caller passes the fixed UI rects' bounding boxes
+ * (e.g. `getBoundingClientRect()` results from the zoom pill, FAB,
+ * top-bar) once per frame.
+ */
+export function clampToSafeArea(
+  rect: Rect,
+  viewport: Size,
+  fixedRects: ReadonlyArray<Rect>,
+  margin = SAFE_AREA_MARGIN_PX,
+): Rect {
+  const r: Rect = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+
+  // 1. Clamp into viewport (preserve size).
+  const minX = margin;
+  const minY = margin;
+  const maxX = viewport.w - margin - r.w;
+  const maxY = viewport.h - margin - r.h;
+  if (r.x < minX) r.x = minX;
+  if (r.y < minY) r.y = minY;
+  if (r.x > maxX) r.x = maxX;
+  if (r.y > maxY) r.y = maxY;
+
+  // 2. Iteratively nudge out of fixed-UI rects.
+  const budget = Math.max(1, fixedRects.length * SAFE_AREA_NUDGE_BUDGET_FACTOR);
+  for (let attempt = 0; attempt < budget; attempt += 1) {
+    let collision: Rect | null = null;
+    for (const fr of fixedRects) {
+      if (rectsOverlap(r, fr)) {
+        collision = fr;
+        break;
+      }
+    }
+    if (!collision) break;
+
+    // Candidate displacements to escape the collision along each axis,
+    // padded so we don't sit flush against the fixed UI.
+    const candidates = [
+      { dx: collision.x - FIXED_RECT_AVOIDANCE_PADDING - (r.x + r.w), dy: 0 }, // left
+      { dx: collision.x + collision.w + FIXED_RECT_AVOIDANCE_PADDING - r.x, dy: 0 }, // right
+      { dx: 0, dy: collision.y - FIXED_RECT_AVOIDANCE_PADDING - (r.y + r.h) }, // up
+      { dx: 0, dy: collision.y + collision.h + FIXED_RECT_AVOIDANCE_PADDING - r.y }, // down
+    ];
+    candidates.sort((a, b) => Math.abs(a.dx) + Math.abs(a.dy) - (Math.abs(b.dx) + Math.abs(b.dy)));
+
+    let applied = false;
+    for (const c of candidates) {
+      const nx = r.x + c.dx;
+      const ny = r.y + c.dy;
+      if (nx >= minX && ny >= minY && nx <= maxX && ny <= maxY) {
+        r.x = nx;
+        r.y = ny;
+        applied = true;
+        break;
+      }
+    }
+    if (!applied) break;
+  }
+
+  return r;
+}
+
 export interface CursorPoint {
   x: number;
   y: number;
