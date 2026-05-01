@@ -300,6 +300,46 @@ def test_validate_absolute_path_member_rejected(
     )
 
 
+def test_validate_non_utf8_manifest_reports_error(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Codex P1 — a bundle whose manifest.yaml carries non-UTF-8
+    bytes must surface as a validation error, not bubble up as a
+    ``UnicodeDecodeError`` that 500s the route."""
+    bad = tmp_path / "non-utf8-manifest.metis-skill"
+    garbage = b"\xff\xfe\x00\x00\x80\x90 not utf-8"
+    with tarfile.open(bad, mode="w") as tf:
+        info = tarfile.TarInfo(name="manifest.yaml")
+        info.size = len(garbage)
+        tf.addfile(info, BytesIO(garbage))
+    errors = forge_bundle.validate_bundle(bad)
+    assert any(
+        "utf-8" in e.lower() or "manifest" in e.lower() for e in errors
+    )
+
+
+def test_validate_non_utf8_skill_md_reports_error(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Codex P1 — a bundle whose skill/SKILL.md carries non-UTF-8
+    bytes must surface as a validation error rather than 500ing
+    the preview/install route."""
+    bad = tmp_path / "non-utf8-skill.metis-skill"
+    with tarfile.open(bad, mode="w") as tf:
+        m = _make_manifest_yaml()
+        info = tarfile.TarInfo(name="manifest.yaml")
+        info.size = len(m)
+        tf.addfile(info, BytesIO(m))
+        garbage = b"\xff\xfe\x80garbage non-utf-8"
+        info2 = tarfile.TarInfo(name="skill/SKILL.md")
+        info2.size = len(garbage)
+        tf.addfile(info2, BytesIO(garbage))
+    errors = forge_bundle.validate_bundle(bad)
+    assert any(
+        "utf-8" in e.lower() or "SKILL.md" in e for e in errors
+    )
+
+
 def test_validate_unsupported_format_version_rejected(
     tmp_path: pathlib.Path,
 ) -> None:

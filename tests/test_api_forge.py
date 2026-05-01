@@ -1354,6 +1354,42 @@ def test_export_skill_400_on_missing_version(tmp_path: pathlib.Path) -> None:
     assert resp.status_code == 400
 
 
+def test_export_skill_400_on_path_separator_in_version(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Codex P2 — `version` flows directly into the bundle filename.
+    A version with `/` or `\\` makes `pack_skill` try to write to a
+    nested non-existent directory, which would 500 if the route
+    didn't validate up front."""
+    skills_root = tmp_path / "skills"
+    _write_phase7_skill(skills_root, "qa-fixture")
+
+    bad_versions = (
+        "1/2",
+        "1\\2",
+        "../escape",
+        "../../etc/passwd",
+        "1.0/v",
+        "v\\1",
+    )
+
+    with (
+        patch(
+            "metis_app.api_litestar.routes.forge._skills_root_for_drafts",
+            return_value=skills_root,
+        ),
+        _client() as client,
+    ):
+        for bad in bad_versions:
+            resp = client.post(
+                "/v1/forge/skills/qa-fixture/export",
+                json={"version": bad},
+            )
+            assert resp.status_code == 400, (
+                f"version={bad!r} should be 400, got {resp.status_code}"
+            )
+
+
 def test_import_preview_returns_manifest_and_no_conflict(
     tmp_path: pathlib.Path,
 ) -> None:

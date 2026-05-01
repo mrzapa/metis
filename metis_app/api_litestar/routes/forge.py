@@ -25,6 +25,7 @@ import base64
 import hashlib
 import logging
 import pathlib
+import re
 import tempfile
 from typing import Any
 
@@ -51,6 +52,13 @@ from metis_app.settings_store import load_settings, save_settings as _save_setti
 log = logging.getLogger(__name__)
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+
+# M14 Phase 7 (Codex P2) — restrict bundle export `version` to
+# filename-safe characters before it flows into the
+# `<skill_id>-<version>.metis-skill` path. Letters, digits, dot,
+# dash, underscore, plus, tilde — covers semver and common
+# release-tag punctuation; rejects path separators and traversal.
+_VERSION_PATTERN = re.compile(r"[A-Za-z0-9._+~\-]+")
 
 
 def _candidates_db_path() -> pathlib.Path:
@@ -487,6 +495,23 @@ def export_skill_bundle(
     if not version:
         raise HTTPException(
             status_code=400, detail="`version` is required"
+        )
+    # `version` flows directly into the bundle filename
+    # `<skill_id>-<version>.metis-skill`. Reject path separators
+    # and traversal characters up front so a malicious or fat-
+    # fingered version can't make `pack_skill` try to write to a
+    # nested non-existent directory (the symptom Codex P2 caught).
+    # Permitted alphabet: letters, digits, dot, dash, underscore,
+    # plus, tilde — the conservative subset of semver + common
+    # release-tag punctuation. Adjust if a real-world version
+    # legitimately needs more.
+    if not _VERSION_PATTERN.fullmatch(version):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "`version` may only contain letters, digits, "
+                "and the punctuation `. - _ + ~`"
+            ),
         )
     author_raw = payload.get("author")
     author = (

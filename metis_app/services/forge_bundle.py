@@ -322,11 +322,23 @@ def inspect_bundle(bundle_path: pathlib.Path) -> InspectedBundle:
                 if member.name == MANIFEST_NAME:
                     fobj = tf.extractfile(member)
                     if fobj is not None:
-                        manifest_text = fobj.read().decode("utf-8")
+                        try:
+                            manifest_text = fobj.read().decode("utf-8")
+                        except UnicodeDecodeError as exc:
+                            errors.append(
+                                f"manifest.yaml is not valid UTF-8: {exc}"
+                            )
+                            manifest_text = None
                 elif member.name == f"{PAYLOAD_PREFIX}{SKILL_FILE_RELATIVE}":
                     fobj = tf.extractfile(member)
                     if fobj is not None:
-                        skill_md_text = fobj.read().decode("utf-8")
+                        try:
+                            skill_md_text = fobj.read().decode("utf-8")
+                        except UnicodeDecodeError as exc:
+                            errors.append(
+                                f"skill/SKILL.md is not valid UTF-8: {exc}"
+                            )
+                            skill_md_text = None
     except tarfile.TarError as exc:
         return InspectedBundle(
             manifest=_zero_manifest(),
