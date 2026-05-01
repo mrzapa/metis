@@ -94,6 +94,31 @@ export function samplePathAt(
 /** Half-window used by `smoothedTangentAt` to compute the secant tangent. */
 const TANGENT_SMOOTHING_DELTA_PX = 5;
 
+/** Enter the flipped state when |tangent| crosses 95° (hysteresis upper bound). */
+const FLIP_ENTER_RAD = (95 * Math.PI) / 180;
+/** Exit the flipped state when |tangent| drops to 90° or below (hysteresis lower bound). */
+const FLIP_EXIT_RAD = Math.PI / 2;
+
+/**
+ * Decide whether a label baseline should be flipped 180° given the
+ * current dominant tangent.
+ *
+ * Hysteresis prevents flicker when the tangent oscillates near the
+ * threshold:
+ *   - From unflipped: only flip once `|tangent| > 95°` (the enter band).
+ *   - From flipped:   only unflip once `|tangent| ≤ 90°` (the exit band).
+ *
+ * Tangents are taken in their full [-π, π] range; `Math.abs` collapses
+ * the symmetric pair (e.g. ±100° both indicate upside-down content).
+ */
+export function shouldFlipOrientation(tangent: number, currentlyFlipped: boolean): boolean {
+  const mag = Math.abs(tangent);
+  if (currentlyFlipped) {
+    return mag > FLIP_EXIT_RAD;
+  }
+  return mag > FLIP_ENTER_RAD;
+}
+
 /**
  * Tangent at arc length `s`, smoothed via central finite difference.
  *
@@ -153,15 +178,27 @@ export interface PlacedChar {
  * (Phase 1: silently; Phase 2 adds an ellipsis fallback under the
  * truncation budget).
  */
+export interface PlaceCharactersOpts {
+  /**
+   * When true, every character's tangent is rotated by π so the label
+   * reads the other way along the path. Used by `drawCometLabel` when
+   * `shouldFlipOrientation(...)` is on, which keeps text right-side-up
+   * for tails diving down-and-left across the screen.
+   */
+  flipped?: boolean;
+}
+
 export function placeCharactersAlongPath(
   label: string,
   font: string,
   tail: ReadonlyArray<TailPoint>,
+  opts: PlaceCharactersOpts = {},
 ): PlacedChar[] {
   if (tail.length < 2 || label.length === 0) return [];
 
   const arcLengths = computeArcLengths(tail);
   const total = arcLengths[arcLengths.length - 1];
+  const flipOffset = opts.flipped ? Math.PI : 0;
 
   const out: PlacedChar[] = [];
   let s = 0;
@@ -173,7 +210,7 @@ export function placeCharactersAlongPath(
     // Position from the polyline-linear sample; tangent from the
     // secant-smoothed window so character rotations vary continuously
     // even at segment corners.
-    const tangent = smoothedTangentAt(arcLengths, tail, center);
+    const tangent = smoothedTangentAt(arcLengths, tail, center) + flipOffset;
     out.push({ char: grapheme, x: sample.x, y: sample.y, tangent });
     s += w;
   }
@@ -243,19 +280,40 @@ const LABEL_FONT_WEIGHT = 400;
 const LABEL_BASE_OPACITY = 0.65;
 
 /**
+ * Per-comet flip state. Module-level so that hysteresis carries across
+ * frames without the caller having to plumb state. Cleaned by
+ * `pruneCometLabelState(activeIds)` whenever the active comet set
+ * shrinks; otherwise grows monotonically.
+ */
+const flipState = new Map<string, boolean>();
+
+/**
+ * Drop flip-state entries for comets no longer in the active set.
+ * Caller should invoke once per frame (or whenever the active comet
+ * list changes) with the currently-rendered comet IDs to prevent the
+ * module-level Map from leaking across long sessions.
+ */
+export function pruneCometLabelState(activeCometIds: Iterable<string>): void {
+  const active = new Set<string>();
+  for (const id of activeCometIds) active.add(id);
+  for (const id of flipState.keys()) {
+    if (!active.has(id)) flipState.delete(id);
+  }
+}
+
+/**
  * Render a comet's full title as path-text along its tail.
  *
- * Phase 1 contract: per-character position from `placeCharactersAlongPath`,
- * per-character rotation from raw segment tangent. No truncation, no
- * orientation flip, no collision suppression, no reduced-motion clamp,
- * no faculty-color tweaks beyond a constant opacity multiplier. Phase 2
- * will add a `DrawCometLabelOpts` parameter for the mitigation knobs.
+ * Phase 2: spatially-smoothed per-character tangent (Task 2.1), and
+ * orientation flip with hysteresis tracked per `comet.comet_id`
+ * (Task 2.3). When `|dominant tangent| > 95°` the label baseline flips
+ * 180° so text stays right-side-up; it unflips when `|dominant tangent|
+ * ≤ 90°`. Hysteresis prevents flicker as a comet's trajectory wobbles
+ * near the threshold.
  *
- * `tailHistory` from `tickComet` is in oldest-first order (each tick
- * pushes the current head to the END of the array; `shift()` drops the
- * oldest from the FRONT). `placeCharactersAlongPath` walks from index
- * 0 outward, so we reverse the input here so characters lay along the
- * trail from the head back into the past.
+ * `tailHistory` from `tickComet` is in oldest-first order. The current
+ * `comet.x/y` is prepended via `buildHeadFirstPath` so the label starts
+ * at the rendered head, not one frame behind it.
  */
 export function drawCometLabel(
   ctx: CanvasRenderingContext2D,
@@ -263,14 +321,22 @@ export function drawCometLabel(
 ): void {
   if (comet.title.length === 0) return;
 
-  // Head-first path: current comet.x/y prepended to the reversed tailHistory
-  // (because tickComet records the OLD position before advancing comet.x/y,
-  // so tailHistory.last() lags the rendered head by one frame).
   const tail = buildHeadFirstPath(comet);
   if (tail.length < 2) return;
 
+  // Dominant tangent: use the path's mid-arc tangent as a stable proxy
+  // for "which way is this label pointing right now." Cheaper than
+  // averaging per-char tangents and equivalent for hysteresis decisions.
+  const arcLengths = computeArcLengths(tail);
+  const total = arcLengths[arcLengths.length - 1];
+  const dominantTangent = smoothedTangentAt(arcLengths, tail, total / 2);
+
+  const wasFlipped = flipState.get(comet.comet_id) ?? false;
+  const isFlipped = shouldFlipOrientation(dominantTangent, wasFlipped);
+  if (isFlipped !== wasFlipped) flipState.set(comet.comet_id, isFlipped);
+
   const font = buildCanvasFont(LABEL_FONT_SIZE_PX, LABEL_FONT_FAMILY, LABEL_FONT_WEIGHT);
-  const placed = placeCharactersAlongPath(comet.title, font, tail);
+  const placed = placeCharactersAlongPath(comet.title, font, tail, { flipped: isFlipped });
   if (placed.length === 0) return;
 
   const [r, g, b] = comet.color;

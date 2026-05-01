@@ -6,6 +6,7 @@ import {
   drawCometLabel,
   placeCharactersAlongPath,
   samplePathAt,
+  shouldFlipOrientation,
   smoothedTangentAt,
 } from "../constellation-comet-labels";
 import type { CometData } from "../comet-types";
@@ -204,6 +205,58 @@ describe("smoothedTangentAt", () => {
     // s=0 and s=total — no later/earlier neighbour to average against.
     expect(smoothedTangentAt(arc, tail, 0)).toBeCloseTo(0);
     expect(smoothedTangentAt(arc, tail, 20)).toBeCloseTo(Math.PI / 2);
+  });
+});
+
+describe("shouldFlipOrientation", () => {
+  // Hysteresis: enter flipped state at |tangent| > 95°, exit at |tangent| ≤ 90°.
+  it("does not flip below the enter threshold from unflipped", () => {
+    expect(shouldFlipOrientation(Math.PI / 2 - 0.1, false)).toBe(false);
+  });
+
+  it("flips when |tangent| crosses 95° from unflipped", () => {
+    expect(shouldFlipOrientation((95 * Math.PI) / 180 + 0.01, false)).toBe(true);
+  });
+
+  it("once flipped, stays flipped while |tangent| > 90°", () => {
+    expect(shouldFlipOrientation((92 * Math.PI) / 180, true)).toBe(true);
+  });
+
+  it("once flipped, unflips when |tangent| ≤ 90°", () => {
+    expect(shouldFlipOrientation((89 * Math.PI) / 180, true)).toBe(false);
+  });
+
+  it("treats negative tangents symmetrically (uses magnitude)", () => {
+    // -100° is just as upside-down as +100°.
+    expect(shouldFlipOrientation((-100 * Math.PI) / 180, false)).toBe(true);
+    expect(shouldFlipOrientation((-89 * Math.PI) / 180, true)).toBe(false);
+  });
+
+  it("π (perfect 180°) flips from either state", () => {
+    expect(shouldFlipOrientation(Math.PI, false)).toBe(true);
+    expect(shouldFlipOrientation(-Math.PI, true)).toBe(true);
+  });
+});
+
+describe("placeCharactersAlongPath with flipped opt", () => {
+  const horizontalTail = [
+    { x: 0, y: 0 },
+    { x: 200, y: 0 },
+  ];
+  const font = '400 11px "Space Grotesk", sans-serif';
+
+  it("when flipped: true, all character tangents are rotated by π", () => {
+    const placed = placeCharactersAlongPath("AB", font, horizontalTail, { flipped: true });
+    expect(placed).toHaveLength(2);
+    // Underlying smoothed tangent on a horizontal tail is 0; flipped → π.
+    expect(placed[0].tangent).toBeCloseTo(Math.PI, 5);
+    expect(placed[1].tangent).toBeCloseTo(Math.PI, 5);
+  });
+
+  it("when flipped: false (default), tangents match the smoothed baseline", () => {
+    const placed = placeCharactersAlongPath("AB", font, horizontalTail);
+    expect(placed[0].tangent).toBeCloseTo(0, 5);
+    expect(placed[1].tangent).toBeCloseTo(0, 5);
   });
 });
 
