@@ -57,6 +57,7 @@ import {
   drawPolarisTendril,
   drawAbsorptionBurst,
 } from "@/lib/constellation-comets";
+import { drawCometLabel } from "@/lib/constellation-comet-labels";
 import {
   buildBrainPlacementIntent,
   buildFacultyAnchoredPlacement,
@@ -4732,6 +4733,12 @@ export default function Home() {
       }
       if (cometSprites.length > 0 && ctx) {
         drawCometSprites(ctx, cometSprites, ts);
+        // M22 Phase 1 — tracer-bullet path-text headline labels along each
+        // comet's tail. No truncation/flip/collision/reduced-motion yet;
+        // those land in Phase 2.
+        for (const c of cometSprites) {
+          drawCometLabel(ctx, c);
+        }
       }
       // Absorption burst effects (persists briefly after comet absorbed)
       for (let i = absorbBursts.length - 1; i >= 0; i--) {

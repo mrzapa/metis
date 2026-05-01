@@ -682,17 +682,39 @@ Phase mapping: items 47, 48, 49 are **Phase 1 / 2** (high-impact noob-friendly +
 
 ## 2026-05-01 — Notes for the next agent
 
-### Canvas text measurement: consolidate on `lib/pretext-labels.ts`
+### Canvas text measurement: convention + 3D-brain-graph cleanup signal
 
 **Context.** `@chenglou/pretext` (npm `@chenglou/pretext@0.0.5`) is already a dependency, vendored on 2026-03-29 in commit `3c6dd61` (folded into an unrelated "feat: add index deletion" commit, easy to miss). It's a TS library that measures text via `Intl.Segmenter` + Canvas 2D — grapheme-cluster-correct, no DOM reflow. Today it backs node-cluster label sprites in [apps/metis-web/app/page.tsx:2542-2552](../apps/metis-web/app/page.tsx:2542) and [line 4234](../apps/metis-web/app/page.tsx:4234) via the wrapper at [apps/metis-web/lib/pretext-labels.ts](../apps/metis-web/lib/pretext-labels.ts), which adds a font-keyed cache and a `ctx.measureText` fallback.
 
-**Audit finding (2026-05-01).** A grep for `measureText` across `apps/metis-web` shows only one site that bypasses the wrapper: [apps/metis-web/components/brain/brain-graph-3d.tsx:219](../apps/metis-web/components/brain/brain-graph-3d.tsx:219) — BrainGraph node-label pill sprites. It calls `ctx.measureText(text)` directly inside the per-frame label draw path.
+**Audit finding (2026-05-01).** A grep for `measureText` across `apps/metis-web` shows only one site that bypasses the wrapper: [apps/metis-web/components/brain/brain-graph-3d.tsx:219](../apps/metis-web/components/brain/brain-graph-3d.tsx:219). On first read this looked like a half-day consolidation patch.
 
-**Action.** A small consolidation patch (~half-day):
-1. Migrate [brain-graph-3d.tsx:217-222](../apps/metis-web/components/brain/brain-graph-3d.tsx:217) to import `measureSingleLineTextWidth` + `buildCanvasFont` from `@/lib/pretext-labels` and replace the raw `ctx.measureText(text).width` call. The wrapper's font-keyed cache is the main win — BrainGraph re-measures the same labels every pan/zoom frame, so this is a real per-frame allocation/measurement saving, not theoretical.
-2. Add a single line under the M01 conventions: **all canvas text measurement in `apps/metis-web` must go through `lib/pretext-labels.ts`** (so a future Forge or constellation surface can't re-introduce a raw `ctx.measureText`).
-3. Tiny visual-regression check on the BrainGraph label pills (zoom in/out, ensure pill widths still hug the labels). No mocks; just open `/`, navigate to a brain view, eyeball.
+**Don't migrate it.** User confirmed (2026-05-01) the 3D brain-graph code path was meant to be deleted. Tracing the imports backs that up — `BrainGraph3D` is referenced only by `brain-graph-animated-wrapper.tsx`, which is referenced only by `brain-graph-animation-showcase.tsx`, which **isn't imported by any route**. The whole subtree is unmounted. Migrating its `ctx.measureText` would just churn code that's headed for deletion and slightly enlarge the eventual cleanup PR. See [§4.9 below](#49-3d-brain-graph-subtree--unmounted-cleanup-candidate-2026-05-01).
 
-**Risk to flag for the next agent.** The library is pinned at `0.0.5` — pre-1.0, breaking changes are normal. Keep the wrapper as the only import surface so a future bump or fork can be done in one file. No Node-side imports (server-rendered metadata routes, unit tests) — pretext requires `Intl.Segmenter` + Canvas 2D, fine in Tauri's webview but absent in Node without polyfills.
+**The convention still stands.** When the next canvas-rendered text surface is added (Forge thumbnails, constellation overlay, comet labels, anything new) it MUST go through [`lib/pretext-labels.ts`](../apps/metis-web/lib/pretext-labels.ts) — `measureSingleLineTextWidth` + `buildCanvasFont`. The wrapper is the only sanctioned import surface for `@chenglou/pretext`. No raw `ctx.measureText` in `apps/metis-web` outside `lib/pretext-labels.ts` itself.
+
+**Risk to flag for the next agent.** `@chenglou/pretext` is pinned at `0.0.5` — pre-1.0, breaking changes are normal. Keep the wrapper as the only import surface so a future bump or fork can be done in one file. No Node-side imports (server-rendered metadata routes, unit tests) — pretext requires `Intl.Segmenter` + Canvas 2D, fine in Tauri's webview but absent in Node without polyfills.
 
 **Filed by:** intake triage on `claude/gifted-knuth-27aeb0` (2026-05-01). Source idea: [`plans/IDEAS.md` → "chenglou/pretext"](../plans/IDEAS.md).
+
+### 4.9 3D brain-graph subtree — unmounted, decision needed (2026-05-01)
+
+`apps/metis-web/components/brain/brain-graph-3d.tsx` · `brain-graph-animated-wrapper.tsx` · `brain-graph-animation-showcase.tsx` · `BRAIN_ANIMATIONS.md`
+
+**The signal.** A grep across `apps/metis-web` shows zero imports of `brain-graph-3d`, `BrainGraph3D`, `brain-graph-animated-wrapper`, or `BrainGraphAnimatedWrapper` from any `app/**` route, page, or layout — no static imports, no `next/dynamic` indirection, nothing under `app/**/*brain*`. The import chain dead-ends at `BrainGraphAnimationShowcase`, which is exported but never imported. `BrainGraph3D` itself is heavy (Three.js, UnrealBloomPass, OutputPass, GSAP, custom WebGL post-processing) so a mounted instance would be obvious in the bundle. User confirmed 2026-05-01 the path was "pretty sure meant to be deleted."
+
+**The wrinkle.** Several **landed** plan docs claim brain-graph-3d.tsx is load-bearing:
+
+- [`plans/trive-v2-homological-scaffold/plan.md`](../plans/trive-v2-homological-scaffold/plan.md) (M10, Landed `6fa1ff2` 2026-04-05) — H₁ persistent-homology rings rendered as `THREE.TorusGeometry` on top of the 3D scene.
+- [`plans/seedling-and-feed/plan.md`](../plans/seedling-and-feed/plan.md) (M13, Landed) — `brain-graph-3d.tsx subscribes to the companion bus`.
+- [`docs/plans/2026-04-26-edge-pulse-visual-design.md`](plans/2026-04-26-edge-pulse-visual-design.md) (edge-pulse PR #567, Landed 2026-04-26) — claims the file `subscribes and pulses on new brain links`.
+- [`docs/plans/2026-04-28-metis-logo-rollout-design.md`](plans/2026-04-28-metis-logo-rollout-design.md) (M20, in progress) — references its GSAP usage.
+- A `brain-graph-3d.test.tsx` is named in the edge-pulse plan but does not exist in the worktree.
+
+So either (a) the file was mounted on a brain page that got deleted during M02 / M12 work and these landed milestones quietly stopped being end-to-end exercisable, or (b) the file is live via a code path I haven't found. Either way, this is a **preserve-and-productise question** worth resolving — it's the difference between "remount it on a route" and "remove it plus its plan-doc references plus the heavy deps it drags in."
+
+**Recommended next-agent action (M01 sweep).**
+1. Confirm there is no live mount point — `git log --diff-filter=D --summary` for any deleted file under `app/**/*brain*` to see when the route last existed, plus a runtime check (`grep` on the running server's served bundles or a `next build` artifact analysis).
+2. **If genuinely unmounted:** delete the `*-3d.tsx`, `*-animated-wrapper.tsx`, `*-animation-showcase.tsx`, `BRAIN_ANIMATIONS.md`, and any orphan deps (`react-force-graph-3d`, `three`'s `examples/jsm/postprocessing/*`). Add a one-liner to each named landed plan doc (M10, M13, edge-pulse) noting that the visual layer never reached users in v1 and was reaped in M01 — so the plan docs reflect reality.
+3. **If a remount was intended:** add the route under `app/brain/page.tsx` (or similar), wire it via `next/dynamic({ ssr: false })`, and route enough data into it to exercise the M10 H₁ rings, M13 companion subscription, and edge-pulse handlers. Then promote *§4.9* to Landed.
+
+Note: [`components/brain/brain-graph.tsx`](../apps/metis-web/components/brain/brain-graph.tsx) is a pure types-and-helpers module (no JSX), shared by both the 3D path above and `brain-graph-view-model.ts`. **Don't delete it** — even if §4.9 reaps the 3D files, the types are imported by the view model.
