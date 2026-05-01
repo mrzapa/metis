@@ -3,9 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   buildHeadFirstPath,
   clampTangentForReducedMotion,
+  clampToSafeArea,
   computeArcLengths,
+  drawCometHoverCard,
   drawCometLabel,
+  findHoveredComet,
   placeCharactersAlongPath,
+  rectsOverlap,
   samplePathAt,
   shouldFlipOrientation,
   smoothedTangentAt,
@@ -370,6 +374,152 @@ describe("placeCharactersAlongPath with flipped opt", () => {
     const placed = placeCharactersAlongPath("AB", font, horizontalTail);
     expect(placed[0].tangent).toBeCloseTo(0, 5);
     expect(placed[1].tangent).toBeCloseTo(0, 5);
+  });
+});
+
+describe("drawCometHoverCard", () => {
+  const vp = { w: 1000, h: 800 };
+
+  it("returns a 220px-wide bbox", () => {
+    const c = mkComet({ x: 100, y: 100 });
+    const bbox = drawCometHoverCard(null, c, { x: 100, y: 100 }, { viewport: vp });
+    expect(bbox.w).toBe(220);
+  });
+
+  it("positions the card 16px to the right of the anchor by default", () => {
+    const c = mkComet({ x: 100, y: 100 });
+    const bbox = drawCometHoverCard(null, c, { x: 100, y: 100 }, { viewport: vp });
+    expect(bbox.x).toBe(100 + 16);
+  });
+
+  it("clamps the card inside the viewport when the anchor is near the right edge", () => {
+    const c = mkComet({ x: 990, y: 100 });
+    const bbox = drawCometHoverCard(null, c, { x: 990, y: 100 }, { viewport: vp });
+    expect(bbox.x + bbox.w).toBeLessThanOrEqual(vp.w - 16);
+  });
+
+  it("avoids fixed UI rects passed in opts (e.g. zoom pill at bottom)", () => {
+    const c = mkComet({ x: 300, y: 690 });
+    const fixedRects = [{ x: 290, y: 700, w: 420, h: 60 }];
+    const bbox = drawCometHoverCard(null, c, { x: 300, y: 690 }, { viewport: vp, fixedRects });
+    expect(rectsOverlap(bbox, fixedRects[0])).toBe(false);
+  });
+
+  it("returns dynamic height that scales with summary length", () => {
+    const shortSummary = mkComet({ x: 100, y: 100, title: "Short", summary: "Brief." });
+    const longSummary = mkComet({
+      x: 100,
+      y: 100,
+      title: "Short",
+      summary:
+        "A much longer summary that will wrap to multiple lines once it exceeds the 196px content width budget that the card layout uses for the body text region.",
+    });
+    const a = drawCometHoverCard(null, shortSummary, { x: 100, y: 100 }, { viewport: vp });
+    const b = drawCometHoverCard(null, longSummary, { x: 100, y: 100 }, { viewport: vp });
+    expect(b.h).toBeGreaterThan(a.h);
+  });
+
+  it("does not throw when called with a real ctx (smoke under jsdom)", () => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return; // jsdom env without canvas package — skip
+    const c = mkComet();
+    expect(() =>
+      drawCometHoverCard(ctx, c, { x: c.x, y: c.y }, { viewport: vp }),
+    ).not.toThrow();
+  });
+});
+
+describe("rectsOverlap", () => {
+  it("returns true for overlapping rects", () => {
+    expect(rectsOverlap({ x: 0, y: 0, w: 10, h: 10 }, { x: 5, y: 5, w: 10, h: 10 })).toBe(true);
+  });
+  it("returns false for separated rects", () => {
+    expect(rectsOverlap({ x: 0, y: 0, w: 10, h: 10 }, { x: 20, y: 0, w: 10, h: 10 })).toBe(false);
+  });
+  it("treats edge-touching rects as non-overlapping", () => {
+    // a's right edge meets b's left edge exactly
+    expect(rectsOverlap({ x: 0, y: 0, w: 10, h: 10 }, { x: 10, y: 0, w: 10, h: 10 })).toBe(false);
+  });
+});
+
+describe("clampToSafeArea", () => {
+  const vp = { w: 1000, h: 800 };
+  const margin = 16;
+
+  it("returns input unchanged when fully inside the safe area", () => {
+    const r = clampToSafeArea({ x: 100, y: 100, w: 200, h: 120 }, vp, []);
+    expect(r).toEqual({ x: 100, y: 100, w: 200, h: 120 });
+  });
+
+  it("nudges left when the rect overflows the right edge", () => {
+    const r = clampToSafeArea({ x: 950, y: 100, w: 220, h: 120 }, vp, []);
+    expect(r.x + r.w).toBeLessThanOrEqual(vp.w - margin);
+    expect(r.w).toBe(220); // size unchanged
+  });
+
+  it("nudges down when the rect overflows the top edge", () => {
+    const r = clampToSafeArea({ x: 100, y: -50, w: 220, h: 120 }, vp, []);
+    expect(r.y).toBeGreaterThanOrEqual(margin);
+  });
+
+  it("nudges up when the rect overflows the bottom edge", () => {
+    const r = clampToSafeArea({ x: 100, y: 750, w: 220, h: 120 }, vp, []);
+    expect(r.y + r.h).toBeLessThanOrEqual(vp.h - margin);
+  });
+
+  it("nudges away from a fixed UI rect (zoom pill at bottom)", () => {
+    const fixedRects = [{ x: 290, y: 700, w: 420, h: 60 }];
+    const r = clampToSafeArea({ x: 300, y: 680, w: 220, h: 120 }, vp, fixedRects);
+    expect(rectsOverlap(r, fixedRects[0])).toBe(false);
+  });
+
+  it("preserves rect size when nudging", () => {
+    const fixedRects = [{ x: 0, y: 0, w: 1000, h: 600 }]; // huge rect
+    const r = clampToSafeArea({ x: 100, y: 100, w: 220, h: 120 }, vp, fixedRects);
+    expect(r.w).toBe(220);
+    expect(r.h).toBe(120);
+  });
+});
+
+describe("findHoveredComet", () => {
+  it("returns the nearest comet within 24px of the cursor", () => {
+    const comets = [
+      mkComet({ comet_id: "a", x: 100, y: 100 }),
+      mkComet({ comet_id: "b", x: 200, y: 200 }),
+    ];
+    expect(findHoveredComet(comets, { x: 110, y: 105 })?.comet_id).toBe("a");
+    expect(findHoveredComet(comets, { x: 195, y: 210 })?.comet_id).toBe("b");
+  });
+
+  it("returns the nearer of two comets in range (relevance is NOT used as tie-breaker)", () => {
+    // Distance-based contract: "closer to the cursor wins". The two
+    // relevance values here are intentionally inverted from distance
+    // ordering to confirm the function ignores relevance — both
+    // assertions resolve purely by which comet head is nearer.
+    const comets = [
+      mkComet({ comet_id: "low", x: 100, y: 100, relevanceScore: 0.9 }),
+      mkComet({ comet_id: "high", x: 110, y: 100, relevanceScore: 0.1 }),
+    ];
+    expect(findHoveredComet(comets, { x: 102, y: 100 })?.comet_id).toBe("low");
+    expect(findHoveredComet(comets, { x: 108, y: 100 })?.comet_id).toBe("high");
+  });
+
+  it("returns null when no comet is within 24px", () => {
+    const comets = [mkComet({ comet_id: "a", x: 0, y: 0 })];
+    expect(findHoveredComet(comets, { x: 50, y: 50 })).toBeNull();
+  });
+
+  it("returns null on an empty comet list", () => {
+    expect(findHoveredComet([], { x: 0, y: 0 })).toBeNull();
+  });
+
+  it("considers the 24px boundary inclusive", () => {
+    const comets = [mkComet({ comet_id: "a", x: 0, y: 0 })];
+    // Exactly 24px away (3-4-5 triangle scaled).
+    expect(findHoveredComet(comets, { x: 0, y: 24 })?.comet_id).toBe("a");
+    // Beyond.
+    expect(findHoveredComet(comets, { x: 0, y: 25 })).toBeNull();
   });
 });
 

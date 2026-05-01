@@ -1,7 +1,7 @@
 "use client";
 
 import type { CometData } from "./comet-types";
-import { buildCanvasFont, measureSingleLineTextWidth } from "./pretext-labels";
+import { buildCanvasFont, measureSingleLineTextWidth, wrapText } from "./pretext-labels";
 
 /**
  * Path-text rendering for comet headline labels.
@@ -383,6 +383,152 @@ const LABEL_FONT_WEIGHT = 400;
 /** Phase 1 ambient opacity multiplier; multiplied by `comet.opacity`. */
 const LABEL_BASE_OPACITY = 0.65;
 
+/** Hover-detect radius around a comet head, in CSS pixels. */
+const HOVER_RADIUS_PX = 24;
+
+/** A rectangle in screen-space pixels — `x/y` is the top-left corner. */
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface Size {
+  w: number;
+  h: number;
+}
+
+/**
+ * AABB overlap test. Edge-touching rects (one's right edge equals the
+ * other's left edge) are treated as NON-overlapping — useful for
+ * "card sits flush against the toolbar with zero overlap."
+ */
+export function rectsOverlap(a: Rect, b: Rect): boolean {
+  return !(
+    a.x + a.w <= b.x ||
+    b.x + b.w <= a.x ||
+    a.y + a.h <= b.y ||
+    b.y + b.h <= a.y
+  );
+}
+
+/** Default outer-edge margin used by `clampToSafeArea`. */
+const SAFE_AREA_MARGIN_PX = 16;
+/** Padding the card keeps when nudging away from a fixed UI rect. */
+const FIXED_RECT_AVOIDANCE_PADDING = 8;
+/**
+ * Bound on the iterative nudge loop in `clampToSafeArea`. Each iteration
+ * may displace the rect through one fixed UI element; we cap at
+ * 2 × fixedRects.length to allow at most two passes through the list
+ * (covering the case where escaping rect A pushes us into rect B).
+ */
+const SAFE_AREA_NUDGE_BUDGET_FACTOR = 2;
+
+/**
+ * Clamp a rect into the viewport's safe area (inset by `margin`) and
+ * iteratively nudge it away from any of `fixedRects` it overlaps.
+ *
+ * Strategy:
+ *   1. Clamp into `viewport` with a `margin`-px outer inset.
+ *   2. Walk `fixedRects` looking for an overlap; if found, pick the
+ *      smallest-magnitude axis-aligned displacement that escapes the
+ *      offender AND keeps the rect inside the viewport.
+ *   3. Repeat up to `2 × fixedRects.length` times. If we can't escape
+ *      (no displacement keeps the rect inside the viewport), accept the
+ *      remaining overlap as least-bad rather than relocating wildly.
+ *
+ * Pure function. Caller passes the fixed UI rects' bounding boxes
+ * (e.g. `getBoundingClientRect()` results from the zoom pill, FAB,
+ * top-bar) once per frame.
+ */
+export function clampToSafeArea(
+  rect: Rect,
+  viewport: Size,
+  fixedRects: ReadonlyArray<Rect>,
+  margin = SAFE_AREA_MARGIN_PX,
+): Rect {
+  const r: Rect = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+
+  // 1. Clamp into viewport (preserve size).
+  const minX = margin;
+  const minY = margin;
+  const maxX = viewport.w - margin - r.w;
+  const maxY = viewport.h - margin - r.h;
+  if (r.x < minX) r.x = minX;
+  if (r.y < minY) r.y = minY;
+  if (r.x > maxX) r.x = maxX;
+  if (r.y > maxY) r.y = maxY;
+
+  // 2. Iteratively nudge out of fixed-UI rects.
+  const budget = Math.max(1, fixedRects.length * SAFE_AREA_NUDGE_BUDGET_FACTOR);
+  for (let attempt = 0; attempt < budget; attempt += 1) {
+    let collision: Rect | null = null;
+    for (const fr of fixedRects) {
+      if (rectsOverlap(r, fr)) {
+        collision = fr;
+        break;
+      }
+    }
+    if (!collision) break;
+
+    // Candidate displacements to escape the collision along each axis,
+    // padded so we don't sit flush against the fixed UI.
+    const candidates = [
+      { dx: collision.x - FIXED_RECT_AVOIDANCE_PADDING - (r.x + r.w), dy: 0 }, // left
+      { dx: collision.x + collision.w + FIXED_RECT_AVOIDANCE_PADDING - r.x, dy: 0 }, // right
+      { dx: 0, dy: collision.y - FIXED_RECT_AVOIDANCE_PADDING - (r.y + r.h) }, // up
+      { dx: 0, dy: collision.y + collision.h + FIXED_RECT_AVOIDANCE_PADDING - r.y }, // down
+    ];
+    candidates.sort((a, b) => Math.abs(a.dx) + Math.abs(a.dy) - (Math.abs(b.dx) + Math.abs(b.dy)));
+
+    let applied = false;
+    for (const c of candidates) {
+      const nx = r.x + c.dx;
+      const ny = r.y + c.dy;
+      if (nx >= minX && ny >= minY && nx <= maxX && ny <= maxY) {
+        r.x = nx;
+        r.y = ny;
+        applied = true;
+        break;
+      }
+    }
+    if (!applied) break;
+  }
+
+  return r;
+}
+
+export interface CursorPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Find the comet whose head is closest to `cursor`, within
+ * `HOVER_RADIUS_PX` (24px). Returns `null` when no comet head is in
+ * range (or the comet list is empty).
+ *
+ * Pure function — no module-level state. Caller invokes per pointer
+ * event and stores the result for the canvas render loop.
+ */
+export function findHoveredComet(
+  comets: ReadonlyArray<CometData>,
+  cursor: CursorPoint,
+): CometData | null {
+  if (comets.length === 0) return null;
+  let best: CometData | null = null;
+  let bestDist = HOVER_RADIUS_PX;
+  for (const c of comets) {
+    const d = Math.hypot(c.x - cursor.x, c.y - cursor.y);
+    if (d <= bestDist) {
+      best = c;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
 /**
  * Per-comet flip state. Module-level so that hysteresis carries across
  * frames without the caller having to plumb state. Cleaned by
@@ -476,4 +622,274 @@ export function drawCometLabel(
     ctx.restore();
   }
   ctx.restore();
+}
+
+// -- Hover card ---------------------------------------------------------------
+
+const CARD_WIDTH = 220;
+const CARD_PAD_X = 12;
+const CARD_PAD_Y = 10;
+const CARD_INNER_WIDTH = CARD_WIDTH - CARD_PAD_X * 2;
+const CARD_ANCHOR_OFFSET = 16;
+const CARD_CORNER_RADIUS = 12;
+
+const CARD_TITLE_FONT_SIZE = 13;
+const CARD_TITLE_FONT_WEIGHT = 600;
+const CARD_TITLE_LINE_HEIGHT = 17;
+const CARD_TITLE_MAX_LINES = 2;
+
+const CARD_SUMMARY_FONT_SIZE = 11;
+const CARD_SUMMARY_FONT_WEIGHT = 400;
+const CARD_SUMMARY_LINE_HEIGHT = 14;
+const CARD_SUMMARY_MAX_LINES = 4;
+
+const CARD_FOOTER_FONT_SIZE = 10;
+const CARD_FOOTER_LINE_HEIGHT = 13;
+
+const CARD_PILL_FONT_SIZE = 9;
+const CARD_PILL_INSET = 8;
+/** Pill height matches what the renderer draws: text-size + 6px padding. */
+const CARD_PILL_HEIGHT = CARD_PILL_FONT_SIZE + 6;
+/** Gap between the pill's bottom and the title's top so they don't kiss. */
+const CARD_PILL_BOTTOM_GAP = 4;
+/**
+ * Offset from the card's top edge to the title's top — at least
+ * `CARD_PAD_Y`, but pushed below the pill if the pill would
+ * otherwise overlap the first title line.
+ */
+const CARD_TITLE_TOP_OFFSET = Math.max(
+  CARD_PAD_Y,
+  CARD_PILL_INSET + CARD_PILL_HEIGHT + CARD_PILL_BOTTOM_GAP,
+);
+
+const CARD_TITLE_TO_SUMMARY_GAP = 4;
+const CARD_SUMMARY_TO_FOOTER_GAP = 6;
+
+const FACULTY_SHORT_CODE: Record<string, string> = {
+  autonomy: "AUT",
+  emergence: "EMR",
+  knowledge: "KNW",
+  memory: "MEM",
+  perception: "PER",
+  personality: "PRS",
+  reasoning: "RSN",
+  skills: "SKL",
+  strategy: "STR",
+  synthesis: "SYN",
+  values: "VAL",
+};
+
+function facultyShortCode(facultyId: string): string {
+  return FACULTY_SHORT_CODE[facultyId.toLowerCase()] ?? facultyId.slice(0, 3).toUpperCase();
+}
+
+/**
+ * Take the first `maxLines` lines from a wrapped result. If the wrap
+ * produced more lines than the cap, append an ellipsis to the last
+ * shown line so the user knows there's more.
+ */
+/**
+ * Take the first `maxLines` lines from a wrapped result. If wrapping
+ * produced more than `maxLines`, append an ellipsis to the last
+ * shown line and trim trailing graphemes from its prefix until the
+ * appended-ellipsis form actually fits within `maxWidth`. The
+ * returned `width` reflects the post-trim, post-ellipsis pixel width
+ * so callers can lay out the card accurately.
+ */
+function clampLines(
+  lines: ReadonlyArray<{ text: string; width: number }>,
+  maxLines: number,
+  font: string,
+  maxWidth: number,
+): Array<{ text: string; width: number }> {
+  if (lines.length === 0) return [];
+  const out = lines.slice(0, maxLines).map((l) => ({ text: l.text, width: l.width }));
+  if (lines.length <= maxLines) return out;
+
+  const last = out[out.length - 1];
+  const ellipsisW = measureSingleLineTextWidth(ELLIPSIS, font);
+
+  // Trim trailing graphemes from `last.text` until `prefix + ELLIPSIS`
+  // fits in maxWidth. Walk graphemes (not code points) so we don't
+  // split combining marks or ZWJ sequences.
+  let graphemes = segmentGraphemes(last.text.replace(/\s+$/, ""));
+  let truncated = graphemes.join("");
+  let truncatedW = measureSingleLineTextWidth(truncated, font);
+  while (graphemes.length > 0 && truncatedW + ellipsisW > maxWidth) {
+    graphemes = graphemes.slice(0, -1);
+    truncated = graphemes.join("").replace(/\s+$/, "");
+    truncatedW = truncated.length > 0 ? measureSingleLineTextWidth(truncated, font) : 0;
+  }
+
+  out[out.length - 1] = {
+    text: `${truncated}${ELLIPSIS}`,
+    width: truncatedW + ellipsisW,
+  };
+  return out;
+}
+
+export interface DrawCometHoverCardOpts {
+  viewport: Size;
+  fixedRects?: ReadonlyArray<Rect>;
+}
+
+/**
+ * Draw (or just lay out) a hover card next to a comet head.
+ *
+ * The function ALWAYS computes and returns the card's bounding rect,
+ * even when `ctx` is `null` (e.g. under jsdom or when the caller wants
+ * the bbox for click hit-testing without rendering). This means
+ * `findHoveredComet → drawCometHoverCard(null, …) → click hit-test`
+ * is a valid pattern off the render loop.
+ *
+ * Layout per the design doc § Hover card:
+ *   - 220px fixed width, dynamic height.
+ *   - Anchored 16px to the right of the comet head, vertically
+ *     centered. `clampToSafeArea` reins it into the viewport and
+ *     away from `opts.fixedRects` (zoom pill, FAB, top-bar, etc.).
+ *   - Frosted-glass pill backdrop, faculty pill in the top-right,
+ *     title (≤2 lines, faculty-coloured), summary (≤4 lines, neutral
+ *     0.7 alpha), footer (`source · age`, neutral 0.5 alpha).
+ *   - Title and summary wrap via pretext (`wrapText`) so emoji,
+ *     CJK, and combining marks render correctly.
+ */
+export function drawCometHoverCard(
+  ctx: CanvasRenderingContext2D | null,
+  comet: CometData,
+  anchor: CursorPoint,
+  opts: DrawCometHoverCardOpts,
+): Rect {
+  const titleFont = buildCanvasFont(
+    CARD_TITLE_FONT_SIZE,
+    LABEL_FONT_FAMILY,
+    CARD_TITLE_FONT_WEIGHT,
+  );
+  const summaryFont = buildCanvasFont(
+    CARD_SUMMARY_FONT_SIZE,
+    LABEL_FONT_FAMILY,
+    CARD_SUMMARY_FONT_WEIGHT,
+  );
+
+  const titleLines = clampLines(
+    wrapText(comet.title, titleFont, CARD_INNER_WIDTH),
+    CARD_TITLE_MAX_LINES,
+    titleFont,
+    CARD_INNER_WIDTH,
+  );
+  const summaryLines = clampLines(
+    wrapText(comet.summary, summaryFont, CARD_INNER_WIDTH),
+    CARD_SUMMARY_MAX_LINES,
+    summaryFont,
+    CARD_INNER_WIDTH,
+  );
+
+  const titleH = titleLines.length * CARD_TITLE_LINE_HEIGHT;
+  const summaryH = summaryLines.length * CARD_SUMMARY_LINE_HEIGHT;
+  const innerH =
+    titleH +
+    (summaryLines.length > 0 ? CARD_TITLE_TO_SUMMARY_GAP + summaryH : 0) +
+    CARD_SUMMARY_TO_FOOTER_GAP +
+    CARD_FOOTER_LINE_HEIGHT;
+  // titleTopOffset reserves vertical space for the pill so the first title
+  // line doesn't render underneath it. CARD_PAD_Y is the floor when the
+  // pill is small enough to fit beside the title (only happens for very
+  // short pill text, which we don't currently emit).
+  const cardH = CARD_TITLE_TOP_OFFSET + Math.max(innerH, CARD_TITLE_LINE_HEIGHT) + CARD_PAD_Y;
+
+  const desiredX = anchor.x + CARD_ANCHOR_OFFSET;
+  const desiredY = anchor.y - cardH / 2;
+  const bbox = clampToSafeArea(
+    { x: desiredX, y: desiredY, w: CARD_WIDTH, h: cardH },
+    opts.viewport,
+    opts.fixedRects ?? [],
+  );
+
+  if (!ctx) return bbox;
+
+  // -- Render --------------------------------------------------------
+  const [r, g, b] = comet.color;
+  const facultyColor = `rgba(${r}, ${g}, ${b}, 1)`;
+
+  ctx.save();
+
+  // Frosted-glass backdrop.
+  ctx.fillStyle = "rgba(8, 10, 16, 0.78)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(bbox.x, bbox.y, bbox.w, bbox.h, CARD_CORNER_RADIUS);
+  } else {
+    // Fallback for older canvas implementations: simple rect.
+    ctx.rect(bbox.x, bbox.y, bbox.w, bbox.h);
+  }
+  ctx.fill();
+  ctx.stroke();
+
+  // Faculty pill (top-right, transparent fill + faculty-colored outline).
+  const pillFont = buildCanvasFont(CARD_PILL_FONT_SIZE, LABEL_FONT_FAMILY, 500);
+  const pillText = facultyShortCode(comet.facultyId);
+  ctx.font = pillFont;
+  const pillTextW = ctx.measureText(pillText).width;
+  const pillW = pillTextW + 10;
+  const pillH = CARD_PILL_HEIGHT;
+  const pillX = bbox.x + bbox.w - pillW - CARD_PILL_INSET;
+  const pillY = bbox.y + CARD_PILL_INSET;
+  ctx.strokeStyle = facultyColor;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(pillX, pillY, pillW, pillH, pillH / 2);
+  } else {
+    ctx.rect(pillX, pillY, pillW, pillH);
+  }
+  ctx.stroke();
+  ctx.fillStyle = facultyColor;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(pillText, pillX + pillW / 2, pillY + pillH / 2);
+
+  // Title — start below the pill (CARD_TITLE_TOP_OFFSET) rather than
+  // directly under CARD_PAD_Y so the first line doesn't render
+  // underneath the faculty pill in the top-right.
+  let cursorY = bbox.y + CARD_TITLE_TOP_OFFSET;
+  ctx.font = titleFont;
+  ctx.fillStyle = facultyColor;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  for (const line of titleLines) {
+    ctx.fillText(line.text, bbox.x + CARD_PAD_X, cursorY);
+    cursorY += CARD_TITLE_LINE_HEIGHT;
+  }
+
+  if (summaryLines.length > 0) {
+    cursorY += CARD_TITLE_TO_SUMMARY_GAP;
+    ctx.font = summaryFont;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+    for (const line of summaryLines) {
+      ctx.fillText(line.text, bbox.x + CARD_PAD_X, cursorY);
+      cursorY += CARD_SUMMARY_LINE_HEIGHT;
+    }
+  }
+
+  // Footer.
+  cursorY += CARD_SUMMARY_TO_FOOTER_GAP;
+  const footerFont = buildCanvasFont(CARD_FOOTER_FONT_SIZE, LABEL_FONT_FAMILY, 400);
+  // Phase 3 footer placeholder: prefer the URL's host (e.g. "news.ycombinator.com")
+  // when available, else fall back to a relevance percentage. The design spec
+  // calls for `${source} · ${age}` but published_at and source_channel live on
+  // the nested news_item payload that the renderer doesn't currently receive;
+  // Phase 5 polish wires those through to CometData and replaces this footer.
+  const hostText = comet.url
+    ? new URL(comet.url, "http://x").host.replace(/^www\./, "")
+    : "";
+  const footerLine = hostText
+    ? hostText
+    : `relevance ${(comet.relevanceScore * 100).toFixed(0)}%`;
+  ctx.font = footerFont;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+  ctx.fillText(footerLine, bbox.x + CARD_PAD_X, cursorY);
+
+  ctx.restore();
+  return bbox;
 }
