@@ -5,7 +5,13 @@
 **Plan-doc reference:** `plans/seedling-and-feed/plan.md` *Phase 6
 follow-up — edge-pulse visual* (deferred from PR #558).
 **Branch:** `claude/m13-edge-pulse-visual`
-**Status:** Approved 2026-04-26.
+**Status:** Approved 2026-04-26. **Frontend portion superseded
+2026-05-01** — the `brain-graph-3d.tsx` surface this design
+targeted was never mounted on a route in v1, and was reaped
+under M01 §4.9. The backend portion (steps 1-3 below: the
+`brain_link_created` event flowing through `CompanionActivityEvent`
+to the live companion dock) shipped and is live; only the
+3D-canvas pulse visualisation in step 4 never reached users.
 
 ## Problem
 

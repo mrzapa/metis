@@ -207,15 +207,23 @@ What's in place today that M13 will lean on:
   swallowed — the reflection itself never demotes (Phase 5 pattern).
   Frontend: ``CompanionActivityEvent.kind`` union extended with
   ``"brain_link_created"`` in ``apps/metis-web/lib/api.ts``;
-  ``brain-graph-3d.tsx`` subscribes to the companion bus, finds both
+  ~~``brain-graph-3d.tsx`` subscribes to the companion bus, finds both
   endpoints in ``graphData.nodes``, and spawns the existing
   Vestige-inspired ``createConnectionFlash`` (emerald ``#34d399`` to
   match the dock's seedling source color). Multiple links from a
   single reflection are staggered 80ms apart so the user sees a
   wave, not a flash. Honors ``prefers-reduced-motion`` (skips spawn
   entirely — no fallback hint, the brain canvas is too noisy a
-  primary surface to insist). With this landed, the plan-doc *Next
+  primary surface to insist).~~ With this landed, the plan-doc *Next
   up* contains only data-gated retro work and the admin close-out.
+
+  **2026-05-01 reap note:** the ``brain-graph-3d.tsx`` subscriber
+  described above was never mounted on a route in v1 — the 3D
+  brain-graph code path was an unreachable subtree, reaped under M01
+  §4.9. The ``brain_link_created`` event still flows through the
+  CompanionActivityEvent bus and is consumed by the live companion
+  dock; only the 3D-canvas connection-flash visualisation never
+  reached users.
 
 ## Retrospective
 

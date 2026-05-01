@@ -1,9 +1,14 @@
 /**
  * BrainGraph shared types and helpers.
  *
- * The actual 3D visualisation lives in ./brain-graph-3d.tsx and is loaded
- * with next/dynamic (ssr: false) by the brain page because it depends on
- * WebGL / Three.js which are unavailable during server-side rendering.
+ * Pure types/helpers module — no JSX. Used by `brain-graph-view-model.ts`
+ * to shape `BrainSceneNode` / `BrainSceneLink` from server payloads.
+ *
+ * Historical note: a 3D visualisation surface (`brain-graph-3d.tsx`)
+ * lived here through 2026-04 but was never mounted on a route in v1.
+ * Reaped under M01 §4.9 on 2026-05-01. If a future iteration wants a
+ * 3D brain view, design lives in git history; re-introduction needs
+ * a route under `app/brain/page.tsx`.
  */
 
 // -- Types ---------------------------------------------------------------
