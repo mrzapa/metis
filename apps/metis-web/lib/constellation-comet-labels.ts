@@ -1,5 +1,7 @@
 "use client";
 
+import { measureSingleLineTextWidth } from "./pretext-labels";
+
 /**
  * Path-text rendering for comet headline labels.
  *
@@ -86,4 +88,53 @@ export function samplePathAt(
     y: tail[i].y + dy * t,
     tangent: Math.atan2(dy, dx),
   };
+}
+
+export interface PlacedChar {
+  char: string;
+  x: number;
+  y: number;
+  /** Tangent angle in radians at this character's center. */
+  tangent: number;
+}
+
+/**
+ * Place each character of `label` along the polyline `tail`, walking
+ * from index 0 outward. Each character occupies its measured advance
+ * width; the character's center is at the cumulative arc-length offset.
+ *
+ * Phase 1: raw per-character tangent from `samplePathAt`. Phase 2 will
+ * smooth this with a Catmull-Rom spline + temporal lowpass.
+ *
+ * Phase 1: per-character measurement via `measureSingleLineTextWidth`.
+ * That sums per-glyph widths and ignores kerning between glyphs. For
+ * tracer-bullet purposes that's fine — characters look slightly looser
+ * than CSS-rendered text but consistently so. Phase 3's `wrapText` adds
+ * pretext's segment cursors which give kerning-aware advances.
+ *
+ * Characters that don't fit in the remaining arc length are dropped
+ * (Phase 1: silently; Phase 2 adds an ellipsis fallback under the
+ * truncation budget).
+ */
+export function placeCharactersAlongPath(
+  label: string,
+  font: string,
+  tail: ReadonlyArray<TailPoint>,
+): PlacedChar[] {
+  if (tail.length < 2 || label.length === 0) return [];
+
+  const arcLengths = computeArcLengths(tail);
+  const total = arcLengths[arcLengths.length - 1];
+
+  const out: PlacedChar[] = [];
+  let s = 0;
+  for (const ch of label) {
+    const w = measureSingleLineTextWidth(ch, font);
+    const center = s + w / 2;
+    if (center > total) break;
+    const sample = samplePathAt(arcLengths, tail, center);
+    out.push({ char: ch, x: sample.x, y: sample.y, tangent: sample.tangent });
+    s += w;
+  }
+  return out;
 }
