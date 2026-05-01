@@ -60,10 +60,12 @@ import {
 } from "@/lib/constellation-comets";
 import {
   drawCometHoverCard,
-  drawCometLabel,
+  drawPreparedLabel,
   findHoveredComet,
+  prepareCometLabel,
   pruneCometLabelState,
   rectsOverlap,
+  suppressCollidingLabels,
   tickHoverPersistence,
   type Rect as CometCardRect,
 } from "@/lib/constellation-comet-labels";
@@ -877,10 +879,14 @@ export default function Home() {
     cardBbox: CometCardRect | null;
     lastSeenAtMs: number;
   }>({ cometId: null, cardBbox: null, lastSeenAtMs: 0 });
-  // M22 Phase 3 — cache the .metis-zoom-pill DOM ref so the render
-  // loop avoids a querySelector per frame. Refreshed lazily if the
-  // cached element is detached (e.g. dev-mode HMR remount).
+  // M22 Phase 3+4 — cache fixed-UI DOM refs so the render loop avoids
+  // querySelector calls per frame. Each ref is set lazily on first
+  // lookup and refreshed if the cached element is detached (e.g.
+  // dev-mode HMR remount). The hover-card's clampToSafeArea reads
+  // these rects each frame to keep the card from overlapping chrome.
   const zoomPillRef = useRef<HTMLElement | null>(null);
+  const homeFabRef = useRef<HTMLElement | null>(null);
+  const heroOverlayRef = useRef<HTMLElement | null>(null);
 
   // Comet-news: subscribe to live news events rendered as comets.
   // Start enabled to preserve the pre-settings-wiring UX, then reconcile to
@@ -4771,13 +4777,23 @@ export default function Home() {
       }
       if (cometSprites.length > 0 && ctx) {
         drawCometSprites(ctx, cometSprites, ts);
-        // M22 Phase 1+2 — path-text headline labels along each comet's tail.
-        // Smoothed per-char tangent, orientation flip with hysteresis,
-        // 18-grapheme + arc-length truncation, reduced-motion ±10° clamp.
-        // Collision suppression lands in Phase 4.
+        // M22 Phase 1+2+4 — path-text headline labels with collision
+        // suppression. Pipeline: prepare every comet's label (math
+        // only) → suppressCollidingLabels keeps the highest-relevance
+        // labels when AABBs overlap >40% → drawPreparedLabel renders
+        // the survivors. Splitting prepare from draw means we can
+        // do suppression on bbox math without doing canvas work for
+        // labels that won't render.
         const labelOpts = { reducedMotion: reducedMotionRef.current };
-        for (const c of cometSprites) {
-          drawCometLabel(ctx, c, labelOpts);
+        const prepared = cometSprites
+          .map((c) => prepareCometLabel(c, labelOpts))
+          .filter((p): p is NonNullable<typeof p> => p !== null);
+        const survivors = suppressCollidingLabels(
+          prepared.map((p) => ({ id: p.cometId, relevance: p.relevance, bbox: p.bbox })),
+        );
+        const survivorIds = new Set(survivors.map((s) => s.id));
+        for (const p of prepared) {
+          if (survivorIds.has(p.cometId)) drawPreparedLabel(ctx, p);
         }
         // Drop module-level flip state for comets that left the active set.
         pruneCometLabelState(cometSprites.map((c) => c.comet_id));
@@ -4806,19 +4822,34 @@ export default function Home() {
           : null;
         if (hovered) {
           const fixedRects: CometCardRect[] = [];
-          // Cache the zoom-pill DOM ref (set once on first lookup;
-          // refreshed if the cached element is detached). Avoids a
-          // querySelector on every animation frame the user is
-          // hovering. Element is fixed-position chrome — its bbox is
-          // stable in CSS-pixel space so per-frame
-          // getBoundingClientRect is fine.
-          if (!zoomPillRef.current || !document.body.contains(zoomPillRef.current)) {
-            zoomPillRef.current = document.querySelector<HTMLElement>(".metis-zoom-pill");
-          }
-          if (zoomPillRef.current) {
-            const r = zoomPillRef.current.getBoundingClientRect();
-            fixedRects.push({ x: r.left, y: r.top, w: r.width, h: r.height });
-          }
+          // Resolve cached fixed-UI elements (lazy; refresh on
+          // detach). Each refresh is amortised across many hover
+          // frames since these elements are stable page chrome.
+          const ensureCachedRef = (
+            ref: typeof zoomPillRef,
+            selector: string,
+          ): HTMLElement | null => {
+            if (!ref.current || !document.body.contains(ref.current)) {
+              ref.current = document.querySelector<HTMLElement>(selector);
+            }
+            return ref.current;
+          };
+          const pushRect = (el: HTMLElement | null) => {
+            if (!el) return;
+            const r = el.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) {
+              fixedRects.push({ x: r.left, y: r.top, w: r.width, h: r.height });
+            }
+          };
+          pushRect(ensureCachedRef(zoomPillRef, ".metis-zoom-pill"));
+          pushRect(ensureCachedRef(homeFabRef, ".metis-home-fab-root"));
+          pushRect(ensureCachedRef(heroOverlayRef, ".metis-hero-overlay"));
+          // The page chrome / top bar doesn't have a single stable
+          // class selector (cn-composed in page-chrome.tsx). A
+          // synthetic 64px-tall band at the top of the viewport is
+          // a robust fallback that doesn't depend on the chrome's
+          // class structure changing.
+          fixedRects.push({ x: 0, y: 0, w: window.innerWidth, h: 64 });
           // Comet positions are computed in CSS-pixel viewport space
           // (see makeCometData(evt, W, H, …) where W/H come from
           // window.innerWidth/Height). Pass the same coordinate space
