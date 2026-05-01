@@ -5801,8 +5801,16 @@ export default function Home() {
           <Link href="/" aria-label="Metis home" className="metis-logo">
             <MetisMark size={32} title="Metis home" />
           </Link>
+          {/* Mirror the canonical nav from <PageChrome>. The home page
+              uses an inline starscape-styled nav (it can't use PageChrome
+              because the constellation takes over the viewport) — but
+              the items must match or Forge / Research log become
+              invisible from the very first surface a user lands on.
+              See M21 #4. */}
           <Link href="/chat" className="metis-nav-link">Chat</Link>
+          <Link href="/forge" className="metis-nav-link">Forge</Link>
           <Link href="/settings" className="metis-nav-link">Settings</Link>
+          <Link href="/improvements" className="metis-nav-link">Research log</Link>
         </div>
         <div className="metis-nav-right" />
       </nav>

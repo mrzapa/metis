@@ -73,6 +73,7 @@ Cross-cutting milestones (Cosmos UI, infra) run alongside.
 | M18 | **LoRA fine-tuning (stretch)** — companion weights adapt to user data | 🌱 | Draft needed | [`plans/lora-stretch/plan.md`](lora-stretch/plan.md) (stub) | — | 2026-04-27 | M13, M16 |
 | M19 | **Mobile companion (stretch)** — Tauri Mobile or PWA, read-only | 🌌 | Draft needed | [`plans/mobile-stretch/plan.md`](mobile-stretch/plan.md) (stub) | — | 2026-04-27 | M15 |
 | M20 | **Metis logo rollout** — M-star mark + glow primitives, brand-system metadata (favicon / OG / Tauri), per-surface motion | 🔧🌌 | In progress | [`plans/metis-logo-rollout/plan.md`](metis-logo-rollout/plan.md) (design: [`docs/plans/2026-04-28-metis-logo-rollout-design.md`](../docs/plans/2026-04-28-metis-logo-rollout-design.md), impl: [`docs/plans/2026-04-28-metis-logo-rollout-implementation.md`](../docs/plans/2026-04-28-metis-logo-rollout-implementation.md)) | claude/cranky-northcutt-42501d (4 phases shipped, PR pending) | 2026-04-28 | — |
+| M21 | **UI critical-eye triage** — bug bash from full-app QA walk: hydration mismatch, dead routes, request-storm, nav inconsistency, overlay/safe-area issues | 🔧 | In progress | [`plans/ui-critical-triage/plan.md`](ui-critical-triage/plan.md) | claude/objective-napier-432f1e | 2026-05-01 | — |
 
 ### Superseded
 

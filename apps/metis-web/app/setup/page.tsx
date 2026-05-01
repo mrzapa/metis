@@ -184,9 +184,25 @@ export default function SetupPage() {
   }, [apiKey, baselineSettings, embeddingProvider, llmProvider]);
 
   // Providers that never require an API key — chat can launch even when
-  // no credential is configured. Anything else needs a non-empty
-  // `api_key_<provider>` (either from the wizard input, the existing
-  // settings file, or a `credential_pool` entry).
+  // no credential is configured. Anything else needs a *persisted*
+  // `api_key_<provider>` — either an existing entry in settings.json or
+  // a `credential_pool` mapping. The wizard's apiKey input is **not**
+  // counted: M21 #5 stopped persisting it (the backend's settings
+  // PATCH 403s any api_key_* write unless METIS_ALLOW_API_KEY_WRITE=1
+  // is set), so a key pasted into the wizard never reaches the chat
+  // surface. Treating it as ready here would show a false-green
+  // "Direct chat ready" pill on step 5. Codex caught this on the M21
+  // Phase 1 PR.
+  //
+  // The result has three shapes now:
+  //   - `ready: true`                   — local provider OR a
+  //                                       persisted credential exists
+  //   - `ready: false, wizardKeyOnly`   — user pasted a key in step 2
+  //                                       but no persisted credential
+  //                                       exists; needs settings.json
+  //   - `ready: false`                  — no credential at all; user
+  //                                       can switch to a local
+  //                                       provider or skip
   const directChatReadiness = useMemo(() => {
     const NO_KEY_PROVIDERS = new Set<string>([
       "local",
@@ -196,9 +212,6 @@ export default function SetupPage() {
       "local_gguf",
     ]);
     if (NO_KEY_PROVIDERS.has(llmProvider)) {
-      return { ready: true as const };
-    }
-    if (apiKey.trim().length > 0) {
       return { ready: true as const };
     }
     const existingKey = baselineSettings[`api_key_${llmProvider}`];
@@ -219,7 +232,8 @@ export default function SetupPage() {
     const providerLabel =
       LLM_PROVIDERS.find((provider) => provider.value === llmProvider)?.label ??
       llmProvider;
-    return { ready: false as const, providerLabel };
+    const wizardKeyOnly = apiKey.trim().length > 0;
+    return { ready: false as const, providerLabel, wizardKeyOnly };
   }, [apiKey, baselineSettings, llmProvider]);
 
   async function handleInstantLaunch() {
@@ -251,17 +265,12 @@ export default function SetupPage() {
         basic_wizard_completed: true,
       };
 
-      if (apiKey) {
-        const keyField =
-          llmProvider === "anthropic"
-            ? "api_key_anthropic"
-            : llmProvider === "openai"
-              ? "api_key_openai"
-              : null;
-        if (keyField) {
-          updates[keyField] = apiKey;
-        }
-      }
+      // Note: api_key_* are intentionally NOT sent. The backend's
+      // settings PATCH endpoint blocks api_key_* writes (403 unless
+      // METIS_ALLOW_API_KEY_WRITE=1) — including them here used to
+      // crash the whole wizard save. The wizard's API-key input is
+      // captured for the user to copy into settings.json themselves.
+      // See M21 #5.
 
       await updateSettings(updates);
 
@@ -331,7 +340,7 @@ export default function SetupPage() {
       description:
         llmProvider === "local"
           ? "Local model mode does not require a hosted API key. You can continue immediately or add one later if you switch providers."
-          : "Paste the API key for the selected provider. You can also add it later in settings.",
+          : "API keys are not stored through the wizard. METIS reads them from settings.json — paste here as a reminder to copy it across after this step.",
       content: (
         <div className="space-y-3">
           <label
@@ -354,7 +363,15 @@ export default function SetupPage() {
           <p className="text-sm leading-7 text-muted-foreground">
             {llmProvider === "local"
               ? "Leave this blank if you’re staying fully local."
-              : "If you skip this now, you can still add it later in your settings file."}
+              : (
+                <>
+                  This wizard never writes <code className="rounded bg-amber-500/15 px-1">api_key_*</code> to settings —
+                  the backend rejects those updates by design. To finish setup with a hosted provider, paste your key
+                  into <code className="rounded bg-amber-500/15 px-1">settings.json</code> at the repo root after the
+                  wizard completes (or set <code className="rounded bg-amber-500/15 px-1">METIS_ALLOW_API_KEY_WRITE=1</code> to
+                  let UI writes through).
+                </>
+              )}
           </p>
         </div>
       ),
@@ -493,6 +510,11 @@ export default function SetupPage() {
                     label={builtIndex ? "RAG ready" : "Direct chat ready"}
                     tone={builtIndex ? "connected" : "neutral"}
                   />
+                ) : directChatReadiness.wizardKeyOnly ? (
+                  <StatusPill
+                    label="Key won’t persist"
+                    tone="warning"
+                  />
                 ) : (
                   <StatusPill
                     label="Missing API key"
@@ -503,11 +525,13 @@ export default function SetupPage() {
               </div>
 
               <p className="mt-4 text-sm leading-7 text-muted-foreground">
-                {!directChatReadiness.ready
-                  ? `Add an API key for ${directChatReadiness.providerLabel} or switch to local model.`
-                  : builtIndex
+                {directChatReadiness.ready
+                  ? builtIndex
                     ? "Opens chat with this index preselected and a starter prompt staged."
-                    : "Opens direct chat with a starter prompt staged."}
+                    : "Opens direct chat with a starter prompt staged."
+                  : directChatReadiness.wizardKeyOnly
+                    ? `Direct chat won’t work yet for ${directChatReadiness.providerLabel}: the wizard does not save API keys. Copy the key from step 2 into settings.json (or set METIS_ALLOW_API_KEY_WRITE=1 to let UI writes through), then return to chat.`
+                    : `Add an API key for ${directChatReadiness.providerLabel} in settings.json or switch to a local model.`}
               </p>
             </div>
           </div>
