@@ -1,8 +1,8 @@
 ---
 Milestone: M22 — Comet headline labels
 Status: In progress
-Claim: claude/m22-phase-2-mitigations (Phase 1 PR #589 open)
-Last updated: 2026-05-01 by claude/m22-phase-2-mitigations
+Claim: claude/m22-phase-3-hover-card (Phases 1-2 landed via PR #589, #590)
+Last updated: 2026-05-01 by claude/m22-phase-3-hover-card
 Vision pillar: Cosmos
 ---
 
@@ -12,11 +12,14 @@ Vision pillar: Cosmos
 - 2026-05-01 — Brainstormed and approved design. Full spec at [`docs/plans/2026-05-01-comet-headline-labels-design.md`](../../docs/plans/2026-05-01-comet-headline-labels-design.md).
 - 2026-05-01 — Implementation plan written. 5 phases of TDD-throughout work. Plan at [`docs/plans/2026-05-01-comet-headline-labels-implementation.md`](../../docs/plans/2026-05-01-comet-headline-labels-implementation.md).
 - 2026-05-01 — Phase 1 claimed on `claude/m22-phase-1-tracer-pathtext`. Tracer-bullet path-text: single comet, full trail, raw per-character spline tangent, no truncation/flip/collision/reduced-motion. The simplest possible signal that the spline math is correct.
+- 2026-05-01 — **Phase 1 landed via PR #589.** Includes two reviewer-driven fixes: head-position prepend (label was one frame behind rendered head) and grapheme-cluster iteration via `Intl.Segmenter` (so ZWJ emoji + combining marks render as one unit).
+- 2026-05-01 — **Phase 2 landed via PR #590.** Smoothed per-char tangent (secant central-difference, equivalent to Catmull-Rom for tangent-only sampling), orientation flip with hysteresis, 18-grapheme + arc-length truncation, and reduced-motion ±10° clamp on the FINAL post-flip tangent (one reviewer fix: pre-fix code clamped pre-flip, producing upside-down glyphs under reduced-motion + flipped).
+- 2026-05-01 — Phase 3 claimed on `claude/m22-phase-3-hover-card`. Hover hit-test, canvas hover card with title/summary/faculty/source/age, `clampToSafeArea`, click-to-open, and `wrapText` shipped in `lib/pretext-labels.ts` — first consumer of pretext's line-breaking surface in METIS.
 
 ## Next up
 
-1. Execute Phase 1 tasks 1.1–1.6 from the [implementation plan](../../docs/plans/2026-05-01-comet-headline-labels-implementation.md) using `superpowers:executing-plans`.
-2. After Phase 1 PR lands on `main`, branch off main as `claude/m22-phase-2-mitigations` and start Phase 2.
+1. Execute Phase 3 tasks 3.1–3.6 from the [implementation plan](../../docs/plans/2026-05-01-comet-headline-labels-implementation.md) using `superpowers:executing-plans`.
+2. After Phase 3 PR lands, branch Phase 4 off main as `claude/m22-phase-4-collision`.
 
 ## Blockers
 
