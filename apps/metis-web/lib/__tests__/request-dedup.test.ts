@@ -1,6 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 import { _resetRequestDedupForTests, dedupedFetch } from "../request-dedup";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("dedupedFetch", () => {
   it("merges concurrent calls with the same key into one fetcher invocation", async () => {
@@ -72,5 +76,46 @@ describe("dedupedFetch", () => {
     const result = await dedupedFetch("GET /v1/settings", fetcher);
     expect(result).toBe("ok");
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects the in-flight promise if the fetcher never settles within the stall window", async () => {
+    // Regression test: without a timeout, a hung HTTP request
+    // (network stall, server hang, etc.) leaves the dedup slot
+    // occupied for the tab's lifetime — every later caller waits
+    // forever. The timeout must reject the in-flight promise so
+    // the slot clears and the next call gets a fresh fetch.
+    _resetRequestDedupForTests();
+    vi.useFakeTimers();
+    // Fetcher returns a promise that never settles.
+    const neverSettles = vi.fn(() => new Promise<unknown>(() => {}));
+
+    const stuck = dedupedFetch("GET /v1/settings", neverSettles).catch(
+      (e: Error) => e.message,
+    );
+    // Advance past the stall window — the timeout should fire and
+    // reject. (Use 30_001 to be safely past the 30_000ms threshold
+    // regardless of the implementation's strict-vs-non-strict
+    // comparison.)
+    await vi.advanceTimersByTimeAsync(30_001);
+    const message = await stuck;
+    expect(message).toMatch(/timed out|stall/i);
+    expect(neverSettles).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows a retry on a fresh call after the stall-timeout fires", async () => {
+    _resetRequestDedupForTests();
+    vi.useFakeTimers();
+    const stuckFetcher = vi.fn(() => new Promise<unknown>(() => {}));
+    const okFetcher = vi.fn(async () => "ok");
+
+    const stuck = dedupedFetch("GET /v1/settings", stuckFetcher).catch(() => null);
+    await vi.advanceTimersByTimeAsync(30_001);
+    await stuck;
+
+    // Slot should be clear; next call uses a fresh fetcher.
+    vi.useRealTimers();
+    const result = await dedupedFetch("GET /v1/settings", okFetcher);
+    expect(result).toBe("ok");
+    expect(okFetcher).toHaveBeenCalledTimes(1);
   });
 });
