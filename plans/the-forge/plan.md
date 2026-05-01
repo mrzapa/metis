@@ -20,6 +20,87 @@ expected; preview screenshots + test output are the evidence.
 
 ## Progress
 
+**Phase 7 — `.metis-skill` bundle export / import (in PR, claude/jovial-volhard-3fa662, 2026-05-01)**
+
+* ADR 0015 (`docs/adr/0015-metis-skill-bundle-format.md`) records
+  the format decisions: POSIX tar at the bundle root with
+  `manifest.yaml` + a `skill/` payload directory, unsigned v1
+  (signing without a trust root is theatre — punted to the
+  marketplace milestone), explicit `replace=True` switch on
+  install (409 default, never silent clobber of local edits),
+  Python 3.12 `tarfile` data filter + explicit `_is_unsafe_member`
+  prefix check as belt-and-braces traversal defence.
+* New `metis_app/services/forge_bundle.py` exposes `Manifest`
+  (frozen dataclass with paired `to_yaml`/`from_yaml`),
+  `pack_skill`, `inspect_bundle`, `validate_bundle`, and
+  `install_bundle`. `from_yaml` rejects unsupported
+  `bundle_format_version` values up front so v1 readers
+  hard-fail on v2+ bundles instead of silently mis-parsing them.
+  Six error classes covered by `validate_bundle`: missing
+  manifest, missing SKILL.md, unsupported format version,
+  skill_id mismatch (manifest vs. SKILL.md frontmatter),
+  unsafe traversal path (`..`), absolute path member.
+  `install_bundle` stages into a tempdir, re-checks every
+  member against `_is_unsafe_member`, then moves the validated
+  payload to `<skills_root>/<id>/`. Replace=False raises
+  `FileExistsError`; replace=True flags the result as
+  `replaced=True` and overwrites cleanly.
+* Four new endpoints under `/v1/forge/skills*` in
+  `metis_app/api_litestar/routes/forge.py`, each delegating to
+  `forge_bundle` so the route layer never touches `tarfile`
+  directly: `GET /v1/forge/skills` (list installed skills with
+  id, name, description, repo-relative path; missing root
+  returns `{"skills": []}` rather than 500ing),
+  `POST /v1/forge/skills/{id}/export` (returns
+  `{filename, content_base64, sha256}`; 404 on unknown id;
+  400 on missing version), `POST /v1/forge/skills/import/preview`
+  (multipart upload, returns parsed manifest + frontmatter +
+  errors + `conflict` flag without touching disk),
+  `POST /v1/forge/skills/import/install` (multipart upload +
+  `replace` flag; 409 on slug conflict without replace,
+  400 on validation failure).
+* Frontend additions in `apps/metis-web/lib/api.ts`:
+  `fetchInstalledSkills`, `exportSkillBundle` (decodes the
+  base64 envelope to a `Blob` client-side, returns `{filename,
+  sha256, blob}` ready for `URL.createObjectURL`),
+  `previewSkillBundle`, `installSkillBundle` (attaches
+  `status` to the thrown `Error` so the UI can disambiguate
+  the 409 race-condition fallback). `CompanionActivityEvent.kind`
+  union extended with `"skill_imported"` for the dock event.
+* New `<InstalledSkillsPane>` (emerald accent) lists the
+  installed skills with inline version + author inputs and a
+  per-row Export button that triggers the browser download
+  via `URL.createObjectURL`. New `<BundleImportZone>` (cyan
+  accent) provides a dashed-border drop zone (with a
+  fallback hidden file input for keyboard / screen-reader
+  users), a manifest preview dialog with validation errors
+  + an opt-in "Replace existing skill" checkbox when the
+  preview reports `conflict: true`, and a
+  `kind: "skill_imported"` `CompanionActivityEvent` on
+  successful install. Both panes mount on `app/forge/page.tsx`
+  in the order: AbsorbForm → ProposalReviewPane →
+  BundleImportZone → CandidateSkillsPane → InstalledSkillsPane
+  → TechniqueGallery, so the import-from-bundle and
+  installed-skills-with-export surfaces sit visually with
+  the other "review/share a capability" panes rather than
+  with the frontier-techniques gallery.
+* Tests: 27 new in `tests/test_forge_bundle.py` (Manifest YAML
+  round-trip, optional-field elision, version rejection;
+  pack→inspect round-trip, filename shape, extra-payload-files
+  preservation, optional author; six `validate_bundle` error
+  classes; install replace-vs-conflict semantics + invalid
+  bundle raises `BundleValidationError`; **parametrised
+  byte-identical round-trip over every shipped skill in
+  `skills/` — all nine** confirm pack→install reproduces
+  `SKILL.md` byte-for-byte). 13 new in `tests/test_api_forge.py`
+  for the four new routes (200/400/404/409 paths each, plus
+  manifest serialisation parity). Frontend `tsc --noEmit` clean
+  on touched files; `vitest run` 623 pass / 10 skipped.
+  Backend pytest 1396 pass / 2 pre-existing fail
+  (`tests/test_install_launcher.py` README docs unrelated to
+  Forge — same posture as Phase 1's verification record).
+  Ruff clean.
+
 **Phase 6 — Trace integration (Landed via PR #585 / `15da54e`, 2026-05-01)**
 
 * `TechniqueDescriptor` gains a `trace_event_types: tuple[str, ...]` field declaring the event-type strings the engine emits when this technique fires. Empty tuple = "no markers wired yet"; the card renders an empty state instead of a counter.
