@@ -159,35 +159,39 @@ You can now begin. Start with the four required reads.
 
 ## Variant: intake workflow (external ask)
 
-When the user asks you to implement something from outside the repo — a
-GitHub repo, a paper, a tweet, a technique, a screenshot, a concept — **do
-not start coding**. Use this shorter prompt instead:
+When you want a fresh agent to consider something from outside the repo — a
+GitHub repo, a paper, a tweet, a technique, a screenshot, a concept — paste
+this shorter prompt instead of the onboarding one above. It tells the agent
+to **file and triage the idea, not implement it**.
 
 ```
-The user has asked me to look at <source>. I will file it in
-`plans/IDEAS.md` under *Open ideas* with:
+I'd like you to triage an idea I'm bringing in from outside the repo:
+<source — link, paper title, screenshot, or description>.
 
-- **Source:** <link / paper title / description>
-- **Ask:** <one-line user summary>
-- **Context:** <what the user said>
-- **Filed:** <today's date> by <session id>
+**Do not start coding.** Follow the METIS intake workflow:
 
-Then produce a triage review in the same message:
+1. File the idea in `plans/IDEAS.md` under *Open ideas* with:
+   - **Source:** <link / paper title / description>
+   - **Ask:** one-line summary of what I'm asking for
+   - **Context:** any context I gave you in this message
+   - **Filed:** today's date
 
-- **What it is** — a paragraph from a genuine read of the source, not a
-  copy-paste.
-- **Pillar fit** — Cosmos / Companion / Cortex / Cross-cutting / doesn't
-  fit the vision, with reasoning.
-- **Overlap** — which `IMPLEMENTATION.md` rows it touches.
-- **Recommendation** — Promote | Merge into M## | Park | Reject.
-- **Rough scope** — patch / day / multi-day / multi-week.
+2. In the same reply, produce a triage review:
+   - **What it is** — a paragraph from a genuine read of the source, not
+     a copy-paste of its abstract or README.
+   - **Pillar fit** — Cosmos / Companion / Cortex / Cross-cutting, or
+     "doesn't fit the vision", with reasoning. See `VISION.md`.
+   - **Overlap** — which rows in `plans/IMPLEMENTATION.md` it touches or
+     depends on.
+   - **Recommendation** — Promote | Merge into M## | Park | Reject.
+   - **Rough scope** — patch / day / multi-day / multi-week.
 
-Stop. Do not start implementation until the user confirms the
-recommendation.
+3. Stop and wait for me to confirm the recommendation before doing any
+   implementation work.
+
+The full intake rules live in `plans/README.md` under *Intake workflow
+for implementation requests from external sources*.
 ```
-
-The full intake rules live in [`plans/README.md`](README.md) under *Intake
-workflow for implementation requests from external sources*.
 
 ---
 
