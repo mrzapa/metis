@@ -5,7 +5,7 @@ import { buildCanvasFont, wrapText } from "../pretext-labels";
 const font = buildCanvasFont(13, '"Space Grotesk", sans-serif', 600);
 
 describe("wrapText", () => {
-  it("returns one line for an empty string", () => {
+  it("returns an empty array for an empty string", () => {
     expect(wrapText("", font, 100)).toEqual([]);
   });
 
@@ -48,5 +48,13 @@ describe("wrapText", () => {
     const a = wrapText("Cached headline text here", font, 200);
     const b = wrapText("Cached headline text here", f2, 200);
     expect(b).not.toBe(a);
+  });
+
+  it("freezes both the outer array and each line entry so mutation can't corrupt the cache", () => {
+    const lines = wrapText("Frozen payload check", font, 200);
+    expect(Object.isFrozen(lines)).toBe(true);
+    if (lines.length > 0) {
+      expect(Object.isFrozen(lines[0])).toBe(true);
+    }
   });
 });

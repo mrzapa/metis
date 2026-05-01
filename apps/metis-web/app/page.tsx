@@ -868,6 +868,10 @@ export default function Home() {
     cometId: string | null;
     cardBbox: CometCardRect | null;
   }>({ cometId: null, cardBbox: null });
+  // M22 Phase 3 — cache the .metis-zoom-pill DOM ref so the render
+  // loop avoids a querySelector per frame. Refreshed lazily if the
+  // cached element is detached (e.g. dev-mode HMR remount).
+  const zoomPillRef = useRef<HTMLElement | null>(null);
 
   // Comet-news: subscribe to live news events rendered as comets.
   // Start enabled to preserve the pre-settings-wiring UX, then reconcile to
@@ -4780,9 +4784,17 @@ export default function Home() {
           : null;
         if (hovered) {
           const fixedRects: CometCardRect[] = [];
-          const zoomPill = document.querySelector<HTMLElement>(".metis-zoom-pill");
-          if (zoomPill) {
-            const r = zoomPill.getBoundingClientRect();
+          // Cache the zoom-pill DOM ref (set once on first lookup;
+          // refreshed if the cached element is detached). Avoids a
+          // querySelector on every animation frame the user is
+          // hovering. Element is fixed-position chrome — its bbox is
+          // stable in CSS-pixel space so per-frame
+          // getBoundingClientRect is fine.
+          if (!zoomPillRef.current || !document.body.contains(zoomPillRef.current)) {
+            zoomPillRef.current = document.querySelector<HTMLElement>(".metis-zoom-pill");
+          }
+          if (zoomPillRef.current) {
+            const r = zoomPillRef.current.getBoundingClientRect();
             fixedRects.push({ x: r.left, y: r.top, w: r.width, h: r.height });
           }
           // Comet positions are computed in CSS-pixel viewport space
@@ -5234,12 +5246,26 @@ export default function Home() {
       mouse.x = e.clientX;
       mouse.y = e.clientY;
 
-      // M22 Phase 3 — update hovered-comet state on every move so the
-      // render loop can draw the hover card next frame. findHoveredComet
-      // is O(n) over a small list (max_active typically 4-8); fine to
-      // run on every pointer event.
-      const hovered = findHoveredComet(cometSprites, { x: e.clientX, y: e.clientY });
-      cometHoverStateRef.current.cometId = hovered ? hovered.comet_id : null;
+      // M22 Phase 3 — update hovered-comet state on pointer moves that
+      // are actually interacting with the canvas. The pointermove
+      // listener is on `document`, so it fires for every move including
+      // those over the star tooltip, settings popovers, the chrome,
+      // etc. Without this gate we'd render comet hover cards under
+      // overlay UI. The same gate is used by the existing
+      // hoveredNode / starTooltip pipeline below at line ~5318+.
+      if (isClientPointInsideCanvas(e.clientX, e.clientY)) {
+        const targetElement = getPointerTargetElement(e.target, e.clientX, e.clientY);
+        const onCanvas = targetElement === canvas;
+        const onStarTooltip = Boolean(targetElement?.closest("#starTooltipCard"));
+        if (onCanvas && !onStarTooltip) {
+          const hovered = findHoveredComet(cometSprites, { x: e.clientX, y: e.clientY });
+          cometHoverStateRef.current.cometId = hovered ? hovered.comet_id : null;
+        } else {
+          cometHoverStateRef.current.cometId = null;
+        }
+      } else {
+        cometHoverStateRef.current.cometId = null;
+      }
 
       const panState = panStateRef.current;
       if (panState && panState.pointerId === e.pointerId) {

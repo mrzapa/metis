@@ -688,16 +688,43 @@ function facultyShortCode(facultyId: string): string {
  * produced more lines than the cap, append an ellipsis to the last
  * shown line so the user knows there's more.
  */
+/**
+ * Take the first `maxLines` lines from a wrapped result. If wrapping
+ * produced more than `maxLines`, append an ellipsis to the last
+ * shown line and trim trailing graphemes from its prefix until the
+ * appended-ellipsis form actually fits within `maxWidth`. The
+ * returned `width` reflects the post-trim, post-ellipsis pixel width
+ * so callers can lay out the card accurately.
+ */
 function clampLines(
   lines: ReadonlyArray<{ text: string; width: number }>,
   maxLines: number,
+  font: string,
+  maxWidth: number,
 ): Array<{ text: string; width: number }> {
   if (lines.length === 0) return [];
   const out = lines.slice(0, maxLines).map((l) => ({ text: l.text, width: l.width }));
-  if (lines.length > maxLines) {
-    const last = out[out.length - 1];
-    out[out.length - 1] = { text: `${last.text.replace(/\s+$/, "")}…`, width: last.width };
+  if (lines.length <= maxLines) return out;
+
+  const last = out[out.length - 1];
+  const ellipsisW = measureSingleLineTextWidth(ELLIPSIS, font);
+
+  // Trim trailing graphemes from `last.text` until `prefix + ELLIPSIS`
+  // fits in maxWidth. Walk graphemes (not code points) so we don't
+  // split combining marks or ZWJ sequences.
+  let graphemes = segmentGraphemes(last.text.replace(/\s+$/, ""));
+  let truncated = graphemes.join("");
+  let truncatedW = measureSingleLineTextWidth(truncated, font);
+  while (graphemes.length > 0 && truncatedW + ellipsisW > maxWidth) {
+    graphemes = graphemes.slice(0, -1);
+    truncated = graphemes.join("").replace(/\s+$/, "");
+    truncatedW = truncated.length > 0 ? measureSingleLineTextWidth(truncated, font) : 0;
   }
+
+  out[out.length - 1] = {
+    text: `${truncated}${ELLIPSIS}`,
+    width: truncatedW + ellipsisW,
+  };
   return out;
 }
 
@@ -746,10 +773,14 @@ export function drawCometHoverCard(
   const titleLines = clampLines(
     wrapText(comet.title, titleFont, CARD_INNER_WIDTH),
     CARD_TITLE_MAX_LINES,
+    titleFont,
+    CARD_INNER_WIDTH,
   );
   const summaryLines = clampLines(
     wrapText(comet.summary, summaryFont, CARD_INNER_WIDTH),
     CARD_SUMMARY_MAX_LINES,
+    summaryFont,
+    CARD_INNER_WIDTH,
   );
 
   const titleH = titleLines.length * CARD_TITLE_LINE_HEIGHT;

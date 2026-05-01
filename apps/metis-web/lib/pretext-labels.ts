@@ -104,12 +104,13 @@ export interface WrappedLine {
 /**
  * Cached results from `wrapText`. Keyed on `${font}::${maxWidth}::${text}`.
  *
- * Returned arrays are reused on subsequent calls — callers MUST NOT
- * mutate them. The frozen marker via `Object.freeze` is a defensive
- * extra guard rather than the contract; the contract is "treat as
- * read-only".
+ * Both the outer array and each `{text, width}` entry are
+ * `Object.freeze`d before being inserted into the cache — accidental
+ * mutation by a caller would otherwise corrupt subsequent reads.
+ * Returned values are typed `ReadonlyArray<Readonly<WrappedLine>>`
+ * so the contract is also visible to TypeScript.
  */
-const wrapTextCache = new Map<string, ReadonlyArray<WrappedLine>>();
+const wrapTextCache = new Map<string, ReadonlyArray<Readonly<WrappedLine>>>();
 
 /**
  * Wrap `text` to fit within `maxWidth` pixels in the given canvas
@@ -132,7 +133,7 @@ export function wrapText(
   text: string,
   font: string,
   maxWidth: number,
-): ReadonlyArray<WrappedLine> {
+): ReadonlyArray<Readonly<WrappedLine>> {
   if (text.length === 0) return [];
 
   const key = `${font}::${maxWidth}::${text}`;
@@ -155,9 +156,14 @@ export function wrapText(
     lines = wrapTextWordBoundaryFallback(text, font, maxWidth);
   }
 
+  // Deep-freeze: outer array AND each line. Without freezing the
+  // line objects, a caller could mutate `result[0].text` and corrupt
+  // every subsequent cache hit on the same key.
+  for (const line of lines) Object.freeze(line);
   Object.freeze(lines);
-  wrapTextCache.set(key, lines);
-  return lines;
+  const frozen = lines as ReadonlyArray<Readonly<WrappedLine>>;
+  wrapTextCache.set(key, frozen);
+  return frozen;
 }
 
 /**
@@ -167,6 +173,14 @@ export function wrapText(
  * inter-word whitespace — but neither does the heuristic in
  * `measureWithCanvas`, so callers already accept the same
  * platform-floor behaviour.
+ *
+ * Hard-break path: when a single token (no whitespace, e.g. a long
+ * URL) exceeds `maxWidth` on its own, code-point-split it into
+ * pieces that each fit. Without this, the fallback would emit a
+ * line wider than `maxWidth`, violating the function's contract.
+ * `Array.from(token)` walks code points (handles surrogate pairs);
+ * combining marks may still split, which is the same compromise
+ * the surrounding heuristics make.
  */
 function wrapTextWordBoundaryFallback(
   text: string,
@@ -176,19 +190,73 @@ function wrapTextWordBoundaryFallback(
   const words = text.split(/(\s+)/).filter((s) => s.length > 0);
   const out: WrappedLine[] = [];
   let curr = "";
-  let currW = 0;
+
+  const pushCurr = () => {
+    const trimmed = curr.trimEnd();
+    if (trimmed.length > 0) {
+      out.push({ text: trimmed, width: measureSingleLineTextWidth(trimmed, font) });
+    }
+    curr = "";
+  };
+
   for (const w of words) {
     const trial = curr + w;
     const trialW = measureSingleLineTextWidth(trial, font);
-    if (trialW <= maxWidth || curr.length === 0) {
+    if (trialW <= maxWidth) {
       curr = trial;
-      currW = trialW;
+      continue;
+    }
+    if (curr.length === 0) {
+      // Lone token exceeds the budget on its own. Code-point-split it
+      // into chunks that each fit, emitting a line per chunk.
+      for (const piece of hardBreakOverlongToken(w, font, maxWidth)) {
+        out.push(piece);
+      }
+      continue;
+    }
+    // Otherwise: flush the current line and re-try the token alone.
+    pushCurr();
+    const trimmed = w.trimStart();
+    const trimmedW = measureSingleLineTextWidth(trimmed, font);
+    if (trimmedW <= maxWidth) {
+      curr = trimmed;
     } else {
-      out.push({ text: curr.trimEnd(), width: measureSingleLineTextWidth(curr.trimEnd(), font) });
-      curr = w.trimStart();
-      currW = measureSingleLineTextWidth(curr, font);
+      for (const piece of hardBreakOverlongToken(trimmed, font, maxWidth)) {
+        out.push(piece);
+      }
     }
   }
-  if (curr.length > 0) out.push({ text: curr.trimEnd(), width: currW });
+  pushCurr();
   return out;
+}
+
+/**
+ * Split a single token wider than `maxWidth` into the longest
+ * code-point prefixes that each fit. Returns one WrappedLine per
+ * piece. Used by `wrapTextWordBoundaryFallback` to respect its
+ * width contract for whitespace-free overlong tokens (URLs etc.).
+ */
+function hardBreakOverlongToken(
+  token: string,
+  font: string,
+  maxWidth: number,
+): WrappedLine[] {
+  const pieces: WrappedLine[] = [];
+  const codePoints = Array.from(token);
+  let buf = "";
+  let bufW = 0;
+  for (const cp of codePoints) {
+    const trial = buf + cp;
+    const trialW = measureSingleLineTextWidth(trial, font);
+    if (trialW <= maxWidth || buf.length === 0) {
+      buf = trial;
+      bufW = trialW;
+    } else {
+      pieces.push({ text: buf, width: bufW });
+      buf = cp;
+      bufW = measureSingleLineTextWidth(buf, font);
+    }
+  }
+  if (buf.length > 0) pieces.push({ text: buf, width: bufW });
+  return pieces;
 }

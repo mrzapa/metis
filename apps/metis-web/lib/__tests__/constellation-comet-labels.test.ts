@@ -492,10 +492,11 @@ describe("findHoveredComet", () => {
     expect(findHoveredComet(comets, { x: 195, y: 210 })?.comet_id).toBe("b");
   });
 
-  it("returns the nearest comet when two are within range (resolves ties by relevance)", () => {
-    // Both comets within 24px; cursor is slightly closer to "low" but
-    // "high" has higher relevance — distance wins (tie-breaker is the
-    // implementation detail; assert on what's documented: "nearest").
+  it("returns the nearer of two comets in range (relevance is NOT used as tie-breaker)", () => {
+    // Distance-based contract: "closer to the cursor wins". The two
+    // relevance values here are intentionally inverted from distance
+    // ordering to confirm the function ignores relevance — both
+    // assertions resolve purely by which comet head is nearer.
     const comets = [
       mkComet({ comet_id: "low", x: 100, y: 100, relevanceScore: 0.9 }),
       mkComet({ comet_id: "high", x: 110, y: 100, relevanceScore: 0.1 }),
