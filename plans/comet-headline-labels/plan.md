@@ -1,8 +1,8 @@
 ---
 Milestone: M22 — Comet headline labels
 Status: In progress
-Claim: claude/m22-phase-3-hover-card (Phases 1-2 landed via PR #589, #590)
-Last updated: 2026-05-01 by claude/m22-phase-3-hover-card
+Claim: claude/m22-phase-5-polish (Phases 1-3 landed via PR #589, #590, #592; Phase 4 deferred)
+Last updated: 2026-05-01 by claude/m22-phase-5-polish
 Vision pillar: Cosmos
 ---
 
