@@ -261,6 +261,28 @@ describe("placeCharactersAlongPath with reducedMotion opt", () => {
     const TEN_DEG_RAD = (10 * Math.PI) / 180;
     expect(placed.some((p) => Math.abs(p.tangent) > TEN_DEG_RAD)).toBe(true);
   });
+
+  it("under flipped: true AND reducedMotion: true, the FINAL (post-flip) tangent stays in the readable band", () => {
+    // Tail pointing in -x direction → smoothedTangent ≈ ±π, which triggers
+    // the flip. Pre-fix bug: the ±10° clamp was applied to the raw tangent
+    // BEFORE the flip offset, so a tangent of ~π collapsed to ±10° and then
+    // gained +π = ~190°, rendering glyphs upside-down for exactly the
+    // down-left/down-right cases that need flipping. Regression test: under
+    // reducedMotion AND flipped, every character must still read upright
+    // (final |tangent| ≤ 10°).
+    const backwardTail = [
+      { x: 0, y: 0 },
+      { x: -200, y: 0 },
+    ];
+    const placed = placeCharactersAlongPath("AB", font, backwardTail, {
+      flipped: true,
+      reducedMotion: true,
+    });
+    const TEN_DEG_RAD = (10 * Math.PI) / 180;
+    for (const p of placed) {
+      expect(Math.abs(p.tangent)).toBeLessThanOrEqual(TEN_DEG_RAD + 1e-9);
+    }
+  });
 });
 
 describe("truncateLabelToFit", () => {

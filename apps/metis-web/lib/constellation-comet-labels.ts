@@ -236,6 +236,20 @@ export interface PlacedChar {
 const REDUCED_MOTION_MAX_TANGENT_RAD = (10 * Math.PI) / 180;
 
 /**
+ * Wrap an angle into the canonical (-π, π] range.
+ *
+ * Used to fold the post-flip tangent before applying the reduced-motion
+ * clamp so that "almost upright but expressed as ~+2π or ~-2π" doesn't
+ * masquerade as a steep angle. Bounded loops; in practice we never see
+ * inputs more than a few full rotations off zero.
+ */
+function normalizeAngle(t: number): number {
+  while (t > Math.PI) t -= 2 * Math.PI;
+  while (t < -Math.PI) t += 2 * Math.PI;
+  return t;
+}
+
+/**
  * Clamp a per-character tangent to ±10° from horizontal when the user
  * has `prefers-reduced-motion: reduce` set. The path-text effect still
  * tracks the trail's curvature, but the per-character rotation
@@ -292,12 +306,16 @@ export function placeCharactersAlongPath(
     const sample = samplePathAt(arcLengths, tail, center);
     // Position from the polyline-linear sample; tangent from the
     // secant-smoothed window so character rotations vary continuously
-    // even at segment corners. Reduced-motion clamp happens BEFORE the
-    // flip offset is applied so the clamp band is symmetric around the
-    // baseline reading direction (not the flipped-180° baseline).
+    // even at segment corners. Apply the flip offset FIRST and then
+    // clamp the normalized result, because the design's "deviation from
+    // horizontal" budget is on the GLYPH's final reading orientation —
+    // clamping the raw tangent before flipping would let an upside-down
+    // baseline survive the clamp (e.g. raw 170° → clamp 10° → flip
+    // 190°, glyph rendered upside-down).
     const baseTangent = smoothedTangentAt(arcLengths, tail, center);
-    const clamped = clampTangentForReducedMotion(baseTangent, reducedMotion);
-    out.push({ char: grapheme, x: sample.x, y: sample.y, tangent: clamped + flipOffset });
+    const finalTangent = normalizeAngle(baseTangent + flipOffset);
+    const clamped = clampTangentForReducedMotion(finalTangent, reducedMotion);
+    out.push({ char: grapheme, x: sample.x, y: sample.y, tangent: clamped });
     s += w;
   }
   return out;
