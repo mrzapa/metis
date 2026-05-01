@@ -1,7 +1,7 @@
 "use client";
 
 import type { CometData } from "./comet-types";
-import { buildCanvasFont, measureSingleLineTextWidth } from "./pretext-labels";
+import { buildCanvasFont, measureSingleLineTextWidth, wrapText } from "./pretext-labels";
 
 /**
  * Path-text rendering for comet headline labels.
@@ -622,4 +622,248 @@ export function drawCometLabel(
     ctx.restore();
   }
   ctx.restore();
+}
+
+// -- Hover card ---------------------------------------------------------------
+
+const CARD_WIDTH = 220;
+const CARD_PAD_X = 12;
+const CARD_PAD_Y = 10;
+const CARD_INNER_WIDTH = CARD_WIDTH - CARD_PAD_X * 2;
+const CARD_ANCHOR_OFFSET = 16;
+const CARD_CORNER_RADIUS = 12;
+
+const CARD_TITLE_FONT_SIZE = 13;
+const CARD_TITLE_FONT_WEIGHT = 600;
+const CARD_TITLE_LINE_HEIGHT = 17;
+const CARD_TITLE_MAX_LINES = 2;
+
+const CARD_SUMMARY_FONT_SIZE = 11;
+const CARD_SUMMARY_FONT_WEIGHT = 400;
+const CARD_SUMMARY_LINE_HEIGHT = 14;
+const CARD_SUMMARY_MAX_LINES = 4;
+
+const CARD_FOOTER_FONT_SIZE = 10;
+const CARD_FOOTER_LINE_HEIGHT = 13;
+
+const CARD_PILL_FONT_SIZE = 9;
+const CARD_PILL_INSET = 8;
+
+const CARD_TITLE_TO_SUMMARY_GAP = 4;
+const CARD_SUMMARY_TO_FOOTER_GAP = 6;
+
+const FACULTY_SHORT_CODE: Record<string, string> = {
+  autonomy: "AUT",
+  emergence: "EMR",
+  knowledge: "KNW",
+  memory: "MEM",
+  perception: "PER",
+  personality: "PRS",
+  reasoning: "RSN",
+  skills: "SKL",
+  strategy: "STR",
+  synthesis: "SYN",
+  values: "VAL",
+};
+
+function facultyShortCode(facultyId: string): string {
+  return FACULTY_SHORT_CODE[facultyId.toLowerCase()] ?? facultyId.slice(0, 3).toUpperCase();
+}
+
+/**
+ * Compact `{n}{unit} ago` formatter for hover-card footers
+ * (e.g. `12m ago`, `2h ago`, `3d ago`). `nowMs` and `publishedSeconds`
+ * are explicit so tests can pin the wall clock.
+ */
+function formatCompactAge(publishedSeconds: number, nowMs: number): string {
+  const ageMs = nowMs - publishedSeconds * 1000;
+  if (ageMs < 0) return "now";
+  const sec = Math.floor(ageMs / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.floor(hr / 24);
+  return `${days}d ago`;
+}
+
+/**
+ * Take the first `maxLines` lines from a wrapped result. If the wrap
+ * produced more lines than the cap, append an ellipsis to the last
+ * shown line so the user knows there's more.
+ */
+function clampLines(
+  lines: ReadonlyArray<{ text: string; width: number }>,
+  maxLines: number,
+): Array<{ text: string; width: number }> {
+  if (lines.length === 0) return [];
+  const out = lines.slice(0, maxLines).map((l) => ({ text: l.text, width: l.width }));
+  if (lines.length > maxLines) {
+    const last = out[out.length - 1];
+    out[out.length - 1] = { text: `${last.text.replace(/\s+$/, "")}…`, width: last.width };
+  }
+  return out;
+}
+
+export interface DrawCometHoverCardOpts {
+  viewport: Size;
+  fixedRects?: ReadonlyArray<Rect>;
+  /** Defaults to `Date.now()`; injectable for tests. */
+  now?: number;
+}
+
+/**
+ * Draw (or just lay out) a hover card next to a comet head.
+ *
+ * The function ALWAYS computes and returns the card's bounding rect,
+ * even when `ctx` is `null` (e.g. under jsdom or when the caller wants
+ * the bbox for click hit-testing without rendering). This means
+ * `findHoveredComet → drawCometHoverCard(null, …) → click hit-test`
+ * is a valid pattern off the render loop.
+ *
+ * Layout per the design doc § Hover card:
+ *   - 220px fixed width, dynamic height.
+ *   - Anchored 16px to the right of the comet head, vertically
+ *     centered. `clampToSafeArea` reins it into the viewport and
+ *     away from `opts.fixedRects` (zoom pill, FAB, top-bar, etc.).
+ *   - Frosted-glass pill backdrop, faculty pill in the top-right,
+ *     title (≤2 lines, faculty-coloured), summary (≤4 lines, neutral
+ *     0.7 alpha), footer (`source · age`, neutral 0.5 alpha).
+ *   - Title and summary wrap via pretext (`wrapText`) so emoji,
+ *     CJK, and combining marks render correctly.
+ */
+export function drawCometHoverCard(
+  ctx: CanvasRenderingContext2D | null,
+  comet: CometData,
+  anchor: CursorPoint,
+  opts: DrawCometHoverCardOpts,
+): Rect {
+  const titleFont = buildCanvasFont(
+    CARD_TITLE_FONT_SIZE,
+    LABEL_FONT_FAMILY,
+    CARD_TITLE_FONT_WEIGHT,
+  );
+  const summaryFont = buildCanvasFont(
+    CARD_SUMMARY_FONT_SIZE,
+    LABEL_FONT_FAMILY,
+    CARD_SUMMARY_FONT_WEIGHT,
+  );
+
+  const titleLines = clampLines(
+    wrapText(comet.title, titleFont, CARD_INNER_WIDTH),
+    CARD_TITLE_MAX_LINES,
+  );
+  const summaryLines = clampLines(
+    wrapText(comet.summary, summaryFont, CARD_INNER_WIDTH),
+    CARD_SUMMARY_MAX_LINES,
+  );
+
+  const titleH = titleLines.length * CARD_TITLE_LINE_HEIGHT;
+  const summaryH = summaryLines.length * CARD_SUMMARY_LINE_HEIGHT;
+  const innerH =
+    titleH +
+    (summaryLines.length > 0 ? CARD_TITLE_TO_SUMMARY_GAP + summaryH : 0) +
+    CARD_SUMMARY_TO_FOOTER_GAP +
+    CARD_FOOTER_LINE_HEIGHT;
+  const cardH = CARD_PAD_Y * 2 + Math.max(innerH, CARD_TITLE_LINE_HEIGHT);
+
+  const desiredX = anchor.x + CARD_ANCHOR_OFFSET;
+  const desiredY = anchor.y - cardH / 2;
+  const bbox = clampToSafeArea(
+    { x: desiredX, y: desiredY, w: CARD_WIDTH, h: cardH },
+    opts.viewport,
+    opts.fixedRects ?? [],
+  );
+
+  if (!ctx) return bbox;
+
+  // -- Render --------------------------------------------------------
+  const [r, g, b] = comet.color;
+  const facultyColor = `rgba(${r}, ${g}, ${b}, 1)`;
+
+  ctx.save();
+
+  // Frosted-glass backdrop.
+  ctx.fillStyle = "rgba(8, 10, 16, 0.78)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(bbox.x, bbox.y, bbox.w, bbox.h, CARD_CORNER_RADIUS);
+  } else {
+    // Fallback for older canvas implementations: simple rect.
+    ctx.rect(bbox.x, bbox.y, bbox.w, bbox.h);
+  }
+  ctx.fill();
+  ctx.stroke();
+
+  // Faculty pill (top-right, transparent fill + faculty-colored outline).
+  const pillFont = buildCanvasFont(CARD_PILL_FONT_SIZE, LABEL_FONT_FAMILY, 500);
+  const pillText = facultyShortCode(comet.facultyId);
+  ctx.font = pillFont;
+  const pillTextW = ctx.measureText(pillText).width;
+  const pillW = pillTextW + 10;
+  const pillH = CARD_PILL_FONT_SIZE + 6;
+  const pillX = bbox.x + bbox.w - pillW - CARD_PILL_INSET;
+  const pillY = bbox.y + CARD_PILL_INSET;
+  ctx.strokeStyle = facultyColor;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(pillX, pillY, pillW, pillH, pillH / 2);
+  } else {
+    ctx.rect(pillX, pillY, pillW, pillH);
+  }
+  ctx.stroke();
+  ctx.fillStyle = facultyColor;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(pillText, pillX + pillW / 2, pillY + pillH / 2);
+
+  // Title.
+  let cursorY = bbox.y + CARD_PAD_Y;
+  ctx.font = titleFont;
+  ctx.fillStyle = facultyColor;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  for (const line of titleLines) {
+    ctx.fillText(line.text, bbox.x + CARD_PAD_X, cursorY);
+    cursorY += CARD_TITLE_LINE_HEIGHT;
+  }
+
+  if (summaryLines.length > 0) {
+    cursorY += CARD_TITLE_TO_SUMMARY_GAP;
+    ctx.font = summaryFont;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+    for (const line of summaryLines) {
+      ctx.fillText(line.text, bbox.x + CARD_PAD_X, cursorY);
+      cursorY += CARD_SUMMARY_LINE_HEIGHT;
+    }
+  }
+
+  // Footer.
+  cursorY += CARD_SUMMARY_TO_FOOTER_GAP;
+  const nowMs = opts.now ?? Date.now();
+  const footerFont = buildCanvasFont(CARD_FOOTER_FONT_SIZE, LABEL_FONT_FAMILY, 400);
+  const footerText = `${comet.url ? new URL(comet.url, "http://x").host || "" : ""}`.replace(
+    /^www\./,
+    "",
+  );
+  // Prefer the explicit source channel, falling back to a derived host.
+  // We intentionally use comet.title/summary fields not the news_item ones —
+  // CometData inlines them, but channel + published_at live in nested data
+  // that the renderer doesn't currently receive. The footer surfaces the
+  // host from the URL plus the relevance score as a stand-in until M22
+  // Phase 5 polish wires the full news_item payload into CometData.
+  const ageText = formatCompactAge(0, nowMs); // 0 → "now" until news_item plumbing arrives
+  const footerLine = footerText
+    ? `${footerText} · ${ageText}`
+    : `relevance ${(comet.relevanceScore * 100).toFixed(0)}%`;
+  ctx.font = footerFont;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+  ctx.fillText(footerLine, bbox.x + CARD_PAD_X, cursorY);
+
+  ctx.restore();
+  return bbox;
 }

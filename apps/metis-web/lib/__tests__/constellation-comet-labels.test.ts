@@ -5,6 +5,7 @@ import {
   clampTangentForReducedMotion,
   clampToSafeArea,
   computeArcLengths,
+  drawCometHoverCard,
   drawCometLabel,
   findHoveredComet,
   placeCharactersAlongPath,
@@ -373,6 +374,59 @@ describe("placeCharactersAlongPath with flipped opt", () => {
     const placed = placeCharactersAlongPath("AB", font, horizontalTail);
     expect(placed[0].tangent).toBeCloseTo(0, 5);
     expect(placed[1].tangent).toBeCloseTo(0, 5);
+  });
+});
+
+describe("drawCometHoverCard", () => {
+  const vp = { w: 1000, h: 800 };
+
+  it("returns a 220px-wide bbox", () => {
+    const c = mkComet({ x: 100, y: 100 });
+    const bbox = drawCometHoverCard(null, c, { x: 100, y: 100 }, { viewport: vp });
+    expect(bbox.w).toBe(220);
+  });
+
+  it("positions the card 16px to the right of the anchor by default", () => {
+    const c = mkComet({ x: 100, y: 100 });
+    const bbox = drawCometHoverCard(null, c, { x: 100, y: 100 }, { viewport: vp });
+    expect(bbox.x).toBe(100 + 16);
+  });
+
+  it("clamps the card inside the viewport when the anchor is near the right edge", () => {
+    const c = mkComet({ x: 990, y: 100 });
+    const bbox = drawCometHoverCard(null, c, { x: 990, y: 100 }, { viewport: vp });
+    expect(bbox.x + bbox.w).toBeLessThanOrEqual(vp.w - 16);
+  });
+
+  it("avoids fixed UI rects passed in opts (e.g. zoom pill at bottom)", () => {
+    const c = mkComet({ x: 300, y: 690 });
+    const fixedRects = [{ x: 290, y: 700, w: 420, h: 60 }];
+    const bbox = drawCometHoverCard(null, c, { x: 300, y: 690 }, { viewport: vp, fixedRects });
+    expect(rectsOverlap(bbox, fixedRects[0])).toBe(false);
+  });
+
+  it("returns dynamic height that scales with summary length", () => {
+    const shortSummary = mkComet({ x: 100, y: 100, title: "Short", summary: "Brief." });
+    const longSummary = mkComet({
+      x: 100,
+      y: 100,
+      title: "Short",
+      summary:
+        "A much longer summary that will wrap to multiple lines once it exceeds the 196px content width budget that the card layout uses for the body text region.",
+    });
+    const a = drawCometHoverCard(null, shortSummary, { x: 100, y: 100 }, { viewport: vp });
+    const b = drawCometHoverCard(null, longSummary, { x: 100, y: 100 }, { viewport: vp });
+    expect(b.h).toBeGreaterThan(a.h);
+  });
+
+  it("does not throw when called with a real ctx (smoke under jsdom)", () => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return; // jsdom env without canvas package — skip
+    const c = mkComet();
+    expect(() =>
+      drawCometHoverCard(ctx, c, { x: c.x, y: c.y }, { viewport: vp }),
+    ).not.toThrow();
   });
 });
 
