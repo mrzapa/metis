@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildHeadFirstPath,
   computeArcLengths,
   drawCometLabel,
   placeCharactersAlongPath,
@@ -138,6 +139,48 @@ describe("placeCharactersAlongPath", () => {
     expect(placeCharactersAlongPath("", font, horizontalTail)).toEqual([]);
     expect(placeCharactersAlongPath("ABC", font, [{ x: 0, y: 0 }])).toEqual([]);
     expect(placeCharactersAlongPath("ABC", font, [])).toEqual([]);
+  });
+});
+
+describe("buildHeadFirstPath", () => {
+  it("prepends the comet's current head position before the reversed tail", () => {
+    // tickComet records the OLD position to tailHistory then advances comet.x/y.
+    // After a tick, comet.x/y is the rendered head position; tailHistory's
+    // last entry is one frame behind. The label path must start at the
+    // current head, not at tailHistory's last entry.
+    const comet = mkComet({
+      x: 100,
+      y: 50,
+      tailHistory: [
+        { x: 60, y: 50 },
+        { x: 70, y: 50 },
+        { x: 80, y: 50 },
+        { x: 90, y: 50 }, // last recorded — one frame behind comet.x
+      ],
+    });
+    const path = buildHeadFirstPath(comet);
+    expect(path[0]).toEqual({ x: 100, y: 50 }); // current head first
+    expect(path[1]).toEqual({ x: 90, y: 50 }); // most recent recorded
+    expect(path[path.length - 1]).toEqual({ x: 60, y: 50 }); // oldest last
+    expect(path).toHaveLength(5);
+  });
+
+  it("returns just the head when tailHistory is empty", () => {
+    const comet = mkComet({ x: 7, y: 11, tailHistory: [] });
+    expect(buildHeadFirstPath(comet)).toEqual([{ x: 7, y: 11 }]);
+  });
+
+  it("does not mutate the input tailHistory", () => {
+    const original = [
+      { x: 60, y: 50 },
+      { x: 70, y: 50 },
+    ];
+    const comet = mkComet({ x: 80, y: 50, tailHistory: original });
+    buildHeadFirstPath(comet);
+    expect(original).toEqual([
+      { x: 60, y: 50 },
+      { x: 70, y: 50 },
+    ]);
   });
 });
 

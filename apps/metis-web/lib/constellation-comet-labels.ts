@@ -140,6 +140,35 @@ export function placeCharactersAlongPath(
   return out;
 }
 
+/**
+ * Build a head-first polyline for label layout from a comet's current
+ * position plus its tail history.
+ *
+ * `tickComet` in `constellation-comets.ts` records each frame's
+ * pre-update `comet.x/y` into `tailHistory` BEFORE advancing the
+ * position. So at render time:
+ *   - `comet.x/y` = the head position the head sprite is drawn at.
+ *   - `tailHistory[length - 1]` = the position one frame ago.
+ * The existing `drawComets` bridges this gap with `ctx.lineTo(comet.x,
+ * comet.y)` after stroking the recorded history; the label path needs
+ * the same bridge or characters render lagging the head.
+ *
+ * Output is head-first (index 0 = current head, last index = oldest).
+ * Returned array is a copy — callers may mutate without affecting the
+ * comet.
+ */
+export function buildHeadFirstPath(
+  comet: Pick<CometData, "x" | "y" | "tailHistory">,
+): TailPoint[] {
+  const path: TailPoint[] = [{ x: comet.x, y: comet.y }];
+  // tailHistory order: oldest first, most-recent last. We want
+  // most-recent first after the current head, so iterate in reverse.
+  for (let i = comet.tailHistory.length - 1; i >= 0; i -= 1) {
+    path.push({ x: comet.tailHistory[i].x, y: comet.tailHistory[i].y });
+  }
+  return path;
+}
+
 // -- Canvas rendering ---------------------------------------------------------
 
 const LABEL_FONT_FAMILY =
@@ -168,13 +197,13 @@ export function drawCometLabel(
   ctx: CanvasRenderingContext2D,
   comet: CometData,
 ): void {
-  if (comet.tailHistory.length < 2 || comet.title.length === 0) return;
+  if (comet.title.length === 0) return;
 
-  // tailHistory: [oldest, ..., current_head]. We want head-first for layout.
-  const tail: TailPoint[] = comet.tailHistory
-    .slice()
-    .reverse()
-    .map((p) => ({ x: p.x, y: p.y }));
+  // Head-first path: current comet.x/y prepended to the reversed tailHistory
+  // (because tickComet records the OLD position before advancing comet.x/y,
+  // so tailHistory.last() lags the rendered head by one frame).
+  const tail = buildHeadFirstPath(comet);
+  if (tail.length < 2) return;
 
   const font = buildCanvasFont(LABEL_FONT_SIZE_PX, LABEL_FONT_FAMILY, LABEL_FONT_WEIGHT);
   const placed = placeCharactersAlongPath(comet.title, font, tail);
