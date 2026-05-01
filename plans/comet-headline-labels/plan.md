@@ -1,8 +1,8 @@
 ---
 Milestone: M22 — Comet headline labels
-Status: Ready
-Claim: unclaimed
-Last updated: 2026-05-01 by claude/gifted-knuth-27aeb0
+Status: In progress
+Claim: claude/m22-phase-1-tracer-pathtext
+Last updated: 2026-05-01 by claude/m22-phase-1-tracer-pathtext
 Vision pillar: Cosmos
 ---
 
@@ -11,14 +11,12 @@ Vision pillar: Cosmos
 - 2026-05-01 — Surfaced from the [`plans/IDEAS.md` → "chenglou/pretext"](../IDEAS.md) intake. UI-exploration brainstorm (preview tour + canvas-text census) found that pretext is already in the only place in METIS where it currently applies, and the proper new home for it is comet headline labels.
 - 2026-05-01 — Brainstormed and approved design. Full spec at [`docs/plans/2026-05-01-comet-headline-labels-design.md`](../../docs/plans/2026-05-01-comet-headline-labels-design.md).
 - 2026-05-01 — Implementation plan written. 5 phases of TDD-throughout work. Plan at [`docs/plans/2026-05-01-comet-headline-labels-implementation.md`](../../docs/plans/2026-05-01-comet-headline-labels-implementation.md).
+- 2026-05-01 — Phase 1 claimed on `claude/m22-phase-1-tracer-pathtext`. Tracer-bullet path-text: single comet, full trail, raw per-character spline tangent, no truncation/flip/collision/reduced-motion. The simplest possible signal that the spline math is correct.
 
 ## Next up
 
-1. Read the design doc top-to-bottom (especially the *Risks* and *Phase boundaries* sections).
-2. Read the implementation plan top-to-bottom. Pay special attention to the *Conventions* block.
-3. Verify the M22 row in [`plans/IMPLEMENTATION.md`](../IMPLEMENTATION.md) is still `Status: Ready` with `Claim` blank.
-4. Claim the row + edit this stub's frontmatter (set `Status: In progress`, `Claim`, `Last updated`).
-5. Branch off `main` as `claude/m22-phase-1-tracer-pathtext`. Begin Phase 1 of the implementation plan.
+1. Execute Phase 1 tasks 1.1–1.6 from the [implementation plan](../../docs/plans/2026-05-01-comet-headline-labels-implementation.md) using `superpowers:executing-plans`.
+2. After Phase 1 PR lands on `main`, branch off main as `claude/m22-phase-2-mitigations` and start Phase 2.
 
 ## Blockers
 
