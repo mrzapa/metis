@@ -699,6 +699,135 @@ export function drawCometLabel(
   ctx.restore();
 }
 
+// -- Collision suppression ----------------------------------------------------
+
+/**
+ * Approximate horizontal extent of one rendered glyph at `fontSize`,
+ * in CSS pixels. Used by `rotatedLabelBbox` to size each glyph's
+ * rotated quad. Rough rule-of-thumb (0.6 × font-size) chosen to
+ * match the average advance width across the Latin alphabet at
+ * typical canvas font rendering — the bbox doesn't need pixel
+ * accuracy because `suppressCollidingLabels` uses a 40% area
+ * threshold, well above per-glyph noise.
+ */
+const GLYPH_HALF_ADVANCE_FACTOR = 0.3;
+
+/**
+ * Compute the AABB enclosing every glyph in a placed-chars label,
+ * accounting for per-character rotation. Used by
+ * `suppressCollidingLabels` for cheap per-frame overlap checks
+ * across multiple comets' labels.
+ *
+ * Each glyph is treated as a rotated `fontSize × fontSize` square
+ * centred on its `(x, y)`. The bbox is the min/max over the four
+ * corners of every glyph's rotated quad.
+ *
+ * Returns `{x: 0, y: 0, w: 0, h: 0}` for an empty placed list — the
+ * caller's overlap test treats a zero-area rect as non-overlapping.
+ */
+export function rotatedLabelBbox(
+  placed: ReadonlyArray<PlacedChar>,
+  fontSize: number,
+): Rect {
+  if (placed.length === 0) return { x: 0, y: 0, w: 0, h: 0 };
+  const halfAdv = fontSize * GLYPH_HALF_ADVANCE_FACTOR;
+  const halfH = fontSize / 2;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const p of placed) {
+    const cos = Math.cos(p.tangent);
+    const sin = Math.sin(p.tangent);
+    // Glyph's local rect corners: (±halfAdv, ±halfH). Rotate each by
+    // tangent, translate to (p.x, p.y), then expand min/max.
+    for (const [lx, ly] of [
+      [-halfAdv, -halfH],
+      [halfAdv, -halfH],
+      [-halfAdv, halfH],
+      [halfAdv, halfH],
+    ]) {
+      const wx = p.x + lx * cos - ly * sin;
+      const wy = p.y + lx * sin + ly * cos;
+      if (wx < minX) minX = wx;
+      if (wx > maxX) maxX = wx;
+      if (wy < minY) minY = wy;
+      if (wy > maxY) maxY = wy;
+    }
+  }
+
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/** A label paired with its bbox + relevance for collision suppression. */
+export interface SuppressionCandidate {
+  /** Stable identifier (e.g. `comet_id`); preserved through suppression. */
+  id: string;
+  /** Higher relevance wins ties when two labels overlap. */
+  relevance: number;
+  /** Rotated AABB from `rotatedLabelBbox`. */
+  bbox: Rect;
+}
+
+/** Default overlap-area / smaller-bbox-area threshold for suppression. */
+const DEFAULT_SUPPRESSION_THRESHOLD = 0.4;
+
+/**
+ * Resolve which labels should render this frame: sort by relevance
+ * descending, then for each candidate, AABB-overlap-test against the
+ * already-kept set. Drop the candidate if its overlap ratio (overlap
+ * area / smaller-bbox area) exceeds `threshold` against ANY kept
+ * label.
+ *
+ * Pure function. Caller (page.tsx render loop) builds the
+ * `SuppressionCandidate[]` from `cometSprites` + the prepared
+ * `PlacedChar[]` lists, calls this, and then renders only the
+ * survivors.
+ *
+ * Rationale (from design § Collision suppression): the visible
+ * label set should NOT have heavy overlaps that turn glyphs into
+ * mush. Higher-`relevanceScore` comets win because they're the
+ * news the user most cares about.
+ */
+export function suppressCollidingLabels(
+  candidates: ReadonlyArray<SuppressionCandidate>,
+  threshold: number = DEFAULT_SUPPRESSION_THRESHOLD,
+): SuppressionCandidate[] {
+  if (candidates.length === 0) return [];
+
+  const sorted = [...candidates].sort((a, b) => b.relevance - a.relevance);
+  const kept: SuppressionCandidate[] = [];
+  for (const cand of sorted) {
+    let suppressed = false;
+    for (const k of kept) {
+      if (overlapRatio(cand.bbox, k.bbox) > threshold) {
+        suppressed = true;
+        break;
+      }
+    }
+    if (!suppressed) kept.push(cand);
+  }
+  return kept;
+}
+
+/**
+ * Overlap-area / smaller-bbox-area ratio for two AABBs. Returns 0
+ * when either rect has zero area or when they don't overlap (per
+ * `rectsOverlap`'s edge-touching = non-overlapping convention).
+ */
+function overlapRatio(a: Rect, b: Rect): number {
+  if (!rectsOverlap(a, b)) return 0;
+  const aArea = a.w * a.h;
+  const bArea = b.w * b.h;
+  if (aArea <= 0 || bArea <= 0) return 0;
+  const overlapW = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const overlapH = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  const overlapArea = overlapW * overlapH;
+  return overlapArea / Math.min(aArea, bArea);
+}
+
 // -- Hover card ---------------------------------------------------------------
 
 const CARD_WIDTH = 220;

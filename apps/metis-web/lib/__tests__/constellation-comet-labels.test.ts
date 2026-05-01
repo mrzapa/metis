@@ -11,9 +11,11 @@ import {
   formatCompactAge,
   placeCharactersAlongPath,
   rectsOverlap,
+  rotatedLabelBbox,
   samplePathAt,
   shouldFlipOrientation,
   smoothedTangentAt,
+  suppressCollidingLabels,
   tickHoverPersistence,
   truncateLabelToFit,
 } from "../constellation-comet-labels";
@@ -575,6 +577,124 @@ describe("formatCompactAge", () => {
     // Without this guard, formatCompactAge(0, Date.now()) returns
     // ~20000d ago — the bug Copilot caught in PR #592.
     expect(formatCompactAge(0, REFERENCE_NOW_MS)).toBe("now");
+  });
+});
+
+describe("rotatedLabelBbox", () => {
+  // Each PlacedChar represents one rendered glyph at (x, y) rotated by
+  // tangent radians. The bbox is the AABB enclosing every glyph's
+  // rotated quad, used by suppressCollidingLabels for AABB-overlap
+  // checks. Glyph extent = ~fontSize/2 from the (x,y) center.
+  const FONT_SIZE = 11;
+
+  it("returns an empty zero-rect for an empty placed list", () => {
+    const r = rotatedLabelBbox([], FONT_SIZE);
+    expect(r).toEqual({ x: 0, y: 0, w: 0, h: 0 });
+  });
+
+  it("encloses a horizontal label with width = char advance + glyph extent", () => {
+    const placed = [
+      { char: "A", x: 0, y: 0, tangent: 0 },
+      { char: "B", x: 10, y: 0, tangent: 0 },
+    ];
+    const r = rotatedLabelBbox(placed, FONT_SIZE);
+    // Span is at least the distance between centers (10) plus a half
+    // glyph on each end.
+    expect(r.w).toBeGreaterThanOrEqual(10);
+    expect(r.h).toBeGreaterThanOrEqual(FONT_SIZE);
+    // Centred around y=0, so the bbox top should be roughly -fontSize/2.
+    expect(r.y).toBeLessThanOrEqual(-FONT_SIZE / 2 + 0.001);
+  });
+
+  it("expands the bbox to enclose a 45°-rotated diagonal label", () => {
+    // Two glyphs along a 45° axis. The bbox must enclose the rotated
+    // quads of both — diagonal extent is wider than either axis alone.
+    const placed = [
+      { char: "A", x: 0, y: 0, tangent: Math.PI / 4 },
+      { char: "B", x: 10, y: 10, tangent: Math.PI / 4 },
+    ];
+    const r = rotatedLabelBbox(placed, FONT_SIZE);
+    expect(r.w).toBeGreaterThan(10);
+    expect(r.h).toBeGreaterThan(10);
+  });
+
+  it("handles a vertical label (90° tangent)", () => {
+    const placed = [
+      { char: "A", x: 0, y: 0, tangent: Math.PI / 2 },
+      { char: "B", x: 0, y: 10, tangent: Math.PI / 2 },
+    ];
+    const r = rotatedLabelBbox(placed, FONT_SIZE);
+    // Vertical run: height should dominate.
+    expect(r.h).toBeGreaterThan(r.w);
+  });
+});
+
+describe("suppressCollidingLabels", () => {
+  // Sort labels by relevance (desc); for each, AABB-overlap-check
+  // against all already-kept labels, drop if overlap area / smaller-
+  // bbox area > threshold (default 0.4 per design § Collision
+  // suppression).
+
+  it("keeps both labels when their bboxes don't overlap", () => {
+    const a = { id: "a", relevance: 0.9, bbox: { x: 0, y: 0, w: 50, h: 11 } };
+    const b = { id: "b", relevance: 0.5, bbox: { x: 100, y: 0, w: 50, h: 11 } };
+    expect(suppressCollidingLabels([a, b]).map((l) => l.id)).toEqual(["a", "b"]);
+  });
+
+  it("suppresses the lower-relevance label when overlap exceeds threshold", () => {
+    const a = { id: "high", relevance: 0.9, bbox: { x: 0, y: 0, w: 50, h: 11 } };
+    const b = { id: "low", relevance: 0.3, bbox: { x: 25, y: 0, w: 50, h: 11 } };
+    // Overlap area = 25*11 = 275. Smaller bbox area = 50*11 = 550. Ratio = 0.5 > 0.4.
+    expect(suppressCollidingLabels([a, b]).map((l) => l.id)).toEqual(["high"]);
+  });
+
+  it("does NOT suppress when overlap is below the threshold", () => {
+    const a = { id: "high", relevance: 0.9, bbox: { x: 0, y: 0, w: 50, h: 11 } };
+    const b = { id: "low", relevance: 0.3, bbox: { x: 45, y: 0, w: 50, h: 11 } };
+    // Overlap = 5*11 = 55; smaller area = 550; ratio = 0.1 < 0.4.
+    const ids = suppressCollidingLabels([a, b])
+      .map((l) => l.id)
+      .sort();
+    expect(ids).toEqual(["high", "low"]);
+  });
+
+  it("respects relevance ordering regardless of input order", () => {
+    const a = { id: "low", relevance: 0.3, bbox: { x: 0, y: 0, w: 50, h: 11 } };
+    const b = { id: "high", relevance: 0.9, bbox: { x: 25, y: 0, w: 50, h: 11 } };
+    expect(suppressCollidingLabels([a, b]).map((l) => l.id)).toEqual(["high"]);
+  });
+
+  it("suppresses every lower-relevance label that overlaps the kept set", () => {
+    // Three labels all stacked over `a`'s span. Suppression is
+    // anchored to the kept set (not transitive through suppressed
+    // candidates), so the algorithm checks each B/C candidate
+    // against `a` — which already overlaps both — and drops them.
+    const labels = [
+      { id: "a", relevance: 0.9, bbox: { x: 0, y: 0, w: 50, h: 11 } },
+      { id: "b", relevance: 0.6, bbox: { x: 20, y: 0, w: 50, h: 11 } }, // 60% over a
+      { id: "c", relevance: 0.3, bbox: { x: 10, y: 0, w: 50, h: 11 } }, // 80% over a
+    ];
+    expect(suppressCollidingLabels(labels).map((l) => l.id)).toEqual(["a"]);
+  });
+
+  it("keeps labels whose bboxes only touch at the edge (non-overlapping)", () => {
+    // Edge-touching is treated as non-overlapping in rectsOverlap.
+    const a = { id: "a", relevance: 0.9, bbox: { x: 0, y: 0, w: 50, h: 11 } };
+    const b = { id: "b", relevance: 0.5, bbox: { x: 50, y: 0, w: 50, h: 11 } };
+    expect(suppressCollidingLabels([a, b])).toHaveLength(2);
+  });
+
+  it("respects a custom overlap threshold", () => {
+    const a = { id: "high", relevance: 0.9, bbox: { x: 0, y: 0, w: 50, h: 11 } };
+    const b = { id: "low", relevance: 0.3, bbox: { x: 45, y: 0, w: 50, h: 11 } };
+    // Overlap ratio = 0.1. Default threshold 0.4 keeps both.
+    expect(suppressCollidingLabels([a, b])).toHaveLength(2);
+    // With threshold 0.05, it suppresses.
+    expect(suppressCollidingLabels([a, b], 0.05)).toHaveLength(1);
+  });
+
+  it("returns [] for an empty input", () => {
+    expect(suppressCollidingLabels([])).toEqual([]);
   });
 });
 
