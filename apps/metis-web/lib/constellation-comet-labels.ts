@@ -91,6 +91,42 @@ export function samplePathAt(
   };
 }
 
+/** Half-window used by `smoothedTangentAt` to compute the secant tangent. */
+const TANGENT_SMOOTHING_DELTA_PX = 5;
+
+/**
+ * Tangent at arc length `s`, smoothed via central finite difference.
+ *
+ * Where `samplePathAt(...).tangent` jumps abruptly at segment boundaries
+ * (because each segment has its own constant tangent), this function
+ * returns the angle of the secant from `s - δ` to `s + δ` along the
+ * polyline. The secant is continuous in `s`, so character orientations
+ * along the trail vary smoothly even at corners.
+ *
+ * Near the polyline endpoints (`s < δ` or `s > total - δ`) the window
+ * clamps to the available range, degrading to a one-sided difference.
+ *
+ * Sub-2-point tails return 0 (no segment to take a tangent of).
+ */
+export function smoothedTangentAt(
+  arcLengths: ReadonlyArray<number>,
+  tail: ReadonlyArray<TailPoint>,
+  s: number,
+): number {
+  if (tail.length < 2) return 0;
+  const total = arcLengths[arcLengths.length - 1];
+  const s0 = Math.max(0, s - TANGENT_SMOOTHING_DELTA_PX);
+  const s1 = Math.min(total, s + TANGENT_SMOOTHING_DELTA_PX);
+  if (s1 - s0 <= 0) {
+    // Both endpoints clamp to the same place (zero-length tail or
+    // s exactly at a degenerate point) — fall back to the raw tangent.
+    return samplePathAt(arcLengths, tail, s).tangent;
+  }
+  const p0 = samplePathAt(arcLengths, tail, s0);
+  const p1 = samplePathAt(arcLengths, tail, s1);
+  return Math.atan2(p1.y - p0.y, p1.x - p0.x);
+}
+
 export interface PlacedChar {
   char: string;
   x: number;

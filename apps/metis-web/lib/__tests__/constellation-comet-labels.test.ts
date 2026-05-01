@@ -6,6 +6,7 @@ import {
   drawCometLabel,
   placeCharactersAlongPath,
   samplePathAt,
+  smoothedTangentAt,
 } from "../constellation-comet-labels";
 import type { CometData } from "../comet-types";
 
@@ -158,6 +159,51 @@ describe("placeCharactersAlongPath", () => {
     expect(placed).toHaveLength(2);
     expect(placed[0].char).toBe("é");
     expect(placed[1].char).toBe("z");
+  });
+});
+
+describe("smoothedTangentAt", () => {
+  it("matches the raw tangent on a straight horizontal line", () => {
+    const tail = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 20, y: 0 },
+      { x: 30, y: 0 },
+    ];
+    const arc = computeArcLengths(tail);
+    expect(smoothedTangentAt(arc, tail, 15)).toBeCloseTo(0, 3);
+  });
+
+  it("smooths a sharp right-angle corner — tangent at the elbow lies between the two segment angles", () => {
+    // 90° turn: x then y. Raw tangent jumps from 0 to π/2 at the elbow.
+    // Smoothed should land somewhere in (0, π/2).
+    const tail = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 10, y: 20 },
+    ];
+    const arc = computeArcLengths(tail);
+    const smoothed = smoothedTangentAt(arc, tail, 10); // exactly at the elbow
+    expect(smoothed).toBeGreaterThan(0);
+    expect(smoothed).toBeLessThan(Math.PI / 2);
+  });
+
+  it("falls back to samplePathAt's tangent for sub-2-point tails", () => {
+    expect(smoothedTangentAt([], [], 0)).toBeCloseTo(0);
+    expect(smoothedTangentAt([0], [{ x: 5, y: 5 }], 0)).toBeCloseTo(0);
+  });
+
+  it("equals the raw segment tangent at endpoints (no neighbour to smooth with)", () => {
+    const tail = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+    ];
+    const arc = computeArcLengths(tail);
+    // s=0 and s=total — no later/earlier neighbour to average against.
+    expect(smoothedTangentAt(arc, tail, 0)).toBeCloseTo(0);
+    expect(smoothedTangentAt(arc, tail, 20)).toBeCloseTo(Math.PI / 2);
   });
 });
 
