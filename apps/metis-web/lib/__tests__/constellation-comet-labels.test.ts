@@ -10,6 +10,7 @@ import {
   findHoveredComet,
   formatCompactAge,
   placeCharactersAlongPath,
+  prepareCometLabel,
   rectsOverlap,
   rotatedLabelBbox,
   samplePathAt,
@@ -577,6 +578,117 @@ describe("formatCompactAge", () => {
     // Without this guard, formatCompactAge(0, Date.now()) returns
     // ~20000d ago — the bug Copilot caught in PR #592.
     expect(formatCompactAge(0, REFERENCE_NOW_MS)).toBe("now");
+  });
+});
+
+describe("prepareCometLabel", () => {
+  // Most prepareCometLabel behaviour is exercised indirectly through
+  // the drawCometLabel smoke tests. The tests here pin the regression
+  // behaviour PR #595 review caught: a near-zero-opacity label MUST
+  // NOT enter the suppression pipeline as a candidate, otherwise an
+  // invisible high-relevance comet can block a visible low-relevance
+  // one (Phase 4 changed cross-comet semantics).
+
+  function mkVisibleComet(overrides: Partial<CometData> = {}): CometData {
+    return mkComet({
+      tailHistory: [
+        { x: 60, y: 100 },
+        { x: 70, y: 100 },
+        { x: 80, y: 100 },
+        { x: 90, y: 100 },
+        { x: 100, y: 100 },
+      ],
+      title: "Visible headline",
+      opacity: 1.0,
+      ...overrides,
+    });
+  }
+
+  it("returns null for a comet whose effective alpha is below the visible threshold", () => {
+    // opacity < ~0.077 ⇒ effective alpha (0.65 × opacity) < 0.05 ⇒ invisible.
+    const fading = mkVisibleComet({ opacity: 0.05 });
+    expect(prepareCometLabel(fading)).toBeNull();
+  });
+
+  it("returns a prepared label for a fully visible comet", () => {
+    const visible = mkVisibleComet({ opacity: 1.0 });
+    const prepared = prepareCometLabel(visible);
+    expect(prepared).not.toBeNull();
+    expect(prepared?.cometId).toBe(visible.comet_id);
+    expect(prepared?.bbox.w).toBeGreaterThan(0);
+  });
+
+  it("returns null for an empty title regardless of opacity", () => {
+    expect(prepareCometLabel(mkVisibleComet({ title: "", opacity: 1.0 }))).toBeNull();
+  });
+});
+
+describe("Phase 4 regression — invisible labels must not suppress visible ones", () => {
+  // Pre-fix: a near-zero-alpha entering/fading comet still produced a
+  // valid `PreparedCometLabel` with a non-null bbox, which fed into
+  // suppressCollidingLabels and could block a fully-visible
+  // lower-relevance comet from rendering. Tests pin that
+  // prepareCometLabel filters invisible candidates out before they
+  // can affect cross-comet suppression decisions.
+
+  function mkComet2(overrides: Partial<CometData>): CometData {
+    return {
+      comet_id: "x",
+      x: 100,
+      y: 100,
+      vx: 0,
+      vy: 0,
+      tailHistory: [
+        { x: 60, y: 100 },
+        { x: 70, y: 100 },
+        { x: 80, y: 100 },
+        { x: 90, y: 100 },
+        { x: 100, y: 100 },
+      ],
+      color: [120, 200, 255],
+      facultyId: "perception",
+      targetX: 0,
+      targetY: 0,
+      phase: "drifting",
+      phaseStartedAt: 0,
+      size: 4,
+      opacity: 1,
+      title: "Visible headline",
+      summary: "",
+      url: "",
+      sourceChannel: "",
+      publishedAt: 0,
+      decision: "drift",
+      relevanceScore: 0.5,
+      ...overrides,
+    };
+  }
+
+  it("a fading high-relevance comet is filtered before suppression so it can't block a visible low-relevance comet", () => {
+    const invisibleHigh = mkComet2({
+      comet_id: "fading-but-relevant",
+      relevanceScore: 0.95,
+      opacity: 0.02, // mid-fade
+    });
+    const visibleLow = mkComet2({
+      comet_id: "visible-but-niche",
+      relevanceScore: 0.2,
+      opacity: 1.0,
+    });
+
+    const prepared = [invisibleHigh, visibleLow]
+      .map((c) => prepareCometLabel(c))
+      .filter((p): p is NonNullable<typeof p> => p !== null);
+
+    // Pre-fix this would have been [invisibleHigh, visibleLow]; suppression
+    // would then drop visibleLow because invisibleHigh has higher relevance.
+    expect(prepared.map((p) => p.cometId)).toEqual(["visible-but-niche"]);
+
+    // And running suppression on the filtered set: visibleLow survives.
+    const survivors = suppressCollidingLabels(
+      prepared.map((p) => ({ id: p.cometId, relevance: p.relevance, bbox: p.bbox })),
+    );
+    expect(survivors.map((s) => s.id)).toEqual(["visible-but-niche"]);
   });
 });
 

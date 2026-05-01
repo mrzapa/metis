@@ -819,6 +819,27 @@ function clampPointToOrbit(x: number, y: number): [number, number] {
   );
 }
 
+/**
+ * M22 Phase 4 — resolve a cached fixed-UI element's bounding rect for
+ * the hover-card safe-area clamp. Lazy: refreshes the cached ref if
+ * the previous element got detached (HMR / re-mount). Returns null if
+ * no element matches OR the rect is degenerate (zero area). Lives at
+ * module scope so the per-frame render loop doesn't re-allocate the
+ * closure each animation frame.
+ */
+function rectFromCachedElement(
+  ref: { current: HTMLElement | null },
+  selector: string,
+): { x: number; y: number; w: number; h: number } | null {
+  if (!ref.current || !document.body.contains(ref.current)) {
+    ref.current = document.querySelector<HTMLElement>(selector);
+  }
+  if (!ref.current) return null;
+  const r = ref.current.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return null;
+  return { x: r.left, y: r.top, w: r.width, h: r.height };
+}
+
 function describeFacultyDrop(faculty: ConstellationFacultyMetadata, bridgeFaculty: ConstellationFacultyMetadata | null): string {
   if (bridgeFaculty) {
     return `${faculty.label} primary with a bridge toward ${bridgeFaculty.label}. Release to persist the reassignment.`;
@@ -4821,30 +4842,17 @@ export default function Home() {
           ? cometSprites.find((c) => c.comet_id === hoverState.cometId)
           : null;
         if (hovered) {
+          // rectFromCachedElement is module-scoped (above) — no
+          // per-frame closure allocation in the hot loop. Each call
+          // returns the cached element's bbox or null on miss.
           const fixedRects: CometCardRect[] = [];
-          // Resolve cached fixed-UI elements (lazy; refresh on
-          // detach). Each refresh is amortised across many hover
-          // frames since these elements are stable page chrome.
-          const ensureCachedRef = (
-            ref: typeof zoomPillRef,
-            selector: string,
-          ): HTMLElement | null => {
-            if (!ref.current || !document.body.contains(ref.current)) {
-              ref.current = document.querySelector<HTMLElement>(selector);
-            }
-            return ref.current;
-          };
-          const pushRect = (el: HTMLElement | null) => {
-            if (!el) return;
-            const r = el.getBoundingClientRect();
-            if (r.width > 0 && r.height > 0) {
-              fixedRects.push({ x: r.left, y: r.top, w: r.width, h: r.height });
-            }
-          };
-          pushRect(ensureCachedRef(zoomPillRef, ".metis-zoom-pill"));
-          pushRect(ensureCachedRef(homeFabRef, ".metis-home-fab-root"));
-          pushRect(ensureCachedRef(heroOverlayRef, ".metis-hero-overlay"));
-          // The page chrome / top bar doesn't have a single stable
+          const pillRect = rectFromCachedElement(zoomPillRef, ".metis-zoom-pill");
+          if (pillRect) fixedRects.push(pillRect);
+          const fabRect = rectFromCachedElement(homeFabRef, ".metis-home-fab-root");
+          if (fabRect) fixedRects.push(fabRect);
+          const heroRect = rectFromCachedElement(heroOverlayRef, ".metis-hero-overlay");
+          if (heroRect) fixedRects.push(heroRect);
+          // The page-chrome top bar doesn't have a single stable
           // class selector (cn-composed in page-chrome.tsx). A
           // synthetic 64px-tall band at the top of the viewport is
           // a robust fallback that doesn't depend on the chrome's

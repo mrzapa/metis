@@ -382,6 +382,15 @@ const LABEL_FONT_SIZE_PX = 11;
 const LABEL_FONT_WEIGHT = 400;
 /** Phase 1 ambient opacity multiplier; multiplied by `comet.opacity`. */
 const LABEL_BASE_OPACITY = 0.65;
+/**
+ * Effective-alpha threshold below which a label is treated as
+ * visually imperceptible and skipped. Used by `prepareCometLabel`
+ * to keep invisible comets out of the suppression pipeline —
+ * without this, a near-zero-alpha entering/fading comet's bbox
+ * could block a fully-visible lower-relevance comet's label
+ * (Phase 4 regression caught in PR #595 review).
+ */
+const MIN_VISIBLE_LABEL_ALPHA = 0.05;
 
 /** Hover-detect radius around a comet head, in CSS pixels. */
 const HOVER_RADIUS_PX = 24;
@@ -671,6 +680,17 @@ export function prepareCometLabel(
 ): PreparedCometLabel | null {
   if (comet.title.length === 0) return null;
 
+  // Visibility short-circuit: a comet with effective alpha below
+  // MIN_VISIBLE_LABEL_ALPHA contributes no visible glyphs. Skip it
+  // BEFORE collision suppression so an invisible high-relevance
+  // candidate can't block a visible low-relevance one. (Pre-Phase-4
+  // every label drew independently, so opacity didn't affect
+  // cross-comet visibility; Phase 4's suppression makes this
+  // matter.)
+  if (LABEL_BASE_OPACITY * comet.opacity < MIN_VISIBLE_LABEL_ALPHA) {
+    return null;
+  }
+
   const tail = buildHeadFirstPath(comet);
   if (tail.length < 2) return null;
 
@@ -765,9 +785,12 @@ const GLYPH_HALF_ADVANCE_FACTOR = 0.3;
  * `suppressCollidingLabels` for cheap per-frame overlap checks
  * across multiple comets' labels.
  *
- * Each glyph is treated as a rotated `fontSize × fontSize` square
- * centred on its `(x, y)`. The bbox is the min/max over the four
- * corners of every glyph's rotated quad.
+ * Each glyph is modelled as a `(2 × halfAdv) × fontSize` rectangle
+ * centred on its `(x, y)`, where
+ * `halfAdv = fontSize × GLYPH_HALF_ADVANCE_FACTOR` (≈ 0.6 × fontSize
+ * total advance, matching the average Latin glyph width). Each
+ * rect is rotated by its `tangent`, and the bbox is the min/max
+ * over all four corners of every glyph's rotated quad.
  *
  * Returns `{x: 0, y: 0, w: 0, h: 0}` for an empty placed list — the
  * caller's overlap test treats a zero-area rect as non-overlapping.
