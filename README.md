@@ -72,6 +72,7 @@ metis
 ```
 
 The launcher starts the local Litestar API and static web UI, then opens `http://127.0.0.1:3000`.
+By default this lands you on the Constellation home landing page.
 
 You can also run directly from source:
 
@@ -83,6 +84,8 @@ python main.py
 |-----------|---------|
 | **Web UI** | `metis` |
 | **Web UI from source** | `python main.py` |
+| **Legacy desktop override** | `metis --desktop` |
+| **Legacy desktop override (alias)** | `metis --gui` |
 | **CLI** | `metis --cli <command>` |
 | **Native desktop shell** | See `apps/metis-desktop/README.md` |
 

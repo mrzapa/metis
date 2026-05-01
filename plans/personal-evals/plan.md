@@ -1,10 +1,14 @@
 ---
 Milestone: Personal evals (M16)
-Status: Draft
-Claim: unclaimed
-Last updated: 2026-04-19 by claude/plans-m14-m16-m17
+Status: In progress
+Claim: claude/m16-phase1-adrs
+Last updated: 2026-05-01 by claude/m16-phase1-adrs
 Vision pillar: Companion
 ---
+
+TDD Mode: pragmatic
+QA Execution Mode: agent-operated
+Phase 1 rationale: docs-only ADR slice; there is no meaningful RED -> GREEN loop, so verification comes from the harvest audit, local DB/corpus probe, and repo checks recorded in Progress.
 
 ## Progress
 
@@ -12,6 +16,45 @@ Vision pillar: Companion
 plan pass. Significant adjacent scaffolding already exists in the repo
 and will be harvested rather than rebuilt. See the harvest list in
 *Notes for the next agent*.)*
+
+- 2026-05-01 Phase 1 claimed on branch `claude/m16-phase1-adrs`; the
+  M16 row in `plans/IMPLEMENTATION.md` is now `In progress`.
+- 2026-05-01 inventory spike confirmed the checked-in harvest surface on
+  `main`: `ArtifactConverter.export_as_eval()`, `trace_feedback`,
+  `message_feedback`, `BehaviorProfile`, and the existing
+  `CompanionActivityEvent` bus all exist already. Local data is still
+  cold-start: `rag_sessions.db` exists but both feedback tables currently
+  have `0` rows, and `evals/golden_dataset.jsonl` is absent.
+- 2026-05-01 draft ADR numbering corrected for current trunk state:
+  `0010`–`0012` were already consumed by M17/M12 work, so M16 Phase 1
+  uses ADR `0016` (grading lanes), `0017` (storage + generation
+  versioning), and `0018` (privacy posture). Optional judge-model
+  pinning moves to `0019` if M16 v2 needs it.
+- 2026-05-01 Phase 1 ADR set landed: ADR 0016 locks the three-lane
+  grading strategy, ADR 0017 chooses a dedicated `evals.db` with
+  content-addressed generation ids, and ADR 0018 keeps storage/grading
+  local while allowing reruns to reuse the user's already-selected
+  companion provider.
+- 2026-05-01 verification snapshot for the Phase 1 docs slice:
+  `npx vitest run` passed in `apps/metis-web`; required repo gates remain
+  blocked by unrelated baseline failures on `main` — backend pytest fails
+  in `tests/test_install_launcher.py` because `README.md` no longer
+  documents `--desktop` / "landing page", `npx tsc --noEmit` fails in
+  `components/shell/__tests__/metis-sigil.test.tsx` on a pre-existing
+  `stage` typing mismatch, and `ruff check <touched files>` is not a
+  usable command for this docs-only slice because Ruff parses the targeted
+  `.md` files as Python and exits with syntax errors.
+- 2026-05-01 verification unblock landed: `README.md` now documents the
+  launcher's `--desktop` / `--gui` overrides and explicitly calls the
+  default web surface the "Constellation home landing page"; the
+  `MetisSigil` test now types its fixture data as `GrowthStage` so
+  `npx tsc --noEmit` no longer widens `stage` to `string`.
+- 2026-05-01 required verification passed after the Phase 1 docs +
+  verification-unblock slice:
+  `python -m pytest tests/ --ignore=tests/_litestar_helpers --ignore=tests/test_api_app.py`
+  => `1511 passed, 12 skipped`; `cd apps/metis-web && npx tsc --noEmit`
+  => clean; `cd apps/metis-web && npx vitest run` => `74 passed, 2
+  skipped`; `ruff check tests/test_install_launcher.py` => clean.
 
 What's in place today that M16 will lean on — "personal evals" is
 closer to shipping than the table status suggests, because the raw
@@ -86,36 +129,21 @@ time-series or surfaced as an eval report:
 
 ## Next up
 
-The first concrete actions for whoever claims M16:
-
-1. **Write ADR 0010 — Personal-eval grading-signal strategy.** Decide
-   on the v1 grading lanes. Recommendation (see *Notes* below): ship
-   v1 with (a) trace_feedback labels already in the DB, (b)
-   message_feedback thumbs already in the DB, and (c) the implicit
-   behavior-profile score from `BehaviorDiscoveryService`. Defer LLM-
-   as-judge to v2, and defer explicit rubric scoring past that.
-   Rationale: (a) and (b) are already producing per-user signal today
-   — no new UI required to get useful data; (c) is rubric-free and
-   runs over any trace with no LLM cost. This unblocks Phase 1 and
-   Phase 4.
-2. **Write ADR 0011 — Eval-run storage format & companion-generation
-   versioning.** Pick between (i) a new `evals.db` SQLite file
-   alongside the existing `sessions.db` / `trace_feedback`,
-   (ii) new tables inside `session_repository`'s existing DB, or
-   (iii) JSONL roll-by-date files under `evals/runs/`. Decide the
-   generation-versioning scheme (git SHA of model config? a monotonic
-   counter bumped on model swap / LoRA adapter / promoted skill?).
-   Generation tracking is the single most load-bearing field; without
-   it M18 (LoRA) cannot gate on eval improvement. Blocker for Phase 3
-   and Phase 4.
-3. **Inventory existing quality signals.** Before writing any new
-   capture code, do a one-day spike: query `trace_feedback` and
-   `message_feedback` on a dev-seeded DB; enumerate every
-   `BehaviorProfile` field that could act as an implicit signal;
-   sketch the `EvalTask` schema against an actual row. Output: a
-   half-page memo in the plan doc's *Notes* updating the phase
-   breakdown with real field names. This catches schema mismatches
-   before they land in code.
+1. **Phase 2 — scaffold the eval store around ADR 0017.** Add
+  `metis_app/evals/{corpus,store,generation}.py` with the `tasks`,
+  `runs`, and `generations` schema in a dedicated `evals.db`, plus
+  first-run import from `evals/golden_dataset.jsonl` when present.
+2. **Phase 2 — wire backend config without growing a second settings
+  surface.** Add `evals_enabled`, `evals_cadence_hours`,
+  `evals_auto_seed_enabled`, and `evals_share_optin` to
+  `metis_app/default_settings.json` / `settings_store.py`, keeping the
+  default posture aligned with ADR 0018 and treating empty local
+  history as the default startup path.
+3. **Phase 3 prep — reserve the activity + API surface before the
+  runner lands.** Extend the existing `CompanionActivityEvent` bus with
+  `source: "eval_run"` and sketch `/v1/evals/tasks` plus
+  `/v1/evals/runs` against the real field names captured in the
+  2026-05-01 inventory memo below.
 
 ## Blockers
 
@@ -132,15 +160,14 @@ The first concrete actions for whoever claims M16:
   (LoRA training-log capture) and M16's Phase 2 (task corpus) should
   share a JSONL shape.
 - **Privacy posture — nothing phones home (VISION product principle
-  #6).** Evals must run entirely locally. No task corpus ever
-  uploaded, no results ever uploaded, no eval leaderboard across
-  users. A user-opt-in *per-run* share ("I found a cool eval result
-  — post it") is acceptable **only** if end-to-end encrypted and
-  user-initiated per event, never default-on. The M17 Network Audit
-  milestone will prove this at the network layer; M16 must not
-  violate it at the architecture layer. Flag any grading strategy
-  that requires an external API (e.g. a cloud LLM-as-judge) as
-  **blocked until ADR 0010 resolves it**.
+  #6).** Eval storage, grading, and reporting stay local. No task
+  corpus is uploaded, no results are uploaded, and no eval leaderboard
+  exists across users. Reruns may reuse the user's already-selected
+  companion provider, but M16 must not introduce any second eval-
+  specific service or hidden telemetry path. The M17 Network Audit
+  milestone will prove this at the network layer. Flag any grading
+  strategy that requires an external API (e.g. a cloud LLM-as-judge) as
+  out of scope under ADR 0018.
 - **Base-rate problem.** Fresh installs have no history. The first
   month of eval output is N=1..10 datapoints and must not be
   surfaced as "your companion is 7% worse this week" — that's
@@ -153,7 +180,7 @@ The first concrete actions for whoever claims M16:
   LoRA adapter (M18), every subsequent eval result is apples-to-
   oranges with the prior result. M16 cannot meaningfully say "the
   companion improved on summary tasks" without knowing which
-  *companion* it's comparing. This is ADR 0011's core job.
+  *companion* it's comparing. This is ADR 0017's core job.
 
 ## Notes for the next agent
 
@@ -165,6 +192,33 @@ is a vibe, not a claim; over-deliver into generic model-eval
 territory (HumanEval, MMLU, cloud leaderboards) and you've built
 someone else's product. Keep it personal, keep it local, keep it
 honest about small sample sizes.
+
+### 2026-05-01 inventory memo — checked-in schema vs local data
+
+- `ArtifactConverter.export_as_eval()` currently writes JSONL rows with
+  `eval_id`, `derived_from_run`, `created_at`, `label`,
+  `feedback_note`, `query`, `mode`, `context_chunks`,
+  `expected_strategy`, `expected_min_iterations`,
+  `expected_min_citations`, `answer_preview`, and `assertions`.
+- `message_feedback` is already the explicit thumbs lane with schema
+  `(feedback_id, session_id, run_id, vote, note, ts)`.
+- `trace_feedback` is already the richer explicit-label lane with schema
+  `(feedback_id, run_id, segment, label, note, created_at)`.
+- `BehaviorProfile` already yields the implicit lane fields M16 can
+  score without an LLM: `query_preview`, `mode`, `primary_skill`,
+  `strategy_fingerprint`, `iterations_used`, `gap_count_total`,
+  `citation_count`, `citation_diversity_score`, `convergence_score`,
+  `source_count`, `retrieval_delta_per_iter`, `fallback_triggered`,
+  `had_error`, `first_seen`, `interestingness_score`, and `anomalies`.
+- Local development data is still empty-state. On 2026-05-01 the local
+  `rag_sessions.db` existed, but both `trace_feedback` and
+  `message_feedback` contained `0` rows; `evals/golden_dataset.jsonl`
+  was absent. Phase 2 therefore needs cold-start handling to be the
+  default path, not an afterthought.
+- The frontend companion activity bus already supports `rag_stream`,
+  `index_build`, `autonomous_research`, `reflection`, `seedling`,
+  `news_comet`, and `forge`. `eval_run` must be additive on this bus,
+  not a new channel.
 
 ### Harvest list — do not rebuild these
 
@@ -257,7 +311,7 @@ should have an explicit *what NOT to do* boundary.
   via a simple weighted sum. v2 layers on local LLM-as-judge. v3
   supports user-authored rubrics. **Do not reach for external LLM
   APIs** — violates product principle #6.
-- Output: `docs/adr/0010-personal-eval-grading-strategy.md`.
+- Output: `docs/adr/0016-personal-eval-grading-strategy.md`.
 
 **Not this phase:** the weighting math (that's Phase 4), the UI copy
 (Phase 5), any code.
@@ -283,7 +337,7 @@ tested on" that survives companion-generation bumps.
       tags: list[str]
       user_pinned_sources: list[str] | None # for rubric-grade retrieval scoring (v3)
   ```
-- Storage: **pick in ADR 0011**. Recommendation: a `tasks` table in
+- Storage: **ADR 0017 picks** a `tasks` table in
   a new `evals.db` SQLite file under the existing data directory,
   keyed by `task_id`. Mirror on-disk as JSONL snapshot weekly for
   portability (user can eyeball the file, diff across weeks).
@@ -311,7 +365,7 @@ blocking interactive use.
   - Grading: query all enabled grading lanes for the new run_id
     (`trace_feedback` — likely empty at eval time, so auto-skipped;
     `message_feedback` — same; `BehaviorProfile` — always available).
-    Compute aggregate score per ADR 0010 weights.
+    Compute aggregate score per ADR 0016 weights.
   - Async: never block UI. Hook into Litestar's executor pool the
     same way `autonomous_research_service` does. Single-threaded
     across eval runs so we don't thrash CPU; the Seedling (M13) may
@@ -344,7 +398,7 @@ reports (Phase 5).
 **Goal:** every eval run is keyed so "week over week improvement"
 is meaningful.
 
-- Schema (inside `evals.db`, or per ADR 0011):
+- Schema (inside `evals.db` per ADR 0017):
   ```
   runs(
     run_id TEXT PRIMARY KEY,
@@ -474,31 +528,23 @@ whether it helped.
 **Not this phase:** the training code, the model swapping
 mechanism, any GPU work.
 
-### Open decisions requiring ADRs
+### ADRs landed in Phase 1 + remaining optional decision
 
-1. **ADR 0010 — Grading-signal strategy.** (Phase 1.) Single most
-   important decision. Ships with Phase 1. Locks in which lanes
-   v1 uses, which lanes v2+ layers on, and — explicitly — which
-   are rejected (external cloud LLM-as-judge, cross-user
-   leaderboard scoring).
-2. **ADR 0011 — Eval-run storage format & companion-generation
-   versioning.** (Phase 2 / Phase 4.) Locks in `evals.db` vs.
-   JSONL vs. extending `session_repository`'s DB; locks in the
-   `generations` table shape; locks in the bump-triggering
-   criteria list.
-3. **ADR 0012 — Eval privacy posture.** (Cross-cuts all phases.)
-   Can eval results ever leave the machine? The VISION default is
-   "no, never, not even for a leaderboard, not even anonymized".
-   If there's any room for a user-initiated share, this ADR is
-   where that room is defined. Recommendation: lock the default
-   to "no network access from eval code paths at all"; any share
-   feature is a separate opt-in flow outside M16's scope. M17
-   (Network Audit) will enforce this at the network layer.
-4. *(Optional, if the claimant wants a separate ADR)* **ADR 0013
-   — LLM-as-judge model pinning.** If/when v2 layers on LLM-as-
-   judge: which model, how is it "frozen" across generation
-   bumps, what happens when the user changes the judge model,
-   how is reviewer bias surfaced.
+1. **ADR 0016 — Grading-signal strategy.** Landed in Phase 1.
+  Locks in the v1 lanes (trace labels, thumbs, implicit behavior
+  score), explicitly rejects external cloud judges, and defers local
+  LLM-as-judge to v2.
+2. **ADR 0017 — Eval-run storage format & companion-generation
+  versioning.** Landed in Phase 1. Locks in `evals.db`, the
+  `generations` table shape, and the bump-trigger criteria M18 will
+  depend on later.
+3. **ADR 0018 — Eval privacy posture.** Landed in Phase 1. Locks the
+  default to local-only execution and keeps any future share flow out
+  of M16 scope.
+4. *(Optional, if M16 v2 needs it)* **ADR 0019 — LLM-as-judge model
+  pinning.** If/when v2 layers on LLM-as-judge: which model, how is it
+  frozen across generation bumps, what happens when the user changes
+  the judge model, and how reviewer bias is surfaced.
 
 ### Coordination risks
 
@@ -610,10 +656,10 @@ Frontend:
   it; only settings knobs land here)*.
 
 ADRs (new):
-- `docs/adr/0010-personal-eval-grading-strategy.md`
-- `docs/adr/0011-eval-storage-and-generation-versioning.md`
-- `docs/adr/0012-eval-privacy-posture.md`
-- *(optional)* `docs/adr/0013-llm-as-judge-model-pinning.md`
+- `docs/adr/0016-personal-eval-grading-strategy.md`
+- `docs/adr/0017-eval-storage-and-generation-versioning.md`
+- `docs/adr/0018-eval-privacy-posture.md`
+- *(optional)* `docs/adr/0019-llm-as-judge-model-pinning.md`
 
 ### Prior art to read before starting
 
