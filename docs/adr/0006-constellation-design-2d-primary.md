@@ -233,3 +233,60 @@ policy is replaced:
 - **Accessibility.** Animated pulsation, variable brightness, rotating
   corona — need a reduced-motion fallback (already partly implemented
   in the current 3D overlay; must carry across).
+
+## Addendum — 2026-05-01 (M21 Phase 5)
+
+The original ADR mandated three things that user critique on 2026-05-01
+asked us to revisit, and two of them are amended here. Recording the
+delta so future readers see what the ADR currently *enforces* rather
+than what it originally proposed.
+
+**Amended:**
+
+1. **Faculty constellation labels are no longer painted on the
+   canvas.** The original ADR didn't explicitly require visible text
+   labels under each anchor — that was an implementation choice in
+   `apps/metis-web/app/page.tsx`. The user reported the rendered
+   "Memory" / "Perception" / "Knowledge" titles read as confusing
+   "function" declarations and wanted them gone. The text-paint at
+   `drawNodes` (`fillText(n.concept.title, …)`) is removed. The hit-zone
+   bookkeeping (`syncNodeLabelLayout`) still runs because semantic-search
+   and drag-to-reassign depend on it. Reinstate by un-commenting the
+   `fillText` line if a future iteration decides labels should return.
+2. **The hover surface for `classical`-tier names is gone.** The ADR's
+   *tiered naming* policy is preserved at the **data layer** —
+   `generateStarName({ tier: "landmark" })` still produces deterministic
+   Bayer/Flamsteed designations, the catalogue inspector and Star
+   Observatory still surface them on click. What was removed is the
+   *hover tooltip* that put a generated classical name plus the footer
+   `Classical star name (Bayer/Flamsteed convention)` under the cursor on
+   every landmark / catalogue mouse-over. The combination read as
+   AI slop. Click-to-inspect is now the only path to a name; hover is
+   silent for every tier (matching the field-tier behaviour the ADR
+   already mandated). The `<div ref={catalogueTooltipRef} …>` element
+   stays in the JSX as a no-op surface in case a different hover
+   mechanism is reintroduced later, but `showCatalogueTooltip` and
+   `getHoveredLandmarkStar` were deleted.
+
+**Also touched (separately, but in the same change set):**
+
+3. **The rotating orbit ring + 8-point diffraction spike pattern +
+   orbiting motes around the central METIS star (the
+   "drawPolarisMetis" composition in `app/page.tsx`) were removed.**
+   Not directly mandated by this ADR — the lens-flare-y motion was an
+   M02 implementation choice — but listed here because it changes the
+   reader's mental picture of "what the constellation home actually
+   looks like in 2026-05-01+". M10's H₁ topology data used to amplify
+   the orbit-ring alpha and spike length; that signal currently has no
+   visual surface and will need a new one if it ever becomes
+   load-bearing.
+
+**Why the contract weakens here:** the original ADR over-specified the
+*surfacing* of tiered names (mandating tooltips with explanatory
+footers) when the load-bearing decision was the *naming policy itself*
+(tiered, deterministic, classical-only on landmarks). The amendment
+keeps the policy and lets the surface evolve.
+
+**Reinstating any of (1), (2), (3):** every removed primitive is
+recoverable from git history at the commits that landed M21 Phase 5 —
+no information was destroyed.

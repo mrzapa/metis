@@ -1055,12 +1055,16 @@ export function StarDetailsPanel({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            {/* M21 Phase 5: horizontal-scroll instead of wrap so the strip
+                never stacks into multiple rows under browser zoom or in
+                the narrow `sm` dialog width — wrap-stacking was visually
+                colliding with content below. */}
+            <div className="-mx-1 flex flex-nowrap items-center gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               <button
                 type="button"
                 onClick={() => setView("build")}
                 className={cn(
-                  "rounded-full px-4 py-2 text-sm transition-all",
+                  "shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm transition-all",
                   view === "build"
                     ? "bg-primary/18 text-primary"
                     : "bg-white/6 text-slate-300 hover:bg-white/10 hover:text-white",
@@ -1072,7 +1076,7 @@ export function StarDetailsPanel({
                 type="button"
                 onClick={() => setView("overview")}
                 className={cn(
-                  "rounded-full px-4 py-2 text-sm transition-all",
+                  "shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm transition-all",
                   view === "overview"
                     ? "bg-primary/18 text-primary"
                     : "bg-white/6 text-slate-300 hover:bg-white/10 hover:text-white",
@@ -1108,13 +1112,15 @@ export function StarDetailsPanel({
                   </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                {/* M21 Phase 5: same horizontal-scroll treatment as the
+                    outer view tabs — see comment above. */}
+                <div className="-mx-1 flex flex-nowrap gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {isDesktop ? (
                     <button
                       type="button"
                       onClick={() => setTab("desktop")}
                       className={cn(
-                        "rounded-full px-4 py-2 text-sm transition-all",
+                        "shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm transition-all",
                         tab === "desktop"
                           ? "bg-primary/18 text-primary"
                           : "bg-white/6 text-slate-300 hover:bg-white/10 hover:text-white",
@@ -1127,7 +1133,7 @@ export function StarDetailsPanel({
                     type="button"
                     onClick={() => setTab("upload")}
                     className={cn(
-                      "rounded-full px-4 py-2 text-sm transition-all",
+                      "shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm transition-all",
                       tab === "upload"
                         ? "bg-primary/18 text-primary"
                         : "bg-white/6 text-slate-300 hover:bg-white/10 hover:text-white",
@@ -1139,7 +1145,7 @@ export function StarDetailsPanel({
                     type="button"
                     onClick={() => setTab("paths")}
                     className={cn(
-                      "rounded-full px-4 py-2 text-sm transition-all",
+                      "shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-sm transition-all",
                       tab === "paths"
                         ? "bg-primary/18 text-primary"
                         : "bg-white/6 text-slate-300 hover:bg-white/10 hover:text-white",

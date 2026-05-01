@@ -1,8 +1,8 @@
 ---
 Milestone: M21 — UI critical-eye triage
 Status: In progress
-Claim: claude/objective-napier-432f1e
-Last updated: 2026-05-01 by claude
+Claim: claude/frosty-hamilton-fd3889 (Phase 5 — constellation aesthetic pivot, #23–#27, code landed; awaiting verification + PR. P0 batch shipped via PR #588 + #6 request-storm dedup landed earlier on `claude/m21-p0-fixes`.)
+Last updated: 2026-05-01 by claude/frosty-hamilton-fd3889
 Vision pillar: Cross-cutting
 TDD Mode: pragmatic
 QA Execution Mode: agent-operated
@@ -151,6 +151,72 @@ written as the fix lands.
   pattern — promote.** Suggest extending to other techniques that depend on
   optional binaries.
 
+### P-aesthetic (Phase 5) — constellation aesthetic critique
+
+Filed 2026-05-01 from a direct user critique of `/`. Bundle of five
+complaints, all addressed in a single phase rather than spread across
+P1–P3 because they're a coherent aesthetic pivot (not a normal bug list).
+
+- **#23 Faculty title text under each anchor was confusing.** "Memory",
+  "Perception", "Knowledge" etc. paint as labels under the constellation
+  anchors and the user reported they read as opaque "function"
+  declarations — the labels announce a category without giving the user
+  a way to see what makes a star belong to it. **Status: landed
+  Phase 5.** The `fillText(n.concept.title, …)` in `drawNodes`
+  (`apps/metis-web/app/page.tsx`) is removed; hit-zone bookkeeping
+  (`syncNodeLabelLayout`) still runs because semantic-search and drag-
+  to-reassign depend on it. Reverts to one-line.
+- **#24 Central METIS star read as a JJ Abrams lens flare.** The
+  rotating orbit ring (always-spinning dotted circle), 8-point
+  diffraction spikes (slowly rotating cross/star pattern), and
+  orbiting particles around the core combined to feel like
+  decorative lens flare with no meaning. **Status: landed Phase 5.**
+  Sections 3a / 3b / spike loops in `drawPolarisMetis` removed. Core
+  star, halo, micro-nodes, animated constellation lines kept — those
+  carry the actual visual story. Note: M10's H₁ topology data used to
+  ride on the orbit-ring alpha and spike length; that signal currently
+  has no visual surface and will need a new one if it ever becomes
+  load-bearing.
+- **#25 Star Observatory dialog tab strip overlapped under scaling.**
+  Two `flex flex-wrap gap-2` button rows in
+  `components/constellation/star-observatory-dialog.tsx` — the outer
+  view tabs (`Add and build / Attached sources`) and the inner build
+  tabs (`Choose files / Upload files / Local paths`) — wrapped into
+  multiple rows under browser zoom or in narrow `sm` dialog widths,
+  visually colliding with content below. **Status: landed Phase 5.**
+  Both rows converted to `flex flex-nowrap … overflow-x-auto …
+  [scrollbar-width:none] [&::-webkit-scrollbar]:hidden` with
+  `shrink-0 whitespace-nowrap` on each pill so they scroll
+  horizontally instead of wrap-stacking.
+- **#26 Hover tooltip for `classical`-tier stars read as AI slop.**
+  Auto-generated Bayer/Flamsteed name plus the footer
+  `Classical star name (Bayer/Flamsteed convention)` displayed on every
+  landmark and named-catalogue mouseover. The combination of generated
+  name + over-explanatory footer felt machine-written. **Status:
+  landed Phase 5.** Hover branches in `onCanvasPointerMove` for
+  `classical`-tier hits removed. The dead `showCatalogueTooltip`
+  function and the now-unused `getHoveredLandmarkStar` hit-test were
+  also deleted (orphan cleanup); unused imports `SeededRNG`, `fnv1a32`
+  dropped from `app/page.tsx`. The tooltip JSX element stays as a
+  no-op surface; `hideCatalogueTooltip` stays as a defensive cleanup
+  no-op called from many tool-change paths. ADR 0006's tiered-naming
+  policy is preserved at the *data* layer (names still generate, still
+  show on click in the catalogue inspector / observatory) — only the
+  hover *surface* is removed.
+- **#27 (Meta) Overall constellation page felt unappealing.** Items
+  #23, #24, #26 together address most of #27 by removing the visual
+  noise (text labels, lens flare, hover-pop names). Re-walk after
+  Phase 5 lands; if the page still feels off, that's a follow-up
+  bundle.
+
+**Design pivot recorded in:**
+[`docs/adr/0006-constellation-design-2d-primary.md` → *Addendum —
+2026-05-01 (M21 Phase 5)*](../../docs/adr/0006-constellation-design-2d-primary.md).
+The amendment is honest about what changed: the original ADR
+over-specified *how* tiered names should surface (tooltip with footer)
+when the load-bearing decision was the *naming policy itself*. Policy
+preserved, surface removed.
+
 ## Phases
 
 Land in priority bands. Each phase = one PR.
@@ -163,6 +229,12 @@ Land in priority bands. Each phase = one PR.
   gating. Group by file when possible to reduce PR count.
 - **Phase 4 — P3 cleanup (#19–#22).** Bonus pass; can be skipped if
   bandwidth is short.
+- **Phase 5 — Constellation aesthetic pivot (#23–#27).** User critique
+  of the home page's first impression: faculty labels confusing, central
+  star reads as lens flare, observatory dialog tabs overlap under
+  scaling, classical-name hover tooltip reads as AI slop. Bundles a
+  recorded design reversal of two M02 / ADR 0006 implementation choices
+  — see ADR 0006 *Addendum — 2026-05-01* and the Phase 5 entries above.
 
 ## Progress
 
@@ -218,6 +290,21 @@ Land in priority bands. Each phase = one PR.
 Phase 1 PR review, then Phase 2 (P1 perf): #6 settings request-storm
 dedup, #7 comets/events abort spam, #8 hard-reload nav, #9 model-load
 progress.
+
+**Phase 5 (constellation aesthetic pivot, #23–#27):** code landed on
+`claude/frosty-hamilton-fd3889` (this branch). Verification + PR
+pending. Files touched:
+- `apps/metis-web/app/page.tsx` — faculty title `fillText` removed in
+  `drawNodes`; sections 3a/3b/spike-loops removed in `drawPolarisMetis`;
+  `showCatalogueTooltip` + `getHoveredLandmarkStar` deleted; classical-
+  hover branches in `onCanvasPointerMove` collapsed to a single
+  `hideCatalogueTooltip()`; `SeededRNG`, `fnv1a32` imports dropped.
+- `apps/metis-web/components/constellation/star-observatory-dialog.tsx`
+  — both tab strips (outer view tabs + inner build tabs) converted to
+  horizontal-scroll containers.
+- `docs/adr/0006-constellation-design-2d-primary.md` — *Addendum —
+  2026-05-01 (M21 Phase 5)* recording the design reversal.
+- `plans/IDEAS.md` — Decision flipped to *Merged into M21 Phase 5*.
 
 ## Addenda
 

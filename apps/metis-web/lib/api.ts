@@ -11,6 +11,7 @@ import type {
   NyxInstallProposalComponent,
 } from "@/lib/chat-types";
 import { emitBrainGraphRagActivity } from "@/lib/brain-graph-rag-activity";
+import { dedupedFetch } from "@/lib/request-dedup";
 
 // Resolves the API base URL once and caches the result.
 // In a Tauri desktop build the sidecar negotiates a dynamic port and exposes
@@ -1490,9 +1491,16 @@ export async function fetchTraceEvents(runId: string): Promise<TraceEvent[]> {
 }
 
 export async function fetchSettings(): Promise<Record<string, unknown>> {
-  const res = await apiFetch(`${await getApiBase()}/v1/settings`);
-  if (!res.ok) throw new Error(`Failed to fetch settings: ${res.status}`);
-  return res.json();
+  // M21 #6: dedup concurrent callers. The settings panel + setup
+  // wizard + 3-4 dock components each call this on mount, and
+  // React-Strict double-mounting compounded the storm to 30+ calls
+  // per fresh load. Per-fetcher dedup collapses each render's burst
+  // into one in-flight request.
+  return dedupedFetch("GET /v1/settings", async () => {
+    const res = await apiFetch(`${await getApiBase()}/v1/settings`);
+    if (!res.ok) throw new Error(`Failed to fetch settings: ${res.status}`);
+    return res.json() as Promise<Record<string, unknown>>;
+  });
 }
 
 export async function fetchUiTelemetrySummary(
@@ -1535,9 +1543,13 @@ export async function updateSettings(
 }
 
 export async function fetchIndexes(): Promise<IndexSummary[]> {
-  const res = await apiFetch(`${await getApiBase()}/v1/index/list`);
-  if (!res.ok) throw new Error(`Failed to fetch indexes: ${res.status}`);
-  return res.json();
+  // M21 #6: dedup the burst — index list is referenced by the
+  // catalogue panel, the constellation, the dock, and chat sources.
+  return dedupedFetch("GET /v1/index/list", async () => {
+    const res = await apiFetch(`${await getApiBase()}/v1/index/list`);
+    if (!res.ok) throw new Error(`Failed to fetch indexes: ${res.status}`);
+    return res.json() as Promise<IndexSummary[]>;
+  });
 }
 
 export async function previewLearningRoute(
@@ -2717,12 +2729,17 @@ export async function fetchTracePlayback(runId: string): Promise<TracePlaybackMa
 }
 
 export async function fetchBrainScaffold(): Promise<BrainScaffoldResponse> {
-  const res = await apiFetch(`${await getApiBase()}/v1/brain/scaffold`);
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Failed to fetch brain scaffold (${res.status}): ${detail}`);
-  }
-  return res.json();
+  // M21 #6: dedup. Scaffold is re-fetched by both the brain view
+  // and the constellation's scaffold-edge layer; rarely changes per
+  // session.
+  return dedupedFetch("GET /v1/brain/scaffold", async () => {
+    const res = await apiFetch(`${await getApiBase()}/v1/brain/scaffold`);
+    if (!res.ok) {
+      const detail = await res.text();
+      throw new Error(`Failed to fetch brain scaffold (${res.status}): ${detail}`);
+    }
+    return res.json() as Promise<BrainScaffoldResponse>;
+  });
 }
 
 export async function fetchAssistant(): Promise<AssistantSnapshot> {
@@ -2831,14 +2848,22 @@ function emitSeedlingActivityEvents(status: SeedlingStatus): void {
 }
 
 export async function fetchSeedlingStatus(): Promise<SeedlingStatus> {
-  const res = await apiFetch(`${await getApiBase()}/v1/seedling/status`);
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Failed to fetch seedling status (${res.status}): ${detail}`);
-  }
-  const status = (await res.json()) as SeedlingStatus;
-  emitSeedlingActivityEvents(status);
-  return status;
+  // M21 #6: dedup. The pulse widget, companion dock, and
+  // companion-overlay heartbeat each poll this; concurrent callers
+  // share one in-flight fetch. emitSeedlingActivityEvents is a
+  // closure over `status` and runs once per fetch, NOT once per
+  // caller — that's the desired behaviour (one activity emit per
+  // status load, not 4-6 emits per render).
+  return dedupedFetch("GET /v1/seedling/status", async () => {
+    const res = await apiFetch(`${await getApiBase()}/v1/seedling/status`);
+    if (!res.ok) {
+      const detail = await res.text();
+      throw new Error(`Failed to fetch seedling status (${res.status}): ${detail}`);
+    }
+    const status = (await res.json()) as SeedlingStatus;
+    emitSeedlingActivityEvents(status);
+    return status;
+  });
 }
 
 export async function reflectAssistant(payload: {
@@ -3172,10 +3197,14 @@ export interface AutonomousStatus {
 }
 
 export async function fetchAutonomousStatus(): Promise<AutonomousStatus> {
-  const base = await getApiBase();
-  const res = await fetch(`${base}/v1/autonomous/status`);
-  if (!res.ok) throw new Error(`autonomous status: ${res.status}`);
-  return res.json() as Promise<AutonomousStatus>;
+  // M21 #6: dedup. Autonomous-research panel + companion dock both
+  // call this on mount.
+  return dedupedFetch("GET /v1/autonomous/status", async () => {
+    const base = await getApiBase();
+    const res = await fetch(`${base}/v1/autonomous/status`);
+    if (!res.ok) throw new Error(`autonomous status: ${res.status}`);
+    return res.json() as Promise<AutonomousStatus>;
+  });
 }
 
 export async function triggerAutonomousResearch(): Promise<{ ok: boolean; result?: unknown }> {
@@ -3853,12 +3882,17 @@ export interface ForgeTechniquesResponse {
 }
 
 export async function fetchForgeTechniques(): Promise<ForgeTechniquesResponse> {
-  const res = await apiFetch(`${await getApiBase()}/v1/forge/techniques`);
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Failed to fetch forge techniques (${res.status}): ${detail}`);
-  }
-  return (await res.json()) as ForgeTechniquesResponse;
+  // M21 #6: dedup. Forge route + skills-sector star generator both
+  // pull the same technique list; tight inventory unchanged per
+  // session.
+  return dedupedFetch("GET /v1/forge/techniques", async () => {
+    const res = await apiFetch(`${await getApiBase()}/v1/forge/techniques`);
+    if (!res.ok) {
+      const detail = await res.text();
+      throw new Error(`Failed to fetch forge techniques (${res.status}): ${detail}`);
+    }
+    return (await res.json()) as ForgeTechniquesResponse;
+  });
 }
 
 /**
