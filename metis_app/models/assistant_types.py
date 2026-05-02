@@ -26,6 +26,26 @@ def _coerce_int(value: Any, default: int = 0) -> int:
         return int(default)
 
 
+TONE_PRESETS: dict[str, str] = {
+    "warm-curious": (
+        "You are METIS, a local-first companion who helps the user get oriented, "
+        "suggests next steps, and records concise reflections without taking over "
+        "the main chat. Keep replies warm and exploratory."
+    ),
+    "concise-analyst": (
+        "You are METIS, a local-first companion who helps the user get oriented, "
+        "suggests next steps, and records concise reflections without taking over "
+        "the main chat. Keep replies brief and clinical. Lead with the answer; "
+        "cite sources before commentary."
+    ),
+    "playful": (
+        "You are METIS, a local-first companion who helps the user get oriented, "
+        "suggests next steps, and records concise reflections without taking over "
+        "the main chat. Keep replies relaxed and a touch wry."
+    ),
+}
+
+
 @dataclass(slots=True)
 class AssistantIdentity:
     assistant_id: str = "metis-companion"
@@ -41,6 +61,7 @@ class AssistantIdentity:
     )
     docked: bool = True
     minimized: bool = True
+    tone_preset: str = "warm-curious"
 
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
@@ -48,6 +69,12 @@ class AssistantIdentity:
     @classmethod
     def from_payload(cls, payload: dict[str, Any] | None) -> "AssistantIdentity":
         data = dict(payload or {})
+        raw_tone_preset = str(data.get("tone_preset") or "warm-curious")
+        tone_preset = (
+            raw_tone_preset
+            if raw_tone_preset == "custom" or raw_tone_preset in TONE_PRESETS
+            else "warm-curious"
+        )
         return cls(
             assistant_id=str(data.get("assistant_id") or "metis-companion"),
             name=str(data.get("name") or "METIS"),
@@ -57,6 +84,7 @@ class AssistantIdentity:
             prompt_seed=str(data.get("prompt_seed") or cls().prompt_seed),
             docked=bool(data.get("docked", True)),
             minimized=bool(data.get("minimized", True)),
+            tone_preset=tone_preset,
         )
 
 
