@@ -1082,7 +1082,7 @@ export function ChatPanel({
                 aria-label="Send message"
               >
                 {isSending ? (
-                  <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />
+                  <DotMatrixLoader name="stream" size={16} className="text-foreground" />
                 ) : (
                   <AnimatedLucideIcon icon={SendHorizontal} mode="hoverLift" className="size-4" />
                 )}
