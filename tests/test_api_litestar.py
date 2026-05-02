@@ -158,6 +158,92 @@ def test_gguf_validate_bad_extension(tmp_path):
         assert ".gguf" in response.json()["detail"].lower()
 
 
+# ---------------------------------------------------------------------------
+# M23 Phase 2 — DELETE routes for assistant memory / playbooks
+# ---------------------------------------------------------------------------
+
+
+def _patch_assistant_orchestrator(monkeypatch, fake):
+    """Swap ``WorkspaceOrchestrator`` on the assistant route module."""
+    from importlib import import_module
+
+    assistant_api = import_module("metis_app.api_litestar.routes.assistant")
+    monkeypatch.setattr(assistant_api, "WorkspaceOrchestrator", lambda: fake)
+
+
+def test_delete_memory_entry_route_round_trip(monkeypatch):
+    from metis_app.api_litestar import create_app
+
+    captured: dict = {}
+
+    class _FakeOrchestrator:
+        def delete_assistant_memory_entry(self, entry_id: str) -> dict:
+            captured["entry_id"] = entry_id
+            return {"ok": True}
+
+    _patch_assistant_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete("/v1/assistant/memory/seed-1")
+        assert response.status_code == 200
+        assert response.json() == {"ok": True}
+        assert captured == {"entry_id": "seed-1"}
+
+
+def test_delete_memory_entry_route_missing_id(monkeypatch):
+    from metis_app.api_litestar import create_app
+
+    class _FakeOrchestrator:
+        def delete_assistant_memory_entry(self, entry_id: str) -> dict:
+            return {"ok": False}
+
+    _patch_assistant_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete("/v1/assistant/memory/does-not-exist")
+        assert response.status_code == 200
+        assert response.json() == {"ok": False}
+
+
+def test_delete_memory_by_kind_route(monkeypatch):
+    from metis_app.api_litestar import create_app
+
+    captured: dict = {}
+
+    class _FakeOrchestrator:
+        def delete_assistant_memory_by_kind(self, kind: str) -> dict:
+            captured["kind"] = kind
+            return {"ok": True, "deleted_count": 3}
+
+    _patch_assistant_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete("/v1/assistant/memory/by-kind?kind=reflection")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["deleted_count"] == 3
+        assert captured == {"kind": "reflection"}
+
+
+def test_delete_playbook_route_round_trip(monkeypatch):
+    from metis_app.api_litestar import create_app
+
+    captured: dict = {}
+
+    class _FakeOrchestrator:
+        def delete_assistant_playbook(self, playbook_id: str) -> dict:
+            captured["playbook_id"] = playbook_id
+            return {"ok": True}
+
+    _patch_assistant_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete("/v1/assistant/playbooks/pb-1")
+        assert response.status_code == 200
+        assert response.json() == {"ok": True}
+        assert captured == {"playbook_id": "pb-1"}
+
+
 def test_gguf_validate_success_contract(tmp_path):
     """Test /v1/gguf/validate success payload contract."""
     from metis_app.api_litestar import create_app

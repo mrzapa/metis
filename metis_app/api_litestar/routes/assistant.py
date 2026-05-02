@@ -87,6 +87,21 @@ def clear_assistant_memory(limit: int = 10) -> dict:
     return WorkspaceOrchestrator().clear_assistant_memory(limit=limit)
 
 
+@delete("/v1/assistant/memory/by-kind", status_code=200)
+def delete_memory_by_kind(kind: str) -> dict:
+    return WorkspaceOrchestrator().delete_assistant_memory_by_kind(kind)
+
+
+@delete("/v1/assistant/memory/{entry_id:str}", status_code=200)
+def delete_memory_entry(entry_id: str) -> dict:
+    return WorkspaceOrchestrator().delete_assistant_memory_entry(entry_id)
+
+
+@delete("/v1/assistant/playbooks/{playbook_id:str}", status_code=200)
+def delete_playbook(playbook_id: str) -> dict:
+    return WorkspaceOrchestrator().delete_assistant_playbook(playbook_id)
+
+
 # ---------------------------------------------------------------------------
 # Star nourishment events
 # ---------------------------------------------------------------------------
@@ -201,6 +216,9 @@ router = Router(
         bootstrap_assistant,
         list_assistant_memory,
         clear_assistant_memory,
+        delete_memory_by_kind,
+        delete_memory_entry,
+        delete_playbook,
         report_star_event,
         get_nourishment,
         get_personality_evolution,
