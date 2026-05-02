@@ -1,0 +1,6 @@
+# Force LF line endings for shell scripts so they run correctly on
+# Linux CI runners regardless of the contributor's OS. Without this,
+# Windows-side checkouts can commit CRLF, and `set -o pipefail` etc.
+# fails with "invalid option name" on Linux because bash sees the
+# trailing carriage return as part of the option name.
+*.sh text eol=lf
