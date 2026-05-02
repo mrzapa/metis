@@ -52,4 +52,15 @@ describe("<DotMatrixLoader>", () => {
     expect(svg!.classList.contains("dm-compile")).toBe(true);
     expect(container.querySelectorAll("circle").length).toBe(25);
   });
+
+  it("renders verify as a one-shot with fill-forwards", () => {
+    const { container } = render(<DotMatrixLoader name="verify" />);
+    const svg = container.querySelector("svg");
+    expect(svg!.classList.contains("dm-verify")).toBe(true);
+    // Six checkmark cells should carry a non-empty animation-delay style.
+    // Other cells should not animate at all.
+    const circles = Array.from(container.querySelectorAll("circle")) as SVGCircleElement[];
+    const animated = circles.filter((c) => c.style.animationDelay !== "");
+    expect(animated.length).toBe(5); // (3,0) (4,1) (3,2) (2,3) (1,4)
+  });
 });

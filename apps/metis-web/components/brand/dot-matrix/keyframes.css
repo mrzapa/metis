@@ -58,3 +58,17 @@
   animation: dm-compile 4600ms ease-out infinite;
   animation-fill-mode: both;
 }
+
+@keyframes dm-verify {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/* Default: invisible. The 5 checkmark cells carry a per-cell animation
+ * that ignites them in sequence and holds (fill-mode: forwards). */
+.dm-verify circle {
+  opacity: 0;
+}
+.dm-verify circle[data-check="1"] {
+  animation: dm-verify 100ms ease-out 1 forwards;
+}
