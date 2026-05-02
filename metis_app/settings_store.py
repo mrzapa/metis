@@ -126,6 +126,7 @@ class AssistantIdentitySettings(BaseModel):
     prompt_seed: str = ""
     docked: bool = True
     minimized: bool = True
+    tone_preset: str = "warm-curious"
 
 
 class AssistantRuntimeSettings(BaseModel):

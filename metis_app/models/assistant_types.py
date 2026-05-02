@@ -55,10 +55,7 @@ class AssistantIdentity:
     greeting: str = (
         "I can help you get started, reflect on completed work, and map what I learn in the Brain tab."
     )
-    prompt_seed: str = (
-        "You are METIS, a local-first companion who helps the user get oriented, suggests next steps, "
-        "and records concise reflections without taking over the main chat."
-    )
+    prompt_seed: str = TONE_PRESETS["warm-curious"]
     docked: bool = True
     minimized: bool = True
     tone_preset: str = "warm-curious"
