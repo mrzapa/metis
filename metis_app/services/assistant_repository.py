@@ -686,6 +686,16 @@ class AssistantRepository:
                 )
         return item
 
+    def delete_playbook(self, playbook_id: str) -> bool:
+        """Hard-delete one playbook. Returns True if a row was deleted."""
+        self._ensure_ready()
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                "DELETE FROM assistant_playbooks WHERE playbook_id = ?",
+                (playbook_id,),
+            )
+            return cursor.rowcount > 0
+
     def list_brain_links(self, *, limit: int | None = None) -> list[AssistantBrainLink]:
         self._ensure_ready()
         query = "SELECT * FROM assistant_brain_links ORDER BY created_at DESC"

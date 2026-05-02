@@ -911,3 +911,16 @@ def test_delete_memory_by_kind_filters_correctly(tmp_path) -> None:
 def test_delete_memory_by_kind_unknown_kind_returns_zero(tmp_path) -> None:
     repo = AssistantRepository(tmp_path / "assistant_state.json")
     assert repo.delete_memory_by_kind("nonexistent") == 0
+
+
+def test_delete_playbook_round_trip(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    pb = AssistantPlaybook.create(title="t", bullets=["a", "b"])
+    repo.add_playbook(pb)
+    assert repo.delete_playbook(pb.playbook_id) is True
+    assert all(item.playbook_id != pb.playbook_id for item in repo.list_playbooks())
+
+
+def test_delete_playbook_missing_id_returns_false(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    assert repo.delete_playbook("not-real") is False
