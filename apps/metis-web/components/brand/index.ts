@@ -13,4 +13,9 @@ export {
 } from "./metis-glow";
 export { MetisLockup, type MetisLockupProps } from "./metis-lockup";
 export { MetisLoader, type MetisLoaderProps } from "./metis-loader";
+export {
+  DotMatrixLoader,
+  type DotMatrixLoaderName,
+  type DotMatrixLoaderProps,
+} from "./dot-matrix-loader";
 export { METIS_MARK_PATH_D, METIS_MARK_VIEWBOX } from "./metis-mark-path";

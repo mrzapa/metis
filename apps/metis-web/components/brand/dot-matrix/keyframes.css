@@ -1,0 +1,118 @@
+/* dot-matrix loader keyframes
+ *
+ * One @keyframes block per loader. Each block is named `dm-<slug>` to
+ * match the class applied by the matching sub-component.
+ *
+ * Theming via currentColor; no opacity overrides here — the keyframe
+ * controls opacity entirely.
+ *
+ * See ./README.md for vocabulary and authorship notes.
+ */
+
+@keyframes dm-breath {
+  0%, 100% { opacity: 0.30; }
+  50%      { opacity: 1.00; }
+}
+
+.dm-breath circle {
+  animation: dm-breath 3000ms ease-in-out infinite;
+}
+
+@keyframes dm-thinking {
+  0%, 100% { opacity: 0; }
+  20%      { opacity: 1; }
+  60%      { opacity: 0; }
+}
+
+/* Outer ring stays dim; inner 3×3 fires per per-dot delays set inline. */
+.dm-thinking circle {
+  opacity: 0.15;
+}
+.dm-thinking circle[data-inner="1"] {
+  opacity: 0;
+  animation: dm-thinking 1200ms ease-in-out infinite;
+}
+
+@keyframes dm-stream {
+  0%             { opacity: 0; }
+  4%             { opacity: 1; }    /* 60ms fade-in over 1500ms cycle ≈ 4% */
+  10.7%          { opacity: 1; }    /* +100ms hold */
+  24%            { opacity: 0; }    /* +200ms fade-out */
+  100%           { opacity: 0; }
+}
+
+.dm-stream circle {
+  opacity: 0;
+  animation: dm-stream 1500ms linear infinite;
+}
+
+@keyframes dm-compile {
+  0%      { opacity: 0; }
+  10%     { opacity: 1; }
+  87%     { opacity: 1; }
+  100%    { opacity: 0; }
+}
+
+.dm-compile circle {
+  opacity: 0;
+  animation: dm-compile 4600ms ease-out infinite;
+  animation-fill-mode: both;
+}
+
+@keyframes dm-verify {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/* Default: invisible. The 5 checkmark cells carry a per-cell animation
+ * that ignites them in sequence and holds (fill-mode: forwards). */
+.dm-verify circle {
+  opacity: 0;
+}
+.dm-verify circle[data-check="1"] {
+  animation: dm-verify 100ms ease-out 1 forwards;
+}
+
+/* Inner 3×3 ring (8 cells around centre) lit until 400ms, then fades to 0
+ * by 700ms, hold transparent. */
+@keyframes dm-halt-ring {
+  0%, 50%       { opacity: 1; }   /* 0–400ms of 800ms cycle */
+  87.5%, 100%   { opacity: 0; }   /* 700–800ms */
+}
+
+/* Centre (2,2) lights at 0% and stays. */
+@keyframes dm-halt-centre {
+  0%, 100% { opacity: 1; }
+}
+
+.dm-halt circle {
+  opacity: 0;
+}
+.dm-halt circle[data-halt="ring"] {
+  animation: dm-halt-ring 800ms ease-out 1 forwards;
+}
+.dm-halt circle[data-halt="centre"] {
+  animation: dm-halt-centre 800ms linear 1 forwards;
+}
+
+/* Reduced-motion contract.
+ *
+ * The base rule for most loaders is `opacity: 0` with the keyframe driving
+ * dots up; without animation, that leaves the SVG empty. So under
+ * `prefers-reduced-motion: reduce` we both stop animation AND force a
+ * sensible static frame: looping loaders show the full grid; one-shot
+ * loaders show only their final-frame foreground cells. This restores
+ * parity with the prior `AnimatedLucideIcon`-based behaviour, which
+ * returned a static lucide icon under reduced-motion. */
+@media (prefers-reduced-motion: reduce) {
+  [data-dot-matrix-loader] circle {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+  [data-dot-matrix-loader="verify"] circle:not([data-check="1"]) {
+    opacity: 0 !important;
+  }
+  [data-dot-matrix-loader="halt"] circle:not([data-halt="centre"]) {
+    opacity: 0 !important;
+  }
+}

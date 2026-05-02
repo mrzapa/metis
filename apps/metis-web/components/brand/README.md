@@ -9,6 +9,9 @@ convenience export, all backed by a single cleaned, themeable SVG.
 | `<MetisGlow>` | Mark + brand glow + topographic ripple rings. Hero, splash, OG image. |
 | `<MetisLockup>` | Mark + lowercase `metis` wordmark. **External surfaces only** — OG, Apple touch, /setup welcome, Tauri splash. NOT for chrome. |
 | `<MetisLoader>` | Mark + continuous sonar rings. Loading states (DesktopReadyGuard, etc.). |
+| `<DotMatrixLoader>` | Inline semantic states (thinking / streaming / compiling / etc.). Sibling to `<MetisLoader>` — see [`dot-matrix/README.md`](./dot-matrix/README.md). |
+
+`<MetisLoader>` is brand-forward — mark + sonar — for whole-surface loading. `<DotMatrixLoader>` is inline-semantic — dot grid + keyframe — for in-text states the brand mark would be too heavy for. Both are `currentColor`-themed; pick by surface size and whether the user should perceive *"the brand is here"* or *"this specific operation is in flight."*
 
 ## The wordmark discipline (don't re-litigate)
 
@@ -53,6 +56,7 @@ Pick the right primitive:
 - Tiny (<48 px), in-app chrome → `<MetisMark>`
 - Medium-large hero / splash, in-app → `<MetisGlow>` wrapping `<MetisMark>`
 - Loading indicator → `<MetisLoader>`
+- Inline semantic state (chat thinking, technique-card compile, etc.) → `<DotMatrixLoader name="…">`. See [`dot-matrix/README.md`](./dot-matrix/README.md).
 - External (OG, Apple touch, `/setup` welcome, Tauri splash) → `<MetisLockup>`
 
 If the surface is a Next.js metadata route (`app/icon.tsx`,

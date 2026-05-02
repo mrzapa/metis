@@ -15,6 +15,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
+import { DotMatrixLoader } from "@/components/brand";
 import { BorderBeam } from "@/components/ui/border-beam";
 import {
   Dialog,
@@ -377,7 +378,7 @@ function ToggleSwitch({ active, pending, blocked, techniqueName, onChange }: Tog
         )}
       >
         {pending ? (
-          <Loader2 className="size-3 animate-spin text-foreground/70" />
+          <DotMatrixLoader name="compile" size={12} className="text-foreground/70" />
         ) : null}
       </span>
     </button>

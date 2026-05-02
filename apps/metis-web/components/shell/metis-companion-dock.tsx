@@ -44,6 +44,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { BrainIcon } from "@/components/icons";
+import { DotMatrixLoader } from "@/components/brand";
 import { HermesHud } from "@/components/shell/hud";
 import { MetisSigil } from "@/components/shell/metis-sigil";
 import { SeedlingPulseWidget } from "@/components/shell/seedling-pulse-widget";
@@ -776,7 +777,7 @@ export function MetisCompanionDock({
                   disabled={atlasBusyAction !== ""}
                 >
                   {atlasBusyAction === "save" ? (
-                    <Loader2 className="size-3.5 animate-spin" />
+                    <DotMatrixLoader name="compile" size={14} className="text-foreground/70" />
                   ) : null}
                   Save to Atlas
                 </Button>
@@ -1060,7 +1061,7 @@ export function MetisCompanionDock({
                     disabled={busyAction !== ""}
                   >
                     {busyAction === "reflect" ? (
-                      <Loader2 className="size-4 animate-spin" />
+                      <DotMatrixLoader name="thinking" size={16} className="text-foreground" />
                     ) : (
                       <RefreshCw className="size-4" />
                     )}
