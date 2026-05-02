@@ -737,3 +737,127 @@ Reduced-motion gate originally NOT implemented; restored during PR #606 review a
 `verify` and `halt` ship without consumers — reserved for future Forge skill-promote toast / eval-pass card.
 
 **Design:** [`docs/plans/2026-05-02-quiet-loaders-design.md`](plans/2026-05-02-quiet-loaders-design.md). **Plan:** [`docs/plans/2026-05-02-quiet-loaders-implementation.md`](plans/2026-05-02-quiet-loaders-implementation.md).
+
+### Shape of AI pattern audit (2026-05-02)
+
+Filed by `claude/sharp-payne-90957a` from the [Shape of AI](https://www.shapeof.ai/) intake in [`plans/IDEAS.md`](../plans/IDEAS.md). Use this section as a *yardstick* — not a punch list. Each future UI change should sanity-check against the matrix below; a finding flips from ⚠️/❌ to ✅ when the relevant work lands.
+
+**License note:** Shape of AI is CC BY-NC-SA. The pattern *names* and *concepts* are referenced here; verbatim text/assets must not be copied into shipped UI or shipped docs.
+
+#### Surface inventory (what was audited)
+
+`/` (constellation home), `/chat` (Direct / RAG / Forecast modes), `/setup` (5-step wizard), `/forge` (technique gallery — `technique-gallery.tsx`, `technique-card.tsx`, `candidate-skills-pane.tsx`, `proposal-review-pane.tsx`, `absorb-form.tsx`, `bundle-import-zone.tsx`), `/settings` (tabbed dashboard + assistant config), `/library` (M21 #2 wired to `<NyxCatalogPage>`), `/improvements` (research log), `/diagnostics`, `/design` (M21 #16: gate behind dev-only). Cross-cutting: companion-dock (`metis-companion-dock.tsx`), star-observatory dialog (`star-observatory-dialog.tsx`), trace timeline (`trace-timeline.tsx`), evidence panel (`evidence-panel.tsx`), `model-status-dialog.tsx`, network-audit panel (settings → privacy).
+
+#### Per-pattern scorecard
+
+Legend: ✅ shipped well · ⚠️ shipped but weak · ❌ missing · ⛔ N/A for Metis vision.
+
+**Wayfinders** (help users construct their first prompt)
+
+| Pattern | Score | Notes |
+|---|---|---|
+| Example gallery | ⚠️ | `technique-gallery.tsx` is one for techniques. No gallery of *example queries / sample populated workspace* to teach what a healthy constellation looks like. |
+| Follow up | ❌ | Chat doesn't ask clarifying questions when a prompt is ambiguous; the RAG pipeline goes straight to retrieval. |
+| Initial CTA | ⚠️ | The constellation *is* the home; M21 Phase 5 removed the "Discover everything" hero text. There is no large open-ended prompt input on `/`. |
+| Nudges | ⚠️ | `first-run-banner.tsx` exists; setup-incomplete banner is a Nudge. No proactive "try this technique" / "feed it a doc" nudges once setup is past. M01 walkthrough item 33 ("no first-run banner on `/`") needs verification against current `main`. |
+| Prompt details | ✅ | Trace timeline + evidence panel show retrieval/RAG details; Forge cards show prompt details for techniques. |
+| Randomize | ⛔ | Mostly N/A — no generative-image surface. Could apply to "give me a random starter prompt"; low priority. |
+| Suggestions | ✅ | `chat-panel.tsx:103-251` ships four suggestion arrays (Direct / RAG-grounded / RAG-no-index / Forecast) selected by mode; empty-state chips render at line 823. |
+| Templates | ⚠️ | Forge `technique-card.tsx` acts as templates for techniques. Setup-wizard staged-prompt is a partial template. No saved-prompt library / user-created templates for chat. |
+
+**Inputs / Prompt actions** (what users can ask the AI to do)
+
+| Pattern | Score | Notes |
+|---|---|---|
+| Auto-fill | ❌ | No "fill multiple fields from one prompt" surface. Could apply to setup wizard or star-observatory metadata. |
+| Chained action | ❌ | No multi-step composer; agentic mode loosely covers this. |
+| Describe | ⛔ | Image-gen flavour; not applicable. |
+| Expand | ⚠️ | RAG modes effectively expand; no inline "expand this paragraph" action on chat output. |
+| Inline Action | ❌ | **Notable gap.** No highlight-to-AI on a star, document, or chat output. Notion / Granola lean on this hard. |
+| Inpainting | ⛔ | Image-gen pattern. |
+| Madlibs | ⛔ | Image-gen flavour; closest fit is forecast schema config. |
+| Open input | ✅ | Chat composer is the canonical open input. |
+| Regenerate | ❌ | No "regenerate this answer" on assistant messages. The existing retry path is for *interrupted* runs (resumable runs), not for "I didn't like that response". |
+| Restructure | ❌ | No "use this assistant message as a starting point for a new prompt" action. |
+| Restyle | ⛔ | Image-gen pattern. |
+| Summary | ✅ | One of the 5 tuned modes per VISION; mode toggle covers it. |
+| Synthesis | ✅ | "Evidence Pack" + IterRAG convergence cover synthesis. |
+| Transform | ⚠️ | Forecast mode transforms CSV → time-series; no general "turn this doc into X" surface. |
+
+**Tuners** (refine the prompt context)
+
+| Pattern | Score | Notes |
+|---|---|---|
+| Attachments | ✅ | Evidence panel + star observatory attach files / paths / indexes. |
+| Connectors | ⚠️ | RSS / podcast / news-comet ingestion via Seedling (M13). No surfaced "Connectors" UI yet — partly hidden. |
+| Filters | ⚠️ | Constellation spectral-class filter exists but per M21 audit (#13) doesn't actually filter (URL theatre). Needs to *work*. |
+| Model management | ✅ | `model-status-dialog.tsx` is an explicit model-management surface; settings has the full provider/model picker. |
+| Modes | ✅ | Direct / RAG / Forecast on chat; 5 tuned modes (Q&A / Summary / Tutor / Research / Evidence Pack). |
+| Parameters | ✅ | Settings exposes hybrid-search alpha, MMR, reranker, etc. |
+| Preset styles | ⛔ | Image-gen flavour; partly covered by Modes. |
+| Prompt enhancer | ❌ | No "improve my prompt" button. Genuinely useful for new RAG users. |
+| Saved styles | ❌ | No per-context saved styles or saved-prompt library. |
+| Voice and tone | ❌ | **Biggest catalogue-shaped gap.** Companion is core-pillar but the *user* has no surface to adjust its voice / tone / personality. Brand chooses for the user. Couples to **Identifiers → Personality**. |
+
+**Governors** (human-in-the-loop oversight)
+
+| Pattern | Score | Notes |
+|---|---|---|
+| Action plan | ❌ | Chat agentic mode doesn't show a plan-before-execute surface. `ActionCard` is per-action approval, reactive. Credibility gap for autonomous research and skill installs. |
+| Branches | ❌ | Chat sessions can't branch. One thread = one timeline. |
+| Citations | ✅ | RAG mode emits citations; `evidence-source-card.tsx` renders them. |
+| Controls | ⚠️ | Chat has `onStopStreaming` (Stop button at `chat-panel.tsx:1135`); no Pause / mid-stream prompt-edit. Companion dock has a global Pause/Resume. |
+| Cost estimates | ⛔ | Mostly N/A — local product, tokens are mostly free. Could matter for cloud-API users; defer to M15 (Pro tier). |
+| Draft mode | ❌ | No "preview before commit" for autonomous research or index builds. Star observatory is close but doesn't frame builds as drafts. |
+| Memory | ⚠️ | Atlas exists; companion-dock has "Clear memory" (atomic) and Atlas snooze/decline. **No inspectable list of what the AI knows about *me*** (vs. what it knows about my docs). VISION explicitly promises this. **Second-biggest catalogue-shaped gap.** |
+| References | ✅ | Evidence-panel + evidence-source-card. |
+| Sample response | ❌ | No "here's what an answer might look like" before submitting an expensive query. Felt sharply on the 12-second model-load (M21 #9). |
+| Shared vision | ❌ | No "watch the AI doing autonomous research live in a shared canvas". Companion-dock thought-log is text-only; comets are tangentially this. |
+| Stream of Thought | ✅ | Trace timeline + `agentic-step-indicator.tsx` + companion-dock thought-log. |
+| Variations | ❌ | No "give me 3 alternative answers" surface. |
+| Verification | ✅ | `ActionCard.onApprove/onDeny` for Nyx install actions; star-observatory deletion confirms. |
+
+**Trust builders** (give users confidence the AI is trustworthy)
+
+| Pattern | Score | Notes |
+|---|---|---|
+| Caveat | ⚠️ | Heretic / forecast / mock-backend warnings exist but inconsistent. M21 #4 / #5 surfaced the "DIRECT CHAT READY" vs. mock-backend disclosure failure. **No systematic per-mode caveat strip.** |
+| Consent | ⚠️ | Setup wizard captures consent at setup. No per-source consent for ingestion (e.g. when a user pastes an RSS URL — does it surface ingestion frequency, network egress, retention?). |
+| Data ownership | ✅ | Entire premise of Metis. Network-audit panel + settings. |
+| Disclosure | ⚠️ | Per M21 partly fixed but not systematic. WebGPU local-model replies are not visually distinguished from cloud replies. Mock-backend disclosure was M21 #4. |
+| Footprints | ✅ | Trace timeline = footprints. |
+| Incognito Mode | ❌ | **Third meaningful gap.** No "this chat won't write to memory" toggle. Strong fit for Metis's privacy-conscious audience. |
+| Watermark | ⛔ | Image-gen pattern. |
+
+**Identifiers** (brand-level AI surfacing)
+
+| Pattern | Score | Notes |
+|---|---|---|
+| Avatar | ❌ (intentional?) | The M-star is the *brand*. The companion currently uses a generic Sparkles icon in `metis-companion-dock.tsx`. Vision-tense: VISION's "stars are knowledge, not astronomy" forbids decorating knowledge artefacts, but the companion is *the* AI, not a knowledge artefact, so it could earn its own avatar without breaking the metaphor. Tread carefully. |
+| Color | ✅ | Cyan / gold / purple system established by M02 / M20. |
+| Iconography | ✅ | Consistent (lucide + dot-matrix from M01 quiet-loaders). |
+| Name | ✅ | "METIS" — the AI shares the product name. The catalogue suggests the *AI* might want its own user-tunable name (links to Voice and tone). |
+| Personality | ❌ | Same as Voice and tone — implicit / data-driven, not user-tunable. |
+
+#### Top 10 highest-leverage gaps
+
+Ordered by *leverage* (impact × pillar fit × inverse risk), not severity. Each entry tags a recommended disposition that's still **awaiting user go/no-go** before promote/merge — see *Decision* line below.
+
+1. **Voice and tone + Personality** (Tuners + Identifiers) — `Promoted as M23 (2026-05-03)` ([`plans/companion-controls/plan.md`](../plans/companion-controls/plan.md), design [`docs/plans/2026-05-03-companion-controls-design.md`](plans/2026-05-03-companion-controls-design.md)). Bundled with gap #2. Couples directly to the Companion pillar's "feels like *yours*" promise. **Risk:** vision-tense (M02 / VISION's "stars are knowledge" stance) — kept strictly companion-scoped per the design. Scope revised down to ~4 days after discovering the backend (`AssistantIdentity.prompt_seed`, `update_config`, `get_snapshot`) is mostly in place. *Audit reconciliation: this row flips to ✅ at M23 Phase 6.*
+2. **Memory inspector** (Governors → Memory) — `Promoted as M23 (2026-05-03)` (same plan + design as #1). VISION promises "the AI that knows you" but there's no surface to *see* what it knows. Renders the existing `assistant_memory` + `assistant_playbooks` data (already flowing through `get_snapshot`) with delete + bulk-clear-by-kind affordances. Read+delete only — no edit, no add (corruption-prone, not promised by VISION). Closes a load-bearing pillar promise. *Audit reconciliation: this row flips to ✅ at M23 Phase 6.*
+3. **Caveat strip per chat mode** (Trust builders → Caveat + Disclosure) — `Merge into M21`. Consistent 1-line caveat under each chat mode (Mock backend / WebGPU local / Cloud provider / no-network). Replaces the silent mock-backend issue from M21 #4 with a systematic surface. Scope: half-day to 1 day. Add as M21 P3 entry.
+4. **Disclosure on AI-generated content** (Trust builders → Disclosure) — `Merge into M21`. Extends Caveat: WebGPU local replies visually distinguished from cloud replies (small badge / colour). Scope: patch. Add as M21 P3 entry. Pairs with #3.
+5. **Filters that work** (Tuners → Filters) — `Already in M21 (#13)`. Reframe under Shape-of-AI vocabulary; prioritise. The dead spectral-class slider is the canonical violation.
+6. **Sample response / model-load progress** (Governors → Sample response) — `Already in M21 (#9)`. The 12-second WebGPU first-load with no progress is the canonical violation. Cross-reference Sample response in the M21 entry so the eventual fix knows it's solving two patterns at once.
+7. **Action plan** (Governors → Action plan) — `Park or Merge into M16`. For autonomous-research streams: show planned steps + token-count estimate before execute, with an approve gate. Strengthens existing `ActionCard`. Plays into M16 evals (running an eval should always show its plan first). Scope: multi-day.
+8. **Incognito Mode** (Trust builders → Incognito Mode) — `Merge into M17 or Park`. Toggle in chat composer ("this chat won't write to memory"). Strong privacy-audience fit, low complexity. Touches `chat-panel.tsx` + the session-write path in `session_repository.py`. Scope: 1–2 days. Park if it complicates M17 Phase 8.
+9. **Regenerate** (Inputs → Regenerate) — `Merge into M21`. Small button on assistant messages to re-run the same prompt with the same context. Cheap. Add as M21 P3 entry. Scope: patch.
+10. **Inline Action** (Inputs → Inline Action) — `Park`. Highlight-to-AI on evidence-panel chunks ("explain this", "find similar"). Big UX win for Cortex pillar but multi-day, and depends on the chat composer being able to receive a context handle. Park until M16 lands so the eval surface can be a first consumer.
+
+**Out-of-scope for Metis (do not chase):** Inpainting, Restyle, Watermark, Madlibs (image-gen patterns); Cost estimates (local product — defer indefinitely until cloud-API users matter at M15); strong-form Avatar (vision-tense). Keep these listed so a future agent doesn't re-discover them.
+
+**Verification needed before acting on:** (a) whether `first-run-banner.tsx` currently renders on `/` (M01 walkthrough #33 said it didn't); (b) whether the WebGPU local-model badge from #4 is partially shipped somewhere; (c) whether M21 #13 spectral-filter has been re-investigated.
+
+#### Disposition
+
+The audit itself is complete. Promote/merge decisions are **deferred to the user** per the IDEAS.md intake. The strongest **Promote** candidates are #1 (Voice/tone) + #2 (Memory inspector) bundled as a single *M23 — Companion controls* milestone (Companion pillar, multi-day, ~5–7 days end-to-end). The strongest **Merge into M21** candidates are #3, #4, #9 (all small, Trust-builder + Inputs polish). The user has explicit go/no-go authority on each.
