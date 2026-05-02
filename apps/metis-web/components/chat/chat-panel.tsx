@@ -18,6 +18,7 @@ import { ActionCard } from "@/components/chat/action-card";
 import { AssistantCopyActions } from "@/components/chat/assistant-copy-actions";
 import { ArrowArtifactBoundary } from "@/components/chat/artifacts/arrow-artifact-boundary";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
+import { DotMatrixLoader } from "@/components/brand";
 import { useArrowState } from "@/hooks/use-arrow-state";
 import { AlertCircle, Bot, ChevronDown, FileSpreadsheet, Loader2, MoreHorizontal, SendHorizontal, Settings, ShieldOff, Square, Wand2 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -906,7 +907,7 @@ export function ChatPanel({
           {isSending && !isStreamingRag && (
             <div className="flex justify-start">
               <div className="glass-micro-surface rounded-[1.1rem] px-3 py-2 text-sm text-muted-foreground">
-                <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-3.5" />
+                <DotMatrixLoader name="thinking" size={14} className="text-muted-foreground" />
               </div>
             </div>
           )}
