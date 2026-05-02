@@ -840,3 +840,25 @@ def test_reflect_promotes_high_scoring_skill_candidates(tmp_path) -> None:
     # Candidate should be marked promoted so it isn't re-promoted next cycle
     candidates = skill_repo.list_candidates(db_path=db_path, limit=10)
     assert candidates == [], "Candidate should be marked promoted and no longer listed"
+
+
+def test_update_config_persists_tone_preset(tmp_path, monkeypatch) -> None:
+    """Tone preset round-trips through the companion service."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    # Redirect settings_store to a tmp_path-backed dict so update_config
+    # does not write to the repo's actual settings.json.
+    fake_settings: dict = {}
+    monkeypatch.setattr(
+        "metis_app.settings_store.load_settings",
+        lambda: dict(fake_settings),
+    )
+    monkeypatch.setattr(
+        "metis_app.settings_store.save_settings",
+        lambda values: fake_settings.update(values),
+    )
+
+    service.update_config(identity={"tone_preset": "concise-analyst"})
+    snapshot = service.get_snapshot({})
+    assert snapshot["identity"]["tone_preset"] == "concise-analyst"
