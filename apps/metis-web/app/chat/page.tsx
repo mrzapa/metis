@@ -2050,6 +2050,18 @@ function ChatPageContent() {
                   onForecastFileSelect={handleForecastFileSelect}
                   onForecastMappingChange={handleForecastMappingChange}
                   onForecastHorizonChange={handleForecastHorizonChange}
+                  modelLoadProgress={
+                    modelProvider === "webgpu" &&
+                    webgpu.status === "loading" &&
+                    webgpuRunIdRef.current !== null
+                      ? {
+                          pct: webgpu.progress?.pct ?? 0,
+                          loadedBytes: webgpu.progress?.loadedBytes ?? 0,
+                          totalBytes: webgpu.progress?.totalBytes ?? 0,
+                          modelLabel: "Bonsai 1.7B",
+                        }
+                      : null
+                  }
                 />
               ),
             },
