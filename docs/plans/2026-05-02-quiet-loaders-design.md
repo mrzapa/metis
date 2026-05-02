@@ -233,7 +233,7 @@ Two changes to the existing file:
 
 The dot/matrix entry's *Decision* line moves from "*awaiting go/no-go*" to:
 
-> **Brainstormed 2026-05-02; merged into M01.** Design at [`docs/plans/2026-05-02-quiet-loaders-design.md`](../docs/plans/2026-05-02-quiet-loaders-design.md); implementation plan at [`plans/quiet-loaders/plan.md`](quiet-loaders/plan.md). Six-loader vocabulary (`thinking`, `stream`, `compile`, `verify`, `halt`, `breath`) ships as `<DotMatrixLoader>` next to M20's `<MetisLoader>`. DAB rejected as a runtime integration target; reference-only. Upstream permission obtained for the dot-matrix technique.
+> **Brainstormed 2026-05-02; merged into M01.** Design at [`docs/plans/2026-05-02-quiet-loaders-design.md`](../docs/plans/2026-05-02-quiet-loaders-design.md); implementation plan at [`docs/plans/2026-05-02-quiet-loaders-implementation.md`](../docs/plans/2026-05-02-quiet-loaders-implementation.md). Six-loader vocabulary (`thinking`, `stream`, `compile`, `verify`, `halt`, `breath`) ships as `<DotMatrixLoader>` next to M20's `<MetisLoader>`. DAB rejected as a runtime integration target; reference-only. Upstream permission obtained for the dot-matrix technique.
 
 ### `docs/preserve-and-productize-plan.md` (update)
 
@@ -267,7 +267,7 @@ The user has explicit permission from `icantcodefyi/dot-matrix-animations` (the 
 
 ## Implementation phases (high level)
 
-The detailed plan is at `plans/quiet-loaders/plan.md` (generated from this design via `superpowers:writing-plans`). Phase summary:
+The detailed plan is at [`docs/plans/2026-05-02-quiet-loaders-implementation.md`](2026-05-02-quiet-loaders-implementation.md) (generated from this design via `superpowers:writing-plans`). Phase summary:
 
 1. **Phase 1 — Primitive scaffold.** Create the dispatcher, the six sub-components (with hand-authored keyframes + delay maps), the keyframes CSS, and the vitest contract tests. Wire the keyframes import into `app/layout.tsx`. Update `components/brand/index.ts` to re-export. Test: `pnpm test components/brand`.
 
