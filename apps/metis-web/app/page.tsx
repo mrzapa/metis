@@ -6224,7 +6224,13 @@ body {
 .metis-nav-right { display: flex; align-items: center; gap: 32px; }
 
 /* M17 Phase 7 — first-run network-audit discoverability card.
-   Fixed top-right, below the nav. Unobtrusive, dismissible, one-shot. */
+   Fixed top-right, below the nav. Unobtrusive, dismissible, one-shot.
+
+   M21 #18: tightened backdrop separation (darker bg + heavier shadow)
+   so the card no longer reads as floating over the Knowledge
+   constellation's stars on desktop, and shrunk the max-width on
+   narrow viewports so it stops consuming ~25 % of mobile screen real
+   estate. */
 .metis-network-audit-first-run-card {
   position: fixed;
   top: 72px;
@@ -6233,17 +6239,29 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-width: 320px;
-  padding: 14px 16px;
+  max-width: 280px;
+  padding: 12px 14px;
   border-radius: 14px;
-  background: rgba(8, 10, 18, 0.85);
-  border: 1px solid rgba(120, 140, 190, 0.18);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(6, 8, 14, 0.94);
+  border: 1px solid rgba(120, 140, 190, 0.24);
+  box-shadow:
+    0 16px 44px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
   font-size: 12px;
   color: var(--text-dim);
   letter-spacing: 0.2px;
+}
+@media (max-width: 640px) {
+  .metis-network-audit-first-run-card {
+    top: 68px;
+    right: 12px;
+    left: auto;
+    max-width: min(220px, calc(100vw - 24px));
+    padding: 10px 12px;
+    font-size: 11px;
+  }
 }
 .metis-network-audit-first-run-card-body { display: flex; flex-direction: column; gap: 4px; }
 .metis-network-audit-first-run-card-title {

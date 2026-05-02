@@ -26,7 +26,13 @@ export function SetupGuard({ children }: { children: React.ReactNode }) {
     fetchSettings()
       .then((settings) => {
         if (!settings.basic_wizard_completed) {
-          router.replace("/setup");
+          // M21 #17: tag the redirect with the origin pathname so the
+          // setup page can render a "Finish setup to start chatting"
+          // banner instead of dumping the user into setup with no
+          // explanation. The query string survives `replace()` and is
+          // read by the setup page on mount; the wizard clears it once
+          // setup completes.
+          router.replace(`/setup?from=${encodeURIComponent(pathname)}`);
         }
       })
       .catch(() => {
