@@ -7439,8 +7439,13 @@ body {
     gap: 22px;
   }
 
+  /* M21 #11: at narrow viewports the fixed .metis-zoom-pill toolbar
+     wraps and can stretch to ~100px tall. The hero headline (Discover
+     everything) used to live at bottom 48px of the overlay and
+     overlapped the toolbar. Pad enough below it to clear the wrapped
+     toolbar plus a small breathing margin. */
   .metis-hero-overlay {
-    padding: 0 20px 48px;
+    padding: 0 20px 120px;
   }
 
   .metis-hero-copy,

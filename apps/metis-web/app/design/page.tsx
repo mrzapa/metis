@@ -1,5 +1,6 @@
 "use client";
 
+import { notFound } from "next/navigation";
 import { useArrowState } from "@/hooks/use-arrow-state";
 import { Button } from "@/components/ui/button";
 import { GlowCard } from "@/components/ui/glow-card";
@@ -58,6 +59,16 @@ function Section({
 const scrollItems = Array.from({ length: 20 }, (_, i) => `Item ${i + 1}`);
 
 export default function DesignPage() {
+  // M21 #16: gate the kitchen-sink behind NODE_ENV. In production builds
+  // `process.env.NODE_ENV` is statically replaced with the string
+  // `"production"` and the bundler tree-shakes the rest of the
+  // component away — so this route 404s on real deploys (Tauri shell,
+  // user's web build) without leaking the design surface or bundling
+  // its dependencies.
+  if (process.env.NODE_ENV === "production") {
+    notFound();
+  }
+
   const [inputValue, setInputValue] = useArrowState("");
   const [textareaValue, setTextareaValue] = useArrowState("");
 
