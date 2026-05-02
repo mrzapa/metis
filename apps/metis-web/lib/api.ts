@@ -3303,8 +3303,10 @@ export async function fetchCometSources(): Promise<CometSourcesResponse> {
   return res.json();
 }
 
-export async function fetchActiveComets(): Promise<CometEvent[]> {
-  const res = await apiFetch(`${await getApiBase()}/v1/comets/active`);
+export async function fetchActiveComets(options?: { signal?: AbortSignal }): Promise<CometEvent[]> {
+  const res = await apiFetch(`${await getApiBase()}/v1/comets/active`, {
+    signal: options?.signal,
+  });
   if (!res.ok) return [];
   return res.json();
 }
@@ -3346,13 +3348,12 @@ export async function streamCometEvents(options: {
   const { signal, pollSeconds = 10, onUpdate } = options;
   const base = await getApiBase();
 
-  // 1. Hydrate immediately
-  const initial = await fetchActiveComets();
-  onUpdate(initial);
-
-  // 2. Open SSE for live updates
-  const params = new URLSearchParams({ poll_seconds: String(pollSeconds) });
-  const url = `${base}/v1/comets/events?${params}`;
+  // M21 #7: thread the caller's signal into both fetches below so the
+  // hydrate request *and* the SSE stream abort together when the caller
+  // (typically `useCometNews`) cleans up. Pre-fix, only the SSE stream
+  // received the abort signal — `fetchActiveComets` ran un-cancellable
+  // and surfaced as a `200 OK [FAILED: net::ERR_ABORTED]` entry in the
+  // privacy panel on every nav.
   const controller = new AbortController();
   if (signal) {
     if (signal.aborted) {
@@ -3361,6 +3362,17 @@ export async function streamCometEvents(options: {
       signal.addEventListener("abort", () => controller.abort(), { once: true });
     }
   }
+
+  // 1. Hydrate immediately
+  const initial = await fetchActiveComets({ signal: controller.signal });
+  if (controller.signal.aborted) {
+    return () => controller.abort();
+  }
+  onUpdate(initial);
+
+  // 2. Open SSE for live updates
+  const params = new URLSearchParams({ poll_seconds: String(pollSeconds) });
+  const url = `${base}/v1/comets/events?${params}`;
 
   const res = await apiFetch(url, { signal: controller.signal });
   if (!res.ok || !res.body) {
