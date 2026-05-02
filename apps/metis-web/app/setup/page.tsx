@@ -80,15 +80,38 @@ export default function SetupPage() {
   const router = useRouter();
   // M21 #17: when SetupGuard redirects a not-yet-set-up user away
   // from /chat (or /forge, /settings, /improvements), it appends
-  // `?from=<origin-pathname>`. Read it once at mount and surface a
-  // contextual banner so the user knows why they landed here. The
-  // query string isn't reactive — once the user starts the wizard the
-  // banner stays visible until they leave the page; that's intentional.
+  // `?from=<origin-pathname>`. Read it once at mount, surface a
+  // contextual banner so the user knows why they landed here, AND
+  // honour the redirect when the launch handlers fire so the user
+  // actually returns to where they came from rather than being
+  // dropped on /chat regardless. The query string is read once on
+  // mount — `searchParams` is stable for the page's lifetime and the
+  // banner intentionally persists while the user is in the wizard
+  // (we navigate AWAY on launch, so the param simply disappears).
+  //
+  // Open-redirect safety: we only trust `from` values that exist as
+  // keys in `REDIRECT_FROM_LABEL`. Anything else falls back to
+  // `/chat`. That allowlist is the same one we use to derive the
+  // banner copy, so the banner and the launch redirect are always
+  // in lockstep — there's no path where the banner says "we'll send
+  // you back to X" but the launch sends you somewhere else.
   const searchParams = useSearchParams();
   const redirectFromPath = searchParams?.get("from") ?? null;
   const redirectFromLabel = redirectFromPath
     ? REDIRECT_FROM_LABEL[redirectFromPath] ?? null
     : null;
+  // Resolved launch target: the `from` value if it's allowlisted,
+  // otherwise `/chat`. Both `handleInstantLaunch` and `handleFinish`
+  // route here at the end of the wizard.
+  const launchTarget = useMemo<string>(() => {
+    if (
+      redirectFromPath
+      && Object.prototype.hasOwnProperty.call(REDIRECT_FROM_LABEL, redirectFromPath)
+    ) {
+      return redirectFromPath;
+    }
+    return "/chat";
+  }, [redirectFromPath]);
   // Wizard fork — `null` shows the binary "instant vs configure" picker;
   // `"configure"` runs the full 5-step wizard. The "instant" branch
   // commits a webgpu/Bonsai default and routes to /chat without ever
@@ -285,7 +308,10 @@ export default function SetupPage() {
         llm_model: "Bonsai 1.7B",
         basic_wizard_completed: true,
       });
-      router.push("/chat");
+      // M21 #17: honour `?from=` redirect when present; falls back
+      // to /chat for the standard first-run flow. See the
+      // `launchTarget` comment above for the safety story.
+      router.push(launchTarget);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to launch in-browser model",
@@ -332,7 +358,8 @@ export default function SetupPage() {
       }
 
       localStorage.setItem("metis_chat_seed_prompt", selectedPrompt);
-      router.push("/chat");
+      // M21 #17: honour `?from=` redirect when present.
+      router.push(launchTarget);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings");
     } finally {
