@@ -72,3 +72,25 @@
 .dm-verify circle[data-check="1"] {
   animation: dm-verify 100ms ease-out 1 forwards;
 }
+
+/* Inner 3×3 ring (8 cells around centre) lit until 400ms, then fades to 0
+ * by 700ms, hold transparent. */
+@keyframes dm-halt-ring {
+  0%, 50%       { opacity: 1; }   /* 0–400ms of 800ms cycle */
+  87.5%, 100%   { opacity: 0; }   /* 700–800ms */
+}
+
+/* Centre (2,2) lights at 0% and stays. */
+@keyframes dm-halt-centre {
+  0%, 100% { opacity: 1; }
+}
+
+.dm-halt circle {
+  opacity: 0;
+}
+.dm-halt circle[data-halt="ring"] {
+  animation: dm-halt-ring 800ms ease-out 1 forwards;
+}
+.dm-halt circle[data-halt="centre"] {
+  animation: dm-halt-centre 800ms linear 1 forwards;
+}

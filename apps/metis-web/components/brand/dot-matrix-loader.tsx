@@ -9,6 +9,7 @@
 
 import { BreathLoader } from "./dot-matrix/breath";
 import { CompileLoader } from "./dot-matrix/compile";
+import { HaltLoader } from "./dot-matrix/halt";
 import { StreamLoader } from "./dot-matrix/stream";
 import { ThinkingLoader } from "./dot-matrix/thinking";
 import { VerifyLoader } from "./dot-matrix/verify";
@@ -55,6 +56,8 @@ export function DotMatrixLoader({
       return <CompileLoader size={size} className={className} ariaLabel={label} />;
     case "verify":
       return <VerifyLoader size={size} className={className} ariaLabel={label} />;
+    case "halt":
+      return <HaltLoader size={size} className={className} ariaLabel={label} />;
     // Other arms added in Tasks 4–13.
     default:
       // Fallback while authoring; replaced with exhaustive switch in Task 14.

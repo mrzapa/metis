@@ -63,4 +63,11 @@ describe("<DotMatrixLoader>", () => {
     const animated = circles.filter((c) => c.style.animationDelay !== "");
     expect(animated.length).toBe(5); // (3,0) (4,1) (3,2) (2,3) (1,4)
   });
+
+  it("renders halt with dm-halt class and 25 circles", () => {
+    const { container } = render(<DotMatrixLoader name="halt" />);
+    const svg = container.querySelector("svg");
+    expect(svg!.classList.contains("dm-halt")).toBe(true);
+    expect(container.querySelectorAll("circle").length).toBe(25);
+  });
 });
