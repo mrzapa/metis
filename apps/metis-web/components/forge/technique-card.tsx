@@ -317,7 +317,7 @@ function HereticInstallDialog({ open, onOpenChange }: HereticInstallDialogProps)
               <code className="rounded bg-white/8 px-1.5 py-0.5 font-mono text-xs">heretic-llm</code>
               {" "}on PyPI; same string referenced by{" "}
               <code className="rounded bg-white/8 px-1.5 py-0.5 font-mono text-xs">pyproject.toml</code>
-              {" "}and the engine's preflight messaging):
+              {" "}and the engine&apos;s preflight messaging):
               <pre className="mt-2 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs">pip install heretic-llm</pre>
             </li>
             <li>
@@ -525,7 +525,7 @@ function RecentUsesPanel({ techniqueId }: RecentUsesPanelProps) {
               data-testid="forge-recent-uses-empty"
               className="text-[11px] text-muted-foreground/70"
             >
-              No recent uses yet — your companion hasn't fired this technique
+              No recent uses yet — your companion hasn&apos;t fired this technique
               in the last week.
             </p>
           ) : null}

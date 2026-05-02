@@ -375,6 +375,17 @@ class AppSettings(BaseModel):
     news_comet_rss_feeds: list[str] = []
     news_comet_reddit_subs: list[str] = []
 
+    # ── Personal evals (M16) ──────────────────────────────────────────────────
+    # Defaults match ADR 0018 + plan-doc base-rate honesty: evals stay
+    # off until the user opts in, share is reserved/inert, and the
+    # cadence mirrors the seedling overnight cycle so eval runs piggyback
+    # on the existing background scheduler rather than introducing a
+    # second one.
+    evals_enabled: bool = False
+    evals_cadence_hours: _EnvPassthrough = 24
+    evals_auto_seed_enabled: bool = False
+    evals_share_optin: bool = False
+
     # ── Nested groups ─────────────────────────────────────────────────────────
     assistant_identity: AssistantIdentitySettings = AssistantIdentitySettings()
     assistant_runtime: AssistantRuntimeSettings = AssistantRuntimeSettings()

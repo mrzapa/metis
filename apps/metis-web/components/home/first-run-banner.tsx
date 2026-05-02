@@ -116,8 +116,13 @@ export function FirstRunBanner(): React.JSX.Element | null {
 
 const firstRunBannerStyles = `
 .metis-first-run-banner {
+  /* M21 #12: was top 12px, which placed the banner inside the
+     .metis-nav band on /. At narrow viewports the centered banner
+     widened to calc(100vw - 32px) and bled through the left-aligned
+     nav links (Chat / Settings / etc.). Move below the nav (matches
+     the .metis-network-audit-first-run-card convention at top 72px). */
   position: fixed;
-  top: 12px;
+  top: 80px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 46;

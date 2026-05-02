@@ -393,8 +393,13 @@ export default function ImprovementsPage() {
   const actions = <NewEntryDialog onCreated={handleCreated} />;
 
   return (
+    // M21 #14: heading aligned with the nav label ("Research log") so URL,
+    // top-nav, and page heading speak the same name. URL stays
+    // `/improvements/` to avoid breaking links from existing transcripts /
+    // bookmarks; redirect-on-rename is the only thing that would warrant
+    // a URL change and isn't worth it here.
     <PageChrome
-      title="Improvement Pipeline"
+      title="Research log"
       description="Track sources, ideas, hypotheses, experiments, algorithms, and results."
       eyebrow="METIS"
       actions={actions}
