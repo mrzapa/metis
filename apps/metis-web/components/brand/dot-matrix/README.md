@@ -15,7 +15,7 @@ vocabulary is brand-coherent without re-using brand-forward primitives.
 |---|---|---|---|
 | `thinking` | Agent composing / reflecting | Outer ring at 15%; inner 3×3 cluster fires on a 1200 ms loop with per-cell delays. Reads as "neurons firing." | Chat thinking-bubble (`chat-panel.tsx`); companion-dock reflect-now busy (`metis-companion-dock.tsx`). |
 | `stream` | Tokens emitting | Dots light in row-major order (top-left → bottom-right) with a 60 ms per-dot stagger. Reads as "tokens marching out in reading order." | Chat send-button pending (`chat-panel.tsx`). |
-| `compile` | Multi-step process running | Five columns fill bottom-up over 600 ms each, 800 ms inter-column stagger; full grid holds, then snap-releases. Reads as "filling, filling, then snap-released." | Forge technique-card pending (`technique-card.tsx`); companion-dock atlas-save busy (`metis-companion-dock.tsx`). |
+| `compile` | Multi-step process running | Five columns fill bottom-up (120 ms per dot, 480 ms per column), 800 ms inter-column stagger; full grid holds, then releases per cell at the end of its own 4600 ms cycle. (See [implementation note](#a-note-on-compile) below.) | Forge technique-card pending (`technique-card.tsx`); companion-dock atlas-save busy (`metis-companion-dock.tsx`). |
 | `verify` | Success (one-shot) | Five cells trace a checkmark in time order, ignite-and-hold; final frame stays via `fill-mode: forwards`. | *Available — no current consumer; reserved for future skill-promote success / eval-pass surfaces.* |
 | `halt` | Error / cancel (one-shot) | Inner 3×3 collapses to centre over 800 ms; final frame is the centre dot alone. | *Available — no current consumer; reserved for future error / cancel surfaces.* |
 | `breath` | Idle "alive" | All 25 dots breathe together 30% → 100% → 30% over 3000 ms. Reads as "the surface is alive but quiet." | Root `app/loading.tsx` (route-level fallback). |
@@ -34,11 +34,14 @@ type DotMatrixLoaderName =
   | "verify" | "halt" | "breath";
 ```
 
-Defaults: `size={20}` (sized for inline use) and `aria-label` derives
-from `name` (capitalised — `"Thinking"`, `"Stream"`, etc.). `verify`
-and `halt` are one-shot (`animation-iteration-count: 1` +
-`fill-mode: forwards`); re-run them by changing `key=` at the call
-site (the standard React idiom for restarting CSS animations).
+Defaults: `size={20}` (sized for inline use), and `aria-label` derives
+from `name` via a semantic-English map (`thinking → "Thinking"`,
+`stream → "Streaming"`, `compile → "Working"`, `verify → "Verified"`,
+`halt → "Halted"`, `breath → "Loading"`). Override per call site
+with the `aria-label` prop. `verify` and `halt` are one-shot
+(`animation-iteration-count: 1` + `fill-mode: forwards`); re-run them
+by changing `key=` at the call site (the standard React idiom for
+restarting CSS animations).
 
 ## Theming
 
@@ -65,6 +68,18 @@ surrounding context.
 6. Add a contract test in `__tests__/dot-matrix-loader.test.tsx`
    (class assertion + 25-circle assertion at minimum;
    per-cell-delay assertions if the choreography is delay-driven).
+
+## A note on `compile`
+
+The current `compile` keyframe (`0/10/87/100`) plus the per-cell
+`animation-delay` map produces *rolling* fill-and-release rather than
+the design doc's intended "snap-release" (where all cells would fade
+together at the global cycle boundary). Achieving snap-release in
+pure CSS requires either two animations per cell or a separate
+synchronised release layer; the current single-keyframe form is a
+deliberate first-pass simplification. If the rolling release reads
+poorly in practice, the upgrade path is documented in the design doc
+under *Phase 4 — Tuning*.
 
 ## Attribution
 
