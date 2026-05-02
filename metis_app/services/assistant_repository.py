@@ -601,6 +601,16 @@ class AssistantRepository:
             )
             return cursor.rowcount > 0
 
+    def delete_memory_by_kind(self, kind: str) -> int:
+        """Hard-delete all memory entries of a given kind. Returns count deleted."""
+        self._ensure_ready()
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                "DELETE FROM assistant_memory WHERE kind = ?",
+                (kind,),
+            )
+            return cursor.rowcount
+
     def clear_recent_memory(self, *, limit: int = 10) -> int:
         self._ensure_ready()
         rows = self.list_memory()

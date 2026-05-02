@@ -887,3 +887,27 @@ def test_delete_memory_entry_round_trip(tmp_path) -> None:
 def test_delete_memory_entry_missing_id_returns_false(tmp_path) -> None:
     repo = AssistantRepository(tmp_path / "assistant_state.json")
     assert repo.delete_memory_entry("does-not-exist") is False
+
+
+def test_delete_memory_by_kind_filters_correctly(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    for i, kind in enumerate(["reflection", "reflection", "reflection", "skill", "skill"]):
+        repo.add_memory_entry(
+            AssistantMemoryEntry(
+                entry_id=f"id-{i}",
+                created_at="2026-05-03T00:00:00+00:00",
+                kind=kind,
+                title=f"t{i}",
+                summary="s",
+            )
+        )
+    deleted = repo.delete_memory_by_kind("reflection")
+    assert deleted == 3
+    remaining = repo.list_memory()
+    assert len(remaining) == 2
+    assert all(item.kind == "skill" for item in remaining)
+
+
+def test_delete_memory_by_kind_unknown_kind_returns_zero(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    assert repo.delete_memory_by_kind("nonexistent") == 0
