@@ -980,6 +980,18 @@ class WorkspaceOrchestrator:
     def clear_assistant_memory(self, *, limit: int = 10) -> dict[str, Any]:
         return self._assistant_service.clear_recent_memory(limit=limit)
 
+    def delete_assistant_memory_entry(self, entry_id: str) -> dict[str, Any]:
+        ok = self._assistant_service.repository.delete_memory_entry(entry_id)
+        return {"ok": ok}
+
+    def delete_assistant_memory_by_kind(self, kind: str) -> dict[str, Any]:
+        deleted = self._assistant_service.repository.delete_memory_by_kind(kind)
+        return {"ok": True, "deleted_count": deleted}
+
+    def delete_assistant_playbook(self, playbook_id: str) -> dict[str, Any]:
+        ok = self._assistant_service.repository.delete_playbook(playbook_id)
+        return {"ok": ok}
+
     def reflect_assistant(
         self,
         *,
