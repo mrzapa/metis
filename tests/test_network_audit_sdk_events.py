@@ -745,9 +745,12 @@ def test_create_llm_returns_wrapper_for_openai(
     This is the key regression-safety test: code paths that construct
     LLMs go through the wrapper, so audit events fire on real invokes.
     """
-    # Stub out ChatOpenAI so we don't hit the network; the wrapper is
-    # what we're testing.
-    import langchain_openai
+    # Stub the LangChain ChatOpenAI import via sys.modules injection so
+    # we don't need `langchain-openai` installed (it ships in the
+    # `runtime-all` extra, not in `dev` — see pyproject.toml). Matches
+    # the pattern used elsewhere in this file.
+    import sys
+    import types
 
     class _StubChatOpenAI:
         def __init__(self, **kwargs: Any) -> None:
@@ -759,7 +762,9 @@ def test_create_llm_returns_wrapper_for_openai(
         def stream(self, _messages: list[Any]):
             yield "chunk"
 
-    monkeypatch.setattr(langchain_openai, "ChatOpenAI", _StubChatOpenAI)
+    stub_module = types.ModuleType("langchain_openai")
+    stub_module.ChatOpenAI = _StubChatOpenAI  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "langchain_openai", stub_module)
 
     from metis_app.utils.llm_providers import (
         _ProviderAuditWrapper,
@@ -788,7 +793,10 @@ def test_create_embeddings_returns_wrapper_for_openai(
     isolated_store: NetworkAuditStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """create_embeddings(provider='openai') returns a _EmbeddingsAuditWrapper."""
-    import langchain_openai
+    # See the sibling test above for why we stub langchain_openai via
+    # sys.modules rather than importing it directly.
+    import sys
+    import types
 
     class _StubOpenAIEmbeddings:
         def __init__(self, **kwargs: Any) -> None:
@@ -800,7 +808,9 @@ def test_create_embeddings_returns_wrapper_for_openai(
         def embed_query(self, _text: str) -> list[float]:
             return [0.0] * 3
 
-    monkeypatch.setattr(langchain_openai, "OpenAIEmbeddings", _StubOpenAIEmbeddings)
+    stub_module = types.ModuleType("langchain_openai")
+    stub_module.OpenAIEmbeddings = _StubOpenAIEmbeddings  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "langchain_openai", stub_module)
 
     from metis_app.utils.embedding_providers import (
         _EmbeddingsAuditWrapper,
