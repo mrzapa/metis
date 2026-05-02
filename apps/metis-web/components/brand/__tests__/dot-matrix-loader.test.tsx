@@ -45,4 +45,11 @@ describe("<DotMatrixLoader>", () => {
       expect((c as SVGCircleElement).style.animationDelay).not.toBe("");
     }
   });
+
+  it("renders compile with dm-compile class and 25 circles", () => {
+    const { container } = render(<DotMatrixLoader name="compile" />);
+    const svg = container.querySelector("svg");
+    expect(svg!.classList.contains("dm-compile")).toBe(true);
+    expect(container.querySelectorAll("circle").length).toBe(25);
+  });
 });

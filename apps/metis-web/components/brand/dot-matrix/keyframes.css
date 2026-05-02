@@ -45,3 +45,16 @@
   opacity: 0;
   animation: dm-stream 1500ms linear infinite;
 }
+
+@keyframes dm-compile {
+  0%      { opacity: 0; }
+  10%     { opacity: 1; }
+  87%     { opacity: 1; }
+  100%    { opacity: 0; }
+}
+
+.dm-compile circle {
+  opacity: 0;
+  animation: dm-compile 4600ms ease-out infinite;
+  animation-fill-mode: both;
+}
