@@ -862,3 +862,28 @@ def test_update_config_persists_tone_preset(tmp_path, monkeypatch) -> None:
     service.update_config(identity={"tone_preset": "concise-analyst"})
     snapshot = service.get_snapshot({})
     assert snapshot["identity"]["tone_preset"] == "concise-analyst"
+
+
+# ---------------------------------------------------------------------------
+# M23 Phase 2 — AssistantRepository delete methods
+# ---------------------------------------------------------------------------
+
+
+def test_delete_memory_entry_round_trip(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    repo.add_memory_entry(
+        AssistantMemoryEntry(
+            entry_id="abc-123",
+            created_at="2026-05-03T00:00:00+00:00",
+            kind="reflection",
+            title="Test entry",
+            summary="A test reflection",
+        )
+    )
+    assert repo.delete_memory_entry("abc-123") is True
+    assert all(item.entry_id != "abc-123" for item in repo.list_memory())
+
+
+def test_delete_memory_entry_missing_id_returns_false(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    assert repo.delete_memory_entry("does-not-exist") is False

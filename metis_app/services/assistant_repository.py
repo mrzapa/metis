@@ -591,6 +591,16 @@ class AssistantRepository:
                 )
         return item
 
+    def delete_memory_entry(self, entry_id: str) -> bool:
+        """Hard-delete one memory entry. Returns True if a row was deleted."""
+        self._ensure_ready()
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                "DELETE FROM assistant_memory WHERE entry_id = ?",
+                (entry_id,),
+            )
+            return cursor.rowcount > 0
+
     def clear_recent_memory(self, *, limit: int = 10) -> int:
         self._ensure_ready()
         rows = self.list_memory()
