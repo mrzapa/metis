@@ -957,7 +957,14 @@ export function StarDetailsPanel({
         <ObservatoryOrbitalLayout
           open={open}
           reducedMotion={prefersReducedMotion}
-          className="pointer-events-none fixed inset-0 z-[265]"
+          /* M21 — DialogContent below anchors to the right edge with a
+             width that scales by breakpoint (sm 460px, lg 520px,
+             xl 580px) plus 16px right margin. Inset the orbital
+             container by the matching amount so the top/bottom slots
+             centre on the AVAILABLE area (left of the dialog) instead
+             of the full viewport, which used to overlap the dialog
+             by ~200-250 px on every desktop width. */
+          className="pointer-events-none fixed inset-y-0 left-0 z-[265] mx-0 w-auto right-[calc(460px+2rem)] lg:right-[calc(520px+2rem)] xl:right-[calc(580px+2rem)]"
           slotClassName={{
             top: "w-[min(560px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] mt-4",
             left: "ml-4 w-[min(340px,calc(50vw-12rem))] max-w-[min(340px,calc(50vw-8rem))]",
