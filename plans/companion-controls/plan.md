@@ -22,6 +22,10 @@ Both surfaces share the same backend (`AssistantCompanionService.update_config` 
 
 Full design at [`docs/plans/2026-05-03-companion-controls-design.md`](../../docs/plans/2026-05-03-companion-controls-design.md). Read it before starting any phase.
 
+## Implementation plan
+
+Task-by-task at [`docs/plans/2026-05-03-companion-controls-implementation.md`](../../docs/plans/2026-05-03-companion-controls-implementation.md). 17 tasks across 6 phases, each task a 2–5 minute RED-GREEN-COMMIT cycle. Use `superpowers:executing-plans` to drive it.
+
 ## Progress
 
 *(milestone not yet started)*
