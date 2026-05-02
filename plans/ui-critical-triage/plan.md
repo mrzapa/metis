@@ -92,11 +92,14 @@ written as the fix lands.
   `200 OK [FAILED: net::ERR_ABORTED]` entries — polling hook starts before
   its `AbortController` is wired, or React 19 strict-mount triggers the
   teardown. Looks benign but pollutes the privacy-panel feed.
-- **#8 Hard reloads on inter-page navigation.** Network log shows three
-  full HTML/chunk reload chains when moving `/` → `/chat/` → `/setup/` →
-  `/chat/`. Investigate whether soft `Link` navs are being defeated by
-  `window.location.href = …` redirects in setup-guard hooks or
-  `DesktopReadyGuard`.
+- **#8 Hard reloads on inter-page navigation. ✅ VERIFIED RESOLVED 2026-05-02 — no fix needed.**
+  Live re-walk of `/` → `/chat/` → `/forge/` → `/settings/` → `/improvements/` → `/`
+  on current `main` confirmed all six transitions are soft Next-router navs:
+  - `window.__metis_doc_id` (random per-document marker) preserved across all six clicks → no document recreation.
+  - `performance.getEntriesByType('navigation')` stays at length 1 throughout → no full HTML reload.
+  - Network log shows only `?_rsc=…` payload fetches per transition, never a full HTML response.
+  - Source-grep for `window.location.(href|assign|replace|reload)` and `location.(href|...)` in `apps/metis-web/`: zero matches. Both `<SetupGuard>` and `<DesktopReadyGuard>` use `router.replace` and `<Link>`.
+  Likely cause of the original report: misinterpreting Next 16 dev-mode RSC payload fetches + Turbopack chunk loads as "full HTML reloads". The user's symptom may also have been transiently introduced and then incidentally fixed by other Phase 1 / 2 work (e.g. PR #588 hydration, PR #597 dedup). Either way, current `main` has no observable hard-nav.
 - **#9 "Try it instantly" hides a multi-second model load.** After
   *Get started* + first chat send, the streaming spinner ran for 12+
   seconds with zero progress feedback while the webgpu Bonsai-1.7B

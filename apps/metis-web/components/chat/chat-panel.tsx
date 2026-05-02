@@ -82,6 +82,19 @@ interface ChatPanelProps {
   onForecastFileSelect?: (file: File | null) => void;
   onForecastMappingChange?: (mapping: ForecastMapping) => void;
   onForecastHorizonChange?: (value: number | null) => void;
+  /**
+   * M21 #9 — when the in-browser WebGPU companion model is downloading
+   * after a "try it instantly" first send, surface progress instead of
+   * the bare spinner so the user knows ~700 MB is in flight rather than
+   * thinking the chat is hung. `null` (or omitted) renders the normal
+   * spinner.
+   */
+  modelLoadProgress?: {
+    pct: number;
+    loadedBytes: number;
+    totalBytes: number;
+    modelLabel: string;
+  } | null;
 }
 
 const RAG_MODES = ["Q&A", "Summary", "Tutor", "Research", "Evidence Pack", "Knowledge Search"] as const;
@@ -107,6 +120,56 @@ const PROMPT_SUGGESTIONS_RAG_NO_INDEX = [
   "What kinds of questions are RAG mode best for?",
   "Explain the difference between RAG and direct chat",
 ];
+
+/**
+ * M21 #9 — small inline progress hint shown in the streaming-spinner
+ * slot while the WebGPU companion model is downloading (~0.7-1.5 GB
+ * after a "try it instantly" first send). Replaces a bare spinner
+ * that previously made the chat look hung for 12+ s.
+ */
+function ModelLoadProgress({
+  pct,
+  loadedBytes,
+  totalBytes,
+  modelLabel,
+}: {
+  pct: number;
+  loadedBytes: number;
+  totalBytes: number;
+  modelLabel: string;
+}) {
+  const fmtMB = (bytes: number) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "—";
+    const mb = bytes / (1024 * 1024);
+    return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(0)} MB`;
+  };
+  const safePct = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0;
+  const sized = totalBytes > 0 ? `${fmtMB(loadedBytes)} / ${fmtMB(totalBytes)}` : null;
+  return (
+    <div className="flex min-w-[14rem] items-center gap-2.5">
+      <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-3.5 shrink-0" />
+      <div className="flex flex-1 flex-col gap-1">
+        <div className="flex items-baseline justify-between gap-2 text-xs">
+          <span>Downloading {modelLabel}…</span>
+          <span className="tabular-nums text-muted-foreground/80">
+            {Math.round(safePct)}%
+          </span>
+        </div>
+        <div className="h-1 w-full overflow-hidden rounded-full bg-white/8">
+          <div
+            className="h-full rounded-full bg-primary/70 transition-[width] duration-300 ease-out"
+            style={{ width: `${safePct}%` }}
+          />
+        </div>
+        {sized ? (
+          <div className="text-[10px] tabular-nums text-muted-foreground/70">
+            {sized}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 const PROMPT_SUGGESTIONS_FORECAST = [
   "Forecast the next 30 days from my time series",
@@ -161,6 +224,7 @@ export function ChatPanel({
   onForecastFileSelect,
   onForecastMappingChange,
   onForecastHorizonChange,
+  modelLoadProgress,
 }: ChatPanelProps) {
   const router = useRouter();
   const [draft, setDraft] = useArrowState(initialDraft ?? "");
@@ -906,7 +970,11 @@ export function ChatPanel({
           {isSending && !isStreamingRag && (
             <div className="flex justify-start">
               <div className="glass-micro-surface rounded-[1.1rem] px-3 py-2 text-sm text-muted-foreground">
-                <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-3.5" />
+                {modelLoadProgress ? (
+                  <ModelLoadProgress {...modelLoadProgress} />
+                ) : (
+                  <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-3.5" />
+                )}
               </div>
             </div>
           )}
