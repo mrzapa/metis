@@ -988,7 +988,12 @@ body {
   :root[data-ui-variant="bold"] .glass-panel-strong,
   :root[data-ui-variant="bold"] .glass-settings-pane,
   .glass-panel--bold {
-    position: relative;
+    /* M21 — `position: relative` is intentionally NOT set here; it lives in
+       a sibling rule below that excludes Tailwind position utilities. The
+       glass surface needs a positioned ancestor for its ::before decoration,
+       but several callers (notably DialogContent) compose this class with
+       `.fixed` to mount as overlays. Letting Tailwind's positioning win
+       avoids dialogs being squashed into in-flow `position: relative`. */
     border: 1px solid color-mix(in oklch, var(--primary) 18%, transparent);
     background:
       radial-gradient(circle at 8% 0%, color-mix(in oklch, white 14%, transparent) 0%, transparent 22%),
@@ -1003,10 +1008,20 @@ body {
       0 0 42px -16px color-mix(in oklch, var(--primary) 52%, transparent);
   }
 
+  /* Apply `position: relative` only when the element is NOT already
+     positioned by Tailwind. This keeps the ::before decoration anchored
+     for inline panels while letting Dialog/Tooltip/etc. stay fixed. */
+  :root[data-ui-variant="bold"] .glass-panel:not(.fixed):not(.absolute):not(.sticky):not(.relative),
+  :root[data-ui-variant="bold"] .glass-panel-strong:not(.fixed):not(.absolute):not(.sticky):not(.relative),
+  :root[data-ui-variant="bold"] .glass-settings-pane:not(.fixed):not(.absolute):not(.sticky):not(.relative),
+  .glass-panel--bold:not(.fixed):not(.absolute):not(.sticky):not(.relative) {
+    position: relative;
+  }
+
   :root[data-ui-variant="bold"] .glass-panel-strong,
   :root[data-ui-variant="bold"] .chat-pane-surface,
   .chat-pane-surface--bold {
-    position: relative;
+    /* See note above — position handled in the gated rule below. */
     border: 1px solid color-mix(in oklch, var(--primary) 16%, transparent);
     background:
       radial-gradient(circle at 14% 0%, color-mix(in oklch, white 14%, transparent) 0%, transparent 24%),
@@ -1018,6 +1033,12 @@ body {
       0 44px 116px -46px color-mix(in oklch, black 88%, transparent),
       inset 0 1px 0 color-mix(in oklch, white 18%, transparent);
     transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1), border-color 200ms ease, box-shadow 200ms ease;
+  }
+
+  :root[data-ui-variant="bold"] .glass-panel-strong:not(.fixed):not(.absolute):not(.sticky):not(.relative),
+  :root[data-ui-variant="bold"] .chat-pane-surface:not(.fixed):not(.absolute):not(.sticky):not(.relative),
+  .chat-pane-surface--bold:not(.fixed):not(.absolute):not(.sticky):not(.relative) {
+    position: relative;
   }
 
   :root[data-ui-variant="bold"] .glass-panel::before,
@@ -1288,7 +1309,8 @@ body {
   :root[data-ui-variant="refined"] .glass-panel,
   :root[data-ui-variant="refined"] .glass-panel-strong,
   :root[data-ui-variant="refined"] .glass-settings-pane {
-    position: relative;
+    /* M21 — `position: relative` lives in a sibling rule below; see the
+       bold-variant comment for why. */
     border: 1px solid color-mix(in oklch, white 7%, transparent);
     background:
       radial-gradient(circle at 10% 0%, color-mix(in oklch, white 10%, transparent) 0%, transparent 26%),
@@ -1301,6 +1323,12 @@ body {
     backdrop-filter: blur(22px) saturate(138%);
     -webkit-backdrop-filter: blur(22px) saturate(138%);
     transition: transform 280ms ease-out, border-color 280ms ease-out, box-shadow 280ms ease-out;
+  }
+
+  :root[data-ui-variant="refined"] .glass-panel:not(.fixed):not(.absolute):not(.sticky):not(.relative),
+  :root[data-ui-variant="refined"] .glass-panel-strong:not(.fixed):not(.absolute):not(.sticky):not(.relative),
+  :root[data-ui-variant="refined"] .glass-settings-pane:not(.fixed):not(.absolute):not(.sticky):not(.relative) {
+    position: relative;
   }
 
   :root[data-ui-variant="refined"] .glass-panel::before,
@@ -1326,7 +1354,7 @@ body {
 
   :root[data-ui-variant="refined"] .glass-panel-strong,
   :root[data-ui-variant="refined"] .chat-pane-surface {
-    position: relative;
+    /* See note above — position handled in the gated rule below. */
     border: 1px solid color-mix(in oklch, white 8%, transparent);
     background:
       radial-gradient(circle at 14% 0%, color-mix(in oklch, white 8%, transparent) 0%, transparent 26%),
@@ -1337,6 +1365,11 @@ body {
       inset 0 0.5px 0 color-mix(in oklch, white 12%, transparent),
       inset 0 0 0 1px color-mix(in oklch, white 3%, transparent);
     transition: transform 280ms ease-out, border-color 280ms ease-out, box-shadow 280ms ease-out;
+  }
+
+  :root[data-ui-variant="refined"] .glass-panel-strong:not(.fixed):not(.absolute):not(.sticky):not(.relative),
+  :root[data-ui-variant="refined"] .chat-pane-surface:not(.fixed):not(.absolute):not(.sticky):not(.relative) {
+    position: relative;
   }
 
   :root[data-ui-variant="refined"] .glass-panel:hover,
