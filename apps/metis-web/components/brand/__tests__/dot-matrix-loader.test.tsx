@@ -70,4 +70,25 @@ describe("<DotMatrixLoader>", () => {
     expect(svg!.classList.contains("dm-halt")).toBe(true);
     expect(container.querySelectorAll("circle").length).toBe(25);
   });
+
+  it("respects a custom size prop on the rendered svg", () => {
+    const { container } = render(<DotMatrixLoader name="breath" size={48} />);
+    const svg = container.querySelector("svg") as SVGSVGElement;
+    expect(svg.getAttribute("width")).toBe("48");
+    expect(svg.getAttribute("height")).toBe("48");
+  });
+
+  it("default aria-label is derived from name when not overridden", () => {
+    const { container } = render(<DotMatrixLoader name="thinking" />);
+    const svg = container.querySelector("svg") as SVGSVGElement;
+    expect(svg.getAttribute("aria-label")).toBe("Thinking");
+  });
+
+  it("custom aria-label overrides the default", () => {
+    const { container } = render(
+      <DotMatrixLoader name="thinking" aria-label="Reasoning…" />
+    );
+    const svg = container.querySelector("svg") as SVGSVGElement;
+    expect(svg.getAttribute("aria-label")).toBe("Reasoning…");
+  });
 });

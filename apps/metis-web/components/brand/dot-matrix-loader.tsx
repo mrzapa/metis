@@ -46,8 +46,6 @@ export function DotMatrixLoader({
 }: DotMatrixLoaderProps) {
   const label = ariaLabel ?? DEFAULT_ARIA[name];
   switch (name) {
-    case "breath":
-      return <BreathLoader size={size} className={className} ariaLabel={label} />;
     case "thinking":
       return <ThinkingLoader size={size} className={className} ariaLabel={label} />;
     case "stream":
@@ -58,9 +56,13 @@ export function DotMatrixLoader({
       return <VerifyLoader size={size} className={className} ariaLabel={label} />;
     case "halt":
       return <HaltLoader size={size} className={className} ariaLabel={label} />;
-    // Other arms added in Tasks 4–13.
-    default:
-      // Fallback while authoring; replaced with exhaustive switch in Task 14.
+    case "breath":
       return <BreathLoader size={size} className={className} ariaLabel={label} />;
+    default: {
+      // Exhaustiveness check — TypeScript should ensure this is unreachable.
+      const _never: never = name;
+      void _never;
+      return null;
+    }
   }
 }
