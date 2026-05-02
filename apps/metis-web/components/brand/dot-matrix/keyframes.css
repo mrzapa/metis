@@ -1,0 +1,19 @@
+/* dot-matrix loader keyframes
+ *
+ * One @keyframes block per loader. Each block is named `dm-<slug>` to
+ * match the class applied by the matching sub-component.
+ *
+ * Theming via currentColor; no opacity overrides here — the keyframe
+ * controls opacity entirely.
+ *
+ * See ./README.md for vocabulary and authorship notes.
+ */
+
+@keyframes dm-breath {
+  0%, 100% { opacity: 0.30; }
+  50%      { opacity: 1.00; }
+}
+
+.dm-breath circle {
+  animation: dm-breath 3000ms ease-in-out infinite;
+}

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
+import "@/components/brand/dot-matrix/keyframes.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SetupGuard } from "@/components/setup-guard";
 import { DesktopReadyGuard } from "@/components/desktop-ready";
