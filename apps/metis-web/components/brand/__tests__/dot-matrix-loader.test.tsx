@@ -33,4 +33,16 @@ describe("<DotMatrixLoader>", () => {
       expect(c.style.animationDelay).not.toBe("");
     }
   });
+
+  it("renders stream with dm-stream class and per-cell row-major delays", () => {
+    const { container } = render(<DotMatrixLoader name="stream" />);
+    const svg = container.querySelector("svg");
+    expect(svg!.classList.contains("dm-stream")).toBe(true);
+    const circles = Array.from(container.querySelectorAll("circle"));
+    expect(circles.length).toBe(25);
+    // Every circle should carry a non-empty animation-delay (every cell animates).
+    for (const c of circles) {
+      expect((c as SVGCircleElement).style.animationDelay).not.toBe("");
+    }
+  });
 });
