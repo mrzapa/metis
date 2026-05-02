@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MetisLockup } from "@/components/brand";
@@ -64,8 +64,54 @@ const STARTER_PROMPTS_DIRECT = [
   "What should I import first if I want METIS to feel useful within ten minutes?",
 ];
 
+/**
+ * M21 #17 — friendly labels for the routes that may redirect a
+ * not-yet-set-up user here. Keeps the banner copy honest and avoids
+ * leaking unfriendly path strings into product copy.
+ */
+const REDIRECT_FROM_LABEL: Record<string, string> = {
+  "/chat": "chat",
+  "/forge": "the Forge",
+  "/improvements": "the research log",
+  "/settings": "settings",
+};
+
 export default function SetupPage() {
   const router = useRouter();
+  // M21 #17: when SetupGuard redirects a not-yet-set-up user away
+  // from /chat (or /forge, /settings, /improvements), it appends
+  // `?from=<origin-pathname>`. Read it once at mount, surface a
+  // contextual banner so the user knows why they landed here, AND
+  // honour the redirect when the launch handlers fire so the user
+  // actually returns to where they came from rather than being
+  // dropped on /chat regardless. The query string is read once on
+  // mount — `searchParams` is stable for the page's lifetime and the
+  // banner intentionally persists while the user is in the wizard
+  // (we navigate AWAY on launch, so the param simply disappears).
+  //
+  // Open-redirect safety: we only trust `from` values that exist as
+  // keys in `REDIRECT_FROM_LABEL`. Anything else falls back to
+  // `/chat`. That allowlist is the same one we use to derive the
+  // banner copy, so the banner and the launch redirect are always
+  // in lockstep — there's no path where the banner says "we'll send
+  // you back to X" but the launch sends you somewhere else.
+  const searchParams = useSearchParams();
+  const redirectFromPath = searchParams?.get("from") ?? null;
+  const redirectFromLabel = redirectFromPath
+    ? REDIRECT_FROM_LABEL[redirectFromPath] ?? null
+    : null;
+  // Resolved launch target: the `from` value if it's allowlisted,
+  // otherwise `/chat`. Both `handleInstantLaunch` and `handleFinish`
+  // route here at the end of the wizard.
+  const launchTarget = useMemo<string>(() => {
+    if (
+      redirectFromPath
+      && Object.prototype.hasOwnProperty.call(REDIRECT_FROM_LABEL, redirectFromPath)
+    ) {
+      return redirectFromPath;
+    }
+    return "/chat";
+  }, [redirectFromPath]);
   // Wizard fork — `null` shows the binary "instant vs configure" picker;
   // `"configure"` runs the full 5-step wizard. The "instant" branch
   // commits a webgpu/Bonsai default and routes to /chat without ever
@@ -93,6 +139,23 @@ export default function SetupPage() {
   const [selectedPrompt, setSelectedPrompt] = useArrowState<string>("");
   const [saving, setSaving] = useArrowState(false);
   const [error, setError] = useArrowState<string | null>(null);
+
+  /**
+   * M21 #13 — when a user revisits /setup/ AFTER completing the wizard,
+   * detect their existing mode so the picker can surface a "currently
+   * active" indicator instead of pretending it's first-run. Reads from
+   * `baselineSettings` populated by the existing `fetchSettings`
+   * effect; resolves to:
+   *   - "browser-only"   → llm_provider === "webgpu"
+   *   - "configured"     → wizard completed with any other provider
+   *   - null             → wizard not yet completed (first-run flow)
+   */
+  const completedMode = useMemo<"browser-only" | "configured" | null>(() => {
+    if (baselineSettings.basic_wizard_completed !== true) return null;
+    return baselineSettings.llm_provider === "webgpu"
+      ? "browser-only"
+      : "configured";
+  }, [baselineSettings.basic_wizard_completed, baselineSettings.llm_provider]);
 
   useEffect(() => {
     if (typeof navigator === "undefined") {
@@ -245,7 +308,10 @@ export default function SetupPage() {
         llm_model: "Bonsai 1.7B",
         basic_wizard_completed: true,
       });
-      router.push("/chat");
+      // M21 #17: honour `?from=` redirect when present; falls back
+      // to /chat for the standard first-run flow. See the
+      // `launchTarget` comment above for the safety story.
+      router.push(launchTarget);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to launch in-browser model",
@@ -292,7 +358,8 @@ export default function SetupPage() {
       }
 
       localStorage.setItem("metis_chat_seed_prompt", selectedPrompt);
-      router.push("/chat");
+      // M21 #17: honour `?from=` redirect when present.
+      router.push(launchTarget);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings");
     } finally {
@@ -571,8 +638,44 @@ export default function SetupPage() {
           </div>
         </header>
 
+        {redirectFromLabel ? (
+          <div
+            data-testid="setup-redirect-banner"
+            role="status"
+            className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-amber-300/30 bg-amber-300/10 px-4 py-2.5 text-sm text-amber-100/95"
+          >
+            <Sparkles className="size-4 shrink-0 opacity-85" aria-hidden="true" />
+            <span>
+              Finish setup to start using {redirectFromLabel}. We&apos;ll send
+              you back to {redirectFromLabel} as soon as you launch.
+            </span>
+          </div>
+        ) : null}
+
         {forkChoice === null ? (
-          <main className="flex flex-1 items-center justify-center py-8">
+          <main className="flex flex-1 flex-col items-center justify-center gap-5 py-8">
+            {completedMode ? (
+              <div
+                data-testid="setup-active-mode-banner"
+                role="status"
+                className="w-full max-w-4xl rounded-2xl border border-emerald-300/25 bg-emerald-300/8 px-4 py-3 text-sm text-emerald-100/95"
+              >
+                <p className="font-medium">
+                  {completedMode === "browser-only"
+                    ? "Browser-only mode is currently active."
+                    : "Your own provider is currently configured."}
+                </p>
+                <p className="mt-1 text-emerald-100/75">
+                  {completedMode === "browser-only"
+                    ? "Pick “Use my own model” below to switch to Anthropic / OpenAI / a local GGUF, or just head back to chat."
+                    : "Pick “Try it instantly” to switch to the in-browser model, or just head back to chat."}
+                  {" "}
+                  <Link href="/chat" className="underline-offset-2 hover:underline">
+                    Open chat &rarr;
+                  </Link>
+                </p>
+              </div>
+            ) : null}
             <section className="grid w-full max-w-4xl gap-4 md:grid-cols-2">
               <button
                 type="button"

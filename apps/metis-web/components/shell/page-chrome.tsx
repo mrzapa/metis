@@ -167,7 +167,13 @@ export function PageChrome({
               pathname as key so the enter/exit motion fires on every
               route change, not just first mount. `mode="wait"` keeps
               the swap clean: old page fades out, then new fades in. */}
-          <main className="flex-1 py-4 sm:py-5">
+          {/* M21 #10: extra bottom padding so the floating
+              MetisCompanionDock at `bottom-4 right-4` (and the Next dev
+              Issue badge in the same band) do not obscure the last form
+              row / table footer / chat hint. The dock is ~3rem tall
+              when minimised; doubled to leave breathing room on
+              mobile + desktop alike. */}
+          <main className="flex-1 py-4 pb-28 sm:py-5 sm:pb-32">
             <AnimatePresence mode="wait" initial={false}>
             <motion.div
               key={pathname}

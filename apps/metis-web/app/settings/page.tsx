@@ -2041,10 +2041,21 @@ export default function SettingsPage() {
                   </p>
                 </div>
                 <Separator />
+                {/*
+                  M21 #15: previous copy said "Read-only in this build.
+                  Kill-switch toggles, CSV export, and the 'prove
+                  offline' button land in the next update (Phase 5c)."
+                  That stale banner contradicted the deep page at
+                  `/settings/privacy/`, which actually ships airplane
+                  mode + per-provider kill switches today (M17 Phase
+                  5c shipped early). Replaced with copy that points
+                  to the live deep page rather than promising work
+                  that's already done.
+                */}
                 <p className="text-sm text-muted-foreground">
-                  Read-only in this build. Kill-switch toggles, CSV export,
-                  and the &ldquo;prove offline&rdquo; button land in the next update
-                  (Phase 5c).
+                  Airplane mode, per-provider kill switches, the live
+                  feed, and the CSV export all live on the privacy
+                  panel — open it to inspect or change outbound posture.
                 </p>
                 <div>
                   <a
