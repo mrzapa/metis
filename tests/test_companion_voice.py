@@ -43,3 +43,8 @@ def test_resolve_falls_back_to_warm_curious_for_unknown_preset():
 def test_default_identity_resolves_to_warm_curious_preset():
     """A freshly constructed identity must hit the preset-match rule, not the user-override rule."""
     assert resolve_prompt_seed(AssistantIdentity()) == TONE_PRESETS["warm-curious"]
+
+
+def test_resolve_treats_whitespace_only_seed_as_empty():
+    identity = AssistantIdentity(tone_preset="playful", prompt_seed="   \n  ")
+    assert resolve_prompt_seed(identity) == TONE_PRESETS["playful"]

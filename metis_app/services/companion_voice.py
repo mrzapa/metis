@@ -16,7 +16,7 @@ def resolve_prompt_seed(identity: AssistantIdentity) -> str:
       - tone_preset is unknown -> fall back to "warm-curious"
     """
     preset = identity.tone_preset or "warm-curious"
-    seed = identity.prompt_seed or ""
+    seed = (identity.prompt_seed or "").strip()
 
     if preset == "custom":
         return seed
