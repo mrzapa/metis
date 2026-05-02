@@ -714,3 +714,26 @@ The unmounted-but-claimed-load-bearing subtree was reaped:
 - `components/brain/brain-graph.tsx` is a pure types-and-helpers module shared by `brain-graph-view-model.ts` (still live) — kept.
 
 If a future need for a mounted 3D brain view emerges (M10's H₁ rings on a real route, M16's eval-result visualisation, etc.), the design lives in git history (`brain-graph-3d.tsx` last commit before delete) — it's a re-introduction with a route, not a recovery from corruption.
+
+---
+
+## 2026-05-02 — Notes for the next agent
+
+### Quiet loader pass
+
+Six-loader dot-matrix vocabulary at `components/brand/dot-matrix/*`, dispatcher at `components/brand/dot-matrix-loader.tsx`. Six surfaces migrated:
+
+- Chat thinking-bubble → `<DotMatrixLoader name="thinking" />`
+- Chat send-button pending → `<DotMatrixLoader name="stream" />`
+- Forge technique-card pending → `<DotMatrixLoader name="compile" />`
+- Companion-dock reflect-now busy → `<DotMatrixLoader name="thinking" />`
+- Companion-dock atlas-save busy → `<DotMatrixLoader name="compile" />`
+- `app/loading.tsx` (cyan-ring outlier) → `<DotMatrixLoader name="breath" />`
+
+Other inline `Loader2` usage left as-is by design — only semantic surfaces migrate. Convention: `<MetisLoader>` for whole-surface brand-forward loading; `<DotMatrixLoader>` for inline-semantic states; `Loader2` for indeterminate-to-text contexts (pagination, list-load, micro-action toggles).
+
+Reduced-motion gate explicitly NOT implemented per design-doc decision; if accessibility regresses noisily, revisit.
+
+`verify` and `halt` ship without consumers — reserved for future Forge skill-promote toast / eval-pass card.
+
+**Design:** [`docs/plans/2026-05-02-quiet-loaders-design.md`](plans/2026-05-02-quiet-loaders-design.md). **Plan:** [`docs/plans/2026-05-02-quiet-loaders-implementation.md`](plans/2026-05-02-quiet-loaders-implementation.md).
