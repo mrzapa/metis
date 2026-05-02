@@ -57,7 +57,7 @@ describe("<DotMatrixLoader>", () => {
     const { container } = render(<DotMatrixLoader name="verify" />);
     const svg = container.querySelector("svg");
     expect(svg!.classList.contains("dm-verify")).toBe(true);
-    // Six checkmark cells should carry a non-empty animation-delay style.
+    // Five checkmark cells (the path (3,0)→(4,1)→(3,2)→(2,3)→(1,4)) carry a non-empty animation-delay style.
     // Other cells should not animate at all.
     const circles = Array.from(container.querySelectorAll("circle")) as SVGCircleElement[];
     const animated = circles.filter((c) => c.style.animationDelay !== "");

@@ -139,15 +139,15 @@ Reads as "filling, filling, then snap-released."
 
 **Inspired by** [icon-38 *Verify*](https://icons.icantcode.fyi/icon/icon-38).
 
-**Choreography.** Six cells trace a checkmark in time order:
+**Choreography.** Five cells trace a checkmark in time order:
 
 - Cell sequence: `(3,0)` → `(4,1)` → `(3,2)` → `(2,3)` → `(1,4)`. Short stroke down-right `(3,0)→(4,1)`, then long stroke up-right `(4,1)→(1,4)`.
 - Each cell ignites over 100 ms, then holds at 100% for the rest of the animation.
 - Stagger: 180 ms per cell.
-- Total: ~1080 ms ignite + 800 ms hold = 1880 ms one-shot.
+- Total: ~820 ms ignite + 1000 ms hold = ~1820 ms one-shot.
 - `animation-iteration-count: 1; animation-fill-mode: forwards` — final frame stays.
 
-**Final frame.** Six checkmark cells at 100%, all others at 0%.
+**Final frame.** Five checkmark cells at 100%, all others at 0%.
 
 Re-running requires a `key=` change at the call site (standard React idiom for restarting CSS animations).
 
