@@ -777,7 +777,7 @@ export function MetisCompanionDock({
                   disabled={atlasBusyAction !== ""}
                 >
                   {atlasBusyAction === "save" ? (
-                    <Loader2 className="size-3.5 animate-spin" />
+                    <DotMatrixLoader name="compile" size={14} className="text-foreground/70" />
                   ) : null}
                   Save to Atlas
                 </Button>
