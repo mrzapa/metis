@@ -94,3 +94,25 @@
 .dm-halt circle[data-halt="centre"] {
   animation: dm-halt-centre 800ms linear 1 forwards;
 }
+
+/* Reduced-motion contract.
+ *
+ * The base rule for most loaders is `opacity: 0` with the keyframe driving
+ * dots up; without animation, that leaves the SVG empty. So under
+ * `prefers-reduced-motion: reduce` we both stop animation AND force a
+ * sensible static frame: looping loaders show the full grid; one-shot
+ * loaders show only their final-frame foreground cells. This restores
+ * parity with the prior `AnimatedLucideIcon`-based behaviour, which
+ * returned a static lucide icon under reduced-motion. */
+@media (prefers-reduced-motion: reduce) {
+  [data-dot-matrix-loader] circle {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+  [data-dot-matrix-loader="verify"] circle:not([data-check="1"]) {
+    opacity: 0 !important;
+  }
+  [data-dot-matrix-loader="halt"] circle:not([data-halt="centre"]) {
+    opacity: 0 !important;
+  }
+}

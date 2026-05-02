@@ -4,8 +4,11 @@
  * 5×5 grid · single CSS @keyframes · per-dot animation-delay map.
  * Technique inspired by https://icons.icantcode.fyi/ (used with permission).
  * See `./dot-matrix/README.md` for the full vocabulary and authorship notes.
+ *
+ * Pure server-component-safe: no hooks, no event handlers, no browser
+ * APIs. Renders identical HTML in RSC and on the client. Animation is
+ * driven entirely by `keyframes.css` (loaded once via `app/layout.tsx`).
  */
-"use client";
 
 import { BreathLoader } from "./dot-matrix/breath";
 import { CompileLoader } from "./dot-matrix/compile";

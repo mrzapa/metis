@@ -36,7 +36,9 @@ A new sibling family next to the M20 brand primitives:
 5. **Documentation:** new `dot-matrix/README.md` with vocabulary table + attribution; existing `components/brand/README.md` extended with the divide-paragraph and decision-tree row.
 6. **Tests:** vitest contract tests, one per sub-component plus a dispatcher test (mirrors the M20 brand-test pattern).
 
-**Out of scope (parked):** light-mode loaders, animated PNG/Lottie export, visual regression testing (no Playwright in repo), reduced-motion media-query gate (deliberately dropped per project owner), DAB integration as a runtime tool, migrating the rest of the `Loader2` spinners (most stay).
+**Out of scope (parked):** light-mode loaders, animated PNG/Lottie export, visual regression testing (no Playwright in repo), DAB integration as a runtime tool, migrating the rest of the `Loader2` spinners (most stay).
+
+**Reduced-motion contract (added during PR review).** The original design dropped the reduced-motion gate per project-owner direction. Copilot review of [PR #606](https://github.com/mrzapa/metis/pull/606) flagged that two of the migrated chat surfaces previously routed through `<AnimatedLucideIcon>`, which honours `prefers-reduced-motion` by falling back to a static lucide icon — so the migration regressed accessibility at those surfaces. To restore parity, a single `@media (prefers-reduced-motion: reduce)` block was added to `keyframes.css`: it stops all dot-matrix animations and forces a sensible static frame per loader (looping loaders show the full grid; one-shot loaders show only their final-frame foreground cells). Single rule, centralised — authors of new loaders don't need to think about it.
 
 ---
 
@@ -96,7 +98,7 @@ The loader family lives inside `components/brand/` rather than a sibling `compon
 
 ## Loader vocabulary
 
-Each entry: choreography description (used to author the keyframe + delay map), and final-frame for one-shots. All loaders use a 5×5 grid with cells indexed `(row, col)` where `(0, 0)` is top-left and `(4, 4)` is bottom-right.
+Each entry: choreography description (used to author the keyframe + delay map), and final-frame for one-shots. All loaders use a 5×5 grid with cells indexed `(col, row)` where `(0, 0)` is top-left and `(4, 4)` is bottom-right. (Convention matches the implementation: `cells.ts` stores `[col, row]` tuples; `INNER_DELAYS` keys are `"col,row"`. Earlier drafts of this doc said `(row, col)` — corrected after Copilot review on PR #606.)
 
 ### 1. `thinking` — agent composing / reflecting
 
@@ -239,7 +241,7 @@ The dot/matrix entry's *Decision* line moves from "*awaiting go/no-go*" to:
 
 Append under *Notes for the next agent*:
 
-> **Quiet loader pass (2026-05-02).** Six-loader vocabulary at `components/brand/dot-matrix/*`, dispatcher at `components/brand/dot-matrix-loader.tsx`. Six surfaces migrated (chat thinking-bubble, chat send-button, Forge technique-card pending, companion-dock reflect-now, companion-dock atlas-save, `app/loading.tsx` cyan-ring outlier). Other inline `Loader2` usage left as-is by design — only semantic surfaces migrate. Design: `docs/plans/2026-05-02-quiet-loaders-design.md`. Plan: `plans/quiet-loaders/plan.md`.
+> **Quiet loader pass (2026-05-02).** Six-loader vocabulary at `components/brand/dot-matrix/*`, dispatcher at `components/brand/dot-matrix-loader.tsx`. Six surfaces migrated (chat thinking-bubble, chat send-button, Forge technique-card pending, companion-dock reflect-now, companion-dock atlas-save, `app/loading.tsx` cyan-ring outlier). Other inline `Loader2` usage left as-is by design — only semantic surfaces migrate. Design: `docs/plans/2026-05-02-quiet-loaders-design.md`. Plan: `docs/plans/2026-05-02-quiet-loaders-implementation.md`.
 
 ---
 
@@ -286,7 +288,7 @@ Aggregate scope: **~2 days** across phases 1–3, with phase 4 deferred to feedb
 - **Single-author choreography risk.** Six animations are authored on instinct. If any reads off in real use (`compile` static-feeling, `thinking` twitchy, `stream` too fast / too slow), tuning is the keyframe timings — a follow-up commit. The design is hard to evaluate as a still-image spec; first PR should expect a tuning round.
 - **`<DotMatrixLoader>` vs. `<MetisLoader>` confusion.** Mitigated by the brand README divide-paragraph. If consumer confusion appears in PR review, escalate by adding a one-paragraph header comment to each file restating the divide.
 - **Bundle weight.** Six SVG components + one CSS file with six keyframes ≈ 4 KB raw / ~2 KB gzipped. Smaller than a single lucide icon's tree-shake hit. Not a concern.
-- **Reduced-motion deliberately not gated.** Loaders are tiny inline animations — much less aggressive than the constellation-scale motion that M21 Phase 5 just removed. If accessibility regressions are reported, revisit; not pre-emptive.
+- **Reduced-motion gated via single media query (added during PR review).** Originally dropped per project-owner direction; restored after Copilot flagged a regression at the two migrated chat surfaces (which previously routed through `<AnimatedLucideIcon>`'s reduced-motion fallback). One `@media (prefers-reduced-motion: reduce)` block in `keyframes.css` halts all dot-matrix animations and forces sensible static frames. Authors of new loaders don't need to think about this; it's centralised.
 - **Two unconsumed loaders (`verify`, `halt`).** Both ship without a live consumer. The marginal cost is two ~25-line files plus two keyframes. The marginal benefit is that a future consumer (skill-promote toast, eval-pass card) can adopt them in a single-line change rather than a re-design. Net: cheap insurance.
 - **Pre-1.0 upstream divergence.** dot/matrix's gallery is at v0.2 and growing (28 → 60 loaders in a week). Our six are authored, not vendored — we own them. No upgrade churn. If a future loader is needed and dot/matrix has a great example, we can author our own version of it under the same permission grant.
 
@@ -297,7 +299,7 @@ Aggregate scope: **~2 days** across phases 1–3, with phase 4 deferred to feedb
 - **Light-mode loaders.** METIS is dark-only today; `currentColor` cascade will Just Work in light mode the day light mode arrives. No extra work needed.
 - **Lottie / animated PNG export.** Surfaces we can't render React on (Discord embeds, GitHub README inline images) don't need a loader anyway.
 - **Visual regression testing.** Repo has no Playwright; manual spot-check + screenshots in PR. Same posture as M20.
-- **Reduced-motion media query.** Explicitly dropped per project owner. If accessibility regresses noisily, revisit.
+- **~~Reduced-motion media query.~~** Originally parked; restored during PR #606 review after Copilot flagged a regression at the chat surfaces. Now implemented as a single block in `keyframes.css`. See *Out of scope* above (the reduced-motion paragraph) and the *Reduced-motion gated* note in *Risks and honest tradeoffs*.
 - **Migrating remaining `Loader2` spinners.** Most stay. A future pass can revisit if a consistent inline vocabulary becomes desirable; today's posture is "indeterminate-to-text contexts keep `Loader2`; semantic contexts use `<DotMatrixLoader>`."
 - **`verify` / `halt` consumer surfacing.** Both ship in this patch but unconsumed. Future Forge UX work (skill-promote toast, eval-pass card) is the natural home.
 - **DAB integration as a runtime tool.** Rejected at triage. DAB stays as a designer-side tool; if we add a 7th loader later, designer fires up DAB locally, exports the JSON delay map, developer translates it. No runtime dependency.

@@ -17,7 +17,7 @@
 ## Conventions
 
 - **Path roots.** All app paths are relative to `apps/metis-web/` unless stated otherwise (e.g. `components/brand/dot-matrix/thinking.tsx` means `apps/metis-web/components/brand/dot-matrix/thinking.tsx`).
-- **Cell indexing.** 5×5 grid. `(row, col)` where `(0, 0)` is top-left and `(4, 4)` is bottom-right.
+- **Cell indexing.** 5×5 grid. `(col, row)` where `(0, 0)` is top-left and `(4, 4)` is bottom-right. Convention matches the shipped `cells.ts` (stores `[col, row]` tuples) and `INNER_DELAYS` (keys are `"col,row"` strings). Earlier drafts of this plan said `(row, col)`; corrected after Copilot review.
 - **Re-locating call sites.** Line numbers in this plan are **as of plan-write time (2026-05-02)**. They will drift. Each migration task gives a `grep` recipe to re-find the exact line before editing.
 - **Test command.** `pnpm test components/brand` (run from `apps/metis-web/`). Build: `pnpm build`. Type-check only: `pnpm typecheck`.
 - **Dev visual check.** `pnpm dev` and visit the surface at `http://localhost:3000/<route>`. Use the chat thinking-bubble surface as the canonical sanity check that the keyframes CSS imported.

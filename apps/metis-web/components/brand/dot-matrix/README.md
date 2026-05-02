@@ -50,6 +50,17 @@ sets `color` (e.g. `text-muted-foreground`). Same convention as
 `<MetisMark>`. No new tokens; loaders inherit text colour from their
 surrounding context.
 
+## Reduced motion
+
+A single `@media (prefers-reduced-motion: reduce)` block in
+`keyframes.css` halts all dot-matrix animations and forces a sensible
+static frame per loader: looping loaders (`thinking`, `stream`,
+`compile`, `breath`) show the full grid; one-shot loaders (`verify`,
+`halt`) show only their final-frame foreground cells. Authors of new
+loaders don't need to think about this — the rule selects on the
+shared `[data-dot-matrix-loader]` attribute, so any new loader added
+via the *Adding a new loader* workflow inherits the contract for free.
+
 ## Adding a new loader
 
 1. Design the choreography on paper or in a tool like

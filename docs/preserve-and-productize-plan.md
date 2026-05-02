@@ -732,7 +732,7 @@ Six-loader dot-matrix vocabulary at `components/brand/dot-matrix/*`, dispatcher 
 
 Other inline `Loader2` usage left as-is by design — only semantic surfaces migrate. Convention: `<MetisLoader>` for whole-surface brand-forward loading; `<DotMatrixLoader>` for inline-semantic states; `Loader2` for indeterminate-to-text contexts (pagination, list-load, micro-action toggles).
 
-Reduced-motion gate explicitly NOT implemented per design-doc decision; if accessibility regresses noisily, revisit.
+Reduced-motion gate originally NOT implemented; restored during PR #606 review after Copilot flagged a regression at the two migrated chat surfaces (which previously routed through `<AnimatedLucideIcon>`'s reduced-motion fallback). Now implemented as a single `@media (prefers-reduced-motion: reduce)` block in `keyframes.css` that halts all dot-matrix animations and forces sensible static frames per loader.
 
 `verify` and `halt` ship without consumers — reserved for future Forge skill-promote toast / eval-pass card.
 
