@@ -8,6 +8,7 @@
 "use client";
 
 import { BreathLoader } from "./dot-matrix/breath";
+import { ThinkingLoader } from "./dot-matrix/thinking";
 
 export type DotMatrixLoaderName =
   | "thinking"
@@ -43,6 +44,8 @@ export function DotMatrixLoader({
   switch (name) {
     case "breath":
       return <BreathLoader size={size} className={className} ariaLabel={label} />;
+    case "thinking":
+      return <ThinkingLoader size={size} className={className} ariaLabel={label} />;
     // Other arms added in Tasks 4–13.
     default:
       // Fallback while authoring; replaced with exhaustive switch in Task 14.

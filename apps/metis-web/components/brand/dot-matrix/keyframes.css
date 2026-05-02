@@ -17,3 +17,18 @@
 .dm-breath circle {
   animation: dm-breath 3000ms ease-in-out infinite;
 }
+
+@keyframes dm-thinking {
+  0%, 100% { opacity: 0; }
+  20%      { opacity: 1; }
+  60%      { opacity: 0; }
+}
+
+/* Outer ring stays dim; inner 3×3 fires per per-dot delays set inline. */
+.dm-thinking circle {
+  opacity: 0.15;
+}
+.dm-thinking circle[data-inner="1"] {
+  opacity: 0;
+  animation: dm-thinking 1200ms ease-in-out infinite;
+}
