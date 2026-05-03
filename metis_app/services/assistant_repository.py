@@ -636,6 +636,30 @@ class AssistantRepository:
                 )
         return len(removed)
 
+    def delete_oldest_memory(self, *, limit: int = 50) -> int:
+        """Hard-delete the OLDEST ``limit`` memory entries. Returns count deleted.
+
+        Sibling to :meth:`clear_recent_memory`, which removes the most
+        recent entries (used by the legacy "clear recent reflections"
+        flow). This method is the one wired to the at-cap "Clear oldest
+        N" button in MemoryInspector — it must remove the entries with
+        the smallest ``created_at`` so the user keeps their most recent
+        thoughts.
+        """
+        self._ensure_ready()
+        normalized_limit = max(int(limit), 0)
+        if normalized_limit == 0:
+            return 0
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                "DELETE FROM assistant_memory WHERE entry_id IN ("
+                "  SELECT entry_id FROM assistant_memory"
+                "  ORDER BY created_at ASC LIMIT ?"
+                ")",
+                (normalized_limit,),
+            )
+            return cursor.rowcount
+
     def list_playbooks(self, *, limit: int | None = None) -> list[AssistantPlaybook]:
         self._ensure_ready()
         query = "SELECT * FROM assistant_playbooks ORDER BY created_at DESC"

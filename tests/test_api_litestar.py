@@ -225,6 +225,38 @@ def test_delete_memory_by_kind_route(monkeypatch):
         assert captured == {"kind": "reflection"}
 
 
+def test_delete_memory_oldest_route(monkeypatch):
+    """``DELETE /v1/assistant/memory/oldest?limit=N`` must dispatch to
+    the orchestrator's ``delete_assistant_memory_oldest`` wrapper, NOT
+    fall through to ``delete_assistant_memory_entry`` with
+    ``entry_id="oldest"`` (a routing-order regression that would happen
+    if the oldest route is registered after the dynamic ``{entry_id}``
+    handler)."""
+    from metis_app.api_litestar import create_app
+
+    captured: dict = {}
+
+    class _FakeOrchestrator:
+        def delete_assistant_memory_oldest(self, *, limit: int) -> dict:
+            captured["limit"] = limit
+            return {"ok": True, "deleted_count": limit}
+
+        def delete_assistant_memory_entry(self, entry_id: str) -> dict:
+            # Must NOT be called — its presence here proves the literal
+            # "oldest" segment is not being captured by ``{entry_id}``.
+            captured["wrong_path"] = entry_id
+            return {"ok": False}
+
+    _patch_assistant_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete("/v1/assistant/memory/oldest?limit=42")
+        assert response.status_code == 200
+        body = response.json()
+        assert body == {"ok": True, "deleted_count": 42}
+        assert captured == {"limit": 42}
+
+
 def test_delete_playbook_route_round_trip(monkeypatch):
     from metis_app.api_litestar import create_app
 

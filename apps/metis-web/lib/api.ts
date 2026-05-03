@@ -3097,6 +3097,20 @@ export async function clearAssistantMemory(limit = 10): Promise<Record<string, u
   return res.json();
 }
 
+export async function deleteAssistantMemoryOldest(
+  limit = 50,
+): Promise<{ ok: boolean; deleted_count: number }> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/assistant/memory/oldest?limit=${encodeURIComponent(String(limit))}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to delete oldest memory (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
 export async function deleteAssistantMemoryEntry(
   entryId: string,
 ): Promise<{ ok: boolean }> {

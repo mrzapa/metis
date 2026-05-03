@@ -8,6 +8,7 @@ const {
   clearAssistantMemory,
   deleteAssistantMemoryEntry,
   deleteAssistantMemoryByKind,
+  deleteAssistantMemoryOldest,
   deleteAssistantPlaybook,
   fetchAtlasCandidate,
   saveAtlasEntry,
@@ -219,6 +220,20 @@ describe("assistant API helpers", () => {
     expect(result).toEqual({ ok: true, deleted_count: 4 });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/v1/assistant/memory/by-kind?kind=skill",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("deleteAssistantMemoryOldest calls DELETE /v1/assistant/memory/oldest?limit=N", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockJsonResponse({ ok: true, deleted_count: 50 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await deleteAssistantMemoryOldest(50);
+    expect(result).toEqual({ ok: true, deleted_count: 50 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/v1/assistant/memory/oldest?limit=50",
       expect.objectContaining({ method: "DELETE" }),
     );
   });

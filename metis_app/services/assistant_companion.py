@@ -160,6 +160,20 @@ class AssistantCompanionService:
             self._refresh_status_summary_after_memory_change()
         return {"ok": True, "deleted_count": deleted}
 
+    def delete_memory_oldest(self, *, limit: int = 50) -> dict[str, Any]:
+        """Delete the oldest ``limit`` memory entries (status-coherent).
+
+        Wraps :meth:`AssistantRepository.delete_oldest_memory`. Deleting
+        the oldest entries does not normally touch the head, but we
+        refresh the status mirror unconditionally to mirror the
+        ``delete_memory_by_kind`` style — cheap, and it correctly
+        handles the edge case where the oldest set happens to include
+        the only entry (memory now empty)."""
+        deleted = self.repository.delete_oldest_memory(limit=limit)
+        if deleted > 0:
+            self._refresh_status_summary_after_memory_change()
+        return {"ok": True, "deleted_count": deleted}
+
     def delete_playbook(self, playbook_id: str) -> dict[str, Any]:
         """Delete one playbook. Status mirror is independent of
         playbooks, so no refresh is needed."""

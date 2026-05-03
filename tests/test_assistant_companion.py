@@ -954,6 +954,59 @@ def test_delete_memory_by_kind_unknown_kind_returns_zero(tmp_path) -> None:
     assert repo.delete_memory_by_kind("nonexistent") == 0
 
 
+def test_delete_oldest_memory_round_trip(tmp_path) -> None:
+    """Deleting the oldest N must remove entries with the SMALLEST
+    ``created_at`` values, not the largest. Regression test for the
+    "Clear oldest 50" bug where the at-cap button was wired to
+    ``clear_recent_memory`` and silently destroyed the user's most
+    recent reflections."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    timestamps = [
+        "2026-05-01T00:00:00+00:00",  # oldest
+        "2026-05-02T00:00:00+00:00",
+        "2026-05-03T00:00:00+00:00",
+        "2026-05-04T00:00:00+00:00",
+        "2026-05-05T00:00:00+00:00",  # newest
+    ]
+    for i, created_at in enumerate(timestamps):
+        repo.add_memory_entry(
+            AssistantMemoryEntry(
+                entry_id=f"id-{i}",
+                created_at=created_at,
+                kind="reflection",
+                title=f"t{i}",
+                summary=f"s{i}",
+            )
+        )
+
+    deleted = repo.delete_oldest_memory(limit=2)
+    assert deleted == 2
+
+    remaining = repo.list_memory()
+    remaining_ids = {item.entry_id for item in remaining}
+    # ``id-0`` and ``id-1`` (the two earliest ``created_at``) are gone.
+    assert "id-0" not in remaining_ids
+    assert "id-1" not in remaining_ids
+    # The three newest entries survived.
+    assert remaining_ids == {"id-2", "id-3", "id-4"}
+
+
+def test_delete_oldest_memory_limit_zero_or_negative_is_noop(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    repo.add_memory_entry(
+        AssistantMemoryEntry(
+            entry_id="only",
+            created_at="2026-05-03T00:00:00+00:00",
+            kind="reflection",
+            title="t",
+            summary="s",
+        )
+    )
+    assert repo.delete_oldest_memory(limit=0) == 0
+    assert repo.delete_oldest_memory(limit=-3) == 0
+    assert len(repo.list_memory()) == 1
+
+
 def test_delete_playbook_round_trip(tmp_path) -> None:
     repo = AssistantRepository(tmp_path / "assistant_state.json")
     pb = AssistantPlaybook.create(title="t", bullets=["a", "b"])

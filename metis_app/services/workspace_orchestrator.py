@@ -986,6 +986,9 @@ class WorkspaceOrchestrator:
     def delete_assistant_memory_by_kind(self, kind: str) -> dict[str, Any]:
         return self._assistant_service.delete_memory_by_kind(kind)
 
+    def delete_assistant_memory_oldest(self, *, limit: int = 50) -> dict[str, Any]:
+        return self._assistant_service.delete_memory_oldest(limit=limit)
+
     def delete_assistant_playbook(self, playbook_id: str) -> dict[str, Any]:
         return self._assistant_service.delete_playbook(playbook_id)
 

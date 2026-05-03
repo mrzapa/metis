@@ -5,8 +5,8 @@ import {
   fetchAssistant,
   deleteAssistantMemoryEntry,
   deleteAssistantMemoryByKind,
+  deleteAssistantMemoryOldest,
   deleteAssistantPlaybook,
-  clearAssistantMemory,
   type AssistantSnapshot,
   type AssistantMemoryEntry,
   type AssistantPlaybook,
@@ -142,7 +142,7 @@ export function MemoryInspector() {
     }));
     // Always refetch — server picks which 50 to delete, may differ from our optimistic guess
     try {
-      await clearAssistantMemory(50);
+      await deleteAssistantMemoryOldest(50);
     } catch {
       // fall through to refetch anyway
     }
