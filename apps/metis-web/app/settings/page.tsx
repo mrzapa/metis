@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { PageChrome } from "@/components/shell/page-chrome";
 import { GgufModelsPanel } from "@/components/gguf/gguf-models-panel";
 import { IdentityCard } from "@/components/settings/companion/identity-card";
+import { MemoryInspector } from "@/components/settings/companion/memory-inspector";
 import { PersonalityCard } from "@/components/settings/companion/personality-card";
 import { ReflectionPolicyCard } from "@/components/settings/companion/reflection-policy-card";
 import { RuntimeCard } from "@/components/settings/companion/runtime-card";
@@ -1655,6 +1656,7 @@ export default function SettingsPage() {
                     <div className="space-y-6">
                       <IdentityCard form={assistantForm} />
                       <PersonalityCard form={assistantForm} />
+                      <MemoryInspector />
                       <ReflectionPolicyCard form={assistantForm} />
                       <RuntimeCard form={assistantForm} />
 
