@@ -1294,6 +1294,49 @@ export default function Home() {
     });
   }, [userStars]);
 
+  // M24 Phase 3 — one-time migration toast. Fires the first time a user
+  // sees the constellation after cluster placement is enabled. Persists
+  // a localStorage flag so subsequent visits stay quiet. The "Undo for
+  // this session" action restores the legacy faculty-anchored layout
+  // for the remainder of the tab; localStorage is *not* cleared, so
+  // the next visit resumes cluster placement.
+  const migrationToastFiredRef = useRef(false);
+  useEffect(() => {
+    if (migrationToastFiredRef.current) return;
+    if (typeof window === "undefined") return;
+    if (!USE_CLUSTER_PLACEMENT) return;
+    if (sessionDisableClusterPlacement) return;
+    if (!clusters || clusters.length === 0) return;
+    if (userStars.length === 0) return;
+    let alreadyMigrated = false;
+    try {
+      alreadyMigrated = window.localStorage.getItem("m24_layout_migrated_v1") !== null;
+    } catch {
+      // localStorage may be blocked (private mode); treat as migrated to
+      // avoid re-firing the toast on every mount in that edge case.
+      alreadyMigrated = true;
+    }
+    if (alreadyMigrated) {
+      migrationToastFiredRef.current = true;
+      return;
+    }
+    try {
+      window.localStorage.setItem("m24_layout_migrated_v1", String(Date.now()));
+    } catch {
+      // Ignore — see comment above; we'll still fire once per session.
+    }
+    migrationToastFiredRef.current = true;
+    showToast({
+      tone: "default",
+      message: "Your constellation has been re-laid out by content.",
+      actionLabel: "Undo for this session",
+      dismissMs: 8000,
+      onAction: () => {
+        setSessionDisableClusterPlacement(true);
+      },
+    });
+  }, [clusters, sessionDisableClusterPlacement, showToast, userStars.length]);
+
   useEffect(() => () => {
     if (starTooltipHideTimeoutRef.current !== null) {
       window.clearTimeout(starTooltipHideTimeoutRef.current);
