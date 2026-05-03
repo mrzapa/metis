@@ -84,15 +84,18 @@ class StarRecommenderService:
             return []
 
         q = np.asarray(query_embedding, dtype=np.float64)
-        # Norm safety: prevent division-by-zero on a zero query vector.
-        q_norm = float(np.linalg.norm(q)) or 1e-9
+        # Norm safety: clamp to prevent division-by-zero on a zero query
+        # vector AND numerical instability on tiny-but-nonzero norms
+        # (e.g. ``1e-20``). ``or 1e-9`` would only catch the exact-zero
+        # case; ``max(...)`` covers both.
+        q_norm = max(float(np.linalg.norm(q)), 1e-9)
 
         members = project_member_star_ids or set()
 
         recommendations: list[StarRecommendation] = []
         for star_id, raw in star_embeddings.items():
             v = np.asarray(raw, dtype=np.float64)
-            v_norm = float(np.linalg.norm(v)) or 1e-9
+            v_norm = max(float(np.linalg.norm(v)), 1e-9)
             similarity = float(np.dot(q, v) / (q_norm * v_norm))
 
             meta = star_metadata.get(star_id, {}) or {}

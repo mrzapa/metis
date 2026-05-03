@@ -2322,3 +2322,49 @@ def test_get_star_clusters_caches_results(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert first == second
     assert call_count["n"] == 1
+
+
+def test_embed_user_stars_cache_shared_across_clusters_and_recommender(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """get_star_clusters then recommend_stars_for_content should embed once.
+
+    Phase 2 review I2: the Add-flow recommender must reuse star
+    embeddings already computed by clustering rather than re-embedding
+    on every request.
+    """
+    call_count = {"n": 0}
+
+    class _CountingEmbedder:
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            call_count["n"] += 1
+            return [
+                [float(abs(hash(t)) % 1000) / 1000.0, 0.0, 0.0] for t in texts
+            ]
+
+        def embed_query(self, text: str) -> list[float]:
+            return [0.5, 0.0, 0.0]
+
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _CountingEmbedder(),
+    )
+
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "s1", "label": "Star One"},
+            {"id": "s2", "label": "Star Two"},
+        ],
+    }
+    monkeypatch.setattr(
+        "metis_app.services.workspace_orchestrator._settings_store.load_settings",
+        lambda: settings,
+    )
+
+    orch = _make_orchestrator()
+    orch.get_star_clusters(settings)
+    orch.recommend_stars_for_content(content="test query", content_type="")
+
+    # Both methods should have hit _embed_user_stars; the second call
+    # should have been served from the shared cache.
+    assert call_count["n"] == 1

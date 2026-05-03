@@ -105,6 +105,11 @@ log = logging.getLogger(__name__)
 _autonomous_running_lock = threading.Lock()
 _autonomous_running_count = 0
 
+# Threshold below which the recommender suggests creating a new star
+# instead of attaching to an existing match. Tunable; M25 may revisit
+# with real eval data.
+_CREATE_NEW_THRESHOLD = 0.5
+
 
 def is_autonomous_research_running() -> bool:
     """Return True if any autonomous research run is currently in flight."""
@@ -722,6 +727,67 @@ class WorkspaceOrchestrator:
         assistant_snapshot = self._assistant_service.get_snapshot(_settings_store.load_settings())
         return BrainGraph().build_from_indexes_and_sessions(indexes, sessions, assistant_snapshot, skip_layout=skip_layout)
 
+    def _embed_user_stars(
+        self, settings: dict[str, Any]
+    ) -> tuple[list[str], dict[str, list[float]], dict[str, dict[str, Any]]]:
+        """Embed all user stars, returning (ids, embeddings_by_id, metadata_by_id).
+
+        Shared between :meth:`get_star_clusters` and
+        :meth:`recommend_stars_for_content` so the Add-flow doesn't
+        re-embed the user's whole star list on every request when
+        clustering already paid that cost.
+
+        Cache: keyed by SHA-256 of ``[star_ids, texts]``, stored on
+        ``self._star_embedding_cache`` (lazy-init). Per-orchestrator-
+        instance — see the same caveat documented on
+        :meth:`get_star_clusters`.
+        """
+        user_stars = list(settings.get("landing_constellation_user_stars") or [])
+        if not user_stars:
+            return [], {}, {}
+
+        star_ids = [str(s.get("id") or "") for s in user_stars]
+        texts = [
+            f"{s.get('label', '')} {s.get('notes', '')}".strip()
+            or str(s.get("id") or "")
+            for s in user_stars
+        ]
+
+        cache_key = hashlib.sha256(
+            json.dumps([star_ids, texts], sort_keys=True).encode()
+        ).hexdigest()
+
+        if not hasattr(self, "_star_embedding_cache"):
+            self._star_embedding_cache: dict[
+                str,
+                tuple[
+                    list[str],
+                    dict[str, list[float]],
+                    dict[str, dict[str, Any]],
+                ],
+            ] = {}
+        cached = self._star_embedding_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Local import keeps the heavy embedding stack off the cold-import
+        # path of WorkspaceOrchestrator.
+        from metis_app.utils.embedding_providers import create_embeddings
+
+        embedder = create_embeddings(settings)
+        raw_embeddings = embedder.embed_documents(texts)
+        embeddings_by_id = dict(zip(star_ids, raw_embeddings))
+        metadata_by_id = {
+            str(s.get("id") or ""): {
+                "label": str(s.get("label", "") or ""),
+                "archetype": str(s.get("archetype", "") or ""),
+            }
+            for s in user_stars
+        }
+        result = (star_ids, embeddings_by_id, metadata_by_id)
+        self._star_embedding_cache[cache_key] = result
+        return result
+
     def get_star_clusters(self, settings: dict[str, Any]) -> list[dict[str, Any]]:
         """Compute (or fetch from cache) cluster + 2D layout for user stars.
 
@@ -739,21 +805,26 @@ class WorkspaceOrchestrator:
         per call). For cross-request caching, the cache would need to
         move to a class-level or module-level dict — defer to a follow-up.
 
+        Star embeddings themselves are cached separately via
+        :meth:`_embed_user_stars` so the Add-flow / recommender can
+        reuse them without re-embedding.
+
         Returns a list of plain ``dict`` rows with the keys ``star_id``,
         ``cluster_id``, ``x``, ``y``, ``cluster_label`` — JSON-friendly
         for the ``GET /v1/stars/clusters`` route. Empty input -> ``[]``.
         """
-        user_stars = list(settings.get("landing_constellation_user_stars") or [])
-        if not user_stars:
+        star_ids, embeddings_by_id, _metadata = self._embed_user_stars(settings)
+        if not star_ids:
             return []
 
-        star_ids = [str(s.get("id") or "") for s in user_stars]
+        # Reconstruct the same texts list used inside _embed_user_stars
+        # so the cluster cache key stays stable across the refactor.
+        user_stars = list(settings.get("landing_constellation_user_stars") or [])
         texts = [
             f"{s.get('label', '')} {s.get('notes', '')}".strip()
             or str(s.get("id") or "")
             for s in user_stars
         ]
-
         cache_key = hashlib.sha256(
             json.dumps([star_ids, texts], sort_keys=True).encode()
         ).hexdigest()
@@ -764,19 +835,12 @@ class WorkspaceOrchestrator:
         if cached is not None:
             return cached
 
-        # Local import keeps the heavy embedding / sklearn stack off the
-        # cold-import path of WorkspaceOrchestrator.
+        # Local import keeps the heavy sklearn stack off the cold-import
+        # path of WorkspaceOrchestrator.
         from metis_app.services.star_clustering_service import StarClusteringService
-        from metis_app.utils.embedding_providers import create_embeddings
-
-        embedder = create_embeddings(settings)
-        raw_embeddings = embedder.embed_documents(texts)
-        embeddings_dict = {
-            sid: emb for sid, emb in zip(star_ids, raw_embeddings)
-        }
 
         service = StarClusteringService()
-        assignments = service.compute_clusters(embeddings_dict)
+        assignments = service.compute_clusters(embeddings_by_id)
 
         result = [
             {
@@ -804,11 +868,16 @@ class WorkspaceOrchestrator:
         and runs the pair through
         :class:`~metis_app.services.star_recommender_service.StarRecommenderService`.
 
+        Star embeddings are cached on the orchestrator instance via
+        :meth:`_embed_user_stars` and shared with
+        :meth:`get_star_clusters` — within a single request the user's
+        stars are embedded at most once.
+
         ``create_new_suggested`` is ``True`` when there are no existing
         stars or when the top recommendation's adjusted similarity is
-        below ``0.5`` — the frontend uses this to decide whether to
-        nudge the user toward a fresh star instead of attaching to an
-        existing one.
+        below :data:`_CREATE_NEW_THRESHOLD` — the frontend uses this to
+        decide whether to nudge the user toward a fresh star instead of
+        attaching to an existing one.
 
         Returns a JSON-friendly dict for the
         ``POST /v1/stars/recommend`` route.
@@ -819,30 +888,11 @@ class WorkspaceOrchestrator:
         from metis_app.utils.embedding_providers import create_embeddings
 
         settings = _settings_store.load_settings()
-        user_stars = list(settings.get("landing_constellation_user_stars") or [])
 
         embedder = create_embeddings(settings)
         query_embedding = embedder.embed_query(content)
 
-        star_embeddings: dict[str, Any] = {}
-        star_metadata: dict[str, dict[str, str]] = {}
-        if user_stars:
-            star_ids = [str(s.get("id") or "") for s in user_stars]
-            texts = [
-                f"{s.get('label', '')} {s.get('notes', '')}".strip()
-                or str(s.get("id") or "")
-                for s in user_stars
-            ]
-            raw_embeddings = embedder.embed_documents(texts)
-            star_embeddings = dict(zip(star_ids, raw_embeddings))
-            star_metadata = {
-                str(s.get("id") or ""): {
-                    "label": str(s.get("label", "") or ""),
-                    "archetype": str(s.get("archetype", "") or ""),
-                    "notes": str(s.get("notes", "") or ""),
-                }
-                for s in user_stars
-            }
+        _star_ids, star_embeddings, star_metadata = self._embed_user_stars(settings)
 
         # M25 will populate project_member_star_ids once Projects exist;
         # in M24 the parameter is intentionally left unset.
@@ -855,7 +905,8 @@ class WorkspaceOrchestrator:
         )
 
         create_new_suggested = bool(
-            not recommendations or recommendations[0].similarity < 0.5
+            not recommendations
+            or recommendations[0].similarity < _CREATE_NEW_THRESHOLD
         )
 
         return {
