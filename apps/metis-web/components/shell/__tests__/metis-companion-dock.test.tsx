@@ -177,6 +177,32 @@ describe("MetisCompanionDock", () => {
     expect(screen.queryByText("The companion stays minimized but persistent.")).not.toBeInTheDocument();
   });
 
+  it("renders settings deep-link in minimised mode (M23 Phase 5)", async () => {
+    vi.mocked(fetchAssistant).mockResolvedValueOnce(buildSnapshot());
+    vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
+
+    render(<MetisCompanionDock />);
+
+    const link = await screen.findByRole("link", {
+      name: /open companion settings/i,
+    });
+    expect(link).toHaveAttribute("href", "/settings#companion");
+  });
+
+  it("hides settings deep-link in expanded mode (M23 Phase 5)", async () => {
+    vi.mocked(fetchAssistant).mockResolvedValueOnce(
+      buildSnapshot({ identity: { minimized: false } as AssistantSnapshot["identity"] }),
+    );
+    vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
+
+    render(<MetisCompanionDock />);
+
+    await waitFor(() => expect(fetchAssistant).toHaveBeenCalled());
+    expect(
+      screen.queryByRole("link", { name: /open companion settings/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the Seedling liveness indicator when the worker is running", async () => {
     vi.mocked(fetchAssistant).mockResolvedValueOnce(buildSnapshot());
     vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
