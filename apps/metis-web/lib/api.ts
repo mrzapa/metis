@@ -3097,6 +3097,48 @@ export async function clearAssistantMemory(limit = 10): Promise<Record<string, u
   return res.json();
 }
 
+export async function deleteAssistantMemoryEntry(
+  entryId: string,
+): Promise<{ ok: boolean }> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/assistant/memory/${encodeURIComponent(entryId)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to delete memory entry (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function deleteAssistantMemoryByKind(
+  kind: string,
+): Promise<{ ok: boolean; deleted_count: number }> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/assistant/memory/by-kind?kind=${encodeURIComponent(kind)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to delete memory by kind (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function deleteAssistantPlaybook(
+  playbookId: string,
+): Promise<{ ok: boolean }> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/assistant/playbooks/${encodeURIComponent(playbookId)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to delete playbook (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
 // ---------------------------------------------------------------------------
 // Star nourishment events (Wave 2)
 // ---------------------------------------------------------------------------
