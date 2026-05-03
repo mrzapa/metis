@@ -244,6 +244,57 @@ def test_delete_playbook_route_round_trip(monkeypatch):
         assert captured == {"playbook_id": "pb-1"}
 
 
+def test_delete_memory_entry_route_real_stack(tmp_path, monkeypatch):
+    """End-to-end happy-path: real AssistantRepository, real
+    AssistantCompanionService, real WorkspaceOrchestrator wired
+    together. The route → orchestrator wrapper → companion service →
+    repo round-trip is exercised through HTTP, proving the wiring (and
+    the status-coherence refresh added in this milestone) survives the
+    full stack."""
+    from metis_app.api_litestar import create_app
+    from metis_app.models.assistant_types import AssistantMemoryEntry
+    from metis_app.services.assistant_companion import AssistantCompanionService
+    from metis_app.services.assistant_repository import AssistantRepository
+    from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
+
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+    orchestrator = WorkspaceOrchestrator(assistant_service=service)
+
+    # Seed one memory entry via the real repo path and prime the
+    # status mirror so we can prove the refresh fires end-to-end.
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "real-stack-1",
+                "created_at": "2026-05-03T12:00:00Z",
+                "kind": "reflection",
+                "title": "Real stack head",
+                "summary": "Real-stack summary.",
+                "why": "Real-stack why.",
+            }
+        )
+    )
+    primed = repo.get_status()
+    primed.latest_summary = "Real-stack summary."
+    primed.latest_why = "Real-stack why."
+    repo.update_status(primed)
+
+    _patch_assistant_orchestrator(monkeypatch, orchestrator)
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete("/v1/assistant/memory/real-stack-1")
+        assert response.status_code == 200
+        assert response.json() == {"ok": True}
+
+    # Repo row is gone.
+    assert repo.list_memory() == []
+    # Status mirror was refreshed by the companion-service layer.
+    status_after = repo.get_status()
+    assert status_after.latest_summary == ""
+    assert status_after.latest_why == ""
+
+
 def test_gguf_validate_success_contract(tmp_path):
     """Test /v1/gguf/validate success payload contract."""
     from metis_app.api_litestar import create_app
