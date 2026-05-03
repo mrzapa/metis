@@ -1,8 +1,8 @@
 ---
 Milestone: M24 — Faculty UI purge + content-first IA + Add flow + Everything chat
-Status: Ready
-Claim: unclaimed
-Last updated: 2026-05-03 by claude/constellation-ia-intake
+Status: Ready for review
+Claim: claude/m24-impl (all 6 phases shipped via 30+ commits — Phase 1 backend clustering + Phase 2 backend recommender + Phase 3 frontend cluster placement + Phase 4 AddStarDialog + Phase 5 EverythingChatSheet + Phase 6 cleanup; Task 3.4 partial cleanup landed in Phase 4 stretch; remaining faculty-ring rendering preserved for comet/RAG/focus consumers until M26)
+Last updated: 2026-05-03 by claude/m24-impl
 Vision pillar: Cosmos
 TDD Mode: pragmatic
 ---
@@ -27,11 +27,20 @@ Task-by-task at [`docs/plans/2026-05-03-constellation-ia-reset-m24-implementatio
 
 ## Progress
 
-*(milestone not yet started)*
+All 6 phases shipped on `claude/m24-impl`:
+
+- **Phase 1 — Backend clustering** (`star_clustering_service.py` + `GET /v1/stars/clusters` + tests). Landed.
+- **Phase 2 — Backend recommender** (`POST /v1/stars/recommend` + cosine ranking + tests). Landed.
+- **Phase 3 — Frontend cluster placement** (cluster-projection rendering replaces faculty-anchored layout for new stars; legacy faculty rings preserved for comet/RAG/focus consumers per the M26 carve-out). Landed.
+- **Phase 4 — AddStarDialog** (file picker + recommender display + create-new fallback; in-flight guard; M24 stretch removed `showConceptAtNode` and the dead `activeNodeRef` state from `app/page.tsx`). Landed.
+- **Phase 5 — EverythingChatSheet** (central METIS star click → ChatPanel against a virtual `_all_stars` index; per-index error surfacing + reranker carve-out doc). Landed.
+- **Phase 6 — Verify + cleanup** (faculty-glyph side panel + dead `FacultyConceptPanel` removed; user-visible faculty copy purged in `app/page.tsx`; landmark tier in `star-name-generator` retired with the 8 classical-named constellations; dead `tool === "add"` canvas-pick path + ADD_CANDIDATE_HIT_RADIUS_PX constants removed). Landed.
+
+Vitest 761/10 (frontend), backend pytest 1621/12 (no backend changes in Phase 6), tsc clean.
 
 ## Next up
 
-Phase 1 — Backend clustering service. See *Phasing (M24)* in the design doc.
+Open the PR; browser-preview QA on main repo post-merge. The 7-step walk specified in the M24 implementation plan (Task 6.5) covers cluster layout, AddStarDialog flow, EverythingChatSheet, observatory cleanup, layout persistence, reduced-motion, and degraded-backend rendering. Browser-preview verification was deferred from this worktree because Turbopack rejects the vitest junction; main repo's dev server is unaffected. Once QA passes and the PR merges, flip `Status` to `Landed` with the merge SHA and update IMPLEMENTATION.md's M24 row in the same edit.
 
 ## Phases
 
