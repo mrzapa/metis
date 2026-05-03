@@ -10,6 +10,7 @@ import type {
   NyxInstallProposal,
   NyxInstallProposalComponent,
 } from "@/lib/chat-types";
+import type { TonePreset } from "@/lib/companion-voice";
 import { emitBrainGraphRagActivity } from "@/lib/brain-graph-rag-activity";
 import { dedupedFetch } from "@/lib/request-dedup";
 
@@ -1095,6 +1096,7 @@ export interface AssistantIdentity {
   prompt_seed: string;
   docked: boolean;
   minimized: boolean;
+  tone_preset: TonePreset;
 }
 
 export interface AssistantRuntime {
@@ -3084,6 +3086,17 @@ export async function fetchAssistantMemory(limit = 20): Promise<AssistantMemoryE
   return res.json();
 }
 
+export async function fetchAssistantPlaybooks(limit = 20): Promise<AssistantPlaybook[]> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/assistant/playbooks?limit=${encodeURIComponent(String(limit))}`,
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch assistant playbooks (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
 export async function clearAssistantMemory(limit = 10): Promise<Record<string, unknown>> {
   const res = await apiFetch(`${await getApiBase()}/v1/assistant/memory?limit=${encodeURIComponent(String(limit))}`, {
     method: "DELETE",
@@ -3091,6 +3104,62 @@ export async function clearAssistantMemory(limit = 10): Promise<Record<string, u
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`Failed to clear assistant memory (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function deleteAssistantMemoryOldest(
+  limit = 50,
+): Promise<{ ok: boolean; deleted_count: number }> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/assistant/memory/oldest?limit=${encodeURIComponent(String(limit))}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to delete oldest memory (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function deleteAssistantMemoryEntry(
+  entryId: string,
+): Promise<{ ok: boolean }> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/assistant/memory/${encodeURIComponent(entryId)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to delete memory entry (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function deleteAssistantMemoryByKind(
+  kind: string,
+): Promise<{ ok: boolean; deleted_count: number }> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/assistant/memory/by-kind?kind=${encodeURIComponent(kind)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to delete memory by kind (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
+export async function deleteAssistantPlaybook(
+  playbookId: string,
+): Promise<{ ok: boolean }> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/assistant/playbooks/${encodeURIComponent(playbookId)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to delete playbook (${res.status}): ${detail}`);
   }
   return res.json();
 }

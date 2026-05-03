@@ -82,9 +82,42 @@ def list_assistant_memory(limit: int = 20) -> list[dict]:
     return WorkspaceOrchestrator().list_assistant_memory(limit=limit)
 
 
+@get("/v1/assistant/playbooks")
+def list_assistant_playbooks(limit: int = 20) -> list[dict]:
+    return WorkspaceOrchestrator().list_assistant_playbooks(limit=limit)
+
+
 @delete("/v1/assistant/memory", status_code=200)
 def clear_assistant_memory(limit: int = 10) -> dict:
     return WorkspaceOrchestrator().clear_assistant_memory(limit=limit)
+
+
+@delete("/v1/assistant/memory/by-kind", status_code=200)
+def delete_memory_by_kind(kind: str) -> dict:
+    return WorkspaceOrchestrator().delete_assistant_memory_by_kind(kind)
+
+
+@delete("/v1/assistant/memory/oldest", status_code=200)
+def delete_memory_oldest(limit: int = 50) -> dict:
+    """Hard-delete the OLDEST ``limit`` memory entries.
+
+    Distinct from ``DELETE /v1/assistant/memory?limit=N`` (which removes
+    the *most recent* N entries via :func:`clear_recent_memory`). This
+    route backs the at-cap "Clear oldest N" affordance in the Memory
+    Inspector — keeping the user's freshest thoughts when memory hits
+    the policy cap.
+    """
+    return WorkspaceOrchestrator().delete_assistant_memory_oldest(limit=limit)
+
+
+@delete("/v1/assistant/memory/{entry_id:str}", status_code=200)
+def delete_memory_entry(entry_id: str) -> dict:
+    return WorkspaceOrchestrator().delete_assistant_memory_entry(entry_id)
+
+
+@delete("/v1/assistant/playbooks/{playbook_id:str}", status_code=200)
+def delete_playbook(playbook_id: str) -> dict:
+    return WorkspaceOrchestrator().delete_assistant_playbook(playbook_id)
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +233,16 @@ router = Router(
         record_companion_reflection,
         bootstrap_assistant,
         list_assistant_memory,
+        list_assistant_playbooks,
         clear_assistant_memory,
+        delete_memory_by_kind,
+        # ``delete_memory_oldest`` MUST be registered before
+        # ``delete_memory_entry`` — otherwise Litestar's dynamic
+        # ``{entry_id:str}`` segment can swallow the literal "oldest"
+        # path and call ``delete_assistant_memory_entry("oldest")``.
+        delete_memory_oldest,
+        delete_memory_entry,
+        delete_playbook,
         report_star_event,
         get_nourishment,
         get_personality_evolution,

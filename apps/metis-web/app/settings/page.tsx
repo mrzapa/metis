@@ -11,11 +11,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BorderBeam } from "@/components/ui/border-beam";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { GgufModelsPanel } from "@/components/gguf/gguf-models-panel";
+import { IdentityCard } from "@/components/settings/companion/identity-card";
+import { MemoryInspector } from "@/components/settings/companion/memory-inspector";
+import { PersonalityCard } from "@/components/settings/companion/personality-card";
+import { ReflectionPolicyCard } from "@/components/settings/companion/reflection-policy-card";
+import { RuntimeCard } from "@/components/settings/companion/runtime-card";
 import {
   fetchAssistantSettings,
   fetchSettings,
@@ -23,6 +27,7 @@ import {
   updateSettings,
   type AssistantSettings,
 } from "@/lib/api";
+import { TONE_PRESETS } from "@/lib/companion-voice";
 import { AlertCircle, CheckCircle2, ChevronDown, HelpCircle, Info, Loader2, RotateCcw, Search, TriangleAlert } from "lucide-react";
 import { useArrowState } from "@/hooks/use-arrow-state";
 
@@ -109,7 +114,7 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
-type AssistantFormValues = AssistantSettings;
+export type AssistantFormValues = AssistantSettings;
 
 const RETRIEVAL_MODES = ["flat", "mmr", "hybrid", "hierarchical"];
 const SEARCH_TYPES = ["similarity", "mmr"];
@@ -149,10 +154,10 @@ const ASSISTANT_DEFAULT_VALUES: AssistantFormValues = {
     archetype: "Local-first research companion",
     companion_enabled: true,
     greeting: "I can help you get started, reflect on completed work, and map what I learn in the Brain view.",
-    prompt_seed:
-      "You are METIS, a local-first companion who helps the user get oriented, suggests next steps, and records concise reflections without taking over the main chat.",
+    prompt_seed: TONE_PRESETS["warm-curious"],
     docked: true,
     minimized: false,
+    tone_preset: "warm-curious",
   },
   assistant_runtime: {
     provider: "",
@@ -341,7 +346,7 @@ function FieldError({ message }: { message?: string }) {
   return <p className="mt-0.5 text-xs text-destructive">{message}</p>;
 }
 
-function FieldLabel({ htmlFor, children, tooltip }: { htmlFor: string; children: ReactNode; tooltip?: string }) {
+export function FieldLabel({ htmlFor, children, tooltip }: { htmlFor: string; children: ReactNode; tooltip?: string }) {
   if (!tooltip) {
     return (
       <label htmlFor={htmlFor} className="text-sm font-medium">
@@ -370,7 +375,7 @@ function FieldLabel({ htmlFor, children, tooltip }: { htmlFor: string; children:
   );
 }
 
-function ToggleRow({
+export function ToggleRow({
   id,
   label,
   description,
@@ -514,11 +519,8 @@ export default function SettingsPage() {
     defaultValues: ASSISTANT_DEFAULT_VALUES,
   });
   const {
-    register: registerAssistant,
     handleSubmit: handleAssistantSubmit,
     reset: resetAssistant,
-    watch: watchAssistant,
-    setValue: setAssistantValue,
   } = assistantForm;
 
   useEffect(() => {
@@ -1652,347 +1654,35 @@ export default function SettingsPage() {
                     </div>
                   ) : (
                     <div className="space-y-6">
-                      <BorderBeam size="md" colorVariant="mono" strength={0.55}>
-                      <div className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
-                        <div>
-                          <h3 className="text-sm font-semibold">Assistant identity</h3>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            Name, greeting, and dock behaviour for the companion.
-                          </p>
-                        </div>
+                      <IdentityCard form={assistantForm} />
+                      <PersonalityCard form={assistantForm} />
+                      <MemoryInspector />
+                      <ReflectionPolicyCard form={assistantForm} />
+                      <RuntimeCard form={assistantForm} />
 
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_identity.assistant_id">Assistant ID</FieldLabel>
-                            <Input
-                              id="assistant_identity.assistant_id"
-                              type="text"
-                              {...registerAssistant("assistant_identity.assistant_id")}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_identity.name">Name</FieldLabel>
-                            <Input
-                              id="assistant_identity.name"
-                              type="text"
-                              {...registerAssistant("assistant_identity.name")}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_identity.archetype">Archetype</FieldLabel>
-                            <Input
-                              id="assistant_identity.archetype"
-                              type="text"
-                              {...registerAssistant("assistant_identity.archetype")}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_identity.greeting">Greeting</FieldLabel>
-                            <Input
-                              id="assistant_identity.greeting"
-                              type="text"
-                              {...registerAssistant("assistant_identity.greeting")}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <FieldLabel htmlFor="assistant_identity.prompt_seed" tooltip="Seed prompt used to shape the companion's personality, tone, and boundaries.">Prompt seed</FieldLabel>
-                          <Textarea
-                            id="assistant_identity.prompt_seed"
-                            rows={5}
-                            {...registerAssistant("assistant_identity.prompt_seed")}
-                            placeholder="Seed prompt used to shape the companion's tone and behaviour."
-                          />
-                        </div>
-
-                        <div className="space-y-2">
-                          <ToggleRow
-                            id="assistant_identity.companion_enabled"
-                            label="Companion enabled"
-                            description="Show the assistant companion in the dock."
-                            checked={watchAssistant("assistant_identity.companion_enabled")}
-                            onChange={(v) => setAssistantValue("assistant_identity.companion_enabled", v)}
-                          />
-                          <ToggleRow
-                            id="assistant_identity.docked"
-                            label="Docked"
-                            description="Keep the companion visible as a docked panel."
-                            checked={watchAssistant("assistant_identity.docked")}
-                            onChange={(v) => setAssistantValue("assistant_identity.docked", v)}
-                          />
-                          <ToggleRow
-                            id="assistant_identity.minimized"
-                            label="Start minimized"
-                            description="Collapse the companion by default."
-                            checked={watchAssistant("assistant_identity.minimized")}
-                            onChange={(v) => setAssistantValue("assistant_identity.minimized", v)}
-                          />
-                        </div>
-                      </div>
-                      </BorderBeam>
-
-                      <div className="space-y-4">
-                        <div>
-                          <h3 className="text-sm font-semibold">Runtime</h3>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            Configure the local or remote model source used by the companion.
-                          </p>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_runtime.provider">Provider</FieldLabel>
-                            <Input
-                              id="assistant_runtime.provider"
-                              type="text"
-                              {...registerAssistant("assistant_runtime.provider")}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_runtime.model">Model</FieldLabel>
-                            <Input
-                              id="assistant_runtime.model"
-                              type="text"
-                              {...registerAssistant("assistant_runtime.model")}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_runtime.local_gguf_model_path">GGUF path</FieldLabel>
-                            <Input
-                              id="assistant_runtime.local_gguf_model_path"
-                              type="text"
-                              {...registerAssistant("assistant_runtime.local_gguf_model_path")}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_runtime.bootstrap_state">Bootstrap state</FieldLabel>
-                            <Input
-                              id="assistant_runtime.bootstrap_state"
-                              type="text"
-                              {...registerAssistant("assistant_runtime.bootstrap_state")}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_runtime.local_gguf_context_length">
-                              Context length
-                            </FieldLabel>
-                            <Input
-                              id="assistant_runtime.local_gguf_context_length"
-                              type="number"
-                              min={512}
-                              {...registerAssistant("assistant_runtime.local_gguf_context_length", {
-                                valueAsNumber: true,
-                              })}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_runtime.local_gguf_gpu_layers">GPU layers</FieldLabel>
-                            <Input
-                              id="assistant_runtime.local_gguf_gpu_layers"
-                              type="number"
-                              min={0}
-                              {...registerAssistant("assistant_runtime.local_gguf_gpu_layers", {
-                                valueAsNumber: true,
-                              })}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_runtime.local_gguf_threads">Threads</FieldLabel>
-                            <Input
-                              id="assistant_runtime.local_gguf_threads"
-                              type="number"
-                              min={0}
-                              {...registerAssistant("assistant_runtime.local_gguf_threads", {
-                                valueAsNumber: true,
-                              })}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_runtime.recommended_model_name">Recommended model</FieldLabel>
-                            <Input
-                              id="assistant_runtime.recommended_model_name"
-                              type="text"
-                              {...registerAssistant("assistant_runtime.recommended_model_name")}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_runtime.recommended_quant">Recommended quant</FieldLabel>
-                            <Input
-                              id="assistant_runtime.recommended_quant"
-                              type="text"
-                              {...registerAssistant("assistant_runtime.recommended_quant")}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_runtime.recommended_use_case">Recommended use case</FieldLabel>
-                            <Input
-                              id="assistant_runtime.recommended_use_case"
-                              type="text"
-                              {...registerAssistant("assistant_runtime.recommended_use_case")}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <ToggleRow
-                            id="assistant_runtime.fallback_to_primary"
-                            label="Fallback to primary"
-                            description="Use the main workspace model when the companion runtime is unavailable."
-                            checked={watchAssistant("assistant_runtime.fallback_to_primary")}
-                            onChange={(v) => setAssistantValue("assistant_runtime.fallback_to_primary", v)}
-                          />
-                          <ToggleRow
-                            id="assistant_runtime.auto_bootstrap"
-                            label="Auto bootstrap"
-                            description="Automatically prepare the companion runtime when needed."
-                            checked={watchAssistant("assistant_runtime.auto_bootstrap")}
-                            onChange={(v) => setAssistantValue("assistant_runtime.auto_bootstrap", v)}
-                          />
-                          <ToggleRow
-                            id="assistant_runtime.auto_install"
-                            label="Auto install"
-                            description="Allow the app to install a recommended local model automatically."
-                            checked={watchAssistant("assistant_runtime.auto_install")}
-                            onChange={(v) => setAssistantValue("assistant_runtime.auto_install", v)}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <div>
-                          <h3 className="text-sm font-semibold">Policy</h3>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            Control reflection behaviour and memory growth limits.
-                          </p>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_policy.reflection_backend">Reflection backend</FieldLabel>
-                            <Input
-                              id="assistant_policy.reflection_backend"
-                              type="text"
-                              {...registerAssistant("assistant_policy.reflection_backend")}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_policy.reflection_cooldown_seconds">
-                              Reflection cooldown
-                            </FieldLabel>
-                            <Input
-                              id="assistant_policy.reflection_cooldown_seconds"
-                              type="number"
-                              min={0}
-                              {...registerAssistant("assistant_policy.reflection_cooldown_seconds", {
-                                valueAsNumber: true,
-                              })}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_policy.max_memory_entries">Max memory entries</FieldLabel>
-                            <Input
-                              id="assistant_policy.max_memory_entries"
-                              type="number"
-                              min={1}
-                              {...registerAssistant("assistant_policy.max_memory_entries", {
-                                valueAsNumber: true,
-                              })}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_policy.max_playbooks">Max playbooks</FieldLabel>
-                            <Input
-                              id="assistant_policy.max_playbooks"
-                              type="number"
-                              min={1}
-                              {...registerAssistant("assistant_policy.max_playbooks", {
-                                valueAsNumber: true,
-                              })}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <FieldLabel htmlFor="assistant_policy.max_brain_links">Max brain links</FieldLabel>
-                            <Input
-                              id="assistant_policy.max_brain_links"
-                              type="number"
-                              min={1}
-                              {...registerAssistant("assistant_policy.max_brain_links", {
-                                valueAsNumber: true,
-                              })}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <ToggleRow
-                            id="assistant_policy.reflection_enabled"
-                            label="Reflection enabled"
-                            description="Allow the assistant to summarise and reflect on completed work."
-                            checked={watchAssistant("assistant_policy.reflection_enabled")}
-                            onChange={(v) => setAssistantValue("assistant_policy.reflection_enabled", v)}
-                          />
-                          <ToggleRow
-                            id="assistant_policy.autonomous_research_enabled"
-                            label="Autonomous Research"
-                            description="Allow METIS to research sparse areas of your constellation and add new stars independently."
-                            checked={watchAssistant("assistant_policy.autonomous_research_enabled") ?? false}
-                            onChange={(v) => setAssistantValue("assistant_policy.autonomous_research_enabled", v)}
-                          />
-                          <ToggleRow
-                            id="assistant_policy.trigger_on_onboarding"
-                            label="Trigger on onboarding"
-                            description="Run the assistant after onboarding-related events."
-                            checked={watchAssistant("assistant_policy.trigger_on_onboarding")}
-                            onChange={(v) => setAssistantValue("assistant_policy.trigger_on_onboarding", v)}
-                          />
-                          <ToggleRow
-                            id="assistant_policy.trigger_on_index_build"
-                            label="Trigger on index build"
-                            description="Reflect after new indexes finish building."
-                            checked={watchAssistant("assistant_policy.trigger_on_index_build")}
-                            onChange={(v) => setAssistantValue("assistant_policy.trigger_on_index_build", v)}
-                          />
-                          <ToggleRow
-                            id="assistant_policy.trigger_on_completed_run"
-                            label="Trigger on completed run"
-                            description="Reflect after finished chat or tool runs."
-                            checked={watchAssistant("assistant_policy.trigger_on_completed_run")}
-                            onChange={(v) => setAssistantValue("assistant_policy.trigger_on_completed_run", v)}
-                          />
-                          <ToggleRow
-                            id="assistant_policy.allow_automatic_writes"
-                            label="Allow automatic writes"
-                            description="Let the assistant store reflections and memory entries automatically."
-                            checked={watchAssistant("assistant_policy.allow_automatic_writes")}
-                            onChange={(v) => setAssistantValue("assistant_policy.allow_automatic_writes", v)}
-                          />
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <Button
-                            type="button"
-                            onClick={() => void handleAssistantSubmit(onAssistantSubmit)()}
-                            disabled={assistantSaving}
-                            className="gap-1.5"
-                          >
-                            {assistantSaving && <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />}
-                            {assistantSaving ? "Saving…" : "Save companion settings"}
-                          </Button>
-                          {assistantSaved && (
-                            <span className={cn("flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400")}>
-                              <AnimatedLucideIcon icon={CheckCircle2} mode="idlePulse" className="size-4" />
-                              Saved
-                            </span>
-                          )}
-                        </div>
-                        {assistantSaveError && (
-                          <div className="flex items-center gap-1.5 text-sm text-destructive">
-                            <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-4" />
-                            {assistantSaveError}
-                          </div>
+                      <div className="flex items-center gap-3">
+                        <Button
+                          type="button"
+                          onClick={() => void handleAssistantSubmit(onAssistantSubmit)()}
+                          disabled={assistantSaving}
+                          className="gap-1.5"
+                        >
+                          {assistantSaving && <AnimatedLucideIcon icon={Loader2} mode="spin" className="size-4" />}
+                          {assistantSaving ? "Saving…" : "Save companion settings"}
+                        </Button>
+                        {assistantSaved && (
+                          <span className={cn("flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400")}>
+                            <AnimatedLucideIcon icon={CheckCircle2} mode="idlePulse" className="size-4" />
+                            Saved
+                          </span>
                         )}
                       </div>
+                      {assistantSaveError && (
+                        <div className="flex items-center gap-1.5 text-sm text-destructive">
+                          <AnimatedLucideIcon icon={AlertCircle} mode="idlePulse" className="size-4" />
+                          {assistantSaveError}
+                        </div>
+                      )}
                     </div>
                   )}
                 </section>

@@ -591,6 +591,26 @@ class AssistantRepository:
                 )
         return item
 
+    def delete_memory_entry(self, entry_id: str) -> bool:
+        """Hard-delete one memory entry. Returns True if a row was deleted."""
+        self._ensure_ready()
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                "DELETE FROM assistant_memory WHERE entry_id = ?",
+                (entry_id,),
+            )
+            return cursor.rowcount > 0
+
+    def delete_memory_by_kind(self, kind: str) -> int:
+        """Hard-delete all memory entries of a given kind. Returns count deleted."""
+        self._ensure_ready()
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                "DELETE FROM assistant_memory WHERE kind = ?",
+                (kind,),
+            )
+            return cursor.rowcount
+
     def clear_recent_memory(self, *, limit: int = 10) -> int:
         self._ensure_ready()
         rows = self.list_memory()
@@ -615,6 +635,30 @@ class AssistantRepository:
                     [self._memory_row(existing) for existing in kept],
                 )
         return len(removed)
+
+    def delete_oldest_memory(self, *, limit: int = 50) -> int:
+        """Hard-delete the OLDEST ``limit`` memory entries. Returns count deleted.
+
+        Sibling to :meth:`clear_recent_memory`, which removes the most
+        recent entries (used by the legacy "clear recent reflections"
+        flow). This method is the one wired to the at-cap "Clear oldest
+        N" button in MemoryInspector — it must remove the entries with
+        the smallest ``created_at`` so the user keeps their most recent
+        thoughts.
+        """
+        self._ensure_ready()
+        normalized_limit = max(int(limit), 0)
+        if normalized_limit == 0:
+            return 0
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                "DELETE FROM assistant_memory WHERE entry_id IN ("
+                "  SELECT entry_id FROM assistant_memory"
+                "  ORDER BY created_at ASC LIMIT ?"
+                ")",
+                (normalized_limit,),
+            )
+            return cursor.rowcount
 
     def list_playbooks(self, *, limit: int | None = None) -> list[AssistantPlaybook]:
         self._ensure_ready()
@@ -665,6 +709,16 @@ class AssistantRepository:
                     [self._playbook_row(existing) for existing in rows],
                 )
         return item
+
+    def delete_playbook(self, playbook_id: str) -> bool:
+        """Hard-delete one playbook. Returns True if a row was deleted."""
+        self._ensure_ready()
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                "DELETE FROM assistant_playbooks WHERE playbook_id = ?",
+                (playbook_id,),
+            )
+            return cursor.rowcount > 0
 
     def list_brain_links(self, *, limit: int | None = None) -> list[AssistantBrainLink]:
         self._ensure_ready()

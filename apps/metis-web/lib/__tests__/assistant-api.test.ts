@@ -6,6 +6,10 @@ const {
   reflectAssistant,
   bootstrapAssistant,
   clearAssistantMemory,
+  deleteAssistantMemoryEntry,
+  deleteAssistantMemoryByKind,
+  deleteAssistantMemoryOldest,
+  deleteAssistantPlaybook,
   fetchAtlasCandidate,
   saveAtlasEntry,
   decideAtlasCandidate,
@@ -191,6 +195,57 @@ describe("assistant API helpers", () => {
       expect.objectContaining({
         method: "DELETE",
       }),
+    );
+  });
+
+  it("deleteAssistantMemoryEntry calls DELETE /v1/assistant/memory/:id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await deleteAssistantMemoryEntry("abc-123");
+    expect(result).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/v1/assistant/memory/abc-123",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("deleteAssistantMemoryByKind calls DELETE /v1/assistant/memory/by-kind?kind=X", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockJsonResponse({ ok: true, deleted_count: 4 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await deleteAssistantMemoryByKind("skill");
+    expect(result).toEqual({ ok: true, deleted_count: 4 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/v1/assistant/memory/by-kind?kind=skill",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("deleteAssistantMemoryOldest calls DELETE /v1/assistant/memory/oldest?limit=N", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockJsonResponse({ ok: true, deleted_count: 50 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await deleteAssistantMemoryOldest(50);
+    expect(result).toEqual({ ok: true, deleted_count: 50 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/v1/assistant/memory/oldest?limit=50",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("deleteAssistantPlaybook calls DELETE /v1/assistant/playbooks/:id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deleteAssistantPlaybook("pb-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/v1/assistant/playbooks/pb-1",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 

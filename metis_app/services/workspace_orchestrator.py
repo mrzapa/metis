@@ -977,8 +977,26 @@ class WorkspaceOrchestrator:
             for item in self._assistant_service.repository.list_memory(limit=limit)
         ]
 
+    def list_assistant_playbooks(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        return [
+            item.to_payload()
+            for item in self._assistant_service.repository.list_playbooks(limit=limit)
+        ]
+
     def clear_assistant_memory(self, *, limit: int = 10) -> dict[str, Any]:
         return self._assistant_service.clear_recent_memory(limit=limit)
+
+    def delete_assistant_memory_entry(self, entry_id: str) -> dict[str, Any]:
+        return self._assistant_service.delete_memory_entry(entry_id)
+
+    def delete_assistant_memory_by_kind(self, kind: str) -> dict[str, Any]:
+        return self._assistant_service.delete_memory_by_kind(kind)
+
+    def delete_assistant_memory_oldest(self, *, limit: int = 50) -> dict[str, Any]:
+        return self._assistant_service.delete_memory_oldest(limit=limit)
+
+    def delete_assistant_playbook(self, playbook_id: str) -> dict[str, Any]:
+        return self._assistant_service.delete_playbook(playbook_id)
 
     def reflect_assistant(
         self,

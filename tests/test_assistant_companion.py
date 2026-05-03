@@ -840,3 +840,410 @@ def test_reflect_promotes_high_scoring_skill_candidates(tmp_path) -> None:
     # Candidate should be marked promoted so it isn't re-promoted next cycle
     candidates = skill_repo.list_candidates(db_path=db_path, limit=10)
     assert candidates == [], "Candidate should be marked promoted and no longer listed"
+
+
+def test_update_config_persists_tone_preset(tmp_path, monkeypatch) -> None:
+    """Tone preset round-trips through the companion service."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    # Redirect settings_store to a tmp_path-backed dict so update_config
+    # does not write to the repo's actual settings.json.
+    fake_settings: dict = {}
+    monkeypatch.setattr(
+        "metis_app.settings_store.load_settings",
+        lambda: dict(fake_settings),
+    )
+    monkeypatch.setattr(
+        "metis_app.settings_store.save_settings",
+        lambda values: fake_settings.update(values),
+    )
+
+    service.update_config(identity={"tone_preset": "concise-analyst"})
+    snapshot = service.get_snapshot({})
+    assert snapshot["identity"]["tone_preset"] == "concise-analyst"
+
+
+def test_reflection_prompt_uses_resolved_seed_when_tone_preset_set_with_empty_seed() -> None:
+    """Regression for M23 final-review I2: ``build_assistant_reflection_prompt``
+    must route ``identity.prompt_seed`` through ``resolve_prompt_seed`` so that
+    a ``tone_preset`` set with an empty ``prompt_seed`` resolves to the canonical
+    preset seed rather than producing an empty leading prompt segment.
+
+    This is the latent bug from M23 Phase 1's dead-resolver gap: previously the
+    reflection prompt read ``identity.prompt_seed.strip()`` directly, bypassing
+    the resolver entirely.
+    """
+    from metis_app.models.assistant_types import AssistantIdentity, TONE_PRESETS
+    from metis_app.services.companion_voice import resolve_prompt_seed
+    from metis_app.services.runtime_resolution import build_assistant_reflection_prompt
+
+    # tone_preset set, prompt_seed empty: the resolver should pick the
+    # canonical preset seed; the prompt builder must include it verbatim.
+    identity = AssistantIdentity()
+    object.__setattr__(identity, "tone_preset", "concise-analyst")
+    object.__setattr__(identity, "prompt_seed", "")
+
+    expected_seed = TONE_PRESETS["concise-analyst"]
+    assert resolve_prompt_seed(identity) == expected_seed
+
+    prompt = build_assistant_reflection_prompt(
+        identity,
+        context_lines=["A test context line."],
+        trace_events=[],
+        seed_summary="",
+        nourishment_block="",
+    )
+
+    # The canonical concise-analyst preset seed must be the leading
+    # segment of the prompt — proving runtime_resolution honours the
+    # resolver and not the raw stored prompt_seed string.
+    assert prompt.startswith(expected_seed), (
+        f"Expected reflection prompt to start with the resolved preset seed.\n"
+        f"  expected_seed = {expected_seed!r}\n"
+        f"  prompt[:200]  = {prompt[:200]!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# M23 Phase 2 — AssistantRepository delete methods
+# ---------------------------------------------------------------------------
+
+
+def test_delete_memory_entry_round_trip(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    repo.add_memory_entry(
+        AssistantMemoryEntry(
+            entry_id="abc-123",
+            created_at="2026-05-03T00:00:00+00:00",
+            kind="reflection",
+            title="Test entry",
+            summary="A test reflection",
+        )
+    )
+    assert repo.delete_memory_entry("abc-123") is True
+    assert all(item.entry_id != "abc-123" for item in repo.list_memory())
+
+
+def test_delete_memory_entry_missing_id_returns_false(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    assert repo.delete_memory_entry("does-not-exist") is False
+
+
+def test_delete_memory_by_kind_filters_correctly(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    for i, kind in enumerate(["reflection", "reflection", "reflection", "skill", "skill"]):
+        repo.add_memory_entry(
+            AssistantMemoryEntry(
+                entry_id=f"id-{i}",
+                created_at="2026-05-03T00:00:00+00:00",
+                kind=kind,
+                title=f"t{i}",
+                summary="s",
+            )
+        )
+    deleted = repo.delete_memory_by_kind("reflection")
+    assert deleted == 3
+    remaining = repo.list_memory()
+    assert len(remaining) == 2
+    assert all(item.kind == "skill" for item in remaining)
+
+
+def test_delete_memory_by_kind_unknown_kind_returns_zero(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    assert repo.delete_memory_by_kind("nonexistent") == 0
+
+
+def test_delete_oldest_memory_round_trip(tmp_path) -> None:
+    """Deleting the oldest N must remove entries with the SMALLEST
+    ``created_at`` values, not the largest. Regression test for the
+    "Clear oldest 50" bug where the at-cap button was wired to
+    ``clear_recent_memory`` and silently destroyed the user's most
+    recent reflections."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    timestamps = [
+        "2026-05-01T00:00:00+00:00",  # oldest
+        "2026-05-02T00:00:00+00:00",
+        "2026-05-03T00:00:00+00:00",
+        "2026-05-04T00:00:00+00:00",
+        "2026-05-05T00:00:00+00:00",  # newest
+    ]
+    for i, created_at in enumerate(timestamps):
+        repo.add_memory_entry(
+            AssistantMemoryEntry(
+                entry_id=f"id-{i}",
+                created_at=created_at,
+                kind="reflection",
+                title=f"t{i}",
+                summary=f"s{i}",
+            )
+        )
+
+    deleted = repo.delete_oldest_memory(limit=2)
+    assert deleted == 2
+
+    remaining = repo.list_memory()
+    remaining_ids = {item.entry_id for item in remaining}
+    # ``id-0`` and ``id-1`` (the two earliest ``created_at``) are gone.
+    assert "id-0" not in remaining_ids
+    assert "id-1" not in remaining_ids
+    # The three newest entries survived.
+    assert remaining_ids == {"id-2", "id-3", "id-4"}
+
+
+def test_delete_oldest_memory_limit_zero_or_negative_is_noop(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    repo.add_memory_entry(
+        AssistantMemoryEntry(
+            entry_id="only",
+            created_at="2026-05-03T00:00:00+00:00",
+            kind="reflection",
+            title="t",
+            summary="s",
+        )
+    )
+    assert repo.delete_oldest_memory(limit=0) == 0
+    assert repo.delete_oldest_memory(limit=-3) == 0
+    assert len(repo.list_memory()) == 1
+
+
+def test_delete_playbook_round_trip(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    pb = AssistantPlaybook.create(title="t", bullets=["a", "b"])
+    repo.add_playbook(pb)
+    assert repo.delete_playbook(pb.playbook_id) is True
+    assert all(item.playbook_id != pb.playbook_id for item in repo.list_playbooks())
+
+
+def test_delete_playbook_missing_id_returns_false(tmp_path) -> None:
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    assert repo.delete_playbook("not-real") is False
+
+
+# ---------------------------------------------------------------------------
+# M23 Phase 2 — AssistantCompanion delete methods (status-coherence layer)
+# ---------------------------------------------------------------------------
+
+
+def _seed_status_summary(repo: AssistantRepository, summary: str, why: str = "") -> None:
+    """Set status.latest_summary / latest_why directly. Mirrors the
+    pattern used by reflect() to seed status before testing."""
+    status = repo.get_status()
+    status.latest_summary = summary
+    status.latest_why = why
+    repo.update_status(status)
+
+
+def test_companion_delete_memory_entry_clears_latest_summary_when_head(
+    tmp_path,
+) -> None:
+    """Deleting the only memory entry must clear status.latest_summary
+    so the dock no longer shows a summary backed by a row that no
+    longer exists."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "head-1",
+                "created_at": "2026-05-03T10:00:00Z",
+                "kind": "reflection",
+                "title": "Head reflection",
+                "summary": "Most recent thought.",
+                "why": "Because of the latest run.",
+            }
+        )
+    )
+    _seed_status_summary(repo, "Most recent thought.", "Because of the latest run.")
+
+    result = service.delete_memory_entry("head-1")
+    assert result == {"ok": True}
+
+    status_after = repo.get_status()
+    assert status_after.latest_summary == ""
+    assert status_after.latest_why == ""
+
+
+def test_companion_delete_memory_entry_refreshes_to_next_when_head_removed(
+    tmp_path,
+) -> None:
+    """When the head entry is removed and another entry remains,
+    status.latest_summary must be refreshed to the new head's summary."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "older",
+                "created_at": "2026-05-03T09:00:00Z",
+                "kind": "reflection",
+                "title": "Older",
+                "summary": "An older thought.",
+                "why": "older why",
+            }
+        )
+    )
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "head",
+                "created_at": "2026-05-03T10:00:00Z",
+                "kind": "reflection",
+                "title": "Head",
+                "summary": "The newest thought.",
+                "why": "newest why",
+            }
+        )
+    )
+    _seed_status_summary(repo, "The newest thought.", "newest why")
+
+    service.delete_memory_entry("head")
+
+    status_after = repo.get_status()
+    assert status_after.latest_summary == "An older thought."
+    assert status_after.latest_why == "older why"
+
+
+def test_companion_delete_memory_entry_preserves_status_when_not_head(
+    tmp_path,
+) -> None:
+    """Deleting a non-head entry must leave status.latest_summary
+    pointing at the still-current head."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "older",
+                "created_at": "2026-05-03T09:00:00Z",
+                "kind": "reflection",
+                "title": "Older",
+                "summary": "An older thought.",
+                "why": "older why",
+            }
+        )
+    )
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "head",
+                "created_at": "2026-05-03T10:00:00Z",
+                "kind": "reflection",
+                "title": "Head",
+                "summary": "The newest thought.",
+                "why": "newest why",
+            }
+        )
+    )
+    _seed_status_summary(repo, "The newest thought.", "newest why")
+
+    service.delete_memory_entry("older")
+
+    status_after = repo.get_status()
+    # Status still mirrors the (still-present) head entry.
+    assert status_after.latest_summary == "The newest thought."
+    assert status_after.latest_why == "newest why"
+
+
+def test_companion_delete_memory_entry_missing_id_skips_status_refresh(
+    tmp_path,
+) -> None:
+    """A no-op delete (missing id) must not touch the status mirror."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    _seed_status_summary(repo, "Pinned summary.", "Pinned why.")
+
+    result = service.delete_memory_entry("does-not-exist")
+    assert result == {"ok": False}
+
+    status_after = repo.get_status()
+    assert status_after.latest_summary == "Pinned summary."
+    assert status_after.latest_why == "Pinned why."
+
+
+def test_companion_delete_memory_by_kind_refreshes_when_head_in_kind(
+    tmp_path,
+) -> None:
+    """Deleting a kind that includes the most-recent entry must
+    refresh status.latest_summary to the next-most-recent surviving
+    entry's summary (or empty if none)."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "skill-older",
+                "created_at": "2026-05-03T08:00:00Z",
+                "kind": "skill",
+                "title": "Skill older",
+                "summary": "Skill summary that survives.",
+                "why": "skill why",
+            }
+        )
+    )
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "reflection-head",
+                "created_at": "2026-05-03T10:00:00Z",
+                "kind": "reflection",
+                "title": "Reflection head",
+                "summary": "Reflection that gets nuked.",
+                "why": "reflection why",
+            }
+        )
+    )
+    _seed_status_summary(
+        repo,
+        "Reflection that gets nuked.",
+        "reflection why",
+    )
+
+    result = service.delete_memory_by_kind("reflection")
+    assert result == {"ok": True, "deleted_count": 1}
+
+    status_after = repo.get_status()
+    # The surviving skill entry now backs the status mirror.
+    assert status_after.latest_summary == "Skill summary that survives."
+    assert status_after.latest_why == "skill why"
+
+
+def test_companion_delete_memory_by_kind_no_matches_skips_status_refresh(
+    tmp_path,
+) -> None:
+    """deleted_count == 0 must not touch the status mirror — the
+    refresh path is gated on a real deletion having happened."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    _seed_status_summary(repo, "Pinned summary.", "Pinned why.")
+
+    result = service.delete_memory_by_kind("no-such-kind")
+    assert result == {"ok": True, "deleted_count": 0}
+
+    status_after = repo.get_status()
+    assert status_after.latest_summary == "Pinned summary."
+    assert status_after.latest_why == "Pinned why."
+
+
+def test_companion_delete_playbook_does_not_touch_status(tmp_path) -> None:
+    """Playbook delete must NOT refresh the status mirror — status
+    mirrors the most-recent memory entry, not playbooks."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    pb = AssistantPlaybook.create(title="t", bullets=["a", "b"])
+    repo.add_playbook(pb)
+    _seed_status_summary(repo, "Pinned summary.", "Pinned why.")
+
+    result = service.delete_playbook(pb.playbook_id)
+    assert result == {"ok": True}
+
+    status_after = repo.get_status()
+    assert status_after.latest_summary == "Pinned summary."
+    assert status_after.latest_why == "Pinned why."

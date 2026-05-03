@@ -158,6 +158,175 @@ def test_gguf_validate_bad_extension(tmp_path):
         assert ".gguf" in response.json()["detail"].lower()
 
 
+# ---------------------------------------------------------------------------
+# M23 Phase 2 — DELETE routes for assistant memory / playbooks
+# ---------------------------------------------------------------------------
+
+
+def _patch_assistant_orchestrator(monkeypatch, fake):
+    """Swap ``WorkspaceOrchestrator`` on the assistant route module."""
+    from importlib import import_module
+
+    assistant_api = import_module("metis_app.api_litestar.routes.assistant")
+    monkeypatch.setattr(assistant_api, "WorkspaceOrchestrator", lambda: fake)
+
+
+def test_delete_memory_entry_route_round_trip(monkeypatch):
+    from metis_app.api_litestar import create_app
+
+    captured: dict = {}
+
+    class _FakeOrchestrator:
+        def delete_assistant_memory_entry(self, entry_id: str) -> dict:
+            captured["entry_id"] = entry_id
+            return {"ok": True}
+
+    _patch_assistant_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete("/v1/assistant/memory/seed-1")
+        assert response.status_code == 200
+        assert response.json() == {"ok": True}
+        assert captured == {"entry_id": "seed-1"}
+
+
+def test_delete_memory_entry_route_missing_id(monkeypatch):
+    from metis_app.api_litestar import create_app
+
+    class _FakeOrchestrator:
+        def delete_assistant_memory_entry(self, entry_id: str) -> dict:
+            return {"ok": False}
+
+    _patch_assistant_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete("/v1/assistant/memory/does-not-exist")
+        assert response.status_code == 200
+        assert response.json() == {"ok": False}
+
+
+def test_delete_memory_by_kind_route(monkeypatch):
+    from metis_app.api_litestar import create_app
+
+    captured: dict = {}
+
+    class _FakeOrchestrator:
+        def delete_assistant_memory_by_kind(self, kind: str) -> dict:
+            captured["kind"] = kind
+            return {"ok": True, "deleted_count": 3}
+
+    _patch_assistant_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete("/v1/assistant/memory/by-kind?kind=reflection")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["deleted_count"] == 3
+        assert captured == {"kind": "reflection"}
+
+
+def test_delete_memory_oldest_route(monkeypatch):
+    """``DELETE /v1/assistant/memory/oldest?limit=N`` must dispatch to
+    the orchestrator's ``delete_assistant_memory_oldest`` wrapper, NOT
+    fall through to ``delete_assistant_memory_entry`` with
+    ``entry_id="oldest"`` (a routing-order regression that would happen
+    if the oldest route is registered after the dynamic ``{entry_id}``
+    handler)."""
+    from metis_app.api_litestar import create_app
+
+    captured: dict = {}
+
+    class _FakeOrchestrator:
+        def delete_assistant_memory_oldest(self, *, limit: int) -> dict:
+            captured["limit"] = limit
+            return {"ok": True, "deleted_count": limit}
+
+        def delete_assistant_memory_entry(self, entry_id: str) -> dict:
+            # Must NOT be called — its presence here proves the literal
+            # "oldest" segment is not being captured by ``{entry_id}``.
+            captured["wrong_path"] = entry_id
+            return {"ok": False}
+
+    _patch_assistant_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete("/v1/assistant/memory/oldest?limit=42")
+        assert response.status_code == 200
+        body = response.json()
+        assert body == {"ok": True, "deleted_count": 42}
+        assert captured == {"limit": 42}
+
+
+def test_delete_playbook_route_round_trip(monkeypatch):
+    from metis_app.api_litestar import create_app
+
+    captured: dict = {}
+
+    class _FakeOrchestrator:
+        def delete_assistant_playbook(self, playbook_id: str) -> dict:
+            captured["playbook_id"] = playbook_id
+            return {"ok": True}
+
+    _patch_assistant_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete("/v1/assistant/playbooks/pb-1")
+        assert response.status_code == 200
+        assert response.json() == {"ok": True}
+        assert captured == {"playbook_id": "pb-1"}
+
+
+def test_delete_memory_entry_route_real_stack(tmp_path, monkeypatch):
+    """End-to-end happy-path: real AssistantRepository, real
+    AssistantCompanionService, real WorkspaceOrchestrator wired
+    together. The route → orchestrator wrapper → companion service →
+    repo round-trip is exercised through HTTP, proving the wiring (and
+    the status-coherence refresh added in this milestone) survives the
+    full stack."""
+    from metis_app.api_litestar import create_app
+    from metis_app.models.assistant_types import AssistantMemoryEntry
+    from metis_app.services.assistant_companion import AssistantCompanionService
+    from metis_app.services.assistant_repository import AssistantRepository
+    from metis_app.services.workspace_orchestrator import WorkspaceOrchestrator
+
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+    orchestrator = WorkspaceOrchestrator(assistant_service=service)
+
+    # Seed one memory entry via the real repo path and prime the
+    # status mirror so we can prove the refresh fires end-to-end.
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "real-stack-1",
+                "created_at": "2026-05-03T12:00:00Z",
+                "kind": "reflection",
+                "title": "Real stack head",
+                "summary": "Real-stack summary.",
+                "why": "Real-stack why.",
+            }
+        )
+    )
+    primed = repo.get_status()
+    primed.latest_summary = "Real-stack summary."
+    primed.latest_why = "Real-stack why."
+    repo.update_status(primed)
+
+    _patch_assistant_orchestrator(monkeypatch, orchestrator)
+
+    with TestClient(app=create_app()) as client:
+        response = client.delete("/v1/assistant/memory/real-stack-1")
+        assert response.status_code == 200
+        assert response.json() == {"ok": True}
+
+    # Repo row is gone.
+    assert repo.list_memory() == []
+    # Status mirror was refreshed by the companion-service layer.
+    status_after = repo.get_status()
+    assert status_after.latest_summary == ""
+    assert status_after.latest_why == ""
+
+
 def test_gguf_validate_success_contract(tmp_path):
     """Test /v1/gguf/validate success payload contract."""
     from metis_app.api_litestar import create_app
