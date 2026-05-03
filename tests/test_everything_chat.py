@@ -243,6 +243,37 @@ class TestRunEverythingChat:
         assert append_calls[1]["content"] == result.answer_text
 
 
+class TestCollectAttachedManifestPaths:
+    """Coverage for ``_collect_attached_manifest_paths`` defensive shapes."""
+
+    def test_string_linked_manifest_paths_is_treated_as_single_path(self) -> None:
+        """A legacy / corrupted ``linkedManifestPaths`` stored as a plain
+        string must NOT iterate by character. Normalise to a one-element
+        list so the path flows through dedupe intact.
+        """
+        orchestrator = WorkspaceOrchestrator.__new__(WorkspaceOrchestrator)
+        settings = {
+            "landing_constellation_user_stars": [
+                {"id": "star-1", "linkedManifestPaths": "lone/manifest.json"},
+            ],
+        }
+        paths = orchestrator._collect_attached_manifest_paths(settings)
+        assert paths == ["lone/manifest.json"]
+
+    def test_non_list_non_string_linked_manifest_paths_is_ignored(self) -> None:
+        """A wholly unexpected shape (dict, int) is ignored, not iterated."""
+        orchestrator = WorkspaceOrchestrator.__new__(WorkspaceOrchestrator)
+        settings = {
+            "landing_constellation_user_stars": [
+                {"id": "s1", "linkedManifestPaths": {"unexpected": "shape"}},
+                {"id": "s2", "linkedManifestPaths": 42},
+                {"id": "s3", "activeManifestPath": "good/path.json"},
+            ],
+        }
+        paths = orchestrator._collect_attached_manifest_paths(settings)
+        assert paths == ["good/path.json"]
+
+
 class TestResolveIndexIdFromManifest:
     """Sentinel-branch coverage for `_resolve_index_id_from_manifest`.
 

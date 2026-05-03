@@ -93,7 +93,10 @@ class StarClusteringService:
         )
 
         # Cluster (HDBSCAN; noise -> cluster_id = -1).
-        clusterer = HDBSCAN(min_cluster_size=self._min_cluster_size)
+        # ``copy=False`` is the current scikit-learn default (1.6.1) but
+        # will flip to ``True`` in 1.10. Pass it explicitly to lock in
+        # the no-copy behaviour and silence the FutureWarning.
+        clusterer = HDBSCAN(min_cluster_size=self._min_cluster_size, copy=False)
         cluster_labels = clusterer.fit_predict(matrix)
 
         # Project to 2D. Fall back to zero-padding if input dim is too small.

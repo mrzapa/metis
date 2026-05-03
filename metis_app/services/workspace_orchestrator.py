@@ -689,7 +689,18 @@ class WorkspaceOrchestrator:
         for star in user_stars:
             if not isinstance(star, dict):
                 continue
-            for path in star.get("linkedManifestPaths") or []:
+            # Defensive: legacy/corrupted settings may store
+            # ``linkedManifestPaths`` as a string instead of a list.
+            # ``for path in <str>`` would iterate characters and silently
+            # spray nonsense into the dedupe set. Normalise first.
+            raw_paths = star.get("linkedManifestPaths") or []
+            if isinstance(raw_paths, str):
+                paths_iter: list[Any] = [raw_paths]
+            elif isinstance(raw_paths, list):
+                paths_iter = raw_paths
+            else:
+                paths_iter = []
+            for path in paths_iter:
                 _push(path)
             _push(star.get("activeManifestPath"))
             _push(star.get("linkedManifestPath"))
