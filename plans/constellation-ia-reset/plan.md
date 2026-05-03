@@ -21,6 +21,10 @@ Full design at [`docs/plans/2026-05-03-constellation-ia-reset-design.md`](../../
 
 ADR at [`docs/adr/0019-constellation-ia-content-first-projects.md`](../../docs/adr/0019-constellation-ia-content-first-projects.md).
 
+## Implementation plan
+
+Task-by-task at [`docs/plans/2026-05-03-constellation-ia-reset-m24-implementation.md`](../../docs/plans/2026-05-03-constellation-ia-reset-m24-implementation.md). 17 tasks across 6 phases. Use `superpowers:executing-plans` to drive it (or `superpowers:subagent-driven-development` for in-session orchestration).
+
 ## Progress
 
 *(milestone not yet started)*
