@@ -1,7 +1,7 @@
 ---
 Milestone: M23 — Companion controls
-Status: Ready for review
-Claim: claude/sharp-payne-90957a (all 6 phases shipped; 25 commits on branch; PR pending)
+Status: Landed
+Claim: Landed via PR #610 (1f3f8af, 2026-05-03)
 Last updated: 2026-05-03 by claude/sharp-payne-90957a
 Vision pillar: Companion
 TDD Mode: pragmatic
