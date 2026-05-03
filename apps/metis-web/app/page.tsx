@@ -31,6 +31,7 @@ import {
 import { CatalogueFilterPanel } from "@/components/constellation/catalogue-filter-panel";
 import { HomeActionFab } from "@/components/home/home-action-fab";
 import { AddStarDialog, type AddDecision } from "@/components/home/add-star-dialog";
+import { EverythingChatSheet } from "@/components/home/everything-chat-sheet";
 import type { CatalogueFilterState } from "@/lib/star-catalogue";
 import {
   CATALOGUE_FILTER_DEFAULT,
@@ -221,6 +222,12 @@ const NODE_LABEL_PADDING_X = 12;
 const NODE_LABEL_PADDING_Y = 8;
 const NODE_LABEL_EDGE_MARGIN_PX = 14;
 const NODE_LABEL_CENTER_OFFSET_RATIO = 0.28;
+// M24 Phase 5 / Task 5.2 — central METIS hit radius for the
+// Everything-chat click target. The painted disc is roughly 5*sc px,
+// but the click target follows the perceived halo + diffraction
+// rays, so a generous 36 px keeps the hit feel honest at default
+// zoom without overlapping nearby user stars.
+const POLARIS_HIT_RADIUS_PX = 36;
 
 type CanvasTool = "select" | "grab" | "add";
 interface CanvasBounds {
@@ -1059,6 +1066,14 @@ export default function Home() {
   // unreachable but left in place per Phase 4 spec; Phase 6 deletes it.
   // TODO(M24-Task-3.4 + Phase-6): remove tool === "add" branch + ADD_CANDIDATE_HIT_RADIUS_PX
   const [addStarDialogOpen, setAddStarDialogOpen] = useState(false);
+  // M24 Phase 5 / Task 5.2 — central METIS star opens the Everything
+  // chat sheet. The render loop populates ``polarisHitRef`` with the
+  // current screen-space centre + hit radius every frame so the
+  // pointer-up handler can hit-test without recomputing the projection.
+  const [everythingChatSheetOpen, setEverythingChatSheetOpen] = useState(false);
+  const polarisHitRef = useRef<{ x: number; y: number; r: number } | null>(
+    null,
+  );
   const [catalogueFilterState, setCatalogueFilterState] = useState<CatalogueFilterState>(
     () => CATALOGUE_FILTER_DEFAULT,
   );
@@ -4198,6 +4213,13 @@ export default function Home() {
       const ppy = Math.round(projected.y + (mouse.y - H / 2) * 0.015) + 0.5;
       const sc = getZoomResponsiveNodeScale(backgroundZoomRef.current);
       const coreR = 5 * sc;
+      // M24 Phase 5 / Task 5.2 — publish the current Polaris screen
+      // position so the canvas pointer-up handler can hit-test against
+      // it. We bias the radius generously (POLARIS_HIT_RADIUS_PX) so
+      // the click target matches what the user perceives as "the
+      // central star and its halo" — a 5*sc disc is harder to hit than
+      // it looks at default zoom.
+      polarisHitRef.current = { x: ppx, y: ppy, r: POLARIS_HIT_RADIUS_PX };
 
       // ── Topology activity strength (0–1) derived from scaffold data ───────────
       const scaffResp = scaffoldResponseRef.current;
@@ -5683,6 +5705,24 @@ export default function Home() {
         return;
       }
 
+      // M24 Phase 5 / Task 5.2 — clicks on the central METIS star open
+      // the Everything chat sheet (RAG over the union of every
+      // attached index). Tested before the faculty-ring + user-star
+      // branches so a click that lands exactly on the centre always
+      // wins over a coincident user-star — the central star is the
+      // canonical Everything entry point and shouldn't be silently
+      // hijacked by a star that happens to share its pixel.
+      const polarisHit = polarisHitRef.current;
+      if (polarisHit) {
+        const pointer = getCanvasPointer(e.clientX, e.clientY);
+        const dx = pointer.x - polarisHit.x;
+        const dy = pointer.y - polarisHit.y;
+        if (dx * dx + dy * dy <= polarisHit.r * polarisHit.r) {
+          setEverythingChatSheetOpen(true);
+          return;
+        }
+      }
+
       const currentUserStars = userStarsRef.current;
       const currentSelectedStarId = selectedUserStarIdRef.current;
       const hitNodeIndex = getHitNodeIndex(e.clientX, e.clientY);
@@ -6402,6 +6442,14 @@ export default function Home() {
         open={addStarDialogOpen}
         onOpenChange={setAddStarDialogOpen}
         onConfirm={handleAddStarConfirm}
+      />
+
+      {/* M24 Phase 5 / Task 5.2 — Chat with everything. Opens when the
+          user clicks the central METIS star; sends RAG queries against
+          the virtual ``_all_stars`` index server-side. */}
+      <EverythingChatSheet
+        open={everythingChatSheetOpen}
+        onOpenChange={setEverythingChatSheetOpen}
       />
     </>
   );
