@@ -1069,8 +1069,12 @@ export default function Home() {
   const starTooltipTitleRef = useRef<HTMLDivElement>(null);
   const starTooltipDescRef = useRef<HTMLDivElement>(null);
   const catalogueTooltipRef = useRef<HTMLDivElement>(null);
-  const activeNodeRef = useRef(-1);
   const hoveredNodeRef = useRef(-1);
+  // Page-level guard so two rapid +Add clicks can't kick off two parallel
+  // upload→build→update chains. The dialog's own `submitting` flag covers
+  // the within-open case; this ref covers across-open (close + reopen
+  // before the previous async chain settles).
+  const addInFlightRef = useRef(false);
   const hoverStartRef = useRef(0);
   const hoverExpandedRef = useRef(false);
   const coarsePointerRef = useRef(false);
@@ -1373,6 +1377,8 @@ export default function Home() {
   // into its cluster on the next render frame.
   const handleAddStarConfirm = useCallback(
     async (decision: AddDecision) => {
+      if (addInFlightRef.current) return;
+      addInFlightRef.current = true;
       try {
         // Helper — upload files + build an index, returning the new
         // manifest path. Returns null if no files were attached.
@@ -1457,6 +1463,7 @@ export default function Home() {
           dismissMs: 3200,
         });
       } finally {
+        addInFlightRef.current = false;
         // Refresh cluster placement so the new star (if any) snaps into
         // its cluster on the next render. Best-effort — silent on error.
         fetchStarClusters()
@@ -1763,10 +1770,6 @@ export default function Home() {
     [backgroundZoomFactor],
   );
 
-  const closeConcept = useCallback(() => {
-    activeNodeRef.current = -1;
-  }, []);
-
   const closeStarTooltip = useCallback(() => {
     if (starTooltipHideTimeoutRef.current !== null) {
       window.clearTimeout(starTooltipHideTimeoutRef.current);
@@ -1791,8 +1794,7 @@ export default function Home() {
     hoverExpandedRef.current = false;
     setHoveredAddCandidateId(null);
     closeStarTooltip();
-    closeConcept();
-  }, [closeConcept, closeStarTooltip]);
+  }, [closeStarTooltip]);
 
   useEffect(() => {
     const currentDrag = dragStateRef.current;
@@ -2108,10 +2110,9 @@ export default function Home() {
     await removeStarWithUndo(hoveredUserStarId, {
       afterRemove: () => {
         closeStarTooltip();
-        closeConcept();
       },
     });
-  }, [closeConcept, closeStarTooltip, hoveredUserStarId, removeStarWithUndo]);
+  }, [closeStarTooltip, hoveredUserStarId, removeStarWithUndo]);
 
   const handleResetOrbit = useCallback(async () => {
     if (userStars.length === 0) {
@@ -4437,7 +4438,6 @@ export default function Home() {
       px: number,
       py: number,
       brightness: number,
-      active: boolean,
       proximity: number,
       nodeAwakenProg: number,
       ragFacultyHighlighted: boolean,
@@ -4454,9 +4454,6 @@ export default function Home() {
       artOpacity += Math.max(0, brightness - 0.18) * 0.04;
       artOpacity += proximity * 0.06;
       artOpacity += node.hoverBoost * (art.activeOpacity - art.idleOpacity);
-      if (active) {
-        artOpacity = Math.max(artOpacity, art.activeOpacity);
-      }
 
       if (ragFacultyHighlighted) {
         artOpacity = Math.max(artOpacity, 0.24 + ragPulseStrength * 0.04);
@@ -4478,7 +4475,6 @@ export default function Home() {
     }
 
     function drawNodes(t: number) {
-      const aNode = activeNodeRef.current;
       const hasAddCandidate = hoveredAddCandidateRef.current !== null;
       const renderTimeMs = getRenderEpochMs(t);
       const ragPulseState = ragPulseStateRef.current;
@@ -4500,19 +4496,17 @@ export default function Home() {
         if (ragFacultyHighlighted) {
           n.targetBrightness = Math.max(n.targetBrightness, 0.56 + ragPulseStrength * 0.34);
         }
-        if (i === aNode) n.targetBrightness = 0.9;
         n.brightness += (n.targetBrightness - n.brightness) * 0.06;
         n.targetHoverBoost = hasAddCandidate ? 0 : hoveredNodeRef.current === i ? 1 : 0;
         n.hoverBoost += (n.targetHoverBoost - n.hoverBoost) * (enhancedHoverMotion ? 0.12 : 0.25);
         const b = n.brightness;
         const hoverScale = enhancedHoverMotion ? n.hoverBoost * 2.6 : 0;
-        const s = (n.baseSize * 2.9 + proximity * 2.6 + (i === aNode ? 1.35 : 0) + hoverScale) * nodeGalaxyScale;
+        const s = (n.baseSize * 2.9 + proximity * 2.6 + hoverScale) * nodeGalaxyScale;
         drawFacultyGlyph(
           n,
           px,
           py,
           b,
-          i === aNode,
           proximity,
           nodeAwakenProg,
           ragFacultyHighlighted,
@@ -4523,7 +4517,7 @@ export default function Home() {
         const cScale = getConstellationCameraScale(backgroundZoomRef.current);
         const edgeAlpha = Math.max(
           nodeAwakenProg * 0.18,
-          i === aNode ? 0.28 : proximity * 0.30,
+          proximity * 0.30,
           ragFacultyHighlighted ? 0.26 + ragPulseStrength * 0.40 : 0,
         );
         if (edgeAlpha > 0.02) {
@@ -5381,7 +5375,6 @@ export default function Home() {
           setIsCanvasPanning(true);
           clearHoveredCandidate();
           hideStarTooltip();
-          closeConcept();
           setDragMessage(null);
         }
         if (!panState.moved) {
@@ -5425,7 +5418,6 @@ export default function Home() {
         );
         clearHoveredCandidate();
         hideStarTooltip();
-        closeConcept();
         return;
       }
 
@@ -5434,7 +5426,6 @@ export default function Home() {
         hoverExpandedRef.current = false;
         clearHoveredCandidate();
         hideStarTooltip();
-        closeConcept();
         return;
       }
 
@@ -5471,7 +5462,6 @@ export default function Home() {
         hoveredNodeRef.current = -1;
         hoverExpandedRef.current = false;
         clearHoveredCandidate();
-        closeConcept();
         return;
       }
 
@@ -5485,7 +5475,6 @@ export default function Home() {
           hoverExpandedRef.current = false;
           hideStarTooltip();
           hideCatalogueTooltip();
-          closeConcept();
           return;
         }
       } else {
@@ -5498,7 +5487,6 @@ export default function Home() {
         hoverExpandedRef.current = false;
         showStarTooltip(hoveredUserStar.star, hoveredUserStar.target);
         hideCatalogueTooltip();
-        closeConcept();
         return;
       }
 
@@ -5563,7 +5551,6 @@ export default function Home() {
         setDragMessage(null);
         clearHoveredCandidate();
         hideStarTooltip();
-        closeConcept();
         try {
           canvas!.setPointerCapture(e.pointerId);
         } catch {
@@ -5581,7 +5568,6 @@ export default function Home() {
       if (hitForgeStar) {
         clearHoveredCandidate();
         hideStarTooltip();
-        closeConcept();
         router.push(`/forge#${hitForgeStar.id}`);
         return;
       }
@@ -5611,7 +5597,6 @@ export default function Home() {
         if (target?.url) {
           clearHoveredCandidate();
           hideStarTooltip();
-          closeConcept();
           window.open(target.url, "_blank", "noopener,noreferrer");
           return;
         }
@@ -5635,7 +5620,6 @@ export default function Home() {
       setDragMessage(null);
       clearHoveredCandidate();
       hideStarTooltip();
-      closeConcept();
       try {
         canvas!.setPointerCapture(e.pointerId);
       } catch {
@@ -5737,7 +5721,6 @@ export default function Home() {
           hoveredAddCandidateRef.current = candidate;
           setHoveredAddCandidateId((current) => (current === candidate.id ? current : candidate.id));
           setAddMessage("Tap the same star again to pull it in and open its details.");
-          closeConcept();
           return;
         }
 
@@ -5775,7 +5758,6 @@ export default function Home() {
           openStarDetails(createdStar, "new");
           clearHoveredCandidate();
         });
-        closeConcept();
         return;
       }
 
@@ -5801,7 +5783,6 @@ export default function Home() {
             setSelectedUserStarId(null);
             setPendingDetailStar(null);
           }
-          closeConcept();
           hideCatalogueTooltip();
           return;
         }
@@ -5812,7 +5793,6 @@ export default function Home() {
         setSelectedUserStarId(null);
         setPendingDetailStar(null);
       }
-      closeConcept();
     }
 
     function clearPointerHoverState() {
@@ -5982,7 +5962,6 @@ export default function Home() {
     activeCanvasTool,
     addUserStar,
     clearConstellationHoverState,
-    closeConcept,
     closeStarDetails,
     focusExistingStar,
     jumpToBackgroundCamera,
@@ -6111,7 +6090,10 @@ export default function Home() {
             // the canvas-pick path; the legacy mode is no longer reachable
             // through the UI but the state plumbing still exists.
             className={`metis-zoom-pill-btn metis-zoom-pill-tool-btn ${addStarDialogOpen ? "is-active" : ""}`}
-            onClick={() => setAddStarDialogOpen(true)}
+            onClick={() => {
+              if (addInFlightRef.current) return;
+              setAddStarDialogOpen(true);
+            }}
             disabled={canvasInteractionsLocked}
             aria-label="Add star"
             aria-pressed={addStarDialogOpen}
