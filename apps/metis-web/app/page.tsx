@@ -82,7 +82,6 @@ import {
   type BrainGraphRagActivity,
 } from "@/lib/brain-graph-rag-activity";
 import {
-  ADD_CANDIDATE_HIT_RADIUS_PX,
   buildOutwardPlacement,
   clampBackgroundZoomFactor,
   CONSTELLATION_FACULTIES,
@@ -96,14 +95,12 @@ import {
   getFacultyColor,
   getAutoStarFaculty,
   getInfluenceColors,
-  getPreviewConnectionNodes,
   getStarDiveFocusStrength,
   isAutonomousStar,
   inferConstellationFaculty,
   isAddableBackgroundStar,
   MAX_BACKGROUND_ZOOM_FACTOR,
   MIN_BACKGROUND_ZOOM_FACTOR,
-  MOBILE_ADD_CANDIDATE_HIT_RADIUS_PX,
   mixConstellationColors,
   projectConstellationPoint,
   screenToConstellationPoint,
@@ -229,7 +226,9 @@ const NODE_LABEL_CENTER_OFFSET_RATIO = 0.28;
 // zoom without overlapping nearby user stars.
 const POLARIS_HIT_RADIUS_PX = 36;
 
-type CanvasTool = "select" | "grab" | "add";
+// M24 Phase 6: `"add"` retired — the +Add affordance now opens the
+// content-first AddStarDialog, not a canvas-pick mode.
+type CanvasTool = "select" | "grab";
 interface CanvasBounds {
   left: number;
   top: number;
@@ -1033,7 +1032,6 @@ export default function Home() {
   const [availableIndexes, setAvailableIndexes] = useState<IndexSummary[]>([]);
   const [indexesLoading, setIndexesLoading] = useState(true);
   const [indexLoadError, setIndexLoadError] = useState<string | null>(null);
-  const [hoveredAddCandidateId, setHoveredAddCandidateId] = useState<string | null>(null);
   const [hoveredUserStarId, setHoveredUserStarId] = useState<string | null>(null);
   const [inspectedCatalogueStar, setInspectedCatalogueStar] =
     useState<CatalogueStarInspectorStar | null>(null);
@@ -1061,10 +1059,9 @@ export default function Home() {
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   // M24 Phase 4 — AddStarDialog open state. Replaces the canvas-pick add
   // affordance: clicking +Add now opens the content-first dialog instead
-  // of entering `tool === "add"` mode. The legacy canvas-pick branch
-  // (lines ~5610–5664 here, plus ADD_CANDIDATE_HIT_RADIUS_PX) is now
-  // unreachable but left in place per Phase 4 spec; Phase 6 deletes it.
-  // TODO(M24-Task-3.4 + Phase-6): remove tool === "add" branch + ADD_CANDIDATE_HIT_RADIUS_PX
+  // of entering canvas-pick mode. M24 Phase 6 removed the legacy
+  // `tool === "add"` branch + the ADD_CANDIDATE_HIT_RADIUS_PX hit-radius
+  // constants entirely.
   const [addStarDialogOpen, setAddStarDialogOpen] = useState(false);
   // M24 Phase 5 / Task 5.2 — central METIS star opens the Everything
   // chat sheet. The render loop populates ``polarisHitRef`` with the
@@ -1102,8 +1099,6 @@ export default function Home() {
   const forgeStarsRef = useRef<ForgeStar[]>(forgeStars);
   const selectedUserStarIdRef = useRef<string | null>(selectedUserStarId);
   const hoveredUserStarIdRef = useRef<string | null>(hoveredUserStarId);
-  const hoveredAddCandidateRef = useRef<StarData | null>(null);
-  const armedAddCandidateIdRef = useRef<string | null>(null);
   const availableIndexesRef = useRef<IndexSummary[]>(availableIndexes);
   // M12 Phase 3 — current filter state, mirrored into a ref so the render
   // loop (which lives inside a single long-lived effect) can read the latest
@@ -1651,26 +1646,12 @@ export default function Home() {
       return "Hand tool active. Drag the constellation to pan, then switch back to Select to claim, inspect, or reposition stars.";
     }
 
-    if (activeCanvasTool === "add") {
-      if (starLimit !== null && userStars.length >= starLimit) {
-        return "Constellation at capacity. Remove a star or reset the orbit to pull in another.";
-      }
-      if (hoveredAddCandidateId) {
-        return "Field star acquired. Click once to claim it, then name it and attach sources.";
-      }
-      return "Add mode active. Hover an empty spot in the constellation, then click to place a new star.";
-    }
-
     if (dragMessage) {
       return dragMessage;
     }
 
     if (starLimit !== null && userStars.length >= starLimit) {
       return "Constellation at capacity. Remove a star or reset the orbit to pull in another.";
-    }
-
-    if (hoveredAddCandidateId) {
-      return "Field star acquired. Switch to Add mode to claim it.";
     }
 
     if (selectedUserStar && selectedStarFaculty) {
@@ -1685,7 +1666,7 @@ export default function Home() {
     }
 
     return "Claim a field star, drag it toward the category it should strengthen, and let its attached sources deepen it.";
-  }, [activeCanvasTool, dragMessage, hoveredAddCandidateId, indexesLoading, isCanvasPanning, selectedStarAttachmentCount, selectedStarFaculty, selectedUserStar, starLimit, unmappedIndexes.length, userStars.length]);
+  }, [activeCanvasTool, dragMessage, indexesLoading, isCanvasPanning, selectedStarAttachmentCount, selectedStarFaculty, selectedUserStar, starLimit, unmappedIndexes.length, userStars.length]);
   const selectedStarSummary = useMemo(() => {
     if (!selectedUserStar || !selectedStarFaculty) {
       return "No star selected. Click a claimed star to open its details, or drag one to reassign its category.";
@@ -1803,11 +1784,8 @@ export default function Home() {
   }, []);
 
   const clearConstellationHoverState = useCallback(() => {
-    hoveredAddCandidateRef.current = null;
-    armedAddCandidateIdRef.current = null;
     hoveredNodeRef.current = -1;
     hoverExpandedRef.current = false;
-    setHoveredAddCandidateId(null);
     closeStarTooltip();
   }, [closeStarTooltip]);
 
@@ -2429,14 +2407,6 @@ export default function Home() {
     });
   }, [addMessage, showToast, syncError]);
 
-  useEffect(() => {
-    if (starLimit !== null && userStars.length >= starLimit) {
-      hoveredAddCandidateRef.current = null;
-      armedAddCandidateIdRef.current = null;
-      setHoveredAddCandidateId(null);
-    }
-  }, [starLimit, userStars.length]);
-
   const requestLearningRoutePreview = useCallback(async (star: UserStar) => {
     if (!hasEligibleCourseSource(star)) {
       setLearningRouteError("Attach a source to this star before starting a course.");
@@ -2750,23 +2720,13 @@ export default function Home() {
       reducedMotionQuery.addListener(handleReducedMotionChange);
     }
 
-    function syncHoveredCandidate(candidate: StarData | null) {
-      const nextId = candidate?.id ?? null;
-      if (hoveredAddCandidateRef.current?.id === nextId) {
-        hoveredAddCandidateRef.current = candidate;
-        return;
-      }
-      hoveredAddCandidateRef.current = candidate;
-      if (!candidate) {
-        armedAddCandidateIdRef.current = null;
-      }
-      setHoveredAddCandidateId((current) => (current === nextId ? current : nextId));
-    }
-
+    // M24 Phase 6: clearHoveredCandidate retired (the canvas-pick add
+    // path is gone, so there is no candidate to clear). Kept as a
+    // no-op so the existing pointer-down / pointer-move / pointer-up
+    // handlers stay readable — they previously needed this hook in
+    // many cleanup paths.
     function clearHoveredCandidate() {
-      hoveredAddCandidateRef.current = null;
-      armedAddCandidateIdRef.current = null;
-      setHoveredAddCandidateId((current) => (current === null ? current : null));
+      // intentionally empty — see comment above
     }
 
     function isPointInsideNodeLabel(node: NodeData, clientX: number, clientY: number): boolean {
@@ -4497,7 +4457,10 @@ export default function Home() {
     }
 
     function drawNodes(t: number) {
-      const hasAddCandidate = hoveredAddCandidateRef.current !== null;
+      // M24 Phase 6: hasAddCandidate retired with the canvas-pick add
+      // path — kept the var name and forced it to false so the existing
+      // hover-boost expression below stays readable.
+      const hasAddCandidate = false;
       const renderTimeMs = getRenderEpochMs(t);
       const ragPulseState = ragPulseStateRef.current;
       const ragPulseStrength = getHomeRagPulseStrength(ragPulseState, renderTimeMs);
@@ -4604,138 +4567,10 @@ export default function Home() {
       });
     }
 
-    function drawAddCandidatePreview(ts: number) {
-      const candidate = hoveredAddCandidateRef.current;
-      if (!candidate) {
-        return;
-      }
-
-      const backgroundCamera = readBackgroundCamera();
-      const candidatePoint = getCandidateConstellationPoint(candidate, backgroundCamera);
-      const previewInfluence = inferConstellationFaculty(candidatePoint);
-      const primaryNode = nodes.find(
-        (node) => node.concept.faculty.id === previewInfluence.primary.faculty.id,
-      );
-      const cScale = getConstellationCameraScale(backgroundZoomRef.current);
-      const previewNodes = primaryNode
-        ? getPreviewConnectionNodes(
-            candidate,
-            primaryNode.concept.faculty.shape.stars
-              .map((shapeStar) => {
-                const anchorX = primaryNode.x + (mouse.x - W / 2) * primaryNode.parallax;
-                const anchorY = primaryNode.y + (mouse.y - H / 2) * primaryNode.parallax;
-
-                return {
-                  _sx: anchorX + shapeStar.dx * W * cScale,
-                  _sy: anchorY + shapeStar.dy * H * cScale,
-                  x: anchorX + shapeStar.dx * W * cScale,
-                  y: anchorY + shapeStar.dy * H * cScale,
-                };
-              }),
-            W,
-            H,
-          )
-        : [];
-      const previewColors = getInfluenceColors(
-        previewInfluence.primary.faculty.id,
-        previewInfluence.bridgeSuggestion ? [previewInfluence.bridgeSuggestion.faculty.id] : undefined,
-      );
-      const [primaryPreviewR, primaryPreviewG, primaryPreviewB] = previewColors[0];
-      const [mixedPreviewR, mixedPreviewG, mixedPreviewB] = mixConstellationColors(previewColors);
-      const px = candidate.screenX;
-      const py = candidate.screenY;
-      const pulse = reducedMotion ? 0.72 : 0.7 + Math.sin(ts * 0.008) * 0.18;
-
-      ctx!.save();
-      if (!reducedMotion) {
-        ctx!.setLineDash([8, 10]);
-        ctx!.lineDashOffset = -ts * 0.018;
-      }
-
-      previewNodes.forEach((node, index) => {
-        const grad = ctx!.createLinearGradient(node._sx, node._sy, px, py);
-        grad.addColorStop(0, `rgba(${primaryPreviewR},${primaryPreviewG},${primaryPreviewB},${0.24 + pulse * 0.1})`);
-        grad.addColorStop(1, `rgba(${mixedPreviewR},${mixedPreviewG},${mixedPreviewB},${0.32 + pulse * 0.12})`);
-        ctx!.strokeStyle = grad;
-        ctx!.lineWidth = index === 0 ? 1.15 : 0.75;
-        ctx!.beginPath();
-        ctx!.moveTo(node._sx, node._sy);
-        ctx!.lineTo(px, py);
-        ctx!.stroke();
-      });
-
-      const selectedAnchor = getSelectedLinkAnchor(candidatePoint);
-      if (selectedAnchor) {
-        const anchorPoint = getResolvedStarPoint(
-          selectedAnchor,
-          dragPreviewPositionsRef.current,
-          selectedAnchor.id,
-          clusterPositionsRef.current,
-        );
-        const anchorProjected = projectedUserStarRenderState.get(selectedAnchor.id)?.target
-          ?? buildProjectedUserStarHitTarget(
-            {
-              id: selectedAnchor.id,
-              size: selectedAnchor.size,
-              x: anchorPoint.x,
-              y: anchorPoint.y,
-            },
-            W,
-            H,
-            backgroundCamera,
-            coarsePointerRef.current ? 12 : 0,
-            mouse,
-          );
-        const anchorFaculty = resolveStarFaculty({
-          x: anchorPoint.x,
-          y: anchorPoint.y,
-          primaryDomainId: selectedAnchor.primaryDomainId,
-        });
-        const [anchorR, anchorG, anchorB] = getFacultyColor(anchorFaculty.id);
-        const anchorGradient = ctx!.createLinearGradient(anchorProjected.x, anchorProjected.y, px, py);
-        anchorGradient.addColorStop(0, `rgba(${anchorR},${anchorG},${anchorB},${0.26 + pulse * 0.08})`);
-        anchorGradient.addColorStop(1, `rgba(${mixedPreviewR},${mixedPreviewG},${mixedPreviewB},${0.32 + pulse * 0.1})`);
-        ctx!.strokeStyle = anchorGradient;
-        ctx!.lineWidth = 0.95;
-        ctx!.beginPath();
-        ctx!.moveTo(anchorProjected.x, anchorProjected.y);
-        ctx!.lineTo(px, py);
-        ctx!.stroke();
-      }
-      ctx!.restore();
-
-      const halo = candidate.baseSize * 10 + 12 + pulse * 4;
-      const glow = ctx!.createRadialGradient(px, py, 0, px, py, halo);
-      glow.addColorStop(0, `rgba(240,244,255,${0.34 + pulse * 0.12})`);
-      glow.addColorStop(0.45, `rgba(${mixedPreviewR},${mixedPreviewG},${mixedPreviewB},${0.22 + pulse * 0.1})`);
-      glow.addColorStop(1, "rgba(0,0,0,0)");
-      ctx!.fillStyle = glow;
-      ctx!.beginPath();
-      ctx!.arc(px, py, halo, 0, Math.PI * 2);
-      ctx!.fill();
-
-      ctx!.beginPath();
-      ctx!.arc(px, py, candidate.baseSize + 2 + pulse * 0.8, 0, Math.PI * 2);
-      ctx!.fillStyle = `rgba(245,248,255,${0.9})`;
-      ctx!.fill();
-
-      ctx!.beginPath();
-      ctx!.arc(px, py, candidate.baseSize * 3.5 + pulse * 2.5, 0, Math.PI * 2);
-      ctx!.strokeStyle = `rgba(${primaryPreviewR},${primaryPreviewG},${primaryPreviewB},${0.36 + pulse * 0.12})`;
-      ctx!.lineWidth = 0.8;
-      ctx!.stroke();
-
-      if (!reducedMotion && previewNodes.length > 0) {
-        const lead = previewNodes[0];
-        const travel = (Math.sin(ts * 0.004) + 1) / 2;
-        const sparkX = lead._sx + (px - lead._sx) * travel;
-        const sparkY = lead._sy + (py - lead._sy) * travel;
-        ctx!.beginPath();
-        ctx!.arc(sparkX, sparkY, 1.6, 0, Math.PI * 2);
-        ctx!.fillStyle = "rgba(255,246,222,0.92)";
-        ctx!.fill();
-      }
-    }
+    // M24 Phase 6: drawAddCandidatePreview retired alongside the
+    // canvas-pick add path. The preview painted a dashed ring + halo
+    // around a hovered field star while the user was in `tool === "add"`
+    // mode; with that mode gone there is no candidate to highlight.
 
     function render(ts: number) {
       const backgroundCamera = constellationCamera.stepCamera({
@@ -5031,7 +4866,6 @@ export default function Home() {
 
       drawNodes(ts);
       drawUserStarEdges(ts);
-      drawAddCandidatePreview(ts);
       drawUserStars(ts);
       drawForgeStars(ts);
 
@@ -5271,45 +5105,9 @@ export default function Home() {
       if (el) el.style.display = "none";
     }
 
-    function getHoveredCandidate(clientX: number, clientY: number): StarData | null {
-      const pointer = getCanvasPointer(clientX, clientY);
-      const spatialHash = landingStarSpatialHash ?? (() => {
-        const addableTargets = visibleStarsRef.current
-          .filter((star) => star.isAddable)
-          .map<LandingWorldStarRenderState>((star) => ({
-            addable: true,
-            apparentSize: star.baseSize,
-            brightness: star.brightness,
-            hitRadius: star.hitRadius,
-            id: star.id,
-            profile: getCachedStellarProfile(star.id),
-            x: star.screenX,
-            y: star.screenY,
-          }));
-
-        return addableTargets.length > 0 ? buildLandingStarSpatialHash(addableTargets) : null;
-      })();
-      if (!spatialHash) {
-        return null;
-      }
-
-      const target = findClosestLandingStarHitTarget(
-        spatialHash,
-        pointer.x,
-        pointer.y,
-        {
-          queryPaddingPx: coarsePointerRef.current
-            ? MOBILE_ADD_CANDIDATE_HIT_RADIUS_PX
-            : ADD_CANDIDATE_HIT_RADIUS_PX,
-        },
-      );
-      if (!target) {
-        return null;
-      }
-      return projectedCandidateById.get(target.id)
-        ?? visibleStarsRef.current.find((star) => star.id === target.id)
-        ?? null;
-    }
+    // M24 Phase 6: getHoveredCandidate retired with the canvas-pick add
+    // path; nothing else inside the render effect needs to identify a
+    // hovered "addable" field star.
 
     function getHoveredCatalogueStar(clientX: number, clientY: number): LandingWorldStarRenderState | null {
       if (!landingStarSpatialHash) return null;
@@ -5487,21 +5285,11 @@ export default function Home() {
         return;
       }
 
-      const canAddMoreStars = starLimit === null || userStarsRef.current.length < starLimit;
-      if (canAddMoreStars) {
-        const candidate = getHoveredCandidate(e.clientX, e.clientY);
-
-        syncHoveredCandidate(candidate);
-        if (candidate) {
-          hoveredNodeRef.current = -1;
-          hoverExpandedRef.current = false;
-          hideStarTooltip();
-          hideCatalogueTooltip();
-          return;
-        }
-      } else {
-        clearHoveredCandidate();
-      }
+      // M24 Phase 6: the hovered-candidate sync (which highlighted a
+      // field star ready to be promoted while in canvas-pick add mode)
+      // is gone. The +Add affordance is now AddStarDialog; field-star
+      // hover used to drive the "Field star acquired" hint and the
+      // dashed preview ring, both retired.
 
       const hoveredUserStar = getHoveredUserStar(e.clientX, e.clientY);
       if (hoveredUserStar) {
@@ -5734,7 +5522,6 @@ export default function Home() {
       // so they don't accidentally fall through to the catalogue
       // inspector. Phase 6 retires the ring rendering entirely.
       if (hitNodeIndex >= 0) {
-        armedAddCandidateIdRef.current = null;
         if (currentSelectedStarId) {
           setSelectedUserStarId(null);
           setPendingDetailStar(null);
@@ -5742,66 +5529,14 @@ export default function Home() {
         return;
       }
 
-      // Audit fix #39: only the explicit "+Add" tool may create new user stars
-      // from a canvas click. SELECT mode now never silently materialises stars
-      // out of empty space — clicks on empty space fall through to catalogue-
-      // star inspection or selection-clear, matching what casual exploration
-      // expects.
-      const candidate = activeCanvasTool === "add" && (starLimit === null || currentUserStars.length < starLimit)
-        ? getHoveredCandidate(e.clientX, e.clientY)
-        : null;
+      // M24 Phase 6: the canvas-pick add path retired. Clicking +Add now
+      // opens AddStarDialog instead of entering a tool-mode that
+      // promoted hovered field stars into user stars on click. SELECT
+      // mode never silently materialises stars out of empty space —
+      // clicks on empty space fall through to catalogue-star
+      // inspection or selection-clear.
 
-      if (candidate) {
-        const backgroundCamera = readBackgroundCamera();
-        const candidatePoint = getCandidateConstellationPoint(candidate, backgroundCamera);
-        const selectedAnchor = getSelectedLinkAnchor(candidatePoint) ?? getNearestUserStar(candidatePoint);
-        const selectedStarId = selectedUserStarIdRef.current;
-        if (coarsePointerRef.current && armedAddCandidateIdRef.current !== candidate.id) {
-          armedAddCandidateIdRef.current = candidate.id;
-          hoveredAddCandidateRef.current = candidate;
-          setHoveredAddCandidateId((current) => (current === candidate.id ? current : candidate.id));
-          setAddMessage("Tap the same star again to pull it in and open its details.");
-          return;
-        }
-
-        const inference = inferConstellationFaculty(candidatePoint);
-        addUserStar({
-          x: candidatePoint.x,
-          y: candidatePoint.y,
-          size: 0.82 + Math.random() * 0.55,
-          primaryDomainId: inference.primary.faculty.id,
-          relatedDomainIds: inference.bridgeSuggestion ? [inference.bridgeSuggestion.faculty.id] : undefined,
-          connectedUserStarIds: selectedAnchor ? [selectedAnchor.id] : undefined,
-          stage: "seed",
-        }).then((createdStar) => {
-          if (!createdStar) {
-            setAddMessage(
-              starLimit !== null && userStarsRef.current.length >= starLimit
-                ? `Star limit reached (${starLimit}/${starLimit}).`
-                : "Unable to place another star right now.",
-            );
-            return;
-          }
-
-          setAddMessage(null);
-          let message = "Star added to the constellation. Its details are open.";
-          if (selectedStarId && !selectedAnchor) {
-            message = "Star added to the constellation. The selected anchor was too far to link.";
-          } else if (selectedAnchor) {
-            message = "Star added and linked into the selected constellation branch.";
-          }
-          showToast({
-            dismissMs: 2400,
-            message,
-            tone: "default",
-          });
-          openStarDetails(createdStar, "new");
-          clearHoveredCandidate();
-        });
-        return;
-      }
-
-      // M12 Phase 1: no add-candidate + no node hit = check for a catalogue-
+      // M12 Phase 1: no node hit = check for a catalogue-
       // star hit (any star, addable or not). If present, open the Catalogue
       // Star Inspector. The addable path above is untouched — addable stars
       // preserve the existing immediate-promote / armed-tap UX; the inspector
@@ -5818,7 +5553,6 @@ export default function Home() {
             worldX: worldData.worldX,
             worldY: worldData.worldY,
           });
-          armedAddCandidateIdRef.current = null;
           if (currentSelectedStarId) {
             setSelectedUserStarId(null);
             setPendingDetailStar(null);
@@ -5828,7 +5562,6 @@ export default function Home() {
         }
       }
 
-      armedAddCandidateIdRef.current = null;
       if (currentSelectedStarId) {
         setSelectedUserStarId(null);
         setPendingDetailStar(null);
