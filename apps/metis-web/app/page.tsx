@@ -30,6 +30,7 @@ import {
 } from "@/components/constellation/catalogue-star-inspector";
 import { CatalogueFilterPanel } from "@/components/constellation/catalogue-filter-panel";
 import { HomeActionFab } from "@/components/home/home-action-fab";
+import { AddStarDialog, type AddDecision } from "@/components/home/add-star-dialog";
 import type { CatalogueFilterState } from "@/lib/star-catalogue";
 import {
   CATALOGUE_FILTER_DEFAULT,
@@ -1050,6 +1051,13 @@ export default function Home() {
   // catalogue search is no longer a separate affordance.
   const [fabOpen, setFabOpen] = useState(false);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  // M24 Phase 4 — AddStarDialog open state. Replaces the canvas-pick add
+  // affordance: clicking +Add now opens the content-first dialog instead
+  // of entering `tool === "add"` mode. The legacy canvas-pick branch
+  // (lines ~5610–5664 here, plus ADD_CANDIDATE_HIT_RADIUS_PX) is now
+  // unreachable but left in place per Phase 4 spec; Phase 6 deletes it.
+  // TODO(M24-Task-3.4 + Phase-6): remove tool === "add" branch + ADD_CANDIDATE_HIT_RADIUS_PX
+  const [addStarDialogOpen, setAddStarDialogOpen] = useState(false);
   const [catalogueFilterState, setCatalogueFilterState] = useState<CatalogueFilterState>(
     () => CATALOGUE_FILTER_DEFAULT,
   );
@@ -1339,6 +1347,79 @@ export default function Home() {
       },
     });
   }, [clusters, sessionDisableClusterPlacement, showToast, userStars.length]);
+
+  // M24 Phase 4 / Task 4.2 — onConfirm callback for AddStarDialog. The
+  // dialog is purely presentational; this is where side effects land.
+  //
+  //  - kind === "create_new": call addUserStar with a placeholder
+  //    coordinate (cluster placement will reposition it on next mount /
+  //    cluster refresh) and the user's suggested label.
+  //  - kind === "attach": no-op for the user-stars store today (the
+  //    backend index-build endpoints + manifest-attach are reachable
+  //    via the Star Observatory dialog and will be wired into this
+  //    callback when file-upload + buildIndexStream from this entry
+  //    point lands. For now the attach branch fires a toast so the
+  //    user sees acknowledgement; full attach-content integration is
+  //    Task 4.3 / file-extraction is Phase-6).
+  //
+  // Re-fetches clusters after a successful add so the new star animates
+  // into its cluster on the next render frame.
+  const handleAddStarConfirm = useCallback(
+    async (decision: AddDecision) => {
+      try {
+        if (decision.kind === "create_new") {
+          const label = decision.suggested_label?.trim() || undefined;
+          // Placeholder placement — cluster recompute will move it.
+          // Use a slight random offset so multiple new stars don't
+          // collide while the cluster fetch is in flight.
+          const created = await addUserStar({
+            x: 0.5 + (Math.random() - 0.5) * 0.04,
+            y: 0.5 + (Math.random() - 0.5) * 0.04,
+            size: 0.9,
+            label,
+            stage: "seed",
+          });
+          if (!created) {
+            showToast({
+              tone: "error",
+              message: "Couldn't add a new star — capacity reached or sync failed.",
+              dismissMs: 3000,
+            });
+            return;
+          }
+          showToast({
+            tone: "default",
+            message: `${created.label ?? "New star"} added to your constellation.`,
+            dismissMs: 2400,
+          });
+        } else {
+          // attach
+          showToast({
+            tone: "default",
+            message:
+              "Attached. Open the star to upload files or build its index.",
+            dismissMs: 2800,
+          });
+        }
+      } catch (error) {
+        showToast({
+          tone: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Add failed. Try again or open the star manually.",
+          dismissMs: 3200,
+        });
+      } finally {
+        // Refresh cluster placement so the new star (if any) snaps into
+        // its cluster on the next render. Best-effort — silent on error.
+        fetchStarClusters()
+          .then((next) => setClusters(next))
+          .catch(() => {/* keep existing layout */});
+      }
+    },
+    [addUserStar, showToast],
+  );
 
   useEffect(() => () => {
     if (starTooltipHideTimeoutRef.current !== null) {
@@ -5988,12 +6069,18 @@ export default function Home() {
           </button>
           <button
             type="button"
-            className={`metis-zoom-pill-btn metis-zoom-pill-tool-btn ${activeCanvasTool === "add" ? "is-active" : ""}`}
-            onClick={() => setActiveCanvasTool("add")}
+            // M24 Phase 4 / Task 4.2 — +Add now opens AddStarDialog instead
+            // of entering `tool === "add"` canvas-pick mode. The aria-pressed
+            // hookup against activeCanvasTool is preserved for the brief
+            // window between the dialog opening and Phase 6's cleanup of
+            // the canvas-pick path; the legacy mode is no longer reachable
+            // through the UI but the state plumbing still exists.
+            className={`metis-zoom-pill-btn metis-zoom-pill-tool-btn ${addStarDialogOpen ? "is-active" : ""}`}
+            onClick={() => setAddStarDialogOpen(true)}
             disabled={canvasInteractionsLocked}
-            aria-label="Add star tool"
-            aria-pressed={activeCanvasTool === "add"}
-            title="Add star — click an empty spot to place a new star"
+            aria-label="Add star"
+            aria-pressed={addStarDialogOpen}
+            title="Add a star — drop in content and let Metis place it"
           >
             +Add
           </button>
@@ -6288,6 +6375,16 @@ export default function Home() {
         searchOpen={semanticSearchExpanded}
         onSearchOpenChange={setSemanticSearchExpanded}
         showSearchSatellite={userStars.length > 0}
+      />
+
+      {/* M24 Phase 4 / Task 4.2 — content-first Add flow. The +Add
+          tool-pill in the zoom rail opens this dialog instead of the
+          legacy canvas-pick mode (which is now unreachable; Phase 6
+          deletes the dead code). */}
+      <AddStarDialog
+        open={addStarDialogOpen}
+        onOpenChange={setAddStarDialogOpen}
+        onConfirm={handleAddStarConfirm}
       />
     </>
   );
