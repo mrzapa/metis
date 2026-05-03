@@ -19,6 +19,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     deleteIndex: vi.fn(),
     fetchIndexes: vi.fn().mockResolvedValue([]),
     fetchSettings: vi.fn().mockResolvedValue({}),
+    fetchStarClusters: vi.fn().mockResolvedValue([]),
     updateSettings: vi.fn().mockResolvedValue({}),
     subscribeCompanionActivity: vi.fn((listener: (event: CompanionActivityEvent) => void) => {
       companionListeners.push(listener);

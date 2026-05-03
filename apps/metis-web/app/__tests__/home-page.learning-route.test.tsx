@@ -15,6 +15,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     ...actual,
     fetchIndexes: vi.fn().mockResolvedValue([]),
     fetchSettings: vi.fn().mockResolvedValue({}),
+    fetchStarClusters: vi.fn().mockResolvedValue([]),
     previewLearningRoute: vi.fn(),
     updateSettings: vi.fn().mockResolvedValue({}),
   };
