@@ -11,7 +11,8 @@ import {
 } from "@/components/library/nyx-shared";
 import { PageChrome } from "@/components/shell/page-chrome";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,

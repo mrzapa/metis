@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { buttonVariants } from "@/components/ui/button";
 import {
   buildNyxComponentHref,
   FEATURED_NYX_COMPONENTS,
 } from "@/components/library/nyx-shared";
+import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 
 export function NyxChatEntry() {

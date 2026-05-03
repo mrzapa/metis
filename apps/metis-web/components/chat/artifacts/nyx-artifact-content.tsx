@@ -4,7 +4,7 @@ import {
   getNyxComponentPreviewHref,
 } from "@/components/library/nyx-shared";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import type { NormalizedArrowArtifact } from "@/lib/artifacts/extract-arrow-artifacts";
 import { cn } from "@/lib/utils";
 
