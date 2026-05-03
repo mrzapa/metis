@@ -32,6 +32,7 @@ import pathlib
 import re
 import threading
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import metis_app.settings_store as _settings_store
@@ -444,23 +445,35 @@ class WorkspaceOrchestrator:
 
         # Per-index retrieval. Failures on a single index don't kill
         # the whole run — Everything chat is best-effort by design.
+        # Parallelised: query_rag is mostly I/O (HTTP to embedding +
+        # LLM services), so a thread pool keeps wall-clock at the
+        # slowest single index instead of summing across all of them.
+        capped_indexes = manifest_paths[:_EVERYTHING_CHAT_INDEX_CAP]
         per_index_results: list[RagQueryResult] = []
         per_index_errors: list[dict[str, Any]] = []
-        for manifest_path in manifest_paths[:_EVERYTHING_CHAT_INDEX_CAP]:
-            try:
-                per_index_results.append(
-                    query_rag(
+        if capped_indexes:
+            with ThreadPoolExecutor(
+                max_workers=min(len(capped_indexes), _EVERYTHING_CHAT_INDEX_CAP),
+            ) as executor:
+                futures = {
+                    executor.submit(
+                        query_rag,
                         RagQueryRequest(
                             manifest_path=manifest_path,
                             question=question,
                             settings=dict(resolved_settings),
+                        ),
+                    ): manifest_path
+                    for manifest_path in capped_indexes
+                }
+                for future in as_completed(futures):
+                    manifest_path = futures[future]
+                    try:
+                        per_index_results.append(future.result())
+                    except Exception as exc:  # pragma: no cover - defensive
+                        per_index_errors.append(
+                            {"manifest_path": str(manifest_path), "error": str(exc)},
                         )
-                    )
-                )
-            except Exception as exc:  # pragma: no cover - defensive
-                per_index_errors.append(
-                    {"manifest_path": str(manifest_path), "error": str(exc)},
-                )
 
         merged = _merge_everything_chat_sources(per_index_results)
 
