@@ -3086,6 +3086,17 @@ export async function fetchAssistantMemory(limit = 20): Promise<AssistantMemoryE
   return res.json();
 }
 
+export async function fetchAssistantPlaybooks(limit = 20): Promise<AssistantPlaybook[]> {
+  const res = await apiFetch(
+    `${await getApiBase()}/v1/assistant/playbooks?limit=${encodeURIComponent(String(limit))}`,
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to fetch assistant playbooks (${res.status}): ${detail}`);
+  }
+  return res.json();
+}
+
 export async function clearAssistantMemory(limit = 10): Promise<Record<string, unknown>> {
   const res = await apiFetch(`${await getApiBase()}/v1/assistant/memory?limit=${encodeURIComponent(String(limit))}`, {
     method: "DELETE",

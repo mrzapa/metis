@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import {
   fetchAssistant,
+  fetchAssistantMemory,
+  fetchAssistantPlaybooks,
   deleteAssistantMemoryEntry,
   deleteAssistantMemoryByKind,
   deleteAssistantMemoryOldest,
@@ -25,8 +27,22 @@ export function MemoryInspector() {
   async function refresh() {
     setLoad({ status: "loading" });
     try {
-      const snapshot = await fetchAssistant();
-      setLoad({ status: "ready", snapshot });
+      // The ``fetchAssistant`` snapshot truncates ``memory`` to 8
+      // entries and ``playbooks`` to 6 (sized for the dock). The
+      // inspector needs the *full* working set up to the policy cap so
+      // the at-cap banner, the entry count, and the per-kind grouping
+      // all reflect reality. Fetch the small fields (identity, policy,
+      // status) from the snapshot but pull memory/playbooks from the
+      // dedicated list endpoints with high limits.
+      const [snapshot, memory, playbooks] = await Promise.all([
+        fetchAssistant(),
+        fetchAssistantMemory(300),
+        fetchAssistantPlaybooks(200),
+      ]);
+      setLoad({
+        status: "ready",
+        snapshot: { ...snapshot, memory, playbooks },
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load memory.";
       setLoad({ status: "error", message });
@@ -109,12 +125,9 @@ export function MemoryInspector() {
     try {
       await deleteAssistantMemoryByKind(kind);
     } catch {
-      try {
-        const fresh = await fetchAssistant();
-        setLoad({ status: "ready", snapshot: fresh });
-      } catch {
-        /* give up */
-      }
+      // Restore the full list from the server if the bulk delete
+      // errored — we already optimistically removed the kind locally.
+      void refresh();
     }
   }
 
@@ -146,12 +159,9 @@ export function MemoryInspector() {
     } catch {
       // fall through to refetch anyway
     }
-    try {
-      const fresh = await fetchAssistant();
-      setLoad({ status: "ready", snapshot: fresh });
-    } catch {
-      // give up — user will see stale optimistic state
-    }
+    // Refresh from the dedicated list endpoints (not the truncated
+    // snapshot) so the inspector reflects the full post-delete state.
+    await refresh();
   }
 
   const maxEntries = snapshot.policy?.max_memory_entries ?? 200;

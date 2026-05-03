@@ -82,6 +82,11 @@ def list_assistant_memory(limit: int = 20) -> list[dict]:
     return WorkspaceOrchestrator().list_assistant_memory(limit=limit)
 
 
+@get("/v1/assistant/playbooks")
+def list_assistant_playbooks(limit: int = 20) -> list[dict]:
+    return WorkspaceOrchestrator().list_assistant_playbooks(limit=limit)
+
+
 @delete("/v1/assistant/memory", status_code=200)
 def clear_assistant_memory(limit: int = 10) -> dict:
     return WorkspaceOrchestrator().clear_assistant_memory(limit=limit)
@@ -228,6 +233,7 @@ router = Router(
         record_companion_reflection,
         bootstrap_assistant,
         list_assistant_memory,
+        list_assistant_playbooks,
         clear_assistant_memory,
         delete_memory_by_kind,
         # ``delete_memory_oldest`` MUST be registered before

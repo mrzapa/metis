@@ -40,8 +40,11 @@ vi.mock("@/lib/api", async () => {
   return {
     ...actual,
     fetchAssistant: vi.fn(async () => SNAPSHOT),
+    fetchAssistantMemory: vi.fn(async () => SNAPSHOT.memory),
+    fetchAssistantPlaybooks: vi.fn(async () => SNAPSHOT.playbooks),
     deleteAssistantMemoryEntry: vi.fn(async () => ({ ok: true })),
     deleteAssistantMemoryByKind: vi.fn(async () => ({ ok: true, deleted_count: 2 })),
+    deleteAssistantMemoryOldest: vi.fn(async () => ({ ok: true, deleted_count: 50 })),
     deleteAssistantPlaybook: vi.fn(async () => ({ ok: true })),
   };
 });
@@ -97,8 +100,25 @@ describe("MemoryInspector", () => {
       memory: [],
       playbooks: [],
     });
+    (
+      apiModule.fetchAssistantMemory as unknown as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce([]);
+    (
+      apiModule.fetchAssistantPlaybooks as unknown as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce([]);
     render(<MemoryInspector />);
     await waitFor(() => screen.getByText(/no reflections yet/i));
     expect(screen.getByRole("link", { name: /open a chat/i })).toHaveAttribute("href", "/chat");
+  });
+
+  it("loads the full memory and playbook lists, not the truncated snapshot", async () => {
+    const apiModule = await import("@/lib/api");
+    render(<MemoryInspector />);
+    await waitFor(() => screen.getByText("Note A"));
+    // The inspector must call the dedicated list endpoints with high
+    // limits so the full working set is available — not rely on
+    // ``fetchAssistant`` which truncates memory to 8 / playbooks to 6.
+    expect(apiModule.fetchAssistantMemory).toHaveBeenCalledWith(300);
+    expect(apiModule.fetchAssistantPlaybooks).toHaveBeenCalledWith(200);
   });
 });

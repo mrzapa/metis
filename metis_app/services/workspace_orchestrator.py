@@ -977,6 +977,12 @@ class WorkspaceOrchestrator:
             for item in self._assistant_service.repository.list_memory(limit=limit)
         ]
 
+    def list_assistant_playbooks(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        return [
+            item.to_payload()
+            for item in self._assistant_service.repository.list_playbooks(limit=limit)
+        ]
+
     def clear_assistant_memory(self, *, limit: int = 10) -> dict[str, Any]:
         return self._assistant_service.clear_recent_memory(limit=limit)
 
