@@ -106,7 +106,13 @@ export function MemoryInspector() {
       memory: prev.memory.filter((e) => e.entry_id !== entry.entry_id),
     }));
     try {
-      await deleteAssistantMemoryEntry(entry.entry_id);
+      const result = await deleteAssistantMemoryEntry(entry.entry_id);
+      if (!result.ok) {
+        // Server returned 200 + ``{ok: false}`` — the row didn't exist
+        // (concurrent-tab race or someone else already deleted it).
+        // Reconcile with the server so the UI doesn't diverge.
+        await refresh();
+      }
     } catch {
       setSnapshot((prev) => ({ ...prev, memory: [...prev.memory, entry] }));
     }
@@ -123,7 +129,14 @@ export function MemoryInspector() {
       memory: prev.memory.filter((e) => e.kind !== kind),
     }));
     try {
-      await deleteAssistantMemoryByKind(kind);
+      const result = await deleteAssistantMemoryByKind(kind);
+      // ``deleted_count: 0`` is the by-kind equivalent of
+      // ``{ok: false}``: the server says nothing matched, so something
+      // else (another tab, a background job) had already cleared the
+      // kind. Refetch to keep the inspector consistent with the server.
+      if (!result.ok || result.deleted_count === 0) {
+        await refresh();
+      }
     } catch {
       // Restore the full list from the server if the bulk delete
       // errored — we already optimistically removed the kind locally.
@@ -137,7 +150,11 @@ export function MemoryInspector() {
       playbooks: prev.playbooks.filter((p) => p.playbook_id !== pb.playbook_id),
     }));
     try {
-      await deleteAssistantPlaybook(pb.playbook_id);
+      const result = await deleteAssistantPlaybook(pb.playbook_id);
+      if (!result.ok) {
+        // Same race-with-the-server reconcile as for memory entries.
+        await refresh();
+      }
     } catch {
       setSnapshot((prev) => ({ ...prev, playbooks: [...prev.playbooks, pb] }));
     }

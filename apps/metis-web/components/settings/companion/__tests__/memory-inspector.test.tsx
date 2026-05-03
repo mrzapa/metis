@@ -121,4 +121,28 @@ describe("MemoryInspector", () => {
     expect(apiModule.fetchAssistantMemory).toHaveBeenCalledWith(300);
     expect(apiModule.fetchAssistantPlaybooks).toHaveBeenCalledWith(200);
   });
+
+  it("refetches when delete-entry returns {ok: false} (server says row was already gone)", async () => {
+    const apiModule = await import("@/lib/api");
+    // The server returns ``{ok: false}`` (200) when the row didn't
+    // exist — typically because another tab already deleted it. The
+    // inspector previously treated this as success and the UI ended
+    // up out of sync. It must refetch instead.
+    (apiModule.deleteAssistantMemoryEntry as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ok: false });
+    // Spy on the refetch path: ``fetchAssistantMemory`` is the
+    // dedicated list endpoint our refresh hits.
+    const memoryFetch = apiModule.fetchAssistantMemory as unknown as ReturnType<
+      typeof vi.fn
+    >;
+    render(<MemoryInspector />);
+    await waitFor(() => screen.getByText("Note A"));
+    const initialCalls = memoryFetch.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: /delete Note A/i }));
+
+    await waitFor(() => {
+      expect(memoryFetch.mock.calls.length).toBeGreaterThan(initialCalls);
+    });
+  });
 });
