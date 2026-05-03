@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (M24 design 2026-05-03)
 - **Date:** 2026-05-03
-- **Supersedes (partially):** [ADR 0006](0006-constellation-design-2d-primary.md) — the *faculty-anchor* placement decision specifically. ADR 0006's archetype system and tiered-naming policy are preserved.
+- **Supersedes (partially):** [ADR 0006](0006-constellation-design-2d-primary.md) — two sub-decisions are reversed: (1) the *faculty-anchor* placement decision; (2) the *landmark tier* of the tiered-naming policy. ADR 0006's archetype system and the field-star + user-content tiers of the naming policy are preserved.
 
 ## Context
 
@@ -82,7 +82,7 @@ The companion dock continues to host pure companion conversation (the WebGPU loc
 ## Constraints
 
 - Must preserve `StellarProfile` archetype system from ADR 0006 (content-type → visual archetype mapping).
-- Must preserve tiered-naming policy from ADR 0006 (field stars unnamed, landmarks classical-on-click only, user-content stars by user name).
+- ADR 0006's tiered-naming policy is **partially** preserved: field stars stay unnamed; user-content stars stay named by the user. The **landmark tier is retired** in M24 Phase 6 — there are no more named-landmark constellations (Perseus, Auriga, Draco, Hercules, Gemini, Big Dipper, Lyra, Boötes), and `star-name-generator.ts`'s `kind: "landmark"` branch is removed. The user-content + field-star portions of the tiered policy survive unchanged.
 - Must preserve Star Observatory dialog and its existing controls (archetype picker, learning-route panel, attached-indexes management).
 - Must preserve the companion dock and all its existing companion-chat surfaces.
 - Must work on mobile (single WebGL context preferred; Project lines render via canvas 2D overlay).
@@ -119,7 +119,7 @@ The companion dock continues to host pure companion conversation (the WebGPU loc
 **Preserved:**
 
 - `StellarProfile` archetype system, palette system, visual profiles, 2D shader family.
-- Tiered-naming policy from ADR 0006 (field stars unnamed, landmarks classical-on-click, user-content stars by user name).
+- The field-star and user-content tiers of ADR 0006's naming policy (field stars unnamed; user-content stars named by the user). The landmark tier is retired in M24 Phase 6 — see *Constraints*.
 - Star Observatory dialog and controls.
 - Companion dock and companion-chat surface.
 - Comet pipeline and news-comet visual rendering (M22 headline labels).
@@ -142,4 +142,4 @@ The companion dock continues to host pure companion conversation (the WebGPU loc
 - Force-directed layout convergence criteria.
 - Per-Project Forge inheritance UX (Reset-to-default vs tri-state).
 - Existing user-data migration — forced vs opt-in (default: forced with session-scoped undo).
-- Whether to also retire the 8 named landmark constellations (Perseus, Auriga, etc.) in M24 Phase 6 cleanup. Recommendation: yes; verify with user.
+- ~~Whether to also retire the 8 named landmark constellations (Perseus, Auriga, etc.) in M24 Phase 6 cleanup.~~ **Resolved:** yes, retired. User confirmed during the 2026-05-03 brainstorm that landmarks read as decorative AI slop. The Constraints section above and the M24 Phase 6 plan-doc step both reflect this decision.

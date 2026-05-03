@@ -48,8 +48,8 @@ Phase 1 — Backend clustering service. See *Phasing (M24)* in the design doc.
 
 ## Blockers
 
-- **Phase 6 retirement of named landmark constellations** needs user confirmation (see design doc *Open question 8*). Default recommendation: yes, retire — they're decorative and the user critique cited them as AI slop.
 - **Phase 3 migration of existing user data** — forced re-layout with session-scoped undo (see design doc *Open question 9*). Default: forced. Verify with user before locking.
+- *(Resolved 2026-05-03)* Phase 6 named-landmark retirement was a blocker; user approved during brainstorm and ADR 0019's *Open Questions* records the resolution. Phase 6 Task 6.3 proceeds without further confirmation.
 
 ## Notes for the next agent
 

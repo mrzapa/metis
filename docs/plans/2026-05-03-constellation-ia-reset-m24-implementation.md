@@ -924,7 +924,7 @@ Update tests in `star-observatory-dialog.test.tsx` to reflect the removed UI.
 
 **Spec:** Per ADR 0019 and the design doc *Open question 8*, the 8 classical-named landmark constellations (Perseus, Auriga, Draco, Hercules, Gemini, Big Dipper, Lyra, Boötes) are decorative leftovers from the faculty era. Retire their generation. The `kind: "landmark"` branch in `generateStarName` returns null or is removed.
 
-**Important:** verify with user via PR comment before merging this task. The design doc flags it as needing user confirmation.
+**Confirmation status:** user approved retirement during the 2026-05-03 brainstorm — see ADR 0019 *Open Questions* (resolved). Proceed without further confirmation.
 
 **Commit:** `refactor(m24): retire 8 classical landmark constellation names`
 
