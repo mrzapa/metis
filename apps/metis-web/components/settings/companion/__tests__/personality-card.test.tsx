@@ -37,4 +37,35 @@ describe("PersonalityCard", () => {
     expect(confirmSpy).toHaveBeenCalled();
     confirmSpy.mockRestore();
   });
+
+  it("auto-promotes tone_preset to 'custom' when legacy custom seed is loaded", async () => {
+    // Legacy data: ``tone_preset`` is the default "warm-curious" but
+    // ``prompt_seed`` is a user-authored override from the pre-M23 free
+    // text UI. The card should normalise ``tone_preset`` to "custom" on
+    // mount so the radio, preview, and backend resolver agree.
+    render(
+      <Harness
+        initial={{
+          tone_preset: "warm-curious",
+          prompt_seed: "Old free-text seed from before M23.",
+        }}
+      />,
+    );
+    const customRadio = await screen.findByRole("radio", { name: /custom/i });
+    expect(customRadio).toBeChecked();
+  });
+
+  it("shows the custom seed in the preview, not the canonical preset", () => {
+    render(
+      <Harness
+        initial={{
+          tone_preset: "warm-curious",
+          prompt_seed: "Old free-text seed from before M23.",
+        }}
+      />,
+    );
+    expect(screen.getByTestId("resolved-seed-preview")).toHaveTextContent(
+      "Old free-text seed from before M23.",
+    );
+  });
 });

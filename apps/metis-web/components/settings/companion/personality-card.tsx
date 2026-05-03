@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { UseFormReturn } from "react-hook-form";
 import type { AssistantFormValues } from "@/app/settings/page";
 import { FieldLabel } from "@/app/settings/page";
@@ -21,6 +21,23 @@ export function PersonalityCard({ form }: Props) {
   const tonePreset = (form.watch("assistant_identity.tone_preset") ?? "warm-curious") as TonePreset;
   const promptSeed = form.watch("assistant_identity.prompt_seed") ?? "";
   const [showOverride, setShowOverride] = useState(false);
+
+  // One-time normalisation: if the loaded values describe a custom seed
+  // but ``tone_preset`` still names a built-in preset (typical of data
+  // saved from the pre-M23 free-text UI, where ``tone_preset`` defaults
+  // to "warm-curious" while ``prompt_seed`` carries the user's
+  // override), promote ``tone_preset`` to "custom" so the radio, the
+  // resolved-seed preview, and the backend's ``resolve_prompt_seed``
+  // path all agree. Marks the form dirty so the user is prompted to
+  // save the migrated state — that's the desired surfacing.
+  useEffect(() => {
+    if (tonePreset !== "custom" && isCustomSeed(tonePreset, promptSeed)) {
+      form.setValue("assistant_identity.tone_preset", "custom", { shouldDirty: true });
+    }
+    // Run once on mount only — guard against feedback loops between
+    // ``tonePreset`` updates and the watch above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function handlePresetChange(next: TonePreset) {
     const currentlyCustom = isCustomSeed(tonePreset, promptSeed);
@@ -47,10 +64,16 @@ export function PersonalityCard({ form }: Props) {
     }
   }
 
-  const resolvedSeed =
-    tonePreset === "custom"
-      ? promptSeed
-      : TONE_PRESETS[tonePreset] ?? TONE_PRESETS["warm-curious"];
+  // Mirror the backend's ``resolve_prompt_seed`` rule: if the stored
+  // ``prompt_seed`` is a user override (custom tone OR a non-matching
+  // free-text seed that legacy data may carry) the override wins.
+  // Otherwise fall back to the canonical preset text. Keeps the
+  // preview, the form state, and the backend resolver in agreement so
+  // the user sees what the AI will actually run on.
+  const isCustom = isCustomSeed(tonePreset, promptSeed);
+  const resolvedSeed = isCustom
+    ? promptSeed
+    : TONE_PRESETS[tonePreset] ?? TONE_PRESETS["warm-curious"];
 
   return (
     <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
