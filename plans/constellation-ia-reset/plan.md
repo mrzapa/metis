@@ -1,8 +1,8 @@
 ---
 Milestone: M24 — Faculty UI purge + content-first IA + Add flow + Everything chat
-Status: Ready for review
-Claim: claude/m24-impl (all 6 phases shipped via 30+ commits — Phase 1 backend clustering + Phase 2 backend recommender + Phase 3 frontend cluster placement + Phase 4 AddStarDialog + Phase 5 EverythingChatSheet + Phase 6 cleanup; Task 3.4 partial cleanup landed in Phase 4 stretch; remaining faculty-ring rendering preserved for comet/RAG/focus consumers until M26)
-Last updated: 2026-05-03 by claude/m24-impl
+Status: Landed
+Claim: Landed via PR #614 (0cf696ae, 2026-05-03) — 41 commits, 6 phases + 6 review-response commits + Phase-4 stretch (showConceptAtNode + activeNodeRef cleanup). Faculty-ring rendering preserved for comet/RAG/focus consumers until M26.
+Last updated: 2026-05-03 by claude/m24-landed-status
 Vision pillar: Cosmos
 TDD Mode: pragmatic
 ---
