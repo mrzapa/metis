@@ -644,7 +644,14 @@ The orchestrator wrapper `recommend_stars_for_content`:
 3. Calls `StarRecommenderService.rank(...)`.
 4. Returns `{"recommendations": [{star_id, similarity, label, archetype}, ...], "create_new_suggested": bool}`.
 
-`create_new_suggested` is `True` if top similarity is below 0.5 (threshold for "no good match").
+`create_new_suggested` is `True` when there are no existing stars, OR when the top match's adjusted similarity is below `_CREATE_NEW_THRESHOLD` (currently `0.5` — the threshold for "no good match"). Concretely:
+
+```python
+create_new_suggested = bool(
+    not recommendations
+    or recommendations[0].similarity < _CREATE_NEW_THRESHOLD
+)
+```
 
 **Step 1–5:** RED → write `recommend_stars_for_content` orchestrator method + route → GREEN → commit.
 

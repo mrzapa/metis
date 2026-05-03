@@ -52,8 +52,8 @@ def test_rank_content_type_tiebreak():
         "doc_b": np.array([1.0, 0.0]),
     }
     star_metadata = {
-        "doc_a": {"label": "Doc A", "archetype": "main_sequence"},
-        "doc_b": {"label": "Doc B", "archetype": "pulsar"},
+        "doc_a": {"label": "Doc A", "archetype": "main_sequence"},  # paper
+        "doc_b": {"label": "Doc B", "archetype": "pulsar"},  # podcast
     }
     query = np.array([1.0, 0.0])
 
