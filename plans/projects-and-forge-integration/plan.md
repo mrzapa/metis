@@ -45,6 +45,11 @@ Wait for M24 to land. Then Phase 1 — Backend Project schema + repo.
 
 ## Notes for the next agent
 
+- **Settings-store vs SQLite for Projects** — Phase 4 of M24 confirmed user stars persist via the settings store (`landing_constellation_user_stars` key, JSON blob in `metis_app/settings_store.py`), not via separate `/v1/stars` CRUD endpoints. The M25 design assumed Projects would be SQLite-backed first-class entities. Two options to revisit before M25 starts:
+  1. Keep SQLite for Projects (different pattern from user stars; adds CRUD endpoints + repository).
+  2. Mirror the user-star pattern — store Projects as `metis_projects` array under settings store (similar shape, simpler infra, but harder to support per-project chat history if the array grows beyond a few hundred entries).
+
+  The size argument matters most: per-project chat histories don't fit cleanly into a settings JSON blob. Lean toward option 1 (SQLite) for the persistence layer, but consider migrating user stars to SQLite at the same time for consistency. **Decision deferred to M25 brainstorm; not blocking for M24 closure.**
 - **Project = saved selection, not separate workspace.** Don't add project-owned uploads or a separate index. Stars own content; Projects are filters.
 - **Click-to-select, not drag-to-draw.** User explicitly chose this in the brainstorm. The line is the *result* of confirm, not the gesture.
 - **Per-Project Forge inheritance** uses a Reset-to-default link per technique, not a tri-state checkbox (see design doc *Open question 7*).

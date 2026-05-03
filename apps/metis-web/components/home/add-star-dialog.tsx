@@ -219,6 +219,7 @@ export function AddStarDialog({ open, onOpenChange, onConfirm }: Props) {
                   size="sm"
                   variant="secondary"
                   disabled={submitting}
+                  aria-label={`Attach to ${rec.label || rec.star_id} (${Math.round(rec.similarity * 100)}% similarity)`}
                   onClick={() => handleAttach(rec)}
                 >
                   Attach
