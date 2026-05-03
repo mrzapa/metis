@@ -47,7 +47,7 @@ import { useConstellationCamera } from "@/hooks/use-constellation-camera";
 import { useStarFocusPhase, type StarFocusPhase } from "@/hooks/use-star-focus-phase";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
 import { useCometNews } from "@/hooks/use-news-comets";
-import { deleteIndex, fetchBrainScaffold, fetchIndexes, fetchSettings, fetchStarClusters, previewLearningRoute, subscribeCompanionActivity } from "@/lib/api";
+import { buildIndexStream, deleteIndex, fetchBrainScaffold, fetchIndexes, fetchSettings, fetchStarClusters, previewLearningRoute, subscribeCompanionActivity, uploadFiles } from "@/lib/api";
 import type { BrainScaffoldEdge, BrainScaffoldResponse, StarClusterAssignment } from "@/lib/api";
 import { noise2D } from "@/lib/simplex-noise";
 import gsap from "gsap";
@@ -1348,30 +1348,48 @@ export default function Home() {
     });
   }, [clusters, sessionDisableClusterPlacement, showToast, userStars.length]);
 
-  // M24 Phase 4 / Task 4.2 — onConfirm callback for AddStarDialog. The
-  // dialog is purely presentational; this is where side effects land.
+  // M24 Phase 4 / Task 4.2 + 4.3 — onConfirm callback for AddStarDialog.
+  // The dialog is purely presentational; this is where side effects land.
   //
-  //  - kind === "create_new": call addUserStar with a placeholder
-  //    coordinate (cluster placement will reposition it on next mount /
-  //    cluster refresh) and the user's suggested label.
-  //  - kind === "attach": no-op for the user-stars store today (the
-  //    backend index-build endpoints + manifest-attach are reachable
-  //    via the Star Observatory dialog and will be wired into this
-  //    callback when file-upload + buildIndexStream from this entry
-  //    point lands. For now the attach branch fires a toast so the
-  //    user sees acknowledgement; full attach-content integration is
-  //    Task 4.3 / file-extraction is Phase-6).
+  //  - kind === "create_new": addUserStar with a placeholder coordinate
+  //    (cluster recompute repositions it on the next refresh) and the
+  //    user's suggested label. If files are attached, upload + build an
+  //    index for them and link the resulting manifest to the new star.
+  //  - kind === "attach": if files are attached, upload + build an
+  //    index and append the manifest path to the target star's
+  //    linkedManifestPaths via updateUserStarById. If only text was
+  //    provided, no backend round-trip is needed today (the recommender
+  //    already routed the text to the right star; we just record the
+  //    intent in a toast).
+  //
+  // Task 4.3 confirmed the existing endpoints (POST /v1/files/upload,
+  // POST /v1/index/build/stream, settings-store user-stars sync) cover
+  // this flow with no new backend routes required. Tests for the
+  // backend round-trip live alongside the Star Observatory dialog
+  // which exercises the same pipeline.
   //
   // Re-fetches clusters after a successful add so the new star animates
   // into its cluster on the next render frame.
   const handleAddStarConfirm = useCallback(
     async (decision: AddDecision) => {
       try {
+        // Helper — upload files + build an index, returning the new
+        // manifest path. Returns null if no files were attached.
+        async function buildIndexFromFiles(): Promise<string | null> {
+          if (decision.files.length === 0) return null;
+          const { paths } = await uploadFiles(decision.files);
+          if (paths.length === 0) return null;
+          const settings = await fetchSettings();
+          const result = await buildIndexStream(paths, settings, () => {
+            // No streaming UI on this surface — events are already
+            // emitted as companion activity by buildIndexStream itself.
+          });
+          return result.manifest_path;
+        }
+
         if (decision.kind === "create_new") {
           const label = decision.suggested_label?.trim() || undefined;
           // Placeholder placement — cluster recompute will move it.
-          // Use a slight random offset so multiple new stars don't
-          // collide while the cluster fetch is in flight.
           const created = await addUserStar({
             x: 0.5 + (Math.random() - 0.5) * 0.04,
             y: 0.5 + (Math.random() - 0.5) * 0.04,
@@ -1387,19 +1405,46 @@ export default function Home() {
             });
             return;
           }
+          const manifestPath = await buildIndexFromFiles();
+          if (manifestPath) {
+            await updateUserStarById(created.id, {
+              linkedManifestPaths: [manifestPath],
+              activeManifestPath: manifestPath,
+            });
+          }
           showToast({
             tone: "default",
-            message: `${created.label ?? "New star"} added to your constellation.`,
+            message: manifestPath
+              ? `${created.label ?? "New star"} added with attached index.`
+              : `${created.label ?? "New star"} added to your constellation.`,
             dismissMs: 2400,
           });
         } else {
-          // attach
-          showToast({
-            tone: "default",
-            message:
-              "Attached. Open the star to upload files or build its index.",
-            dismissMs: 2800,
-          });
+          // attach — append a new index to the target star, if files exist.
+          const manifestPath = await buildIndexFromFiles();
+          if (manifestPath) {
+            const target = userStarsRef.current.find(
+              (star) => star.id === decision.star_id,
+            );
+            const previousPaths = target?.linkedManifestPaths ?? [];
+            const dedup = previousPaths.filter((p) => p !== manifestPath);
+            await updateUserStarById(decision.star_id, {
+              linkedManifestPaths: [...dedup, manifestPath],
+              activeManifestPath: manifestPath,
+            });
+            showToast({
+              tone: "default",
+              message: "Content attached and indexed onto the star.",
+              dismissMs: 2400,
+            });
+          } else {
+            showToast({
+              tone: "default",
+              message:
+                "Attached. Open the star to upload files or build its index.",
+              dismissMs: 2800,
+            });
+          }
         }
       } catch (error) {
         showToast({
@@ -1418,7 +1463,7 @@ export default function Home() {
           .catch(() => {/* keep existing layout */});
       }
     },
-    [addUserStar, showToast],
+    [addUserStar, showToast, updateUserStarById],
   );
 
   useEffect(() => () => {
