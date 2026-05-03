@@ -11,7 +11,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BorderBeam } from "@/components/ui/border-beam";
 import { AnimatedLucideIcon } from "@/components/ui/animated-lucide-icon";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PageChrome } from "@/components/shell/page-chrome";
@@ -27,6 +26,7 @@ import {
   updateSettings,
   type AssistantSettings,
 } from "@/lib/api";
+import { TONE_PRESETS } from "@/lib/companion-voice";
 import { AlertCircle, CheckCircle2, ChevronDown, HelpCircle, Info, Loader2, RotateCcw, Search, TriangleAlert } from "lucide-react";
 import { useArrowState } from "@/hooks/use-arrow-state";
 
@@ -153,8 +153,7 @@ const ASSISTANT_DEFAULT_VALUES: AssistantFormValues = {
     archetype: "Local-first research companion",
     companion_enabled: true,
     greeting: "I can help you get started, reflect on completed work, and map what I learn in the Brain view.",
-    prompt_seed:
-      "You are METIS, a local-first companion who helps the user get oriented, suggests next steps, and records concise reflections without taking over the main chat.",
+    prompt_seed: TONE_PRESETS["warm-curious"],
     docked: true,
     minimized: false,
     tone_preset: "warm-curious",
