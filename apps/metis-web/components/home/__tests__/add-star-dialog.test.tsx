@@ -122,6 +122,56 @@ describe("AddStarDialog", () => {
     });
   });
 
+  it("clamps out-of-range similarity values to [0, 100]% in label and aria-label", async () => {
+    // StarRecommenderService can emit similarities slightly above 1.0 due to
+    // content-type / project-member boosts, and degenerate embedders can
+    // surface negative cosines. Both must clamp before render.
+    mockedRecommend.mockResolvedValueOnce(
+      makeRecommendResponse({
+        recommendations: [
+          {
+            star_id: "star-high",
+            similarity: 1.5,
+            label: "Boosted match",
+            archetype: "main_sequence",
+          },
+          {
+            star_id: "star-neg",
+            similarity: -0.12,
+            label: "Negative match",
+            archetype: "main_sequence",
+          },
+        ],
+      }),
+    );
+
+    render(
+      <AddStarDialog open onOpenChange={() => {}} onConfirm={async () => {}} />,
+    );
+
+    fireEvent.change(screen.getByTestId("add-star-dialog-textarea"), {
+      target: { value: "any seed" },
+    });
+    fireEvent.click(screen.getByTestId("add-star-dialog-next"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("add-star-dialog-rec-star-high")).toBeInTheDocument();
+    });
+
+    // Visible label is clamped to 100% (not 150%).
+    const highCard = screen.getByTestId("add-star-dialog-rec-star-high");
+    expect(highCard.textContent).toContain("similarity 100%");
+    // aria-label on the Attach button mirrors the clamped value.
+    const highButton = highCard.querySelector("button");
+    expect(highButton?.getAttribute("aria-label")).toContain("(100% similarity)");
+
+    // Negative similarities clamp to 0%.
+    const negCard = screen.getByTestId("add-star-dialog-rec-star-neg");
+    expect(negCard.textContent).toContain("similarity 0%");
+    const negButton = negCard.querySelector("button");
+    expect(negButton?.getAttribute("aria-label")).toContain("(0% similarity)");
+  });
+
   it("clicking Create on the create-new card calls onConfirm with kind=create_new", async () => {
     mockedRecommend.mockResolvedValueOnce(makeRecommendResponse());
     const decisions: AddDecision[] = [];

@@ -84,6 +84,10 @@ export function AddStarDialog({ open, onOpenChange, onConfirm }: Props) {
     setError(null);
     setLoadingRecs(true);
     try {
+      // TODO(M25 polish): when only files are uploaded (no pasted text), the
+      // recommender currently embeds the raw filename as the seed, which produces
+      // noisy similarity scores. Read the first ~1KB of text-like files for a
+      // better seed, or skip the recommend call and default to Create-new.
       const seedText = content.trim().length > 0 ? content : files[0]?.name ?? "";
       const result = await recommendStarsForContent(seedText);
       setRecommendations(result.recommendations);
@@ -198,34 +202,47 @@ export function AddStarDialog({ open, onOpenChange, onConfirm }: Props) {
             className="flex flex-wrap gap-3"
             data-testid="add-star-dialog-suggestions"
           >
-            {recommendations.map((rec) => (
-              <div
-                key={rec.star_id}
-                className="flex w-[200px] flex-col gap-2 rounded-2xl border border-white/10 bg-white/5 p-3"
-                data-testid={`add-star-dialog-rec-${rec.star_id}`}
-              >
-                <div className="flex flex-col gap-1">
-                  <span className="font-medium text-white">
-                    {rec.label || rec.star_id}
-                  </span>
-                  <span className="text-xs text-slate-400">
-                    {rec.archetype || "—"}
-                  </span>
-                  <span className="text-xs text-slate-500">
-                    similarity {(rec.similarity * 100).toFixed(0)}%
-                  </span>
-                </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={submitting}
-                  aria-label={`Attach to ${rec.label || rec.star_id} (${Math.round(rec.similarity * 100)}% similarity)`}
-                  onClick={() => handleAttach(rec)}
+            {recommendations.map((rec) => {
+              // Cosine similarity is mathematically in [-1, 1]. Backend
+              // boosts (content-type +0.001, project-member +0.01) push
+              // the upper bound a hair above 1.0, and recombination
+              // / quirky embedders can occasionally surface negative
+              // values too. Clamp before rendering so the user never
+              // sees "-12% similarity" or "101% similarity" in either
+              // the visible label or the aria-label.
+              const displayPct = Math.max(
+                0,
+                Math.min(100, Math.round(rec.similarity * 100)),
+              );
+              return (
+                <div
+                  key={rec.star_id}
+                  className="flex w-[200px] flex-col gap-2 rounded-2xl border border-white/10 bg-white/5 p-3"
+                  data-testid={`add-star-dialog-rec-${rec.star_id}`}
                 >
-                  Attach
-                </Button>
-              </div>
-            ))}
+                  <div className="flex flex-col gap-1">
+                    <span className="font-medium text-white">
+                      {rec.label || rec.star_id}
+                    </span>
+                    <span className="text-xs text-slate-400">
+                      {rec.archetype || "—"}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      similarity {displayPct}%
+                    </span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={submitting}
+                    aria-label={`Attach to ${rec.label || rec.star_id} (${displayPct}% similarity)`}
+                    onClick={() => handleAttach(rec)}
+                  >
+                    Attach
+                  </Button>
+                </div>
+              );
+            })}
             <div
               className="flex w-[200px] flex-col gap-2 rounded-2xl border border-primary/40 bg-primary/10 p-3"
               data-testid="add-star-dialog-create-new"
