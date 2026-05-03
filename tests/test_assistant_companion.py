@@ -924,3 +924,232 @@ def test_delete_playbook_round_trip(tmp_path) -> None:
 def test_delete_playbook_missing_id_returns_false(tmp_path) -> None:
     repo = AssistantRepository(tmp_path / "assistant_state.json")
     assert repo.delete_playbook("not-real") is False
+
+
+# ---------------------------------------------------------------------------
+# M23 Phase 2 — AssistantCompanion delete methods (status-coherence layer)
+# ---------------------------------------------------------------------------
+
+
+def _seed_status_summary(repo: AssistantRepository, summary: str, why: str = "") -> None:
+    """Set status.latest_summary / latest_why directly. Mirrors the
+    pattern used by reflect() to seed status before testing."""
+    status = repo.get_status()
+    status.latest_summary = summary
+    status.latest_why = why
+    repo.update_status(status)
+
+
+def test_companion_delete_memory_entry_clears_latest_summary_when_head(
+    tmp_path,
+) -> None:
+    """Deleting the only memory entry must clear status.latest_summary
+    so the dock no longer shows a summary backed by a row that no
+    longer exists."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "head-1",
+                "created_at": "2026-05-03T10:00:00Z",
+                "kind": "reflection",
+                "title": "Head reflection",
+                "summary": "Most recent thought.",
+                "why": "Because of the latest run.",
+            }
+        )
+    )
+    _seed_status_summary(repo, "Most recent thought.", "Because of the latest run.")
+
+    result = service.delete_memory_entry("head-1")
+    assert result == {"ok": True}
+
+    status_after = repo.get_status()
+    assert status_after.latest_summary == ""
+    assert status_after.latest_why == ""
+
+
+def test_companion_delete_memory_entry_refreshes_to_next_when_head_removed(
+    tmp_path,
+) -> None:
+    """When the head entry is removed and another entry remains,
+    status.latest_summary must be refreshed to the new head's summary."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "older",
+                "created_at": "2026-05-03T09:00:00Z",
+                "kind": "reflection",
+                "title": "Older",
+                "summary": "An older thought.",
+                "why": "older why",
+            }
+        )
+    )
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "head",
+                "created_at": "2026-05-03T10:00:00Z",
+                "kind": "reflection",
+                "title": "Head",
+                "summary": "The newest thought.",
+                "why": "newest why",
+            }
+        )
+    )
+    _seed_status_summary(repo, "The newest thought.", "newest why")
+
+    service.delete_memory_entry("head")
+
+    status_after = repo.get_status()
+    assert status_after.latest_summary == "An older thought."
+    assert status_after.latest_why == "older why"
+
+
+def test_companion_delete_memory_entry_preserves_status_when_not_head(
+    tmp_path,
+) -> None:
+    """Deleting a non-head entry must leave status.latest_summary
+    pointing at the still-current head."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "older",
+                "created_at": "2026-05-03T09:00:00Z",
+                "kind": "reflection",
+                "title": "Older",
+                "summary": "An older thought.",
+                "why": "older why",
+            }
+        )
+    )
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "head",
+                "created_at": "2026-05-03T10:00:00Z",
+                "kind": "reflection",
+                "title": "Head",
+                "summary": "The newest thought.",
+                "why": "newest why",
+            }
+        )
+    )
+    _seed_status_summary(repo, "The newest thought.", "newest why")
+
+    service.delete_memory_entry("older")
+
+    status_after = repo.get_status()
+    # Status still mirrors the (still-present) head entry.
+    assert status_after.latest_summary == "The newest thought."
+    assert status_after.latest_why == "newest why"
+
+
+def test_companion_delete_memory_entry_missing_id_skips_status_refresh(
+    tmp_path,
+) -> None:
+    """A no-op delete (missing id) must not touch the status mirror."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    _seed_status_summary(repo, "Pinned summary.", "Pinned why.")
+
+    result = service.delete_memory_entry("does-not-exist")
+    assert result == {"ok": False}
+
+    status_after = repo.get_status()
+    assert status_after.latest_summary == "Pinned summary."
+    assert status_after.latest_why == "Pinned why."
+
+
+def test_companion_delete_memory_by_kind_refreshes_when_head_in_kind(
+    tmp_path,
+) -> None:
+    """Deleting a kind that includes the most-recent entry must
+    refresh status.latest_summary to the next-most-recent surviving
+    entry's summary (or empty if none)."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "skill-older",
+                "created_at": "2026-05-03T08:00:00Z",
+                "kind": "skill",
+                "title": "Skill older",
+                "summary": "Skill summary that survives.",
+                "why": "skill why",
+            }
+        )
+    )
+    repo.add_memory_entry(
+        AssistantMemoryEntry.from_payload(
+            {
+                "entry_id": "reflection-head",
+                "created_at": "2026-05-03T10:00:00Z",
+                "kind": "reflection",
+                "title": "Reflection head",
+                "summary": "Reflection that gets nuked.",
+                "why": "reflection why",
+            }
+        )
+    )
+    _seed_status_summary(
+        repo,
+        "Reflection that gets nuked.",
+        "reflection why",
+    )
+
+    result = service.delete_memory_by_kind("reflection")
+    assert result == {"ok": True, "deleted_count": 1}
+
+    status_after = repo.get_status()
+    # The surviving skill entry now backs the status mirror.
+    assert status_after.latest_summary == "Skill summary that survives."
+    assert status_after.latest_why == "skill why"
+
+
+def test_companion_delete_memory_by_kind_no_matches_skips_status_refresh(
+    tmp_path,
+) -> None:
+    """deleted_count == 0 must not touch the status mirror — the
+    refresh path is gated on a real deletion having happened."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    _seed_status_summary(repo, "Pinned summary.", "Pinned why.")
+
+    result = service.delete_memory_by_kind("no-such-kind")
+    assert result == {"ok": True, "deleted_count": 0}
+
+    status_after = repo.get_status()
+    assert status_after.latest_summary == "Pinned summary."
+    assert status_after.latest_why == "Pinned why."
+
+
+def test_companion_delete_playbook_does_not_touch_status(tmp_path) -> None:
+    """Playbook delete must NOT refresh the status mirror — status
+    mirrors the most-recent memory entry, not playbooks."""
+    repo = AssistantRepository(tmp_path / "assistant_state.json")
+    service = AssistantCompanionService(repository=repo)
+
+    pb = AssistantPlaybook.create(title="t", bullets=["a", "b"])
+    repo.add_playbook(pb)
+    _seed_status_summary(repo, "Pinned summary.", "Pinned why.")
+
+    result = service.delete_playbook(pb.playbook_id)
+    assert result == {"ok": True}
+
+    status_after = repo.get_status()
+    assert status_after.latest_summary == "Pinned summary."
+    assert status_after.latest_why == "Pinned why."

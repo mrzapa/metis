@@ -136,6 +136,55 @@ class AssistantCompanionService:
         snapshot["removed_count"] = removed
         return snapshot
 
+    def delete_memory_entry(self, entry_id: str) -> dict[str, Any]:
+        """Delete one memory entry and refresh status mirror if needed.
+
+        Mirrors the status-coherence behaviour of
+        :meth:`clear_recent_memory`: if the deleted entry was backing
+        ``AssistantStatus.latest_summary`` / ``latest_why``, re-derive
+        those fields from the new most-recent entry (or clear them if
+        memory is now empty)."""
+        ok = self.repository.delete_memory_entry(entry_id)
+        if ok:
+            self._refresh_status_summary_after_memory_change()
+        return {"ok": ok}
+
+    def delete_memory_by_kind(self, kind: str) -> dict[str, Any]:
+        """Delete all memory entries of a kind and refresh status mirror.
+
+        If any entries were deleted we refresh — the deletion may have
+        included the head entry that ``status.latest_summary`` was
+        mirroring."""
+        deleted = self.repository.delete_memory_by_kind(kind)
+        if deleted > 0:
+            self._refresh_status_summary_after_memory_change()
+        return {"ok": True, "deleted_count": deleted}
+
+    def delete_playbook(self, playbook_id: str) -> dict[str, Any]:
+        """Delete one playbook. Status mirror is independent of
+        playbooks, so no refresh is needed."""
+        ok = self.repository.delete_playbook(playbook_id)
+        return {"ok": ok}
+
+    def _refresh_status_summary_after_memory_change(self) -> None:
+        """Re-derive ``latest_summary`` / ``latest_why`` from the head
+        of memory (or clear them if memory is empty).
+
+        Mirrors the status-update style used by
+        :meth:`clear_recent_memory`: read status, mutate the two
+        mirror fields, write status back through
+        ``repository.update_status``."""
+        recent = self.repository.list_memory(limit=1)
+        status = self.repository.get_status()
+        if recent:
+            head = recent[0]
+            status.latest_summary = head.summary
+            status.latest_why = head.why
+        else:
+            status.latest_summary = ""
+            status.latest_why = ""
+        self.repository.update_status(status)
+
     def bootstrap_runtime(
         self,
         *,
