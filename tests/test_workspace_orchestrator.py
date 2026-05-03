@@ -8,6 +8,7 @@ mock objects so that no real disk I/O or LLM calls are made.
 
 from __future__ import annotations
 
+import random
 from typing import Any
 from unittest.mock import ANY, MagicMock, patch
 
@@ -2255,7 +2256,7 @@ class _FakeEmbedder:
         out: list[list[float]] = []
         for text in texts:
             seed = abs(hash(text)) & 0xFFFFFFFF
-            rng = __import__("random").Random(seed)
+            rng = random.Random(seed)
             out.append([rng.uniform(-1.0, 1.0) for _ in range(8)])
         return out
 
@@ -2267,11 +2268,6 @@ def test_get_star_clusters_returns_one_per_star(monkeypatch: pytest.MonkeyPatch)
     ``cluster_id``, ``x``, ``y``, ``cluster_label``) that the
     ``GET /v1/stars/clusters`` route surfaces to the frontend.
     """
-    monkeypatch.setattr(
-        "metis_app.services.workspace_orchestrator.create_embeddings",
-        lambda _settings: _FakeEmbedder(),
-        raising=False,
-    )
     monkeypatch.setattr(
         "metis_app.utils.embedding_providers.create_embeddings",
         lambda _settings: _FakeEmbedder(),

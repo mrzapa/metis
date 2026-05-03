@@ -25,6 +25,7 @@ Subsystems composed here
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import pathlib
@@ -740,8 +741,6 @@ class WorkspaceOrchestrator:
         ``cluster_id``, ``x``, ``y``, ``cluster_label`` — JSON-friendly
         for the ``GET /v1/stars/clusters`` route. Empty input -> ``[]``.
         """
-        import hashlib
-
         user_stars = list(settings.get("landing_constellation_user_stars") or [])
         if not user_stars:
             return []
