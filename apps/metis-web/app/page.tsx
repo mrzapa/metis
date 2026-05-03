@@ -177,11 +177,12 @@ import type {
 // M24 Phase 3 — when true, user stars are placed using embedding-cluster
 // projections fetched from `GET /v1/stars/clusters`. When false, the
 // legacy faculty-anchored layout is used. TODO(M24-Task-3.4, deferred to
-// post-Phase-4): once `AddStarDialog` lands and the 5 verified-TRUE
-// faculty-anchor consumers (comet targeting, RAG pulse highlighting,
-// showConceptAtNode click-to-add, focus camera + brain-graph activity,
-// buildFacultyAnchoredPlacement seed) are migrated, delete this flag and
-// the entire `FACULTY_CONCEPTS` placement path.
+// Phase 6): the click-to-add consumer (`showConceptAtNode`) was retired
+// in Phase 4 stretch when `AddStarDialog` covered the same affordance.
+// Four consumers remain (comet targeting, RAG pulse highlighting, focus
+// camera + brain-graph activity, buildFacultyAnchoredPlacement seed) —
+// once those migrate, delete this flag and the entire `FACULTY_CONCEPTS`
+// placement path.
 const USE_CLUSTER_PLACEMENT = true;
 
 // Cluster coordinates from the backend are in [-1, 1] centred on the
@@ -2784,24 +2785,12 @@ export default function Home() {
       return hit;
     }
 
-    function showConceptAtNode(idx: number) {
-      activeNodeRef.current = idx;
-      const c = nodes[idx].concept;
-      const conceptPoint: Point = { x: c.faculty.x, y: c.faculty.y };
-      const autoAnchor = getNearestUserStar(conceptPoint);
-      void addUserStar({
-        x: c.faculty.x,
-        y: c.faculty.y,
-        size: 0.82 + Math.random() * 0.55,
-        primaryDomainId: c.faculty.id,
-        connectedUserStarIds: autoAnchor ? [autoAnchor.id] : undefined,
-        stage: "seed",
-      }).then((createdStar) => {
-        if (!createdStar) return;
-        openStarDetails(createdStar, "new");
-        clearHoveredCandidate();
-      });
-    }
+    // M24 Phase 4 stretch — `showConceptAtNode` removed. The
+    // faculty-ring click-to-add affordance is replaced by AddStarDialog
+    // (opened via the +Add tool-pill). Faculty-ring rendering still
+    // happens for comet targeting, RAG pulse, focus camera, and brain
+    // graph — those use the ring's geometry, not click handling. Phase 6
+    // retires the rendering itself.
 
     /* nodes */
     const nodes: NodeData[] = FACULTY_CONCEPTS.map((concept) => ({
@@ -5714,17 +5703,18 @@ export default function Home() {
       const currentSelectedStarId = selectedUserStarIdRef.current;
       const hitNodeIndex = getHitNodeIndex(e.clientX, e.clientY);
 
+      // M24 Phase 4 stretch — clicks on faculty-ring nodes used to
+      // call `showConceptAtNode` to seed a new star. That affordance is
+      // replaced by the AddStarDialog (opened via the +Add tool-pill);
+      // faculty-ring clicks now consume the event without side effects
+      // so they don't accidentally fall through to the catalogue
+      // inspector. Phase 6 retires the ring rendering entirely.
       if (hitNodeIndex >= 0) {
         armedAddCandidateIdRef.current = null;
         if (currentSelectedStarId) {
           setSelectedUserStarId(null);
           setPendingDetailStar(null);
         }
-        if (activeNodeRef.current === hitNodeIndex) {
-          closeConcept();
-          return;
-        }
-        showConceptAtNode(hitNodeIndex);
         return;
       }
 
