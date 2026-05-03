@@ -66,6 +66,11 @@ class StarClusteringService:
         - Single star -> one assignment at the origin, ``cluster_id=0``.
         - Embedding dim < ``pca_components`` -> coordinates are padded
           with zeros along the missing axes before normalisation.
+
+        Note: HDBSCAN with ``min_cluster_size=2`` labels all stars as
+        noise (``cluster_id=-1``) until the input has roughly 5+ stars.
+        Frontend code must render ``cluster_id=-1`` gracefully (treat as
+        "no cluster yet").
         """
         if not embeddings:
             return []

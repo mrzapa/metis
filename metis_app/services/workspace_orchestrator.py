@@ -731,11 +731,13 @@ class WorkspaceOrchestrator:
         configured embedder, and runs them through
         :class:`~metis_app.services.star_clustering_service.StarClusteringService`.
 
-        Results are cached on the orchestrator instance keyed by SHA-256
-        of ``[star_ids, texts]`` so repeated calls without input changes
-        don't re-run HDBSCAN/PCA. The cache is invalidated naturally by
-        the key whenever a star is added, removed, or its label/notes
-        change.
+        Cache: keyed by SHA-256 of ``[sorted star_ids, texts]``, stored
+        on ``self._cluster_cache``. The cache is **per-orchestrator-
+        instance** — it deduplicates *within* a single request when this
+        method is called multiple times, but does NOT survive across
+        HTTP requests (the route constructs a fresh ``WorkspaceOrchestrator``
+        per call). For cross-request caching, the cache would need to
+        move to a class-level or module-level dict — defer to a follow-up.
 
         Returns a list of plain ``dict`` rows with the keys ``star_id``,
         ``cluster_id``, ``x``, ``y``, ``cluster_label`` — JSON-friendly
