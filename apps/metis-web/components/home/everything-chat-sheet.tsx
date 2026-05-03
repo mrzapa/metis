@@ -146,6 +146,7 @@ export function EverythingChatSheet({
       <DialogContent
         className="fixed top-0 right-0 left-auto bottom-0 z-[270] grid h-screen w-full max-w-[100vw] -translate-x-0 -translate-y-0 grid-rows-[auto_1fr_auto] gap-0 rounded-none border-l border-white/10 p-0 sm:max-w-2xl"
         data-testid="everything-chat-sheet"
+        showCloseButton={false}
       >
         <header className="flex shrink-0 items-center gap-2 border-b border-white/10 px-5 py-4">
           <DialogTitle className="text-base font-semibold">

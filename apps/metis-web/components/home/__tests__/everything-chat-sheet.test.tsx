@@ -5,6 +5,19 @@ import { fetchSettings, queryRag } from "@/lib/api";
 
 import { ALL_STARS_MARKER, EverythingChatSheet } from "../everything-chat-sheet";
 
+function mockRagResult(answerText: string) {
+  return {
+    run_id: "run-x",
+    answer_text: answerText,
+    sources: [],
+    context_block: "",
+    top_score: 0.5,
+    selected_mode: "Q&A",
+    retrieval_plan: { stages: [] },
+    fallback: {},
+  } as never;
+}
+
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
@@ -77,5 +90,53 @@ describe("EverythingChatSheet", () => {
     await waitFor(() => {
       expect(screen.getByText("Aggregated answer.")).toBeInTheDocument();
     });
+  });
+
+  it("clears the transcript when the sheet is closed and reopened", async () => {
+    mockedFetchSettings.mockResolvedValueOnce({} as never);
+    mockedQueryRag.mockResolvedValueOnce(mockRagResult("first answer"));
+
+    const { rerender } = render(
+      <EverythingChatSheet open onOpenChange={() => {}} />,
+    );
+
+    fireEvent.change(screen.getByTestId("everything-chat-input"), {
+      target: { value: "first question" },
+    });
+    fireEvent.click(screen.getByTestId("everything-chat-send"));
+
+    await waitFor(() => {
+      expect(screen.getByText("first answer")).toBeInTheDocument();
+    });
+
+    // Close and reopen — transcript should be empty.
+    rerender(<EverythingChatSheet open={false} onOpenChange={() => {}} />);
+    rerender(<EverythingChatSheet open onOpenChange={() => {}} />);
+
+    expect(screen.queryByText("first answer")).not.toBeInTheDocument();
+    expect(screen.queryByText("first question")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/spans your entire constellation/i),
+    ).toBeInTheDocument();
+  });
+
+  it("renders an error bubble when queryRag throws", async () => {
+    mockedFetchSettings.mockResolvedValueOnce({} as never);
+    mockedQueryRag.mockRejectedValueOnce(new Error("boom"));
+
+    render(
+      <EverythingChatSheet open onOpenChange={() => {}} />,
+    );
+
+    fireEvent.change(screen.getByTestId("everything-chat-input"), {
+      target: { value: "explode please" },
+    });
+    fireEvent.click(screen.getByTestId("everything-chat-send"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("everything-chat-msg-error")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("boom")).toBeInTheDocument();
   });
 });

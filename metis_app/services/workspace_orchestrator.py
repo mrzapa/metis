@@ -148,6 +148,14 @@ def _merge_everything_chat_sources(
 
     Pure helper — exposed module-level so tests can exercise the
     merge logic in isolation without standing up the LLM stack.
+
+    NOTE: This is a score-based merge sort, NOT a cross-encoder rerank.
+    Per-index scores are not strictly comparable across indexes — a 0.7
+    from a sparse index is not the same as a 0.7 from a rich one. M25
+    polish: wire the existing reranker (cross-encoder) here to normalise
+    relevance across indexes. For first-pass M24, score-sort is
+    acceptable.
+    TODO(M25): swap for cross-index reranker.
     """
     flat_sources: list[dict[str, Any]] = []
     top_score = 0.0
