@@ -26,7 +26,7 @@ describe("PersonalityCard", () => {
   it("flips tone_preset to 'custom' when the user types in the override textarea", () => {
     render(<Harness initial={{ tone_preset: "warm-curious", prompt_seed: TONE_PRESETS["warm-curious"] }} />);
     fireEvent.click(screen.getByRole("button", { name: /edit prompt seed directly/i }));
-    fireEvent.change(screen.getByLabelText(/prompt seed/i), { target: { value: "I am a pirate." } });
+    fireEvent.change(screen.getByLabelText(/^prompt seed$/i), { target: { value: "I am a pirate." } });
     expect(screen.getByRole("radio", { name: /custom/i })).toBeChecked();
   });
 

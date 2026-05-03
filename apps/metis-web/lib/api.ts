@@ -10,6 +10,7 @@ import type {
   NyxInstallProposal,
   NyxInstallProposalComponent,
 } from "@/lib/chat-types";
+import type { TonePreset } from "@/lib/companion-voice";
 import { emitBrainGraphRagActivity } from "@/lib/brain-graph-rag-activity";
 import { dedupedFetch } from "@/lib/request-dedup";
 
@@ -1095,7 +1096,7 @@ export interface AssistantIdentity {
   prompt_seed: string;
   docked: boolean;
   minimized: boolean;
-  tone_preset: string;
+  tone_preset: TonePreset;
 }
 
 export interface AssistantRuntime {

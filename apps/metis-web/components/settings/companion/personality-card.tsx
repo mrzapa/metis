@@ -50,7 +50,7 @@ export function PersonalityCard({ form }: Props) {
   const resolvedSeed =
     tonePreset === "custom"
       ? promptSeed
-      : (TONE_PRESETS as Record<string, string>)[tonePreset] ?? TONE_PRESETS["warm-curious"];
+      : TONE_PRESETS[tonePreset] ?? TONE_PRESETS["warm-curious"];
 
   return (
     <section className="space-y-4 rounded-2xl border border-white/8 bg-black/10 p-4">
@@ -65,6 +65,7 @@ export function PersonalityCard({ form }: Props) {
             <input
               type="radio"
               name="tone_preset"
+              className="accent-primary"
               checked={tonePreset === preset}
               onChange={() => handlePresetChange(preset)}
               aria-label={TONE_PRESET_LABELS[preset]}
@@ -89,10 +90,16 @@ export function PersonalityCard({ form }: Props) {
         </Button>
         {showOverride && (
           <div className="space-y-1.5">
-            <FieldLabel htmlFor="assistant_identity.prompt_seed_override">Prompt seed</FieldLabel>
+            <FieldLabel
+              htmlFor="assistant_identity.prompt_seed_override"
+              tooltip="Seed prompt used to shape the companion's personality, tone, and boundaries."
+            >
+              Prompt seed
+            </FieldLabel>
             <Textarea
               id="assistant_identity.prompt_seed_override"
               rows={5}
+              placeholder="Seed prompt used to shape the companion's tone and behaviour."
               value={promptSeed}
               onChange={(e) => handleOverrideChange(e.target.value)}
             />
