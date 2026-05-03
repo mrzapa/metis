@@ -175,9 +175,12 @@ import type {
 
 // M24 Phase 3 — when true, user stars are placed using embedding-cluster
 // projections fetched from `GET /v1/stars/clusters`. When false, the
-// legacy faculty-anchored layout is used. This flag is removed in
-// Task 3.4 once the rip-out lands; until then it lets us A/B for an
-// "Undo for this session" toast affordance (Task 3.3).
+// legacy faculty-anchored layout is used. TODO(M24-Task-3.4, deferred to
+// post-Phase-4): once `AddStarDialog` lands and the 5 verified-TRUE
+// faculty-anchor consumers (comet targeting, RAG pulse highlighting,
+// showConceptAtNode click-to-add, focus camera + brain-graph activity,
+// buildFacultyAnchoredPlacement seed) are migrated, delete this flag and
+// the entire `FACULTY_CONCEPTS` placement path.
 const USE_CLUSTER_PLACEMENT = true;
 
 // Cluster coordinates from the backend are in [-1, 1] centred on the
