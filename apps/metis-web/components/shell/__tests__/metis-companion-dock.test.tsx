@@ -186,7 +186,35 @@ describe("MetisCompanionDock", () => {
     const link = await screen.findByRole("link", {
       name: /open companion settings/i,
     });
-    expect(link).toHaveAttribute("href", "/settings#companion");
+    // Next.js normalises the rendered href (strips the trailing slash on
+    // the path), so the DOM attribute is "/settings?tab=companion" even
+    // though the source uses "/settings/?tab=companion" to match the
+    // existing convention on the settings privacy page.
+    expect(link).toHaveAttribute("href", "/settings?tab=companion");
+  });
+
+  it("links to the Companion settings tab via tab query parameter (regression: not a #fragment)", async () => {
+    // Regression for M23 final-review I1: the original href used a
+    // "#companion" fragment, which the settings page does not honour
+    // (it reads only `searchParams.get("tab")`). Asserting the parsed
+    // query parameter ensures we cannot accidentally regress to a
+    // fragment-style link.
+    vi.mocked(fetchAssistant).mockResolvedValueOnce(buildSnapshot());
+    vi.mocked(fetchAtlasCandidate).mockResolvedValueOnce(null);
+
+    render(<MetisCompanionDock />);
+
+    const link = await screen.findByRole("link", {
+      name: /open companion settings/i,
+    });
+    const href = link.getAttribute("href");
+    expect(href).toBeTruthy();
+    const url = new URL(href!, "http://localhost");
+    expect(url.searchParams.get("tab")).toBe("companion");
+    // The destination is the settings route — not a fragment on some
+    // other page, and not anchored at "#companion".
+    expect(url.pathname.replace(/\/$/, "")).toBe("/settings");
+    expect(url.hash).toBe("");
   });
 
   it("hides settings deep-link in expanded mode (M23 Phase 5)", async () => {

@@ -890,7 +890,7 @@ export function MetisCompanionDock({
           )}
           {minimized && (
             <Link
-              href="/settings#companion"
+              href="/settings/?tab=companion"
               aria-label="Open companion settings"
               className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
             >
