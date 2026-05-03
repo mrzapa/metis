@@ -791,6 +791,86 @@ class WorkspaceOrchestrator:
         self._cluster_cache[cache_key] = result
         return result
 
+    def recommend_stars_for_content(
+        self,
+        *,
+        content: str,
+        content_type: str = "",
+    ) -> dict[str, Any]:
+        """Rank existing user stars against ``content`` (M24 Phase 2).
+
+        Reads ``landing_constellation_user_stars`` from settings, embeds
+        the new content + each existing star's ``label + notes`` text,
+        and runs the pair through
+        :class:`~metis_app.services.star_recommender_service.StarRecommenderService`.
+
+        ``create_new_suggested`` is ``True`` when there are no existing
+        stars or when the top recommendation's adjusted similarity is
+        below ``0.5`` — the frontend uses this to decide whether to
+        nudge the user toward a fresh star instead of attaching to an
+        existing one.
+
+        Returns a JSON-friendly dict for the
+        ``POST /v1/stars/recommend`` route.
+        """
+        from metis_app.services.star_recommender_service import (
+            StarRecommenderService,
+        )
+        from metis_app.utils.embedding_providers import create_embeddings
+
+        settings = _settings_store.load_settings()
+        user_stars = list(settings.get("landing_constellation_user_stars") or [])
+
+        embedder = create_embeddings(settings)
+        query_embedding = embedder.embed_query(content)
+
+        star_embeddings: dict[str, Any] = {}
+        star_metadata: dict[str, dict[str, str]] = {}
+        if user_stars:
+            star_ids = [str(s.get("id") or "") for s in user_stars]
+            texts = [
+                f"{s.get('label', '')} {s.get('notes', '')}".strip()
+                or str(s.get("id") or "")
+                for s in user_stars
+            ]
+            raw_embeddings = embedder.embed_documents(texts)
+            star_embeddings = dict(zip(star_ids, raw_embeddings))
+            star_metadata = {
+                str(s.get("id") or ""): {
+                    "label": str(s.get("label", "") or ""),
+                    "archetype": str(s.get("archetype", "") or ""),
+                    "notes": str(s.get("notes", "") or ""),
+                }
+                for s in user_stars
+            }
+
+        # M25 will populate project_member_star_ids once Projects exist;
+        # in M24 the parameter is intentionally left unset.
+        recommendations = StarRecommenderService().rank(
+            query_embedding=query_embedding,
+            star_embeddings=star_embeddings,
+            star_metadata=star_metadata,
+            top_k=5,
+            content_type_hint=content_type,
+        )
+
+        create_new_suggested = bool(
+            not recommendations or recommendations[0].similarity < 0.5
+        )
+
+        return {
+            "recommendations": [
+                {
+                    "star_id": r.star_id,
+                    "similarity": r.similarity,
+                    "label": r.label,
+                    "archetype": r.archetype,
+                }
+                for r in recommendations
+            ],
+            "create_new_suggested": create_new_suggested,
+        }
+
     # ------------------------------------------------------------------
     # Sessions / Memory
     # ------------------------------------------------------------------
