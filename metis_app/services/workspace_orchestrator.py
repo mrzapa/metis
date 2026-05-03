@@ -110,11 +110,72 @@ _autonomous_running_count = 0
 # with real eval data.
 _CREATE_NEW_THRESHOLD = 0.5
 
+# M24 Phase 5 / Task 5.3 — sentinel ``manifest_path`` value that the
+# query route uses to ask for "RAG over the union of every attached
+# index". When seen, ``run_rag_query`` dispatches to
+# ``_run_everything_chat`` instead of the per-index pipeline. Kept in
+# sync with ``ALL_STARS_MARKER`` in the EverythingChatSheet on the
+# frontend.
+ALL_STARS_MARKER = "_all_stars"
+# Cap on per-index retrieval rounds when a user has many attached
+# indexes — guards against a 100-star constellation paying 100 LLM
+# round-trips for retrieval. Sources from each retrieval still merge
+# into the final synthesis, so the cap only bounds how many indexes
+# we touch, not how rich the combined context can get.
+_EVERYTHING_CHAT_INDEX_CAP = 8
+# Cap on the number of merged sources fed into the final synthesis
+# call, after combining and re-sorting per-index results.
+_EVERYTHING_CHAT_SOURCE_CAP = 12
+
 
 def is_autonomous_research_running() -> bool:
     """Return True if any autonomous research run is currently in flight."""
     with _autonomous_running_lock:
         return _autonomous_running_count > 0
+
+
+def _merge_everything_chat_sources(
+    per_index_results: list[RagQueryResult],
+) -> dict[str, Any]:
+    """Merge per-index ``RagQueryResult`` objects into a single payload.
+
+    Sources from every index are combined, sorted by their numeric
+    ``score`` (highest first), and capped at
+    :data:`_EVERYTHING_CHAT_SOURCE_CAP`. The merged ``context_block``
+    is rebuilt from the surviving sources so the LLM sees the same
+    ``[S1], [S2], …`` numbering the citations refer to.
+
+    Pure helper — exposed module-level so tests can exercise the
+    merge logic in isolation without standing up the LLM stack.
+    """
+    flat_sources: list[dict[str, Any]] = []
+    top_score = 0.0
+    for per_index in per_index_results:
+        for source in per_index.sources or []:
+            if not isinstance(source, dict):
+                continue
+            flat_sources.append(dict(source))
+        if isinstance(per_index.top_score, (int, float)):
+            top_score = max(top_score, float(per_index.top_score))
+
+    flat_sources.sort(
+        key=lambda item: float(item.get("score") or 0.0),
+        reverse=True,
+    )
+    capped = flat_sources[:_EVERYTHING_CHAT_SOURCE_CAP]
+
+    blocks: list[str] = []
+    for idx, source in enumerate(capped, start=1):
+        snippet = str(source.get("snippet") or source.get("text") or "").strip()
+        title = str(source.get("title") or source.get("source") or "").strip()
+        header = f"[S{idx}] {title}".rstrip()
+        blocks.append(f"{header}\n{snippet}".strip())
+
+    return {
+        "sources": capped,
+        "context_block": "\n\n".join(blocks),
+        "top_score": top_score,
+    }
 
 
 class WorkspaceOrchestrator:
@@ -229,7 +290,17 @@ class WorkspaceOrchestrator:
         *,
         session_id: str = "",
     ) -> RagQueryResult:
-        """Execute a batch RAG query via the engine."""
+        """Execute a batch RAG query via the engine.
+
+        When ``req.manifest_path`` is the sentinel
+        :data:`ALL_STARS_MARKER`, dispatches to
+        :meth:`_run_everything_chat`, which unions retrieval across
+        every attached index on every user star. Otherwise runs a
+        single per-index pipeline.
+        """
+        if str(req.manifest_path or "").strip() == ALL_STARS_MARKER:
+            return self._run_everything_chat(req, session_id=session_id)
+
         resolved_settings = self._resolve_query_settings(req.settings, query=req.question)
         normalized = RagQueryRequest(
             manifest_path=req.manifest_path,
@@ -310,6 +381,206 @@ class WorkspaceOrchestrator:
                 _orchestrator=self,
             )
         return result
+
+    def _run_everything_chat(
+        self,
+        req: RagQueryRequest,
+        *,
+        session_id: str = "",
+    ) -> RagQueryResult:
+        """Aggregate RAG retrieval across every attached index.
+
+        Sentinel-path implementation for the M24 Phase 5 "Chat with
+        everything" entry point. Resolves the union of attached
+        manifest paths from ``landing_constellation_user_stars``,
+        runs the per-index ``query_rag`` against each (capped by
+        :data:`_EVERYTHING_CHAT_INDEX_CAP`), then merges the resulting
+        sources by score and synthesises a single answer.
+
+        When the user has no attached indexes the method returns a
+        no-answer fallback ``RagQueryResult`` so the chat surface can
+        still render a friendly message instead of 5xx-ing.
+        """
+        from metis_app.engine.querying import (
+            _normalize_run_id,
+            _response_text,
+            _selected_mode,
+            _system_instructions,
+        )
+        from metis_app.utils.llm_providers import create_llm
+
+        resolved_settings = self._resolve_query_settings(req.settings, query=req.question)
+        question = str(req.question or "").strip()
+        if not question:
+            raise ValueError("question must not be empty.")
+
+        manifest_paths = self._collect_attached_manifest_paths(resolved_settings)
+        if not manifest_paths:
+            return RagQueryResult(
+                run_id=_normalize_run_id(req.run_id),
+                answer_text=(
+                    "There are no attached indexes yet — add content to a star "
+                    "to give Everything chat something to retrieve from."
+                ),
+                sources=[],
+                context_block="",
+                top_score=0.0,
+                selected_mode=ALL_STARS_MARKER,
+                retrieval_plan={
+                    "stages": [
+                        {
+                            "stage_type": ALL_STARS_MARKER,
+                            "payload": {"index_count": 0},
+                        },
+                    ],
+                },
+                fallback={
+                    "triggered": True,
+                    "strategy": "no_answer",
+                    "reason": "no_attached_indexes",
+                    "message": "No attached indexes available for Everything chat.",
+                },
+            )
+
+        # Per-index retrieval. Failures on a single index don't kill
+        # the whole run — Everything chat is best-effort by design.
+        per_index_results: list[RagQueryResult] = []
+        per_index_errors: list[dict[str, Any]] = []
+        for manifest_path in manifest_paths[:_EVERYTHING_CHAT_INDEX_CAP]:
+            try:
+                per_index_results.append(
+                    query_rag(
+                        RagQueryRequest(
+                            manifest_path=manifest_path,
+                            question=question,
+                            settings=dict(resolved_settings),
+                        )
+                    )
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                per_index_errors.append(
+                    {"manifest_path": str(manifest_path), "error": str(exc)},
+                )
+
+        merged = _merge_everything_chat_sources(per_index_results)
+
+        # Single synthesis call against the merged context. Reuses the
+        # same LLM the user already configured — Everything chat doesn't
+        # introduce a new model surface.
+        run_id = _normalize_run_id(req.run_id)
+        if not merged["sources"]:
+            answer_text = (
+                "I couldn't find any matching passages across your "
+                "attached indexes for that question."
+            )
+            top_score = 0.0
+            fallback = {
+                "triggered": True,
+                "strategy": "no_answer",
+                "reason": "empty_union",
+                "message": "Empty merged context after union retrieval.",
+            }
+        else:
+            llm = create_llm(resolved_settings)
+            system_prompt = (
+                f"{_system_instructions(resolved_settings)}\n\n"
+                "Answer the user's question using ONLY the CONTEXT below, "
+                "which is the union of retrievals across every attached "
+                "index. Cite passages as [S1], [S2], etc. If the context "
+                "is insufficient, say so.\n\n"
+                f"CONTEXT:\n{merged['context_block']}"
+            )
+            answer_text = _response_text(
+                llm.invoke(
+                    [
+                        {"type": "system", "content": system_prompt},
+                        {"type": "human", "content": question},
+                    ]
+                )
+            )
+            top_score = float(merged["top_score"])
+            fallback = {}
+
+        retrieval_plan: dict[str, Any] = {
+            "stages": [
+                {
+                    "stage_type": ALL_STARS_MARKER,
+                    "payload": {
+                        "index_count": len(per_index_results),
+                        "manifest_paths": [
+                            str(path) for path in manifest_paths[:_EVERYTHING_CHAT_INDEX_CAP]
+                        ],
+                        "errors": per_index_errors,
+                        "sources_merged": len(merged["sources"]),
+                    },
+                },
+            ],
+        }
+
+        result = RagQueryResult(
+            run_id=run_id,
+            answer_text=answer_text,
+            sources=merged["sources"],
+            context_block=merged["context_block"],
+            top_score=top_score,
+            selected_mode=_selected_mode(resolved_settings),
+            retrieval_plan=retrieval_plan,
+            fallback=fallback,
+        )
+
+        # Session bookkeeping mirrors the per-index path so the
+        # transcript captures the conversation. The sentinel value is
+        # used as the "manifest" so the session detail row is
+        # internally consistent — a follow-up M25 ticket could
+        # introduce a real ``index_id="_all_stars"`` row instead.
+        if session_id:
+            self._prepare_session_for_query(
+                session_id,
+                question,
+                resolved_settings,
+                manifest_path=ALL_STARS_MARKER,
+            )
+            self.append_message(session_id, role="user", content=question, run_id="")
+            self.append_message(
+                session_id,
+                role="assistant",
+                content=result.answer_text,
+                run_id=result.run_id,
+                sources=[EvidenceSource.from_dict(item) for item in result.sources],
+            )
+        return result
+
+    def _collect_attached_manifest_paths(
+        self,
+        settings: dict[str, Any],
+    ) -> list[str]:
+        """Return the unique, ordered set of attached manifest paths.
+
+        Reads ``landing_constellation_user_stars`` and unions
+        ``linkedManifestPaths`` (plural), ``activeManifestPath``, and
+        ``linkedManifestPath`` (legacy singular) across every star.
+        Dedupes preserving insertion order so the per-index loop is
+        deterministic.
+        """
+        user_stars = list(settings.get("landing_constellation_user_stars") or [])
+        seen: set[str] = set()
+        ordered: list[str] = []
+
+        def _push(candidate: Any) -> None:
+            text = str(candidate or "").strip()
+            if not text or text in seen:
+                return
+            seen.add(text)
+            ordered.append(text)
+
+        for star in user_stars:
+            if not isinstance(star, dict):
+                continue
+            for path in star.get("linkedManifestPaths") or []:
+                _push(path)
+            _push(star.get("activeManifestPath"))
+            _push(star.get("linkedManifestPath"))
+        return ordered
 
     def run_direct_query(
         self,

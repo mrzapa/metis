@@ -1,0 +1,181 @@
+"""Tests for M24 Phase 5 / Task 5.3 — _all_stars virtual retrieval.
+
+Two surfaces exercised:
+
+* :func:`_merge_everything_chat_sources` — pure merge helper; verified
+  in isolation so the source-ranking + context-block assembly logic
+  is pinned without standing up the LLM stack.
+* :meth:`WorkspaceOrchestrator._run_everything_chat` — happy-path
+  aggregation across two indexes, mocked so neither retrieval nor
+  the LLM round-trips for real. Confirms the sentinel ``_all_stars``
+  path is wired and that responses reference both indexes.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import patch
+
+import pytest
+
+from metis_app.engine.querying import RagQueryRequest, RagQueryResult
+from metis_app.services.workspace_orchestrator import (
+    ALL_STARS_MARKER,
+    WorkspaceOrchestrator,
+    _merge_everything_chat_sources,
+)
+
+
+def _make_per_index_result(
+    *,
+    run_id: str,
+    sources: list[dict[str, Any]],
+    top_score: float,
+) -> RagQueryResult:
+    return RagQueryResult(
+        run_id=run_id,
+        answer_text=f"answer for {run_id}",
+        sources=sources,
+        context_block="legacy block, ignored by the merger",
+        top_score=top_score,
+        selected_mode="Q&A",
+    )
+
+
+class TestMergeEverythingChatSources:
+    def test_orders_sources_by_score_descending(self) -> None:
+        result_a = _make_per_index_result(
+            run_id="A",
+            sources=[{"score": 0.4, "title": "a-low", "snippet": "a low"}],
+            top_score=0.4,
+        )
+        result_b = _make_per_index_result(
+            run_id="B",
+            sources=[
+                {"score": 0.9, "title": "b-high", "snippet": "b high"},
+                {"score": 0.5, "title": "b-mid", "snippet": "b mid"},
+            ],
+            top_score=0.9,
+        )
+
+        merged = _merge_everything_chat_sources([result_a, result_b])
+
+        assert [s["title"] for s in merged["sources"]] == [
+            "b-high",
+            "b-mid",
+            "a-low",
+        ]
+        assert merged["top_score"] == pytest.approx(0.9)
+        assert "[S1] b-high" in merged["context_block"]
+        assert "[S2] b-mid" in merged["context_block"]
+        assert "[S3] a-low" in merged["context_block"]
+
+    def test_handles_empty_input(self) -> None:
+        merged = _merge_everything_chat_sources([])
+        assert merged["sources"] == []
+        assert merged["context_block"] == ""
+        assert merged["top_score"] == 0.0
+
+
+class TestRunEverythingChat:
+    def test_aggregates_results_across_indexes(self) -> None:
+        orchestrator = WorkspaceOrchestrator.__new__(WorkspaceOrchestrator)
+        orchestrator._nyx_catalog = None  # type: ignore[attr-defined]
+
+        settings = {
+            "landing_constellation_user_stars": [
+                {"id": "star-1", "linkedManifestPaths": ["idx-a"]},
+                {"id": "star-2", "activeManifestPath": "idx-b"},
+            ],
+            "system_instructions": "test",
+            "llm_provider": "mock",
+        }
+
+        # Stub _resolve_query_settings so the test doesn't need a real
+        # settings_store on disk.
+        with (
+            patch.object(
+                WorkspaceOrchestrator,
+                "_resolve_query_settings",
+                return_value=settings,
+            ),
+            patch(
+                "metis_app.services.workspace_orchestrator.query_rag",
+            ) as fake_query_rag,
+            patch(
+                "metis_app.utils.llm_providers.create_llm",
+            ) as fake_create_llm,
+        ):
+            fake_query_rag.side_effect = [
+                _make_per_index_result(
+                    run_id="A",
+                    sources=[
+                        {
+                            "score": 0.8,
+                            "title": "from-idx-a",
+                            "snippet": "alpha snippet",
+                        }
+                    ],
+                    top_score=0.8,
+                ),
+                _make_per_index_result(
+                    run_id="B",
+                    sources=[
+                        {
+                            "score": 0.7,
+                            "title": "from-idx-b",
+                            "snippet": "beta snippet",
+                        }
+                    ],
+                    top_score=0.7,
+                ),
+            ]
+            fake_llm = fake_create_llm.return_value
+            fake_llm.invoke.return_value = type(
+                "FakeLLMResponse", (), {"content": "Aggregated answer."}
+            )()
+
+            result = orchestrator._run_everything_chat(
+                RagQueryRequest(
+                    manifest_path=ALL_STARS_MARKER,
+                    question="what spans both?",
+                    settings={},
+                )
+            )
+
+        # Both indexes were retrieved against.
+        assert fake_query_rag.call_count == 2
+        manifest_paths_used = sorted(
+            str(call.args[0].manifest_path) for call in fake_query_rag.call_args_list
+        )
+        assert manifest_paths_used == ["idx-a", "idx-b"]
+
+        # The merged result references sources from both.
+        titles = {source["title"] for source in result.sources}
+        assert titles == {"from-idx-a", "from-idx-b"}
+        assert result.answer_text == "Aggregated answer."
+        assert result.top_score == pytest.approx(0.8)
+        assert result.retrieval_plan["stages"][0]["stage_type"] == ALL_STARS_MARKER
+        assert result.retrieval_plan["stages"][0]["payload"]["index_count"] == 2
+
+    def test_no_attached_indexes_returns_friendly_fallback(self) -> None:
+        orchestrator = WorkspaceOrchestrator.__new__(WorkspaceOrchestrator)
+        orchestrator._nyx_catalog = None  # type: ignore[attr-defined]
+
+        with patch.object(
+            WorkspaceOrchestrator,
+            "_resolve_query_settings",
+            return_value={"landing_constellation_user_stars": []},
+        ):
+            result = orchestrator._run_everything_chat(
+                RagQueryRequest(
+                    manifest_path=ALL_STARS_MARKER,
+                    question="anything?",
+                    settings={},
+                )
+            )
+
+        assert result.fallback["triggered"] is True
+        assert result.fallback["reason"] == "no_attached_indexes"
+        assert "no attached indexes" in result.answer_text.lower()
+        assert result.sources == []
