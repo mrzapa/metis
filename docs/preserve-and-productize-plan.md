@@ -797,7 +797,7 @@ Legend: ✅ shipped well · ⚠️ shipped but weak · ❌ missing · ⛔ N/A fo
 | Preset styles | ⛔ | Image-gen flavour; partly covered by Modes. |
 | Prompt enhancer | ❌ | No "improve my prompt" button. Genuinely useful for new RAG users. |
 | Saved styles | ❌ | No per-context saved styles or saved-prompt library. |
-| Voice and tone | ❌ | **Biggest catalogue-shaped gap.** Companion is core-pillar but the *user* has no surface to adjust its voice / tone / personality. Brand chooses for the user. Couples to **Identifiers → Personality**. |
+| Voice and tone | ✅ | *Closed by M23 (2026-05-03).* `tone_preset` field on `AssistantIdentity` + three presets (warm-curious / concise-analyst / playful) + Custom override. Surfaced in `/settings → Companion → Personality` card. `resolve_prompt_seed` is wired into `runtime_resolution.py` so the preset actually drives the AI's voice. |
 
 **Governors** (human-in-the-loop oversight)
 
@@ -809,7 +809,7 @@ Legend: ✅ shipped well · ⚠️ shipped but weak · ❌ missing · ⛔ N/A fo
 | Controls | ⚠️ | Chat has `onStopStreaming` (Stop button at `chat-panel.tsx:1135`); no Pause / mid-stream prompt-edit. Companion dock has a global Pause/Resume. |
 | Cost estimates | ⛔ | Mostly N/A — local product, tokens are mostly free. Could matter for cloud-API users; defer to M15 (Pro tier). |
 | Draft mode | ❌ | No "preview before commit" for autonomous research or index builds. Star observatory is close but doesn't frame builds as drafts. |
-| Memory | ⚠️ | Atlas exists; companion-dock has "Clear memory" (atomic) and Atlas snooze/decline. **No inspectable list of what the AI knows about *me*** (vs. what it knows about my docs). VISION explicitly promises this. **Second-biggest catalogue-shaped gap.** |
+| Memory | ✅ | *Closed by M23 (2026-05-03).* New Memory inspector at `/settings → Companion → Memory`: stats row, grouped accordion by `kind`, per-entry delete, bulk "clear all <kind>", at-cap "Clear oldest 50", playbook delete. Backend `AssistantCompanionService.delete_*` methods maintain `AssistantStatus.latest_summary` mirror coherence. |
 | References | ✅ | Evidence-panel + evidence-source-card. |
 | Sample response | ❌ | No "here's what an answer might look like" before submitting an expensive query. Felt sharply on the 12-second model-load (M21 #9). |
 | Shared vision | ❌ | No "watch the AI doing autonomous research live in a shared canvas". Companion-dock thought-log is text-only; comets are tangentially this. |
@@ -837,14 +837,14 @@ Legend: ✅ shipped well · ⚠️ shipped but weak · ❌ missing · ⛔ N/A fo
 | Color | ✅ | Cyan / gold / purple system established by M02 / M20. |
 | Iconography | ✅ | Consistent (lucide + dot-matrix from M01 quiet-loaders). |
 | Name | ✅ | "METIS" — the AI shares the product name. The catalogue suggests the *AI* might want its own user-tunable name (links to Voice and tone). |
-| Personality | ❌ | Same as Voice and tone — implicit / data-driven, not user-tunable. |
+| Personality | ✅ | *Closed by M23 (2026-05-03).* Bundled with Voice and tone — same `tone_preset` knob, same Personality card. |
 
 #### Top 10 highest-leverage gaps
 
 Ordered by *leverage* (impact × pillar fit × inverse risk), not severity. Each entry tags a recommended disposition that's still **awaiting user go/no-go** before promote/merge — see *Decision* line below.
 
-1. **Voice and tone + Personality** (Tuners + Identifiers) — `Promoted as M23 (2026-05-03)` ([`plans/companion-controls/plan.md`](../plans/companion-controls/plan.md), design [`docs/plans/2026-05-03-companion-controls-design.md`](plans/2026-05-03-companion-controls-design.md)). Bundled with gap #2. Couples directly to the Companion pillar's "feels like *yours*" promise. **Risk:** vision-tense (M02 / VISION's "stars are knowledge" stance) — kept strictly companion-scoped per the design. Scope revised down to ~4 days after discovering the backend (`AssistantIdentity.prompt_seed`, `update_config`, `get_snapshot`) is mostly in place. *Audit reconciliation: this row flips to ✅ at M23 Phase 6.*
-2. **Memory inspector** (Governors → Memory) — `Promoted as M23 (2026-05-03)` (same plan + design as #1). VISION promises "the AI that knows you" but there's no surface to *see* what it knows. Renders the existing `assistant_memory` + `assistant_playbooks` data (already flowing through `get_snapshot`) with delete + bulk-clear-by-kind affordances. Read+delete only — no edit, no add (corruption-prone, not promised by VISION). Closes a load-bearing pillar promise. *Audit reconciliation: this row flips to ✅ at M23 Phase 6.*
+1. **Voice and tone + Personality** (Tuners + Identifiers) — **✅ Landed via M23 (2026-05-03)** ([`plans/companion-controls/plan.md`](../plans/companion-controls/plan.md), design [`docs/plans/2026-05-03-companion-controls-design.md`](plans/2026-05-03-companion-controls-design.md)). Bundled with gap #2. Three tone presets (warm-curious / concise-analyst / playful) plus Custom override under `/settings → Companion → Personality`. `resolve_prompt_seed` wired into `runtime_resolution.py` so presets actually drive the AI's voice.
+2. **Memory inspector** (Governors → Memory) — **✅ Landed via M23 (2026-05-03)** (same plan + design as #1). Renders `assistant_memory` + `assistant_playbooks` (via `get_snapshot`) with delete + bulk-clear-by-kind affordances + at-cap "Clear oldest 50" fallback. Read+delete only — no edit, no add. `AssistantCompanionService.delete_*` methods maintain `AssistantStatus.latest_summary` mirror coherence so the dock doesn't show stale summaries after a delete.
 3. **Caveat strip per chat mode** (Trust builders → Caveat + Disclosure) — `Merge into M21`. Consistent 1-line caveat under each chat mode (Mock backend / WebGPU local / Cloud provider / no-network). Replaces the silent mock-backend issue from M21 #4 with a systematic surface. Scope: half-day to 1 day. Add as M21 P3 entry.
 4. **Disclosure on AI-generated content** (Trust builders → Disclosure) — `Merge into M21`. Extends Caveat: WebGPU local replies visually distinguished from cloud replies (small badge / colour). Scope: patch. Add as M21 P3 entry. Pairs with #3.
 5. **Filters that work** (Tuners → Filters) — `Already in M21 (#13)`. Reframe under Shape-of-AI vocabulary; prioritise. The dead spectral-class slider is the canonical violation.

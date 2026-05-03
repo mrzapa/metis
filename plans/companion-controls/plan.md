@@ -1,7 +1,7 @@
 ---
 Milestone: M23 — Companion controls
-Status: Ready
-Claim: unclaimed
+Status: Ready for review
+Claim: claude/sharp-payne-90957a (all 6 phases shipped; 25 commits on branch; PR pending)
 Last updated: 2026-05-03 by claude/sharp-payne-90957a
 Vision pillar: Companion
 TDD Mode: pragmatic
@@ -28,18 +28,24 @@ Task-by-task at [`docs/plans/2026-05-03-companion-controls-implementation.md`](.
 
 ## Progress
 
-*(milestone not yet started)*
+All six phases shipped on `claude/sharp-payne-90957a` between 2026-05-03 (start) and 2026-05-03 (PR). 25 commits, bisect-friendly. Final state:
+
+- **Phase 1** — Backend tone preset. Three commits (`d69f58d`, `91b93bd`, `59bc9af`) + two fix commits from review (`72e8aba`, `68adb04`).
+- **Phase 2** — Backend delete endpoints. Five commits (`136b150`, `5f8ddf1`, `c7e4b10`, `ea13762`, `69878ce`) + three fix commits maintaining `AssistantStatus.latest_summary` coherence (`949be37`, `c4cc474`, `13bcdc3`).
+- **Phase 3** — Frontend Companion-tab restructure + PersonalityCard. Two commits (`8d6a83f`, `ee22fc8`) + two fix commits (`0ed459e`, `f51ad28`).
+- **Phase 4** — Frontend MemoryInspector. Three commits (`a2a3c56`, `c365624`, `2b132a5`) + two fix commits (`42d9dea`, `42c2e5d`).
+- **Phase 5** — Companion-dock settings deep-link. One commit (`6d7bb43`).
+- **Final review fixes** — Two commits (`9ae8925` dock-link `?tab=` query fix, `3d93991` `resolve_prompt_seed` wiring).
+- **Phase 6** — Audit reconciliation: M01 plan-doc gaps #1, #2 flipped ❌→✅; this plan-stub frontmatter promoted to *Ready for review*; IDEAS.md decision line updated; IMPLEMENTATION.md M23 row to be flipped to *Landed* post-PR-merge with merge SHA.
+
+Cumulative test status at HEAD:
+- Backend pytest (excluding pre-existing-broken `tests/test_api_app.py`): **1598 passed, 12 skipped**.
+- Frontend vitest: **735 passed, 10 skipped, 80 files**.
+- `tsc --noEmit` (in `apps/metis-web`): clean.
 
 ## Next up
 
-Phase 1 — Backend: tone preset. See *Phasing* in the design doc.
-
-1. Add `tone_preset: str = "warm-curious"` to `AssistantIdentity` in `metis_app/models/assistant_types.py`.
-2. Add `TONE_PRESETS: dict[str, str]` constant in the same module with three presets (warm-curious / concise-analyst / playful).
-3. Implement seed resolution rule in `AssistantCompanionService` (or wherever `prompt_seed` is read at use-time — most likely `runtime_resolution.py`).
-4. Wire `tone_preset` through `update_config` and `get_snapshot`.
-5. Add four pytest cases per the design doc *Testing* section.
-6. Run full backend suite (`pytest`); confirm no regressions in `test_assistant_companion.py` and `test_assistant_repository.py`.
+Open the PR. After merge, flip IMPLEMENTATION.md M23 row to *Landed* with merge SHA.
 
 ## Phases
 
