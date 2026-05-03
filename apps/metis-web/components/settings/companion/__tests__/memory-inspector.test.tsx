@@ -51,11 +51,15 @@ describe("MemoryInspector", () => {
     vi.clearAllMocks();
   });
 
-  it("optimistically removes an entry on delete", async () => {
+  it("optimistically removes an entry on delete and calls the API with its id", async () => {
+    const apiModule = await import("@/lib/api");
     render(<MemoryInspector />);
     await waitFor(() => screen.getByText("Note A"));
     fireEvent.click(screen.getByRole("button", { name: /delete Note A/i }));
     expect(screen.queryByText("Note A")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(apiModule.deleteAssistantMemoryEntry).toHaveBeenCalledWith("m1");
+    });
   });
 
   it("shows confirm and bulk-clears a kind group on accept", async () => {
@@ -68,6 +72,21 @@ describe("MemoryInspector", () => {
       expect(screen.queryByText("Note A")).not.toBeInTheDocument();
       expect(screen.queryByText("Note B")).not.toBeInTheDocument();
     });
+    confirmSpy.mockRestore();
+  });
+
+  it("does not bulk-clear when confirm is rejected", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const apiModule = await import("@/lib/api");
+    render(<MemoryInspector />);
+    await waitFor(() => screen.getByText("Note A"));
+    fireEvent.click(screen.getByRole("button", { name: /clear all reflection/i }));
+    expect(confirmSpy).toHaveBeenCalled();
+    // Both reflection entries should still be in the DOM
+    expect(screen.getByText("Note A")).toBeInTheDocument();
+    expect(screen.getByText("Note B")).toBeInTheDocument();
+    // No API call should have happened
+    expect(apiModule.deleteAssistantMemoryByKind).not.toHaveBeenCalled();
     confirmSpy.mockRestore();
   });
 
