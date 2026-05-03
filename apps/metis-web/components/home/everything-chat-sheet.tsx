@@ -84,11 +84,18 @@ export function EverythingChatSheet({
   const [messages, setMessages] = useState<Message[]>([]);
   const [pending, setPending] = useState(false);
   const messageIdRef = useRef(0);
+  // Monotonic token for the in-flight handleSend invocation. The reset
+  // effect bumps this when the sheet closes; any handleSend whose token
+  // no longer matches abandons its setState calls so an orphaned async
+  // reply can't reappear after the sheet has been closed (and its
+  // transcript cleared) by the user.
+  const handleSendActiveRef = useRef(0);
 
   // Reset transcript when the sheet closes so the next open starts
   // clean (mirrors AddStarDialog's lifecycle reset behaviour).
   useEffect(() => {
     if (open) return;
+    handleSendActiveRef.current += 1;
     setDraft("");
     setMessages([]);
     setPending(false);
@@ -99,10 +106,15 @@ export function EverythingChatSheet({
     return `everything-chat-${messageIdRef.current}`;
   }
 
+  // TODO(M25): pass a `sessionId` to `queryRag` to enable session bookkeeping
+  // (transcript persistence + reflect + Atlas candidates) via _run_everything_chat.
+  // Currently conversations are component-local only because lean Option B
+  // doesn't promise persistence. M25's per-Project chat will need this wired.
   async function handleSend() {
     const text = draft.trim();
     if (!text || pending) return;
 
+    const sendId = ++handleSendActiveRef.current;
     const userMsg: Message = { id: nextId(), role: "user", text };
     setMessages((prev) => [...prev, userMsg]);
     setDraft("");
@@ -111,6 +123,7 @@ export function EverythingChatSheet({
     try {
       const settings = await fetchSettings();
       const result = await queryRag(indexMarker, text, settings);
+      if (handleSendActiveRef.current !== sendId) return;
       setMessages((prev) => [
         ...prev,
         {
@@ -122,6 +135,7 @@ export function EverythingChatSheet({
         },
       ]);
     } catch (err) {
+      if (handleSendActiveRef.current !== sendId) return;
       const message =
         err instanceof Error ? err.message : "Query failed";
       setMessages((prev) => [
@@ -129,7 +143,7 @@ export function EverythingChatSheet({
         { id: nextId(), role: "error", text: message },
       ]);
     } finally {
-      setPending(false);
+      if (handleSendActiveRef.current === sendId) setPending(false);
     }
   }
 

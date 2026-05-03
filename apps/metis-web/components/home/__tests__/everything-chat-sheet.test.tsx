@@ -139,4 +139,44 @@ describe("EverythingChatSheet", () => {
 
     expect(screen.getByText("boom")).toBeInTheDocument();
   });
+
+  it("does not append assistant message when sheet closes before queryRag resolves", async () => {
+    // Simulate a queryRag that resolves only after we explicitly let it.
+    let resolveQuery: ((value: ReturnType<typeof mockRagResult>) => void) | null = null;
+    const inFlight = new Promise<ReturnType<typeof mockRagResult>>((res) => {
+      resolveQuery = res;
+    });
+    mockedFetchSettings.mockResolvedValueOnce({} as never);
+    mockedQueryRag.mockReturnValueOnce(inFlight as never);
+
+    const { rerender } = render(
+      <EverythingChatSheet open onOpenChange={() => {}} />,
+    );
+
+    fireEvent.change(screen.getByTestId("everything-chat-input"), {
+      target: { value: "race against close" },
+    });
+    fireEvent.click(screen.getByTestId("everything-chat-send"));
+
+    // Close the sheet before queryRag resolves — this is the race the
+    // fix targets. The reset effect bumps `handleSendActiveRef`, which
+    // the in-flight handler must check against before calling setState.
+    rerender(<EverythingChatSheet open={false} onOpenChange={() => {}} />);
+
+    // Now let the query resolve. Without the abort guard the handler
+    // would race and re-append an assistant bubble that would reappear
+    // on next open.
+    resolveQuery!(mockRagResult("orphaned answer"));
+
+    // Reopen and wait for any pending microtasks to flush.
+    rerender(<EverythingChatSheet open onOpenChange={() => {}} />);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Transcript must be empty — the orphaned reply was abandoned.
+    expect(screen.queryByText("orphaned answer")).not.toBeInTheDocument();
+    expect(screen.queryByText("race against close")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/spans your entire constellation/i),
+    ).toBeInTheDocument();
+  });
 });
