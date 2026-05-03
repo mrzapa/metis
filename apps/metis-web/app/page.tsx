@@ -46,8 +46,8 @@ import { useConstellationCamera } from "@/hooks/use-constellation-camera";
 import { useStarFocusPhase, type StarFocusPhase } from "@/hooks/use-star-focus-phase";
 import { useConstellationStars } from "@/hooks/use-constellation-stars";
 import { useCometNews } from "@/hooks/use-news-comets";
-import { deleteIndex, fetchBrainScaffold, fetchIndexes, fetchSettings, previewLearningRoute, subscribeCompanionActivity } from "@/lib/api";
-import type { BrainScaffoldEdge, BrainScaffoldResponse } from "@/lib/api";
+import { deleteIndex, fetchBrainScaffold, fetchIndexes, fetchSettings, fetchStarClusters, previewLearningRoute, subscribeCompanionActivity } from "@/lib/api";
+import type { BrainScaffoldEdge, BrainScaffoldResponse, StarClusterAssignment } from "@/lib/api";
 import { noise2D } from "@/lib/simplex-noise";
 import gsap from "gsap";
 import type { CometData, CometEvent } from "@/lib/comet-types";
@@ -945,6 +945,27 @@ export default function Home() {
   const focusPhaseHandle = useStarFocusPhase("idle");
   const starFocusPhase = focusPhaseHandle.phase;
   const [starDiveFocusStrength, setStarDiveFocusStrength] = useState(0);
+  // M24 Phase 3 — cluster placement: fetch cluster assignments on mount and
+  // store the resulting list. `null` means we haven't received a response
+  // yet (loading); an empty array means we've received a response with no
+  // assignments OR the request failed (graceful degrade — render falls
+  // through to the legacy faculty-anchor layout in that case).
+  const [clusters, setClusters] = useState<StarClusterAssignment[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchStarClusters()
+      .then((result) => {
+        if (cancelled) return;
+        setClusters(result);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setClusters([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [availableIndexes, setAvailableIndexes] = useState<IndexSummary[]>([]);
   const [indexesLoading, setIndexesLoading] = useState(true);
   const [indexLoadError, setIndexLoadError] = useState<string | null>(null);
