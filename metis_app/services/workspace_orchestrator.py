@@ -31,6 +31,7 @@ import logging
 import pathlib
 import re
 import threading
+from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -127,6 +128,62 @@ _EVERYTHING_CHAT_INDEX_CAP = 8
 # Cap on the number of merged sources fed into the final synthesis
 # call, after combining and re-sorting per-index results.
 _EVERYTHING_CHAT_SOURCE_CAP = 12
+
+# Module-level caches for star clustering + embeddings. Litestar
+# constructs a fresh ``WorkspaceOrchestrator`` per HTTP request, so
+# instance-level caches never fired in production. Moving them here
+# means the cache survives across requests (within a single process)
+# and the typical "user lands on home, frontend fetches clusters,
+# user types a few chars and the recommender refires" sequence pays
+# the embedding cost once per change to the user-stars list, not once
+# per request.
+#
+# Bounded with a simple LRU eviction (most-recent at the end). The
+# practical key cardinality is "number of distinct user-star list
+# fingerprints in a session" — usually 1-3, occasionally up to 10
+# while the user is editing labels. 16 is comfortably above that
+# without letting an evergreen process grow without bound.
+_CACHE_CAPACITY = 16
+_CLUSTER_CACHE: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+_STAR_EMBEDDING_CACHE: OrderedDict[
+    str,
+    tuple[list[str], dict[str, list[float]], dict[str, dict[str, Any]]],
+] = OrderedDict()
+_STAR_CACHE_LOCK = threading.Lock()
+
+
+def _lru_get(
+    cache: OrderedDict[str, Any],
+    key: str,
+) -> Any | None:
+    """Return cached value and bump its recency, or ``None`` on miss.
+
+    Module-private helper — guards both reads with the shared
+    ``_STAR_CACHE_LOCK``. ``OrderedDict.move_to_end`` is the cheap LRU
+    bump that makes the eviction in :func:`_lru_set` O(1).
+    """
+    with _STAR_CACHE_LOCK:
+        if key not in cache:
+            return None
+        cache.move_to_end(key)
+        return cache[key]
+
+
+def _lru_set(
+    cache: OrderedDict[str, Any],
+    key: str,
+    value: Any,
+    *,
+    capacity: int = _CACHE_CAPACITY,
+) -> None:
+    """Insert ``value`` under ``key`` and evict the LRU entry if over
+    capacity. Threadsafe.
+    """
+    with _STAR_CACHE_LOCK:
+        cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > capacity:
+            cache.popitem(last=False)
 
 
 def is_autonomous_research_running() -> bool:
@@ -1064,10 +1121,11 @@ class WorkspaceOrchestrator:
         re-embed the user's whole star list on every request when
         clustering already paid that cost.
 
-        Cache: keyed by SHA-256 of ``[star_ids, texts]``, stored on
-        ``self._star_embedding_cache`` (lazy-init). Per-orchestrator-
-        instance — see the same caveat documented on
-        :meth:`get_star_clusters`.
+        Cache: keyed by SHA-256 of ``[star_ids, texts]`` in their
+        insertion order in settings. Stored at module level so it
+        survives across HTTP requests (Litestar constructs a fresh
+        orchestrator per request). LRU-bounded to
+        :data:`_CACHE_CAPACITY` entries.
 
         Defensive validation:
 
@@ -1130,16 +1188,7 @@ class WorkspaceOrchestrator:
             json.dumps([star_ids, texts], sort_keys=True).encode()
         ).hexdigest()
 
-        if not hasattr(self, "_star_embedding_cache"):
-            self._star_embedding_cache: dict[
-                str,
-                tuple[
-                    list[str],
-                    dict[str, list[float]],
-                    dict[str, dict[str, Any]],
-                ],
-            ] = {}
-        cached = self._star_embedding_cache.get(cache_key)
+        cached = _lru_get(_STAR_EMBEDDING_CACHE, cache_key)
         if cached is not None:
             return cached
 
@@ -1164,7 +1213,7 @@ class WorkspaceOrchestrator:
             for s, sid in zip(valid_user_stars, star_ids)
         }
         result = (star_ids, embeddings_by_id, metadata_by_id)
-        self._star_embedding_cache[cache_key] = result
+        _lru_set(_STAR_EMBEDDING_CACHE, cache_key, result)
         return result
 
     def get_star_clusters(self, settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1176,13 +1225,12 @@ class WorkspaceOrchestrator:
         configured embedder, and runs them through
         :class:`~metis_app.services.star_clustering_service.StarClusteringService`.
 
-        Cache: keyed by SHA-256 of ``[sorted star_ids, texts]``, stored
-        on ``self._cluster_cache``. The cache is **per-orchestrator-
-        instance** — it deduplicates *within* a single request when this
-        method is called multiple times, but does NOT survive across
-        HTTP requests (the route constructs a fresh ``WorkspaceOrchestrator``
-        per call). For cross-request caching, the cache would need to
-        move to a class-level or module-level dict — defer to a follow-up.
+        Cache: keyed by SHA-256 of ``[star_ids, texts]`` in their
+        **insertion order** in settings, stored at module level so it
+        survives across HTTP requests. LRU-bounded to
+        :data:`_CACHE_CAPACITY` entries. Reordering stars in settings
+        deliberately invalidates the cache so the layout reflects the
+        new sequence (drag-to-reorder is a meaningful user intent).
 
         Star embeddings themselves are cached separately via
         :meth:`_embed_user_stars` so the Add-flow / recommender can
@@ -1215,9 +1263,7 @@ class WorkspaceOrchestrator:
             json.dumps([star_ids, texts], sort_keys=True).encode()
         ).hexdigest()
 
-        if not hasattr(self, "_cluster_cache"):
-            self._cluster_cache: dict[str, list[dict[str, Any]]] = {}
-        cached = self._cluster_cache.get(cache_key)
+        cached = _lru_get(_CLUSTER_CACHE, cache_key)
         if cached is not None:
             return cached
 
@@ -1238,7 +1284,7 @@ class WorkspaceOrchestrator:
             }
             for a in assignments
         ]
-        self._cluster_cache[cache_key] = result
+        _lru_set(_CLUSTER_CACHE, cache_key, result)
         return result
 
     def recommend_stars_for_content(

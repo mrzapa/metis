@@ -2244,6 +2244,26 @@ class TestApiBrainGraphUsesOrchestrator:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=False)
+def _isolate_star_caches() -> Any:
+    """Clear the module-level star clustering + embedding caches.
+
+    The caches survive across `WorkspaceOrchestrator` instances by
+    design (so they survive across HTTP requests in production), so
+    tests that assert "compute_clusters runs N times" or "embedder
+    is called once" must start from an empty cache. Apply this
+    fixture explicitly to those tests so unrelated tests still
+    benefit from the cache (matches production behaviour).
+    """
+    from metis_app.services import workspace_orchestrator as wo
+
+    wo._CLUSTER_CACHE.clear()
+    wo._STAR_EMBEDDING_CACHE.clear()
+    yield
+    wo._CLUSTER_CACHE.clear()
+    wo._STAR_EMBEDDING_CACHE.clear()
+
+
 class _FakeEmbedder:
     """Deterministic stand-in for an embedding model.
 
@@ -2290,7 +2310,10 @@ def test_get_star_clusters_returns_one_per_star(monkeypatch: pytest.MonkeyPatch)
         assert expected_keys <= set(item.keys())
 
 
-def test_get_star_clusters_caches_results(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_star_clusters_caches_results(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
+) -> None:
     """Calling twice with the same star list runs HDBSCAN/PCA only once."""
     monkeypatch.setattr(
         "metis_app.utils.embedding_providers.create_embeddings",
@@ -2326,6 +2349,7 @@ def test_get_star_clusters_caches_results(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_embed_user_stars_cache_shared_across_clusters_and_recommender(
     monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
 ) -> None:
     """get_star_clusters then recommend_stars_for_content should embed once.
 
@@ -2370,7 +2394,10 @@ def test_embed_user_stars_cache_shared_across_clusters_and_recommender(
     assert call_count["n"] == 1
 
 
-def test_embed_user_stars_filters_empty_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embed_user_stars_filters_empty_ids(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
+) -> None:
     """Stars with empty/missing ``id`` are skipped, not silently dropped.
 
     Regression for the duplicate-empty-string-key footgun in the
@@ -2405,6 +2432,7 @@ def test_embed_user_stars_filters_empty_ids(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_embed_user_stars_raises_on_duplicate_ids(
     monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
 ) -> None:
     """Two stars sharing a non-empty ``id`` raise ``ValueError`` loudly."""
     monkeypatch.setattr(
@@ -2424,6 +2452,7 @@ def test_embed_user_stars_raises_on_duplicate_ids(
 
 def test_embed_user_stars_raises_on_embedder_length_mismatch(
     monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
 ) -> None:
     """If ``embed_documents`` returns N-1 vectors for N texts, raise loudly.
 
@@ -2457,6 +2486,7 @@ def test_embed_user_stars_raises_on_embedder_length_mismatch(
 
 def test_embed_user_stars_skips_non_dict_entries(
     monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
 ) -> None:
     """Corrupted/legacy non-dict entries in settings are filtered.
 
@@ -2478,3 +2508,77 @@ def test_embed_user_stars_skips_non_dict_entries(
     }
     star_ids, _emb, _meta = orch._embed_user_stars(settings)
     assert star_ids == ["real"]
+
+
+def test_module_level_caches_survive_across_orchestrator_instances(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
+) -> None:
+    """The cluster + embedding caches must survive across orchestrator
+    instances (Litestar constructs a fresh ``WorkspaceOrchestrator`` per
+    HTTP request, so per-instance caches never fire in production).
+    """
+    embedder_calls = {"n": 0}
+
+    class _CountingEmbedder:
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            embedder_calls["n"] += 1
+            return [[float(abs(hash(t)) % 1000) / 1000.0, 0.0] for t in texts]
+
+        def embed_query(self, text: str) -> list[float]:  # pragma: no cover
+            return [0.5, 0.0]
+
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _CountingEmbedder(),
+    )
+
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "alpha", "label": "Alpha"},
+            {"id": "beta", "label": "Beta"},
+        ],
+    }
+
+    # First request — fresh orchestrator, cache is cold.
+    orch1 = _make_orchestrator()
+    first_clusters = orch1.get_star_clusters(settings)
+    assert embedder_calls["n"] == 1
+
+    # Second request — brand-new orchestrator, but the module-level
+    # cache means the embedder must NOT be hit again.
+    orch2 = _make_orchestrator()
+    second_clusters = orch2.get_star_clusters(settings)
+    assert second_clusters == first_clusters
+    assert embedder_calls["n"] == 1, (
+        "Module-level cache must survive across orchestrator instances; "
+        f"embedder was called {embedder_calls['n']} times."
+    )
+
+
+def test_module_level_cache_lru_eviction(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
+) -> None:
+    """Inserting more entries than ``_CACHE_CAPACITY`` evicts the oldest."""
+    from metis_app.services import workspace_orchestrator as wo
+
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _FakeEmbedder(),
+    )
+    orch = _make_orchestrator()
+
+    for i in range(wo._CACHE_CAPACITY + 3):
+        settings = {
+            "landing_constellation_user_stars": [
+                {"id": f"s{i}-1", "label": f"label-{i}"},
+                {"id": f"s{i}-2", "label": f"other-{i}"},
+            ],
+        }
+        orch.get_star_clusters(settings)
+
+    # Cache must be at exactly ``_CACHE_CAPACITY`` after the overflow,
+    # not _CACHE_CAPACITY + 3.
+    assert len(wo._CLUSTER_CACHE) == wo._CACHE_CAPACITY
+    assert len(wo._STAR_EMBEDDING_CACHE) == wo._CACHE_CAPACITY
