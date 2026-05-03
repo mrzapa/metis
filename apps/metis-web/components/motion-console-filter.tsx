@@ -29,23 +29,51 @@ interface FilteredWarn {
   __metisMotionFiltered?: boolean;
 }
 
-if (typeof window !== "undefined" && typeof console !== "undefined") {
-  const original = console.warn as FilteredWarn;
-  if (typeof original === "function" && !original.__metisMotionFiltered) {
-    const wrapped: FilteredWarn = function metisMotionWarnFilter(...args: unknown[]) {
-      const first = args[0];
-      if (
-        typeof first === "string"
-        && (first.includes("reduced-motion-disabled")
-          || first.includes("You have Reduced Motion enabled"))
-      ) {
-        return;
-      }
-      original.apply(console, args as []);
-    };
-    wrapped.__metisMotionFiltered = true;
-    console.warn = wrapped;
+/**
+ * Predicate split out so the unit tests can exercise the matcher
+ * without having to hijack `console.warn` themselves. Exported only
+ * for tests; production callers go through the wrapped `console.warn`.
+ *
+ * @internal
+ */
+export function isMotionReducedMotionWarning(message: unknown): boolean {
+  if (typeof message !== "string") return false;
+  return (
+    message.includes("reduced-motion-disabled")
+    || message.includes("You have Reduced Motion enabled")
+  );
+}
+
+/**
+ * Wraps the supplied `console.warn` so the motion/react reduced-motion
+ * warning is dropped and everything else is forwarded unchanged.
+ * Idempotent against double-installation via the `__metisMotionFiltered`
+ * flag. Exported for tests; production wires this in via the
+ * module-load side effect below.
+ *
+ * @internal
+ */
+export function installMotionWarnFilter(target: Console): void {
+  const original = target.warn as FilteredWarn;
+  if (typeof original !== "function" || original.__metisMotionFiltered) {
+    return;
   }
+  const wrapped: FilteredWarn = function metisMotionWarnFilter(...args: unknown[]) {
+    if (isMotionReducedMotionWarning(args[0])) {
+      return;
+    }
+    // Forward verbatim. Spread keeps the call signature honest —
+    // earlier draft used `original.apply(console, args as [])` which
+    // mis-types the call as taking no arguments and would silently
+    // break if `apply`'s typings tighten.
+    (original as (...rest: unknown[]) => void)(...args);
+  };
+  wrapped.__metisMotionFiltered = true;
+  target.warn = wrapped as Console["warn"];
+}
+
+if (typeof window !== "undefined" && typeof console !== "undefined") {
+  installMotionWarnFilter(console);
 }
 
 export function MotionConsoleFilter() {

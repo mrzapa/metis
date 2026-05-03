@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { MetisMark } from "@/components/brand";
 
 /**
@@ -34,12 +34,20 @@ export default function NotFound() {
           constellation and try from there.
         </p>
       </div>
+      {/*
+        Codex review: avoid `<Link><Button/></Link>` since `Link`
+        renders an `<a>` and `Button` renders a `<button>` — the
+        result is `<a><button/></a>`, which is invalid HTML and
+        confuses keyboard / screen-reader navigation. Style the
+        link directly with `buttonVariants` instead so each
+        recovery action is exactly one interactive element.
+      */}
       <div className="flex flex-wrap items-center justify-center gap-3">
-        <Link href="/">
-          <Button>Back to home</Button>
+        <Link href="/" className={buttonVariants()}>
+          Back to home
         </Link>
-        <Link href="/chat">
-          <Button variant="outline">Open chat</Button>
+        <Link href="/chat" className={buttonVariants({ variant: "outline" })}>
+          Open chat
         </Link>
       </div>
     </main>
