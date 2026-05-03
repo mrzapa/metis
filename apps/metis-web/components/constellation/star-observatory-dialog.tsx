@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FacultyGlyphPanel } from "@/components/constellation/faculty-glyph-panel";
 import { LearningRoutePanel } from "@/components/constellation/learning-route-panel";
 import {
   ObservatoryOrbitalLayout,
@@ -624,28 +623,12 @@ export function StarDetailsPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, building, uploading, removing, handleOpenChange]);
 
-  const activeFaculty = useMemo(() => {
-    if (!star) {
-      return null;
-    }
-
-    const activeStar = star as DetailStar;
-    const chosenFacultyId = primaryDomainIdDraft.trim() || activeStar.primaryDomainId;
-    if (chosenFacultyId) {
-      const matchedFaculty = CONSTELLATION_FACULTIES.find((faculty) => faculty.id === chosenFacultyId);
-      if (matchedFaculty) {
-        return matchedFaculty;
-      }
-    }
-
-    return inferConstellationFaculty({
-      x: activeStar.x,
-      y: activeStar.y,
-    }).primary.faculty;
-  }, [primaryDomainIdDraft, star]);
-
-  // Phase 4: on desktop, surface the three observatory sub-panels (faculty
-  // glyph, archetype picker, learning route) as docked rings around the star.
+  // M24 Phase 6: faculty-glyph side panel removed (ADR 0019). Stellar Identity
+  // card, archetype picker, and learning-route panel remain as the surviving
+  // observatory carve-outs.
+  //
+  // Phase 4: on desktop, surface the remaining observatory sub-panels
+  // (archetype picker, learning route) as docked rings around the star.
   // On mobile fall back to the classic side-rail modal where these render
   // inline. See ObservatoryOrbitalLayout for the slot API + stagger curve.
   // Called unconditionally (before the early return below) to satisfy Rules
@@ -981,11 +964,7 @@ export function StarDetailsPanel({
                 />
               </div>
             ) : null,
-            left: activeFaculty ? (
-              <div className="pointer-events-auto">
-                <FacultyGlyphPanel faculty={activeFaculty} />
-              </div>
-            ) : null,
+            left: null,
             bottom: (
               <div className="pointer-events-auto rounded-[1.6rem] border border-white/12 bg-[linear-gradient(180deg,rgba(14,20,34,0.92),rgba(10,13,23,0.9))] p-4 shadow-[0_24px_80px_rgba(3,8,19,0.55)] backdrop-blur-md">
                 <LearningRoutePanel
@@ -1093,7 +1072,6 @@ export function StarDetailsPanel({
               </button>
             </div>
 
-            {isOrbital ? null : <FacultyGlyphPanel faculty={activeFaculty} />}
           </DialogHeader>
         </div>
 
