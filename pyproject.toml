@@ -44,6 +44,10 @@ api = [
     "litestar>=2.4",
     "python-multipart==0.0.26",
     "uvicorn[standard]==0.44.0",
+    # M24: backend clustering service (HDBSCAN + PCA) consumed by the
+    # /v1/stars/clusters route. Pinned to the same range used in the
+    # forecast-xreg extra so a single sklearn install satisfies both.
+    "scikit-learn>=1.5.0,<2",
 ]
 dev = [
     "pytest>=8",
@@ -55,6 +59,8 @@ dev = [
     "python-multipart==0.0.26",
     "uvicorn[standard]==0.44.0",
     "litestar>=2.4",
+    # M24: backend clustering service tests need sklearn imports.
+    "scikit-learn>=1.5.0,<2",
 ]
 forecast = [
     "timesfm>=2,<3",

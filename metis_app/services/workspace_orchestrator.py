@@ -722,6 +722,92 @@ class WorkspaceOrchestrator:
         return BrainGraph().build_from_indexes_and_sessions(indexes, sessions, assistant_snapshot, skip_layout=skip_layout)
 
     # ------------------------------------------------------------------
+    # Star clusters (M24 — content-first placement, replaces faculty anchors)
+    # ------------------------------------------------------------------
+
+    def get_star_clusters(self, settings: dict[str, Any]) -> list[dict[str, Any]]:
+        """Compute (or fetch from cache) cluster assignments + 2D positions
+        for the user's stars.
+
+        Replaces the faculty-anchored placement from M02 / ADR 0006.
+        Each user star is embedded by its label + notes, the embeddings
+        are clustered via HDBSCAN, and the result is projected to 2D
+        screen-space normalised to ``[-1, 1]`` per
+        :class:`StarClusteringService`. The ``cluster_label`` field is
+        empty here — Phase 1 only computes geometry; M24 follow-ups
+        attach human-readable labels.
+
+        Cached on the orchestrator instance keyed on a hash of the
+        ``(star_id, embed_text)`` tuples. Adding/removing a star, or
+        editing a label/notes, busts the cache. The cache is per-
+        orchestrator-instance, not per-process — fine for the typical
+        single-orchestrator-per-API pattern; rebuild the orchestrator
+        if you want a fresh cache.
+
+        Returns
+        -------
+        list[dict[str, Any]]
+            One entry per user star. Empty when no user stars exist.
+        """
+        import hashlib
+        import json
+
+        from metis_app.services.star_clustering_service import (
+            StarClusteringService,
+        )
+        from metis_app.utils.embedding_providers import create_embeddings
+
+        user_stars = list(settings.get("landing_constellation_user_stars") or [])
+        if not user_stars:
+            return []
+
+        # Build (star_id, embed_text) tuples in input order. Falling
+        # back to the star id keeps the cache key stable for stars that
+        # have no label or notes set.
+        star_ids: list[str] = [str(s.get("id") or "") for s in user_stars]
+        texts: list[str] = []
+        for star, sid in zip(user_stars, star_ids):
+            label = str(star.get("label") or "").strip()
+            notes = str(star.get("notes") or "").strip()
+            text = (label + " " + notes).strip() or sid
+            texts.append(text)
+
+        cache_key = hashlib.sha256(
+            json.dumps([star_ids, texts], sort_keys=False).encode()
+        ).hexdigest()
+
+        cache = getattr(self, "_cluster_cache", None)
+        if cache is None:
+            cache = {}
+            self._cluster_cache = cache  # type: ignore[attr-defined]
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        embedder = create_embeddings(settings)
+        raw_embeddings = embedder.embed_documents(texts)
+        embeddings_dict: dict[str, list[float]] = {
+            sid: emb for sid, emb in zip(star_ids, raw_embeddings)
+        }
+
+        service = StarClusteringService()
+        assignments = service.compute_clusters(embeddings_dict)
+
+        result: list[dict[str, Any]] = [
+            {
+                "star_id": a.star_id,
+                "cluster_id": a.cluster_id,
+                "x": a.x,
+                "y": a.y,
+                "cluster_label": a.cluster_label,
+            }
+            for a in assignments
+        ]
+
+        cache[cache_key] = result
+        return result
+
+    # ------------------------------------------------------------------
     # Sessions / Memory
     # ------------------------------------------------------------------
 

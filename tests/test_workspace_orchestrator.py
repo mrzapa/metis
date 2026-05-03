@@ -2236,3 +2236,248 @@ class TestApiBrainGraphUsesOrchestrator:
         assert "edges" in body
         assert isinstance(body["nodes"], list)
         assert isinstance(body["edges"], list)
+
+
+# ---------------------------------------------------------------------------
+# M24 Phase 1 Task 1.3 — get_star_clusters
+# ---------------------------------------------------------------------------
+
+
+class _FakeEmbedder:
+    """Embeds each text into a tiny vector that's near-identical for inputs
+    sharing the same first word, so HDBSCAN groups them into one cluster.
+
+    Used by the M24 Task 1.3 tests — no provider dependency required.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(list(texts))
+        out: list[list[float]] = []
+        for text in texts:
+            head = (text.split() or [""])[0]
+            # Map the leading token to a 4-d unit-ish vector. Stars whose
+            # labels share a first word land near each other; HDBSCAN +
+            # PCA in StarClusteringService groups them.
+            seed = sum(ord(ch) for ch in head) % 7
+            out.append([float(seed), float(seed * 0.5), 0.0, 0.0])
+        return out
+
+    def embed_query(self, text: str) -> list[float]:  # pragma: no cover - unused
+        return self.embed_documents([text])[0]
+
+
+class TestGetStarClusters:
+    """M24 Phase 1 — orchestrator.get_star_clusters."""
+
+    def test_returns_one_assignment_per_user_star(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "metis_app.utils.embedding_providers.create_embeddings",
+            lambda settings: _FakeEmbedder(),
+        )
+        orch = _make_orchestrator()
+        settings = {
+            "landing_constellation_user_stars": [
+                {"id": "star1", "label": "Python perf"},
+                {"id": "star2", "label": "Python tooling"},
+                {"id": "star3", "label": "Cooking recipes"},
+            ]
+        }
+        result = orch.get_star_clusters(settings)
+        assert len(result) == 3
+        assert {item["star_id"] for item in result} == {"star1", "star2", "star3"}
+        for item in result:
+            assert {"star_id", "cluster_id", "x", "y", "cluster_label"} <= set(item)
+            assert -1.0 <= item["x"] <= 1.0
+            assert -1.0 <= item["y"] <= 1.0
+
+    def test_returns_empty_when_no_user_stars(self) -> None:
+        orch = _make_orchestrator()
+        # Both empty list and missing key should yield [].
+        assert orch.get_star_clusters({}) == []
+        assert orch.get_star_clusters({"landing_constellation_user_stars": []}) == []
+
+    def test_caches_results_for_unchanged_input(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        embedder = _FakeEmbedder()
+        monkeypatch.setattr(
+            "metis_app.utils.embedding_providers.create_embeddings",
+            lambda settings: embedder,
+        )
+        orch = _make_orchestrator()
+        settings = {
+            "landing_constellation_user_stars": [
+                {"id": "s1", "label": "alpha note"},
+                {"id": "s2", "label": "alpha sketch"},
+                {"id": "s3", "label": "beta thought"},
+            ]
+        }
+
+        first = orch.get_star_clusters(settings)
+        second = orch.get_star_clusters(settings)
+
+        assert second is first  # same cached object
+        # The embedder was only invoked for the first call.
+        assert len(embedder.calls) == 1
+
+    def test_invalidates_cache_when_a_star_label_changes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        embedder = _FakeEmbedder()
+        monkeypatch.setattr(
+            "metis_app.utils.embedding_providers.create_embeddings",
+            lambda settings: embedder,
+        )
+        orch = _make_orchestrator()
+        settings_v1 = {
+            "landing_constellation_user_stars": [
+                {"id": "s1", "label": "alpha"},
+                {"id": "s2", "label": "beta"},
+            ]
+        }
+        settings_v2 = {
+            "landing_constellation_user_stars": [
+                {"id": "s1", "label": "alpha"},
+                {"id": "s2", "label": "beta v2"},  # edited
+            ]
+        }
+
+        orch.get_star_clusters(settings_v1)
+        orch.get_star_clusters(settings_v2)
+
+        # Two separate embed_documents calls — cache key differs.
+        assert len(embedder.calls) == 2
+
+    def test_invalidates_cache_when_a_star_is_added(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        embedder = _FakeEmbedder()
+        monkeypatch.setattr(
+            "metis_app.utils.embedding_providers.create_embeddings",
+            lambda settings: embedder,
+        )
+        orch = _make_orchestrator()
+        settings_v1 = {
+            "landing_constellation_user_stars": [
+                {"id": "s1", "label": "alpha"},
+                {"id": "s2", "label": "beta"},
+            ]
+        }
+        settings_v2 = {
+            "landing_constellation_user_stars": [
+                {"id": "s1", "label": "alpha"},
+                {"id": "s2", "label": "beta"},
+                {"id": "s3", "label": "gamma"},
+            ]
+        }
+
+        orch.get_star_clusters(settings_v1)
+        orch.get_star_clusters(settings_v2)
+
+        assert len(embedder.calls) == 2
+
+    def test_falls_back_to_star_id_when_label_and_notes_are_empty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        embedder = _FakeEmbedder()
+        monkeypatch.setattr(
+            "metis_app.utils.embedding_providers.create_embeddings",
+            lambda settings: embedder,
+        )
+        orch = _make_orchestrator()
+        result = orch.get_star_clusters(
+            {
+                "landing_constellation_user_stars": [
+                    {"id": "lonely", "label": "", "notes": ""},
+                ]
+            }
+        )
+        # Single-star path: returns one assignment at the origin.
+        assert result == [
+            {
+                "star_id": "lonely",
+                "cluster_id": 0,
+                "x": 0.0,
+                "y": 0.0,
+                "cluster_label": "",
+            }
+        ]
+
+
+# ---------------------------------------------------------------------------
+# M24 Phase 1 Task 1.4 — GET /v1/stars/clusters route
+# ---------------------------------------------------------------------------
+
+
+class TestApiStarClusters:
+    """Smoke-test the new GET /v1/stars/clusters route end-to-end."""
+
+    def test_endpoint_returns_assignments(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from importlib import import_module
+
+        from litestar.testing import TestClient
+
+        api_module = import_module("metis_app.api_litestar")
+
+        sample = [
+            {
+                "star_id": "alpha",
+                "cluster_id": 0,
+                "x": 0.42,
+                "y": -0.13,
+                "cluster_label": "",
+            },
+            {
+                "star_id": "beta",
+                "cluster_id": 1,
+                "x": -0.5,
+                "y": 0.21,
+                "cluster_label": "",
+            },
+        ]
+
+        def _fake_clusters(self_: Any, settings: dict[str, Any]) -> list[dict[str, Any]]:
+            return sample
+
+        monkeypatch.setattr(
+            "metis_app.services.workspace_orchestrator.WorkspaceOrchestrator.get_star_clusters",
+            _fake_clusters,
+        )
+
+        client = TestClient(app=api_module.create_app())
+        response = client.get("/v1/stars/clusters")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert isinstance(body, list)
+        assert body == sample
+
+    def test_endpoint_returns_empty_list_when_no_user_stars(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from importlib import import_module
+
+        from litestar.testing import TestClient
+
+        api_module = import_module("metis_app.api_litestar")
+
+        def _empty(self_: Any, settings: dict[str, Any]) -> list[dict[str, Any]]:
+            return []
+
+        monkeypatch.setattr(
+            "metis_app.services.workspace_orchestrator.WorkspaceOrchestrator.get_star_clusters",
+            _empty,
+        )
+
+        client = TestClient(app=api_module.create_app())
+        response = client.get("/v1/stars/clusters")
+
+        assert response.status_code == 200
+        assert response.json() == []

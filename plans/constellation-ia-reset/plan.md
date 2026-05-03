@@ -1,8 +1,8 @@
 ---
 Milestone: M24 — Faculty UI purge + content-first IA + Add flow + Everything chat
-Status: Ready
-Claim: unclaimed
-Last updated: 2026-05-03 by claude/constellation-ia-intake
+Status: In progress
+Claim: claude/m24-phase1-clustering (Phase 1 backend in PR; ships safely under unchanged frontend)
+Last updated: 2026-05-03 by claude/m24-phase1-clustering
 Vision pillar: Cosmos
 TDD Mode: pragmatic
 ---
@@ -27,11 +27,39 @@ Task-by-task at [`docs/plans/2026-05-03-constellation-ia-reset-m24-implementatio
 
 ## Progress
 
-*(milestone not yet started)*
+- **2026-05-03 — Phase 1 (backend clustering) complete; PR pending.** Branch
+  `claude/m24-phase1-clustering`. Tasks 1.1–1.4 landed locally:
+  - **1.1** scikit-learn added to `[api]` and `[dev]` extras
+    (`pyproject.toml`).
+  - **1.2** `metis_app/services/star_clustering_service.py` — HDBSCAN +
+    PCA, normalised to `[-1, 1]`, with edge cases for empty input,
+    single star, and below-PCA-dim embeddings. 6 unit tests in
+    `tests/test_star_clustering_service.py`.
+  - **1.3** `WorkspaceOrchestrator.get_star_clusters(settings)` —
+    fetches user stars from `landing_constellation_user_stars`,
+    embeds `label + notes` (falls back to star id), runs the service,
+    returns the dict shape promised in the implementation doc. SHA-256
+    cache keyed on `(star_ids, texts)` busts on label/notes edits and
+    add/remove. 6 tests in `tests/test_workspace_orchestrator.py
+    ::TestGetStarClusters` (one-per-star, empty, cache hit, label
+    edit invalidates, add invalidates, empty-text fallback).
+  - **1.4** `GET /v1/stars/clusters` Litestar route in new
+    `metis_app/api_litestar/routes/stars.py`; registered in
+    `protected_routes` alongside the other v1 routes. 2 integration
+    tests in `tests/test_workspace_orchestrator.py
+    ::TestApiStarClusters` (returns assignments, empty when no
+    stars).
+
+  Verification: full backend `pytest --ignore=tests/_litestar_helpers
+  --ignore=tests/test_api_app.py` → **1615 passed / 12 skipped /
+  0 failed** (was 1601 before). `ruff check` on touched files
+  passes clean.
 
 ## Next up
 
-Phase 1 — Backend clustering service. See *Phasing (M24)* in the design doc.
+Phase 2 — Backend Add recommender (`StarRecommenderService` +
+`POST /v1/stars/recommend`). Single-day work; ships safely under
+unchanged frontend. See *Phasing (M24)* in the design doc.
 
 ## Phases
 
