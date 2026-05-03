@@ -144,15 +144,37 @@ written as the fix lands.
 
 ### P3 — minor
 
-- **#19 `motion.dev` reduced-motion warning fires on every render.** Log
-  noise; throttle or suppress.
-- **#20 404 page has no "Back to home" link.** Users dead-end on stale
-  URLs. Add a link.
-- **#21 Chat `Sources` panel "No sources yet" copy is permanent for new
-  users** because `/library/` is a stub (#2). Resolves when #2 is fixed.
-- **#22 Forge `RUNTIME CHECK` cards (TimesFM, Heretic) are excellent
-  pattern — promote.** Suggest extending to other techniques that depend on
-  optional binaries.
+- **#19 `motion.dev` reduced-motion warning. ✅ landed Phase 4 (P3).**
+  `motion/react`'s informational `console.warn` ("You have Reduced
+  Motion enabled… For more information visit
+  https://motion.dev/troubleshooting/reduced-motion-disabled") is
+  developer-facing and uninteresting to METIS's logs. New
+  `<MotionConsoleFilter>` client component installs a one-shot
+  console.warn wrapper that drops messages containing
+  `reduced-motion-disabled` (or the canonical message text) and
+  forwards everything else unchanged. Mounted once via
+  `app/layout.tsx`; idempotent against double-mount in dev
+  (`__metisMotionFiltered` flag).
+- **#20 404 page has no "Back to home" link. ✅ landed Phase 4 (P3).**
+  No `app/not-found.tsx` existed, so Next.js's default text-only 404
+  was used. Added a custom one with the brand mark, an empathic
+  one-line explanation, and two recovery actions (`Back to home`
+  primary, `Open chat` secondary). No client JS, static, fast.
+- **#21 Chat `Sources` panel "No sources yet" copy. ✅ resolved by
+  PR #588 (P0 #2).** The original concern was the permanent empty
+  state for users with no documents indexed; once PR #588 wired
+  `/library/` to `<NyxCatalogPage>`, users have a path to add
+  sources. Existing copy ("No sources yet. Sources will appear
+  here when the assistant references documents.") is honest and
+  doesn't need rewording. Marking resolved-via-#2 per the original
+  triage note.
+- **#22 Forge `RUNTIME CHECK` pattern — promote. (Punted.)** The
+  RUNTIME CHECK card pattern (TimesFM, Heretic preflight badges) is
+  genuinely good UX, and extending it to other optional-binary
+  techniques would be valuable — but it's design + product work,
+  not a polish fix. Filed as a follow-up idea instead of forcing it
+  into a P3 polish PR. Belongs in M14's Phase 7 stretch or a future
+  Forge enhancement pass.
 
 ### P-aesthetic (Phase 5) — constellation aesthetic critique
 
