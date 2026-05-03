@@ -21,40 +21,30 @@ describe("generateStarName", () => {
   });
 
   describe("landmark tier", () => {
-    it("produces a classical Bayer designation for bright magnitudes", () => {
+    // M24 Phase 6 (ADR 0019): the 8 classical-named landmark constellations
+    // were retired alongside the faculty IA. Landmark tier now degrades to
+    // a field-tier null name; legacy callers continue to compile.
+    it("returns null name and kind (retired tier)", () => {
       const rng = new SeededRNG(1);
-      const result = generateStarName({ tier: "landmark", rng, magnitude: 1 });
-      expect(result.kind).toBe("classical");
-      expect(typeof result.name).toBe("string");
-      expect(result.name).toMatch(/^[A-Z][a-z]+ [A-Z]/);
+      expect(generateStarName({ tier: "landmark", rng, magnitude: 1 })).toEqual({
+        name: null,
+        kind: null,
+      });
     });
 
-    it("produces Flamsteed-style names for mid magnitudes", () => {
-      const rng = new SeededRNG(2);
-      const result = generateStarName({ tier: "landmark", rng, magnitude: 3 });
-      expect(result.kind).toBe("classical");
-      expect(result.name).toMatch(/^\d+ [A-Z]/);
-    });
-
-    it("produces HD catalogue numbers for dim magnitudes", () => {
-      const rng = new SeededRNG(3);
-      const result = generateStarName({ tier: "landmark", rng, magnitude: 5 });
-      expect(result.kind).toBe("classical");
-      expect(result.name).toMatch(/^HD \d+$/);
-    });
-
-    it("is deterministic for the same rng seed and magnitude", () => {
-      const a = generateStarName({ tier: "landmark", rng: new SeededRNG(42), magnitude: 1 });
-      const b = generateStarName({ tier: "landmark", rng: new SeededRNG(42), magnitude: 1 });
-      expect(a).toEqual(b);
-    });
-
-    it("throws when rng is omitted", () => {
-      expect(() => generateStarName({ tier: "landmark", magnitude: 1 })).toThrow();
-    });
-
-    it("throws when magnitude is omitted", () => {
-      expect(() => generateStarName({ tier: "landmark", rng: new SeededRNG(1) })).toThrow();
+    it("returns null even when rng or magnitude are omitted", () => {
+      expect(generateStarName({ tier: "landmark" })).toEqual({
+        name: null,
+        kind: null,
+      });
+      expect(generateStarName({ tier: "landmark", magnitude: 3 })).toEqual({
+        name: null,
+        kind: null,
+      });
+      expect(generateStarName({ tier: "landmark", rng: new SeededRNG(7) })).toEqual({
+        name: null,
+        kind: null,
+      });
     });
   });
 

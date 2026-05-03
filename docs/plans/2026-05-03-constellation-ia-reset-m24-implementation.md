@@ -644,7 +644,14 @@ The orchestrator wrapper `recommend_stars_for_content`:
 3. Calls `StarRecommenderService.rank(...)`.
 4. Returns `{"recommendations": [{star_id, similarity, label, archetype}, ...], "create_new_suggested": bool}`.
 
-`create_new_suggested` is `True` if top similarity is below 0.5 (threshold for "no good match").
+`create_new_suggested` is `True` when there are no existing stars, OR when the top match's adjusted similarity is below `_CREATE_NEW_THRESHOLD` (currently `0.5` — the threshold for "no good match"). Concretely:
+
+```python
+create_new_suggested = bool(
+    not recommendations
+    or recommendations[0].similarity < _CREATE_NEW_THRESHOLD
+)
+```
 
 **Step 1–5:** RED → write `recommend_stars_for_content` orchestrator method + route → GREEN → commit.
 
@@ -757,7 +764,13 @@ git commit -m "feat(m24): cluster halo rendering"
 
 ---
 
-### Task 3.4: Remove faculty-anchor code path
+### Task 3.4: ~~Remove faculty-anchor code path~~ — DEFERRED to post-Phase-4
+
+**Status (2026-05-03):** Deferred. Discovered during Phase 3 implementation that the faculty-ring rendering code does work for non-Phase-3 features: comet targeting, RAG pulse highlighting, `showConceptAtNode` click-to-add (replaced by `AddStarDialog` in Phase 4), focus camera + brain-graph activity, and `buildFacultyAnchoredPlacement` seed for new index stars. Spec-compliance review verified all 5 risk vectors as TRUE.
+
+**New target:** Phase 4 / Phase 6 — once `AddStarDialog` provides the replacement for `showConceptAtNode`, the faculty-ring rendering is safe to delete. Bundled into Phase 6 cleanup or a Phase 4 follow-up commit.
+
+[Original task spec preserved below for the future agent.]
 
 **Files:**
 - Modify: `apps/metis-web/app/page.tsx` — delete `FACULTY_CONCEPTS`, `FacultyConcept`, `FacultyArtRenderState`, faculty-ring rendering helpers

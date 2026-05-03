@@ -8,6 +8,7 @@ mock objects so that no real disk I/O or LLM calls are made.
 
 from __future__ import annotations
 
+import random
 from typing import Any
 from unittest.mock import ANY, MagicMock, patch
 
@@ -2236,3 +2237,348 @@ class TestApiBrainGraphUsesOrchestrator:
         assert "edges" in body
         assert isinstance(body["nodes"], list)
         assert isinstance(body["edges"], list)
+
+
+# ---------------------------------------------------------------------------
+# M24 Phase 1 — get_star_clusters (StarClusteringService integration + cache)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=False)
+def _isolate_star_caches() -> Any:
+    """Clear the module-level star clustering + embedding caches.
+
+    The caches survive across `WorkspaceOrchestrator` instances by
+    design (so they survive across HTTP requests in production), so
+    tests that assert "compute_clusters runs N times" or "embedder
+    is called once" must start from an empty cache. Apply this
+    fixture explicitly to those tests so unrelated tests still
+    benefit from the cache (matches production behaviour).
+    """
+    from metis_app.services import workspace_orchestrator as wo
+
+    wo._CLUSTER_CACHE.clear()
+    wo._STAR_EMBEDDING_CACHE.clear()
+    yield
+    wo._CLUSTER_CACHE.clear()
+    wo._STAR_EMBEDDING_CACHE.clear()
+
+
+class _FakeEmbedder:
+    """Deterministic stand-in for an embedding model.
+
+    Hashes each text into a small float vector so semantically distinct
+    texts get distinct embeddings; identical texts get identical
+    embeddings. Avoids loading any real embedding backend in tests.
+    """
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        out: list[list[float]] = []
+        for text in texts:
+            seed = abs(hash(text)) & 0xFFFFFFFF
+            rng = random.Random(seed)
+            out.append([rng.uniform(-1.0, 1.0) for _ in range(8)])
+        return out
+
+
+def test_get_star_clusters_returns_one_per_star(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Three user stars in settings -> three cluster assignments returned.
+
+    Each result row carries the canonical keys (``star_id``,
+    ``cluster_id``, ``x``, ``y``, ``cluster_label``) that the
+    ``GET /v1/stars/clusters`` route surfaces to the frontend.
+    """
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _FakeEmbedder(),
+    )
+
+    orch = _make_orchestrator()
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "star1", "label": "Python perf", "notes": ""},
+            {"id": "star2", "label": "Python tooling", "notes": ""},
+            {"id": "star3", "label": "Cooking", "notes": ""},
+        ]
+    }
+
+    result = orch.get_star_clusters(settings)
+    assert len(result) == 3
+    assert {item["star_id"] for item in result} == {"star1", "star2", "star3"}
+    expected_keys = {"star_id", "cluster_id", "x", "y", "cluster_label"}
+    for item in result:
+        assert expected_keys <= set(item.keys())
+
+
+def test_get_star_clusters_caches_results(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
+) -> None:
+    """Calling twice with the same star list runs HDBSCAN/PCA only once."""
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _FakeEmbedder(),
+    )
+
+    call_count = {"n": 0}
+    from metis_app.services import star_clustering_service as scs
+
+    real_compute = scs.StarClusteringService.compute_clusters
+
+    def _spy(self: Any, embeddings: dict[str, Any]) -> Any:
+        call_count["n"] += 1
+        return real_compute(self, embeddings)
+
+    monkeypatch.setattr(scs.StarClusteringService, "compute_clusters", _spy)
+
+    orch = _make_orchestrator()
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "star1", "label": "Python perf"},
+            {"id": "star2", "label": "Python tooling"},
+            {"id": "star3", "label": "Cooking"},
+        ]
+    }
+
+    first = orch.get_star_clusters(settings)
+    second = orch.get_star_clusters(settings)
+
+    assert first == second
+    assert call_count["n"] == 1
+
+
+def test_embed_user_stars_cache_shared_across_clusters_and_recommender(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
+) -> None:
+    """get_star_clusters then recommend_stars_for_content should embed once.
+
+    Phase 2 review I2: the Add-flow recommender must reuse star
+    embeddings already computed by clustering rather than re-embedding
+    on every request.
+    """
+    call_count = {"n": 0}
+
+    class _CountingEmbedder:
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            call_count["n"] += 1
+            return [
+                [float(abs(hash(t)) % 1000) / 1000.0, 0.0, 0.0] for t in texts
+            ]
+
+        def embed_query(self, text: str) -> list[float]:
+            return [0.5, 0.0, 0.0]
+
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _CountingEmbedder(),
+    )
+
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "s1", "label": "Star One"},
+            {"id": "s2", "label": "Star Two"},
+        ],
+    }
+    monkeypatch.setattr(
+        "metis_app.services.workspace_orchestrator._settings_store.load_settings",
+        lambda: settings,
+    )
+
+    orch = _make_orchestrator()
+    orch.get_star_clusters(settings)
+    orch.recommend_stars_for_content(content="test query", content_type="")
+
+    # Both methods should have hit _embed_user_stars; the second call
+    # should have been served from the shared cache.
+    assert call_count["n"] == 1
+
+
+def test_embed_user_stars_filters_empty_ids(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
+) -> None:
+    """Stars with empty/missing ``id`` are skipped, not silently dropped.
+
+    Regression for the duplicate-empty-string-key footgun in the
+    ``dict(zip(star_ids, raw_embeddings))`` collapse: if two stars have
+    empty IDs, both would be keyed at ``""`` and the second would win,
+    producing fewer cluster assignments than user stars.
+    """
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _FakeEmbedder(),
+    )
+    orch = _make_orchestrator()
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "valid-1", "label": "Real star"},
+            {"id": "", "label": "Bad star"},
+            {"label": "Missing id"},
+        ],
+    }
+
+    star_ids, embeddings_by_id, metadata_by_id = orch._embed_user_stars(settings)
+
+    assert star_ids == ["valid-1"]
+    assert set(embeddings_by_id.keys()) == {"valid-1"}
+    assert set(metadata_by_id.keys()) == {"valid-1"}
+
+    # And the public surfaces honour the same filter.
+    clusters = orch.get_star_clusters(settings)
+    assert len(clusters) == 1
+    assert clusters[0]["star_id"] == "valid-1"
+
+
+def test_embed_user_stars_raises_on_duplicate_ids(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
+) -> None:
+    """Two stars sharing a non-empty ``id`` raise ``ValueError`` loudly."""
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _FakeEmbedder(),
+    )
+    orch = _make_orchestrator()
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "dup", "label": "First"},
+            {"id": "dup", "label": "Second"},
+        ],
+    }
+    with pytest.raises(ValueError, match="Duplicate user star id"):
+        orch._embed_user_stars(settings)
+
+
+def test_embed_user_stars_raises_on_embedder_length_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
+) -> None:
+    """If ``embed_documents`` returns N-1 vectors for N texts, raise loudly.
+
+    Without this guard ``dict(zip(...))`` silently truncates the missing
+    star — the recommender / clusterer would see a partial picture with
+    no signal that anything went wrong.
+    """
+
+    class _ShortEmbedder:
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            # Return one fewer vector than asked for.
+            return [[0.1, 0.2, 0.3] for _ in texts[:-1]]
+
+        def embed_query(self, text: str) -> list[float]:  # pragma: no cover
+            return [0.1, 0.2, 0.3]
+
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _ShortEmbedder(),
+    )
+    orch = _make_orchestrator()
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "s1", "label": "A"},
+            {"id": "s2", "label": "B"},
+        ],
+    }
+    with pytest.raises(RuntimeError, match="Embedder returned"):
+        orch._embed_user_stars(settings)
+
+
+def test_embed_user_stars_skips_non_dict_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
+) -> None:
+    """Corrupted/legacy non-dict entries in settings are filtered.
+
+    ``landing_constellation_user_stars`` is typed ``list[Any]``;
+    non-dict entries (strings, None) used to crash on ``.get(...)``.
+    """
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _FakeEmbedder(),
+    )
+    orch = _make_orchestrator()
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "real", "label": "Real"},
+            "i am not a dict",
+            None,
+            42,
+        ],
+    }
+    star_ids, _emb, _meta = orch._embed_user_stars(settings)
+    assert star_ids == ["real"]
+
+
+def test_module_level_caches_survive_across_orchestrator_instances(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
+) -> None:
+    """The cluster + embedding caches must survive across orchestrator
+    instances (Litestar constructs a fresh ``WorkspaceOrchestrator`` per
+    HTTP request, so per-instance caches never fire in production).
+    """
+    embedder_calls = {"n": 0}
+
+    class _CountingEmbedder:
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            embedder_calls["n"] += 1
+            return [[float(abs(hash(t)) % 1000) / 1000.0, 0.0] for t in texts]
+
+        def embed_query(self, text: str) -> list[float]:  # pragma: no cover
+            return [0.5, 0.0]
+
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _CountingEmbedder(),
+    )
+
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "alpha", "label": "Alpha"},
+            {"id": "beta", "label": "Beta"},
+        ],
+    }
+
+    # First request — fresh orchestrator, cache is cold.
+    orch1 = _make_orchestrator()
+    first_clusters = orch1.get_star_clusters(settings)
+    assert embedder_calls["n"] == 1
+
+    # Second request — brand-new orchestrator, but the module-level
+    # cache means the embedder must NOT be hit again.
+    orch2 = _make_orchestrator()
+    second_clusters = orch2.get_star_clusters(settings)
+    assert second_clusters == first_clusters
+    assert embedder_calls["n"] == 1, (
+        "Module-level cache must survive across orchestrator instances; "
+        f"embedder was called {embedder_calls['n']} times."
+    )
+
+
+def test_module_level_cache_lru_eviction(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolate_star_caches: Any,
+) -> None:
+    """Inserting more entries than ``_CACHE_CAPACITY`` evicts the oldest."""
+    from metis_app.services import workspace_orchestrator as wo
+
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _FakeEmbedder(),
+    )
+    orch = _make_orchestrator()
+
+    for i in range(wo._CACHE_CAPACITY + 3):
+        settings = {
+            "landing_constellation_user_stars": [
+                {"id": f"s{i}-1", "label": f"label-{i}"},
+                {"id": f"s{i}-2", "label": f"other-{i}"},
+            ],
+        }
+        orch.get_star_clusters(settings)
+
+    # Cache must be at exactly ``_CACHE_CAPACITY`` after the overflow,
+    # not _CACHE_CAPACITY + 3.
+    assert len(wo._CLUSTER_CACHE) == wo._CACHE_CAPACITY
+    assert len(wo._STAR_EMBEDDING_CACHE) == wo._CACHE_CAPACITY

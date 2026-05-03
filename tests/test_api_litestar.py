@@ -347,3 +347,158 @@ def test_gguf_validate_success_contract(tmp_path):
         assert "file_size_bytes" in data
 
 
+# ---------------------------------------------------------------------------
+# M24 Phase 1 — GET /v1/stars/clusters
+# ---------------------------------------------------------------------------
+
+
+def _patch_stars_orchestrator(monkeypatch, fake):
+    """Swap ``WorkspaceOrchestrator`` on the stars route module."""
+    from importlib import import_module
+
+    stars_api = import_module("metis_app.api_litestar.routes.stars")
+    monkeypatch.setattr(stars_api, "WorkspaceOrchestrator", lambda: fake)
+
+
+def test_get_star_clusters_route_returns_assignments(monkeypatch):
+    """Route returns 200 + a list of cluster assignment dicts.
+
+    Mirrors the M23 pattern: monkeypatch the orchestrator so the
+    route smoke test does not depend on the real embedding stack.
+    """
+    from metis_app.api_litestar import create_app
+
+    captured: dict = {}
+
+    class _FakeOrchestrator:
+        def get_star_clusters(self, settings):
+            captured["called_with"] = settings
+            return [
+                {
+                    "star_id": "star1",
+                    "cluster_id": 0,
+                    "x": 0.42,
+                    "y": -0.13,
+                    "cluster_label": "",
+                },
+                {
+                    "star_id": "star2",
+                    "cluster_id": 0,
+                    "x": -0.42,
+                    "y": 0.13,
+                    "cluster_label": "",
+                },
+            ]
+
+    _patch_stars_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.get("/v1/stars/clusters")
+        assert response.status_code == 200
+        body = response.json()
+        assert isinstance(body, list)
+        assert len(body) == 2
+        first = body[0]
+        assert {"star_id", "cluster_id", "x", "y", "cluster_label"} <= set(first.keys())
+        # Settings must have been forwarded through (load_settings always
+        # returns at least an empty dict-like payload).
+        assert "called_with" in captured
+
+
+def test_get_star_clusters_route_empty_when_no_stars(monkeypatch):
+    """No user stars -> 200 with an empty JSON list."""
+    from metis_app.api_litestar import create_app
+
+    class _FakeOrchestrator:
+        def get_star_clusters(self, settings):
+            # Mirrors the orchestrator's real empty-input contract.
+            return []
+
+    _patch_stars_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.get("/v1/stars/clusters")
+        assert response.status_code == 200
+        assert response.json() == []
+
+
+# ---------------------------------------------------------------------------
+# M24 Phase 2 — POST /v1/stars/recommend
+# ---------------------------------------------------------------------------
+
+
+def test_recommend_stars_route_returns_top_5(monkeypatch):
+    """POST returns ``{recommendations, create_new_suggested}`` shape."""
+    from metis_app.api_litestar import create_app
+
+    captured: dict = {}
+
+    class _FakeOrchestrator:
+        def recommend_stars_for_content(self, *, content, content_type=""):
+            captured["content"] = content
+            captured["content_type"] = content_type
+            return {
+                "recommendations": [
+                    {
+                        "star_id": "python_perf",
+                        "similarity": 0.92,
+                        "label": "Python perf",
+                        "archetype": "main_sequence",
+                    },
+                    {
+                        "star_id": "python_tooling",
+                        "similarity": 0.71,
+                        "label": "Python tooling",
+                        "archetype": "main_sequence",
+                    },
+                    {
+                        "star_id": "cooking",
+                        "similarity": 0.05,
+                        "label": "Cooking",
+                        "archetype": "main_sequence",
+                    },
+                ],
+                "create_new_suggested": False,
+            }
+
+    _patch_stars_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.post(
+            "/v1/stars/recommend",
+            json={"content": "Python performance optimization"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body.keys()) >= {"recommendations", "create_new_suggested"}
+        recs = body["recommendations"]
+        assert isinstance(recs, list)
+        assert len(recs) == 3
+        # Sorted by similarity descending.
+        sims = [r["similarity"] for r in recs]
+        assert sims == sorted(sims, reverse=True)
+        # Each row has the expected shape.
+        assert {"star_id", "similarity", "label", "archetype"} <= set(recs[0].keys())
+        assert body["create_new_suggested"] is False
+        assert captured["content"] == "Python performance optimization"
+
+
+def test_recommend_stars_route_create_new_when_no_match(monkeypatch):
+    """Empty / weak recommendations -> create_new_suggested=True."""
+    from metis_app.api_litestar import create_app
+
+    class _FakeOrchestrator:
+        def recommend_stars_for_content(self, *, content, content_type=""):
+            return {"recommendations": [], "create_new_suggested": True}
+
+    _patch_stars_orchestrator(monkeypatch, _FakeOrchestrator())
+
+    with TestClient(app=create_app()) as client:
+        response = client.post(
+            "/v1/stars/recommend",
+            json={"content": "Something totally unrelated"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["recommendations"] == []
+        assert body["create_new_suggested"] is True

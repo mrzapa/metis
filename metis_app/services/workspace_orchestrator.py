@@ -25,12 +25,15 @@ Subsystems composed here
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import pathlib
 import re
 import threading
+from collections import OrderedDict
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import metis_app.settings_store as _settings_store
@@ -104,11 +107,141 @@ log = logging.getLogger(__name__)
 _autonomous_running_lock = threading.Lock()
 _autonomous_running_count = 0
 
+# Threshold below which the recommender suggests creating a new star
+# instead of attaching to an existing match. Tunable; M25 may revisit
+# with real eval data.
+_CREATE_NEW_THRESHOLD = 0.5
+
+# M24 Phase 5 / Task 5.3 — sentinel ``manifest_path`` value that the
+# query route uses to ask for "RAG over the union of every attached
+# index". When seen, ``run_rag_query`` dispatches to
+# ``_run_everything_chat`` instead of the per-index pipeline. Kept in
+# sync with ``ALL_STARS_MARKER`` in the EverythingChatSheet on the
+# frontend.
+ALL_STARS_MARKER = "_all_stars"
+# Cap on per-index retrieval rounds when a user has many attached
+# indexes — guards against a 100-star constellation paying 100 LLM
+# round-trips for retrieval. Sources from each retrieval still merge
+# into the final synthesis, so the cap only bounds how many indexes
+# we touch, not how rich the combined context can get.
+_EVERYTHING_CHAT_INDEX_CAP = 8
+# Cap on the number of merged sources fed into the final synthesis
+# call, after combining and re-sorting per-index results.
+_EVERYTHING_CHAT_SOURCE_CAP = 12
+
+# Module-level caches for star clustering + embeddings. Litestar
+# constructs a fresh ``WorkspaceOrchestrator`` per HTTP request, so
+# instance-level caches never fired in production. Moving them here
+# means the cache survives across requests (within a single process)
+# and the typical "user lands on home, frontend fetches clusters,
+# user types a few chars and the recommender refires" sequence pays
+# the embedding cost once per change to the user-stars list, not once
+# per request.
+#
+# Bounded with a simple LRU eviction (most-recent at the end). The
+# practical key cardinality is "number of distinct user-star list
+# fingerprints in a session" — usually 1-3, occasionally up to 10
+# while the user is editing labels. 16 is comfortably above that
+# without letting an evergreen process grow without bound.
+_CACHE_CAPACITY = 16
+_CLUSTER_CACHE: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+_STAR_EMBEDDING_CACHE: OrderedDict[
+    str,
+    tuple[list[str], dict[str, list[float]], dict[str, dict[str, Any]]],
+] = OrderedDict()
+_STAR_CACHE_LOCK = threading.Lock()
+
+
+def _lru_get(
+    cache: OrderedDict[str, Any],
+    key: str,
+) -> Any | None:
+    """Return cached value and bump its recency, or ``None`` on miss.
+
+    Module-private helper — guards both reads with the shared
+    ``_STAR_CACHE_LOCK``. ``OrderedDict.move_to_end`` is the cheap LRU
+    bump that makes the eviction in :func:`_lru_set` O(1).
+    """
+    with _STAR_CACHE_LOCK:
+        if key not in cache:
+            return None
+        cache.move_to_end(key)
+        return cache[key]
+
+
+def _lru_set(
+    cache: OrderedDict[str, Any],
+    key: str,
+    value: Any,
+    *,
+    capacity: int = _CACHE_CAPACITY,
+) -> None:
+    """Insert ``value`` under ``key`` and evict the LRU entry if over
+    capacity. Threadsafe.
+    """
+    with _STAR_CACHE_LOCK:
+        cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > capacity:
+            cache.popitem(last=False)
+
 
 def is_autonomous_research_running() -> bool:
     """Return True if any autonomous research run is currently in flight."""
     with _autonomous_running_lock:
         return _autonomous_running_count > 0
+
+
+def _merge_everything_chat_sources(
+    per_index_results: list[RagQueryResult],
+) -> dict[str, Any]:
+    """Merge per-index ``RagQueryResult`` objects into a single payload.
+
+    Sources from every index are combined, sorted by their numeric
+    ``score`` (highest first), and capped at
+    :data:`_EVERYTHING_CHAT_SOURCE_CAP`. The merged ``context_block``
+    is rebuilt from the surviving sources so the LLM sees the same
+    ``[S1], [S2], …`` numbering the citations refer to.
+
+    Pure helper — exposed module-level so tests can exercise the
+    merge logic in isolation without standing up the LLM stack.
+
+    NOTE: This is a score-based merge sort, NOT a cross-encoder rerank.
+    Per-index scores are not strictly comparable across indexes — a 0.7
+    from a sparse index is not the same as a 0.7 from a rich one. M25
+    polish: wire the existing reranker (cross-encoder) here to normalise
+    relevance across indexes. For first-pass M24, score-sort is
+    acceptable.
+    TODO(M25): swap for cross-index reranker.
+    """
+    flat_sources: list[dict[str, Any]] = []
+    top_score = 0.0
+    for per_index in per_index_results:
+        for source in per_index.sources or []:
+            if not isinstance(source, dict):
+                continue
+            flat_sources.append(dict(source))
+        if isinstance(per_index.top_score, (int, float)):
+            top_score = max(top_score, float(per_index.top_score))
+
+    flat_sources.sort(
+        key=lambda item: float(item.get("score") or 0.0),
+        reverse=True,
+    )
+    capped = flat_sources[:_EVERYTHING_CHAT_SOURCE_CAP]
+
+    blocks: list[str] = []
+    for idx, source in enumerate(capped, start=1):
+        snippet = str(source.get("snippet") or source.get("text") or "").strip()
+        title = str(source.get("title") or source.get("source") or "").strip()
+        header = f"[S{idx}] {title}".rstrip()
+        blocks.append(f"{header}\n{snippet}".strip())
+
+    return {
+        "sources": capped,
+        "context_block": "\n\n".join(blocks),
+        "top_score": top_score,
+    }
 
 
 class WorkspaceOrchestrator:
@@ -223,7 +356,17 @@ class WorkspaceOrchestrator:
         *,
         session_id: str = "",
     ) -> RagQueryResult:
-        """Execute a batch RAG query via the engine."""
+        """Execute a batch RAG query via the engine.
+
+        When ``req.manifest_path`` is the sentinel
+        :data:`ALL_STARS_MARKER`, dispatches to
+        :meth:`_run_everything_chat`, which unions retrieval across
+        every attached index on every user star. Otherwise runs a
+        single per-index pipeline.
+        """
+        if str(req.manifest_path or "").strip() == ALL_STARS_MARKER:
+            return self._run_everything_chat(req, session_id=session_id)
+
         resolved_settings = self._resolve_query_settings(req.settings, query=req.question)
         normalized = RagQueryRequest(
             manifest_path=req.manifest_path,
@@ -304,6 +447,264 @@ class WorkspaceOrchestrator:
                 _orchestrator=self,
             )
         return result
+
+    def _run_everything_chat(
+        self,
+        req: RagQueryRequest,
+        *,
+        session_id: str = "",
+    ) -> RagQueryResult:
+        """Aggregate RAG retrieval across every attached index.
+
+        Sentinel-path implementation for the M24 Phase 5 "Chat with
+        everything" entry point. Resolves the union of attached
+        manifest paths from ``landing_constellation_user_stars``,
+        runs the per-index ``query_rag`` against each (capped by
+        :data:`_EVERYTHING_CHAT_INDEX_CAP`), then merges the resulting
+        sources by score and synthesises a single answer.
+
+        When the user has no attached indexes the method returns a
+        no-answer fallback ``RagQueryResult`` so the chat surface can
+        still render a friendly message instead of 5xx-ing.
+        """
+        from metis_app.engine.querying import (
+            _normalize_run_id,
+            _response_text,
+            _selected_mode,
+            _system_instructions,
+        )
+        from metis_app.utils.llm_providers import create_llm
+
+        resolved_settings = self._resolve_query_settings(req.settings, query=req.question)
+        question = str(req.question or "").strip()
+        if not question:
+            raise ValueError("question must not be empty.")
+
+        manifest_paths = self._collect_attached_manifest_paths(resolved_settings)
+        if not manifest_paths:
+            no_index_result = RagQueryResult(
+                run_id=_normalize_run_id(req.run_id),
+                answer_text=(
+                    "There are no attached indexes yet — add content to a star "
+                    "to give Everything chat something to retrieve from."
+                ),
+                sources=[],
+                context_block="",
+                top_score=0.0,
+                selected_mode=_selected_mode(resolved_settings),
+                retrieval_plan={
+                    "stages": [
+                        {
+                            "stage_type": ALL_STARS_MARKER,
+                            "payload": {"index_count": 0},
+                        },
+                    ],
+                },
+                fallback={
+                    "triggered": True,
+                    "strategy": "no_answer",
+                    "reason": "no_attached_indexes",
+                    "message": "No attached indexes available for Everything chat.",
+                },
+            )
+            self._persist_everything_chat_turn(
+                session_id=session_id,
+                question=question,
+                resolved_settings=resolved_settings,
+                result=no_index_result,
+            )
+            return no_index_result
+
+        # Per-index retrieval. Failures on a single index don't kill
+        # the whole run — Everything chat is best-effort by design.
+        # Parallelised: query_rag is mostly I/O (HTTP to embedding +
+        # LLM services), so a thread pool keeps wall-clock at the
+        # slowest single index instead of summing across all of them.
+        capped_indexes = manifest_paths[:_EVERYTHING_CHAT_INDEX_CAP]
+        per_index_results: list[RagQueryResult] = []
+        per_index_errors: list[dict[str, Any]] = []
+        if capped_indexes:
+            with ThreadPoolExecutor(
+                max_workers=min(len(capped_indexes), _EVERYTHING_CHAT_INDEX_CAP),
+            ) as executor:
+                futures = {
+                    executor.submit(
+                        query_rag,
+                        RagQueryRequest(
+                            manifest_path=manifest_path,
+                            question=question,
+                            settings=dict(resolved_settings),
+                        ),
+                    ): manifest_path
+                    for manifest_path in capped_indexes
+                }
+                for future in as_completed(futures):
+                    manifest_path = futures[future]
+                    try:
+                        per_index_results.append(future.result())
+                    except Exception as exc:  # pragma: no cover - defensive
+                        per_index_errors.append(
+                            {"manifest_path": str(manifest_path), "error": str(exc)},
+                        )
+
+        merged = _merge_everything_chat_sources(per_index_results)
+
+        # Single synthesis call against the merged context. Reuses the
+        # same LLM the user already configured — Everything chat doesn't
+        # introduce a new model surface.
+        run_id = _normalize_run_id(req.run_id)
+        if not merged["sources"]:
+            answer_text = (
+                "I couldn't find any matching passages across your "
+                "attached indexes for that question."
+            )
+            top_score = 0.0
+            fallback = {
+                "triggered": True,
+                "strategy": "no_answer",
+                "reason": "empty_union",
+                "message": "Empty merged context after union retrieval.",
+            }
+        else:
+            llm = create_llm(resolved_settings)
+            system_prompt = (
+                f"{_system_instructions(resolved_settings)}\n\n"
+                "Answer the user's question using ONLY the CONTEXT below, "
+                "which is the union of retrievals across every attached "
+                "index. Cite passages as [S1], [S2], etc. If the context "
+                "is insufficient, say so.\n\n"
+                f"CONTEXT:\n{merged['context_block']}"
+            )
+            answer_text = _response_text(
+                llm.invoke(
+                    [
+                        {"type": "system", "content": system_prompt},
+                        {"type": "human", "content": question},
+                    ]
+                )
+            )
+            top_score = float(merged["top_score"])
+            fallback = {}
+
+        retrieval_plan: dict[str, Any] = {
+            "stages": [
+                {
+                    "stage_type": ALL_STARS_MARKER,
+                    "payload": {
+                        "index_count": len(per_index_results),
+                        "manifest_paths": [
+                            str(path) for path in manifest_paths[:_EVERYTHING_CHAT_INDEX_CAP]
+                        ],
+                        "errors": per_index_errors,
+                        "sources_merged": len(merged["sources"]),
+                    },
+                },
+            ],
+        }
+
+        result = RagQueryResult(
+            run_id=run_id,
+            answer_text=answer_text,
+            sources=merged["sources"],
+            context_block=merged["context_block"],
+            top_score=top_score,
+            selected_mode=_selected_mode(resolved_settings),
+            retrieval_plan=retrieval_plan,
+            fallback=fallback,
+        )
+
+        # Session bookkeeping mirrors the per-index path so the
+        # transcript captures the conversation. The sentinel manifest
+        # path flows through ``_resolve_index_id_from_manifest`` which
+        # has a dedicated branch returning ``ALL_STARS_MARKER``, so
+        # Everything chat sessions are tagged with ``index_id="_all_stars"``
+        # in the session DB — distinguishable from regular unattached
+        # sessions (which carry an empty ``index_id``).
+        self._persist_everything_chat_turn(
+            session_id=session_id,
+            question=question,
+            resolved_settings=resolved_settings,
+            result=result,
+        )
+        # TODO(M25): wire `self._assistant_service.reflect("completed_run", ...)` and
+        # `self._maybe_create_atlas_candidate(...)` for everything-chat turns. Currently
+        # skipped because Option B's lean composer doesn't surface companion features.
+        return result
+
+    def _persist_everything_chat_turn(
+        self,
+        *,
+        session_id: str,
+        question: str,
+        resolved_settings: dict[str, Any],
+        result: RagQueryResult,
+    ) -> None:
+        """Append the user + assistant turn to the session, if any.
+
+        Shared by the normal ``_run_everything_chat`` path AND the
+        no-attached-indexes early return so a session_id always sees
+        both messages persisted, regardless of which branch produced
+        the answer.
+        """
+        if not session_id:
+            return
+        self._prepare_session_for_query(
+            session_id,
+            question,
+            resolved_settings,
+            manifest_path=ALL_STARS_MARKER,
+        )
+        self.append_message(session_id, role="user", content=question, run_id="")
+        self.append_message(
+            session_id,
+            role="assistant",
+            content=result.answer_text,
+            run_id=result.run_id,
+            sources=[EvidenceSource.from_dict(item) for item in (result.sources or [])],
+        )
+
+    def _collect_attached_manifest_paths(
+        self,
+        settings: dict[str, Any],
+    ) -> list[str]:
+        """Return the unique, ordered set of attached manifest paths.
+
+        Reads ``landing_constellation_user_stars`` and unions
+        ``linkedManifestPaths`` (plural), ``activeManifestPath``, and
+        ``linkedManifestPath`` (legacy singular) across every star.
+        Dedupes preserving insertion order so the per-index loop is
+        deterministic.
+        """
+        user_stars = list(settings.get("landing_constellation_user_stars") or [])
+        seen: set[str] = set()
+        ordered: list[str] = []
+
+        def _push(candidate: Any) -> None:
+            text = str(candidate or "").strip()
+            if not text or text in seen:
+                return
+            seen.add(text)
+            ordered.append(text)
+
+        for star in user_stars:
+            if not isinstance(star, dict):
+                continue
+            # Defensive: legacy/corrupted settings may store
+            # ``linkedManifestPaths`` as a string instead of a list.
+            # ``for path in <str>`` would iterate characters and silently
+            # spray nonsense into the dedupe set. Normalise first.
+            raw_paths = star.get("linkedManifestPaths") or []
+            if isinstance(raw_paths, str):
+                paths_iter: list[Any] = [raw_paths]
+            elif isinstance(raw_paths, list):
+                paths_iter = raw_paths
+            else:
+                paths_iter = []
+            for path in paths_iter:
+                _push(path)
+            _push(star.get("activeManifestPath"))
+            _push(star.get("linkedManifestPath"))
+        return ordered
 
     def run_direct_query(
         self,
@@ -720,6 +1121,249 @@ class WorkspaceOrchestrator:
         sessions = self._session_repo.list_sessions()
         assistant_snapshot = self._assistant_service.get_snapshot(_settings_store.load_settings())
         return BrainGraph().build_from_indexes_and_sessions(indexes, sessions, assistant_snapshot, skip_layout=skip_layout)
+
+    def _embed_user_stars(
+        self, settings: dict[str, Any]
+    ) -> tuple[list[str], dict[str, list[float]], dict[str, dict[str, Any]]]:
+        """Embed all user stars, returning (ids, embeddings_by_id, metadata_by_id).
+
+        Shared between :meth:`get_star_clusters` and
+        :meth:`recommend_stars_for_content` so the Add-flow doesn't
+        re-embed the user's whole star list on every request when
+        clustering already paid that cost.
+
+        Cache: keyed by SHA-256 of ``[star_ids, texts]`` in their
+        insertion order in settings. Stored at module level so it
+        survives across HTTP requests (Litestar constructs a fresh
+        orchestrator per request). LRU-bounded to
+        :data:`_CACHE_CAPACITY` entries.
+
+        Defensive validation:
+
+        - Non-dict entries in ``landing_constellation_user_stars`` are
+          skipped with a warning (legacy / corrupted settings shape).
+        - Stars with empty/missing ``id`` are skipped with a warning
+          (otherwise ``dict(zip(...))`` would silently drop them via
+          duplicate empty-string keys).
+        - Stars with duplicate non-empty ``id`` raise ``ValueError`` —
+          the contract is "one assignment per user star" and a
+          duplicate would silently collapse via the same ``zip`` trick.
+        - If the embedder returns a different number of vectors than
+          texts, raise ``RuntimeError`` rather than silently truncate
+          via ``zip``.
+        """
+        user_stars_raw = settings.get("landing_constellation_user_stars") or []
+        user_stars: list[dict[str, Any]] = [
+            s for s in user_stars_raw if isinstance(s, dict)
+        ]
+        if len(user_stars) != len(user_stars_raw):
+            log.warning(
+                "_embed_user_stars: skipped %d non-dict user-star entries",
+                len(user_stars_raw) - len(user_stars),
+            )
+
+        # Filter empty IDs (would collide on the empty-string key inside
+        # the eventual dict(zip(...))). Detect duplicates of real IDs
+        # early so callers see a loud failure rather than a silent drop.
+        valid_user_stars: list[dict[str, Any]] = []
+        empty_id_skipped = 0
+        seen_ids: set[str] = set()
+        for s in user_stars:
+            sid = str(s.get("id") or "").strip()
+            if not sid:
+                empty_id_skipped += 1
+                continue
+            if sid in seen_ids:
+                raise ValueError(
+                    f"Duplicate user star id: {sid!r}. Each star must have "
+                    "a unique non-empty id."
+                )
+            seen_ids.add(sid)
+            valid_user_stars.append(s)
+        if empty_id_skipped:
+            log.warning(
+                "_embed_user_stars: skipped %d user-star entries with empty/missing id",
+                empty_id_skipped,
+            )
+
+        if not valid_user_stars:
+            return [], {}, {}
+
+        star_ids = [str(s["id"]).strip() for s in valid_user_stars]
+        texts = [
+            f"{s.get('label', '')} {s.get('notes', '')}".strip() or sid
+            for s, sid in zip(valid_user_stars, star_ids)
+        ]
+
+        cache_key = hashlib.sha256(
+            json.dumps([star_ids, texts], sort_keys=True).encode()
+        ).hexdigest()
+
+        cached = _lru_get(_STAR_EMBEDDING_CACHE, cache_key)
+        if cached is not None:
+            return cached
+
+        # Local import keeps the heavy embedding stack off the cold-import
+        # path of WorkspaceOrchestrator.
+        from metis_app.utils.embedding_providers import create_embeddings
+
+        embedder = create_embeddings(settings)
+        raw_embeddings = embedder.embed_documents(texts)
+        if len(raw_embeddings) != len(texts):
+            raise RuntimeError(
+                f"Embedder returned {len(raw_embeddings)} vectors for "
+                f"{len(texts)} texts. This indicates a provider error "
+                "or misconfiguration."
+            )
+        embeddings_by_id = dict(zip(star_ids, raw_embeddings))
+        metadata_by_id = {
+            sid: {
+                "label": str(s.get("label", "") or ""),
+                "archetype": str(s.get("archetype", "") or ""),
+            }
+            for s, sid in zip(valid_user_stars, star_ids)
+        }
+        result = (star_ids, embeddings_by_id, metadata_by_id)
+        _lru_set(_STAR_EMBEDDING_CACHE, cache_key, result)
+        return result
+
+    def get_star_clusters(self, settings: dict[str, Any]) -> list[dict[str, Any]]:
+        """Compute (or fetch from cache) cluster + 2D layout for user stars.
+
+        M24 Phase 1 placement engine. Reads
+        ``landing_constellation_user_stars`` from *settings*, embeds each
+        star's ``label + notes`` (or its ``id`` as a last resort) via the
+        configured embedder, and runs them through
+        :class:`~metis_app.services.star_clustering_service.StarClusteringService`.
+
+        Cache: keyed by SHA-256 of ``[star_ids, texts]`` in their
+        **insertion order** in settings, stored at module level so it
+        survives across HTTP requests. LRU-bounded to
+        :data:`_CACHE_CAPACITY` entries. Reordering stars in settings
+        deliberately invalidates the cache so the layout reflects the
+        new sequence (drag-to-reorder is a meaningful user intent).
+
+        Star embeddings themselves are cached separately via
+        :meth:`_embed_user_stars` so the Add-flow / recommender can
+        reuse them without re-embedding.
+
+        Returns a list of plain ``dict`` rows with the keys ``star_id``,
+        ``cluster_id``, ``x``, ``y``, ``cluster_label`` — JSON-friendly
+        for the ``GET /v1/stars/clusters`` route. Empty input -> ``[]``.
+        """
+        star_ids, embeddings_by_id, _metadata = self._embed_user_stars(settings)
+        if not star_ids:
+            return []
+
+        # Reconstruct the same texts list used inside _embed_user_stars
+        # so the cluster cache key stays stable across the refactor.
+        # ``_embed_user_stars`` already filtered out non-dict and
+        # empty-id entries; mirror that filter here so the cache key
+        # matches the filtered star_ids returned above.
+        user_stars_raw = settings.get("landing_constellation_user_stars") or []
+        valid_stars = [
+            s for s in user_stars_raw
+            if isinstance(s, dict) and str(s.get("id") or "").strip()
+        ]
+        texts = [
+            f"{s.get('label', '')} {s.get('notes', '')}".strip()
+            or str(s.get("id")).strip()
+            for s in valid_stars
+        ]
+        cache_key = hashlib.sha256(
+            json.dumps([star_ids, texts], sort_keys=True).encode()
+        ).hexdigest()
+
+        cached = _lru_get(_CLUSTER_CACHE, cache_key)
+        if cached is not None:
+            return cached
+
+        # Local import keeps the heavy sklearn stack off the cold-import
+        # path of WorkspaceOrchestrator.
+        from metis_app.services.star_clustering_service import StarClusteringService
+
+        service = StarClusteringService()
+        assignments = service.compute_clusters(embeddings_by_id)
+
+        result = [
+            {
+                "star_id": a.star_id,
+                "cluster_id": a.cluster_id,
+                "x": a.x,
+                "y": a.y,
+                "cluster_label": a.cluster_label,
+            }
+            for a in assignments
+        ]
+        _lru_set(_CLUSTER_CACHE, cache_key, result)
+        return result
+
+    def recommend_stars_for_content(
+        self,
+        *,
+        content: str,
+        content_type: str = "",
+    ) -> dict[str, Any]:
+        """Rank existing user stars against ``content`` (M24 Phase 2).
+
+        Reads ``landing_constellation_user_stars`` from settings, embeds
+        the new content + each existing star's ``label + notes`` text,
+        and runs the pair through
+        :class:`~metis_app.services.star_recommender_service.StarRecommenderService`.
+
+        Star embeddings are cached on the orchestrator instance via
+        :meth:`_embed_user_stars` and shared with
+        :meth:`get_star_clusters` — within a single request the user's
+        stars are embedded at most once.
+
+        ``create_new_suggested`` is ``True`` when there are no existing
+        stars or when the top recommendation's adjusted similarity is
+        below :data:`_CREATE_NEW_THRESHOLD` — the frontend uses this to
+        decide whether to nudge the user toward a fresh star instead of
+        attaching to an existing one.
+
+        Returns a JSON-friendly dict for the
+        ``POST /v1/stars/recommend`` route.
+        """
+        from metis_app.services.star_recommender_service import (
+            StarRecommenderService,
+        )
+        from metis_app.utils.embedding_providers import create_embeddings
+
+        settings = _settings_store.load_settings()
+
+        embedder = create_embeddings(settings)
+        query_embedding = embedder.embed_query(content)
+
+        _star_ids, star_embeddings, star_metadata = self._embed_user_stars(settings)
+
+        # M25 will populate project_member_star_ids once Projects exist;
+        # in M24 the parameter is intentionally left unset.
+        recommendations = StarRecommenderService().rank(
+            query_embedding=query_embedding,
+            star_embeddings=star_embeddings,
+            star_metadata=star_metadata,
+            top_k=5,
+            content_type_hint=content_type,
+        )
+
+        create_new_suggested = bool(
+            not recommendations
+            or recommendations[0].similarity < _CREATE_NEW_THRESHOLD
+        )
+
+        return {
+            "recommendations": [
+                {
+                    "star_id": r.star_id,
+                    "similarity": r.similarity,
+                    "label": r.label,
+                    "archetype": r.archetype,
+                }
+                for r in recommendations
+            ],
+            "create_new_suggested": create_new_suggested,
+        }
 
     # ------------------------------------------------------------------
     # Sessions / Memory
@@ -1475,6 +2119,13 @@ class WorkspaceOrchestrator:
         candidate = str(manifest_path or "").strip()
         if not candidate:
             return ""
+        # Sentinel branch — Everything chat sessions tag with the
+        # ``_all_stars`` marker so they are distinguishable from
+        # regular unattached sessions (which carry an empty index_id)
+        # in the session DB. Without this branch the lookup below
+        # falls through and returns "", losing the signal entirely.
+        if candidate == ALL_STARS_MARKER:
+            return ALL_STARS_MARKER
         for row in self.list_indexes():
             if str(row.get("manifest_path") or "").strip() == candidate:
                 return str(row.get("index_id") or row.get("collection_name") or "")
