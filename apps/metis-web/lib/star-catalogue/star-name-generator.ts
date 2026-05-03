@@ -15,9 +15,14 @@ const CONSTELLATIONS_GENITIVE = [
 ] as const;
 
 /**
- * Naming tier per ADR 0006:
+ * Naming tier per ADR 0006 + ADR 0019 carve-out:
  *  - `field`: background decorative stars. No visible name.
- *  - `landmark`: faculty-constellation stars. Classical Bayer/Flamsteed/HD.
+ *  - `landmark`: retired in M24 Phase 6. The 8 classical-named landmark
+ *    constellations (Perseus, Auriga, Draco, Hercules, Gemini, Big
+ *    Dipper, Lyra, Boötes) were faculty-era decoration; under ADR 0019's
+ *    content-first IA they have no place. The tier value is preserved
+ *    so legacy callers don't crash, but it now returns `{ name: null,
+ *    kind: null }` like a field star.
  *  - `user`: user-created content stars. User-supplied name.
  */
 export type NameTier = "field" | "landmark" | "user";
@@ -36,9 +41,11 @@ export interface GeneratedStarName {
 
 export interface GenerateStarNameInput {
   tier: NameTier;
-  /** Required for `landmark` tier — drives classical name generation. */
+  /** Legacy. Kept for callers that still pass it; ignored after the
+   * `landmark` tier was retired in M24 Phase 6. */
   rng?: SeededRNG;
-  /** Required for `landmark` tier — selects Bayer / Flamsteed / HD form. */
+  /** Legacy. Kept for callers that still pass it; ignored after the
+   * `landmark` tier was retired in M24 Phase 6. */
   magnitude?: number;
   /** Used for `user` tier. Trimmed; empty strings are treated as absent. */
   userSuppliedName?: string | null;
@@ -55,13 +62,11 @@ export function generateStarName(input: GenerateStarNameInput): GeneratedStarNam
     case "field":
       return { name: null, kind: null };
     case "landmark": {
-      if (!input.rng || input.magnitude === undefined) {
-        throw new Error("landmark tier requires rng and magnitude");
-      }
-      return {
-        name: generateClassicalDesignation(input.rng, input.magnitude),
-        kind: "classical",
-      };
+      // M24 Phase 6 (ADR 0019): landmark tier retired alongside the 8
+      // faculty constellations. Treated as field stars from now on.
+      // `generateClassicalDesignation` is still exported for procedural
+      // user-star fallback naming in `use-constellation-stars`.
+      return { name: null, kind: null };
     }
     case "user": {
       const trimmed = input.userSuppliedName?.trim();
