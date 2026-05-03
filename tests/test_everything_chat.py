@@ -179,6 +179,68 @@ class TestRunEverythingChat:
         assert result.fallback["reason"] == "no_attached_indexes"
         assert "no attached indexes" in result.answer_text.lower()
         assert result.sources == []
+        # selected_mode must NOT be the sentinel — that would leak the
+        # internal manifest marker to the frontend. It should mirror the
+        # default mode resolution used elsewhere.
+        assert result.selected_mode != ALL_STARS_MARKER
+
+    def test_no_index_path_persists_session_bookkeeping(self) -> None:
+        """When a session_id is supplied AND there are no attached indexes,
+        the user message + fallback assistant message must still hit the
+        session repository — the early-return previously dropped both.
+        """
+        from unittest.mock import MagicMock
+
+        orchestrator = WorkspaceOrchestrator.__new__(WorkspaceOrchestrator)
+        orchestrator._nyx_catalog = None  # type: ignore[attr-defined]
+
+        prepare_calls: list[tuple[Any, ...]] = []
+        append_calls: list[dict[str, Any]] = []
+
+        def fake_prepare(self_: Any, session_id: str, *args: Any, **kwargs: Any) -> None:
+            prepare_calls.append((session_id, args, kwargs))
+
+        def fake_append(self_: Any, session_id: str, **kwargs: Any) -> None:
+            append_calls.append({"session_id": session_id, **kwargs})
+
+        with (
+            patch.object(
+                WorkspaceOrchestrator,
+                "_resolve_query_settings",
+                return_value={"landing_constellation_user_stars": []},
+            ),
+            patch.object(
+                WorkspaceOrchestrator,
+                "_prepare_session_for_query",
+                fake_prepare,
+            ),
+            patch.object(
+                WorkspaceOrchestrator,
+                "append_message",
+                fake_append,
+            ),
+        ):
+            result = orchestrator._run_everything_chat(
+                RagQueryRequest(
+                    manifest_path=ALL_STARS_MARKER,
+                    question="anything?",
+                    settings={},
+                ),
+                session_id="sess-no-idx",
+            )
+
+        # Session was prepared exactly once with the sentinel marker.
+        assert len(prepare_calls) == 1
+        assert prepare_calls[0][0] == "sess-no-idx"
+        assert prepare_calls[0][2].get("manifest_path") == ALL_STARS_MARKER
+
+        # Both user + assistant turns were appended.
+        roles = [call.get("role") for call in append_calls]
+        assert roles == ["user", "assistant"]
+        assert append_calls[0]["session_id"] == "sess-no-idx"
+        assert append_calls[0]["content"] == "anything?"
+        assert append_calls[1]["session_id"] == "sess-no-idx"
+        assert append_calls[1]["content"] == result.answer_text
 
 
 class TestResolveIndexIdFromManifest:

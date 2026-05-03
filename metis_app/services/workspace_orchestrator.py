@@ -425,7 +425,7 @@ class WorkspaceOrchestrator:
 
         manifest_paths = self._collect_attached_manifest_paths(resolved_settings)
         if not manifest_paths:
-            return RagQueryResult(
+            no_index_result = RagQueryResult(
                 run_id=_normalize_run_id(req.run_id),
                 answer_text=(
                     "There are no attached indexes yet — add content to a star "
@@ -434,7 +434,7 @@ class WorkspaceOrchestrator:
                 sources=[],
                 context_block="",
                 top_score=0.0,
-                selected_mode=ALL_STARS_MARKER,
+                selected_mode=_selected_mode(resolved_settings),
                 retrieval_plan={
                     "stages": [
                         {
@@ -450,6 +450,13 @@ class WorkspaceOrchestrator:
                     "message": "No attached indexes available for Everything chat.",
                 },
             )
+            self._persist_everything_chat_turn(
+                session_id=session_id,
+                question=question,
+                resolved_settings=resolved_settings,
+                result=no_index_result,
+            )
+            return no_index_result
 
         # Per-index retrieval. Failures on a single index don't kill
         # the whole run — Everything chat is best-effort by design.
@@ -556,22 +563,48 @@ class WorkspaceOrchestrator:
         # Everything chat sessions are tagged with ``index_id="_all_stars"``
         # in the session DB — distinguishable from regular unattached
         # sessions (which carry an empty ``index_id``).
-        if session_id:
-            self._prepare_session_for_query(
-                session_id,
-                question,
-                resolved_settings,
-                manifest_path=ALL_STARS_MARKER,
-            )
-            self.append_message(session_id, role="user", content=question, run_id="")
-            self.append_message(
-                session_id,
-                role="assistant",
-                content=result.answer_text,
-                run_id=result.run_id,
-                sources=[EvidenceSource.from_dict(item) for item in result.sources],
-            )
+        self._persist_everything_chat_turn(
+            session_id=session_id,
+            question=question,
+            resolved_settings=resolved_settings,
+            result=result,
+        )
+        # TODO(M25): wire `self._assistant_service.reflect("completed_run", ...)` and
+        # `self._maybe_create_atlas_candidate(...)` for everything-chat turns. Currently
+        # skipped because Option B's lean composer doesn't surface companion features.
         return result
+
+    def _persist_everything_chat_turn(
+        self,
+        *,
+        session_id: str,
+        question: str,
+        resolved_settings: dict[str, Any],
+        result: RagQueryResult,
+    ) -> None:
+        """Append the user + assistant turn to the session, if any.
+
+        Shared by the normal ``_run_everything_chat`` path AND the
+        no-attached-indexes early return so a session_id always sees
+        both messages persisted, regardless of which branch produced
+        the answer.
+        """
+        if not session_id:
+            return
+        self._prepare_session_for_query(
+            session_id,
+            question,
+            resolved_settings,
+            manifest_path=ALL_STARS_MARKER,
+        )
+        self.append_message(session_id, role="user", content=question, run_id="")
+        self.append_message(
+            session_id,
+            role="assistant",
+            content=result.answer_text,
+            run_id=result.run_id,
+            sources=[EvidenceSource.from_dict(item) for item in (result.sources or [])],
+        )
 
     def _collect_attached_manifest_paths(
         self,
