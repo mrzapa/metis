@@ -49,6 +49,7 @@ from .routes import (
     seedling,
     sessions,
     settings,
+    stars,
     version,
     web_graph,
 )
@@ -117,6 +118,7 @@ def create_app() -> Litestar:
             seedling.router,
             sessions.router,
             settings.router,
+            stars.router,
             web_graph.router,
         ],
     )
