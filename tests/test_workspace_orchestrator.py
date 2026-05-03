@@ -2368,3 +2368,113 @@ def test_embed_user_stars_cache_shared_across_clusters_and_recommender(
     # Both methods should have hit _embed_user_stars; the second call
     # should have been served from the shared cache.
     assert call_count["n"] == 1
+
+
+def test_embed_user_stars_filters_empty_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stars with empty/missing ``id`` are skipped, not silently dropped.
+
+    Regression for the duplicate-empty-string-key footgun in the
+    ``dict(zip(star_ids, raw_embeddings))`` collapse: if two stars have
+    empty IDs, both would be keyed at ``""`` and the second would win,
+    producing fewer cluster assignments than user stars.
+    """
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _FakeEmbedder(),
+    )
+    orch = _make_orchestrator()
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "valid-1", "label": "Real star"},
+            {"id": "", "label": "Bad star"},
+            {"label": "Missing id"},
+        ],
+    }
+
+    star_ids, embeddings_by_id, metadata_by_id = orch._embed_user_stars(settings)
+
+    assert star_ids == ["valid-1"]
+    assert set(embeddings_by_id.keys()) == {"valid-1"}
+    assert set(metadata_by_id.keys()) == {"valid-1"}
+
+    # And the public surfaces honour the same filter.
+    clusters = orch.get_star_clusters(settings)
+    assert len(clusters) == 1
+    assert clusters[0]["star_id"] == "valid-1"
+
+
+def test_embed_user_stars_raises_on_duplicate_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two stars sharing a non-empty ``id`` raise ``ValueError`` loudly."""
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _FakeEmbedder(),
+    )
+    orch = _make_orchestrator()
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "dup", "label": "First"},
+            {"id": "dup", "label": "Second"},
+        ],
+    }
+    with pytest.raises(ValueError, match="Duplicate user star id"):
+        orch._embed_user_stars(settings)
+
+
+def test_embed_user_stars_raises_on_embedder_length_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If ``embed_documents`` returns N-1 vectors for N texts, raise loudly.
+
+    Without this guard ``dict(zip(...))`` silently truncates the missing
+    star — the recommender / clusterer would see a partial picture with
+    no signal that anything went wrong.
+    """
+
+    class _ShortEmbedder:
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            # Return one fewer vector than asked for.
+            return [[0.1, 0.2, 0.3] for _ in texts[:-1]]
+
+        def embed_query(self, text: str) -> list[float]:  # pragma: no cover
+            return [0.1, 0.2, 0.3]
+
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _ShortEmbedder(),
+    )
+    orch = _make_orchestrator()
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "s1", "label": "A"},
+            {"id": "s2", "label": "B"},
+        ],
+    }
+    with pytest.raises(RuntimeError, match="Embedder returned"):
+        orch._embed_user_stars(settings)
+
+
+def test_embed_user_stars_skips_non_dict_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Corrupted/legacy non-dict entries in settings are filtered.
+
+    ``landing_constellation_user_stars`` is typed ``list[Any]``;
+    non-dict entries (strings, None) used to crash on ``.get(...)``.
+    """
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _FakeEmbedder(),
+    )
+    orch = _make_orchestrator()
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "real", "label": "Real"},
+            "i am not a dict",
+            None,
+            42,
+        ],
+    }
+    star_ids, _emb, _meta = orch._embed_user_stars(settings)
+    assert star_ids == ["real"]

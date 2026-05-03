@@ -1035,16 +1035,62 @@ class WorkspaceOrchestrator:
         ``self._star_embedding_cache`` (lazy-init). Per-orchestrator-
         instance — see the same caveat documented on
         :meth:`get_star_clusters`.
+
+        Defensive validation:
+
+        - Non-dict entries in ``landing_constellation_user_stars`` are
+          skipped with a warning (legacy / corrupted settings shape).
+        - Stars with empty/missing ``id`` are skipped with a warning
+          (otherwise ``dict(zip(...))`` would silently drop them via
+          duplicate empty-string keys).
+        - Stars with duplicate non-empty ``id`` raise ``ValueError`` —
+          the contract is "one assignment per user star" and a
+          duplicate would silently collapse via the same ``zip`` trick.
+        - If the embedder returns a different number of vectors than
+          texts, raise ``RuntimeError`` rather than silently truncate
+          via ``zip``.
         """
-        user_stars = list(settings.get("landing_constellation_user_stars") or [])
-        if not user_stars:
+        user_stars_raw = settings.get("landing_constellation_user_stars") or []
+        user_stars: list[dict[str, Any]] = [
+            s for s in user_stars_raw if isinstance(s, dict)
+        ]
+        if len(user_stars) != len(user_stars_raw):
+            log.warning(
+                "_embed_user_stars: skipped %d non-dict user-star entries",
+                len(user_stars_raw) - len(user_stars),
+            )
+
+        # Filter empty IDs (would collide on the empty-string key inside
+        # the eventual dict(zip(...))). Detect duplicates of real IDs
+        # early so callers see a loud failure rather than a silent drop.
+        valid_user_stars: list[dict[str, Any]] = []
+        empty_id_skipped = 0
+        seen_ids: set[str] = set()
+        for s in user_stars:
+            sid = str(s.get("id") or "").strip()
+            if not sid:
+                empty_id_skipped += 1
+                continue
+            if sid in seen_ids:
+                raise ValueError(
+                    f"Duplicate user star id: {sid!r}. Each star must have "
+                    "a unique non-empty id."
+                )
+            seen_ids.add(sid)
+            valid_user_stars.append(s)
+        if empty_id_skipped:
+            log.warning(
+                "_embed_user_stars: skipped %d user-star entries with empty/missing id",
+                empty_id_skipped,
+            )
+
+        if not valid_user_stars:
             return [], {}, {}
 
-        star_ids = [str(s.get("id") or "") for s in user_stars]
+        star_ids = [str(s["id"]).strip() for s in valid_user_stars]
         texts = [
-            f"{s.get('label', '')} {s.get('notes', '')}".strip()
-            or str(s.get("id") or "")
-            for s in user_stars
+            f"{s.get('label', '')} {s.get('notes', '')}".strip() or sid
+            for s, sid in zip(valid_user_stars, star_ids)
         ]
 
         cache_key = hashlib.sha256(
@@ -1070,13 +1116,19 @@ class WorkspaceOrchestrator:
 
         embedder = create_embeddings(settings)
         raw_embeddings = embedder.embed_documents(texts)
+        if len(raw_embeddings) != len(texts):
+            raise RuntimeError(
+                f"Embedder returned {len(raw_embeddings)} vectors for "
+                f"{len(texts)} texts. This indicates a provider error "
+                "or misconfiguration."
+            )
         embeddings_by_id = dict(zip(star_ids, raw_embeddings))
         metadata_by_id = {
-            str(s.get("id") or ""): {
+            sid: {
                 "label": str(s.get("label", "") or ""),
                 "archetype": str(s.get("archetype", "") or ""),
             }
-            for s in user_stars
+            for s, sid in zip(valid_user_stars, star_ids)
         }
         result = (star_ids, embeddings_by_id, metadata_by_id)
         self._star_embedding_cache[cache_key] = result
@@ -1113,11 +1165,18 @@ class WorkspaceOrchestrator:
 
         # Reconstruct the same texts list used inside _embed_user_stars
         # so the cluster cache key stays stable across the refactor.
-        user_stars = list(settings.get("landing_constellation_user_stars") or [])
+        # ``_embed_user_stars`` already filtered out non-dict and
+        # empty-id entries; mirror that filter here so the cache key
+        # matches the filtered star_ids returned above.
+        user_stars_raw = settings.get("landing_constellation_user_stars") or []
+        valid_stars = [
+            s for s in user_stars_raw
+            if isinstance(s, dict) and str(s.get("id") or "").strip()
+        ]
         texts = [
             f"{s.get('label', '')} {s.get('notes', '')}".strip()
-            or str(s.get("id") or "")
-            for s in user_stars
+            or str(s.get("id")).strip()
+            for s in valid_stars
         ]
         cache_key = hashlib.sha256(
             json.dumps([star_ids, texts], sort_keys=True).encode()
