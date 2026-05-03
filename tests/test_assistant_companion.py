@@ -864,6 +864,47 @@ def test_update_config_persists_tone_preset(tmp_path, monkeypatch) -> None:
     assert snapshot["identity"]["tone_preset"] == "concise-analyst"
 
 
+def test_reflection_prompt_uses_resolved_seed_when_tone_preset_set_with_empty_seed() -> None:
+    """Regression for M23 final-review I2: ``build_assistant_reflection_prompt``
+    must route ``identity.prompt_seed`` through ``resolve_prompt_seed`` so that
+    a ``tone_preset`` set with an empty ``prompt_seed`` resolves to the canonical
+    preset seed rather than producing an empty leading prompt segment.
+
+    This is the latent bug from M23 Phase 1's dead-resolver gap: previously the
+    reflection prompt read ``identity.prompt_seed.strip()`` directly, bypassing
+    the resolver entirely.
+    """
+    from metis_app.models.assistant_types import AssistantIdentity, TONE_PRESETS
+    from metis_app.services.companion_voice import resolve_prompt_seed
+    from metis_app.services.runtime_resolution import build_assistant_reflection_prompt
+
+    # tone_preset set, prompt_seed empty: the resolver should pick the
+    # canonical preset seed; the prompt builder must include it verbatim.
+    identity = AssistantIdentity()
+    object.__setattr__(identity, "tone_preset", "concise-analyst")
+    object.__setattr__(identity, "prompt_seed", "")
+
+    expected_seed = TONE_PRESETS["concise-analyst"]
+    assert resolve_prompt_seed(identity) == expected_seed
+
+    prompt = build_assistant_reflection_prompt(
+        identity,
+        context_lines=["A test context line."],
+        trace_events=[],
+        seed_summary="",
+        nourishment_block="",
+    )
+
+    # The canonical concise-analyst preset seed must be the leading
+    # segment of the prompt — proving runtime_resolution honours the
+    # resolver and not the raw stored prompt_seed string.
+    assert prompt.startswith(expected_seed), (
+        f"Expected reflection prompt to start with the resolved preset seed.\n"
+        f"  expected_seed = {expected_seed!r}\n"
+        f"  prompt[:200]  = {prompt[:200]!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # M23 Phase 2 — AssistantRepository delete methods
 # ---------------------------------------------------------------------------

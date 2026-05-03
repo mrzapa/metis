@@ -15,6 +15,7 @@ from metis_app.models.parity_types import (
     SkillMatch,
     SkillSessionState,
 )
+from metis_app.services.companion_voice import resolve_prompt_seed
 from metis_app.services.nyx_catalog import get_default_nyx_catalog_broker
 from metis_app.services.nyx_runtime import append_system_instruction, build_nyx_runtime_context
 from metis_app.services.skill_repository import SCALAR_OVERRIDE_KEYS
@@ -591,8 +592,11 @@ def build_assistant_reflection_prompt(
         f"- {str(item.get('event_type') or item.get('stage') or 'event')}: {str((item.get('payload') or {}))[:180]}"
         for item in (trace_events or [])[:6]
     ]
+    # Route through resolve_prompt_seed so the active tone preset wins
+    # when the stored prompt_seed is empty or matches the canonical
+    # preset text — see metis_app/services/companion_voice.py for rules.
     prompt_parts = [
-        identity.prompt_seed.strip(),
+        resolve_prompt_seed(identity),
         (
             "You are generating a compact local reflection for the persistent METIS companion. "
             "Return JSON with keys: title, summary, details, why, playbook_title, playbook_bullets, tags, confidence."
