@@ -179,3 +179,34 @@ class TestRunEverythingChat:
         assert result.fallback["reason"] == "no_attached_indexes"
         assert "no attached indexes" in result.answer_text.lower()
         assert result.sources == []
+
+
+class TestResolveIndexIdFromManifest:
+    """Sentinel-branch coverage for `_resolve_index_id_from_manifest`.
+
+    Everything chat sessions persist with ``index_id="_all_stars"``
+    so they can be distinguished from regular unattached sessions
+    (which carry ``index_id=""``) in the session DB. Prior to the
+    sentinel branch, the manifest-path lookup fell through and
+    returned ``""`` for the marker, losing that signal.
+    """
+
+    def test_all_stars_marker_returns_sentinel(self) -> None:
+        orchestrator = WorkspaceOrchestrator.__new__(WorkspaceOrchestrator)
+        # No ``list_indexes`` should be hit — the sentinel branch
+        # short-circuits before the lookup. We monkey-patch it to
+        # raise to make that explicit.
+        with patch.object(
+            WorkspaceOrchestrator,
+            "list_indexes",
+            side_effect=AssertionError("list_indexes must not be called"),
+        ):
+            assert (
+                orchestrator._resolve_index_id_from_manifest(ALL_STARS_MARKER)
+                == ALL_STARS_MARKER
+            )
+
+    def test_empty_manifest_returns_empty_string(self) -> None:
+        orchestrator = WorkspaceOrchestrator.__new__(WorkspaceOrchestrator)
+        assert orchestrator._resolve_index_id_from_manifest("") == ""
+        assert orchestrator._resolve_index_id_from_manifest(None) == ""

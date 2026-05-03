@@ -43,6 +43,27 @@ interface Message {
   role: "user" | "assistant" | "error";
   text: string;
   sourceCount?: number;
+  /** Number of attached indexes that errored during retrieval, surfaced
+   *  from `result.retrieval_plan.stages[0].payload.errors`. Rendered as
+   *  a small amber notice under the answer so users know a partial
+   *  result is being shown rather than silently swallowing failures. */
+  errorCount?: number;
+}
+
+/** Defensive narrowing of `result.retrieval_plan` — the type is
+ *  `Record<string, unknown>` on the stage payload, so we can't trust
+ *  the shape statically. Returns 0 when the field is missing or the
+ *  shape doesn't match. */
+function countRetrievalErrors(retrievalPlan: unknown): number {
+  if (!retrievalPlan || typeof retrievalPlan !== "object") return 0;
+  const stages = (retrievalPlan as { stages?: unknown }).stages;
+  if (!Array.isArray(stages) || stages.length === 0) return 0;
+  const firstStage = stages[0];
+  if (!firstStage || typeof firstStage !== "object") return 0;
+  const payload = (firstStage as { payload?: unknown }).payload;
+  if (!payload || typeof payload !== "object") return 0;
+  const errors = (payload as { errors?: unknown }).errors;
+  return Array.isArray(errors) ? errors.length : 0;
 }
 
 interface Props {
@@ -97,6 +118,7 @@ export function EverythingChatSheet({
           role: "assistant",
           text: result.answer_text,
           sourceCount: result.sources?.length ?? 0,
+          errorCount: countRetrievalErrors(result.retrieval_plan),
         },
       ]);
     } catch (err) {
@@ -162,6 +184,16 @@ export function EverythingChatSheet({
                     <p className="mt-1 text-[10px] opacity-70">
                       {msg.sourceCount} source
                       {msg.sourceCount === 1 ? "" : "s"}
+                    </p>
+                  ) : null}
+                  {msg.role === "assistant" && msg.errorCount ? (
+                    <p
+                      className="mt-1 text-[10px] text-amber-600"
+                      data-testid="everything-chat-error-notice"
+                    >
+                      Note: {msg.errorCount} index
+                      {msg.errorCount === 1 ? "" : "es"} couldn&apos;t be queried
+                      for this question.
                     </p>
                   ) : null}
                 </div>

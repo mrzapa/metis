@@ -542,10 +542,12 @@ class WorkspaceOrchestrator:
         )
 
         # Session bookkeeping mirrors the per-index path so the
-        # transcript captures the conversation. The sentinel value is
-        # used as the "manifest" so the session detail row is
-        # internally consistent — a follow-up M25 ticket could
-        # introduce a real ``index_id="_all_stars"`` row instead.
+        # transcript captures the conversation. The sentinel manifest
+        # path flows through ``_resolve_index_id_from_manifest`` which
+        # has a dedicated branch returning ``ALL_STARS_MARKER``, so
+        # Everything chat sessions are tagged with ``index_id="_all_stars"``
+        # in the session DB — distinguishable from regular unattached
+        # sessions (which carry an empty ``index_id``).
         if session_id:
             self._prepare_session_for_query(
                 session_id,
@@ -1960,6 +1962,13 @@ class WorkspaceOrchestrator:
         candidate = str(manifest_path or "").strip()
         if not candidate:
             return ""
+        # Sentinel branch — Everything chat sessions tag with the
+        # ``_all_stars`` marker so they are distinguishable from
+        # regular unattached sessions (which carry an empty index_id)
+        # in the session DB. Without this branch the lookup below
+        # falls through and returns "", losing the signal entirely.
+        if candidate == ALL_STARS_MARKER:
+            return ALL_STARS_MARKER
         for row in self.list_indexes():
             if str(row.get("manifest_path") or "").strip() == candidate:
                 return str(row.get("index_id") or row.get("collection_name") or "")
