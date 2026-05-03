@@ -1926,6 +1926,47 @@ export async function suggestStarArchetypes(
   }
 }
 
+// ── M24 Star Clustering + Recommendation ────────────────────────────────────
+
+export interface StarClusterAssignment {
+  star_id: string;
+  cluster_id: number;
+  x: number;
+  y: number;
+  cluster_label: string;
+}
+
+export interface StarRecommendation {
+  star_id: string;
+  similarity: number;
+  label: string;
+  archetype: string;
+}
+
+export interface RecommendResponse {
+  recommendations: StarRecommendation[];
+  create_new_suggested: boolean;
+}
+
+export async function fetchStarClusters(): Promise<StarClusterAssignment[]> {
+  const res = await apiFetch(`${await getApiBase()}/v1/stars/clusters`, {});
+  if (!res.ok) throw new Error(`fetch star clusters failed: ${res.status}`);
+  return res.json();
+}
+
+export async function recommendStarsForContent(
+  content: string,
+  contentType?: string,
+): Promise<RecommendResponse> {
+  const res = await apiFetch(`${await getApiBase()}/v1/stars/recommend`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, content_type: contentType ?? "" }),
+  });
+  if (!res.ok) throw new Error(`recommend stars failed: ${res.status}`);
+  return res.json();
+}
+
 // ── Improvement Pipeline ─────────────────────────────────────────────────────
 
 export type ArtifactType =
