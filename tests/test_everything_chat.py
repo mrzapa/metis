@@ -189,8 +189,6 @@ class TestRunEverythingChat:
         the user message + fallback assistant message must still hit the
         session repository — the early-return previously dropped both.
         """
-        from unittest.mock import MagicMock
-
         orchestrator = WorkspaceOrchestrator.__new__(WorkspaceOrchestrator)
         orchestrator._nyx_catalog = None  # type: ignore[attr-defined]
 
