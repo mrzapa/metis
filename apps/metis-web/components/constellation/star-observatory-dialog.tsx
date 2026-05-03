@@ -1809,43 +1809,8 @@ export function StarDetailsPanel({
   );
 }
 
-/* ─────────────────── Faculty concept panel ─────────────────────────── */
-
-interface FacultyConceptPanelProps {
-  open: boolean;
-  onClose: () => void;
-  concept: { label: string; title: string; desc: string } | null;
-}
-
-export function FacultyConceptPanel({ open, onClose, concept }: FacultyConceptPanelProps) {
-  if (!concept) return null;
-  return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent
-        className="left-1/2 top-auto bottom-3 flex max-h-[calc(100vh-1.5rem)] w-[calc(100%-1.5rem)] max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-0 flex-col gap-0 overflow-hidden rounded-[1.75rem] border-white/12 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(8,11,20,0.96))] p-0 sm:left-auto sm:right-4 sm:top-4 sm:bottom-4 sm:max-h-[calc(100vh-2rem)] sm:w-[min(460px,calc(100vw-2rem))] sm:max-w-[460px] sm:translate-x-0 sm:translate-y-0 lg:w-[min(520px,calc(100vw-2rem))] lg:max-w-[520px] xl:w-[min(580px,calc(100vw-2rem))] xl:max-w-[580px]"
-        showOverlay={false}
-      >
-        <div className="border-b border-white/10 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(10,13,23,0.92))] px-5 py-5 sm:px-6">
-          <DialogHeader className="gap-3 pr-10">
-            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.32em] text-[#d6b361]">
-              <Orbit className="size-3.5" />
-              {concept.label}
-            </div>
-            <DialogTitle className="font-display text-3xl font-semibold tracking-[-0.05em] text-white">
-              {concept.title}
-            </DialogTitle>
-            <DialogDescription className="text-sm leading-7 text-slate-300">
-              {concept.desc}
-            </DialogDescription>
-          </DialogHeader>
-        </div>
-        <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">
-          <p className="text-sm leading-relaxed text-slate-400">
-            Faculty nodes are the gravitational poles of the constellation. Drag your stars toward{" "}
-            <span className="text-slate-200">{concept.title}</span> to align them with this domain, or add a new star near this node to begin building knowledge here.
-          </p>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
+// M24 Phase 6: FacultyConceptPanel removed (ADR 0019). It was dead code
+// after the M24 Phase 4 stretch dropped showConceptAtNode, and its user-
+// visible body referenced "Faculty nodes" which is no longer the IA. The
+// faculty-ring canvas rendering survives until M26 for comet/RAG/focus
+// consumers but the modal that explained it is gone.

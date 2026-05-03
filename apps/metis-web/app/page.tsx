@@ -1677,18 +1677,18 @@ export default function Home() {
       if (selectedStarAttachmentCount > 0) {
         return `${selectedUserStar.label ?? "Selected star"} currently leans into ${selectedStarFaculty.label}. Open its details to inspect attached sources or launch grounded chat.`;
       }
-      return `${selectedUserStar.label ?? "Selected star"} is orbiting ${selectedStarFaculty.label}. Drag it toward another faculty or open its details to feed it.`;
+      return `${selectedUserStar.label ?? "Selected star"} is orbiting ${selectedStarFaculty.label}. Drag it toward another category or open its details to feed it.`;
     }
 
     if (!indexesLoading && unmappedIndexes.length > 0) {
       return `${getCountLabel(unmappedIndexes.length, "indexed source")} ${unmappedIndexes.length === 1 ? "is" : "are"} ready to file into the constellation from the control rail below.`;
     }
 
-    return "Follow the faculty ring: claim a field star, drag it toward the faculty it should strengthen, and let its attached sources deepen it.";
+    return "Claim a field star, drag it toward the category it should strengthen, and let its attached sources deepen it.";
   }, [activeCanvasTool, dragMessage, hoveredAddCandidateId, indexesLoading, isCanvasPanning, selectedStarAttachmentCount, selectedStarFaculty, selectedUserStar, starLimit, unmappedIndexes.length, userStars.length]);
   const selectedStarSummary = useMemo(() => {
     if (!selectedUserStar || !selectedStarFaculty) {
-      return "No star selected. Click a claimed star to open its details, or drag one to reassign its faculty.";
+      return "No star selected. Click a claimed star to open its details, or drag one to reassign its category.";
     }
     return `${selectedUserStar.label ?? "Selected star"} is aligned with ${selectedStarFaculty.label} and holds ${getCountLabel(selectedStarAttachmentCount, "attached source")}.`;
   }, [selectedStarAttachmentCount, selectedStarFaculty, selectedUserStar]);
