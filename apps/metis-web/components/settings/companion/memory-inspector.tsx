@@ -14,19 +14,53 @@ import {
 import { MemoryStatsRow } from "./memory-stats-row";
 import { Button } from "@/components/ui/button";
 
+type LoadState =
+  | { status: "loading" }
+  | { status: "ready"; snapshot: AssistantSnapshot }
+  | { status: "error"; message: string };
+
 export function MemoryInspector() {
-  const [snapshot, setSnapshot] = useState<AssistantSnapshot | null>(null);
+  const [load, setLoad] = useState<LoadState>({ status: "loading" });
+
+  async function refresh() {
+    setLoad({ status: "loading" });
+    try {
+      const snapshot = await fetchAssistant();
+      setLoad({ status: "ready", snapshot });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load memory.";
+      setLoad({ status: "error", message });
+    }
+  }
 
   useEffect(() => {
-    fetchAssistant()
-      .then(setSnapshot)
-      .catch(() => setSnapshot(null));
+    refresh();
   }, []);
 
-  if (!snapshot) {
+  // Helper: mutate the ready snapshot in place. No-op if not ready.
+  function setSnapshot(updater: (prev: AssistantSnapshot) => AssistantSnapshot) {
+    setLoad((prev) =>
+      prev.status === "ready" ? { status: "ready", snapshot: updater(prev.snapshot) } : prev,
+    );
+  }
+
+  if (load.status === "loading") {
     return <div className="text-sm text-muted-foreground">Loading memory…</div>;
   }
 
+  if (load.status === "error") {
+    return (
+      <section className="space-y-3 rounded-2xl border border-rose-400/20 bg-rose-400/5 p-4">
+        <h3 className="text-sm font-semibold">Memory</h3>
+        <p className="text-xs text-muted-foreground">Couldn&apos;t load memory: {load.message}</p>
+        <Button type="button" variant="ghost" size="sm" onClick={refresh}>
+          Retry
+        </Button>
+      </section>
+    );
+  }
+
+  const snapshot = load.snapshot;
   const entries: AssistantMemoryEntry[] = snapshot.memory ?? [];
   const playbooks: AssistantPlaybook[] = snapshot.playbooks ?? [];
 
@@ -51,15 +85,14 @@ export function MemoryInspector() {
   }, {});
 
   async function handleDeleteEntry(entry: AssistantMemoryEntry) {
-    setSnapshot((prev) =>
-      prev
-        ? { ...prev, memory: prev.memory.filter((e) => e.entry_id !== entry.entry_id) }
-        : prev,
-    );
+    setSnapshot((prev) => ({
+      ...prev,
+      memory: prev.memory.filter((e) => e.entry_id !== entry.entry_id),
+    }));
     try {
       await deleteAssistantMemoryEntry(entry.entry_id);
     } catch {
-      setSnapshot((prev) => (prev ? { ...prev, memory: [...prev.memory, entry] } : prev));
+      setSnapshot((prev) => ({ ...prev, memory: [...prev.memory, entry] }));
     }
   }
 
@@ -69,15 +102,16 @@ export function MemoryInspector() {
       `Clear all ${count} ${kind} entries? This cannot be undone.`,
     );
     if (!ok) return;
-    setSnapshot((prev) =>
-      prev ? { ...prev, memory: prev.memory.filter((e) => e.kind !== kind) } : prev,
-    );
+    setSnapshot((prev) => ({
+      ...prev,
+      memory: prev.memory.filter((e) => e.kind !== kind),
+    }));
     try {
       await deleteAssistantMemoryByKind(kind);
     } catch {
       try {
         const fresh = await fetchAssistant();
-        setSnapshot(fresh);
+        setLoad({ status: "ready", snapshot: fresh });
       } catch {
         /* give up */
       }
@@ -85,37 +119,38 @@ export function MemoryInspector() {
   }
 
   async function handleDeletePlaybook(pb: AssistantPlaybook) {
-    setSnapshot((prev) =>
-      prev
-        ? { ...prev, playbooks: prev.playbooks.filter((p) => p.playbook_id !== pb.playbook_id) }
-        : prev,
-    );
+    setSnapshot((prev) => ({
+      ...prev,
+      playbooks: prev.playbooks.filter((p) => p.playbook_id !== pb.playbook_id),
+    }));
     try {
       await deleteAssistantPlaybook(pb.playbook_id);
     } catch {
-      setSnapshot((prev) =>
-        prev ? { ...prev, playbooks: [...prev.playbooks, pb] } : prev,
-      );
+      setSnapshot((prev) => ({ ...prev, playbooks: [...prev.playbooks, pb] }));
     }
   }
 
   async function handleClearOldest50() {
+    // Optimistic: hide oldest 50 immediately for snappy UI
     const oldest = [...entries]
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
       .slice(0, 50);
     const oldestIds = new Set(oldest.map((e) => e.entry_id));
-    setSnapshot((prev) =>
-      prev ? { ...prev, memory: prev.memory.filter((e) => !oldestIds.has(e.entry_id)) } : prev,
-    );
+    setSnapshot((prev) => ({
+      ...prev,
+      memory: prev.memory.filter((e) => !oldestIds.has(e.entry_id)),
+    }));
+    // Always refetch — server picks which 50 to delete, may differ from our optimistic guess
     try {
       await clearAssistantMemory(50);
     } catch {
-      try {
-        const fresh = await fetchAssistant();
-        setSnapshot(fresh);
-      } catch {
-        /* give up */
-      }
+      // fall through to refetch anyway
+    }
+    try {
+      const fresh = await fetchAssistant();
+      setLoad({ status: "ready", snapshot: fresh });
+    } catch {
+      // give up — user will see stale optimistic state
     }
   }
 
