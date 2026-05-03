@@ -17,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { PageChrome } from "@/components/shell/page-chrome";
 import { GgufModelsPanel } from "@/components/gguf/gguf-models-panel";
 import { IdentityCard } from "@/components/settings/companion/identity-card";
+import { PersonalityCard } from "@/components/settings/companion/personality-card";
 import { ReflectionPolicyCard } from "@/components/settings/companion/reflection-policy-card";
 import { RuntimeCard } from "@/components/settings/companion/runtime-card";
 import {
@@ -156,6 +157,7 @@ const ASSISTANT_DEFAULT_VALUES: AssistantFormValues = {
       "You are METIS, a local-first companion who helps the user get oriented, suggests next steps, and records concise reflections without taking over the main chat.",
     docked: true,
     minimized: false,
+    tone_preset: "warm-curious",
   },
   assistant_runtime: {
     provider: "",
@@ -1653,8 +1655,9 @@ export default function SettingsPage() {
                   ) : (
                     <div className="space-y-6">
                       <IdentityCard form={assistantForm} />
-                      <RuntimeCard form={assistantForm} />
+                      <PersonalityCard form={assistantForm} />
                       <ReflectionPolicyCard form={assistantForm} />
+                      <RuntimeCard form={assistantForm} />
 
                       <div className="flex items-center gap-3">
                         <Button

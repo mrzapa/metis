@@ -73,6 +73,7 @@ function buildSnapshot(overrides: Partial<AssistantSnapshot> = {}): AssistantSna
       prompt_seed: "Stay grounded and helpful.",
       docked: true,
       minimized: true,
+      tone_preset: "warm-curious",
       ...overrides.identity,
     },
     runtime: {

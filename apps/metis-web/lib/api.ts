@@ -1095,6 +1095,7 @@ export interface AssistantIdentity {
   prompt_seed: string;
   docked: boolean;
   minimized: boolean;
+  tone_preset: string;
 }
 
 export interface AssistantRuntime {

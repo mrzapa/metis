@@ -4,7 +4,6 @@ import type { UseFormReturn } from "react-hook-form";
 import type { AssistantFormValues } from "@/app/settings/page";
 import { FieldLabel, ToggleRow } from "@/app/settings/page";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { BorderBeam } from "@/components/ui/border-beam";
 
 interface Props {
@@ -57,16 +56,6 @@ export function IdentityCard({ form }: Props) {
             {...registerAssistant("assistant_identity.greeting")}
           />
         </div>
-      </div>
-
-      <div className="space-y-1.5">
-        <FieldLabel htmlFor="assistant_identity.prompt_seed" tooltip="Seed prompt used to shape the companion's personality, tone, and boundaries.">Prompt seed</FieldLabel>
-        <Textarea
-          id="assistant_identity.prompt_seed"
-          rows={5}
-          {...registerAssistant("assistant_identity.prompt_seed")}
-          placeholder="Seed prompt used to shape the companion's tone and behaviour."
-        />
       </div>
 
       <div className="space-y-2">
