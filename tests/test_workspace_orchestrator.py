@@ -2236,3 +2236,93 @@ class TestApiBrainGraphUsesOrchestrator:
         assert "edges" in body
         assert isinstance(body["nodes"], list)
         assert isinstance(body["edges"], list)
+
+
+# ---------------------------------------------------------------------------
+# M24 Phase 1 — get_star_clusters (StarClusteringService integration + cache)
+# ---------------------------------------------------------------------------
+
+
+class _FakeEmbedder:
+    """Deterministic stand-in for an embedding model.
+
+    Hashes each text into a small float vector so semantically distinct
+    texts get distinct embeddings; identical texts get identical
+    embeddings. Avoids loading any real embedding backend in tests.
+    """
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        out: list[list[float]] = []
+        for text in texts:
+            seed = abs(hash(text)) & 0xFFFFFFFF
+            rng = __import__("random").Random(seed)
+            out.append([rng.uniform(-1.0, 1.0) for _ in range(8)])
+        return out
+
+
+def test_get_star_clusters_returns_one_per_star(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Three user stars in settings -> three cluster assignments returned.
+
+    Each result row carries the canonical keys (``star_id``,
+    ``cluster_id``, ``x``, ``y``, ``cluster_label``) that the
+    ``GET /v1/stars/clusters`` route surfaces to the frontend.
+    """
+    monkeypatch.setattr(
+        "metis_app.services.workspace_orchestrator.create_embeddings",
+        lambda _settings: _FakeEmbedder(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _FakeEmbedder(),
+    )
+
+    orch = _make_orchestrator()
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "star1", "label": "Python perf", "notes": ""},
+            {"id": "star2", "label": "Python tooling", "notes": ""},
+            {"id": "star3", "label": "Cooking", "notes": ""},
+        ]
+    }
+
+    result = orch.get_star_clusters(settings)
+    assert len(result) == 3
+    assert {item["star_id"] for item in result} == {"star1", "star2", "star3"}
+    expected_keys = {"star_id", "cluster_id", "x", "y", "cluster_label"}
+    for item in result:
+        assert expected_keys <= set(item.keys())
+
+
+def test_get_star_clusters_caches_results(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Calling twice with the same star list runs HDBSCAN/PCA only once."""
+    monkeypatch.setattr(
+        "metis_app.utils.embedding_providers.create_embeddings",
+        lambda _settings: _FakeEmbedder(),
+    )
+
+    call_count = {"n": 0}
+    from metis_app.services import star_clustering_service as scs
+
+    real_compute = scs.StarClusteringService.compute_clusters
+
+    def _spy(self: Any, embeddings: dict[str, Any]) -> Any:
+        call_count["n"] += 1
+        return real_compute(self, embeddings)
+
+    monkeypatch.setattr(scs.StarClusteringService, "compute_clusters", _spy)
+
+    orch = _make_orchestrator()
+    settings = {
+        "landing_constellation_user_stars": [
+            {"id": "star1", "label": "Python perf"},
+            {"id": "star2", "label": "Python tooling"},
+            {"id": "star3", "label": "Cooking"},
+        ]
+    }
+
+    first = orch.get_star_clusters(settings)
+    second = orch.get_star_clusters(settings)
+
+    assert first == second
+    assert call_count["n"] == 1

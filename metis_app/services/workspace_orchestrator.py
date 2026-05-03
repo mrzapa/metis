@@ -721,6 +721,75 @@ class WorkspaceOrchestrator:
         assistant_snapshot = self._assistant_service.get_snapshot(_settings_store.load_settings())
         return BrainGraph().build_from_indexes_and_sessions(indexes, sessions, assistant_snapshot, skip_layout=skip_layout)
 
+    def get_star_clusters(self, settings: dict[str, Any]) -> list[dict[str, Any]]:
+        """Compute (or fetch from cache) cluster + 2D layout for user stars.
+
+        M24 Phase 1 placement engine. Reads
+        ``landing_constellation_user_stars`` from *settings*, embeds each
+        star's ``label + notes`` (or its ``id`` as a last resort) via the
+        configured embedder, and runs them through
+        :class:`~metis_app.services.star_clustering_service.StarClusteringService`.
+
+        Results are cached on the orchestrator instance keyed by SHA-256
+        of ``[star_ids, texts]`` so repeated calls without input changes
+        don't re-run HDBSCAN/PCA. The cache is invalidated naturally by
+        the key whenever a star is added, removed, or its label/notes
+        change.
+
+        Returns a list of plain ``dict`` rows with the keys ``star_id``,
+        ``cluster_id``, ``x``, ``y``, ``cluster_label`` — JSON-friendly
+        for the ``GET /v1/stars/clusters`` route. Empty input -> ``[]``.
+        """
+        import hashlib
+
+        user_stars = list(settings.get("landing_constellation_user_stars") or [])
+        if not user_stars:
+            return []
+
+        star_ids = [str(s.get("id") or "") for s in user_stars]
+        texts = [
+            f"{s.get('label', '')} {s.get('notes', '')}".strip()
+            or str(s.get("id") or "")
+            for s in user_stars
+        ]
+
+        cache_key = hashlib.sha256(
+            json.dumps([star_ids, texts], sort_keys=True).encode()
+        ).hexdigest()
+
+        if not hasattr(self, "_cluster_cache"):
+            self._cluster_cache: dict[str, list[dict[str, Any]]] = {}
+        cached = self._cluster_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Local import keeps the heavy embedding / sklearn stack off the
+        # cold-import path of WorkspaceOrchestrator.
+        from metis_app.services.star_clustering_service import StarClusteringService
+        from metis_app.utils.embedding_providers import create_embeddings
+
+        embedder = create_embeddings(settings)
+        raw_embeddings = embedder.embed_documents(texts)
+        embeddings_dict = {
+            sid: emb for sid, emb in zip(star_ids, raw_embeddings)
+        }
+
+        service = StarClusteringService()
+        assignments = service.compute_clusters(embeddings_dict)
+
+        result = [
+            {
+                "star_id": a.star_id,
+                "cluster_id": a.cluster_id,
+                "x": a.x,
+                "y": a.y,
+                "cluster_label": a.cluster_label,
+            }
+            for a in assignments
+        ]
+        self._cluster_cache[cache_key] = result
+        return result
+
     # ------------------------------------------------------------------
     # Sessions / Memory
     # ------------------------------------------------------------------
