@@ -23,7 +23,7 @@ Every layer is swappable. Every capability is inspectable. Everything runs local
 Every capability in the codebase lives under one of three:
 
 ### 🌌 Cosmos — your knowledge as a universe
-Every document, paper, podcast, video, tweet, and note becomes a *star*. Stars are placed by faculty (Perception, Knowledge, Memory, Reasoning, Skills, Strategy, Personality, Values). Indexes become constellations. Live activity renders as comets. Individual stars open into a Star Observatory where you assign archetypes, plan learning routes, and link sources. The constellation is the primary navigation — not decoration.
+Every document, paper, podcast, video, tweet, and note becomes a *star*. Stars are placed by **content** — clustered by what they're about, with intentional connections drawn by the user as **Projects**. Indexes become constellations. Live activity renders as comets. Individual stars open into a Star Observatory where you assign archetypes, plan learning routes, and link sources. The constellation is the primary navigation — not decoration. Click the central METIS star to chat across *everything*; draw a Project line between stars to scope chat to just those stars.
 
 ### 🌱 Companion — an AI that grows
 The beating heart of METIS. A persistent local AI entity that bootstraps an identity on first run, keeps an Atlas of episodic memories, runs reflection loops in the background, and follows its own curiosity when you're away. It ingests news feeds, RSS, podcasts, and your documents as continuous nutrients. It has visible growth stages. Over months, its brain graph densifies and its skills accumulate until it knows your thinking better than any cloud assistant ever could.
@@ -37,7 +37,8 @@ Most AI products have one of these done well. METIS has all three, fused, local,
 
 The promise is simple: every day, your companion gets smarter — about you, not about everyone.
 
-- **Feed it.** Drop documents, paste URLs, subscribe to RSS, point it at a podcast feed. The news-comet service streams fresh signal continuously.
+- **Feed it.** Drop documents, paste URLs, subscribe to RSS, point it at a podcast feed. The news-comet service streams fresh signal continuously. Each new file gets AI-suggested attachment to existing stars or its own new star.
+- **Group it.** Click stars and confirm to create *Projects* — scoped workspaces with their own chat history, instructions, and technique config. Project chat sees only the Project's stars; central-star Everything chat sees them all. Per-Project Forge config means each Project can have its own behaviour.
 - **Graft in techniques.** Browse the Forge — a gallery of frontier AI techniques as togglable modules. IterRAG convergence, swarm simulation, multimodal ingestion, abliterated models, sub-query expansion. Paste an arXiv link, get a new skill.
 - **Let it dream.** Overnight, the companion reflects. Candidate skills emerge from high-convergence traces. Memory consolidates. In the morning, it proposes what it learned.
 - **Watch it grow.** Companion stages (Seedling → Sapling → Bloom → Elder) track knowledge density, skill count, reflection depth. The brain graph densifies visibly. Personal evals track how the companion is getting better at *your* specific tasks.

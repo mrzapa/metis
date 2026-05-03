@@ -290,3 +290,52 @@ keeps the policy and lets the surface evolve.
 **Reinstating any of (1), (2), (3):** every removed primitive is
 recoverable from git history at the commits that landed M21 Phase 5 —
 no information was destroyed.
+
+## Addendum — 2026-05-03 (M24 / ADR 0019)
+
+The **faculty-anchor placement decision** in this ADR is superseded by
+[ADR 0019 — Constellation IA: content-first, drawable Projects](0019-constellation-ia-content-first-projects.md).
+Specifically:
+
+- **Faculty as a placement principle is removed.** Stars are no longer
+  positioned around the 8 (or 11, depending on which file) named-faculty
+  anchors. Placement is by content-embedding clusters with Project-pull
+  override.
+- **Faculty as a curriculum signal is removed end-to-end in M26.** The
+  M04 reverse-curriculum logic is preserved, but the signal it operates
+  on changes from faculty-gap-scoring to cluster-gap-scoring after M16
+  evals validate parity.
+- **The 8 faculty constellation landmarks (Perseus, Auriga, Draco,
+  Hercules, Gemini, Big Dipper, Lyra, Boötes) are slated for retirement
+  in M24 Phase 6 cleanup**, including their classical-naming surface in
+  `star-name-generator.ts`.
+
+**Preserved from this ADR (not superseded):**
+
+- The `StellarProfile` archetype system (content-type → 2D archetype
+  mapping). This survives and continues to drive star rendering.
+- The tiered-naming policy: field stars unnamed, user-content stars by
+  user name. Landmarks-classical-on-click changes shape — there are no
+  more named landmark constellations after M24 Phase 6 — but the *user-
+  content naming* portion of the tier continues unchanged.
+- The Star Observatory dialog architecture (orbital panels around the
+  selected star). The faculty-glyph-panel inside it goes away; archetype
+  picker and learning-route panel survive.
+- The 2D-only "knowledge-first dive" framing. M24+ does not reintroduce
+  the 3D sphere.
+
+**Why the contract weakens here:** the original ADR built the placement
+principle, the curriculum signal, and the visual landmark system on the
+same faculty taxonomy — and that taxonomy turned out to drift between
+files (8-faculty in this ADR vs. 11-faculty in
+`autonomous_research_service.py`) and to lack user-visible value. ADR
+0019 separates the three concerns: placement (now content-cluster),
+curriculum (still gap-scoring, just on cluster IDs after M26), and
+visual landmarks (retired). The archetype system and naming-tier policy
+were never tied to faculty and survive intact.
+
+**Reinstating faculty-anchor placement:** every removed primitive is
+recoverable from git history at the commits that landed M24+. Faculty
+IDs persist in the data layer through M25 as invisible internals; M26
+removes them. Reverting is possible up to the M26 cutover, expensive
+after.
