@@ -173,6 +173,20 @@ import type {
 
 /* ────────────────────────────── constants ────────────────────────────── */
 
+// M24 Phase 3 — when true, user stars are placed using embedding-cluster
+// projections fetched from `GET /v1/stars/clusters`. When false, the
+// legacy faculty-anchored layout is used. This flag is removed in
+// Task 3.4 once the rip-out lands; until then it lets us A/B for an
+// "Undo for this session" toast affordance (Task 3.3).
+const USE_CLUSTER_PLACEMENT = true;
+
+// Cluster coordinates from the backend are in [-1, 1] centred on the
+// origin. UserStar.x/y is in [0, 1] centred on (0.5, 0.5). This factor
+// scales the cluster output into the home-page coordinate system; we
+// keep it well below 0.5 so projected stars stay clear of the canvas
+// edges (the existing layout clamps to roughly [0.04, 0.96]).
+const CLUSTER_COORD_SCALE = 0.4;
+
 const FACULTY_CONCEPTS = CONSTELLATION_FACULTIES.map((faculty, index) => ({
   faculty,
   label: `Faculty ${String(index + 1).padStart(2, "0")}`,
@@ -704,12 +718,21 @@ function getResolvedStarPoint(
   star: Pick<UserStar, "x" | "y">,
   previewPositions: ReadonlyMap<string, { x: number; y: number }>,
   starId: string,
+  clusterPositions?: ReadonlyMap<string, { x: number; y: number }> | null,
 ): Point {
   const previewPosition = previewPositions.get(starId);
-  return {
-    x: previewPosition?.x ?? star.x,
-    y: previewPosition?.y ?? star.y,
-  };
+  if (previewPosition) {
+    return { x: previewPosition.x, y: previewPosition.y };
+  }
+  // M24 Phase 3 — when cluster placement is active and the star has a
+  // cluster-projected position, use it as the anchor instead of the
+  // persisted x/y. This is what swaps the constellation from
+  // faculty-anchored to embedding-cluster-anchored layout.
+  const clusterPosition = clusterPositions?.get(starId);
+  if (clusterPosition) {
+    return { x: clusterPosition.x, y: clusterPosition.y };
+  }
+  return { x: star.x, y: star.y };
 }
 
 /**
@@ -966,6 +989,35 @@ export default function Home() {
       cancelled = true;
     };
   }, []);
+  // Session-only override for the migration toast's "Undo" affordance
+  // (Task 3.3). When set, we treat cluster placement as disabled until
+  // the next page load — localStorage is *not* updated, so the next visit
+  // still uses cluster placement.
+  const [sessionDisableClusterPlacement, setSessionDisableClusterPlacement] =
+    useState(false);
+  // Map of star_id -> normalised (x, y) in the [0, 1] home-page coordinate
+  // space, derived from the cluster API's [-1, 1] output. `null` while
+  // clusters are loading or when the placement path is disabled, so
+  // `getResolvedStarPoint` can fall through to the persisted star.x/y.
+  const clusterPositions = useMemo<ReadonlyMap<string, { x: number; y: number }> | null>(() => {
+    if (!USE_CLUSTER_PLACEMENT || sessionDisableClusterPlacement) return null;
+    if (!clusters || clusters.length === 0) return null;
+    const map = new Map<string, { x: number; y: number }>();
+    for (const assignment of clusters) {
+      map.set(assignment.star_id, {
+        x: 0.5 + assignment.x * CLUSTER_COORD_SCALE,
+        y: 0.5 + assignment.y * CLUSTER_COORD_SCALE,
+      });
+    }
+    return map;
+  }, [clusters, sessionDisableClusterPlacement]);
+  // Ref mirror of clusterPositions so the canvas render-loop closure (which
+  // is wrapped in a useEffect with stable deps) reads the latest map without
+  // tearing down and rebuilding the loop on every cluster fetch.
+  const clusterPositionsRef = useRef<ReadonlyMap<string, { x: number; y: number }> | null>(null);
+  useEffect(() => {
+    clusterPositionsRef.current = clusterPositions;
+  }, [clusterPositions]);
   const [availableIndexes, setAvailableIndexes] = useState<IndexSummary[]>([]);
   const [indexesLoading, setIndexesLoading] = useState(true);
   const [indexLoadError, setIndexLoadError] = useState<string | null>(null);
@@ -1481,7 +1533,7 @@ export default function Home() {
     };
     const previewPositions = dragPreviewPositionsRef.current;
     const connectedStarIds = new Set(detailsStar.connectedUserStarIds ?? []);
-    const originPoint = getResolvedStarPoint(detailsStar, previewPositions, detailsStar.id);
+    const originPoint = getResolvedStarPoint(detailsStar, previewPositions, detailsStar.id, clusterPositions);
     const currentStepId = getCurrentLearningRouteStepId(displayedLearningRoute);
     const origin = projectConstellationPoint(originPoint, viewportWidth, viewportHeight, backgroundCamera);
     const stops: LearningRouteOverlayStop[] = displayedLearningRoute.steps.map((step, index) => {
@@ -1492,7 +1544,7 @@ export default function Home() {
         ) ?? null
         : null;
       const waypoint = connectedStar
-        ? getResolvedStarPoint(connectedStar, previewPositions, connectedStar.id)
+        ? getResolvedStarPoint(connectedStar, previewPositions, connectedStar.id, clusterPositions)
         : buildLearningRouteWaypoint(originPoint, index, displayedLearningRoute.steps.length);
       const projected = projectConstellationPoint(waypoint, viewportWidth, viewportHeight, backgroundCamera);
 
@@ -1510,6 +1562,7 @@ export default function Home() {
     return { origin, stops };
   }, [
     backgroundZoomFactor,
+    clusterPositions,
     detailsStar,
     displayedLearningRoute,
     displayedLearningRouteUnavailableManifestPaths,
@@ -2798,6 +2851,7 @@ export default function Home() {
         selectedStar,
         dragPreviewPositionsRef.current,
         selectedStar.id,
+        clusterPositionsRef.current,
       );
       const distance = Math.hypot(selectedPoint.x - candidatePoint.x, selectedPoint.y - candidatePoint.y);
       if (distance > USER_STAR_LINK_MAX_DISTANCE) {
@@ -2814,7 +2868,7 @@ export default function Home() {
       let nearest: UserStar | null = null;
       let nearestDist = Infinity;
       for (const star of existing) {
-        const p = getResolvedStarPoint(star, dragPreviewPositionsRef.current, star.id);
+        const p = getResolvedStarPoint(star, dragPreviewPositionsRef.current, star.id, clusterPositionsRef.current);
         const d = Math.hypot(p.x - candidatePoint.x, p.y - candidatePoint.y);
         if (d < nearestDist) {
           nearestDist = d;
@@ -3398,7 +3452,7 @@ export default function Home() {
       projectedUserStarRenderState = new Map();
 
       userStarsRef.current.forEach((star) => {
-        const resolvedPoint = getResolvedStarPoint(star, previewPositions, star.id);
+        const resolvedPoint = getResolvedStarPoint(star, previewPositions, star.id, clusterPositionsRef.current);
         const easedOffset = animatedSemanticOffsets.get(star.id) ?? { x: 0, y: 0 };
         const [shiftedX, shiftedY] = clampPointToOrbit(
           resolvedPoint.x + easedOffset.x,
@@ -4439,6 +4493,7 @@ export default function Home() {
           selectedAnchor,
           dragPreviewPositionsRef.current,
           selectedAnchor.id,
+          clusterPositionsRef.current,
         );
         const anchorProjected = projectedUserStarRenderState.get(selectedAnchor.id)?.target
           ?? buildProjectedUserStarHitTarget(
@@ -4904,7 +4959,7 @@ export default function Home() {
       const availableTargets = cachedTargets.length > 0
         ? cachedTargets
         : userStarsRef.current.map((star) => {
-            const resolvedPoint = getResolvedStarPoint(star, previewPositions, star.id);
+            const resolvedPoint = getResolvedStarPoint(star, previewPositions, star.id, clusterPositionsRef.current);
             return buildProjectedUserStarHitTarget(
               {
                 id: star.id,
